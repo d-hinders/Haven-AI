@@ -8,7 +8,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-07-27"
+last-verified: "2026-08-04"
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)

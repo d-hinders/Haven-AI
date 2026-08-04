@@ -16,9 +16,33 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Address } from 'viem'
 import { api } from '@/lib/api'
-import { useActiveSigner } from '@/lib/signer'
+import { useActiveSigner, hasPasskeyCredentialOnDevice, credentialIdFromKeyId } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import type { AccountSigners, DelegationMessage } from '@/lib/delegationPasskeySigner'
+
+/**
+ * Which signer to use for THIS device, given the account's signer set (the
+ * multi-signer fix): a Hybrid account accepts ANY of its enrolled signers
+ * on-chain, so "the account has an EOA owner" must never disable the passkey
+ * path — that stranded every passkey user who enrolled a wallet as backup.
+ * Preference: a passkey enrolled on this device → a connected owner wallet →
+ * any passkey (the authenticator can find credentials our device markers
+ * missed). Null only when the account has no reachable signer from here.
+ */
+export function pickSigningPath(
+  signers: AccountSigners | null,
+  eoaConnected: boolean,
+): 'passkey' | 'eoa' | null {
+  if (!signers) return null
+  const hasPasskeys = signers.passkeys.length > 0
+  const onDevice =
+    hasPasskeys &&
+    signers.passkeys.some((p) => hasPasskeyCredentialOnDevice(credentialIdFromKeyId(p.key_id)))
+  if (onDevice) return 'passkey'
+  if (signers.owner_address && eoaConnected) return 'eoa'
+  if (hasPasskeys) return 'passkey'
+  return null
+}
 
 export interface DelegationBudget {
   id: string
@@ -124,7 +148,10 @@ export function useDelegationBudget(agentId: string, chainId: number) {
     void reloadSigners()
   }, [reload, reloadSigners])
 
-  const passkeyOnly = !!signers && !signers.owner_address && signers.passkeys.length > 0
+  // The signing path is a DEVICE decision, not an account-shape decision:
+  // an account with both an owner and passkeys signs with whichever is
+  // reachable here (passkey preferred).
+  const signingPath = pickSigningPath(signers, signer?.type === 'eoa')
 
   const grant = useCallback(
     async (input: GrantInput): Promise<BudgetResult> => {
@@ -137,7 +164,7 @@ export function useDelegationBudget(agentId: string, chainId: number) {
           period_seconds: input.periodSeconds,
         })
         let signature: string
-        if (passkeyOnly && signers) {
+        if (signingPath === 'passkey' && signers) {
           // ONE passkey ceremony — the kit signs the delegation itself; the
           // typed-data message IS the delegation (#828's payload).
           const { signDelegationWithPasskey } = await import('@/lib/delegationPasskeySigner')
@@ -158,14 +185,19 @@ export function useDelegationBudget(agentId: string, chainId: number) {
         setBusy(false)
       }
     },
-    [agentId, passkeyOnly, reload, signer, signers],
+    [agentId, signingPath, reload, signer, signers],
   )
 
   const revoke = useCallback(
     async (delegationHash: string): Promise<BudgetResult> => {
       setBusy(true)
       try {
-        const prep = await api.post<RevokePrepare>(`/agents/${agentId}/delegations/${delegationHash}/revoke`, {})
+        // Tell the backend which signer this device will use — the prepared
+        // op's gas estimation is shaped by the signature kind, and the server
+        // cannot know what is available here.
+        const prep = await api.post<RevokePrepare>(`/agents/${agentId}/delegations/${delegationHash}/revoke`, {
+          signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
+        })
         let signature: string
         if (prep.signature_scheme === 'webauthn_userop') {
           if (!signers) return { ok: false, reason: 'failed' }
@@ -191,17 +223,17 @@ export function useDelegationBudget(agentId: string, chainId: number) {
         setBusy(false)
       }
     },
-    [agentId, reload, signer, signers],
+    [agentId, reload, signer, signers, signingPath],
   )
 
-  // Ready: a passkey-only account signs with its passkey (no wallet needed);
-  // an EOA-owned account still needs the connected owner wallet.
+  // Ready: some signer for this account is reachable from THIS device — a
+  // passkey enrolled here, or the connected owner wallet.
   return {
     budgets,
     grant,
     revoke,
     busy,
-    ready: passkeyOnly || signer?.type === 'eoa',
+    ready: signingPath !== null,
     reload,
     signersError,
     reloadSigners,

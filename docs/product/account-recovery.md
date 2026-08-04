@@ -6,7 +6,7 @@ covers:
   - packages/frontend/src/hooks/useAccountSigners.ts
   - packages/frontend/src/components/onboarding/RecoveryNudge.tsx
   - packages/backend/src/routes/agent-delegations.ts
-last-verified: "2026-07-14"
+last-verified: "2026-08-04"
 ---
 
 # Account recovery (delegation-rail accounts)

@@ -284,6 +284,16 @@ export interface TreasuryOpsConfig {
   bundlerUrl: string
   rpcUrl: string
   sponsorshipPolicyId?: string
+  /**
+   * Which of the account's signers the CLIENT intends to sign with. A Hybrid
+   * account with both an EOA owner and passkeys accepts either on-chain, and
+   * the choice is the client's — only the device knows what is available
+   * (the multi-signer lesson: "has an owner" is not "must sign as the owner").
+   * It also shapes gas estimation: WebAuthn signatures are longer than EOA
+   * ones, so the dummy signature must match what will actually be submitted.
+   * Omitted: the legacy inference (owner if present, else passkey).
+   */
+  signWith?: 'owner' | 'passkey'
 }
 
 export interface PreparedTreasuryOp {
@@ -313,7 +323,15 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
   const chain = chainForId(cfg.chainId)
   const publicClient = createPublicClient({ chain, transport: http(cfg.rpcUrl) })
   const passkeys = cfg.passkeys ?? []
-  const isPasskey = !cfg.ownerAddress && passkeys.length > 0
+  if (cfg.signWith === 'passkey' && passkeys.length === 0) {
+    throw new Error('treasury ops: signWith=passkey but the account has no passkeys')
+  }
+  if (cfg.signWith === 'owner' && !cfg.ownerAddress) {
+    throw new Error('treasury ops: signWith=owner but the account has no EOA owner')
+  }
+  const isPasskey = cfg.signWith
+    ? cfg.signWith === 'passkey'
+    : !cfg.ownerAddress && passkeys.length > 0
   if (!cfg.ownerAddress && !isPasskey) {
     throw new Error('treasury ops: an EOA owner or at least one passkey is required')
   }

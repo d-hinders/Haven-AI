@@ -38,7 +38,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-07-26"
+last-verified: "2026-08-04"
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -227,7 +227,10 @@ radius shifts in a few ways worth mapping explicitly:
 - **The signer set is user-managed and can be pure-passkey (#836).** An account
   holds one or more P256 passkeys and/or an EOA owner; enrolling or removing a
   signer (`addKey`/`removeKey`/`transferOwnership`) is prepared by Haven and
-  signed by an EXISTING signer — WebAuthn or EOA per the account's kind. Haven
+  signed by an EXISTING signer — WebAuthn or EOA, whichever of the account's
+  signers the signing DEVICE can produce (the client requests the scheme,
+  validated against the real signer set — a mixed account is never forced onto
+  its owner wallet). Haven
   stores only PUBLIC key material (`hybrid_account_passkeys`), synced to chain
   state after the op confirms and pinned to the signed calldata. Recovery and
   the ≥2-signer floor: [account-recovery](../../docs/product/account-recovery.md)

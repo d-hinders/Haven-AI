@@ -627,4 +627,80 @@ describe('delegation lifecycle API (#828)', () => {
       expect(String(listQuery[0])).not.toContain('delegation_json')
     })
   })
+
+  describe('multi-signer accounts pick the signature scheme per request (the Daniel regression)', () => {
+    // An account with BOTH an EOA owner and passkeys accepts either signer
+    // on-chain. The old code read "has an owner" as "must sign as the owner",
+    // which stranded every passkey user the moment they enrolled a backup
+    // wallet: sign with passkey → add EOA owner → passkey stops working.
+    const BOTH = {
+      owner: OWNER,
+      passkeys: [{ key_id: '0x' + '77'.repeat(32), public_key_x: '0xaa', public_key_y: '0xbb' }],
+    }
+    const STORED_DELEGATION = {
+      delegation_json: JSON.stringify({ delegate: DELEGATE_ACCOUNT, delegator: TREASURY, authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '1', signature: '0x' + 'cd'.repeat(65) }),
+      status: 'active',
+    }
+    const prepared = () =>
+      mockTreasury.mockResolvedValue({
+        treasuryAddress: TREASURY,
+        prepareCall: vi.fn().mockResolvedValue({
+          userOperation: { nonce: 1n, sender: TREASURY },
+          userOpHash: `0x${'ef'.repeat(32)}`,
+          signingTypedData: { domain: { name: 'HybridDeleGator' }, types: {}, primaryType: 'PackedUserOperation', message: {} },
+          treasuryAddress: TREASURY,
+        }),
+        submitCall: vi.fn(),
+      })
+
+    it('revoke prepare honours a requested webauthn_userop even when an owner exists', async () => {
+      mockDb({ stored: STORED_DELEGATION, ...BOTH })
+      prepared()
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke`,
+        payload: { signature_scheme: 'webauthn_userop' },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().signature_scheme).toBe('webauthn_userop')
+      expect(res.json().user_op_hash).toBe(`0x${'ef'.repeat(32)}`)
+      // Gas estimation must be shaped by the signer that will actually sign:
+      expect(mockTreasury.mock.calls[0][0]).toMatchObject({ signWith: 'passkey' })
+    })
+
+    it('revoke prepare without a requested scheme keeps the legacy owner default', async () => {
+      mockDb({ stored: STORED_DELEGATION, ...BOTH })
+      prepared()
+      const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke` })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().signature_scheme).toBe('eip712_userop')
+      expect(mockTreasury.mock.calls[0][0]).toMatchObject({ signWith: 'owner' })
+    })
+
+    it('refuses a scheme the account cannot satisfy', async () => {
+      mockDb({ stored: STORED_DELEGATION, passkeys: [] }) // owner only
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke`,
+        payload: { signature_scheme: 'webauthn_userop' },
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.json().error).toMatch(/no passkeys/)
+    })
+
+    it('account-signers prepare honours the requested scheme on a mixed account', async () => {
+      mockDb(BOTH)
+      prepared()
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/account-signers/prepare`,
+        payload: {
+          action: 'add_passkey',
+          passkey: { key_id: '0x' + '88'.repeat(32), x: '0x1', y: '0x2' },
+          signature_scheme: 'webauthn_userop',
+        },
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().signature_scheme).toBe('webauthn_userop')
+      expect(res.json().user_op_hash).toBeTruthy()
+      expect(mockTreasury.mock.calls[0][0]).toMatchObject({ signWith: 'passkey' })
+    })
+  })
 })

@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-07-26"
+last-verified: "2026-08-04"
 ---
 
 # Haven Agent API OpenAPI Contract

@@ -192,7 +192,12 @@ own signer set. It is a read: no route lets Haven — or this endpoint's caller 
 change a signer set without an existing signer's signature (invariant 13
 unchanged). Client-side, signing selects the passkey whose credential is
 actually enrolled on the signing device rather than blindly `passkeys[0]`, so
-recovery with a backup key works from the backup device.
+recovery with a backup key works from the backup device. Scheme selection is
+likewise a **device** decision, never an account-shape decision: a mixed
+account (EOA owner *and* passkeys) accepts either signer on-chain, so the
+client requests the scheme it can actually produce (`signature_scheme` on the
+prepare routes, validated server-side against the real signer set) — enrolling
+a backup wallet never disables the passkey path.
 
 **The honest limit, stated plainly:** a **single-signer account has no recovery**
 — if its only signer is lost, the account is unreachable by the user *and* by

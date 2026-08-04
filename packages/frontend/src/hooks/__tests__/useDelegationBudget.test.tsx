@@ -1,16 +1,21 @@
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockGet, mockPost, mockSignDelegation, mockSignUserOp, mockSigner } = vi.hoisted(() => ({
+const { mockGet, mockPost, mockSignDelegation, mockSignUserOp, mockSigner, mockOnDevice } = vi.hoisted(() => ({
   mockGet: vi.fn(),
   mockPost: vi.fn(),
   mockSignDelegation: vi.fn(),
   mockSignUserOp: vi.fn(),
   mockSigner: vi.fn(),
+  mockOnDevice: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({ api: { get: mockGet, post: mockPost } }))
-vi.mock('@/lib/signer', () => ({ useActiveSigner: () => mockSigner() }))
+vi.mock('@/lib/signer', () => ({
+  useActiveSigner: () => mockSigner(),
+  hasPasskeyCredentialOnDevice: (id: string) => mockOnDevice(id),
+  credentialIdFromKeyId: (k: string) => k,
+}))
 vi.mock('@/lib/delegationPasskeySigner', () => ({
   signDelegationWithPasskey: mockSignDelegation,
   signUserOpWithPasskey: mockSignUserOp,
@@ -42,6 +47,8 @@ beforeEach(() => {
   mockSignUserOp.mockReset()
   mockSigner.mockReset()
   mockSigner.mockReturnValue(null) // no wallet connected by default
+  mockOnDevice.mockReset()
+  mockOnDevice.mockReturnValue(false) // no device markers by default
 })
 
 describe('useDelegationBudget passkey dispatch (#887)', () => {
@@ -133,5 +140,88 @@ describe('useDelegationBudget passkey dispatch (#887)', () => {
     })
     expect(mockSignUserOp).not.toHaveBeenCalled()
     expect(mockSignDelegation).not.toHaveBeenCalled()
+  })
+})
+
+describe('multi-signer accounts (the Daniel regression)', () => {
+  // Sequence that stranded a real user: sign with passkey → enroll an EOA
+  // owner as backup → the account now has BOTH → the old passkeyOnly
+  // predicate flipped false and every signing surface demanded the wallet,
+  // abandoning the passkey that was still enrolled and still valid on-chain.
+  const MIXED_SIGNERS = {
+    account_address: '0x' + 'aa'.repeat(20),
+    chain_id: 84532,
+    owner_address: '0x' + 'ee'.repeat(20),
+    passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+  }
+
+  it('stays ready and signs with the passkey after an EOA owner is enrolled', async () => {
+    mockApi(MIXED_SIGNERS)
+    mockOnDevice.mockReturnValue(true) // the passkey is on this device
+    const message = { delegate: '0xd', delegator: '0xa', authority: '0x0', caveats: [], salt: '1' }
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({ delegation_hash: '0xhash', version: 1, signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message } })
+      }
+      return Promise.resolve({ activated: true })
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'ab'.repeat(200))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.grant({
+        tokenAddress: ('0x' + 'cc'.repeat(20)) as never,
+        budgetAtomic: '1000',
+        periodSeconds: 86400,
+      })
+      expect(res.ok).toBe(true)
+    })
+    expect(mockSignDelegation).toHaveBeenCalled()
+  })
+
+  it('revoke on a mixed account requests the webauthn scheme when the passkey is here', async () => {
+    mockApi(MIXED_SIGNERS)
+    mockOnDevice.mockReturnValue(true)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke')) {
+        return Promise.resolve({ signature_scheme: 'webauthn_userop', user_op_hash: '0xhash', user_operation: { nonce: '1n' } })
+      }
+      return Promise.resolve({ revoked: true })
+    })
+    mockSignUserOp.mockResolvedValue('0x' + 'ab'.repeat(200))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.revoke('0x' + 'ab'.repeat(32))
+      expect(res.ok).toBe(true)
+    })
+    const prepareCall = mockPost.mock.calls.find(([url]) => String(url).endsWith('/revoke'))!
+    expect(prepareCall[1]).toMatchObject({ signature_scheme: 'webauthn_userop' })
+    expect(mockSignUserOp).toHaveBeenCalled()
+  })
+
+  it('falls back to the connected wallet when no passkey is on this device', async () => {
+    mockApi(MIXED_SIGNERS)
+    mockOnDevice.mockReturnValue(false)
+    const signTypedData = vi.fn().mockResolvedValue('0x' + 'cd'.repeat(65))
+    mockSigner.mockReturnValue({ type: 'eoa', address: MIXED_SIGNERS.owner_address, walletClient: { signTypedData } })
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke')) {
+        return Promise.resolve({ signature_scheme: 'eip712_userop', signing_payload: { domain: {}, types: {}, primaryType: 'PackedUserOperation', message: {} }, user_operation: { nonce: '1n' } })
+      }
+      return Promise.resolve({ revoked: true })
+    })
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.revoke('0x' + 'ab'.repeat(32))
+      expect(res.ok).toBe(true)
+    })
+    const prepareCall = mockPost.mock.calls.find(([url]) => String(url).endsWith('/revoke'))!
+    expect(prepareCall[1]).toMatchObject({ signature_scheme: 'eip712_userop' })
+    expect(signTypedData).toHaveBeenCalled()
   })
 })

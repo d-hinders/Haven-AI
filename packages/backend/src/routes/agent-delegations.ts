@@ -34,7 +34,8 @@ import { isAddress as isValidAddress } from '@haven_ai/core'
 import { getChain } from '../lib/chains.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../lib/delegation-contracts.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../lib/hybrid-provisioning.js'
-import { loadHybridOwnerConfig, isPasskeyOnly } from '../lib/hybrid-account-config.js'
+import { loadHybridOwnerConfig } from '../lib/hybrid-account-config.js'
+import type { HybridOwnerConfig } from '../lib/hybrid-provisioning.js'
 import { signerFloorError } from '../lib/mainnet-gate.js'
 import {
   buildBudgetDelegation,
@@ -142,6 +143,37 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     action?: SignerAction
     passkey?: { key_id?: string; x?: string; y?: string }
     owner_address?: string
+    signature_scheme?: string
+  }
+
+  /**
+   * Resolve which signer the client will sign with (multi-signer fix): a
+   * Hybrid account with BOTH an EOA owner and passkeys accepts either
+   * on-chain, and only the device knows what is available — "has an owner"
+   * must never mean "must sign as the owner". The requested scheme is
+   * validated against the account's actual signer set; omitted keeps the
+   * legacy default (owner if present, else passkey) so old clients are
+   * unaffected.
+   */
+  function resolveSignatureScheme(
+    requested: string | undefined,
+    config: HybridOwnerConfig,
+  ): { scheme: 'eip712_userop' | 'webauthn_userop' } | { error: string } {
+    const hasPasskeys = !!config.passkeys && config.passkeys.length > 0
+    if (requested === undefined) {
+      return { scheme: config.ownerAddress ? 'eip712_userop' : 'webauthn_userop' }
+    }
+    if (requested === 'webauthn_userop') {
+      return hasPasskeys
+        ? { scheme: 'webauthn_userop' }
+        : { error: 'This account has no passkeys to sign with' }
+    }
+    if (requested === 'eip712_userop') {
+      return config.ownerAddress
+        ? { scheme: 'eip712_userop' }
+        : { error: 'This account has no EOA owner to sign with' }
+    }
+    return { error: `Unknown signature_scheme: ${requested}` }
   }
 
   /**
@@ -217,6 +249,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       if ('error' in encoded) return reply.code(409).send({ error: encoded.error })
 
       try {
+        const resolved = resolveSignatureScheme(request.body?.signature_scheme, owner.config)
+        if ('error' in resolved) return reply.code(409).send({ error: resolved.error })
         const treasury = await createTreasuryOps({
           ownerAddress: owner.config.ownerAddress,
           passkeys: owner.config.passkeys,
@@ -225,12 +259,13 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
           rpcUrl: getChain(agent.chain_id).rpcUrl,
           sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
+          signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
         })
         const prepared = await treasury.prepareCall(agent.treasury_address as Address, encoded.data)
         const user_operation = JSON.parse(
           JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
         )
-        if (isPasskeyOnly(owner.config)) {
+        if (resolved.scheme === 'webauthn_userop') {
           return {
             signature_scheme: 'webauthn_userop',
             user_op_hash: prepared.userOpHash,
@@ -592,7 +627,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
 
       try {
         const revocation = buildRevocation(JSON.parse(target.delegation_json), agent.chain_id)
-        const passkeyOnly = isPasskeyOnly(owner.config)
+        const resolved = resolveSignatureScheme(
+          (request.body as { signature_scheme?: string } | undefined)?.signature_scheme,
+          owner.config,
+        )
+        if ('error' in resolved) return reply.code(409).send({ error: resolved.error })
         const treasury = await createTreasuryOps({
           ownerAddress: owner.config.ownerAddress,
           passkeys: owner.config.passkeys,
@@ -601,12 +640,13 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
           rpcUrl: getChain(agent.chain_id).rpcUrl,
           sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
+          signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
         })
         const prepared = await treasury.prepareCall(revocation.to, revocation.data)
         const user_operation = JSON.parse(
           JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
         )
-        if (passkeyOnly) {
+        if (resolved.scheme === 'webauthn_userop') {
           // Passkey accounts: the owner signs the userOpHash with the account
           // passkey (WebAuthn) — the frontend slice, #887. No EIP-712 payload.
           return {

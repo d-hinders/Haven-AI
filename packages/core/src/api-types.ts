@@ -1054,6 +1054,7 @@ export type components = {
             safe_address: string | null;
             safe_name: string | null;
             safe_chain_id: number | null;
+            account_type?: string | null;
             api_key_prefix: string | null;
             /** @enum {string} */
             status: "active" | "paused" | "pending_approval" | "revoked";

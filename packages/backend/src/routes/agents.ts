@@ -93,6 +93,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const agentResult = await pool.query<AgentRow>(
       `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
+              us.account_type,
               a.api_key_prefix, a.status, a.created_at,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
@@ -188,7 +189,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       safe_chain_id: number | null
       safe_address: string | null
     }>(
-      `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.safe_address
+      `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.safe_address, us.account_type
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
        WHERE a.user_id = $1 AND a.id = $2 AND a.status != 'revoked'
@@ -409,6 +410,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
          )
          SELECT updated.id, updated.name, updated.description, updated.delegate_address,
                 updated.safe_id, us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
+                us.account_type,
                 updated.api_key_prefix, updated.status, updated.created_at,
                 (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = updated.id) AS mcp_last_seen_at
          FROM updated

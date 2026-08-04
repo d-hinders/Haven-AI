@@ -1986,6 +1986,8 @@ export const openapiSpec = {
           safe_address: { anyOf: [address, { type: 'null' }] },
           safe_name: { type: ['string', 'null'] },
           safe_chain_id: { type: ['integer', 'null'] },
+          /** 'delegator_hybrid' = delegation rail; frontends branch budget UX on it. */
+          account_type: { type: ['string', 'null'] },
           api_key_prefix: { type: ['string', 'null'] },
           status: { type: 'string', enum: ['active', 'paused', 'pending_approval', 'revoked'] },
           created_at: isoDateTime,

@@ -34,6 +34,8 @@ interface UserSafeRow {
   safe_address: string
   chain_id: number
   name: string
+  /** 'delegator_hybrid' on the delegation rail; null/legacy = Safe rail (#1069). */
+  account_type: string | null
 }
 
 interface OwnerAliasRow {
@@ -58,7 +60,7 @@ function normalizeName(name: unknown): string | null {
 
 async function listUserSafes(userId: string): Promise<UserSafeRow[]> {
   const result = await pool.query<UserSafeRow>(
-    `SELECT id, safe_address, chain_id, name
+    `SELECT id, safe_address, chain_id, name, account_type
      FROM user_safes
      WHERE user_id = $1
      ORDER BY created_at ASC`,

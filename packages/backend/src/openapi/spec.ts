@@ -2722,7 +2722,7 @@ export const openapiSpec = {
             items: {
               type: 'object',
               required: ['id', 'name', 'status'],
-              properties: { id: uuid, name: { type: 'string' }, status: { type: 'string', enum: ['active', 'paused', 'revoked'] } },
+              properties: { id: uuid, name: { type: 'string' }, status: { type: 'string', enum: ['active', 'paused', 'pending_approval', 'revoked'] } },
               additionalProperties: false,
             },
           },

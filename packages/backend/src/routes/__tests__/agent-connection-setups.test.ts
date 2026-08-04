@@ -1421,3 +1421,285 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 })
+
+describe('delegation-rail budget approval (#1073)', () => {
+  const DELEGATION_SETUP = { ...CONNECTED_SETUP, account_type: 'delegator_hybrid' }
+  /** The signed budget that satisfies ALLOWANCE: same token, amount, period. */
+  const MATCHING_DELEGATION = {
+    token_address: ALLOWANCE.token_address.toLowerCase(),
+    budget_atomic: ALLOWANCE.allowance_amount,
+    period_seconds: ALLOWANCE.reset_period_min * 60,
+  }
+
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientRelease.mockReset()
+    mockClientQuery.mockResolvedValue({ rows: [] })
+    mockConnect.mockResolvedValue({
+      query: (...args: unknown[]) => mockClientQuery(...args),
+      release: mockClientRelease,
+    })
+  })
+
+  async function buildApp(): Promise<FastifyInstance> {
+    const app = Fastify()
+    await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
+    await app.ready()
+    return app
+  }
+
+  function approve(app: FastifyInstance) {
+    return app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/budget-approval`,
+      payload: {},
+    })
+  }
+
+  it('activates the setup and the agent once the owner-signed budget exists', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+      .mockResolvedValueOnce({ rows: [MATCHING_DELEGATION] })
+    mockWalletApprovalPersist(DELEGATION_SETUP)
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ setup_id: SETUP.id, status: 'active' })
+
+    // No Safe transaction is recorded on this rail — the signature IS the
+    // approval, and there is no tx hash to carry.
+    const setupUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agent_connection_setups'),
+    )
+    expect(setupUpdate?.[1]).toEqual([SETUP.id, 'user-1', 'active', 'confirmed', null, null, null])
+    const agentUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agents'),
+    )
+    expect(String(agentUpdate?.[0])).toContain("status = 'active'")
+
+    await app.close()
+  })
+
+  it('refuses to activate when no signed budget exists — the client cannot assert one', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/not been approved yet/)
+    // Nothing written: no transaction was even opened.
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('refuses a signed budget that does not match the amount the user reviewed', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+      .mockResolvedValueOnce({
+        rows: [{ ...MATCHING_DELEGATION, budget_atomic: '99000000' }],
+      })
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/budget does not match/)
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('refuses a signed budget whose period does not match the setup', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+      .mockResolvedValueOnce({
+        // Weekly instead of the daily budget the user reviewed.
+        rows: [{ ...MATCHING_DELEGATION, period_seconds: 604_800 }],
+      })
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/reset period does not match/)
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('rejects a legacy Safe account — that rail approves with a wallet transaction', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [{ ...CONNECTED_SETUP, account_type: 'safe' }] })
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/wallet transaction/)
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('requires the local connection before the budget can approve the setup', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ ...DELEGATION_SETUP, status: 'awaiting_connection' }] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/Local connection is required/)
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+})
+
+describe('delegation-rail budget approval — credential hygiene (#1073)', () => {
+  it('refuses credential material even though the body is ignored', async () => {
+    const app = Fastify()
+    await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
+    await app.ready()
+    mockQuery.mockReset()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/budget-approval`,
+      payload: { private_key: '0xsecret' },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(mockQuery).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+})
+
+describe('cancel cannot orphan a live delegation-rail agent (#1073)', () => {
+  const DELEGATION_SETUP = { ...CONNECTED_SETUP, account_type: 'delegator_hybrid' }
+
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientRelease.mockReset()
+    mockClientQuery.mockResolvedValue({ rows: [] })
+    mockConnect.mockResolvedValue({
+      query: (...args: unknown[]) => mockClientQuery(...args),
+      release: mockClientRelease,
+    })
+  })
+
+  async function buildApp(): Promise<FastifyInstance> {
+    const app = Fastify()
+    await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
+    await app.ready()
+    return app
+  }
+
+  it('refuses to cancel once the budget signature has activated the agent', async () => {
+    // The regression this guards: on this rail the grant activates the agent
+    // in its OWN transaction, and no safe_tx_hash/tx_hash is ever written, so
+    // the setup still looks cancellable. Cancelling would have reported "this
+    // setup can no longer connect an agent" while leaving a live, spending
+    // agent behind — the revoke is scoped to 'pending_approval' and misses it.
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [DELEGATION_SETUP] }
+      }
+      if (String(sql).includes('SELECT status FROM agents')) {
+        return { rows: [{ status: 'active' }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/cancel`,
+      payload: {},
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/paused or revoked from the agent page/)
+    expect(mockClientQuery).toHaveBeenCalledWith('ROLLBACK')
+    // The setup must NOT have been marked cancelled.
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("SET status = 'cancelled'"),
+      ),
+    ).toBe(false)
+
+    await app.close()
+  })
+
+  it('still cancels a setup whose agent never became active', async () => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [DELEGATION_SETUP] }
+      }
+      if (String(sql).includes('SELECT status FROM agents')) {
+        return { rows: [{ status: 'pending_approval' }] }
+      }
+      if (String(sql).includes("SET status = 'cancelled'")) {
+        return { rows: [{ id: SETUP.id }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/cancel`,
+      payload: {},
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(mockClientQuery).toHaveBeenCalledWith('COMMIT')
+
+    await app.close()
+  })
+
+  it('accepts a PINNED budget as satisfying the setup — narrower authority is safe', async () => {
+    // The one comparison verifyDelegationSetupAuthority deliberately skips.
+    // A recipient-pinned budget grants strictly LESS than the unpinned budget
+    // the setup described, so it must still activate rather than 409.
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+      .mockResolvedValueOnce({
+        rows: [{
+          token_address: ALLOWANCE.token_address.toLowerCase(),
+          budget_atomic: ALLOWANCE.allowance_amount,
+          period_seconds: ALLOWANCE.reset_period_min * 60,
+          recipient_address: '0x' + 'cc'.repeat(20),
+        }],
+      })
+    mockWalletApprovalPersist(DELEGATION_SETUP)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/budget-approval`,
+      payload: {},
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ status: 'active' })
+
+    await app.close()
+  })
+})

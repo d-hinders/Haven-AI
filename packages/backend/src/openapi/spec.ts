@@ -547,6 +547,31 @@ export const openapiSpec = {
         },
       },
     },
+    '/agent-connection-setups/{setupId}/budget-approval': {
+      post: {
+        tags: ['Connect Agent 2'],
+        operationId: 'recordAgentConnectionBudgetApproval',
+        summary: 'Complete a delegation-rail Connect Agent 2 setup.',
+        description:
+          'The delegation rail\'s counterpart to wallet-approval. Activates the pending agent only after Haven confirms that every budget this setup promised exists as an active, owner-signed budget on the agent — the caller asserts nothing, so the request body is empty and the call is safe to retry. Rejected with 409 on a Safe / AllowanceModule wallet, which approves with a wallet transaction instead.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/SetupId' }],
+        responses: {
+          '200': {
+            description: 'The budget was confirmed and the setup status was returned.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentConnectionSetupStatus' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '410': errorResponse,
+        },
+      },
+    },
     '/agent-connection-setups/{setupId}/cancel': {
       post: {
         tags: ['Connect Agent 2'],

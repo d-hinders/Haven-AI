@@ -12,7 +12,8 @@
 import { useCallback, useMemo, useState } from 'react'
 import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
-import { useDelegationBudget, type DelegationBudget } from '@/hooks/useDelegationBudget'
+import { useDelegationBudget, type DelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
+import BudgetGrantAction from './BudgetGrantAction'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
@@ -54,31 +55,31 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens }: Props
   const recipientValid = recipient.trim() === '' || isAddress(recipient.trim())
   const amountValid = amount.trim() !== '' && Number(amount) > 0
 
-  const handleGrant = useCallback(async () => {
-    if (!tokenCfg || !amountValid || !recipientValid) return
+  // The grant INPUT is this card's business; performing the grant — and
+  // telling a cancelled signature apart from a failed one — belongs to the
+  // shared BudgetGrantAction, so the modal and this card behave identically
+  // (#1073). Null while the form is incomplete, which disables the control.
+  const grantInput = useMemo<GrantInput | null>(() => {
+    if (!tokenCfg || !amountValid || !recipientValid) return null
     let budgetAtomic: string
     try {
       budgetAtomic = parseUnits(amount, tokenCfg.decimals).toString()
     } catch {
-      toast.error('Enter a valid amount.')
-      return
+      return null
     }
-    const result = await grant({
+    return {
       tokenAddress: tokenCfg.address as Address,
       recipientAddress: recipient.trim() ? (recipient.trim() as Address) : null,
       budgetAtomic,
       periodSeconds: period,
-    })
-    if (result.ok) {
-      setAmount('')
-      setRecipient('')
-      toast.success('Budget set — it refills itself every period.')
-    } else if (result.reason === 'cancelled') {
-      toast.error('Signature was cancelled.')
-    } else {
-      toast.error('Could not set the budget. Try again.')
     }
-  }, [amount, amountValid, grant, period, recipient, recipientValid, toast, tokenCfg])
+  }, [amount, amountValid, period, recipient, recipientValid, tokenCfg])
+
+  const handleGranted = useCallback(() => {
+    setAmount('')
+    setRecipient('')
+    toast.success('Budget set — it refills itself every period.')
+  }, [toast])
 
   const handleRevoke = useCallback(
     async (hash: string) => {
@@ -147,12 +148,16 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens }: Props
             className="font-mono"
             aria-label="Recipient"
           />
-          <div className="flex items-center gap-3">
-            <Button onClick={handleGrant} disabled={busy || !ready || !amountValid || !recipientValid}>
-              {busy ? 'Setting…' : 'Set budget'}
-            </Button>
-            <span className="text-xs text-[var(--v2-ink-muted)]">One signature. Refills every period automatically.</span>
-          </div>
+          <BudgetGrantAction
+            grant={grant}
+            busy={busy}
+            ready={ready}
+            input={grantInput}
+            label="Set budget"
+            busyLabel="Setting…"
+            helper="One signature. Refills every period automatically."
+            onGranted={handleGranted}
+          />
         </div>
       ) : null}
     </Card>

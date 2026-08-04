@@ -29,6 +29,8 @@ import { isIncompleteMoneyInput, validateMoneyInput } from '@/lib/money-input'
 import { getChainTokens } from '@/lib/safe-tx'
 import { executeAgentSetup } from '@/lib/agent-setup'
 import { useActiveSigner } from '@/lib/signer'
+import { useDelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
+import BudgetGrantAction from './BudgetGrantAction'
 import WalletButton from './WalletButton'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
@@ -356,9 +358,22 @@ export default function ConnectAgent2Modal({
     amount: allowance.amount,
     period: budgetPeriodLabel(allowance.resetTimeMin),
   }))
-  const availableTokens = tokenOptions.filter(
-    (token) => !allowances.some((allowance) => allowance.tokenSymbol === token.symbol),
-  )
+  // #1073: on the delegation rail each budget is its own signature, so setup
+  // takes exactly ONE. Three tokens would mean three consecutive passkey
+  // prompts, and a failure on the second leaves a half-approved agent with no
+  // sensible UI. Further tokens are added later from the agent page, one
+  // deliberate signature at a time.
+  const budgetSlotsFull = isDelegationAccount && allowances.length >= 1
+  const availableTokens = budgetSlotsFull
+    ? []
+    : tokenOptions.filter(
+        (token) => !allowances.some((allowance) => allowance.tokenSymbol === token.symbol),
+      )
+  // A delegation budget refills on a real period boundary; "One-time" (0) has
+  // no delegation equivalent, so it is not offered on this rail.
+  const resetPeriodOptions = isDelegationAccount
+    ? RESET_PERIODS.filter((period) => period.value > 0)
+    : RESET_PERIODS
   const addTokenOption = availableTokens.find((token) => token.symbol === addToken)
   const addAmountValidation =
     addAmount && addTokenOption
@@ -765,7 +780,7 @@ export default function ConnectAgent2Modal({
                       className="v2-tabular"
                     />
                     <Select value={addReset} onChange={(event) => setAddReset(Number(event.target.value))}>
-                      {RESET_PERIODS.map((period) => (
+                      {resetPeriodOptions.map((period) => (
                         <option key={period.value} value={period.value}>
                           {period.label}
                         </option>
@@ -782,6 +797,11 @@ export default function ConnectAgent2Modal({
                     Add budget
                   </Button>
                 </div>
+              ) : budgetSlotsFull ? (
+                <p className="rounded-[10px] bg-[var(--v2-surface)] px-3 py-2 text-xs text-[var(--v2-ink-2)]">
+                  Setup takes one budget, approved with a single signature. You can add more from
+                  the agent&apos;s page once it is running.
+                </p>
               ) : allowances.length > 0 ? (
                 <p className="rounded-[10px] bg-[var(--v2-surface)] px-3 py-2 text-xs text-[var(--v2-ink-2)]">
                   All supported tokens for {walletNetworkName} already have budgets.
@@ -813,7 +833,7 @@ export default function ConnectAgent2Modal({
             <div className="v2-animate-step-rise space-y-5">
               <AgentRulesSummary
                 title="Confirm agent rules"
-                description="Haven creates a pending setup; the agent creates its key locally and Haven receives only the public signing address. Nothing can spend until you approve the budget with your wallet — the signature is the authority."
+                description={`Haven creates a pending setup; the agent creates its key locally and Haven receives only the public signing address. Nothing can spend until you approve the budget${isDelegationAccount ? '' : ' with your wallet'} — the signature is the authority.`}
                 density="compact"
                 items={[
                   { label: 'Who can spend', value: name, helper: description.trim() || undefined },
@@ -899,18 +919,30 @@ export default function ConnectAgent2Modal({
                 (runtimeIsConfigured(setupStatus?.install_status) ||
                   setupStatus?.install_status?.error_code)) ||
                 visibleStatus === 'awaiting_wallet_approval') && isDelegationAccount && (
-                <SetupStatusState
-                  title="Set the agent's budget to activate it"
-                  body="Your agent is connected and its credentials are ready. On this account, you approve by granting a budget — one passkey or wallet signature on the agent's page. The agent cannot spend until a budget is active."
-                  tone="brand"
-                  primaryLabel="Set budget"
-                  onPrimary={() => {
-                    handleClose()
-                    // agent_id arrives with the register step's status payload;
-                    // fall back to the agents list if polling has not caught up.
-                    router.push(setupStatus?.agent_id ? `/agents/${setupStatus.agent_id}` : '/agents')
-                  }}
-                />
+                setupStatus?.agent_id ? (
+                  <DelegationApprovalStep
+                    key={setupStatus.agent_id}
+                    agentId={setupStatus.agent_id}
+                    setupId={setup.setup_id}
+                    chainId={approvalChainId}
+                    status={setupStatus}
+                    walletName={approvalWalletLabel}
+                    onApproved={async () => {
+                      await statusQuery.refetch()
+                      onSetupUpdated?.({ delegateAddress: setupStatus.delegate_address ?? null })
+                    }}
+                    onCancel={handleCancelSetup}
+                    onClose={handleClose}
+                    isWrongChain={isWrongChain}
+                    approvalChainName={approvalChainName}
+                    onSwitchChain={() => switchChain({ chainId: approvalChainId })}
+                    isSwitchingChain={isSwitchingChain}
+                  />
+                ) : (
+                  // agent_id lands with the register step; polling is a beat
+                  // behind at most. Never route the user away for it.
+                  <FinalizingLocalSetup loading={statusQuery.loading} />
+                )
               )}
 
               {((visibleStatus === 'connected_local' &&
@@ -1321,56 +1353,12 @@ function LocalConnectionReady({
           },
         ]}
         footer={
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-[12px] text-[var(--v2-ink-2)]">
-              <Icon icon={Check} className="h-3.5 w-3.5 shrink-0 text-[var(--v2-success)]" />
-              <span>
-                Local connection verified
-                {verifiedAddressShort ? ` · ${verifiedAddressShort}` : ''}
-              </span>
-            </div>
-            {(status?.delegate_address || install || safeThreshold > 1) && (
-              <details className="group text-[12px]">
-                <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]">
-                  <Icon icon={ChevronRight} className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
-                  Verification details
-                </summary>
-                <dl className="mt-2 space-y-2 border-l border-[var(--v2-border)] pl-3">
-                  {status?.delegate_address && (
-                    <div>
-                      <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
-                        Public address
-                      </dt>
-                      <dd className="mt-0.5 break-all font-mono text-xs text-[var(--v2-ink)]">
-                        {status.delegate_address}
-                      </dd>
-                    </div>
-                  )}
-                  {install && (
-                    <div>
-                      <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
-                        Runtime setup
-                      </dt>
-                      <dd className="mt-0.5 text-xs text-[var(--v2-ink-2)]">
-                        <span className="text-[var(--v2-ink)]">{runtimeStatusLabel(install)}</span>
-                        {runtimeStatusHelper(install) ? ` — ${runtimeStatusHelper(install)}` : ''}
-                      </dd>
-                    </div>
-                  )}
-                  {safeThreshold > 1 && (
-                    <div>
-                      <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
-                        Approvals required
-                      </dt>
-                      <dd className="mt-0.5 text-xs text-[var(--v2-ink-2)]">
-                        {safeThreshold} of {safeOwnerCount}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              </details>
-            )}
-          </div>
+          <ConnectionVerificationFooter
+            delegateAddress={status?.delegate_address ?? null}
+            install={install}
+            safeThreshold={safeThreshold}
+            safeOwnerCount={safeOwnerCount}
+          />
         }
       />
 
@@ -1423,6 +1411,272 @@ function LocalConnectionReady({
       </div>
       <span className="sr-only">{fallbackSetup.setup_id}</span>
     </>
+  )
+}
+
+/**
+ * Step 4 on the DELEGATION rail (#1073).
+ *
+ * Same step, same position in the stepper, same summary-then-approve shape as
+ * the legacy `LocalConnectionReady` — only the instrument differs: a passkey
+ * or owner signature over the budget instead of a Safe transaction. The user
+ * approves where the rules are shown, and never leaves the modal to do it.
+ *
+ * The budget was already chosen at the policy step, so nothing is re-entered
+ * here; this screen restates it and takes the signature.
+ */
+function DelegationApprovalStep({
+  agentId,
+  setupId,
+  chainId,
+  status,
+  walletName,
+  onApproved,
+  onCancel,
+  onClose,
+  isWrongChain,
+  approvalChainName,
+  onSwitchChain,
+  isSwitchingChain,
+}: {
+  agentId: string
+  setupId: string
+  chainId: number
+  status: AgentConnectionSetupStatusResponse
+  walletName: string
+  onApproved: () => Promise<void>
+  onCancel: () => void
+  onClose: () => void
+  /** True when a wallet is connected but to the wrong chain for this account. */
+  isWrongChain: boolean
+  approvalChainName: string
+  onSwitchChain: () => void
+  isSwitchingChain: boolean
+}) {
+  const { grant, busy, ready } = useDelegationBudget(agentId, chainId)
+  const [confirming, setConfirming] = useState(false)
+  const [confirmFailed, setConfirmFailed] = useState(false)
+  // Once the budget is signed the agent is live and spending — there is
+  // nothing left for "Cancel setup" to undo, and offering it would promise a
+  // reversal Haven cannot perform (#1073 review). The backend refuses it too.
+  const [granted, setGranted] = useState(false)
+
+  const budget = status.agent_budget[0] ?? null
+  const displayAmount = budget
+    ? formatAllowanceForToken(budget.allowance_amount, chainId, budget.token_symbol)
+    : null
+
+  // The policy step's single budget, in the shape the grant takes. Minutes on
+  // the setup record, seconds on a delegation.
+  const grantInput: GrantInput | null = budget
+    ? {
+        tokenAddress: budget.token_address as Address,
+        // Unpinned by design: a recipient-pinned budget cannot fund the agent
+        // wallet, which would lock the agent out of the standard x402 path.
+        // Pinning stays a deliberate choice on the agent's page.
+        recipientAddress: null,
+        budgetAtomic: budget.allowance_amount,
+        periodSeconds: budget.reset_period_min * 60,
+      }
+    : null
+
+  async function confirmWithHaven() {
+    setGranted(true)
+    setConfirming(true)
+    setConfirmFailed(false)
+    try {
+      // Haven verifies the signed budget itself — this asserts nothing and is
+      // safe to retry.
+      await api.post(`/agent-connection-setups/${encodeURIComponent(setupId)}/budget-approval`, {})
+      await onApproved()
+    } catch {
+      setConfirmFailed(true)
+    } finally {
+      setConfirming(false)
+    }
+  }
+
+  return (
+    <>
+      <AgentRulesSummary
+        title="Approve agent rules"
+        description={`You sign once to give ${status.agent.name ?? 'this agent'} authority to spend within this budget. It refills every period, and nothing executes outside what you approve here.`}
+        density="compact"
+        items={[
+          {
+            label: 'Agent',
+            value: status.agent.name ?? 'New agent',
+            helper: status.agent.description?.trim() || undefined,
+          },
+          { label: 'From', value: walletName },
+          {
+            label: 'Budget',
+            value: displayAmount ? (
+              `${displayAmount} ${budget?.token_symbol} ${budgetPeriodLabel(budget?.reset_period_min ?? 0)}`
+            ) : (
+              <span className="text-[var(--v2-ink-3)]">Waiting for budget</span>
+            ),
+          },
+        ]}
+        footer={
+          <ConnectionVerificationFooter
+            delegateAddress={status.delegate_address ?? null}
+            install={status.install_status}
+          />
+        }
+      />
+
+      {confirmFailed && (
+        <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
+          <p className="text-sm font-semibold text-[var(--v2-ink)]">Budget set — finishing up</p>
+          <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            Your budget is approved and the agent can spend within it. Haven just could not finish
+            marking this setup complete.
+          </p>
+          <Button variant="ghost" size="sm" onClick={confirmWithHaven} disabled={confirming} className="mt-3 w-full">
+            {confirming ? 'Finishing…' : 'Try again'}
+          </Button>
+        </div>
+      )}
+
+      {confirmFailed ? (
+        <div className="flex gap-3">
+          {/* The budget is signed and the agent is live. Closing is all that
+              is left — to stop it, the user pauses or revokes it on its own
+              page. Offering "Cancel setup" here would promise a reversal
+              Haven cannot perform. */}
+          <Button variant="ghost" onClick={onClose} disabled={confirming} className="flex-1">
+            Close
+          </Button>
+        </div>
+      ) : (
+        <BudgetGrantAction
+          grant={grant}
+          busy={busy || confirming}
+          ready={ready}
+          input={grantInput}
+          label="Approve budget"
+          busyLabel={confirming ? 'Finishing…' : 'Waiting for signature…'}
+          // Same footer shape as the legacy step: equal-width ghost-then-
+          // primary, with the money-authority action carrying the weight.
+          leadingAction={
+            granted ? (
+              <Button variant="ghost" onClick={onClose} disabled={confirming} className="flex-1">
+                Close
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                onClick={onCancel}
+                disabled={busy || confirming}
+                className="flex-1"
+              >
+                Cancel setup
+              </Button>
+            )
+          }
+          notReadyHint={
+            isWrongChain
+              ? `This Haven wallet is on ${approvalChainName}. Switch networks to approve the budget.`
+              : 'Connect the wallet that owns this Haven wallet to approve the budget.'
+          }
+          // A passkey account is always ready. An EOA-owned one is blocked for
+          // one of two different reasons, and the legacy step distinguishes
+          // them — offer the SAME two exits rather than a generic connect
+          // button that a wrong-network user cannot act on.
+          notReadyAction={
+            isWrongChain ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onSwitchChain}
+                disabled={isSwitchingChain}
+                className="w-full"
+              >
+                {isSwitchingChain ? 'Switching network…' : `Switch to ${approvalChainName}`}
+              </Button>
+            ) : (
+              <WalletButton />
+            )
+          }
+          onGranted={confirmWithHaven}
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * The approval step's footer, shared by both rails (#1073).
+ *
+ * The verified-connection line plus the collapsible proof behind it. Both
+ * approval steps show the same evidence for the same decision — only the
+ * Safe-specific "Approvals required" row is rail-conditional, and it is
+ * absent on the delegation rail because a single signature IS the approval.
+ */
+function ConnectionVerificationFooter({
+  delegateAddress,
+  install,
+  safeThreshold = 1,
+  safeOwnerCount = 1,
+}: {
+  delegateAddress: string | null
+  install: AgentConnectionSetupStatusResponse['install_status'] | undefined
+  safeThreshold?: number
+  safeOwnerCount?: number
+}) {
+  const addressShort = delegateAddress ? truncate(delegateAddress) : null
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-[12px] text-[var(--v2-ink-2)]">
+        <Icon icon={Check} className="h-3.5 w-3.5 shrink-0 text-[var(--v2-success)]" />
+        <span>
+          Local connection verified
+          {addressShort ? ` · ${addressShort}` : ''}
+        </span>
+      </div>
+      {(delegateAddress || install || safeThreshold > 1) && (
+        <details className="group text-[12px]">
+          <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]">
+            <Icon icon={ChevronRight} className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
+            Verification details
+          </summary>
+          <dl className="mt-2 space-y-2 border-l border-[var(--v2-border)] pl-3">
+            {delegateAddress && (
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+                  Public address
+                </dt>
+                <dd className="mt-0.5 break-all font-mono text-xs text-[var(--v2-ink)]">
+                  {delegateAddress}
+                </dd>
+              </div>
+            )}
+            {install && (
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+                  Runtime setup
+                </dt>
+                <dd className="mt-0.5 text-xs text-[var(--v2-ink-2)]">
+                  <span className="text-[var(--v2-ink)]">{runtimeStatusLabel(install)}</span>
+                  {runtimeStatusHelper(install) ? ` — ${runtimeStatusHelper(install)}` : ''}
+                </dd>
+              </div>
+            )}
+            {safeThreshold > 1 && (
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+                  Approvals required
+                </dt>
+                <dd className="mt-0.5 text-xs text-[var(--v2-ink-2)]">
+                  {safeThreshold} of {safeOwnerCount}
+                </dd>
+              </div>
+            )}
+          </dl>
+        </details>
+      )}
+    </div>
   )
 }
 

@@ -18,6 +18,7 @@ import { useActiveSigner } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import { createPasskey, base64UrlDecode } from '@/lib/passkey'
 import type { AccountSigners } from '@/lib/delegationPasskeySigner'
+import { pickSigningPath } from './useDelegationBudget'
 
 export type SignerResult = { ok: true } | { ok: false; reason: 'cancelled' | 'blocked' | 'failed'; message?: string }
 
@@ -56,7 +57,10 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
     void reload()
   }, [reload])
 
-  const passkeyOnly = !!signers && !signers.owner_address && signers.passkeys.length > 0
+  // Device decision, not account-shape decision (the multi-signer fix): an
+  // account with both an owner and passkeys signs with whichever is reachable
+  // from here — enrolling a backup wallet must never strand the passkey.
+  const signingPath = pickSigningPath(signers, signer?.type === 'eoa')
 
   /** Sign the prepared op with the account's kind of signer (never Haven). */
   const signPrepared = useCallback(
@@ -86,7 +90,13 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
     async (body: Record<string, unknown>): Promise<SignerResult> => {
       setBusy(true)
       try {
-        const prep = await api.post<PrepareResponse>(`/agents/${agentId}/account-signers/prepare`, body)
+        // Tell the backend which signer this device will use — gas estimation
+        // is shaped by the signature kind, and only the device knows what is
+        // available.
+        const prep = await api.post<PrepareResponse>(`/agents/${agentId}/account-signers/prepare`, {
+          ...body,
+          signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
+        })
         const signature = await signPrepared(prep)
         await api.post(`/agents/${agentId}/account-signers/submit`, {
           ...body,
@@ -108,7 +118,7 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
         setBusy(false)
       }
     },
-    [agentId, reload, signPrepared],
+    [agentId, reload, signPrepared, signingPath],
   )
 
   /** Enroll a backup passkey — a fresh WebAuthn credential on this device. */
@@ -148,9 +158,10 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
     signers,
     loadError,
     busy,
-    // Managing signers requires being able to sign as an EXISTING signer:
-    // a passkey account signs with its passkey; an EOA account needs its wallet.
-    ready: passkeyOnly || signer?.type === 'eoa',
+    // Managing signers requires being able to sign as an EXISTING signer —
+    // any signer reachable from this device (passkey here, or the connected
+    // owner wallet).
+    ready: signingPath !== null,
     enrollBackupPasskey,
     enrollOwnerWallet,
     removePasskey,

@@ -27,7 +27,7 @@ covers:
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-07-26"
+last-verified: "2026-08-04"
 ---
 
 # Haven — System Context

@@ -6,7 +6,7 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/lib/delegation-rail.ts
   - packages/backend/src/lib/delegation-authorization.ts
-last-verified: "2026-07-24"
+last-verified: "2026-08-04"
 ---
 
 # Delegation rail — definition-of-done report (#835, epic #821)

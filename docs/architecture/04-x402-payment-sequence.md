@@ -351,7 +351,9 @@ which neither Hybrid can do — so 3009-mode redeems the budget delegation to
 **transiently fund the agent EOA** (a sponsored UserOp the agent signs; caveats
 run on-chain at gas estimation), which then signs the standard header. One
 budget delegation meters direct transfers, erc7710 settlement, and 3009 funding:
-revoke once, everything stops.
+revoke once, everything stops. (The owner-side revoke signature picks its
+scheme per DEVICE — a multi-signer account signs with whichever of its
+signers is reachable, never forced onto the owner wallet; security model §6.)
 
 **Pins are never weakened.** A recipient-pinned budget delegation structurally
 cannot fund the EOA (the pin locks the transfer to the merchant), so

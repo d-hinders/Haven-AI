@@ -6,7 +6,6 @@ covers:
   - docs/product/design-system.md
   - docs/product/copy-guidelines.md
   - docs/regulatory/casp-risk-guardrails.md
-  - packages/frontend/src/app/**
   - packages/frontend/src/components/SendModal.tsx
   - packages/frontend/src/components/ReceiveFundsModal.tsx
   - packages/frontend/src/components/AddFundsModal.tsx

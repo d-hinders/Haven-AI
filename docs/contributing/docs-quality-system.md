@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/docs-drift/docs-drift.test.ts
   - packages/backend/src/docs-drift/env-example-drift.test.ts
   - .env.example
-last-verified: "2026-07-27"
+last-verified: "2026-08-04"
 ---
 
 # Documentation-quality system
@@ -132,12 +132,42 @@ them.
 **Coupling gate** (`.github/workflows/docs-coupling.yml` →
 `scripts/docs/coupling-gate.mjs`): on every PR, finds docs whose `covers` globs
 match a changed file the PR did **not** also touch, and posts a single advisory
-sticky comment naming each doc and its `last-verified` age. The script always
-exits 0 and the workflow is not a required check, so it can never block a merge.
-Run it locally with `node scripts/docs/coupling-gate.mjs --changed=path/a,path/b`.
+sticky comment naming each doc and its `last-verified` age.
+
+**Run `npm run docs:coupling` locally — it is the strict, CI-equivalent form.**
+The bare `node scripts/docs/coupling-gate.mjs` is the *advisory* posture: it always
+exits 0, so it does not tell you what CI will say. Since Phase 4 the same script
+also runs `--strict`, where a `contract: true` doc is **blocking** (see below).
+`--changed=path/a,path/b` still forces an explicit file list.
+
+With no `--changed` and no `BASE_SHA`, the candidate set is the working tree —
+`origin/dev...HEAD` **plus** staged, unstaged and untracked files. Committed
+changes alone reported "no covered docs implicated" for an uncommitted diff, and
+that false green is how [#1076](https://github.com/d-hinders/Haven-AI/pull/1076)
+reached CI with an untouched contract doc ([#1077](https://github.com/d-hinders/Haven-AI/issues/1077)).
+For the same reason an empty candidate set is reported as "nothing was checked"
+and fails closed under `--strict`, rather than passing.
+
 A doc whose `last-verified` is **today** is suppressed — once you've confirmed it
 accurate in a day's work, subsequent edits to a covered file won't re-flag it
-the same day (a noise-reduction heuristic; the gate is advisory regardless).
+the same day. This is a noise-reduction heuristic for the advisory comment and it
+does **not** apply to a contract doc under `--strict`: a blocking check must not
+depend on wall-clock time, and a doc some *other* PR verified today says nothing
+about whether this one made it stale.
+
+**Scoping `covers` (#1077).** `covers` means *this doc describes that code*, not
+*this doc applies to that code*. A standing checklist that globs
+`src/components/**` fires on every frontend PR and buries the one ⚠️ finding that
+mattered — so scope a checklist to the design system it checks against **plus the
+money and authority screens it actually contains rules about**, not to every
+screen it is applied to. Narrowing to zero is the opposite failure: a doc that
+matches nothing never gets the doc-reviewer nudge, so keep a real net.
+Two related rules the gate applies for you:
+test files and generated files (`__tests__/`, `*.test.*`, `*.spec.*`,
+`packages/core/src/api-types.ts`) implicate a doc only when `covers` names the
+path **exactly** — a wildcard does not sweep them up, since prose is not made
+stale by a test being added; and a `#` comment may only trail a `covers` item,
+never occupy its own line, which would silently truncate the list.
 
 **Drift tests** (`packages/backend/src/docs-drift/`): vitest tests, modeled on
 the OpenAPI drift test, that pin hand-maintained doc/config claims to the code

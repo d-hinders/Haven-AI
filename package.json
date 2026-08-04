@@ -22,6 +22,7 @@
     "release:bump": "node scripts/release-bump.mjs",
     "docs:check": "node scripts/docs/validate-frontmatter.mjs && node scripts/docs/validate-agent-skills.mjs",
     "docs:new": "node scripts/docs/new-doc.mjs",
+    "docs:coupling": "node scripts/docs/coupling-gate.mjs --strict --out=/dev/null",
     "docs:test": "node --test scripts/docs/*.test.mjs",
     "lint:copy": "node scripts/frontend-copy-lint.mjs",
     "lint:copy:update": "node scripts/frontend-copy-lint.mjs --update",

@@ -58,7 +58,7 @@ Stop and ask the user if scope or acceptance is unsafe to infer. Never guess on 
    - `area:frontend` → `frontend.md`
    - `area:backend` → `backend.md`
    - `area:sdk` or `area:mcp` → `sdk.md`
-   - `area:docs` → `docs.md`
+   - `area:docs` → `docs.md`, and also whenever the diff touches code that some doc's `covers:` maps to — the coupling gate fires on **code** changes, so routing its playbook by `area:docs` alone loads it exactly when it is not needed
    - `money-path` → `money.md`
 6. For non-trivial work, use the coordinator and explorer roles from [haven-agent-workflow](../haven-agent-workflow/SKILL.md).
 
@@ -80,6 +80,7 @@ Run checks proportionate to every changed surface:
 Run the **repository's own required checks** locally before pushing, for fast feedback:
 
 - `npm run docs:check` and `npm run docs:test` when the diff touches any Markdown file, anything under `docs/` or `scripts/docs/`, or a root gravity file (`CLAUDE.md`, `README.md`, `AGENTS.md`, `ABOUT_HAVEN.md`);
+- `npm run docs:coupling` when the diff touches **any source file** — this one is keyed on code, not Markdown, so the Markdown-keyed line above never fires for the pure-code PR that needs it (the #1076 failure). It is the strict, CI-equivalent form; the bare `node scripts/docs/coupling-gate.mjs` always exits 0 and will not tell you what CI says. Run it from the worktree holding the candidate change — it reads uncommitted work, so it is valid before the commit;
 - `npm run design:lint -w packages/frontend` and `node packages/frontend/scripts/design-system-coupling.mjs --strict` when the diff touches frontend surfaces or adds an exported component under `components/ui/**` or `components/haven/**`. Add the showcase entry to `app/(authenticated)/design-system/page.tsx`, or mark a genuinely internal export `// design-system-exempt: <reason>`.
 
 These are **CI required checks** (#1023), not gates this skill owns — every PR gets them however it was opened. Running them here only saves a round trip. Do not restate their rules in this file: the workflow comments and `docs/contributing/docs-quality-system.md` are the definition, and a second copy drifts.
@@ -94,7 +95,11 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
 2. Apply clear, scoped blocking and should-fix findings, then rerun affected checks.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
 4. Record applied and deferred findings with reasons.
-5. Run `node scripts/docs/coupling-gate.mjs` for the changed paths. When the diff touches code that any doc's `covers:` maps to, running the doc-reviewer role is a **hard definition-of-done step**, not optional: review the implicated docs and, in the same pull request, either update the stale claims or genuinely re-verify them and bump `last-verified`, then rerun the docs checks. Do not open the pull request while a `covers:`-mapped doc is left unreviewed.
+5. Run `npm run docs:coupling`. Two kinds of finding, and they are not the same obligation:
+   - **⚠️ contract doc → blocking.** The strict gate exits 1 and so will CI. Resolve it in *this* pull request: update the stale claims, or genuinely re-verify the doc and bump `last-verified`. Never push with this red.
+   - **Everything else → advisory.** Run the doc-reviewer role over the implicated docs; this is a **hard definition-of-done step**, not optional. Update what the diff actually made stale. Bump `last-verified` only on a doc you really re-read — a rubber-stamped date is worse than a stale one, because the weekly staleness audit ranks on it, so leaving a doc untouched and saying why is a legitimate outcome.
+
+   Do not open the pull request while a `covers:`-mapped doc is left unreviewed. Report what the gate actually printed — "no covered docs implicated" is only evidence when the gate saw the candidate diff, which is why it now refuses to call an empty file set a pass.
 
 ## Commit And Pull Request
 

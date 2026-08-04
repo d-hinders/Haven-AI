@@ -4,7 +4,7 @@ status: current
 covers:
   - .agents/skills/ship-next/SKILL.md
   - .github/labels.yml
-last-verified: "2026-07-27"
+last-verified: "2026-08-04"
 ---
 
 # Ship-next playbooks
@@ -49,7 +49,7 @@ and are synced to the repo by `.github/workflows/labels.yml`.
 | `area:backend` | backend / API in `packages/backend` | `backend.md` |
 | `area:sdk` | SDK / connect / API contract / credentials | `sdk.md` |
 | `area:mcp` | MCP server / signer / hosted MCP | `sdk.md` |
-| `area:docs` | docs only | `docs.md` → [`docs-quality-system.md`](../docs-quality-system.md) |
+| `area:docs` | docs, **plus any diff touching `covers:`-mapped code** | `docs.md` → [`docs-quality-system.md`](../docs-quality-system.md) |
 | `money-path` | payments, agent authority, allowances, migrations | `money.md` |
 
 An issue may carry several surface labels; the skill loads each matching

@@ -159,6 +159,12 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - The headless equivalent should match the risk: class stability for animation, shared formatter output for cross-surface display, gated rendering for loading flashes, and render/state tests for empty or populated setup states.
 - Do not use "browser skipped" as a blanket waiver for visual or interaction risk on primary money movement or agent authority flows.
 
+## Green-Gate Evidence
+
+- A gate that reports on a file list can report success on an **empty** list, and that reads identically to a clean pass. Before recording a check as green in the PR body, confirm the run actually saw the candidate diff.
+- Flag a PR whose Local Checks quote a gate's success message when the gate's default range could not have included the change — a committed-only range run before the commit, a `paths`-filtered job on a non-matching PR, a check run in the wrong worktree.
+- Run the **CI-equivalent** form, not the convenient one. `node scripts/docs/coupling-gate.mjs` is advisory and always exits 0; `npm run docs:coupling` is what CI runs. A local invocation that cannot fail is not evidence that CI will pass (#1076 → #1077).
+
 ## Test Gaps Worth Catching
 
 - Add tests for changed non-happy states: loading, empty, error, proposed/submitted, approved-but-not-executed, expired, cancelled, and duplicate cases.

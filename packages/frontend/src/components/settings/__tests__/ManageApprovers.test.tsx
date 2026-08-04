@@ -18,7 +18,11 @@ vi.mock('@/hooks/useSafeApprovers', () => ({
 vi.mock('@/hooks/useSafeOperationGate', () => ({
   useSafeOperationGate: (...args: unknown[]) => mockUseSafeOperationGate(...args),
 }))
-vi.mock('@/lib/signer', () => ({ useActiveSigner: (...a: unknown[]) => mockUseActiveSigner(...a) }))
+vi.mock('@/lib/signer', () => ({
+  useActiveSigner: (...a: unknown[]) => mockUseActiveSigner(...a),
+  // Real predicate shape (#1079): narrows away the delegator_passkey variant.
+  isSafeCapableSigner: (s: { type?: string } | null) => s !== null && s.type !== 'delegator_passkey',
+}))
 vi.mock('wagmi', () => ({ usePublicClient: (...a: unknown[]) => mockUsePublicClient(...a) }))
 vi.mock('@/lib/approver-tx', () => ({
   applyApproverChange: (...a: unknown[]) => mockApplyApproverChange(...a),

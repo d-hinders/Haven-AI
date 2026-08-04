@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/lib/hybrid-account-config.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-03"
+last-verified: "2026-08-04"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -181,6 +181,18 @@ independent-of-Haven path is [exit/README.md](../exit/README.md).
   calldata** — the DB can never record a signer the owner didn't actually sign.
 - **UUPS upgrade authority stays with the signers** (invariant 11); recovery
   changes signers, never the implementation.
+
+**Read surface (#1079).** The signer set is additionally readable at account
+level via `GET /accounts/hybrid/:address/signers` — owner-scoped (dashboard
+JWT + ownership check on `user_safes`) and returning **public-key material
+only** (`key_id`, P256 x/y, owner address). It powers login-time signer
+resolution and the account-level recovery card, so an account with zero agents
+can still see (and, through any live agent's prepare/submit routes, manage) its
+own signer set. It is a read: no route lets Haven — or this endpoint's caller —
+change a signer set without an existing signer's signature (invariant 13
+unchanged). Client-side, signing selects the passkey whose credential is
+actually enrolled on the signing device rather than blindly `passkeys[0]`, so
+recovery with a backup key works from the backup device.
 
 **The honest limit, stated plainly:** a **single-signer account has no recovery**
 — if its only signer is lost, the account is unreachable by the user *and* by

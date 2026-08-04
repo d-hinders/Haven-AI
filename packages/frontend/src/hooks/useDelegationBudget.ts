@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { Address } from 'viem'
 import { api } from '@/lib/api'
 import { useActiveSigner } from '@/lib/signer'
+import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import type { AccountSigners, DelegationMessage } from '@/lib/delegationPasskeySigner'
 
 export interface DelegationBudget {
@@ -84,8 +85,15 @@ async function signTyped(
 export function useDelegationBudget(agentId: string, chainId: number) {
   const [budgets, setBudgets] = useState<DelegationBudget[] | null>(null)
   const [signers, setSigners] = useState<AccountSigners | null>(null)
+  const [signersError, setSignersError] = useState(false)
   const [busy, setBusy] = useState(false)
-  const signer = useActiveSigner({ chainId })
+  // The ACCOUNT address scopes the signer lookup (#1079): without it the
+  // stored-passkey/hybrid branches are unreachable and `ready` would depend
+  // on any globally-connected wallet with no per-account check.
+  const signer = useActiveSigner({
+    safeAddress: signers ? (signers.account_address as Address) : undefined,
+    chainId,
+  })
 
   const reload = useCallback(async () => {
     try {
@@ -96,16 +104,25 @@ export function useDelegationBudget(agentId: string, chainId: number) {
     }
   }, [agentId])
 
+  // The account's signer set decides HOW the owner signs (#887): a
+  // passkey-only account signs via WebAuthn; anything with an EOA owner
+  // keeps the connected-wallet EIP-712 path. A failed fetch is RETRYABLE
+  // (#1079): it sets an error flag instead of stranding the hook at a
+  // permanent null.
+  const reloadSigners = useCallback(async () => {
+    try {
+      setSigners(await api.get<AccountSigners>(`/agents/${agentId}/account-signers`))
+      setSignersError(false)
+    } catch {
+      setSigners(null)
+      setSignersError(true)
+    }
+  }, [agentId])
+
   useEffect(() => {
     void reload()
-    // The account's signer set decides HOW the owner signs (#887): a
-    // passkey-only account signs via WebAuthn; anything with an EOA owner
-    // keeps the connected-wallet EIP-712 path.
-    void api
-      .get<AccountSigners>(`/agents/${agentId}/account-signers`)
-      .then(setSigners)
-      .catch(() => setSigners(null))
-  }, [agentId, reload])
+    void reloadSigners()
+  }, [reload, reloadSigners])
 
   const passkeyOnly = !!signers && !signers.owner_address && signers.passkeys.length > 0
 
@@ -179,10 +196,23 @@ export function useDelegationBudget(agentId: string, chainId: number) {
 
   // Ready: a passkey-only account signs with its passkey (no wallet needed);
   // an EOA-owned account still needs the connected owner wallet.
-  return { budgets, grant, revoke, busy, ready: passkeyOnly || signer?.type === 'eoa', reload }
+  return {
+    budgets,
+    grant,
+    revoke,
+    busy,
+    ready: passkeyOnly || signer?.type === 'eoa',
+    reload,
+    signersError,
+    reloadSigners,
+  }
 }
 
 function cancelled(err: unknown): boolean {
+  // The passkey path (ox SignFailedError wrapping a NotAllowedError
+  // DOMException) is covered by the shared predicate — the #1076 regression.
+  // The EOA wallet path additionally says "User rejected the request".
+  if (isPasskeyCancellation(err)) return true
   const m = err instanceof Error ? err.message.toLowerCase() : ''
-  return m.includes('rejected') || m.includes('denied')
+  return m.includes('rejected')
 }

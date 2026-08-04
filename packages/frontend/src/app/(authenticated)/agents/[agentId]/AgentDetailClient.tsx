@@ -30,9 +30,9 @@ import {
   failedOrRejectedStatus,
 } from '@/lib/payment-status'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
-import { useActiveSigner } from '@/lib/signer'
+import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import EditAgentModal, { type EditAgentModalMode } from '@/components/EditAgentModal'
-import DelegationBudgetCard from '@/components/DelegationBudgetCard'
+import DelegationBudgetCard, { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
 import AccountSignersCard from '@/components/AccountSignersCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -294,10 +294,13 @@ export default function AgentDetailClient({ agentId }: Props) {
     : null
 
   const publicClient = usePublicClient({ chainId })
-  const signer = useActiveSigner({
+  const activeSigner = useActiveSigner({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,
   })
+  // Revoking here is a Safe transaction — only a Safe-capable signer applies.
+  // Delegation agents hide this path entirely (#1079).
+  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
   const operationGate = useSafeOperationGate({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,
@@ -314,7 +317,17 @@ export default function AgentDetailClient({ agentId }: Props) {
     setEditMode('agent')
     setEditOpen(true)
   }
+  const isDelegationAgent = agent?.account_type === 'delegator_hybrid'
   const openUpdateBudget = () => {
+    if (isDelegationAgent) {
+      // Routing fix (#1079): on the delegation rail the budget control is
+      // DelegationBudgetCard on this same page — EditAgentModal is the legacy
+      // AllowanceModule editor and can never succeed here. Scroll, don't open.
+      document
+        .getElementById(DELEGATION_BUDGET_CARD_ID)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
     setEditMode('budget')
     setEditOpen(true)
   }
@@ -527,11 +540,13 @@ export default function AgentDetailClient({ agentId }: Props) {
 
       {currentAgent.account_type === 'delegator_hybrid' ? (
         <>
-          <DelegationBudgetCard
-            agentId={agentId}
-            chainId={chainId}
-            tokens={recipientTokens}
-          />
+          <div id={DELEGATION_BUDGET_CARD_ID} className="scroll-mt-24">
+            <DelegationBudgetCard
+              agentId={agentId}
+              chainId={chainId}
+              tokens={recipientTokens}
+            />
+          </div>
           <AccountSignersCard agentId={agentId} chainId={chainId} userEmail={user?.email ?? ''} />
         </>
       ) : null}
@@ -666,7 +681,10 @@ export default function AgentDetailClient({ agentId }: Props) {
                       {pendingAction === 'resume' ? 'Resuming…' : 'Resume agent'}
                     </Button>
                   ) : null}
-                  {!isRevoked ? (
+                  {/* Safe revoke is an AllowanceModule teardown; on delegation
+                      agents the real path is DelegationBudgetCard's per-budget
+                      stop (#1079), so the Safe control is hidden there. */}
+                  {!isRevoked && !isDelegationAgent ? (
                     <Button
                       onClick={() => setConfirmAction('revoke')}
                       disabled={pendingAction !== null || revokeBlockedByOtherDevice}

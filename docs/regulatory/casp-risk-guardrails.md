@@ -453,6 +453,8 @@ Implementation rule:
 
 > Haven must not silently create or expand an agent's authority.
 
+**The dashboard's signing surfaces are rail-honest (#1079).** The signer layer types the two authorities apart: a Safe transaction can only be signed by a `SafeCapableSigner` (EOA or Safe passkey), never by a Hybrid account's passkey — the compiler enforces the exclusion at every Safe-shaped call site (send, approval execution, owner changes, AllowanceModule edits), and Safe-only controls are hidden on delegation accounts rather than dead-ending at a signer they cannot use. This is a UI/type-layer hardening only; the on-chain authority model above is unchanged.
+
 **Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** Both connect-setup approval routes work this way (`routes/agent-connection-setups.ts`): the legacy `wallet-approval` reads the live AllowanceModule state on-chain, and the delegation rail's `budget-approval` reads the agent's own active, owner-signed delegations. The latter takes an empty request body precisely so that no amount, recipient, or hash a caller supplies can influence the outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. A pinned recipient is accepted where the reviewed budget was unpinned, because that is strictly narrower authority than the user approved (#1073).
 
 ### Keep Agent Spend Authority Narrow

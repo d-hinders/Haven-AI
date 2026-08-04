@@ -17,6 +17,7 @@ import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useUserSafes } from '@/hooks/useUserSafes'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import SendModal from '@/components/SendModal'
+import AccountSignersCard, { AccountSignersReadOnly } from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
@@ -153,6 +154,9 @@ export default function AccountDetailClient() {
 
   // Build linked-agent list
   const safeAgents = agents.filter((a) => a.safe_id === safeId)
+  // #1079: the signer-management endpoints are agent-scoped; any live agent
+  // on this account can carry the account-level recovery card.
+  const recoveryAgent = safeAgents.find((a) => a.status !== 'revoked') ?? null
 
   const {
     details,
@@ -261,9 +265,14 @@ export default function AccountDetailClient() {
             <StatusBadge>{chain.name}</StatusBadge>
             {safeAddress && (
               <>
-                <Button onClick={() => setSendOpen(true)}>
-                  Send
-                </Button>
+                {/* Sending is a Safe transaction; there is no owner-send on
+                    the delegation rail yet, so the entry point is hidden
+                    there rather than dead-ending at a signer gate (#1079). */}
+                {safe.account_type !== 'delegator_hybrid' ? (
+                  <Button onClick={() => setSendOpen(true)}>
+                    Send
+                  </Button>
+                ) : null}
                 <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
                   Receive
                 </Button>
@@ -459,6 +468,23 @@ export default function AccountDetailClient() {
         )}
       </Card>
 
+      {/* #1079: account-level recovery for delegation accounts — the entire
+          backup/recovery UI used to render only inside an agent page, so an
+          account with zero agents had no path to enrol a backup passkey.
+          Management reuses the agent-scoped routes when an agent exists;
+          otherwise the signer set is shown read-only. */}
+      {safe.account_type === 'delegator_hybrid' ? (
+        recoveryAgent ? (
+          <AccountSignersCard
+            agentId={recoveryAgent.id}
+            chainId={chainId}
+            userEmail={user?.email ?? ''}
+          />
+        ) : !agentsLoading ? (
+          <AccountSignersReadOnly safeAddress={safe.safe_address} chainId={chainId} />
+        ) : null
+      ) : null}
+
       {/* Account info */}
       <Card hover={false} className="p-5 sm:p-6">
         <div className="mb-5 flex items-center justify-between gap-3">
@@ -617,7 +643,7 @@ export default function AccountDetailClient() {
         backing a wagmi wallet-client subscription) don't run in the
         background on every account page view.
       */}
-      {sendOpen && safeAddress && (
+      {sendOpen && safeAddress && safe.account_type !== 'delegator_hybrid' && (
         <SendModal
           open
           onClose={() => setSendOpen(false)}

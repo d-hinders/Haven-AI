@@ -12,10 +12,11 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { toHex } from 'viem'
+import { toHex, type Address } from 'viem'
 import { api } from '@/lib/api'
 import { useActiveSigner } from '@/lib/signer'
-import { createPasskey, base64UrlDecode, PasskeyCancelledError } from '@/lib/passkey'
+import { isPasskeyCancellation } from '@/lib/passkeyErrors'
+import { createPasskey, base64UrlDecode } from '@/lib/passkey'
 import type { AccountSigners } from '@/lib/delegationPasskeySigner'
 
 export type SignerResult = { ok: true } | { ok: false; reason: 'cancelled' | 'blocked' | 'failed'; message?: string }
@@ -29,14 +30,25 @@ interface PrepareResponse {
 
 export function useAccountSigners(agentId: string, chainId: number, userEmail: string) {
   const [signers, setSigners] = useState<AccountSigners | null>(null)
+  const [loadError, setLoadError] = useState(false)
   const [busy, setBusy] = useState(false)
-  const signer = useActiveSigner({ chainId })
+  // Scope the signer lookup to the ACCOUNT (#1079) — without safeAddress the
+  // stored-passkey/hybrid branches are unreachable and `ready` would track
+  // whatever wallet happens to be globally connected.
+  const signer = useActiveSigner({
+    safeAddress: signers ? (signers.account_address as Address) : undefined,
+    chainId,
+  })
 
+  // A failed fetch is retryable via `reload` — it flags the error instead of
+  // stranding the account at a permanent null signer set (#1079).
   const reload = useCallback(async () => {
     try {
       setSigners(await api.get<AccountSigners>(`/agents/${agentId}/account-signers`))
+      setLoadError(false)
     } catch {
       setSigners(null)
+      setLoadError(true)
     }
   }, [agentId])
 
@@ -84,7 +96,10 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
         await reload()
         return { ok: true }
       } catch (err) {
-        if (err instanceof PasskeyCancelledError) return { ok: false, reason: 'cancelled' }
+        // Shared predicate (#1079): the WebAuthn path throws ox's
+        // SignFailedError, never our PasskeyCancelledError — an instanceof
+        // check here classified every dismissed sheet as a failure.
+        if (isPasskeyCancellation(err)) return { ok: false, reason: 'cancelled' }
         const status = (err as { status?: number }).status
         const message = err instanceof Error ? err.message : undefined
         if (status === 409) return { ok: false, reason: 'blocked', message }
@@ -106,7 +121,7 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
         userDisplayName: userEmail,
       })
     } catch (err) {
-      if (err instanceof PasskeyCancelledError) return { ok: false, reason: 'cancelled' }
+      if (isPasskeyCancellation(err)) return { ok: false, reason: 'cancelled' }
       return { ok: false, reason: 'failed', message: err instanceof Error ? err.message : undefined }
     }
     return run({
@@ -131,6 +146,7 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
 
   return {
     signers,
+    loadError,
     busy,
     // Managing signers requires being able to sign as an EXISTING signer:
     // a passkey account signs with its passkey; an EOA account needs its wallet.

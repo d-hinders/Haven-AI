@@ -28,7 +28,7 @@ import { truncate } from '@/lib/format'
 import { isIncompleteMoneyInput, validateMoneyInput } from '@/lib/money-input'
 import { getChainTokens } from '@/lib/safe-tx'
 import { executeAgentSetup } from '@/lib/agent-setup'
-import { useActiveSigner } from '@/lib/signer'
+import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import { useDelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
 import BudgetGrantAction from './BudgetGrantAction'
 import WalletButton from './WalletButton'
@@ -233,10 +233,15 @@ export default function ConnectAgent2Modal({
     chainId: approvalChainId,
   })
   const publicClient = usePublicClient({ chainId: approvalChainId })
-  const signer = useActiveSigner({
+  const activeSigner = useActiveSigner({
     safeAddress: approvalSafeAddress ? (approvalSafeAddress as Address) : undefined,
     chainId: approvalChainId,
   })
+  // #1079: this surface signs SAFE transactions; a delegator_passkey cannot.
+  // The narrowed view keeps every downstream call type-honest — on delegation
+  // accounts these controls are hidden, so null here renders the same
+  // no-signer state as before.
+  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
 
   // Detect when a wallet IS connected but to the wrong chain for this approval.
   // In that case `useWalletClient({ chainId: approvalChainId })` returns null, so

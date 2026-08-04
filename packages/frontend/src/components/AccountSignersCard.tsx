@@ -10,9 +10,11 @@
  * signer; Haven signs nothing.
  */
 
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { isAddress } from 'viem'
 import { useAccountSigners } from '@/hooks/useAccountSigners'
+import { api } from '@/lib/api'
+import type { HybridAccountSigners } from '@/lib/signer'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
@@ -23,6 +25,93 @@ interface Props {
   agentId: string
   chainId: number
   userEmail: string
+}
+
+/**
+ * Display-only signer list for a delegation account with NO agent yet (#1079).
+ *
+ * Signer MANAGEMENT (add/remove) rides the agent-scoped
+ * `/agents/:id/account-signers/*` routes — an account without an agent has no
+ * management path today, and building account-level management routes is out
+ * of scope here. This read-only view uses the by-address signers route so the
+ * account's approval methods are at least visible before the first agent.
+ */
+export function AccountSignersReadOnly({
+  safeAddress,
+  chainId,
+}: {
+  safeAddress: string
+  chainId: number
+}) {
+  const [signers, setSigners] = useState<HybridAccountSigners | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      setSigners(
+        await api.get<HybridAccountSigners>(
+          `/accounts/hybrid/${safeAddress}/signers?chain_id=${chainId}`,
+        ),
+      )
+      setFailed(false)
+    } catch {
+      setSigners(null)
+      setFailed(true)
+    }
+  }, [chainId, safeAddress])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  if (signers === null && !failed) return null
+
+  return (
+    <Card hover={false} className="mt-6 p-5 md:p-6">
+      <div>
+        <h2 className="text-base font-semibold text-[var(--v2-ink)]">Backup &amp; recovery</h2>
+        <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
+          These are the ways this account can be approved. Connect an agent to add or remove one.
+        </p>
+      </div>
+
+      {failed ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+          <p className="text-sm text-[var(--v2-ink-2)]">
+            Haven could not load how this account is approved.
+          </p>
+          <Button size="sm" variant="ghost" onClick={() => void load()}>
+            Try again
+          </Button>
+        </div>
+      ) : signers ? (
+        <Card.Section divided className="mt-4">
+          {signers.owner_address ? (
+            <div className="flex items-center justify-between gap-3 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[var(--v2-ink)]">A connected wallet</p>
+                <p className="truncate text-xs text-[var(--v2-ink-muted)]">
+                  {truncateAddress(signers.owner_address)}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          {signers.passkeys.map((pk, i) => (
+            <div key={pk.key_id} className="flex items-center justify-between gap-3 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-[var(--v2-ink)]">
+                  {i === 0 ? 'Face ID / Touch ID' : `Backup ${i}`}
+                </p>
+                <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
+                  {truncateAddress(pk.key_id)}
+                </p>
+              </div>
+            </div>
+          ))}
+        </Card.Section>
+      ) : null}
+    </Card>
+  )
 }
 
 export default function AccountSignersCard({ agentId, chainId, userEmail }: Props) {

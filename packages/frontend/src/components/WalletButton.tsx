@@ -268,6 +268,10 @@ export default function WalletButton() {
     chainId: activeSafe?.chain_id,
   })
   const passkeySigner = activeSigner?.type === 'passkey' ? activeSigner : null
+  // #1079: a Hybrid DeleGator account whose passkey is on this device gets the
+  // same "Passkey ready" pill — the reported symptom was this header reading
+  // "Connect wallet" for a passkey that had just signed a budget.
+  const delegatorSigner = activeSigner?.type === 'delegator_passkey' ? activeSigner : null
   const passkeyUnavailableOnDevice = useMemo(() => {
     const safeAddress = activeSafe?.safe_address.toLowerCase()
     if (!safeAddress || activeSafe?.chain_id === undefined || passkeySigner) {
@@ -385,6 +389,52 @@ export default function WalletButton() {
                   address: passkeySigner.address,
                   chainName: safeChainName,
                   displayName: passkeyAlias,
+                }}
+                secondary={connectedWallet}
+                open={popoverOpen}
+                onClose={() => setPopoverOpen(false)}
+                onSwitchWallet={handleSwitchWallet}
+                onConnectWallet={openWalletConnect}
+                hasConnectedWallet={connected}
+                switching={pendingSwitch}
+                anchorRef={triggerRef}
+              />
+            </div>
+          )
+        }
+
+        if (delegatorSigner) {
+          const accountAlias = getOwnerAlias(delegatorSigner.accountAddress)
+          const connectedWallet =
+            connected && account
+              ? {
+                  label: 'Connected wallet',
+                  address: account.address,
+                  chainName: chain?.name,
+                  displayName: getOwnerAlias(account.address),
+                }
+              : undefined
+
+          return (
+            <div className="relative">
+              <button
+                ref={triggerRef}
+                type="button"
+                onClick={() => setPopoverOpen((v) => !v)}
+                aria-haspopup="dialog"
+                aria-expanded={popoverOpen}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+              >
+                <AddressAvatar address={delegatorSigner.accountAddress} />
+                <span>Passkey ready</span>
+              </button>
+
+              <WalletPopover
+                primary={{
+                  label: 'Haven account (passkey)',
+                  address: delegatorSigner.accountAddress,
+                  chainName: safeChainName,
+                  displayName: accountAlias,
                 }}
                 secondary={connectedWallet}
                 open={popoverOpen}

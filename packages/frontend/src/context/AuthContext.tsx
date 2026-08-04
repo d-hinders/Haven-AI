@@ -14,7 +14,9 @@ import {
   PASSKEY_SCHEMA_VERSION,
   clearStoredPasskeySigner,
   hasPasskeyCredentialOnDevice,
+  setStoredHybridSigners,
   setStoredPasskeySigner,
+  type HybridAccountSigners,
 } from '@/lib/signer'
 import type { Address } from 'viem'
 
@@ -100,7 +102,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  const hydratePasskeys = useCallback(async () => {
+  // Takes the freshly-fetched user rather than reading state: it runs inside
+  // refreshUser/login/signup BEFORE React commits setUser, so `user` state
+  // would still be the stale previous value (#1079).
+  const hydratePasskeys = useCallback(async (u: User) => {
     try {
       const { passkeys: rows } = await api.listPasskeys()
       setPasskeys(rows)
@@ -125,6 +130,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       setPasskeys([])
     }
+
+    // #1079: hybrid DeleGator accounts keep their signer set in
+    // hybrid_account_passkeys, invisible to GET /passkeys — resolve each
+    // account's set so useActiveSigner can see it. Per-safe failures are
+    // skipped silently, same as the loop above: the gate simply stays at
+    // no_signer for that account until the next refresh.
+    const hybridSafes = (u.safes ?? []).filter((s) => s.account_type === 'delegator_hybrid')
+    await Promise.all(
+      hybridSafes.map(async (safe) => {
+        try {
+          const signers = await api.get<HybridAccountSigners>(
+            `/accounts/hybrid/${safe.safe_address}/signers?chain_id=${safe.chain_id}`,
+          )
+          setStoredHybridSigners(signers)
+        } catch {
+          /* skipped silently — per-safe parity with the passkey loop */
+        }
+      }),
+    )
   }, [])
 
   const refreshUser = useCallback(async () => {
@@ -132,7 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const u = await api.get<User>('/auth/me')
       setUser(u)
       syncActiveSafe(u)
-      await hydratePasskeys()
+      await hydratePasskeys(u)
     } catch {
       // Silently fail — token might be invalid
     }
@@ -159,7 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         setUser(u)
         syncActiveSafe(u)
-        await hydratePasskeys()
+        await hydratePasskeys(u)
       })
       .catch(() => {
         if (cancelled) return
@@ -186,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(res.token)
       setUser(res.user)
       syncActiveSafe(res.user)
-      await hydratePasskeys()
+      await hydratePasskeys(res.user)
       return res.user
     },
     [hydratePasskeys, syncActiveSafe],
@@ -202,7 +226,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(res.token)
       setUser(res.user)
       syncActiveSafe(res.user)
-      await hydratePasskeys()
+      await hydratePasskeys(res.user)
       return res.user
     },
     [hydratePasskeys, syncActiveSafe],

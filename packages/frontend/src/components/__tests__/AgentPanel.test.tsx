@@ -39,6 +39,8 @@ vi.mock('@/hooks/useSafeDetails', () => ({
 
 vi.mock('@/lib/signer', () => ({
   useActiveSigner: () => mockUseActiveSigner(),
+  // Real predicate shape (#1079): narrows away the delegator_passkey variant.
+  isSafeCapableSigner: (s: { type?: string } | null) => s !== null && s.type !== 'delegator_passkey',
 }))
 
 vi.mock('../ConnectAgent2Modal', () => ({

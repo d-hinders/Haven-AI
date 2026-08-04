@@ -21,7 +21,7 @@ import {
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
 import { Address as AddressDisplay } from '@/components/haven'
 import { timeAgo, timeUntil } from '@/lib/format'
-import { useActiveSigner } from '@/lib/signer'
+import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import {
   approvalRecipientLabel,
   approvalSourceLabel,
@@ -399,10 +399,15 @@ function ApprovalCardWithContext({
   }
   const { details: safeDetails } = useSafeDetails(safeAddress, { chainId })
   const publicClient = usePublicClient({ chainId })
-  const signer = useActiveSigner({
+  const activeSigner = useActiveSigner({
     safeAddress,
     chainId,
   })
+  // #1079: this surface signs SAFE transactions; a delegator_passkey cannot.
+  // The narrowed view keeps every downstream call type-honest — on delegation
+  // accounts these controls are hidden, so null here renders the same
+  // no-signer state as before.
+  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
   const operationGate = useSafeOperationGate({
     safeAddress,
     chainId,

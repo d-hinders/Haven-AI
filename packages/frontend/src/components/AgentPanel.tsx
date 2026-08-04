@@ -21,7 +21,7 @@ import EditAgentModal from './EditAgentModal'
 import ConfirmDialog from './ConfirmDialog'
 import { truncate } from '@/lib/format'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
-import { useActiveSigner } from '@/lib/signer'
+import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import { formatAllowanceAmount, getTokenDecimals } from '@/lib/allowance-format'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { Button } from './ui/Button'
@@ -503,7 +503,10 @@ function AgentCard({
                 {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
               </button>
             )}
-            {canUseWalletActions ? (
+            {/* Safe revoke is an AllowanceModule teardown; on delegation
+                agents the real path is the budget card's per-budget stop
+                (#1079), so the Safe control is hidden there. */}
+            {canUseWalletActions && agent.account_type !== 'delegator_hybrid' ? (
               <>
                 <span className="text-[var(--v2-border-strong)]">|</span>
                 <button
@@ -701,10 +704,15 @@ export default function AgentPanel() {
     refetch,
   } = useAgents()
   const publicClient = usePublicClient({ chainId })
-  const signer = useActiveSigner({
+  const activeSigner = useActiveSigner({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,
   })
+  // #1079: this surface signs SAFE transactions; a delegator_passkey cannot.
+  // The narrowed view keeps every downstream call type-honest — on delegation
+  // accounts these controls are hidden, so null here renders the same
+  // no-signer state as before.
+  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
 
   const [connect2Open, setConnect2Open] = useState(false)
   const [firstAgentSetup, setFirstAgentSetup] = useState(false)

@@ -131,6 +131,14 @@ export default function Sidebar() {
       : {}),
   }
 
+  // #1079: the approval queue is a legacy-rail (AllowanceModule) concept — the
+  // delegation rail enforces budgets on-chain with no queue. A user whose
+  // accounts are ALL delegation accounts never has approvals, so the entry
+  // point is hidden. Any Safe-rail account keeps it (mixed users included).
+  const onlyDelegationAccounts =
+    (user?.safes?.length ?? 0) > 0 &&
+    (user?.safes ?? []).every((safe) => safe.account_type === 'delegator_hybrid')
+
   // Labeled clusters (#858): the core money loop first, tools and admin
   // after — same routes, same order within each cluster as before.
   const navGroups: Array<{ label: string; items: NavItem[] }> = [
@@ -141,7 +149,7 @@ export default function Sidebar() {
         baseNavItems[1], // Accounts
         baseNavItems[2], // Transactions
         baseNavItems[3], // Agents
-        approvalsItem, // Approvals (dynamic badge)
+        ...(onlyDelegationAccounts ? [] : [approvalsItem]), // Approvals (dynamic badge)
       ],
     },
     {

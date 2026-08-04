@@ -227,6 +227,7 @@ function DashboardHero({
   fundingStateKnown,
   watchingForDeposit,
   requiresOtherDevice,
+  canSend,
   onSend,
   onReceive,
   onAddFunds,
@@ -243,6 +244,8 @@ function DashboardHero({
   fundingStateKnown: boolean
   watchingForDeposit: boolean
   requiresOtherDevice: boolean
+  /** False when no linked account supports owner send (delegation-only, #1079). */
+  canSend: boolean
   onSend: () => void
   onReceive: () => void
   onAddFunds: () => void
@@ -322,10 +325,12 @@ function DashboardHero({
             // While balances are still loading, keep this neutral action order
             // so the hero does not briefly claim the account needs funds.
             <div className="flex flex-wrap gap-3">
-              <Button onClick={onSend} size="lg">
-                Send
-              </Button>
-              <Button onClick={onReceive} variant="ghost" size="lg">
+              {canSend ? (
+                <Button onClick={onSend} size="lg">
+                  Send
+                </Button>
+              ) : null}
+              <Button onClick={onReceive} variant={canSend ? 'ghost' : 'primary'} size="lg">
                 Receive
               </Button>
               <Button onClick={onAddFunds} variant="ghost" size="lg">
@@ -343,9 +348,11 @@ function DashboardHero({
               <Button onClick={onAddFunds} variant="ghost" size="lg">
                 Add funds
               </Button>
-              <Button onClick={onSend} variant="ghost" size="lg">
-                Send
-              </Button>
+              {canSend ? (
+                <Button onClick={onSend} variant="ghost" size="lg">
+                  Send
+                </Button>
+              ) : null}
             </div>
           )
         ) : (
@@ -664,6 +671,14 @@ export default function DashboardClient() {
     [activeSafe, safes],
   )
 
+  // Owner-initiated send is a Safe transaction; the delegation rail has no
+  // implementation of it yet, so those accounts are excluded from the send
+  // flow entirely (#1079 — hidden, not disabled).
+  const sendCapableSafes = useMemo(
+    () => safes.filter((safe) => safe.account_type !== 'delegator_hybrid'),
+    [safes],
+  )
+
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
   const [pickerAction, setPickerAction] = useState<'send' | 'receive' | 'add-funds' | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
@@ -818,13 +833,26 @@ export default function DashboardClient() {
       return
     }
 
+    // #1079: sending is a Safe transaction — delegation accounts have no
+    // owner-send yet (follow-up feature), so the send flow only ever sees
+    // Safe-rail accounts. The hero hides Send when none exist.
+    if (action === 'send') {
+      if (sendCapableSafes.length === 0) return
+      if (sendCapableSafes.length > 1) {
+        setPickerAction('send')
+        return
+      }
+      setActionSafeId(sendCapableSafes[0].id)
+      setSendOpen(true)
+      return
+    }
+
     if (safes.length > 1) {
       setPickerAction(action)
       return
     }
 
     setActionSafeId(defaultSafe?.id ?? null)
-    if (action === 'send') setSendOpen(true)
     if (action === 'receive') {
       setHasOpenedReceive(true)
       setReceiveOpen(true)
@@ -872,6 +900,7 @@ export default function DashboardClient() {
       fundingStateKnown={fundingStateKnown}
       watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
+      canSend={sendCapableSafes.length > 0}
       onSend={() => openHeroAction('send')}
       onReceive={() => openHeroAction('receive')}
       onAddFunds={() => openHeroAction('add-funds')}
@@ -1018,12 +1047,12 @@ export default function DashboardClient() {
       <DashboardActionPickerModal
         open={pickerAction !== null}
         action={pickerAction ?? 'send'}
-        safes={safes}
+        safes={pickerAction === 'send' ? sendCapableSafes : safes}
         onClose={() => setPickerAction(null)}
         onSelect={handleActionSafeSelected}
       />
 
-      {sendOpen && selectedActionSafe && (
+      {sendOpen && selectedActionSafe && selectedActionSafe.account_type !== 'delegator_hybrid' && (
         <SendModal
           open
           onClose={() => setSendOpen(false)}

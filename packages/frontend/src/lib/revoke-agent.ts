@@ -1,14 +1,14 @@
 import { type Address, type PublicClient } from 'viem'
 import { buildAgentRevokeTx } from './allowance-module'
 import { executeSafeTx, getSafeNonce, getSafeTxHash, proposeSafeTx, signSafeTx } from './safe-tx'
-import type { HavenUserSigner } from './signer'
+import type { SafeCapableSigner } from './signer'
 import type { Agent } from '@/hooks/useAgents'
 import type { SafeDetails } from '@/types/transactions'
 
 interface RevokeAgentParams {
   agent: Agent
   publicClient: PublicClient
-  signer: HavenUserSigner
+  signer: SafeCapableSigner
   safeAddress: Address
   safeDetails: SafeDetails
   chainId: number

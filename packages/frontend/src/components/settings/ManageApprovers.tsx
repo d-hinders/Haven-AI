@@ -11,7 +11,7 @@ import {
   type ApproverType,
 } from '@/hooks/useSafeApprovers'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
-import { useActiveSigner } from '@/lib/signer'
+import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import { applyApproverChange } from '@/lib/approver-tx'
 import { provisionPasskeyApprover } from '@/lib/passkey-approver'
 import { PasskeyCancelledError, PasskeyUnsupportedError } from '@/lib/passkey'
@@ -24,7 +24,9 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 
 export default function ManageApprovers() {
   const { user } = useAuth()
-  const safes = user?.safes ?? []
+  // Approvers are Safe owners; a Hybrid DeleGator account has no Safe owner
+  // set — its signer management lives in AccountSignersCard (#1079).
+  const safes = (user?.safes ?? []).filter((s) => s.account_type !== 'delegator_hybrid')
 
   if (safes.length === 0) {
     return (
@@ -52,7 +54,9 @@ function SafeApproversCard({ safe, multiple }: { safe: UserSafe; multiple: boole
   const { approvers, loading, error, refetch } = useSafeApprovers(safe.id)
   const { known, refetch: refetchKnown } = useKnownApprovers()
   const publicClient = usePublicClient({ chainId: safe.chain_id })
-  const signer = useActiveSigner({ safeAddress, chainId: safe.chain_id })
+  const activeSigner = useActiveSigner({ safeAddress, chainId: safe.chain_id })
+  // Owner changes are Safe self-calls; only a Safe-capable signer applies (#1079).
+  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
   const gate = useSafeOperationGate({ safeAddress, chainId: safe.chain_id })
 
   const [adding, setAdding] = useState(false)

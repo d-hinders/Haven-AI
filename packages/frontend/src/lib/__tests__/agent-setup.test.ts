@@ -3,7 +3,7 @@ import type { Address, Hash, PublicClient } from 'viem'
 
 import { executeAgentSetup } from '@/lib/agent-setup'
 import { SafeTxReceiptTimeoutError } from '@/lib/safe-tx'
-import type { HavenUserSigner } from '@/lib/signer'
+import type { SafeCapableSigner } from '@/lib/signer'
 
 // Mock the on-chain primitives so the test exercises only the orchestration.
 vi.mock('@/lib/allowance-module', () => ({
@@ -29,7 +29,7 @@ vi.mock('@/lib/safe-tx', async () => {
   }
 })
 
-const SIGNER = { type: 'eoa', address: '0xowner' } as unknown as HavenUserSigner
+const SIGNER = { type: 'eoa', address: '0xowner' } as unknown as SafeCapableSigner
 const PUBLIC_CLIENT = {} as PublicClient
 const baseParams = {
   signer: SIGNER,

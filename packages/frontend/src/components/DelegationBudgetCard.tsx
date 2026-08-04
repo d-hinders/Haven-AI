@@ -33,6 +33,12 @@ interface Props {
   tokens: TokenOption[]
 }
 
+/**
+ * Stable anchor for the card so budget affordances elsewhere on the agent
+ * page can scroll to it instead of opening the legacy editor (#1079).
+ */
+export const DELEGATION_BUDGET_CARD_ID = 'delegation-budget-card'
+
 const PERIODS: Array<{ label: string; seconds: number }> = [
   { label: 'per day', seconds: 86_400 },
   { label: 'per week', seconds: 604_800 },
@@ -40,7 +46,8 @@ const PERIODS: Array<{ label: string; seconds: number }> = [
 ]
 
 export default function DelegationBudgetCard({ agentId, chainId, tokens }: Props) {
-  const { budgets, grant, revoke, busy, ready } = useDelegationBudget(agentId, chainId)
+  const { budgets, grant, revoke, busy, ready, signersError, reloadSigners } =
+    useDelegationBudget(agentId, chainId)
   const { toast } = useToast()
 
   const [token, setToken] = useState(tokens[0]?.address ?? '')
@@ -103,6 +110,19 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens }: Props
           Set how much this agent can spend each period. The budget refills itself — no monthly signing.
         </p>
       </div>
+
+      {/* A failed signer-set fetch must be retryable (#1079) — without it the
+          card is stranded at ready=false with no way out. */}
+      {signersError ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+          <p className="text-sm text-[var(--v2-ink-2)]">
+            Haven could not load how this account is approved.
+          </p>
+          <Button size="sm" variant="ghost" onClick={() => void reloadSigners()}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
 
       <Card.Section divided className="mt-4">
         {active.length === 0 ? (

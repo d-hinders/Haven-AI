@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
-import { useActiveSigner } from '@/lib/signer'
+import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import {
   buildSafeTx,
   signSafeTx,
@@ -40,10 +40,14 @@ export function useSendTransaction(args: {
   const [error, setError] = useState<string | null>(null)
 
   const publicClient = usePublicClient({ chainId: args.chainId })
-  const signer = useActiveSigner({
+  const activeSigner = useActiveSigner({
     safeAddress: args.safeAddress,
     chainId: args.chainId,
   })
+  // Sending is a Safe transaction — a Hybrid DeleGator passkey cannot sign it
+  // (#1079). Delegation accounts never reach this hook (SendModal is hidden
+  // there); narrowing keeps the money path honest if one ever does.
+  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
 
   const reset = useCallback(() => {
     setStatus('idle')

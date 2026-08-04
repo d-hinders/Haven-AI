@@ -29,7 +29,7 @@ import {
 } from '@/lib/safe-tx'
 import type { SafeDetails } from '@/types/transactions'
 import type { Agent } from '@/hooks/useAgents'
-import { useActiveSigner } from '@/lib/signer'
+import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import { SigningStatus } from './SigningStatus'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
@@ -79,7 +79,12 @@ export default function EditAgentModal({
   mode = 'all',
 }: Props) {
   const showAgentFields = mode === 'all' || mode === 'agent'
-  const showBudgetFields = mode === 'all' || mode === 'budget'
+  // #1079: the budget half of this modal is the legacy AllowanceModule editor
+  // (signSafeTx) — it can never succeed on a delegation agent, whose budget is
+  // managed by DelegationBudgetCard. Name/description need no signature and
+  // stay editable on both rails.
+  const isDelegationAgent = agent.account_type === 'delegator_hybrid'
+  const showBudgetFields = (mode === 'all' || mode === 'budget') && !isDelegationAgent
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
   const chainTokens = getChainTokens(chainId)
@@ -117,10 +122,15 @@ export default function EditAgentModal({
 
   // Wagmi
   const publicClient = usePublicClient({ chainId })
-  const signer = useActiveSigner({
+  const activeSigner = useActiveSigner({
     safeAddress: safeAddress as Address,
     chainId,
   })
+  // #1079: this surface signs SAFE transactions; a delegator_passkey cannot.
+  // The narrowed view keeps every downstream call type-honest — on delegation
+  // accounts these controls are hidden, so null here renders the same
+  // no-signer state as before.
+  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
   const operationGate = useSafeOperationGate({
     safeAddress: safeAddress as Address,
     chainId,

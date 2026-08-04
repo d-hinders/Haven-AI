@@ -41,7 +41,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-03"
+last-verified: "2026-08-04"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -444,7 +444,7 @@ Implementation rule:
 
 Agent authority should only be created through:
 
-- Safe transaction signed by the user or Safe owner.
+- A user signature that is itself the authority: a Safe transaction signed by the user or Safe owner on the legacy rail, or an owner-signed delegation on the delegation rail (the generalisation recorded above under "Hard Architecture Invariants").
 - Clear UI explaining spender, token, amount, reset period, expiry, and revocation.
 - On-chain registration of the relevant spender or agent authority.
 - Audit log of user consent.
@@ -452,6 +452,8 @@ Agent authority should only be created through:
 Implementation rule:
 
 > Haven must not silently create or expand an agent's authority.
+
+**Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** Both connect-setup approval routes work this way (`routes/agent-connection-setups.ts`): the legacy `wallet-approval` reads the live AllowanceModule state on-chain, and the delegation rail's `budget-approval` reads the agent's own active, owner-signed delegations. The latter takes an empty request body precisely so that no amount, recipient, or hash a caller supplies can influence the outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. A pinned recipient is accepted where the reviewed budget was unpinned, because that is strictly narrower authority than the user approved (#1073).
 
 ### Keep Agent Spend Authority Narrow
 
@@ -593,7 +595,7 @@ Before merging any payment-related, agent-authority, Safe, SDK, x402/MPP, or rel
 - [ ] Every automated payment requires an agent-held or user-held key signature.
 - [ ] Every Safe-originated automated funding transfer is constrained by Safe Allowance Module or equivalent on-chain control; any standard x402 merchant leg carries the agent-held delegate signature and matches exact authenticated payment context.
 - [ ] Haven database policy is not the only spend control.
-- [ ] User-approved Safe transactions establish or modify agent authority.
+- [ ] A user signature establishes or modifies agent authority — a user-approved Safe transaction on the legacy rail, an owner-signed delegation on the delegation rail.
 - [ ] Users can revoke agent authority on-chain.
 - [ ] Users can access their Safe through another UI.
 - [ ] Haven cannot block or freeze user funds.

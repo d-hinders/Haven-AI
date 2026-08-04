@@ -115,6 +115,8 @@ interface SetupRow {
   safe_address: string
   safe_name: string
   safe_chain_id: number
+  /** 'delegator_hybrid' = delegation rail (#1073); 'safe' = legacy AllowanceModule. */
+  account_type: string | null
 }
 
 interface AllowanceRow {
@@ -532,6 +534,75 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     },
   )
 
+  // ── POST /:setupId/budget-approval — the DELEGATION rail's approval ──
+  //
+  // The legacy rail proves authority by reading the Safe's AllowanceModule
+  // on-chain (`tryVerifySetupAuthority`). A delegation has nothing to read
+  // until it is redeemed — its enforcement is the caveat enforcers at payment
+  // time — so the analogue is the signed, activated delegation itself: a row
+  // only reaches `status='active'` after POST /agents/:id/delegations/:hash/
+  // activate validated the OWNER's signature and deployed the account.
+  //
+  // Haven still verifies rather than trusts: the client asserts nothing here.
+  // The body is empty by design — there is no hash, amount, or recipient a
+  // caller could supply that would change the outcome.
+  app.post<{ Params: { setupId: string } }>(
+    '/:setupId/budget-approval',
+    { preHandler: authMiddleware },
+    async (request, reply) => {
+      // The body is ignored, but every sibling route refuses credential
+      // material outright rather than discarding it quietly — a private key
+      // should never get far enough to reach a log line.
+      if (containsForbiddenPrivateKeyField(request.body)) {
+        return reply.code(400).send({ error: 'Private key fields are not accepted by Haven' })
+      }
+
+      const { sub } = request.user as { sub: string }
+      const setup = await loadSetupForUser(request.params.setupId, sub)
+      if (!setup) return reply.code(404).send({ error: 'Setup not found' })
+
+      if (setup.account_type !== 'delegator_hybrid') {
+        return reply
+          .code(409)
+          .send({ error: 'This Haven wallet approves agent rules with a wallet transaction' })
+      }
+
+      const allowances = await loadSetupAllowances(setup.id)
+      const precondition = validateBudgetApprovalPreconditions(setup, allowances)
+      if (!precondition.ok) {
+        return reply.code(precondition.statusCode).send({ error: precondition.error })
+      }
+
+      if (setup.status === 'active') {
+        return buildUserSetupStatus(setup, allowances)
+      }
+
+      const verification = await verifyDelegationSetupAuthority(setup, allowances)
+      if (!verification.ok) {
+        return reply.code(409).send({ error: verification.error })
+      }
+
+      // The AGENT is already active by this point — #1069 flips it inside the
+      // grant-activation transaction, because the grant signature is what
+      // confers the authority. What is left is the SETUP record's own
+      // lifecycle. `activateAgent` stays true as an idempotent safety net for
+      // a budget granted by some other path; its UPDATE is a no-op on an
+      // already-active agent.
+      const active = await persistWalletApprovalState(setup, {
+        status: 'active',
+        approvalStatus: 'confirmed',
+        txHash: null,
+        safeTxHash: null,
+        failureReason: null,
+        activateAgent: true,
+      })
+      if (!active) {
+        return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
+      }
+      return buildUserSetupStatus(active, allowances)
+    },
+  )
+
   app.post<{ Params: { setupId: string }; Body: InstallStatusBody }>(
     '/:setupId/install-status',
     async (request, reply) => {
@@ -602,6 +673,28 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         if (!['awaiting_connection', 'connected_local', 'awaiting_wallet_approval'].includes(setup.status)) {
           await client.query('ROLLBACK')
           return reply.code(409).send({ error: 'Setup cannot be cancelled' })
+        }
+        // #1073: the guards above read the SETUP's own state, which on the
+        // delegation rail can lag the authority itself. The grant activates
+        // the agent in its own transaction, and this rail never writes
+        // safe_tx_hash/tx_hash — so a setup whose budget is already signed
+        // still looks cancellable here. Cancelling it would report "this
+        // setup can no longer connect an agent" while leaving a live,
+        // spend-capable agent behind, and the revoke below is scoped to
+        // 'pending_approval' so it would not catch it either.
+        // Ask the agent, not the setup.
+        if (setup.agent_id) {
+          const agent = await client.query<{ status: string }>(
+            `SELECT status FROM agents WHERE id = $1 AND user_id = $2`,
+            [setup.agent_id, sub],
+          )
+          const agentStatus = agent.rows[0]?.status
+          if (agentStatus === 'active' || agentStatus === 'paused') {
+            await client.query('ROLLBACK')
+            return reply
+              .code(409)
+              .send({ error: 'Approved agents must be paused or revoked from the agent page' })
+          }
         }
 
         const cancelled = await client.query<{ id: string }>(
@@ -809,6 +902,84 @@ function validateWalletApprovalBody(
     return { ok: false, statusCode: 409, error: 'Wallet approval is already tied to a different transaction' }
   }
   return { ok: true }
+}
+
+/**
+ * The rail-agnostic preconditions the legacy `validateWalletApprovalBody`
+ * checks before it starts on its Safe-shaped body fields. The delegation rail
+ * has no body to validate, so it needs exactly this subset — kept separate
+ * rather than branching inside the legacy validator, which stays untouched.
+ */
+function validateBudgetApprovalPreconditions(
+  setup: SetupRow,
+  allowances: AllowanceRow[],
+): { ok: true } | { ok: false; statusCode: 409 | 410; error: string } {
+  if (setup.status === 'cancelled' || setup.status === 'expired' || setup.status === 'failed') {
+    return { ok: false, statusCode: 409, error: 'Setup cannot be approved' }
+  }
+  if (!WALLET_APPROVAL_STATES.has(setup.status)) {
+    const expired = setup.status === 'awaiting_connection' && isExpired(setup.setup_token_expires_at)
+    return {
+      ok: false,
+      statusCode: expired ? 410 : 409,
+      error: expired ? 'Setup token expired' : 'Local connection is required before approving the budget',
+    }
+  }
+  if (!setup.agent_id || !setup.delegate_address) {
+    return { ok: false, statusCode: 409, error: 'Public signing address is required before approving the budget' }
+  }
+  if (allowances.length === 0) {
+    return { ok: false, statusCode: 409, error: 'Agent budget is required before approving the budget' }
+  }
+  return { ok: true }
+}
+
+/**
+ * Delegation-rail authority check: every budget this setup promised must exist
+ * as an ACTIVE, owner-signed delegation on the setup's agent.
+ *
+ * Deliberately does NOT compare `recipient_address`. A pinned delegation is
+ * STRICTLY narrower than the unpinned budget the setup described, so honouring
+ * it activates an agent with less authority than the user approved — safe in
+ * the only direction that matters. Amount and period are matched exactly:
+ * those can differ in the dangerous direction.
+ */
+async function verifyDelegationSetupAuthority(
+  setup: SetupRow,
+  allowances: AllowanceRow[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const active = await pool.query<{
+      token_address: string
+      budget_atomic: string
+      period_seconds: number
+    }>(
+      `SELECT token_address, budget_atomic, period_seconds
+       FROM agent_delegations
+       WHERE agent_id = $1 AND status = 'active'`,
+      [setup.agent_id],
+    )
+
+    for (const allowance of allowances) {
+      const match = active.rows.find(
+        (row) => row.token_address.toLowerCase() === allowance.token_address.toLowerCase(),
+      )
+      if (!match) {
+        return { ok: false, error: 'The agent budget has not been approved yet' }
+      }
+      if (BigInt(match.budget_atomic) !== BigInt(allowance.allowance_amount)) {
+        return { ok: false, error: `${allowance.token_symbol} budget does not match this setup` }
+      }
+      // The setup records minutes; a delegation period is seconds.
+      if (match.period_seconds !== allowance.reset_period_min * 60) {
+        return { ok: false, error: `${allowance.token_symbol} reset period does not match this setup` }
+      }
+    }
+    return { ok: true }
+  } catch (err) {
+    appLogSafeError(err)
+    return { ok: false, error: 'Haven could not confirm the agent budget yet' }
+  }
 }
 
 async function maybeActivateFromLiveAuthority(
@@ -1045,7 +1216,8 @@ function setupSelectSql(where: string): string {
                  s.api_key_prefix, s.connector_version, s.connector_context,
                  s.install_status, s.approval_status, s.safe_tx_hash, s.tx_hash,
                  s.failure_reason,
-                 us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id
+                 us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
+                 us.account_type
           FROM agent_connection_setups s
           JOIN user_safes us ON us.id = s.safe_id
           WHERE ${where}

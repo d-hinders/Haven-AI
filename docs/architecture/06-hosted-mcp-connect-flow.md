@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/lib/sweep.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402.ts
-last-verified: "2026-07-18"
+last-verified: "2026-08-04"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -52,8 +52,13 @@ Staged Connect Agent pairing is the only current dashboard flow:
 4. Registration sends only the setup token, runtime/version metadata, public
    signing address and proof, and API-key hash/prefix. No private key or
    plaintext API key is registered.
-5. The user signs the wallet approval. The agent cannot spend until the
-   AllowanceModule permission exists on-chain.
+5. The user approves, in the modal, with one signature — and that signature is
+   the authority. On the legacy rail it is a wallet approval, and the agent
+   cannot spend until the AllowanceModule permission exists on-chain. On the
+   delegation rail it is the budget delegation itself, granted at the same step
+   of the same flow; the agent cannot spend until that budget is active, and
+   its limits are carried by the caveat enforcers at redemption rather than by
+   a module permission.
 6. Later hosted requests use the locally stored API key as Bearer identity;
    the local signer retains the delegate key as authority.
 

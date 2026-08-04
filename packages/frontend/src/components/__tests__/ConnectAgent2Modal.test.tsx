@@ -26,6 +26,11 @@ const {
   mockProposeSafeTx,
   mockGetSafeTxHash,
   mockManualSignMessage,
+  mockApiGet,
+  mockGrant,
+  mockDelegationBudgetReady,
+  mockUseAccount,
+  mockSwitchChain,
 } = vi.hoisted(() => ({
   SAFE: {
     id: 'safe-1',
@@ -64,6 +69,11 @@ const {
   mockProposeSafeTx: vi.fn(),
   mockGetSafeTxHash: vi.fn(),
   mockManualSignMessage: vi.fn(),
+  mockApiGet: vi.fn(),
+  mockGrant: vi.fn(),
+  mockDelegationBudgetReady: vi.fn(),
+  mockUseAccount: vi.fn(),
+  mockSwitchChain: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -75,8 +85,8 @@ vi.mock('wagmi', () => ({
   usePublicClient: (args: unknown) => mockUsePublicClient(args),
   // Not connected by default — avoids wrong-chain detection in tests that
   // don't explicitly set up a wallet connection.
-  useAccount: () => ({ address: undefined, chain: undefined }),
-  useSwitchChain: () => ({ switchChain: vi.fn(), isPending: false }),
+  useAccount: () => mockUseAccount(),
+  useSwitchChain: () => ({ switchChain: mockSwitchChain, isPending: false }),
 }))
 
 vi.mock('@/context/AuthContext', () => ({
@@ -99,8 +109,23 @@ vi.mock('@/hooks/useAgentConnectionSetupStatus', () => ({
 vi.mock('@/lib/api', () => ({
   api: {
     post: (...args: unknown[]) => mockApiPost(...args),
+    get: (...args: unknown[]) => mockApiGet(...args),
   },
   getResolvedApiBaseUrl: () => 'https://api.haven.example',
+}))
+
+// #1073: the delegation approval step performs the grant in-modal. Drive the
+// grant outcome directly so a cancelled signature is testable without a
+// WebAuthn ceremony.
+vi.mock('@/hooks/useDelegationBudget', () => ({
+  useDelegationBudget: () => ({
+    budgets: [],
+    grant: mockGrant,
+    revoke: vi.fn(),
+    busy: false,
+    ready: mockDelegationBudgetReady(),
+    reload: vi.fn(),
+  }),
 }))
 
 vi.mock('@/lib/signer', () => ({
@@ -229,6 +254,14 @@ async function fillAndCreateSetup() {
   })
 }
 
+/** Put the modal on a delegation-rail (Hybrid DeleGator) Haven wallet. */
+function useDelegationAccount() {
+  mockUseAuth.mockReturnValue({
+    user: { safes: [{ ...SAFE, account_type: 'delegator_hybrid' }] },
+    activeSafe: { ...SAFE, account_type: 'delegator_hybrid' },
+  })
+}
+
 function connectedSetupStatus(overrides: Record<string, unknown> = {}) {
   return {
     setup_id: 'setup-1',
@@ -317,6 +350,10 @@ describe('ConnectAgent2Modal', () => {
     })
     mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
     mockUsePublicClient.mockReturnValue({})
+    mockApiGet.mockResolvedValue({})
+    mockGrant.mockResolvedValue({ ok: true })
+    mockDelegationBudgetReady.mockReturnValue(true)
+    mockUseAccount.mockReturnValue({ address: undefined, chain: undefined })
     mockUseActiveSigner.mockReturnValue({
       type: 'eoa',
       address: SIGNER_ADDRESS,
@@ -515,28 +552,221 @@ describe('ConnectAgent2Modal', () => {
     expect(screen.queryByText(/active spending today/i)).not.toBeInTheDocument()
   })
 
-  it('routes a DELEGATION account to the budget step — never the wallet approval (#1069)', async () => {
+  it('a DELEGATION account approves the budget IN the modal — never the wallet approval (#1073)', async () => {
     // A Hybrid DeleGator (possibly passkey-only) has no AllowanceModule and
-    // maybe no connectable EOA — the legacy approval step is a dead end. The
-    // final step must offer the budget grant instead.
+    // maybe no connectable EOA — the legacy approval step is a dead end.
+    //
+    // #1070 replaced that dead end with a hand-off to the agent page, which
+    // made the user RE-ENTER the budget they already set at the policy step.
+    // #1073 completes the grant here instead: the budget is restated, not
+    // re-typed, and the signature is taken where the rules are shown.
     mockUseAgentConnectionSetupStatus.mockReturnValue({
       data: connectedSetupStatus(),
       loading: false,
       error: null,
       refetch: vi.fn(),
     })
-    mockUseAuth.mockReturnValue({
-      user: { safes: [{ ...SAFE, account_type: 'delegator_hybrid' }] },
-      activeSafe: { ...SAFE, account_type: 'delegator_hybrid' },
-    })
+    useDelegationAccount()
     renderModal()
     await fillAndCreateSetup()
 
-    expect(await screen.findByText("Set the agent's budget to activate it")).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
-    // The legacy approval UI must be absent — that is the whole bug:
+    expect(await screen.findByText('Approve agent rules')).toBeInTheDocument()
+    // The budget is RESTATED from the setup — never an empty field to refill.
+    expect(screen.getByText(/10\.00 USDC\.e per day/)).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('Amount')).not.toBeInTheDocument()
+
+    // The legacy approval UI must be absent — that is the original bug:
     expect(screen.queryByRole('button', { name: 'Approve rules' })).not.toBeInTheDocument()
     expect(document.body.textContent).not.toContain('still connecting to the wallet network')
+    // ...and so must the hand-off that replaced it.
+    expect(document.body.textContent).not.toContain("Set the agent's budget to activate it")
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+      await Promise.resolve()
+    })
+
+    // Granted with the policy step's budget, UNPINNED: a recipient-pinned
+    // budget cannot fund the agent wallet and would lock it out of standard
+    // x402.
+    expect(mockGrant).toHaveBeenCalledWith({
+      tokenAddress: '0x9999999999999999999999999999999999999999',
+      recipientAddress: null,
+      budgetAtomic: '10000000',
+      periodSeconds: 86_400,
+    })
+    // Haven is then asked to confirm — it verifies the signed budget itself,
+    // so the body carries no assertion.
+    await waitFor(() =>
+      expect(mockApiPost).toHaveBeenCalledWith(
+        '/agent-connection-setups/setup-1/budget-approval',
+        {},
+      ),
+    )
+  })
+
+  it('a cancelled signature re-arms the delegation step in place — not an error (#1073)', async () => {
+    // Dismissing the passkey sheet is the most common interaction here. It
+    // means "not yet", not "something broke": the step must stay live, the
+    // copy must not be an error, and nothing may be reported to Haven.
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockGrant.mockResolvedValue({ ok: false, reason: 'cancelled' })
+    useDelegationAccount()
+    renderModal()
+    await fillAndCreateSetup()
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'Approve budget' }))
+      await Promise.resolve()
+    })
+
+    expect(screen.getByText(/No signature yet — nothing changed/)).toBeInTheDocument()
+    // Still on the approval step, still actionable.
+    expect(screen.getByRole('button', { name: 'Approve budget' })).toBeEnabled()
+    expect(screen.getByText('Approve agent rules')).toBeInTheDocument()
+    // A cancelled signature is not a failure and not an approval.
+    expect(document.body.textContent).not.toMatch(/could not set the budget/i)
+    expect(mockApiPost).not.toHaveBeenCalledWith(
+      '/agent-connection-setups/setup-1/budget-approval',
+      {},
+    )
+  })
+
+  it('after the budget is signed there is no "Cancel setup" left to offer (#1073)', async () => {
+    // The signature already activated the agent, in its own transaction. A
+    // cancel here would promise a reversal Haven cannot perform and would
+    // report the setup dead while a live, spending agent remained.
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    // Grant succeeds; the follow-up confirm fails — the partial-failure window.
+    mockApiPost.mockImplementation(async (url: string) => {
+      if (String(url).includes('/budget-approval')) throw new Error('network')
+      return { setup_id: 'setup-1', status: 'awaiting_connection', setup_token: 't', expires_at: '2099-01-01T00:00:00.000Z', connector_command: 'cmd', setup_prompt: 'prompt' }
+    })
+    useDelegationAccount()
+    renderModal()
+    await fillAndCreateSetup()
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'Approve budget' }))
+      await Promise.resolve()
+    })
+
+    // Honest about what DID happen: the money authority is real.
+    expect(await screen.findByText('Budget set — finishing up')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Cancel setup' })).not.toBeInTheDocument()
+    // A visible "Close" in the step footer — not the header's icon button,
+    // which is aria-labelled the same way.
+    expect(
+      screen.getAllByRole('button', { name: 'Close' }).some((b) => b.textContent === 'Close'),
+    ).toBe(true)
+  })
+
+  it('keeps the legacy step-4 footer shape: cancel beside approve, approve carrying the weight (#1073)', async () => {
+    // A rendered review caught the first cut inverting this — approve was a
+    // small button above a full-width Cancel, making the loudest element on a
+    // money screen the one that does nothing.
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    useDelegationAccount()
+    renderModal()
+    await fillAndCreateSetup()
+
+    const approve = await screen.findByRole('button', { name: 'Approve budget' })
+    const cancel = screen.getByRole('button', { name: 'Cancel setup' })
+    // Same row...
+    expect(approve.parentElement).toBe(cancel.parentElement)
+    // ...both sharing the width, approve rendered last so it reads as primary.
+    expect(approve.className).toContain('flex-1')
+    expect(cancel.className).toContain('flex-1')
+    expect(cancel.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('offers the SAME verification disclosure as the legacy step (#1073)', async () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    useDelegationAccount()
+    renderModal()
+    await fillAndCreateSetup()
+
+    await screen.findByText('Approve agent rules')
+    expect(screen.getByText('Verification details')).toBeInTheDocument()
+    expect(screen.getByText('0x3333333333333333333333333333333333333333')).toBeInTheDocument()
+    // Safe-only row must NOT appear on this rail — one signature IS the approval.
+    expect(screen.queryByText('Approvals required')).not.toBeInTheDocument()
+  })
+
+  it('a wrong-network owner wallet gets a switch action, not a dead connect button (#1073)', async () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    // Connected, but on a different chain than the account: useActiveSigner
+    // returns null, so the budget hook is not ready.
+    mockUseAccount.mockReturnValue({ address: SIGNER_ADDRESS, chain: { id: 8453 } })
+    mockUseActiveSigner.mockReturnValue(null)
+    mockDelegationBudgetReady.mockReturnValue(false)
+    useDelegationAccount()
+    renderModal()
+    await fillAndCreateSetup()
+
+    await screen.findByText('Approve agent rules')
+    expect(screen.getByRole('button', { name: /^Switch to / })).toBeInTheDocument()
+    expect(screen.getByText(/Switch networks to approve the budget/)).toBeInTheDocument()
+  })
+
+  it('keeps the stepper at 4 steps on the delegation rail — the rail is not a step (#1073)', async () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus(),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    useDelegationAccount()
+    renderModal()
+    await fillAndCreateSetup()
+
+    await screen.findByText('Approve agent rules')
+    // The stepper mock reports "Step {current} of {total}": approval is the
+    // 4th of 4 on this rail exactly as it is on the legacy one — the rail
+    // changes the instrument, never the shape of the flow.
+    expect(screen.getByLabelText('Step 4 of 4')).toBeInTheDocument()
+  })
+
+  it('delegation setup takes ONE budget — further tokens are added later (#1073)', async () => {
+    // Each grant is its own signature: N tokens would mean N consecutive
+    // passkey prompts and a half-approved agent if one fails.
+    useDelegationAccount()
+    renderModal()
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Research Agent' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+
+    // The add-another affordance is gone, replaced by an explanation.
+    expect(screen.queryByRole('button', { name: 'Add budget' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Setup takes one budget/)).toBeInTheDocument()
+    // ...and the flow still continues.
+    expect(screen.getByRole('button', { name: 'Review agent rules' })).toBeEnabled()
   })
 
   it('uses non-wallet copy on the approval screen', async () => {

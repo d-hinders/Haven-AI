@@ -12,7 +12,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/loop-engineering.md
   - docs/contributing/loop-harness-index.md
-last-verified: "2026-07-01"
+last-verified: "2026-08-05"
 ---
 
 # Haven Code Quality Loop

@@ -17,6 +17,7 @@ import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useUserSafes } from '@/hooks/useUserSafes'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import SendModal from '@/components/SendModal'
+import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -160,7 +161,10 @@ export default function AccountDetailClient() {
     loading: detailsLoading,
     error: detailsError,
     refetch: refetchDetails,
-  } = useSafeDetails(safeAddress, { chainId })
+    // #1107: a delegator_hybrid account has no Safe contract — fetching Safe
+    // details 500s and pollutes every console session on the default rail.
+    // The signer set (Backup & recovery card) is that rail's approval story.
+  } = useSafeDetails(safe?.account_type === 'delegator_hybrid' ? null : safeAddress, { chainId })
 
   const {
     totalUsd,
@@ -262,14 +266,12 @@ export default function AccountDetailClient() {
             <StatusBadge>{chain.name}</StatusBadge>
             {safeAddress && (
               <>
-                {/* Sending is a Safe transaction; there is no owner-send on
-                    the delegation rail yet, so the entry point is hidden
-                    there rather than dead-ending at a signer gate (#1079). */}
-                {safe.account_type !== 'delegator_hybrid' ? (
-                  <Button onClick={() => setSendOpen(true)}>
-                    Send
-                  </Button>
-                ) : null}
+                {/* Send exists on BOTH rails now (#1083): Safe accounts get
+                    the Safe transaction modal, delegation accounts the
+                    sponsored owner-send. */}
+                <Button onClick={() => setSendOpen(true)}>
+                  Send
+                </Button>
                 <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
                   Receive
                 </Button>
@@ -633,6 +635,15 @@ export default function AccountDetailClient() {
         backing a wagmi wallet-client subscription) don't run in the
         background on every account page view.
       */}
+      {sendOpen && safeAddress && safe.account_type === 'delegator_hybrid' && (
+        <DelegationSendModal
+          open
+          onClose={() => setSendOpen(false)}
+          accountAddress={safeAddress}
+          chainId={chainId}
+          onSent={handleSendSuccess}
+        />
+      )}
       {sendOpen && safeAddress && safe.account_type !== 'delegator_hybrid' && (
         <SendModal
           open

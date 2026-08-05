@@ -48,6 +48,9 @@ only one:
   sponsored op: it draws relayer gas balance, and a drained relayer blocks
   **grants**, not payments. Same alerting as every other relayer chain.
 - **The merchant / facilitator** — erc7710 x402 settlement, below.
+- Owner-initiated **sends** (#1083) and signer changes are also
+  paymaster-sponsored account ops — roughly one warm-op cost each; they
+  draw the same policy budget as payments.
 
 **x402 sponsorship depends on the settlement scheme (#946).** The scheme is
 chosen per payment from the `payTo` shape (or an explicit `settlementScheme`)
@@ -126,6 +129,10 @@ Probes:
 - `ops:check-delegation` — every PINNED contract (manager, entry point,
   factory, Hybrid impl, 8 enforcers) is live bytecode on every enabled
   chain. Run on deploy and daily; exit 1 = stop before any rail use.
+- `ops:check-mainnet-reconciliation` — the read-only 8453 probe (#1067):
+  /health, relayer-monitor liveness + low-water, and (in the prod shell)
+  the lingering-delegate scan. The mainnet canary procedure that uses it:
+  [`mainnet-canary.md`](mainnet-canary.md).
 
 ## 4. Anti-lock-in: fork-and-pin policy + re-evaluation tripwires
 

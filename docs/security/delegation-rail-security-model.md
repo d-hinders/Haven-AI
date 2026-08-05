@@ -6,6 +6,7 @@ covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/lib/hybrid-signer-actions.ts
+  - packages/backend/src/lib/hybrid-transfers.ts
   - packages/backend/src/infra/repositories/hybrid-signers.ts
   - packages/backend/src/lib/hybrid-account-config.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
@@ -168,6 +169,14 @@ and the backup removes the lost one and enrols a replacement. The user-facing
 walkthrough is [account-recovery.md](../product/account-recovery.md); the
 independent-of-Haven path is [exit/README.md](../exit/README.md).
 
+**Owner send (#1083) rides the same op discipline:** an owner-initiated
+transfer from the treasury is a sponsored account op the OWNER signs —
+prepare/submit split, the submitted UserOperation pinned to the re-derived
+transfer calldata, scheme chosen by the device (#1086), and no Haven-held key
+anywhere (invariants 5/7/12/13 unchanged). Sponsorship pays gas only; the
+transfer itself is bounded by nothing but the owner's signature, which is the
+point — it is the owner's own money.
+
 **The signer set is symmetric (#1087):** enrolling an EOA owner is not a
 one-way door — `remove_owner` encodes `transferOwnership(address(0))` through
 the same prepare/submit path and returns the account to passkey-only. Refused
@@ -220,7 +229,9 @@ are **one implementation** (`lib/hybrid-signer-actions.ts`), because two copies
 of a spend-authority rule is how they drift apart. Invariant 13 is asserted
 against that shared core and against both routes reaching it. Client-side, signing selects the passkey whose credential is
 actually enrolled on the signing device rather than blindly `passkeys[0]`, so
-recovery with a backup key works from the backup device. Scheme selection is
+recovery with a backup key works from the backup device. UI surfaces treat a
+DISMISSED signing sheet as a neutral cancel, never an error (#1085) — a user
+changing their mind is not a failure mode. Scheme selection is
 likewise a **device** decision, never an account-shape decision: a mixed
 account (EOA owner *and* passkeys) accepts either signer on-chain, so the
 client requests the scheme it can actually produce (`signature_scheme` on the

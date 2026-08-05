@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/routes/__tests__/x402.test.ts
   - packages/backend/src/routes/__tests__/machine-payments.test.ts
   - docs/contributing/ai-agent-workflow.md
-last-verified: "2026-07-18"
+last-verified: "2026-08-05"
 ---
 
 # x402 / Machine-Payment Consolidation (PT-1)

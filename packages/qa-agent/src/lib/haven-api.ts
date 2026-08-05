@@ -38,6 +38,15 @@ export interface X402AuthorizeResult {
   phase?: string
   shortfall?: number | string
   remaining_allowance?: number | string
+  /** erc7710 direct settlement (#1064): the child-delegation typed data the delegate signs. */
+  sign_data?: { signature_scheme?: string; typed_data?: TypedDataPayload }
+}
+
+export interface TypedDataPayload {
+  domain: Record<string, unknown>
+  types: Record<string, Record<string, unknown>[]>
+  primaryType: string
+  message: Record<string, unknown>
 }
 
 export interface X402AuthorizeBody {
@@ -46,6 +55,8 @@ export interface X402AuthorizeBody {
   amount: string // atomic units
   asset: string // token contract address
   network: string // CAIP-2 (e.g. eip155:84532) or x402 network name
+  /** Echoed to the merchant in the v2 header — pass the QUOTED value (#1064). */
+  maxTimeoutSeconds?: number
 }
 
 export interface ApiResponse<T> {
@@ -78,7 +89,9 @@ export interface MachinePaymentReceipt {
   settlement_address?: string | null
   payer_address?: string | null
   amount_human?: string
-  /** The intent's `machine_metadata`, which carries `settlement_scheme` (#946). */
+  /** Which settlement branch ran (eip3009 | erc7710) — the intent's recorded scheme (#946), joined into the evidence row. */
+  settlement_scheme?: string | null
+  /** The RAW x402 402-challenge body the merchant sent (error/accepts/resource/x402Version) — NOT Haven metadata. */
   challenge_payload?: Record<string, unknown> | null
   created_at?: string
 }
@@ -132,6 +145,11 @@ export class HavenApi {
 
   authorizeX402(body: X402AuthorizeBody): Promise<ApiResponse<X402AuthorizeResult>> {
     return this.call('POST', '/x402/authorize', body as unknown as Record<string, unknown>)
+  }
+
+  /** erc7710 step 2 (#1064): exchange the signed child delegation for the merchant header. */
+  settleX402(id: string, signature: string): Promise<ApiResponse<{ payment_header?: string; error?: string }>> {
+    return this.call('POST', `/x402/${id}/settle`, { signature })
   }
 
   /** Payment evidence for this agent, newest first. */

@@ -73,7 +73,7 @@ const TREASURY = '0x' + 'a1'.repeat(20)
 const receipt = (over: Record<string, unknown> = {}) => ({
   payment_id: 'pay_new',
   resource_url: MCP_URL,
-  challenge_payload: { settlement_scheme: 'eip3009' },
+  settlement_scheme: 'eip3009',
   settlement_address: DELEGATE,
   merchant_address: MERCHANT,
   amount_human: '0.001',
@@ -172,7 +172,7 @@ describe('the scheme discriminator — the reason this scenario is not vacuous',
     // bridge — the path with the hot balance and the real merchant reach — has
     // no live coverage at all.
     settled([
-      receipt({ challenge_payload: { settlement_scheme: 'erc7710' }, settlement_address: MERCHANT }),
+      receipt({ settlement_scheme: 'erc7710', settlement_address: MERCHANT }),
     ])
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(false)
@@ -180,7 +180,7 @@ describe('the scheme discriminator — the reason this scenario is not vacuous',
   })
 
   it('FAILS when the scheme was never recorded', async () => {
-    settled([receipt({ challenge_payload: {} })])
+    settled([receipt({ settlement_scheme: undefined })])
     const r = await x402Delegation3009.run(ctx())
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/absent/)

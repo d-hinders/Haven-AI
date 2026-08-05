@@ -21,6 +21,7 @@ import { toHex, type Address } from 'viem'
 import { api } from '@/lib/api'
 import { useActiveSigner } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
+import { signPreparedAccountOp } from '@/lib/hybridAccountOps'
 import { createPasskey, base64UrlDecode } from '@/lib/passkey'
 import type { AccountSigners } from '@/lib/delegationPasskeySigner'
 import { pickSigningPath } from './useDelegationBudget'
@@ -71,25 +72,7 @@ export function useAccountSigners(safeAddress: string, chainId: number, userEmai
 
   /** Sign the prepared op with the account's kind of signer (never Haven). */
   const signPrepared = useCallback(
-    async (prep: PrepareResponse): Promise<string> => {
-      if (prep.signature_scheme === 'webauthn_userop') {
-        if (!signers) throw new Error('signers not loaded')
-        const { signUserOpWithPasskey } = await import('@/lib/delegationPasskeySigner')
-        return signUserOpWithPasskey(signers, prep.user_operation)
-      }
-      if (!signer || signer.type !== 'eoa' || !prep.signing_payload) {
-        throw new Error('Connect your account owner wallet')
-      }
-      const types = { ...prep.signing_payload.types }
-      delete (types as Record<string, unknown>).EIP712Domain
-      return signer.walletClient.signTypedData({
-        account: signer.address,
-        domain: prep.signing_payload.domain,
-        types,
-        primaryType: prep.signing_payload.primaryType,
-        message: prep.signing_payload.message,
-      } as never)
-    },
+    (prep: PrepareResponse): Promise<string> => signPreparedAccountOp(prep, signers, signer),
     [signer, signers],
   )
 

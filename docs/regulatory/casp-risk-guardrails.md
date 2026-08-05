@@ -146,7 +146,10 @@ Haven backend
 > The reference is deliberately NOT placed in the `X-PAYMENT` payload, so it
 > cannot alter the authenticated payment context or any leg's authority. Absent
 > (`null`) is a normal answer, and a lookup **error** degrades to `null` rather
-> than affecting the payment.
+> than affecting the payment. (The header itself is x402 v2-shaped since
+> #1064 — it additionally echoes the accepted requirements entry, which is
+> public payment metadata the merchant already quoted: no new data class, no
+> authority change.)
 
 > **Current state (2026-07-18, #956):** agents may report the MERCHANT's own
 > receipt after a settled payment (`POST /machine-payments/:id/merchant-receipt`,
@@ -455,7 +458,7 @@ Implementation rule:
 
 **The dashboard's signing surfaces are rail-honest (#1079).** The signer layer types the two authorities apart: a Safe transaction can only be signed by a `SafeCapableSigner` (EOA or Safe passkey), never by a Hybrid account's passkey — the compiler enforces the exclusion at every Safe-shaped call site (send, approval execution, owner changes, AllowanceModule edits), and Safe-only controls are hidden on delegation accounts rather than dead-ending at a signer they cannot use. This is a UI/type-layer hardening only; the on-chain authority model above is unchanged.
 
-**Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** Both connect-setup approval routes work this way (`routes/agent-connection-setups.ts`): the legacy `wallet-approval` reads the live AllowanceModule state on-chain, and the delegation rail's `budget-approval` reads the agent's own active, owner-signed delegations. The latter takes an empty request body precisely so that no amount, recipient, or hash a caller supplies can influence the outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. A pinned recipient is accepted where the reviewed budget was unpinned, because that is strictly narrower authority than the user approved (#1073).
+**Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** Both connect-setup approval routes work this way (`routes/agent-connection-setups.ts`): the legacy `wallet-approval` reads the live AllowanceModule state on-chain, and the delegation rail's `budget-approval` reads the agent's own active, owner-signed delegations. The latter takes an empty request body precisely so that no amount, recipient, or hash a caller supplies can influence the outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. A pinned recipient is accepted where the reviewed budget was unpinned, because that is strictly narrower authority than the user approved (#1073). Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
 
 ### Keep Agent Spend Authority Narrow
 

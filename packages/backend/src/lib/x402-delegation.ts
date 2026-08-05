@@ -143,15 +143,42 @@ export function assembleSettlementPayload(
   }
 }
 
-/** The base64 X-PAYMENT header for an exact-scheme erc7710 payment. */
+/** The requirements entry the payer chose — echoed back per x402 v2. */
+export interface X402AcceptedEcho {
+  amount: string
+  payTo: Address
+  asset: Address
+  maxTimeoutSeconds: number
+}
+
+/**
+ * The base64 X-PAYMENT header for an exact-scheme erc7710 payment.
+ *
+ * x402 v2 shape: the payer ECHOES the accepted requirements entry (`accepted`)
+ * alongside the scheme payload — merchants built on @x402/core v2 match it
+ * field-for-field (scheme/network/amount/payTo/asset/maxTimeoutSeconds +
+ * extra.assetTransferMethod) before touching the chain. The v1 shape
+ * (payload only) made every v2 merchant reject with a generic failure —
+ * caught by the #1064 QA leg's first live run.
+ */
 export function encodeXPaymentHeader(
   network: string,
   payload: X402Erc7710Payload,
+  accepted: X402AcceptedEcho,
 ): string {
   const body = {
-    x402Version: 1,
+    x402Version: 2,
     scheme: 'exact',
     network,
+    accepted: {
+      scheme: 'exact',
+      network,
+      amount: accepted.amount,
+      payTo: accepted.payTo,
+      maxTimeoutSeconds: accepted.maxTimeoutSeconds,
+      asset: accepted.asset,
+      extra: { assetTransferMethod: 'erc7710' },
+    },
     payload,
   }
   return Buffer.from(JSON.stringify(body), 'utf8').toString('base64')

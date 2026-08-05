@@ -148,9 +148,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
-function mapEvidence(row: MachinePaymentEvidenceRow) {
+function mapEvidence(row: MachinePaymentEvidenceRow & { settlement_scheme?: string | null }) {
   return {
     id: row.id,
+    /** Which settlement branch ran (eip3009 | erc7710), from the intent (#946). */
+    settlement_scheme: row.settlement_scheme ?? null,
     payment_id: row.payment_intent_id ?? row.approval_request_id,
     payment_intent_id: row.payment_intent_id,
     approval_request_id: row.approval_request_id,
@@ -516,11 +518,18 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       ? Math.min(Math.max(parsedLimit, 1), 100)
       : 25
 
-    const result = await pool.query<MachinePaymentEvidenceRow>(
-      `SELECT *
-       FROM machine_payment_evidence
-       WHERE agent_id = $1
-       ORDER BY created_at DESC
+    // settlement_scheme lives on the INTENT (#946 recorded it in
+    // machine_metadata for observability) — joined in here because the
+    // evidence row is what agents actually read, and "which branch ran"
+    // (eip3009 bridge vs erc7710 direct) is unverifiable without it. Found
+    // by the first real run of the delegation QA leg (#1063): the scenario
+    // had nowhere to read the scheme from.
+    const result = await pool.query<MachinePaymentEvidenceRow & { settlement_scheme: string | null }>(
+      `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme
+       FROM machine_payment_evidence e
+       LEFT JOIN payment_intents pi ON pi.id = e.payment_intent_id
+       WHERE e.agent_id = $1
+       ORDER BY e.created_at DESC
        LIMIT $2`,
       [agent.id, limit],
     )

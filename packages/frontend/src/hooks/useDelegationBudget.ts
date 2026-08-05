@@ -128,11 +128,10 @@ export function useDelegationBudget(agentId: string, chainId: number) {
     }
   }, [agentId])
 
-  // The account's signer set decides HOW the owner signs (#887): a
-  // passkey-only account signs via WebAuthn; anything with an EOA owner
-  // keeps the connected-wallet EIP-712 path. A failed fetch is RETRYABLE
-  // (#1079): it sets an error flag instead of stranding the hook at a
-  // permanent null.
+  // The signer set feeds pickSigningPath (#1086): the DEVICE picks which of
+  // the account's signers to use — never the account's shape. A failed fetch
+  // is RETRYABLE (#1079): it sets an error flag instead of stranding the hook
+  // at a permanent null.
   const reloadSigners = useCallback(async () => {
     try {
       setSigners(await api.get<AccountSigners>(`/agents/${agentId}/account-signers`))

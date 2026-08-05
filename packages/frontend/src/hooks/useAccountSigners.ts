@@ -4,11 +4,12 @@
  * Account signer management for the delegation rail (#888, epic #836).
  *
  * The recovery substrate: enroll a backup passkey (or an EOA owner), remove a
- * passkey — each an ACCOUNT op (addKey/removeKey/transferOwnership) the backend
- * prepares and an EXISTING signer signs (WebAuthn or EOA, per the account's
- * kind). Haven signs nothing. The ≥2-signer rule is enforced on-chain (the
- * #884 CannotRemoveLastSigner finding) AND surfaced by the backend as a clean
- * 409, so the UI never has to guess.
+ * passkey or the owner — each an ACCOUNT op (addKey/removeKey/
+ * transferOwnership) the backend prepares and an EXISTING signer signs
+ * (WebAuthn or EOA — whichever this DEVICE can produce, #1086). Haven signs
+ * nothing. Haven's ≥2-signer rule is surfaced as a clean 409 (the chain
+ * itself refuses only removing the LAST signer, the #884
+ * CannotRemoveLastSigner finding), so the UI never has to guess.
  */
 
 import { useCallback, useEffect, useState } from 'react'

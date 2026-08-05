@@ -8,7 +8,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-08-04"
+last-verified: "2026-08-05"
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -88,6 +88,11 @@ run no estimation, so recovery retries cost nothing.
   delete old key (the #738 procedure). One credential, one env var — and
   `ops:check-bundler` reads that same var through the rail's resolver, so the
   probe verifies the rotation rather than a stale copy of it.
+- **The URL is chain-scoped by its path** (`…/v2/<chainId>/rpc?...`): one
+  deployed environment serves exactly one chain's bundler. The resolver
+  refuses a chain the URL does not target (a config error at first use, the
+  #1053 guard) — so enabling a second chain means provisioning that chain's
+  credential, not just flipping the chain list.
 
 ## 3. Failure modes & the degradation contract
 
@@ -110,8 +115,11 @@ Probes:
   green probe **is** evidence about the deployed environment: it exercised the
   same credential and the same chain gate a payment would. Unset credential or
   a non-enabled chain exits 2 (*not configured*) with the rail's own message,
-  distinct from exit 1 (*degraded*). Defaults to the lowest enabled chain;
-  override with `CHECK_BUNDLER_CHAIN_ID`.
+  distinct from exit 1 (*degraded*). `CHECK_BUNDLER_CHAIN_ID` is **required**
+  whenever more than one chain is enabled (both 8453 and 84532 since the #908
+  mainnet pins) — the probe exits 2 rather than guess, because a Sepolia
+  credential answering a mainnet probe would read healthy while proving
+  nothing. With a single enabled chain it defaults to that chain.
   (Until 2026-07-25 it read the retired `SESSION_RAIL_BUNDLER_URL` and proved
   nothing about the deployed env — fixed by pointing it at the resolver so the
   probe cannot drift from the rail again.)

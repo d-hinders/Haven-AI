@@ -47,7 +47,8 @@ servers, connector, and selected dashboard setup flows:
 
 - agent creation, listing, lookup, and revocation
 - Connect Agent setup creation, pairing, registration, install status, and
-  wallet-approval evidence
+  rail-aware approval evidence (`wallet-approval` on the legacy rail,
+  `budget-approval` on the delegation rail)
 - delegate balance inspection
 - direct Haven payment intents and signature submission
 - `GET /payments/{id}/resume_state` for x402 and MPP resume context

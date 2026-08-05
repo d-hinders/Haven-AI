@@ -20,7 +20,7 @@ covers:
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-last-verified: "2026-07-13"
+last-verified: "2026-08-05"
 ---
 
 # Haven AI UX Review

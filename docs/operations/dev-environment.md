@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-07-27"
+last-verified: "2026-08-05"
 ---
 
 # Dev environment
@@ -16,8 +16,9 @@ Haven runs a **shared dev backend stack** that mirrors production, so
 work-in-progress on the `dev` integration branch can be exercised end-to-end
 before it is promoted to `main`. The **backend, hosted MCP, demo-merchant, and
 Postgres** are one shared set of Railway services deploying from `dev`. The
-**frontend has no permanent dev URL** — it is served as **per-PR Vercel preview
-deployments**, and the preview URL changes on every deployment.
+frontend's **canonical dev URL is the branch-tracking Vercel preview** of the
+`dev` branch (stable across deploys); each PR additionally gets its own
+per-PR preview link.
 
 This doc is the authoritative reference for how the dev environment is wired and
 how to configure it. For the branch workflow that feeds it, see
@@ -27,20 +28,33 @@ how to configure it. For the branch workflow that feeds it, see
 
 | Service | Platform | Deploys from | Notes |
 |---|---|---|---|
-| Frontend | **Vercel** (dev project) | per-PR preview deploys | **No permanent URL** — each PR gets a Vercel preview link that changes on every deployment. The Preview scope sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. |
+| Frontend | **Vercel** (dev project) | `dev` branch preview + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable). Per-PR previews exist alongside it. The Preview scope sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. |
 | Backend / API | **Railway** (dev project) | `dev` branch | Own isolated Postgres — never the prod DB. |
 | Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend. |
 | Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. EIP-3009 by default; the experimental ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
 | Postgres | **Railway** managed | — | A separate managed instance, isolated from prod. |
 
 Production is the same shape deploying from `main`. The two never share a
-database, JWT secret, or relayer key.
+database or JWT secret. The **relayer key is the deliberate exception**: one
+EOA (`0xC825…9D7E`) is reused across Base mainnet and Base Sepolia and funded
+on both (owner decision on #908, 2026-07-19) — the per-chain
+`RELAYER_PRIVATE_KEY_<chainId>` mechanism *permits* split keys but is not
+deployed that way today.
 
 **URLs** (no custom domain — we test against the platform URLs):
 
-- Frontend (Vercel): **no permanent URL** — it's a **per-PR Vercel preview link**
-  that changes on every deploy (get it from the PR's Vercel check or the dev
-  project's Deployments list). ⚠️ `haven-dev.vercel.app` is a *different* app
+- Frontend (Vercel): `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
+  — the **branch-tracking preview of `dev`** (stable across deploys; points at the
+  dev backend). Per-PR preview links exist alongside it (the PR's Vercel check).
+  ⚠️ `haven-ai-frontend.vercel.app` is the Vercel **production alias → PROD
+  backend**: on it, dev-only features are missing and passkey onboarding dies
+  with "Relayer is temporarily unfunded" (old code targets Gnosis, whose relayer
+  is intentionally unfunded). Both this and domain-hopping between previews have
+  burned real sessions: **passkeys are bound to the exact domain they were
+  created on** — switching preview domains makes enrolled passkeys unreachable
+  (the browser offers only the "use another device" QR). Do all passkey work on
+  the branch-tracking URL above.
+  ⚠️ `haven-dev.vercel.app` is a *different* app
   ("HAVEN Project" Vite SPA), not Haven's dashboard.
 - Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public).
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
@@ -82,17 +96,22 @@ Isolation rules that are non-negotiable for a payments product:
 
 - **Separate Postgres** from prod (`DATABASE_URL` points at the dev instance).
 - **Dev-only `JWT_SECRET`** — prevents cross-environment token confusion.
-- **Dev-only `RELAYER_PRIVATE_KEY`** — a throwaway EOA funded with minimal
-  testnet gas, so WIP code can never move real funds.
-- **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado**, `RPC_URL_BASE` →
-  **Base Sepolia**. Swap to mainnet RPCs only if a test genuinely needs mainnet
-  state.
+- **`RELAYER_PRIVATE_KEY`** — since the #908 owner decision (2026-07-19) the
+  SAME relayer EOA (`0xC825…9D7E`) serves Base mainnet and Base Sepolia,
+  funded on both; it is gas-only either way (customer funds are unreachable
+  from it). **Gnosis (chain 100) is intentionally unfunded/dead** — the
+  delegation rail is pinned to 8453/84532, so a zero balance there is a
+  decision, not a broken relayer.
+- **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado** (legacy config;
+  chain 100 is dead per above), `RPC_URL_BASE` → **Base Sepolia**. Swap to
+  mainnet RPCs only if a test genuinely needs mainnet state.
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A
   multichain backend resolves the relayer **per chain**
-  (`RELAYER_PRIVATE_KEY_<chainId>`, #640/#678), so a testnet relayer can never
-  touch mainnet funds.
+  (`RELAYER_PRIVATE_KEY_<chainId>`, #640/#678) — a mechanism that *permits*
+  isolating testnet from mainnet keys, though the deployed posture shares one
+  key (see above).
 
 The dev backend also runs the **Fortnox bookkeeping integration**: `FORTNOX_*`
 vars (client id/secret + redirect to the dev backend's
@@ -198,9 +217,10 @@ renders nothing.
 
 - **Railway → dev backend service → Deployments** — build and runtime logs.
 - **Railway → dev Postgres → Data** — inspect tables (read-only with Viewer role).
-- **Vercel → dev project** — frontend build logs and the **per-PR preview
-  deployments** (no permanent dev frontend URL; open the preview link for the
-  deployment under test). ⚠️ `haven-dev.vercel.app` is a different app, not ours.
+- **Vercel → dev project** — frontend build logs, the branch-tracking `dev`
+  preview (the canonical dev URL above) and the per-PR preview deployments
+  (open a PR's own link only to test that PR's build — remember passkeys are
+  domain-bound). ⚠️ `haven-dev.vercel.app` is a different app, not ours.
   The backend is `https://havenbackend-dev-8b95.up.railway.app`.
 
 If you need an env var changed or a secret rotated in the dev projects, ping the

@@ -15,10 +15,13 @@
  * before any script runs (the same keys the app and e2e fixtures use), so
  * authenticated routes render without a real login. Data: Haven-API requests
  * are answered by a route-keyed POPULATED dataset (a funded account, three
- * agents on both rails, transactions, one pending approval, contacts) so
+ * agents on both rails, transactions, one pending approval, contacts, agent
+ * activity + spend stats) so
  * lists, tables and amounts render realistically — that's what the
  * design-reviewer pass judges. Anything not explicitly keyed falls back to a
- * benign empty shape. `SCREENSHOT_FIXTURE=empty` reverts everything to the
+ * benign empty shape — which carries every collection key the hooks read, so
+ * an unkeyed endpoint degrades to "empty" instead of crashing the route
+ * (#1075). `SCREENSHOT_FIXTURE=empty` reverts everything to the
  * empty shapes when you specifically want empty states. All data is fake and
  * deterministic; no live backend, no secrets.
  *
@@ -203,6 +206,70 @@ export const FIXTURE_OVERVIEW = {
   })),
   transactions: FIXTURE_TXS.slice(0, 4),
 }
+// Agent detail (#1075): the activity feed + spend stats behind
+// `/agent-activity/:id/*`. Without these the route fell through to the empty
+// fallback, which had no `activity` key at all — the page rendered nothing and
+// the harness captured a crashed screen. Ordered created_at-DESC like the real
+// route: the MCP-calls panel renders in array order without sorting.
+export const FIXTURE_AGENT_ACTIVITY = [
+  {
+    type: 'payment', id: 'pay-1', agent_id: 'agent-research', agent_name: 'Research agent',
+    token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    amount_raw: '25000000', amount: '25.00', to: ADDR.merchant,
+    reason: null, status: 'executed', tx_hash: `0x${'a1'.repeat(32)}`,
+    source: 'x402', x402_resource_url: 'https://api.example.dev/reports',
+    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
+    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
+    confirmed_at: '2026-07-10T08:20:00.000Z', payment_proof_status: 'verified',
+    payment_flow_status: 'paid', payment_attention_reason: null,
+    created_at: '2026-07-10T08:18:00.000Z',
+  },
+  {
+    type: 'mcp_tool_call', id: 'call-1', agent_id: 'agent-research', agent_name: 'Research agent',
+    tool_name: 'haven_pay_x402_quote', payment_id: 'pay-1', result_status: 'ok',
+    next_action: 'settle', error_code: null, status_code: 200,
+    created_at: '2026-07-10T08:17:00.000Z',
+  },
+  {
+    type: 'approval', id: 'appr-1', agent_id: 'agent-research', agent_name: 'Research agent',
+    token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    amount_raw: '750000000', amount: '750.00', to: ADDR.recipient,
+    reason: 'Quarterly vendor invoice exceeds the daily budget',
+    status: 'pending', tx_hash: null, source: 'api',
+    x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_SAFE.chain_id,
+    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    explorer_url: null, confirmed_at: null, payment_proof_status: null,
+    payment_flow_status: null, payment_attention_reason: null,
+    created_at: '2026-07-10T07:45:00.000Z',
+  },
+  {
+    type: 'payment', id: 'pay-2', agent_id: 'agent-research', agent_name: 'Research agent',
+    token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    amount_raw: '4500000', amount: '4.50', to: ADDR.recipient,
+    reason: null, status: 'executed', tx_hash: `0x${'b2'.repeat(32)}`,
+    source: 'api', x402_resource_url: null, x402_merchant_address: null,
+    chain_id: FIXTURE_SAFE.chain_id,
+    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    explorer_url: `https://sepolia.basescan.org/tx/0x${'b2'.repeat(32)}`,
+    confirmed_at: '2026-07-09T14:02:00.000Z', payment_proof_status: null,
+    payment_flow_status: 'paid', payment_attention_reason: null,
+    created_at: '2026-07-09T14:01:00.000Z',
+  },
+  {
+    type: 'mcp_tool_call', id: 'call-2', agent_id: 'agent-research', agent_name: 'Research agent',
+    tool_name: 'haven_get_allowances', payment_id: null, result_status: 'ok',
+    next_action: null, error_code: null, status_code: 200,
+    created_at: '2026-07-09T11:30:00.000Z',
+  },
+]
+export const FIXTURE_AGENT_STATS = {
+  all_time: [{ token: 'USDC', total_spent: '482.50', tx_count: 37 }],
+  today: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
+  this_week: [{ token: 'USDC', total_spent: '109.75', tx_count: 6 }],
+  pending_approvals: 1,
+}
+
 const FIXTURE_CONTACTS = [
   { id: 'ct-1', name: 'Cloud vendor', address: ADDR.recipient, created_at: '2026-05-02T10:00:00.000Z', updated_at: '2026-05-02T10:00:00.000Z' },
   { id: 'ct-2', name: 'Data provider', address: ADDR.contact, created_at: '2026-06-11T10:00:00.000Z', updated_at: '2026-06-11T10:00:00.000Z' },
@@ -225,6 +292,15 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     return { approvals: FIXTURE_APPROVALS, actionable_count: 1, pending_count: 1 }
   }
   if (pathname === '/contacts') return { contacts: FIXTURE_CONTACTS }
+  if (pathname === '/agent-activity/feed') {
+    return { activity: FIXTURE_AGENT_ACTIVITY, pending_approvals: FIXTURE_AGENT_STATS.pending_approvals }
+  }
+  if (pathname.endsWith('/activity') && pathname.startsWith('/agent-activity/')) {
+    return { activity: FIXTURE_AGENT_ACTIVITY }
+  }
+  if (pathname.endsWith('/stats') && pathname.startsWith('/agent-activity/')) {
+    return FIXTURE_AGENT_STATS
+  }
   if (pathname === '/transactions') {
     // The aggregated feed (useTransactionsFeed).
     return { transactions: FIXTURE_TXS, total: FIXTURE_TXS.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedSafeIds: [] }
@@ -244,6 +320,20 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     return { transactions: FIXTURE_TXS, total: FIXTURE_TXS.length, page: 1, limit: 25, pages: 1 }
   }
   return null
+}
+
+/**
+ * The shape every UNKEYED Haven-API path is answered with. It has to carry
+ * every collection key the hooks read, because a hook that does
+ * `setState(res.thing)` on a missing key stores `undefined` and the next
+ * `.filter`/`.map` takes the whole route down (#1075 — `activity` was the
+ * missing key). Exported so a test can pin the list.
+ */
+export const FIXTURE_EMPTY_FALLBACK = {
+  data: [], items: [], overview: {},
+  safes: [], agents: [], transactions: [], approvals: [], contacts: [],
+  recipients: [], delegations: [], owners: [], passkeys: [], tokens: [],
+  payments: [], receipts: [], catalog: [], activity: [],
 }
 
 function slug(route) {
@@ -327,12 +417,7 @@ async function main() {
         // Anything unkeyed → a benign empty shape carrying every collection
         // key the hooks read, so a missing key never throws (e.g. useApprovals
         // reads `.approvals`, which it then `.filter`s).
-        return json({
-          data: [], items: [], overview: {},
-          safes: [], agents: [], transactions: [], approvals: [], contacts: [],
-          recipients: [], delegations: [], owners: [], passkeys: [], tokens: [],
-          payments: [], receipts: [], catalog: [],
-        })
+        return json(FIXTURE_EMPTY_FALLBACK)
       })
 
       const page = await context.newPage()

@@ -82,7 +82,11 @@ export const FIXTURE_USER = {
   email: 'fixture@haven.test',
   wallet_address: null,
   safe_address: FIXTURE_SAFE.safe_address,
-  safes: [FIXTURE_SAFE],
+  // Delegation-rail on the `/auth/me`-shaped safes list only — so the account
+  // page's Backup & recovery card (#1089) has something real to render,
+  // without perturbing FIXTURE_SAFE's identity shape (pinned against the e2e
+  // fixture by fixture-shape-parity.test.ts).
+  safes: [{ ...FIXTURE_SAFE, account_type: 'delegator_hybrid' }],
   currency_preference: 'USD',
   created_at: '2026-05-01T10:00:00.000Z',
 }
@@ -318,6 +322,16 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname.startsWith('/transactions/')) {
     // Safe-scoped, paginated (useTransactions / useAggregatedPortfolio).
     return { transactions: FIXTURE_TXS, total: FIXTURE_TXS.length, page: 1, limit: 25, pages: 1 }
+  }
+  if (pathname.startsWith('/accounts/hybrid/') && pathname.endsWith('/signers')) {
+    // The account-scoped signer set (#1081/#1089) — one passkey, so the
+    // Backup & recovery card renders its "only one way to approve" state.
+    return {
+      account_address: FIXTURE_SAFE.safe_address,
+      chain_id: FIXTURE_SAFE.chain_id,
+      owner_address: null,
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+    }
   }
   return null
 }

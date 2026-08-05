@@ -90,11 +90,6 @@ vi.mock('@/components/DelegationBudgetCard', () => ({
   DELEGATION_BUDGET_CARD_ID: 'delegation-budget-card',
 }))
 
-vi.mock('@/components/AccountSignersCard', () => ({
-  default: () => null,
-  AccountSignersReadOnly: () => null,
-}))
-
 vi.mock('@/components/PaymentCredentialsModal', () => ({
   default: () => null,
 }))
@@ -437,6 +432,23 @@ describe('AgentDetailClient last-activity metadata', () => {
     // The empty-state "Add budget" affordance takes the same route.
     fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
     expect(screen.queryByTestId('edit-agent-modal')).not.toBeInTheDocument()
+  })
+
+  // ── Backup & recovery pointer, not a second copy (#1089) ────────────────
+
+  it('points a delegation agent at the account page instead of rendering signer controls', () => {
+    mockDelegationAgent()
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const link = screen.getByRole('link', { name: /Backup & recovery/ })
+    expect(link).toHaveAttribute('href', '/accounts/safe-1')
+    // No enrollment controls on the agent page — those live only on the account page now.
+    expect(screen.queryByRole('button', { name: /Add a backup/ })).not.toBeInTheDocument()
+  })
+
+  it('hides the backup & recovery pointer on a legacy agent', () => {
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByRole('link', { name: /Backup & recovery/ })).not.toBeInTheDocument()
   })
 
   it('still opens EditAgentModal in budget mode on a legacy agent', () => {

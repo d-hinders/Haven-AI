@@ -207,8 +207,12 @@ agent-scoped (`/agents/:id/account-signers/{prepare,submit}`, #888) and
 account-scoped (`POST /accounts/hybrid/:address/signers/{prepare,submit}`), the
 latter so an account with **zero agents** can enrol its second signer before
 anything else exists — which is when the ≥2-signer floor (#908) matters most.
-(That capability is API-level today; the account-page card is read-only until
-the #1089 frontend wiring lands.)
+**The frontend now uses the account-scoped surface exclusively (#1089):**
+`AccountSignersCard` is the single home for backup & recovery, rendered on the
+account page for any `delegator_hybrid` account — including one with zero
+agents — and no longer duplicated on the agent page. The agent-scoped route
+stays live server-side (it is the same shared implementation below, just
+resolved differently) but has no remaining frontend caller.
 The two surfaces differ only in how the account is resolved: agent lookup
 versus an owner-scoped `(address, chain)` lookup on `user_safes`. Authority
 rules, the ≥2-signer refusal, the calldata encoding and the signed-op matching

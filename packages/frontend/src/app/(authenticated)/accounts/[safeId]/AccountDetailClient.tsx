@@ -17,7 +17,7 @@ import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useUserSafes } from '@/hooks/useUserSafes'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import SendModal from '@/components/SendModal'
-import AccountSignersCard, { AccountSignersReadOnly } from '@/components/AccountSignersCard'
+import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
@@ -154,9 +154,6 @@ export default function AccountDetailClient() {
 
   // Build linked-agent list
   const safeAgents = agents.filter((a) => a.safe_id === safeId)
-  // #1079: the signer-management endpoints are agent-scoped; any live agent
-  // on this account can carry the account-level recovery card.
-  const recoveryAgent = safeAgents.find((a) => a.status !== 'revoked') ?? null
 
   const {
     details,
@@ -468,21 +465,14 @@ export default function AccountDetailClient() {
         )}
       </Card>
 
-      {/* #1079: account-level recovery for delegation accounts — the entire
-          backup/recovery UI used to render only inside an agent page, so an
-          account with zero agents had no path to enrol a backup passkey.
-          Management reuses the agent-scoped routes when an agent exists;
-          otherwise the signer set is shown read-only. */}
+      {/* #1089: backup & recovery is an account capability, not an agent one —
+          it works from the moment the account exists, with no agent required. */}
       {safe.account_type === 'delegator_hybrid' ? (
-        recoveryAgent ? (
-          <AccountSignersCard
-            agentId={recoveryAgent.id}
-            chainId={chainId}
-            userEmail={user?.email ?? ''}
-          />
-        ) : !agentsLoading ? (
-          <AccountSignersReadOnly safeAddress={safe.safe_address} chainId={chainId} />
-        ) : null
+        <AccountSignersCard
+          safeAddress={safe.safe_address}
+          chainId={chainId}
+          userEmail={user?.email ?? ''}
+        />
       ) : null}
 
       {/* Account info */}

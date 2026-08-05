@@ -10,7 +10,7 @@ vi.mock('@/components/ui/Toast', () => ({
 
 const AccountSignersCard = (await import('../AccountSignersCard')).default
 
-const PROPS = { agentId: 'a1', chainId: 84532, userEmail: 'x@y.z' }
+const PROPS = { safeAddress: '0x' + 'aa'.repeat(20), chainId: 84532, userEmail: 'x@y.z' }
 
 function base(overrides: Record<string, unknown> = {}) {
   return {
@@ -20,6 +20,7 @@ function base(overrides: Record<string, unknown> = {}) {
       owner_address: null,
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
     },
+    loadError: false,
     busy: false,
     ready: true,
     enrollBackupPasskey: vi.fn().mockResolvedValue({ ok: true }),
@@ -109,18 +110,61 @@ describe('AccountSignersCard (#888)', () => {
     expect(ownerRemove.disabled).toBe(true)
   })
 
-  it('surfaces the honest "Lost a device?" recovery explainer', async () => {
+  it('surfaces the honest "Lost a device?" recovery explainer behind a help modal', async () => {
     mockUseSigners.mockReturnValue(base())
     render(<AccountSignersCard {...PROPS} />)
-    expect(screen.getByText('Lost a device?')).toBeTruthy()
+    // Not shown until the help affordance is opened — no raw <details> left in the DOM.
+    expect(document.querySelector('details')).toBeNull()
+    expect(screen.queryByText(/Haven can.t do this for you/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /Lost a device\?/ }))
+
+    expect(screen.getByRole('dialog')).toBeTruthy()
     expect(screen.getByText(/Haven can.t do this for you/)).toBeTruthy()
     expect(screen.getByRole('link', { name: 'How recovery works' }).getAttribute('href')).toContain('/product/account-recovery')
+
+    // Every other Modal in the app has a visible close affordance — this one
+    // must too, not just backdrop-click/Escape.
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('renders nothing while signers are loading (null)', () => {
     mockUseSigners.mockReturnValue(base({ signers: null }))
     const { container } = render(<AccountSignersCard {...PROPS} />)
     expect(container.textContent).toBe('')
+  })
+
+  it('shows a retry affordance when the signer set fails to load', async () => {
+    const reload = vi.fn()
+    mockUseSigners.mockReturnValue(base({ signers: null, loadError: true, reload }))
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.getByText(/could not load/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(reload).toHaveBeenCalled()
+  })
+
+  it('names the real not-ready blocker: owner wallet for an EOA-backed account', () => {
+    mockUseSigners.mockReturnValue(
+      base({
+        ready: false,
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.getByText(/Connect your account owner wallet/)).toBeTruthy()
+  })
+
+  it('names the real not-ready blocker: the passkey device for a passkey-only account', () => {
+    mockUseSigners.mockReturnValue(base({ ready: false }))
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.queryByText(/Connect your account owner wallet/)).toBeNull()
+    expect(screen.getByText(/isn.t on this device/)).toBeTruthy()
   })
 
   it('copy is outcome language — no signer/passkey/addKey jargon leads', () => {

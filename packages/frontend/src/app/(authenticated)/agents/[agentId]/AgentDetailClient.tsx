@@ -33,7 +33,6 @@ import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import EditAgentModal, { type EditAgentModalMode } from '@/components/EditAgentModal'
 import DelegationBudgetCard, { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
-import AccountSignersCard from '@/components/AccountSignersCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import {
@@ -49,6 +48,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -548,7 +548,19 @@ export default function AgentDetailClient({ agentId }: Props) {
               onBudgetChange={refetch}
             />
           </div>
-          <AccountSignersCard agentId={agentId} chainId={chainId} userEmail={user?.email ?? ''} />
+          {/* #1089: backup & recovery moved to the account page — it's an
+              account capability, not an agent one. This is a pointer, not a
+              second copy of the controls. */}
+          {safe ? (
+            <Card hover={false} className="mt-6 p-2">
+              <Row
+                href={`/accounts/${safe.id}`}
+                title="Backup & recovery"
+                subtitle="Manage the ways this account can be approved"
+                trailing={<Icon icon={ArrowRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}
+              />
+            </Card>
+          ) : null}
         </>
       ) : null}
       {/* Session-rail banner + recipients card retired with the rail (#834);

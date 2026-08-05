@@ -7,9 +7,11 @@
  * (#834): its machinery is deleted, and any account or intent still marked
  * `session_key` gets HTTP 410 — fail-closed, nothing written — on every
  * agent-payment ENTRY point (/payments, /payments/:id/sign, MPP authorize +
- * replay, /machine-payments/send, x402 authorize). Known residual: a
- * pre-retirement queued approval_requests row does not re-consult the seam
- * at execution (follow-up filed on #993). The typed seam itself stays for
+ * replay, /machine-payments/send, x402 authorize). Queued approvals are NOT
+ * a residual (investigated on #1121): approval execution is an OWNER-signed
+ * Safe transaction built by the dashboard — owner authority, not the
+ * retired rail's agent authority, so the seam is rightly not consulted
+ * there. The typed seam itself stays for
  * reversibility (the #834 owner decision); what #993 removed is the four
  * scattered copies of the retirement gate, not the seam.
  *

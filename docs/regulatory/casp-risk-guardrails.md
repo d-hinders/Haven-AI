@@ -137,8 +137,9 @@ Haven backend
 > (`lib/execution-rail.ts`), and enforced at every agent-payment entry point
 > (/payments, sign, MPP authorize + replay, /machine-payments/send, x402
 > authorize) regardless of the account's permission/chain configuration.
-> Known residual, tracked: a pre-retirement queued approval row does not
-> re-consult the seam at execution time.
+> Queued-approval completion is not a gap (#1121, investigated): the
+> dashboard executes an OWNER-signed Safe transaction — owner authority,
+> outside any agent rail — so the seam is rightly not consulted there.
 
 > **Current state (2026-07-27, #976):** the erc7710 settle response carries a
 > `passport` reference — `{ attestation_uid, chain_id }`, plus an optional

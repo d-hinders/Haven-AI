@@ -209,6 +209,9 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     expect(mockQuery.mock.calls.some((c) => /SET signature/.test(String(c[0])))).toBe(false)
+    // #993 hardening of the same contract: ZERO writes of any kind — the 410
+    // must not leave an intent row, audit row, or status flip behind.
+    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE|DELETE/i.test(String(c[0])))).toBe(false)
   })
 
   it('POST /payments REFUSES a session-rail account — the rail is retired (#834)', async () => {
@@ -231,6 +234,8 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     // Fail-closed: no session machinery invoked, nothing written:
     expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
+    // #993: ZERO writes of any kind on the 410 path.
+    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE|DELETE/i.test(String(c[0])))).toBe(false)
   })
 
   it('POST /payments on the delegation rail: prepares, pins the delegation, ships typed data — WITHOUT an allowance row (#829, #835)', async () => {

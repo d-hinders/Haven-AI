@@ -16,7 +16,7 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-07-18"
+last-verified: "2026-08-05"
 ---
 
 # Haven

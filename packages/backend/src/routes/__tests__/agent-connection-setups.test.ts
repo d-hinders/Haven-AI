@@ -1422,6 +1422,66 @@ describe('agent connection setup routes', () => {
   })
 })
 
+describe('setup allowance cap on the delegation rail (#1074)', () => {
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientQuery.mockResolvedValue({ rows: [] })
+    mockConnect.mockResolvedValue({
+      query: (...args: unknown[]) => mockClientQuery(...args),
+      release: vi.fn(),
+    })
+  })
+
+  const SECOND_ALLOWANCE = { ...ALLOWANCE, token_address: '0x' + '3b'.repeat(20), token_symbol: 'EURe' }
+
+  it('rejects >1 allowance on a delegator_hybrid wallet at CREATE — not as a dead end at approval', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [{ ...SAFE, account_type: 'delegator_hybrid' }] })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', runtime: 'claude_code', allowances: [ALLOWANCE, SECOND_ALLOWANCE] },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toMatch(/one budget per agent/)
+    // Nothing was persisted:
+    expect(mockClientQuery.mock.calls.some((c) => /INSERT INTO agent_connection_setups/.test(String(c[0])))).toBe(false)
+  })
+
+  it('a single allowance on the delegation rail is accepted', async () => {
+    const app = await buildApp()
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM user_safes')) return { rows: [{ ...SAFE, account_type: 'delegator_hybrid' }] }
+      return { rows: [] }
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', runtime: 'claude_code', allowances: [ALLOWANCE] },
+    })
+    expect(response.statusCode).toBe(201)
+  })
+
+  it('the legacy Safe rail still accepts multiple allowances — unchanged', async () => {
+    const app = await buildApp()
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM user_safes')) return { rows: [{ ...SAFE, account_type: null }] }
+      return { rows: [] }
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', runtime: 'claude_code', allowances: [ALLOWANCE, SECOND_ALLOWANCE] },
+    })
+    expect(response.statusCode).toBe(201)
+  })
+})
+
 describe('delegation-rail budget approval (#1073)', () => {
   const DELEGATION_SETUP = { ...CONNECTED_SETUP, account_type: 'delegator_hybrid' }
   /** The signed budget that satisfies ALLOWANCE: same token, amount, period. */

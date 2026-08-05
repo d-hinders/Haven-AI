@@ -229,7 +229,9 @@ are **one implementation** (`lib/hybrid-signer-actions.ts`), because two copies
 of a spend-authority rule is how they drift apart. Invariant 13 is asserted
 against that shared core and against both routes reaching it. Client-side, signing selects the passkey whose credential is
 actually enrolled on the signing device rather than blindly `passkeys[0]`, so
-recovery with a backup key works from the backup device. Scheme selection is
+recovery with a backup key works from the backup device. UI surfaces treat a
+DISMISSED signing sheet as a neutral cancel, never an error (#1085) — a user
+changing their mind is not a failure mode. Scheme selection is
 likewise a **device** decision, never an account-shape decision: a mixed
 account (EOA owner *and* passkeys) accepts either signer on-chain, so the
 client requests the scheme it can actually produce (`signature_scheme` on the

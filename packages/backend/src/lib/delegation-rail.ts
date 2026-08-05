@@ -338,22 +338,31 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
   // Passkey accounts sign the userOpHash via WebAuthn (#887); the prepare here
   // never signs, so the WebAuthn signer's getFn is a stub that must not be
   // called server-side. EOA accounts keep the watch-only owner-signer.
-  // Address pinned when known (post-deploy, the only time treasury ops run);
-  // deployParams-derivation only as a legacy fallback for callers that
-  // predate the pin.
-  const location = cfg.accountAddress
-    ? ({ address: cfg.accountAddress } as const)
-    : isPasskey
-      ? ({
-          deployParams: [
-            zeroAddress,
-            passkeys.map((p) => p.keyId),
-            passkeys.map((p) => p.x),
-            passkeys.map((p) => p.y),
-          ],
-          deploySalt: '0x',
-        } as const)
-      : ({ deployParams: [cfg.ownerAddress as Address, [], [], []], deploySalt: '0x' } as const)
+  //
+  // Address pinned when the account is DEPLOYED (#891: the signer set can
+  // have evolved since provisioning, so deriving would find the wrong
+  // account). A COUNTERFACTUAL account is the one case where deriving from
+  // the stored set is CORRECT — nothing on-chain can have diverged, because
+  // every signer change requires a deployed account op — and it is also
+  // REQUIRED: the kit cannot build a UserOperation for an undeployed account
+  // without deployParams (initCode). This is what lets a zero-agent account
+  // enrol its backup signer (#1089): deploy + addKey ride the same sponsored
+  // op. The derived address is checked against the pin below, so set drift
+  // still refuses instead of targeting a different account.
+  const fullDeployParams = [
+    cfg.ownerAddress ?? zeroAddress,
+    passkeys.map((p) => p.keyId),
+    passkeys.map((p) => p.x),
+    passkeys.map((p) => p.y),
+  ] as const
+  const pinnedCode = cfg.accountAddress
+    ? await publicClient.getCode({ address: cfg.accountAddress }).catch(() => undefined)
+    : undefined
+  const pinnedDeployed = !!pinnedCode && pinnedCode !== '0x'
+  const location =
+    cfg.accountAddress && pinnedDeployed
+      ? ({ address: cfg.accountAddress } as const)
+      : ({ deployParams: fullDeployParams, deploySalt: '0x' } as const)
   const signerConfig = isPasskey
     ? {
         webAuthnAccount: toWebAuthnAccount({
@@ -376,6 +385,18 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
     ...location,
     signer: signerConfig,
   } as never)
+  // The counterfactual branch derives — refuse a derivation that does not
+  // land on the stored address (the #891 mismatch class: acting on a
+  // DIFFERENT account than the one the user owns must be impossible).
+  if (
+    cfg.accountAddress &&
+    !pinnedDeployed &&
+    account.address.toLowerCase() !== cfg.accountAddress.toLowerCase()
+  ) {
+    throw new Error(
+      'treasury ops: the stored signer set does not derive the stored account address — refusing to act on a different account',
+    )
+  }
   const pimlico = createPimlicoClient({
     transport: http(cfg.bundlerUrl),
     entryPoint: { address: entryPoint07Address, version: '0.7' },

@@ -82,6 +82,11 @@ deployed that way today.
   harness — a reappearing skip means a broken precondition (drained QA
   treasury, expired credential, reverted env var), never a missing identity
   (see agent-qa.md, which also documents how to legitimately retire a leg).
+  Since #1047 a `workflow_dispatch` override of `haven_api_url` is validated
+  to be an `https://<app>.up.railway.app` origin (whole-string match) and
+  logged with the dispatching actor — the quiet arbitrary-endpoint path is
+  gone, though Railway itself is multi-tenant; the full residual-risk
+  statement lives in autonomous-pr-loop.md's safety model.
   A **money-path `hotfix/*`** blocks outright: the harness tests a *deployed* backend and a
   hotfix is deployed nowhere until it merges, so no automatic evidence about it
   can exist. Bypass in both cases: the `qa-override` label, with a comment

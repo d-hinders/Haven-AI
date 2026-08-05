@@ -211,6 +211,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
         chainId,
         userSafeId: owner.userSafeId,
         config: owner.config,
+        singleSignerWaiverAt: owner.singleSignerWaiverAt,
       },
     }
   }

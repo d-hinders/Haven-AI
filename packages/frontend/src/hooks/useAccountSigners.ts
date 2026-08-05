@@ -154,6 +154,14 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
     [run],
   )
 
+  // #1087: enrolling a wallet owner is not a one-way door — the account can
+  // return to passkey-only. The backend refuses removals that would leave no
+  // signer (and applies the #908 mainnet floor).
+  const removeOwner = useCallback(
+    (): Promise<SignerResult> => run({ action: 'remove_owner' }),
+    [run],
+  )
+
   return {
     signers,
     loadError,
@@ -165,6 +173,7 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
     enrollBackupPasskey,
     enrollOwnerWallet,
     removePasskey,
+    removeOwner,
     reload,
   }
 }

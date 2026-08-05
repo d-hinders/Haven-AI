@@ -33,6 +33,20 @@ vi.mock('../../lib/allowance-module.js', () => ({
   getTokensForDelegate: (...args: unknown[]) => mockGetTokensForDelegate(...args),
 }))
 
+// Mirrors agents.test.ts: the passport module is mocked so the register-path
+// opt-in (#1072) can be tested directly, including the "never breaks
+// registration" guarantee it inherits from POST /agents (#972).
+const { mockRequestPassport, mockIssueBestEffort } = vi.hoisted(() => ({
+  mockRequestPassport: vi.fn(),
+  mockIssueBestEffort: vi.fn(),
+}))
+vi.mock('../../lib/passport/index.js', () => ({
+  requestPassport: (...a: unknown[]) => mockRequestPassport(...a),
+  issuePassportBestEffort: (...a: unknown[]) => mockIssueBestEffort(...a),
+  isPassportConfigured: () => true,
+  PASSPORT_CHAIN_IDS: new Set([84532]),
+}))
+
 const SAFE = {
   id: 'safe-1',
   safe_address: '0x2222222222222222222222222222222222222222',
@@ -172,6 +186,8 @@ describe('agent connection setup routes', () => {
     })
     mockGetTokenAllowance.mockReset()
     mockGetTokensForDelegate.mockReset()
+    mockRequestPassport.mockReset().mockResolvedValue(true)
+    mockIssueBestEffort.mockReset()
     delete process.env.HAVEN_API_URL
     delete process.env.HAVEN_HOSTED_MCP_URL
   })
@@ -225,6 +241,31 @@ describe('agent connection setup routes', () => {
       ALLOWANCE.allowance_amount,
       ALLOWANCE.reset_period_min,
     ])
+
+    await app.close()
+  })
+
+  it('persists the passport opt-in on the setup row for /register to act on later (#1072)', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        allowances: [ALLOWANCE],
+        issue_passport: true,
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    const insertSetup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO agent_connection_setups'),
+    )
+    const params = insertSetup?.[1] as unknown[]
+    expect(params[12]).toBe(true)
 
     await app.close()
   })
@@ -719,6 +760,133 @@ describe('agent connection setup routes', () => {
     expect(insertAgent?.[1]).toContain(API_KEY_HASH)
     expect(JSON.stringify(mockClientQuery.mock.calls)).not.toContain(wallet.privateKey)
     expect(mockClientQuery).toHaveBeenCalledWith('COMMIT')
+
+    await app.close()
+  })
+
+  /**
+   * #1072: the connector flow could not opt in at all — `issue_passport` had
+   * no path from setup creation through to the agent that /register creates.
+   * This pins the flag actually reaching `requestPassport`/
+   * `issuePassportBestEffort`, mirroring the POST /agents coverage in
+   * agents.test.ts so the two entry points are held to the same bar.
+   */
+  it('requests a passport at register time when the setup opted in on an eligible chain', async () => {
+    const app = await buildApp()
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    const passportSetup = { ...SETUP, issue_passport: true, safe_chain_id: 84532 }
+    const proof = await wallet.signMessage(passportSetup.challenge_message)
+
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [passportSetup] }
+      }
+      if (String(sql).includes('SELECT id FROM agents')) {
+        return { rows: [] }
+      }
+      if (String(sql).includes('INSERT INTO agents')) {
+        return { rows: [{ id: 'agent-1' }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_test',
+        challenge_id: passportSetup.challenge_id,
+        delegate_address: wallet.address,
+        proof_signature: proof,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().passport_requested).toBe(true)
+    expect(mockRequestPassport).toHaveBeenCalledWith('agent-1', 84532)
+    expect(mockIssueBestEffort).toHaveBeenCalledWith('agent-1', 'user-1')
+
+    await app.close()
+  })
+
+  it('does not request a passport unless the setup explicitly opted in', async () => {
+    const app = await buildApp()
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    // SETUP carries no issue_passport flag — the normal, unchanged case.
+    const proof = await wallet.signMessage(SETUP.challenge_message)
+
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [SETUP] }
+      }
+      if (String(sql).includes('SELECT id FROM agents')) {
+        return { rows: [] }
+      }
+      if (String(sql).includes('INSERT INTO agents')) {
+        return { rows: [{ id: 'agent-1' }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_test',
+        challenge_id: SETUP.challenge_id,
+        delegate_address: wallet.address,
+        proof_signature: proof,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().passport_requested).toBe(false)
+    expect(mockRequestPassport).not.toHaveBeenCalled()
+    expect(mockIssueBestEffort).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('registers the agent even when passport issuance throws', async () => {
+    const app = await buildApp()
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    const passportSetup = { ...SETUP, issue_passport: true, safe_chain_id: 84532 }
+    const proof = await wallet.signMessage(passportSetup.challenge_message)
+    mockRequestPassport.mockRejectedValue(new Error('passport table missing'))
+
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [passportSetup] }
+      }
+      if (String(sql).includes('SELECT id FROM agents')) {
+        return { rows: [] }
+      }
+      if (String(sql).includes('INSERT INTO agents')) {
+        return { rows: [{ id: 'agent-1' }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_test',
+        challenge_id: passportSetup.challenge_id,
+        delegate_address: wallet.address,
+        proof_signature: proof,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().agent_status).toBe('pending_approval')
+    expect(mockClientQuery.mock.calls.some(([sql]) => /ROLLBACK/.test(String(sql)))).toBe(false)
 
     await app.close()
   })

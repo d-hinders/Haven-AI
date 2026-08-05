@@ -1755,6 +1755,10 @@ export const openapiSpec = {
             type: 'array',
             items: { $ref: '#/components/schemas/AgentConnectionAllowanceInput' },
           },
+          issue_passport: {
+            type: 'boolean',
+            description: 'Opt in to an L0 Agent Passport for the agent this setup creates. Default false.',
+          },
         },
         additionalProperties: false,
       },
@@ -1859,6 +1863,10 @@ export const openapiSpec = {
           delegate_address: address,
           hosted_mcp_url: { type: 'string', format: 'uri' },
           next_action: { type: 'string', enum: ['return_to_haven_for_wallet_approval'] },
+          passport_requested: {
+            type: 'boolean',
+            description: 'True when the setup opted in and its chain issues L0 passports.',
+          },
         },
         additionalProperties: false,
       },

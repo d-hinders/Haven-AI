@@ -180,6 +180,7 @@ export default function ConnectAgent2Modal({
   const [description, setDescription] = useState('')
   const [runtime, setRuntime] = useState('claude-code')
   const [localMcp, setLocalMcp] = useState(false)
+  const [issuePassport, setIssuePassport] = useState(false)
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
   const [addToken, setAddToken] = useState('')
   const [addAmount, setAddAmount] = useState('')
@@ -319,6 +320,7 @@ export default function ConnectAgent2Modal({
     setDescription('')
     setRuntime('claude-code')
     setLocalMcp(false)
+    setIssuePassport(false)
     setAllowances([])
     setAddToken(tokenOptions[0]?.symbol ?? '')
     setAddAmount('')
@@ -418,6 +420,7 @@ export default function ConnectAgent2Modal({
           allowance_amount: parseUnits(allowance.amount, allowance.decimals).toString(),
           reset_period_min: allowance.resetTimeMin,
         })),
+        issue_passport: issuePassport || undefined,
       })
       setSetup(response)
       setCancelled(false)
@@ -819,6 +822,20 @@ export default function ConnectAgent2Modal({
                 </p>
               )}
 
+              <label className="flex items-start gap-2 py-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                <input
+                  type="checkbox"
+                  checked={issuePassport}
+                  onChange={(event) => setIssuePassport(event.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Optional: issue an Agent Passport — a signed record that this agent was issued
+                  by Haven, bound to this wallet, and revocable at any time. Haven covers the
+                  small on-chain fee to issue it.
+                </span>
+              </label>
+
               <div className="flex gap-3">
                 <Button variant="ghost" onClick={() => setStep('details')} className="flex-1">
                   Back
@@ -859,6 +876,13 @@ export default function ConnectAgent2Modal({
                     label: 'Approve actions',
                     value: 'Payments above budget',
                     helper: 'Haven will ask you before requests above the remaining budget move money.',
+                  },
+                  {
+                    label: 'Agent Passport',
+                    value: issuePassport ? 'Issue on approval' : 'Not requested',
+                    helper: issuePassport
+                      ? 'A signed, revocable record that this agent was issued by Haven — governance, not spend authority.'
+                      : 'You can issue one later from the agent page.',
                   },
                 ]}
               />

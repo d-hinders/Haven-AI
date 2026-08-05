@@ -895,6 +895,8 @@ export type components = {
             safe_id?: string;
             runtime?: string;
             allowances?: components["schemas"]["AgentConnectionAllowanceInput"][];
+            /** @description Opt in to an L0 Agent Passport for the agent this setup creates. Default false. */
+            issue_passport?: boolean;
         };
         CreateAgentConnectionSetupResponse: {
             /** Format: uuid */
@@ -965,6 +967,8 @@ export type components = {
             hosted_mcp_url: string;
             /** @enum {string} */
             next_action: "return_to_haven_for_wallet_approval";
+            /** @description True when the setup opted in and its chain issues L0 passports. */
+            passport_requested?: boolean;
         };
         AgentConnectionSetupStatus: {
             /** Format: uuid */

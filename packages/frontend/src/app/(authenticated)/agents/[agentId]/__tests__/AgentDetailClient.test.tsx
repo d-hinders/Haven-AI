@@ -12,6 +12,7 @@ const {
   mockUseSafeOperationGate,
   mockUseActiveSigner,
   mockUseDelegateBalance,
+  mockUseAgentPassport,
 } = vi.hoisted(() => ({
   mockUseAuth: vi.fn(),
   mockUseAgents: vi.fn(),
@@ -22,6 +23,7 @@ const {
   mockUseSafeOperationGate: vi.fn(),
   mockUseActiveSigner: vi.fn(),
   mockUseDelegateBalance: vi.fn(),
+  mockUseAgentPassport: vi.fn(),
 }))
 
 vi.mock('wagmi', () => ({
@@ -50,6 +52,10 @@ vi.mock('@/hooks/useOnChainAllowances', () => ({
 
 vi.mock('@/hooks/useDelegateBalance', () => ({
   useDelegateBalance: (...args: unknown[]) => mockUseDelegateBalance(...args),
+}))
+
+vi.mock('@/hooks/useAgentPassport', () => ({
+  useAgentPassport: (...args: unknown[]) => mockUseAgentPassport(...args),
 }))
 
 vi.mock('@/hooks/useSafeDetails', () => ({
@@ -186,6 +192,15 @@ describe('AgentDetailClient last-activity metadata', () => {
       hasStranded: false,
       hasRecoverableUsdc: false,
       loading: false,
+      refetch: vi.fn(),
+    })
+    mockUseAgentPassport.mockReturnValue({
+      passport: null,
+      standing: null,
+      loading: false,
+      issuing: false,
+      issueError: null,
+      issuePassport: vi.fn(),
       refetch: vi.fn(),
     })
   })

@@ -47,7 +47,7 @@ interface AcceptsEntry {
   asset?: string
   network?: string
   maxTimeoutSeconds?: number
-  extra?: { assetTransferMethod?: string }
+  extra?: { assetTransferMethod?: string; facilitatorAddresses?: string[] }
 }
 interface PaymentRequired {
   accepts?: AcceptsEntry[]
@@ -182,6 +182,10 @@ export const x402Erc7710Settle: Scenario = {
       // The v2 header echoes the accepted entry field-for-field — the quoted
       // timeout must round-trip or the merchant rejects the echo.
       maxTimeoutSeconds: erc7710Entry.maxTimeoutSeconds,
+      // #1058: forward the merchant's advertised facilitators verbatim — the
+      // child delegation becomes redeemable ONLY by them, and the merchant's
+      // v2 matcher requires them back in the echo.
+      facilitatorAddresses: erc7710Entry.extra?.facilitatorAddresses,
     })
     if (!auth.ok || !auth.data.payment_id) {
       return fail(`authorize failed (${auth.status}): ${JSON.stringify(auth.data).slice(0, 200)}`)

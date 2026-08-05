@@ -72,6 +72,12 @@ interface X402AuthorizeBody {
    * instead of getting the wrong flow.
    */
   settlementScheme?: string
+  /**
+   * #1058: the erc7710 challenge entry's `extra.facilitatorAddresses`,
+   * forwarded VERBATIM. Pins the settlement child's redeemer caveat and is
+   * echoed in the v2 X-PAYMENT header's accepted entry.
+   */
+  facilitatorAddresses?: string[]
 }
 
 interface X402ApprovalRow {
@@ -364,6 +370,22 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         error: 'erc7710 settlement requires a delegation-rail account — the legacy AllowanceModule rail settles via EIP-3009 only',
       })
     }
+    // #1058: facilitator addresses pin the settlement child's redeemer caveat.
+    // Garbage here would either brick the child (unredeemable) or silently
+    // skip the pin — both are caller errors that must fail loudly.
+    const { facilitatorAddresses } = request.body
+    if (facilitatorAddresses !== undefined) {
+      if (
+        !Array.isArray(facilitatorAddresses) ||
+        facilitatorAddresses.length === 0 ||
+        facilitatorAddresses.length > 16 ||
+        facilitatorAddresses.some((a) => typeof a !== 'string' || !isValidAddress(a))
+      ) {
+        return reply.code(400).send({
+          error: 'facilitatorAddresses must be 1-16 valid addresses (the erc7710 challenge entry\'s extra.facilitatorAddresses)',
+        })
+      }
+    }
 
     // 2. Resolve token from asset address (shared with the MPP core).
     const tokenResult = resolvePaymentToken(agent.chain_id, asset)
@@ -407,6 +429,14 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       if (settlementScheme === 'erc7710' && fundingShape) {
         return reply.code(400).send({
           error: 'erc7710 settlement requires payTo = the merchant, not the agent delegate EOA',
+        })
+      }
+      if (facilitatorAddresses !== undefined && fundingShape) {
+        // #1058: on the 3009 two-leg the merchant settles via EIP-3009 — a
+        // redeemer pin is meaningless there and forwarding it means the
+        // client confused its schemes.
+        return reply.code(400).send({
+          error: 'facilitatorAddresses applies to erc7710 direct settlement only — the EIP-3009 funding leg has no redeemer',
         })
       }
 
@@ -717,6 +747,10 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           asset: tokenAddress as `0x${string}`,
           amountAtomic: amountRaw,
           payTo: payTo.toLowerCase() as `0x${string}`,
+          // #1058: pin the child to the merchant's advertised facilitators —
+          // normalized for the caveat; the VERBATIM strings are stored below
+          // for the header echo (the v2 matcher deep-equals them).
+          redeemers: facilitatorAddresses?.map((a) => normaliseAddress(a) as `0x${string}`),
           // Reviewed (#1053 minor): validated numeric at the route top — a
           // string here would NaN through the clamp into a 502.
           maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
@@ -757,6 +791,9 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           // Echoed back to the merchant in the v2 X-PAYMENT header — must be
           // the QUOTED value, and the child's expiry was derived from it.
           maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
+          // #1058: echoed verbatim; the child's redeemer caveat was built
+          // from these (normalized), so state and caveat stay one thing.
+          facilitatorAddresses,
         }),
         conflictTarget: 'x402_idempotency_key',
       })
@@ -1505,6 +1542,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           delegateAccountAddress: `0x${string}`
           network: string
           maxTimeoutSeconds?: number
+          facilitatorAddresses?: string[]
         }
         // #946 guard: a 3009-mode funding intent stores a prepared UserOp, not
         // an erc7710 {child, budget} settlement state. Refuse it here
@@ -1552,6 +1590,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           // Pre-#1064 intents stored no echo value; 300 is the same default
           // the child expiry was built with, so the echo stays consistent.
           maxTimeoutSeconds: state.maxTimeoutSeconds ?? 300,
+          facilitatorAddresses: state.facilitatorAddresses,
         })
 
         // #976: the agent's own passport reference, so it can PRESENT rather

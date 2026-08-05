@@ -137,6 +137,71 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockQuery.mock.calls.some((c) => /allowance/i.test(String(c[0])))).toBe(false)
   })
 
+  // ── #1058: facilitator redeemers ─────────────────────────────────────────
+  it('authorize pins the child to forwarded facilitators and stores them verbatim', async () => {
+    mockSelect.mockResolvedValueOnce({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    const facilitators = ['0x' + 'Fa'.repeat(20)] // mixed case: stored verbatim, caveat normalized
+
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ facilitatorAddresses: facilitators }),
+    })
+    expect(res.statusCode).toBe(201)
+    const stored = JSON.parse(
+      (mockCreateIntent.mock.calls[0][0] as { preparedUserOp: string }).preparedUserOp,
+    )
+    // The echo source is the VERBATIM client value…
+    expect(stored.facilitatorAddresses).toEqual(facilitators)
+    // …and the child grew a redeemer caveat (one more than a bare build).
+    const bare = await (async () => {
+      mockSelect.mockResolvedValueOnce({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+      mockCreateIntent.mockResolvedValueOnce({ id: 'pi_other', status: 'pending_signature', expires_at: 'x' })
+      await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody(),
+      })
+      return JSON.parse((mockCreateIntent.mock.calls[1][0] as { preparedUserOp: string }).preparedUserOp)
+    })()
+    expect(stored.child.caveats.length).toBe(bare.child.caveats.length + 1)
+  })
+
+  it('authorize 400s malformed facilitatorAddresses — garbage cannot half-pin a child', async () => {
+    for (const bad of [[], ['not-an-address'], 'x', new Array(17).fill('0x' + 'aa'.repeat(20))]) {
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ facilitatorAddresses: bad }),
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/facilitatorAddresses/)
+    }
+  })
+
+  it('authorize 400s facilitatorAddresses on the 3009 funding shape — no redeemer there', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({
+        payTo: DELEGATE_EOA,
+        merchantPayTo: MERCHANT,
+        facilitatorAddresses: ['0x' + 'fa'.repeat(20)],
+      }),
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/erc7710 direct settlement only/)
+  })
+
   it('authorize rejects native-token x402 on the delegation rail (characterization, #946)', async () => {
     const res = await app.inject({
       method: 'POST', url: '/x402/authorize',
@@ -418,6 +483,49 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(decoded.payload.delegator.toLowerCase()).toBe(DELEGATE_ACCT.toLowerCase())
     // The intent flipped to submitted:
     expect(mockQuery.mock.calls.some((c) => /status = 'submitted'/.test(String(c[0])))).toBe(true)
+  })
+
+  // #1058: stored facilitators ride the accepted echo — the v2 matcher
+  // requires the merchant's advertised extra as a subset of it.
+  it('settle echoes stored facilitatorAddresses in the accepted extra', async () => {
+    const childFixture = JSON.parse(JSON.stringify(buildBudgetDelegation({
+      agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+      delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+      budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+    })))
+    const facilitators = ['0x' + 'Fa'.repeat(20)]
+    const preparedState = {
+      child: childFixture,
+      budget: signedBudget,
+      delegateAccountAddress: DELEGATE_ACCT,
+      network: 'eip155:84532',
+      maxTimeoutSeconds: 120,
+      facilitatorAddresses: facilitators,
+    }
+    mockQuery.mockImplementation((sql: string) => {
+      if (/SELECT id, status, execution_rail/.test(String(sql))) {
+        return Promise.resolve({ rows: [{
+          id: INTENT_ID, status: 'pending_signature', execution_rail: 'delegation',
+          prepared_user_op: preparedState, chain_id: 84532,
+          x402_resource_url: 'https://merchant.example/resource',
+          to_address: '0x' + 'cc'.repeat(20), amount_raw: '1000', token_address: USDC,
+        }] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+
+    const res = await app.inject({
+      method: 'POST', url: `/x402/${INTENT_ID}/settle`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: await signChild(childFixture) },
+    })
+    expect(res.statusCode).toBe(200)
+    const decoded = JSON.parse(Buffer.from(res.json().payment_header, 'base64').toString('utf8'))
+    expect(decoded.accepted.maxTimeoutSeconds).toBe(120)
+    expect(decoded.accepted.extra).toEqual({
+      assetTransferMethod: 'erc7710',
+      facilitatorAddresses: facilitators,
+    })
   })
 
   // ── #976: present inline, verify authoritatively ─────────────────────────

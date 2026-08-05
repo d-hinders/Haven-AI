@@ -123,4 +123,42 @@ describe('assembleSettlementPayload + header (#830)', () => {
     })
     expect(decoded.payload.delegator.toLowerCase()).toBe(DELEGATE_ACCT.toLowerCase())
   })
+
+  // #1058: @x402/core's v2 matcher requires the merchant's advertised extra to
+  // be a SUBSET of the echo — advertised facilitators must round-trip VERBATIM.
+  it('echoes facilitatorAddresses verbatim in the accepted extra when present', () => {
+    const built = buildSettlementDelegation(req())
+    const payload = assembleSettlementPayload(
+      84532, built.child, ('0x' + 'ef'.repeat(65)) as `0x${string}`, signedBudget, DELEGATE_ACCT,
+    )
+    const facilitators = ['0x' + 'Fa'.repeat(20)] // deliberately mixed-case: echo must not normalize
+    const header = encodeXPaymentHeader('base-sepolia', payload, {
+      amount: '1000',
+      payTo: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
+      asset: USDC as `0x${string}`,
+      maxTimeoutSeconds: 300,
+      facilitatorAddresses: facilitators,
+    })
+    const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8'))
+    expect(decoded.accepted.extra).toEqual({
+      assetTransferMethod: 'erc7710',
+      facilitatorAddresses: facilitators,
+    })
+  })
+
+  it('omits the facilitatorAddresses key entirely when none were advertised', () => {
+    const built = buildSettlementDelegation(req())
+    const payload = assembleSettlementPayload(
+      84532, built.child, ('0x' + 'ef'.repeat(65)) as `0x${string}`, signedBudget, DELEGATE_ACCT,
+    )
+    const header = encodeXPaymentHeader('base-sepolia', payload, {
+      amount: '1000',
+      payTo: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
+      asset: USDC as `0x${string}`,
+      maxTimeoutSeconds: 300,
+      facilitatorAddresses: [],
+    })
+    const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8'))
+    expect(decoded.accepted.extra).toEqual({ assetTransferMethod: 'erc7710' })
+  })
 })

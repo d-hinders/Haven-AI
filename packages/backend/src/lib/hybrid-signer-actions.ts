@@ -126,10 +126,11 @@ export function encodeSignerAction(
       return { error: 'No such passkey on this account' }
     }
     if (signerCount - 1 < 2) {
+      // Haven's floor is ≥2 so recovery always exists; the chain itself only
+      // refuses removing the LAST signer (#884 CannotRemoveLastSigner) — do
+      // not claim the stricter rule is on-chain.
       return {
-        error:
-          'Removing this would leave fewer than two ways to approve — add a backup first. ' +
-          'The account itself enforces this on-chain.',
+        error: 'Removing this would leave fewer than two ways to approve — add a backup first.',
       }
     }
     return { data: encodeFunctionData({ abi: HYBRID_SIGNER_ABI, functionName: 'removeKey', args: [keyId] }) }

@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/lib/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-07-18"
+last-verified: "2026-08-05"
 ---
 
 # Haven Screen Recipes
@@ -91,7 +91,8 @@ Structure:
 Money and risk clarity:
 - Show the selected Haven wallet before the user reviews.
 - Show the budget amount with token and reset period together, for example `250 USDC per day`.
-- State that requests above the remaining budget require approval.
+- State the over-budget behaviour for the account's rail: queued for approval
+  on legacy Safe accounts, refused on-chain on delegation accounts.
 - Do not say `AllowanceModule`, `delegate`, `policy engine`, or `session key` in primary UI.
 
 States:
@@ -111,6 +112,9 @@ Structure:
 4. Secondary technical disclosure only if needed, collapsed or visually subordinate.
 5. Primary action: `Create setup prompt` for creation; for edits, `Update
    budget`/`Add budget` when the budget changed or `Save details` otherwise.
+   Budget editing here is legacy-Safe-only — delegation-rail agents manage
+   budgets per-budget on the agent detail page, so their edit modal offers
+   `Save details` only.
 
 Money and risk clarity:
 - Show whether the agent can make payments automatically within the budget.
@@ -128,9 +132,9 @@ Structure:
    register the public signing address and proof with Haven.
 3. Show the registered public address and reviewed agent budget before wallet
    approval.
-4. Ask the user to approve the rules from the selected Haven wallet and network.
-5. If more approvals are required, show a submitted/waiting state rather than
-   implying the agent is active.
+4. Ask the user to approve the agent's authority: a wallet approval from the selected Haven wallet on legacy Safe accounts, or a single in-modal budget signature on delegation accounts — which activates the agent.
+5. On legacy multisig accounts, if more approvals are required, show a
+   submitted/waiting state rather than implying the agent is active.
 6. Finish with `Done` plus runtime-specific restart or next-message guidance.
 
 Money and risk clarity:

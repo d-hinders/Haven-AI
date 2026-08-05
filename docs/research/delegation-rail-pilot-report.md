@@ -6,7 +6,7 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/lib/delegation-rail.ts
   - packages/backend/src/lib/delegation-authorization.ts
-last-verified: "2026-08-04"
+last-verified: "2026-08-05"
 ---
 
 # Delegation rail — definition-of-done report (#835, epic #821)
@@ -53,7 +53,7 @@ route layer — and that difference is exactly what caught the bug in §3.
 `POST /payments` gated every request on an `agent_allowances` row (the
 AllowanceModule per-token config) **before** it resolved the execution rail.
 A delegation-rail agent is configured entirely through the delegation lifecycle
-(#828) and the dashboard (#833) and holds **no** `agent_allowances` row — its
+(#828) and the dashboard (#833) and holds an `agent_allowances` row only as a frozen onboarding mirror written at connection setup (#1090) — its
 authority is the signed budget delegation. So the guard returned
 `403 "Agent is not configured for USDC payments"` before the request ever
 reached the delegation branch that would have authorized it on-chain.

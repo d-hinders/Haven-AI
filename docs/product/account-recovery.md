@@ -6,6 +6,9 @@ covers:
   - packages/frontend/src/hooks/useAccountSigners.ts
   - packages/frontend/src/components/onboarding/RecoveryNudge.tsx
   - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/routes/hybrid-accounts.ts
+  - packages/backend/src/lib/hybrid-signer-actions.ts
+  - packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx
 last-verified: "2026-08-05"
 ---
 
@@ -35,10 +38,10 @@ enroll a replacement.
   funds in it, are unreachable — by you *and* by Haven. This is not a policy we
   can override; it is how self-custody works.
 
-The account enforces this itself: it **refuses to drop below two signers**
-on-chain, so you can't accidentally remove your last one. Haven surfaces the
-same rule as a clear message ("add a backup first") rather than a failed
-transaction.
+Haven refuses any change that would leave fewer than two ways to approve
+("add a backup first" — a clear message rather than a failed transaction),
+and the account itself refuses on-chain to remove its *last* signer, so the
+floor holds even outside Haven.
 
 Because a fresh single-passkey account starts with exactly one way to approve,
 **On mainnet, a backup is required — not just suggested.** Real-money accounts
@@ -48,12 +51,13 @@ explicitly acknowledge that losing it loses the account — Haven records that
 choice. (On testnets this rule does not apply.)
 
 **Haven nudges you to add a backup right after signup.** It is dismissible, and
-you can add one at any time from **Backup & recovery** on any agent that uses
-the account.
+you can add one at any time from **Backup & recovery** on the account's page
+(it also appears on any agent that uses the account).
 
 ## Add a backup (do this early)
 
-On an agent's page, open **Backup & recovery** and choose one:
+On the account's page (or any of its agents), open **Backup & recovery** and
+choose one:
 
 - **Add a backup with Face ID / Touch ID** — creates a second passkey. On the
   same device it's a second credential; on a *different* device (your phone as
@@ -72,7 +76,7 @@ Each takes one approval from a signer you already have.
 
 1. Open Haven on a device that still has a working signer (your backup passkey,
    or the wallet you enrolled).
-2. Go to **Backup & recovery** on any agent.
+2. Go to **Backup & recovery** on the account's page (or any of its agents).
 3. **Add a replacement** for the device you lost (a new passkey on the device
    you're on now), so you're back to two ways to approve.
 4. **Remove** the lost signer from the list.

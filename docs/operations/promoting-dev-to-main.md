@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
-last-verified: "2026-06-30"
+last-verified: "2026-08-05"
 ---
 
 # Promoting `dev → main` (production release)
@@ -32,7 +32,7 @@ for how the environments are wired, see
       scenarios pass, or link and assess every known failure. See
       [`agent-qa.md`](./agent-qa.md) for secrets, funding, commands, and result
       interpretation.
-- [ ] Run **QA — live smoke (dev)** against the current Vercel preview and review
+- [ ] Run **QA — live smoke (dev)** against the branch-tracking `dev` preview (the canonical dev URL in [dev-environment.md](dev-environment.md)) and review
       its Playwright artifact if it fails.
 - [ ] The change set has **soaked on `dev`** — exercise the key flows against the
       dev URL (login, balances, one x402 / payment happy path).

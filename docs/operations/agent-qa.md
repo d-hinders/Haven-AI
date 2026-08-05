@@ -19,7 +19,7 @@ covers:
   - packages/backend/src/config.ts
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-07-27"
+last-verified: "2026-08-05"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -58,7 +58,7 @@ promotion — see [Automation & gating](#automation--gating).
 | Demo merchant | `https://demo-merchant-dev-84e4.up.railway.app` |
 | Chain | Base Sepolia (`84532`) |
 | USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
-| Frontend | The current Vercel preview URL; there is no permanent dev frontend URL |
+| Frontend | `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app` — the branch-tracking preview of `dev` (stable). ⚠️ never `haven-ai-frontend.vercel.app` (prod alias → prod backend; passkeys are domain-bound) |
 
 The seed and money-flow harness are Node processes that call the backend
 directly. They do not depend on browser CORS. The live UI smoke drives a real
@@ -442,7 +442,7 @@ Run it against the current non-production Vercel preview:
 gh workflow run qa-live.yml \
   --repo d-hinders/Haven-AI \
   --ref dev \
-  -f base_url=https://<current-preview>.vercel.app
+  -f base_url=https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app
 ```
 
 The preview must set `NEXT_PUBLIC_HAVEN_ENV=dev`; production builds intentionally
@@ -452,7 +452,7 @@ For a local invocation:
 
 ```bash
 npx playwright install chromium
-export PLAYWRIGHT_BASE_URL=https://<current-preview>.vercel.app
+export PLAYWRIGHT_BASE_URL=https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app
 export QA_HAVEN_API_URL=https://havenbackend-dev-8b95.up.railway.app
 export QA_USER_EMAIL=<dedicated dev QA user email>
 export QA_USER_PASSWORD=<dedicated dev QA user password>

@@ -377,6 +377,13 @@ erc7710 stays the long-term goal. The exposure is bounded by exact-amount
 funding, the capped header window, the delegate-balance monitor, and the
 rail-agnostic sweep (which recovers residuals to the treasury Hybrid).
 
+(Treasury-op note, shared machinery: ops against the treasury Hybrid pin its
+DEPLOYED address; for a still-counterfactual account — a zero-agent account
+enrolling its first backup signer — the op instead carries initCode derived
+from the full stored signer config, with the derived address checked against
+the stored pin. Deploy and the signer change ride one sponsored op; no
+relayer draw on that path.)
+
 **Hardening on the authorize path** ([#961](https://github.com/d-hinders/Haven-AI/issues/961)):
 an idempotent retry **resumes** — `sign_data` is reconstructed from the stored
 intent rather than re-running a sponsored estimation, a confirmed retry replays

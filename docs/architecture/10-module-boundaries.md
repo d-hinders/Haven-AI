@@ -210,7 +210,8 @@ Current state as of 2026-08-05, recorded so progress is measurable:
 > **The baseline is a file-edge count, and that is a real limit.**
 > `pg-only-in-infra` fires once per file that imports `db.ts`, whatever that
 > file's query volume — `routes/agent-connection-setups.ts` was 1 violation and
-> 53 queries. So the baseline held flat at 66 from 2026-07-26 while inline SQL
+> 56 `.query` call sites (24 statements plus 32 BEGIN/COMMIT/ROLLBACK; the
+> distinction matters when comparing counts, and #985 removed all of them). So the baseline held flat at 66 from 2026-07-26 while inline SQL
 > grew from 256 call sites to 344 in the same set of files. Read the ratchet as
 > "no new offending *files*", never as "the debt is not growing"
 > ([#999](https://github.com/d-hinders/Haven-AI/issues/999) tracks fixing the

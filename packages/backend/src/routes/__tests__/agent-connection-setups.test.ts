@@ -2114,14 +2114,19 @@ describe('data access characterization (#985)', () => {
    * did not quietly convert one of them into a committed empty transaction.
    */
   it.each([
-    ['invalid challenge', { challenge_id: 'wrong' }, 400],
-    ['malformed signing address', { delegate_address: 'not-an-address' }, 400],
-    ['malformed api key hash', { api_key_hash: 'short' }, 400],
-    ['malformed api key prefix', { api_key_prefix: 42 }, 400],
-  ])('rolls back the register transaction on %s', async (_label, override, expected) => {
+    ['setup not found under the lock', {}, 401, null],
+    ['setup already consumed', {}, 409, { ...SETUP, setup_token_consumed_at: '2026-01-01T00:00:00.000Z' }],
+    ['setup no longer awaiting connection', {}, 409, { ...SETUP, status: 'connected_local' }],
+    ['expired setup token', {}, 410, { ...SETUP, setup_token_expires_at: '2000-01-01T00:00:00.000Z' }],
+    ['invalid challenge', { challenge_id: 'wrong' }, 400, SETUP],
+    ['malformed signing address', { delegate_address: 'not-an-address' }, 400, SETUP],
+    ['invalid proof signature', { proof_signature: `0x${'9'.repeat(130)}` }, 400, SETUP],
+    ['malformed api key hash', { api_key_hash: 'short' }, 400, SETUP],
+    ['malformed api key prefix', { api_key_prefix: 42 }, 400, SETUP],
+  ])('rolls back the register transaction on %s', async (_label, override, expected, row) => {
     const app = await buildApp()
     mockClientQuery.mockImplementation(async (sql: string) => {
-      if (String(sql).includes('FROM agent_connection_setups')) return { rows: [SETUP] }
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: row ? [row] : [] }
       return { rows: [] }
     })
 

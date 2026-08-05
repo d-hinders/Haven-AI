@@ -38,6 +38,15 @@ export interface X402AuthorizeResult {
   phase?: string
   shortfall?: number | string
   remaining_allowance?: number | string
+  /** erc7710 direct settlement (#1064): the child-delegation typed data the delegate signs. */
+  sign_data?: { signature_scheme?: string; typed_data?: TypedDataPayload }
+}
+
+export interface TypedDataPayload {
+  domain: Record<string, unknown>
+  types: Record<string, Record<string, unknown>[]>
+  primaryType: string
+  message: Record<string, unknown>
 }
 
 export interface X402AuthorizeBody {
@@ -134,6 +143,11 @@ export class HavenApi {
 
   authorizeX402(body: X402AuthorizeBody): Promise<ApiResponse<X402AuthorizeResult>> {
     return this.call('POST', '/x402/authorize', body as unknown as Record<string, unknown>)
+  }
+
+  /** erc7710 step 2 (#1064): exchange the signed child delegation for the merchant header. */
+  settleX402(id: string, signature: string): Promise<ApiResponse<{ payment_header?: string; error?: string }>> {
+    return this.call('POST', `/x402/${id}/settle`, { signature })
   }
 
   /** Payment evidence for this agent, newest first. */

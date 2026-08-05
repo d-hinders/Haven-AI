@@ -376,6 +376,11 @@ receipt's gas numbers for cost attribution. Availability guard, not a funds
 gate: it fails open on database errors because funds stay caveat-gated
 on-chain either way.
 
+Since #993 the x402 authorize entry point also runs the retired-session
+gate: a session-marked account gets the seam's 410 (nothing written) before
+either scheme branch — it can no longer slip into the legacy AllowanceModule
+flow below.
+
 **How 3009-mode works.** EIP-3009 (`transferWithAuthorization`) is ECDSA-based —
 the fund-holder must be an **EOA** that signs (USDC rejects EIP-1271 for it),
 which neither Hybrid can do — so 3009-mode redeems the budget delegation to

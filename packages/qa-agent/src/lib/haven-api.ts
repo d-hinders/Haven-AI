@@ -78,7 +78,9 @@ export interface MachinePaymentReceipt {
   settlement_address?: string | null
   payer_address?: string | null
   amount_human?: string
-  /** The intent's `machine_metadata`, which carries `settlement_scheme` (#946). */
+  /** Which settlement branch ran (eip3009 | erc7710) — the intent's recorded scheme (#946), joined into the evidence row. */
+  settlement_scheme?: string | null
+  /** The RAW x402 402-challenge body the merchant sent (error/accepts/resource/x402Version) — NOT Haven metadata. */
   challenge_payload?: Record<string, unknown> | null
   created_at?: string
 }

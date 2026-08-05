@@ -160,11 +160,19 @@ describe('AccountSignersCard (#888)', () => {
     expect(screen.getByText(/Connect your account owner wallet/)).toBeTruthy()
   })
 
-  it('names the real not-ready blocker: the passkey device for a passkey-only account', () => {
-    mockUseSigners.mockReturnValue(base({ ready: false }))
+  // #1097: the passkey optimistic fallback keeps `ready` true, so cross-device
+  // is a HINT next to a working action, never a blocker.
+  it('shows the cross-device hint when ready but no passkey is on this device', () => {
+    mockUseSigners.mockReturnValue(base({ passkeyElsewhere: true }))
     render(<AccountSignersCard {...PROPS} />)
+    expect(screen.getByText(/may be on another device/)).toBeTruthy()
     expect(screen.queryByText(/Connect your account owner wallet/)).toBeNull()
-    expect(screen.getByText(/isn.t on this device/)).toBeTruthy()
+  })
+
+  it('shows no cross-device hint when a passkey is on this device', () => {
+    mockUseSigners.mockReturnValue(base({ passkeyElsewhere: false }))
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.queryByText(/may be on another device/)).toBeNull()
   })
 
   it('copy is outcome language — no signer/passkey/addKey jargon leads', () => {

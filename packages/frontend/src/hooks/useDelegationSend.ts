@@ -18,7 +18,7 @@ import { useActiveSigner } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import { signPreparedAccountOp, type PreparedAccountOp } from '@/lib/hybridAccountOps'
 import type { AccountSigners } from '@/lib/delegationPasskeySigner'
-import { pickSigningPath } from './useDelegationBudget'
+import { pickSigningPath, passkeyLikelyElsewhere } from './useDelegationBudget'
 
 export type SendResult =
   | { ok: true; txHash: string | null }
@@ -88,6 +88,8 @@ export function useDelegationSend(accountAddress: string, chainId: number) {
     busy,
     // Some signer for this account is reachable from THIS device.
     ready: signingPath !== null,
+    // #1097: hint condition — the ceremony may hand off to another device.
+    passkeyElsewhere: passkeyLikelyElsewhere(signers),
     send,
   }
 }

@@ -28,7 +28,7 @@ interface Props {
 }
 
 export default function DelegationSendModal({ open, onClose, accountAddress, chainId, onSent }: Props) {
-  const { busy, ready, send } = useDelegationSend(accountAddress, chainId)
+  const { busy, ready, passkeyElsewhere, send } = useDelegationSend(accountAddress, chainId)
   const { toast } = useToast()
 
   const tokens = useMemo(
@@ -109,9 +109,16 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
           className="font-mono"
         />
         {!ready ? (
+          // #1097: only reachable for owner-only accounts (the optimistic
+          // passkey fallback keeps `ready` true otherwise).
           <p className="text-xs text-[var(--v2-ink-muted)]">
-            This account&apos;s Face ID / Touch ID lives on another device. Open Haven there — or
-            connect the account&apos;s owner wallet — to send.
+            Connect the account&apos;s owner wallet to send.
+          </p>
+        ) : null}
+        {ready && passkeyElsewhere ? (
+          <p className="text-xs text-[var(--v2-ink-muted)]">
+            This account&apos;s Face ID / Touch ID may be on another device — your browser will
+            guide you there when you approve.
           </p>
         ) : null}
         <div className="flex justify-end gap-2 pt-1">

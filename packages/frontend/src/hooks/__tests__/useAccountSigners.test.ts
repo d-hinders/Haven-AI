@@ -48,6 +48,19 @@ describe('useAccountSigners is account-scoped (#1089)', () => {
     )
   })
 
+  // #1097: the cross-device HINT condition — passkeys exist, none on this device.
+  it('reports passkeyElsewhere when no passkey is on this device, and clears it when one is', async () => {
+    const first = renderHook(() => useAccountSigners(SAFE_ADDRESS, 84532, 'x@y.z'))
+    await waitFor(() => expect(first.result.current.passkeyElsewhere).toBe(true))
+    // Still ready — the optimistic fallback hands the ceremony to the browser.
+    expect(first.result.current.ready).toBe(true)
+
+    mockOnDevice.mockReturnValue(true)
+    const second = renderHook(() => useAccountSigners(SAFE_ADDRESS, 84532, 'x@y.z'))
+    await waitFor(() => expect(second.result.current.signers).not.toBeNull())
+    expect(second.result.current.passkeyElsewhere).toBe(false)
+  })
+
   it('surfaces a retryable error instead of hiding a failed fetch forever', async () => {
     mockGet.mockRejectedValue(new Error('boom'))
     const { result } = renderHook(() => useAccountSigners(SAFE_ADDRESS, 84532, 'x@y.z'))

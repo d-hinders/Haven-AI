@@ -24,7 +24,7 @@ import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import { signPreparedAccountOp } from '@/lib/hybridAccountOps'
 import { createPasskey, base64UrlDecode } from '@/lib/passkey'
 import type { AccountSigners } from '@/lib/delegationPasskeySigner'
-import { pickSigningPath } from './useDelegationBudget'
+import { pickSigningPath, passkeyLikelyElsewhere } from './useDelegationBudget'
 
 export type SignerResult = { ok: true } | { ok: false; reason: 'cancelled' | 'blocked' | 'failed'; message?: string }
 
@@ -163,6 +163,8 @@ export function useAccountSigners(safeAddress: string, chainId: number, userEmai
     // any signer reachable from this device (passkey here, or the connected
     // owner wallet).
     ready: signingPath !== null,
+    // #1097: hint condition — the ceremony may hand off to another device.
+    passkeyElsewhere: passkeyLikelyElsewhere(signers),
     enrollBackupPasskey,
     enrollOwnerWallet,
     removePasskey,

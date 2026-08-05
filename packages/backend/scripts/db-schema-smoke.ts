@@ -24,6 +24,7 @@
  */
 
 import { getPool } from '../src/db.js'
+import { selectDelegation } from '../src/lib/delegation-authorization.js'
 import { AGENT_BY_API_KEY_SQL } from '../src/middleware/agentAuth.js'
 import { runMigrations } from '../src/db/migrate.js'
 import {
@@ -242,6 +243,94 @@ async function main(): Promise<void> {
     } finally {
       client.release()
     }
+  }
+
+  // ── behavioral: selectDelegation ordering (#1060) ─────────────────────────
+  // The ORDER BY decides WHICH grant authorizes a payment — security-relevant
+  // SQL that was only ever exercised through mocks. Seeded against the real
+  // schema, asserted through the REAL exported function, cleaned up after.
+  console.log('\nselectDelegation ordering (#1060)…')
+  const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
+  const PINNED_TO = '0x' + 'aa'.repeat(20)
+  const OTHER_TO = '0x' + 'bb'.repeat(20)
+  const fx = await pool.connect()
+  let userId = ''
+  try {
+    userId = (
+      await fx.query<{ id: string }>(
+        `INSERT INTO users (name, email, password_hash) VALUES ('smoke-1060', $1, 'x') RETURNING id`,
+        [`smoke-1060-${Date.now()}@haven.test`],
+      )
+    ).rows[0].id
+    const safeId = (
+      await fx.query<{ id: string }>(
+        `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default, account_type, execution_rail)
+         VALUES ($1, $2, 84532, 'smoke', false, 'delegator_hybrid', 'delegation') RETURNING id`,
+        [userId, '0x' + 'cc'.repeat(20)],
+      )
+    ).rows[0].id
+    const agentId = (
+      await fx.query<{ id: string }>(
+        `INSERT INTO agents (user_id, name, delegate_address, api_key_hash, api_key_prefix, safe_id)
+         VALUES ($1, 'smoke-1060', $2, 'smoke-hash-1060', 'sk_smoke', $3) RETURNING id`,
+        [userId, '0x' + 'dd'.repeat(20), safeId],
+      )
+    ).rows[0].id
+
+    const grant = (hash: string, recipient: string | null, status: string, minutesAgo: number) =>
+      fx.query(
+        `INSERT INTO agent_delegations (
+           agent_id, chain_id, token_address, recipient_address, delegation_hash,
+           delegation_json, version, status, budget_atomic, period_seconds,
+           start_date, expires_at, created_at
+         ) VALUES ($1, 84532, $2, $3, $4, '{}', 1, $5, '1000', 86400,
+                   0, 9999999999, NOW() - ($6 || ' minutes')::interval)`,
+        [agentId, USDC, recipient, hash, status, String(minutesAgo)],
+      )
+    // Fixture: an OLD pinned grant, a NEWER open grant, an even newer second
+    // open grant, and dead rows in both classes.
+    await grant('0x' + '01'.repeat(32), PINNED_TO, 'active', 60)
+    await grant('0x' + '02'.repeat(32), null, 'active', 30)
+    await grant('0x' + '03'.repeat(32), null, 'active', 10)
+    await grant('0x' + '04'.repeat(32), PINNED_TO, 'replaced', 5)
+    await grant('0x' + '05'.repeat(32), null, 'revoked', 1)
+
+    const behavioral: Array<[string, boolean]> = []
+    // 1. Pinned beats open for the pinned recipient — even though every open
+    //    grant is newer than the pin.
+    const pinned = await selectDelegation(agentId, USDC, PINNED_TO)
+    behavioral.push([
+      'pinned grant beats newer open grants for the pinned recipient',
+      pinned?.delegation_hash === '0x' + '01'.repeat(32),
+    ])
+    // 2. Other recipients fall through to the open class, newest first.
+    const open = await selectDelegation(agentId, USDC, OTHER_TO)
+    behavioral.push([
+      'open class serves other recipients, newest active open wins',
+      open?.delegation_hash === '0x' + '03'.repeat(32),
+    ])
+    // 3. replaced/revoked rows never authorize: kill the actives, expect null.
+    await fx.query(`UPDATE agent_delegations SET status = 'revoked' WHERE agent_id = $1 AND status = 'active'`, [agentId])
+    const none = await selectDelegation(agentId, USDC, PINNED_TO)
+    behavioral.push(['replaced/revoked grants never authorize (null → clean 403)', none === null])
+
+    for (const [name, ok] of behavioral) {
+      console.log(`  ${ok ? '✓' : '✗'} ${name}`)
+      if (!ok) failures.push(`selectDelegation: ${name}`)
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.log(`  ✗ selectDelegation behavioral setup failed: ${msg}`)
+    failures.push(`selectDelegation setup: ${msg}`)
+  } finally {
+    // Throwaway fixtures out, whatever happened above.
+    if (userId) {
+      await fx.query(`DELETE FROM agent_delegations WHERE agent_id IN (SELECT id FROM agents WHERE user_id = $1)`, [userId])
+      await fx.query(`DELETE FROM agents WHERE user_id = $1`, [userId])
+      await fx.query(`DELETE FROM user_safes WHERE user_id = $1`, [userId])
+      await fx.query(`DELETE FROM users WHERE id = $1`, [userId])
+    }
+    fx.release()
   }
 
   await pool.end()

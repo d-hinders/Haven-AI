@@ -299,20 +299,26 @@ restricts who may redeem; pinning `to` to the first entry (the pre-#1061
 behaviour) silently contradicted a multi-entry caveat and would have failed for
 every facilitator but the first.
 
-Stated honestly: no live path populates the redeemer list today, because
-`routes/x402.ts` does not yet parse facilitator addresses out of the 402
-challenge's `requirements.extra`. **Every settlement child is therefore a bearer
-instrument** — whoever holds it can redeem it — within hard bounds that are the
-actual guarantee:
+Since [#1058](https://github.com/d-hinders/Haven-AI/issues/1058) the redeemer
+list IS populated in practice: the client forwards the 402 entry's
+`extra.facilitatorAddresses` (MetaMask's erc7710 shape, validated 1–16
+addresses) into `POST /x402/authorize`, the child's redeemer caveat is built
+from the normalized addresses, and the **verbatim** strings are stored with the
+settle state and echoed in the v2 X-PAYMENT header's accepted entry — required,
+because @x402/core's v2 matcher demands the advertised `extra` as a subset of
+the echo. The demo merchant advertises its settlement account this way, so the
+QA leg exercises the pinned path end-to-end.
+
+When a merchant advertises **no** facilitators there is nothing to pin and the
+child remains a bearer instrument — whoever holds it can redeem it — within
+hard bounds that are the actual guarantee:
 
 - the **exact** payment amount (`erc20TransferAmount` scope),
 - **pinned to the merchant** `payTo`,
 - an expiry of **≤600 s**.
 
 The ceiling of that exposure is "the merchant gets paid without delivering",
-never loss of funds beyond the quoted amount. Wiring `requirements.extra`
-through so the redeemer caveat is populated in practice is tracked as
-[#1058](https://github.com/d-hinders/Haven-AI/issues/1058).
+never loss of funds beyond the quoted amount.
 
 ### Settlement-scheme reality and the EIP-3009 bridge
 

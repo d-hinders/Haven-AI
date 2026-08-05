@@ -60,6 +60,9 @@ export function getDelegationEnvironment(chainId: number) {
     ['AllowedCalldataEnforcer', pins.enforcers.allowedCalldata],
     ['TimestampEnforcer', pins.enforcers.timestamp],
     ['ERC20TransferAmountEnforcer', pins.enforcers.erc20TransferAmount],
+    // #1058: the settlement child's redeemer pin is money-path — a kit
+    // upgrade silently moving this enforcer must fail the drift guard.
+    ['RedeemerEnforcer', pins.enforcers.redeemer],
   ]
   for (const [name, pinned] of enforcerPins) {
     const fromKit = (env.caveatEnforcers as Record<string, string>)[name]

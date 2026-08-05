@@ -1,3 +1,4 @@
+import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, type RelayerAttribution } from './relayer-spend-guard.js'
 import { ethers } from 'ethers'
 import {
   buildSweepAuthorizationMessage,
@@ -115,7 +116,17 @@ export function recoverSweepSigner(auth: SweepAuthorization, signature: string):
 export async function relaySweepAuthorization(
   auth: SweepAuthorization,
   signature: string,
+  /** #717: who this sweep is billed to (relayer gas budget + attribution). */
+  attribution?: RelayerAttribution,
 ): Promise<{ txHash: string }> {
+  await assertRelayerBudget('sweep', attribution ?? {})
+  // #717: attempt row before broadcast — bursts see each other in the count.
+  const spendId = await recordRelayerSpend({
+    operation: 'sweep',
+    chainId: auth.chainId,
+    agentId: attribution?.agentId,
+    userId: attribution?.userId,
+  })
   const relayer = getRelayerWallet(auth.chainId)
   const usdc = new ethers.Contract(auth.token, USDC_TRANSFER_WITH_AUTHORIZATION_ABI, relayer)
   // Serialise the broadcast with every other relayer submission on this chain
@@ -141,6 +152,11 @@ export async function relaySweepAuthorization(
     throw new Error(`Relayer provider not configured for chain ${auth.chainId}`)
   }
   const receipt = await provider.waitForTransaction(tx.hash, 1, 90_000)
+  await finishRelayerSpend(spendId, {
+    txHash: tx.hash,
+    gasUsed: receipt ? BigInt(receipt.gasUsed.toString()) : null,
+    effectiveGasPrice: receipt?.gasPrice != null ? BigInt(receipt.gasPrice.toString()) : null,
+  })
   if (!receipt) {
     throw new Error(`Sweep tx ${tx.hash} not confirmed within 90s`)
   }

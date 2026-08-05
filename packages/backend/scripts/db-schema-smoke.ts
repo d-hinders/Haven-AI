@@ -155,6 +155,19 @@ const QUERIES: SmokeQuery[] = [
           RETURNING *`,
   },
   {
+    name: 'relayer: gas-event insert (#717 attribution)',
+    sql: `INSERT INTO relayer_gas_events
+            (chain_id, operation, agent_id, user_id, tx_hash, gas_used, effective_gas_price, cost_wei)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          RETURNING id`,
+  },
+  {
+    name: 'relayer: budget window count (#717 guard)',
+    sql: `SELECT COUNT(*)::text AS cnt FROM relayer_gas_events
+          WHERE agent_id = $1 AND operation = $2
+            AND created_at > NOW() - ($3 || ' minutes')::interval`,
+  },
+  {
     name: 'delegations: authorization selection (pinned wins over open, #829)',
     sql: `SELECT delegation_hash, delegation_json, recipient_address
           FROM agent_delegations

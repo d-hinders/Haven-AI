@@ -51,6 +51,7 @@ import * as agentPassportRevocation from './049_agent_passport_revocation.js'
 import * as agentPassportRevocationIndex from './050_agent_passport_revocation_index.js'
 import * as agentPassportAddresses from './051_agent_passport_addresses.js'
 import * as paymentIntentBudgetDelegationHash from './053_payment_intent_budget_delegation_hash.js'
+import * as relayerGasEvents from './054_relayer_gas_events.js'
 
 export interface Migration {
   version: string
@@ -115,4 +116,5 @@ export const migrations: Migration[] = [
   agentPassportRevocationIndex,
   agentPassportAddresses,
   paymentIntentBudgetDelegationHash,
+  relayerGasEvents,
 ]

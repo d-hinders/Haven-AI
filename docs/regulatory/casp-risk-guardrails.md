@@ -128,6 +128,10 @@ Haven backend
 > Since #1059 every delegation-rail intent also records `budget_delegation_hash`
 > — the metering budget, uniform across schemes — so attribution in the
 > accounting feed never depends on parsing prepared execution state.
+> Since #717 relayer-paid operations run under per-identity gas budgets
+> (429 on over-cap, spend recorded per agent/user for attribution) — an
+> availability control on the shared gas sponsor, deliberately fail-open on
+> database errors because it gates gas, never funds.
 
 > **Current state (2026-07-27, #976):** the erc7710 settle response carries a
 > `passport` reference — `{ attestation_uid, chain_id }`, plus an optional

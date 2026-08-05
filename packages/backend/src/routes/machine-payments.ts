@@ -1,3 +1,4 @@
+import { resolveExecutionRail, sessionRailRetired } from '../lib/execution-rail.js'
 import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
@@ -565,6 +566,17 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   app.post<{ Body: SendBody }>('/send', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const { asset, recipient, amount } = request.body
+
+    // #993 (review finding on #1120): the retired-rail refusal must hold on
+    // EVERY money entry point — /send previously never consulted the seam.
+    const sendRail = resolveExecutionRail({
+      safeExecutionRail: agent.execution_rail ?? null,
+      chainId: agent.chain_id,
+    })
+    if (sendRail.rail === 'retired_session') {
+      const retired = sessionRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
+    }
 
     // 1. Validate inputs
     if (!asset || !SUPPORTED_ASSETS.includes(asset as SendAsset)) {

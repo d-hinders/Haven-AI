@@ -175,9 +175,8 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // 4. Resolve the execution rail first — the token-configuration gate is
     // rail-specific.
     //
-    // ── Session-key rail (#745) — fail-closed; see lib/execution-rail.ts.
-    // Only a Safe explicitly marked migrated, whose agent has an enabled
-    // session, on an allowlisted chain, leaves the legacy path below.
+    // ── Retired-session gate (#993) — the marking alone decides; see
+    // lib/execution-rail.ts for the seam and the retirement record.
     const railState = await loadExecutionRailState(agent)
 
     // Policy check: session/legacy rails carry the per-token policy in
@@ -473,6 +472,14 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         })
       }
 
+      // #993: the retired check comes BEFORE the expiry flip — an expired
+      // session intent previously got a status write on a path whose contract
+      // is 410-with-nothing-written (review finding on #1120).
+      if (isRetiredRailIntent(intent.execution_rail)) {
+        const retired = sessionRailRetired('intent')
+        return reply.code(retired.statusCode).send(retired.body)
+      }
+
       // Check expiry
       if (new Date(intent.expires_at) < new Date()) {
         await pool.query(
@@ -488,12 +495,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // account's EIP-712 typed data; legacy intents sign the AllowanceModule
       // transfer hash with raw ECDSA. The intent's rail was pinned at
       // authorize time, so a signature can never be checked against the wrong
-      // scheme. Session-rail intents are RETIRED (#834): any still-pending
-      // one is refused before anything is verified or written.
-      if (isRetiredRailIntent(intent.execution_rail)) {
-        const retired = sessionRailRetired('intent')
-        return reply.code(retired.statusCode).send(retired.body)
-      }
+      // scheme.
       const isDelegationRail = intent.execution_rail === 'delegation'
 
       // Delegation-rail intents sign the prepared UserOperation with the

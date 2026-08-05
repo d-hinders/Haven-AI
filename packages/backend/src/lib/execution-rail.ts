@@ -5,9 +5,13 @@
  * Safes) and the delegation rail (the base for new accounts, epic #821). The
  * session-key rail (ERC-4337 Safe7579 + Smart Sessions) is RETIRED outright
  * (#834): its machinery is deleted, and any account or intent still marked
- * `session_key` gets HTTP 410 — fail-closed, nothing written. The typed seam
- * itself stays for reversibility (the #834 owner decision); what #993
- * removed is the four scattered copies of the retirement gate, not the seam.
+ * `session_key` gets HTTP 410 — fail-closed, nothing written — on every
+ * agent-payment ENTRY point (/payments, /payments/:id/sign, MPP authorize +
+ * replay, /machine-payments/send, x402 authorize). Known residual: a
+ * pre-retirement queued approval_requests row does not re-consult the seam
+ * at execution (follow-up filed on #993). The typed seam itself stays for
+ * reversibility (the #834 owner decision); what #993 removed is the four
+ * scattered copies of the retirement gate, not the seam.
  *
  * Retirement is decided HERE, once: `resolveExecutionRail` returns
  * `retired_session` for any session-marked account (no chain allowlist, no
@@ -26,8 +30,6 @@ import { getChain } from './chains.js'
 export interface ExecutionRailState {
   /** `user_safes.execution_rail` for the agent's Safe (null = no row / legacy). */
   safeExecutionRail: string | null
-  /** `agents.session_permission_id` (null = no enabled session). */
-  sessionPermissionId: string | null
   chainId: number
 }
 
@@ -88,9 +90,8 @@ export async function loadExecutionRailState(agent: {
 }): Promise<ExecutionRailState> {
   const result = await pool.query<{
     execution_rail: string | null
-    session_permission_id: string | null
   }>(
-    `SELECT us.execution_rail, a.session_permission_id
+    `SELECT us.execution_rail
      FROM agents a
      LEFT JOIN user_safes us ON us.id = a.safe_id
      WHERE a.id = $1`,
@@ -99,7 +100,6 @@ export async function loadExecutionRailState(agent: {
   const row = result.rows[0]
   return {
     safeExecutionRail: row?.execution_rail ?? null,
-    sessionPermissionId: row?.session_permission_id ?? null,
     chainId: agent.chain_id,
   }
 }

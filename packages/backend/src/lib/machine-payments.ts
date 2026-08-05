@@ -787,10 +787,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     }
   }
 
-  // ── Session-key rail (#745) ────────────────────────────────────────────────
-  // Fail-closed: only a Safe explicitly marked migrated, whose agent has an
-  // enabled session, on an allowlisted chain, leaves the legacy path. The
-  // legacy AllowanceModule flow below is untouched for everyone else.
+  // ── Retired-session gate (#993) — the marking alone decides; see the seam.
   const railDecision = resolveExecutionRail({
     ...(await loadExecutionRailState(agent)),
     chainId: agent.chain_id,

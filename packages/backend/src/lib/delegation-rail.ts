@@ -453,7 +453,7 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
   return { treasuryAddress: account.address, prepareCall, submitCall }
 }
 
-/** Convenience mirror of getSessionRailFor — resolves env + pinned config. */
+/** Resolves env + pinned config for the delegation rail (the old getSessionRailFor mirror comment predated the #834 retirement). */
 export async function getDelegationRailFor(
   delegateOwnerAddress: Address,
   chainId: number,

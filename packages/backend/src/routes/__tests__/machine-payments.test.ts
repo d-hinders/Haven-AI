@@ -373,6 +373,21 @@ describe('machine payment routes', () => {
     expect(JSON.stringify(response.json())).not.toContain('secret-proof-header')
   })
 
+  // #993 (review finding on #1120): /send never consulted the seam — a
+  // session-marked account could still move money through it.
+  it('REFUSES a session-marked account on /send — 410, zero writes', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [{ ...AGENT, execution_rail: 'session_key' }] })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/send',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { asset: 'USDC', recipient: RECIPIENT, amount: '0.01' },
+    })
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toMatch(/session rail is retired/)
+    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE|DELETE/i.test(String(c[0])))).toBe(false)
+  })
+
   // #993 characterization (written BEFORE the seam change): a replayed
   // idempotency key whose EXISTING intent is session-rail gets 410 with ZERO
   // writes — no refresh, no status flip, no partial state.

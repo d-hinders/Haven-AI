@@ -44,7 +44,7 @@ import {
   assembleSettlementPayload,
   encodeXPaymentHeader,
 } from '../lib/x402-delegation.js'
-import { serializeUserOp, deserializeUserOp } from '../lib/execution-rail.js'
+import { serializeUserOp, deserializeUserOp, resolveExecutionRail, sessionRailRetired } from '../lib/execution-rail.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -422,6 +422,18 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
 
     // Human-readable amount for storage
     const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
+
+    // #993 (review finding on #1120): the retired-rail refusal must hold on
+    // EVERY money entry point, not just /payments — a session-marked account
+    // previously slipped into the legacy AllowanceModule x402 flow below.
+    const railDecision = resolveExecutionRail({
+      safeExecutionRail: agent.execution_rail ?? null,
+      chainId: agent.chain_id,
+    })
+    if (railDecision.rail === 'retired_session') {
+      const retired = sessionRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
+    }
 
     // ── Delegation rail (#830, epic #821) — DIRECT settlement ──────────────
     // The agent's budget delegation IS the settlement instrument: the delegate

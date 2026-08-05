@@ -34,7 +34,7 @@
  * actually reached submission, because that is what burns gas.
  */
 
-import pool from '../db.js'
+import { countRecentEvents, insertEvent, updateEvent, spendSummary, type SpendSummaryRow } from '../infra/repositories/relayer-gas-events.js'
 
 export type RelayerOperation =
   | 'safe_deploy'
@@ -146,13 +146,7 @@ export async function assertRelayerBudget(
   const cap = capFor(rule)
   let count: number
   try {
-    const res = await pool.query<{ cnt: string }>(
-      `SELECT COUNT(*)::text AS cnt FROM relayer_gas_events
-       WHERE ${rule.identity} = $1 AND operation = $2
-         AND created_at > NOW() - ($3 || ' minutes')::interval`,
-      [identityValue, operation, String(rule.windowMinutes)],
-    )
-    count = Number(res.rows[0]?.cnt ?? '0')
+    count = await countRecentEvents(rule.identity, identityValue, operation, rule.windowMinutes)
   } catch (err) {
     // Fail OPEN — availability guard; see the header for why.
     console.warn(
@@ -186,23 +180,16 @@ export async function recordRelayerSpend(record: RelayerSpendRecord): Promise<st
       ? (record.gasUsed * record.effectiveGasPrice).toString()
       : null
   try {
-    const res = await pool.query<{ id: string }>(
-      `INSERT INTO relayer_gas_events
-        (chain_id, operation, agent_id, user_id, tx_hash, gas_used, effective_gas_price, cost_wei)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id`,
-      [
-        record.chainId,
-        record.operation,
-        record.agentId ?? null,
-        record.userId ?? null,
-        record.txHash ?? null,
-        record.gasUsed?.toString() ?? null,
-        record.effectiveGasPrice?.toString() ?? null,
-        costWei,
-      ],
-    )
-    return res.rows[0]?.id ?? null
+    return await insertEvent({
+      chainId: record.chainId,
+      operation: record.operation,
+      agentId: record.agentId,
+      userId: record.userId,
+      txHash: record.txHash,
+      gasUsed: record.gasUsed?.toString() ?? null,
+      effectiveGasPrice: record.effectiveGasPrice?.toString() ?? null,
+      costWei,
+    })
   } catch (err) {
     console.warn(
       `relayer-spend-guard: could not record ${record.operation} spend (${err instanceof Error ? err.message : String(err)})`,
@@ -225,15 +212,12 @@ export async function finishRelayerSpend(
       ? (fields.gasUsed * fields.effectiveGasPrice).toString()
       : null
   try {
-    await pool.query(
-      `UPDATE relayer_gas_events
-       SET tx_hash = COALESCE($2, tx_hash),
-           gas_used = COALESCE($3, gas_used),
-           effective_gas_price = COALESCE($4, effective_gas_price),
-           cost_wei = COALESCE($5, cost_wei)
-       WHERE id = $1`,
-      [id, fields.txHash ?? null, fields.gasUsed?.toString() ?? null, fields.effectiveGasPrice?.toString() ?? null, costWei],
-    )
+    await updateEvent(id, {
+      txHash: fields.txHash,
+      gasUsed: fields.gasUsed?.toString() ?? null,
+      effectiveGasPrice: fields.effectiveGasPrice?.toString() ?? null,
+      costWei,
+    })
   } catch (err) {
     console.warn(
       `relayer-spend-guard: could not finish spend record ${id} (${err instanceof Error ? err.message : String(err)})`,
@@ -242,16 +226,6 @@ export async function finishRelayerSpend(
 }
 
 /** Per-chain, per-operation spend over a trailing window — the ops rollup. */
-export async function relayerSpendSummary(
-  hours = 24,
-): Promise<Array<{ chain_id: number; operation: string; ops: number; total_cost_wei: string | null }>> {
-  const res = await pool.query<{ chain_id: number; operation: string; ops: string; total_cost_wei: string | null }>(
-    `SELECT chain_id, operation, COUNT(*)::text AS ops, SUM(cost_wei)::text AS total_cost_wei
-     FROM relayer_gas_events
-     WHERE created_at > NOW() - ($1 || ' hours')::interval
-     GROUP BY chain_id, operation
-     ORDER BY chain_id, operation`,
-    [String(hours)],
-  )
-  return res.rows.map((r) => ({ ...r, ops: Number(r.ops) }))
+export async function relayerSpendSummary(hours = 24): Promise<SpendSummaryRow[]> {
+  return spendSummary(hours)
 }

@@ -46,6 +46,15 @@ import {
 } from '../lib/delegation-policy.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from '../lib/delegation-rail.js'
 import { redactVendorSecrets } from '../lib/execution-rail.js'
+// Signer management is shared with the account-scoped routes (#1081) — one
+// copy of the authority rules, reached two ways.
+import {
+  prepareSignerChange,
+  resolveSignatureScheme,
+  submitSignerChange,
+  validateSignedSubmission,
+  type SignerActionBody,
+} from '../lib/hybrid-signer-actions.js'
 
 /** Vendor errors echo the bundler URL (which embeds the API key) — #764. */
 function safeDetails(err: unknown): string {
@@ -132,107 +141,6 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   // ≥2-signers rule mirrors the chain's CannotRemoveLastSigner guard (#884
   // finding: a pure-passkey Hybrid refuses to drop below two keys) so the
   // user gets a clean 409 instead of an opaque revert.
-  const HYBRID_SIGNER_ABI = [
-    { name: 'addKey', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: '_keyId', type: 'string' }, { name: '_x', type: 'uint256' }, { name: '_y', type: 'uint256' }], outputs: [] },
-    { name: 'removeKey', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: '_keyId', type: 'string' }], outputs: [] },
-    { name: 'transferOwnership', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'newOwner', type: 'address' }], outputs: [] },
-  ] as const
-
-  type SignerAction = 'add_passkey' | 'remove_passkey' | 'add_owner'
-  interface SignerActionBody {
-    action?: SignerAction
-    passkey?: { key_id?: string; x?: string; y?: string }
-    owner_address?: string
-    signature_scheme?: string
-  }
-
-  /**
-   * Resolve which signer the client will sign with (multi-signer fix): a
-   * Hybrid account with BOTH an EOA owner and passkeys accepts either
-   * on-chain, and only the device knows what is available — "has an owner"
-   * must never mean "must sign as the owner". The requested scheme is
-   * validated against the account's actual signer set; omitted keeps the
-   * legacy default (owner if present, else passkey) so old clients are
-   * unaffected.
-   */
-  function resolveSignatureScheme(
-    requested: string | undefined,
-    config: HybridOwnerConfig,
-  ): { scheme: 'eip712_userop' | 'webauthn_userop' } | { error: string } {
-    const hasPasskeys = !!config.passkeys && config.passkeys.length > 0
-    if (requested === undefined) {
-      return { scheme: config.ownerAddress ? 'eip712_userop' : 'webauthn_userop' }
-    }
-    if (requested === 'webauthn_userop') {
-      return hasPasskeys
-        ? { scheme: 'webauthn_userop' }
-        : { error: 'This account has no passkeys to sign with' }
-    }
-    if (requested === 'eip712_userop') {
-      return config.ownerAddress
-        ? { scheme: 'eip712_userop' }
-        : { error: 'This account has no EOA owner to sign with' }
-    }
-    return { error: `Unknown signature_scheme: ${requested}` }
-  }
-
-  /**
-   * Validate the action against the CURRENT signer set and encode the inner
-   * calldata. Shared by prepare and submit — submit re-derives the calldata
-   * and requires it inside the signed UserOperation, so the DB sync can never
-   * record something other than what the owner actually signed.
-   */
-  function encodeSignerAction(
-    body: SignerActionBody,
-    owner: { config: { ownerAddress?: Address; passkeys?: Array<{ keyId: string; x: bigint; y: bigint }> } },
-  ): { data: Hex } | { error: string } {
-    const passkeys = owner.config.passkeys ?? []
-    const signerCount = passkeys.length + (owner.config.ownerAddress ? 1 : 0)
-
-    if (body.action === 'add_passkey') {
-      const pk = body.passkey
-      if (!pk?.key_id || !/^0x[0-9a-fA-F]+$/.test(pk.key_id) || !pk.x || !pk.y) {
-        return { error: 'passkey with 0x-hex key_id, x and y is required' }
-      }
-      if (passkeys.some((k) => k.keyId.toLowerCase() === pk.key_id!.toLowerCase())) {
-        return { error: 'This passkey is already enrolled' }
-      }
-      let x: bigint, y: bigint
-      try { x = BigInt(pk.x); y = BigInt(pk.y) } catch { return { error: 'x and y must be numeric' } }
-      return { data: encodeFunctionData({ abi: HYBRID_SIGNER_ABI, functionName: 'addKey', args: [pk.key_id, x, y] }) }
-    }
-    if (body.action === 'remove_passkey') {
-      const keyId = body.passkey?.key_id
-      if (!keyId) return { error: 'passkey.key_id is required' }
-      if (!passkeys.some((k) => k.keyId.toLowerCase() === keyId.toLowerCase())) {
-        return { error: 'No such passkey on this account' }
-      }
-      if (signerCount - 1 < 2) {
-        return {
-          error:
-            'Removing this would leave fewer than two ways to approve — add a backup first. ' +
-            'The account itself enforces this on-chain.',
-        }
-      }
-      return { data: encodeFunctionData({ abi: HYBRID_SIGNER_ABI, functionName: 'removeKey', args: [keyId] }) }
-    }
-    if (body.action === 'add_owner') {
-      if (owner.config.ownerAddress) {
-        return { error: 'This account already has a wallet owner' }
-      }
-      // Zero address = the "no owner" encoding; it must never be enrolled as
-      // a signer (it would inflate the #908 floor count with a non-signer).
-      if (body.owner_address && /^0x0{40}$/i.test(body.owner_address)) {
-        return { error: 'owner_address must not be the zero address' }
-      }
-      if (!body.owner_address || !isValidAddress(body.owner_address)) {
-        return { error: 'A valid owner_address is required' }
-      }
-      return { data: encodeFunctionData({ abi: HYBRID_SIGNER_ABI, functionName: 'transferOwnership', args: [body.owner_address as Address] }) }
-    }
-    return { error: 'action must be add_passkey, remove_passkey or add_owner' }
-  }
-
   app.post<{ Params: { id: string }; Body: SignerActionBody }>(
     '/:id/account-signers/prepare',
     async (request, reply) => {
@@ -245,43 +153,20 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const owner = await loadHybridOwnerConfig(sub, agent.treasury_address, agent.chain_id)
       if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
 
-      const encoded = encodeSignerAction(request.body ?? {}, owner)
-      if ('error' in encoded) return reply.code(409).send({ error: encoded.error })
-
-      try {
-        const resolved = resolveSignatureScheme(request.body?.signature_scheme, owner.config)
-        if ('error' in resolved) return reply.code(409).send({ error: resolved.error })
-        const treasury = await createTreasuryOps({
-          ownerAddress: owner.config.ownerAddress,
-          passkeys: owner.config.passkeys,
+      const result = await prepareSignerChange(
+        {
           accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
-          bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
-          rpcUrl: getChain(agent.chain_id).rpcUrl,
-          sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
-          signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
-        })
-        const prepared = await treasury.prepareCall(agent.treasury_address as Address, encoded.data)
-        const user_operation = JSON.parse(
-          JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
-        )
-        if (resolved.scheme === 'webauthn_userop') {
-          return {
-            signature_scheme: 'webauthn_userop',
-            user_op_hash: prepared.userOpHash,
-            user_operation,
-            instructions: 'Sign with the account passkey (WebAuthn), then POST /account-signers/submit',
-          }
-        }
-        return {
-          signature_scheme: 'eip712_userop',
-          signing_payload: prepared.signingTypedData,
-          user_operation,
-          instructions: 'Sign signing_payload (EIP-712) with the owner key, then POST /account-signers/submit',
-        }
-      } catch (err) {
-        return reply.code(502).send({ error: 'Could not prepare the signer change', details: safeDetails(err) })
+          userSafeId: owner.userSafeId,
+          config: owner.config,
+        },
+        request.body ?? {},
+      )
+      if (!result.ok) {
+        const { status, error, details } = result.failure
+        return reply.code(status).send(details ? { error, details } : { error })
       }
+      return result.prepared
     },
   )
 
@@ -291,69 +176,29 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const { sub } = request.user as { sub: string }
       const agent = await loadOwnedDelegationAgent(request.params.id, sub)
       if (!agent) return reply.code(404).send({ error: 'Agent not found' })
-      const { signature, user_operation } = request.body ?? {}
-      if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
-        return reply.code(400).send({ error: 'signature is required' })
-      }
-      if (!user_operation || typeof user_operation !== 'object') {
-        return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
+      // Envelope first, config second — the precedence this route has always
+      // had: a malformed body is a 400 regardless of config state.
+      const envelope = validateSignedSubmission(request.body ?? {})
+      if (!envelope.ok) {
+        return reply.code(envelope.failure.status).send({ error: envelope.failure.error })
       }
       const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
       if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
 
-      // Re-derive the calldata from the CLAIMED action and require it inside
-      // the signed UserOperation — the DB sync below can then never diverge
-      // from what the owner actually signed.
-      const encoded = encodeSignerAction(request.body ?? {}, owner)
-      if ('error' in encoded) return reply.code(409).send({ error: encoded.error })
-      const callData = String((user_operation as { callData?: string }).callData ?? '')
-      if (!callData.toLowerCase().includes(encoded.data.slice(2).toLowerCase())) {
-        return reply.code(400).send({ error: 'user_operation does not match the requested signer change' })
-      }
-
-      try {
-        const treasury = await createTreasuryOps({
-          ownerAddress: owner.config.ownerAddress,
-          passkeys: owner.config.passkeys,
+      const result = await submitSignerChange(
+        {
           accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
-          bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
-          rpcUrl: getChain(agent.chain_id).rpcUrl,
-          sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
-        })
-        const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>
-          typeof v === 'string' && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v,
-        )
-        const result = await treasury.submitCall(
-          { userOperation: revived, userOpHash: '0x' as Hex, signingTypedData: null, treasuryAddress: treasury.treasuryAddress },
-          signature as Hex,
-        )
-
-        // Sync storage with the now-on-chain signer set (#885 is the source
-        // the deploy/sign paths rebuild from — it must track the chain).
-        const body = request.body ?? {}
-        if (body.action === 'add_passkey' && body.passkey) {
-          await pool.query(
-            `INSERT INTO hybrid_account_passkeys (user_safe_id, key_id, public_key_x, public_key_y)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT DO NOTHING`,
-            [owner.userSafeId, body.passkey.key_id, body.passkey.x, body.passkey.y],
-          )
-        } else if (body.action === 'remove_passkey' && body.passkey) {
-          await pool.query(
-            `DELETE FROM hybrid_account_passkeys WHERE user_safe_id = $1 AND LOWER(key_id) = LOWER($2)`,
-            [owner.userSafeId, body.passkey.key_id],
-          )
-        } else if (body.action === 'add_owner') {
-          await pool.query(
-            `UPDATE user_safes SET owner_address = $1 WHERE id = $2`,
-            [String(body.owner_address).toLowerCase(), owner.userSafeId],
-          )
-        }
-        return { updated: true, tx_hash: result.txHash }
-      } catch (err) {
-        return reply.code(502).send({ error: 'Signer change failed', details: safeDetails(err) })
+          userSafeId: owner.userSafeId,
+          config: owner.config,
+        },
+        request.body ?? {},
+      )
+      if (!result.ok) {
+        const { status, error, details } = result.failure
+        return reply.code(status).send(details ? { error, details } : { error })
       }
+      return { updated: true, tx_hash: result.txHash }
     },
   )
 

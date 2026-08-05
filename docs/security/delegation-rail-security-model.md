@@ -4,6 +4,9 @@ status: current
 contract: true
 covers:
   - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/routes/hybrid-accounts.ts
+  - packages/backend/src/lib/hybrid-signer-actions.ts
+  - packages/backend/src/infra/repositories/hybrid-signers.ts
   - packages/backend/src/lib/hybrid-account-config.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
@@ -68,7 +71,7 @@ dropped.
 | 10 | Paymaster has no value-transfer surface | Unchanged — sponsorship pays gas only; proven in the spike (agent key held zero ETH and zero USDC) | CI + spike evidence |
 | 11 | *(new)* **No upgrade path from Haven code** | Haven's codebase contains no call site that can reach the account's UUPS upgrade function; upgrade authority = account signers only | CI (ABI/selector scan for `upgradeToAndCall` against DeleGator targets) |
 | 12 | *(new)* **Delegations are client-signed only** | No Haven code path calls `signDelegation`/EIP-712 delegation signing with a server-held key (pilot scripts with throwaway testnet keys excepted, path-scoped) | CI (import + call-site scan) |
-| 13 | *(new, #888)* **Signer changes are client-signed only** | Enrolling/removing a backup signer (`addKey`/`removeKey`/`transferOwnership`) is PREPARED by Haven and signed by an EXISTING account signer; the submit step pins the DB sync to the signed calldata. Haven holds no key that can change an account's signer set | CI (route + config-loader scan) |
+| 13 | *(new, #888)* **Signer changes are client-signed only** | Enrolling/removing a backup signer (`addKey`/`removeKey`/`transferOwnership`) is PREPARED by Haven and signed by an EXISTING account signer; the submit step pins the DB sync to the signed calldata. Haven holds no key that can change an account's signer set. Since #1081 this is one shared implementation reached by both the agent-scoped and account-scoped routes | CI (shared-core + both-routes + config-loader scan) |
 
 **Monitored-not-enforced:** enforcer/manager *contract immutability* is a
 property of the deployed bytecode, not our code — covered by pinning exact
@@ -186,11 +189,21 @@ independent-of-Haven path is [exit/README.md](../exit/README.md).
 level via `GET /accounts/hybrid/:address/signers` — owner-scoped (dashboard
 JWT + ownership check on `user_safes`) and returning **public-key material
 only** (`key_id`, P256 x/y, owner address). It powers login-time signer
-resolution and the account-level recovery card, so an account with zero agents
-can still see (and, through any live agent's prepare/submit routes, manage) its
-own signer set. It is a read: no route lets Haven — or this endpoint's caller —
-change a signer set without an existing signer's signature (invariant 13
-unchanged). Client-side, signing selects the passkey whose credential is
+resolution and the account-level recovery card. It is a read: no route lets
+Haven — or this endpoint's caller — change a signer set without an existing
+signer's signature (invariant 13 unchanged).
+
+**Management surface (#1081).** Signer changes are reachable the same two ways:
+agent-scoped (`/agents/:id/account-signers/{prepare,submit}`, #888) and
+account-scoped (`POST /accounts/hybrid/:address/signers/{prepare,submit}`), the
+latter so an account with **zero agents** can enrol its second signer before
+anything else exists — which is when the ≥2-signer floor (#908) matters most.
+The two surfaces differ only in how the account is resolved: agent lookup
+versus an owner-scoped `(address, chain)` lookup on `user_safes`. Authority
+rules, the ≥2-signer refusal, the calldata encoding and the signed-op matching
+are **one implementation** (`lib/hybrid-signer-actions.ts`), because two copies
+of a spend-authority rule is how they drift apart. Invariant 13 is asserted
+against that shared core and against both routes reaching it. Client-side, signing selects the passkey whose credential is
 actually enrolled on the signing device rather than blindly `passkeys[0]`, so
 recovery with a backup key works from the backup device. Scheme selection is
 likewise a **device** decision, never an account-shape decision: a mixed

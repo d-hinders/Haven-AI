@@ -193,14 +193,29 @@ describe('non-custody invariants — delegation rail (#831, mapping: docs/securi
   // client, and no production code holds a key that could authorize a signer
   // change. Every account-authority change is signed by an EXISTING signer.
   it('prepares signer changes for the owner to sign — Haven signs none', () => {
-    const route = read('routes', 'agent-delegations.ts')
+    // #1081 moved the logic into a shared module so the agent-scoped and
+    // account-scoped surfaces cannot drift. The invariant is unchanged; it is
+    // now asserted where the logic lives, and over BOTH entry points.
+    const core = read('lib', 'hybrid-signer-actions.ts')
     // The prepare step returns a payload, never a signature:
-    expect(route).toMatch(/account-signers\/prepare/)
-    expect(route).toMatch(/signature_scheme/)
+    expect(core).toMatch(/signature_scheme/)
     // The submit step requires a client signature and pins it to the op:
-    expect(route).toMatch(/account-signers\/submit/)
-    expect(route).toMatch(/signature is required/i)
-    expect(route).toMatch(/does not match the requested signer change/)
+    expect(core).toMatch(/signature is required/i)
+    expect(core).toMatch(/does not match the requested signer change/)
+    // Nothing in the shared core can produce a signature:
+    expect(core).not.toMatch(/privateKeyToAccount|new Wallet\(|signMessage\(|signTypedData\(/)
+
+    // Both surfaces reach it, and neither re-implements it:
+    const agentRoute = read('routes', 'agent-delegations.ts')
+    expect(agentRoute).toMatch(/account-signers\/prepare/)
+    expect(agentRoute).toMatch(/account-signers\/submit/)
+    const accountRoute = read('routes', 'hybrid-accounts.ts')
+    expect(accountRoute).toMatch(/signers\/prepare/)
+    expect(accountRoute).toMatch(/signers\/submit/)
+    for (const route of [agentRoute, accountRoute]) {
+      expect(route).toMatch(/hybrid-signer-actions\.js/)
+    }
+
     // The config loader that the deploy/sign paths rebuild from is a pure
     // read — no signing surface:
     const cfg = read('lib', 'hybrid-account-config.ts')

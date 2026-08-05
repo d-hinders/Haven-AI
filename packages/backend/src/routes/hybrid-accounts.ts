@@ -19,6 +19,13 @@ import { isAddress as isValidAddress } from '@haven_ai/core'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../lib/delegation-contracts.js'
 import { isValueBearingChain, signerFloorError } from '../lib/mainnet-gate.js'
 import { computeHybridAccountAddress, type PasskeySigner } from '../lib/hybrid-provisioning.js'
+import {
+  prepareSignerChange,
+  submitSignerChange,
+  validateSignedSubmission,
+  type SignerActionAccount,
+  type SignerActionBody,
+} from '../lib/hybrid-signer-actions.js'
 import { loadHybridOwnerConfig } from '../lib/hybrid-account-config.js'
 
 interface CreateHybridBody {
@@ -160,6 +167,105 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     })
   })
 
+  /**
+   * Resolve an account the caller owns from (address, chain) — the
+   * account-scoped counterpart to agent-delegations' `loadOwnedDelegationAgent`.
+   * Ownership is the `user_safes` row, so a caller can only ever reach their
+   * own account regardless of which address they name.
+   */
+  async function resolveOwnedHybridAccount(
+    userId: string,
+    address: string,
+    chainIdRaw: string | undefined,
+  ): Promise<
+    | { ok: true; account: SignerActionAccount }
+    | { ok: false; status: 400 | 404 | 409; error: string }
+  > {
+    if (!isValidAddress(address)) {
+      return { ok: false, status: 400, error: 'Invalid address' }
+    }
+    const chainId = Number(chainIdRaw)
+    if (!Number.isFinite(chainId)) {
+      return { ok: false, status: 400, error: 'chain_id is required' }
+    }
+    // `SELECT 1`, matching the sibling GET verbatim — the provisioning route's
+    // duplicate check is a `SELECT id FROM user_safes`, and sharing that shape
+    // would make pattern-matched test mocks ambiguous between the two.
+    const owned = await pool.query(
+      `SELECT 1 FROM user_safes
+       WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3
+         AND account_type = 'delegator_hybrid'`,
+      [userId, address, chainId],
+    )
+    if (owned.rows.length === 0) {
+      return { ok: false, status: 404, error: 'Account not found' }
+    }
+    const owner = await loadHybridOwnerConfig(userId, address, chainId)
+    if (!owner) {
+      return { ok: false, status: 409, error: 'Account signer configuration unknown' }
+    }
+    return {
+      ok: true,
+      account: {
+        accountAddress: address as `0x${string}`,
+        chainId,
+        userSafeId: owner.userSafeId,
+        config: owner.config,
+      },
+    }
+  }
+
+  // ── Account-scoped signer management (#1081) ──────────────────────────────
+  //
+  // The agent-scoped twin (`/agents/:id/account-signers/*`, #888) required an
+  // agent to exist before an account could enrol a backup or remove a key —
+  // so a fresh account had no path to its own recovery setup, which is
+  // exactly when it matters most: the #908 mainnet floor wants a second
+  // signer enrolled BEFORE anything else happens.
+  //
+  // Same helpers, same authority rules, same ≥2-signer floor — the only
+  // difference is that the account is resolved by (address, chain) instead of
+  // through an agent. `chain_id` stays on the query string so an account is
+  // addressed identically here and on the sibling GET.
+  app.post<{
+    Params: { address: string }
+    Querystring: { chain_id?: string }
+    Body: SignerActionBody
+  }>('/hybrid/:address/signers/prepare', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const resolved = await resolveOwnedHybridAccount(sub, request.params.address, request.query.chain_id)
+    if (!resolved.ok) return reply.code(resolved.status).send({ error: resolved.error })
+
+    const result = await prepareSignerChange(resolved.account, request.body ?? {})
+    if (!result.ok) {
+      const { status, error, details } = result.failure
+      return reply.code(status).send(details ? { error, details } : { error })
+    }
+    return result.prepared
+  })
+
+  app.post<{
+    Params: { address: string }
+    Querystring: { chain_id?: string }
+    Body: SignerActionBody & { signature?: string; user_operation?: unknown }
+  }>('/hybrid/:address/signers/submit', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    // Envelope first, matching the agent-scoped route's precedence.
+    const envelope = validateSignedSubmission(request.body ?? {})
+    if (!envelope.ok) {
+      return reply.code(envelope.failure.status).send({ error: envelope.failure.error })
+    }
+    const resolved = await resolveOwnedHybridAccount(sub, request.params.address, request.query.chain_id)
+    if (!resolved.ok) return reply.code(resolved.status).send({ error: resolved.error })
+
+    const result = await submitSignerChange(resolved.account, request.body ?? {})
+    if (!result.ok) {
+      const { status, error, details } = result.failure
+      return reply.code(status).send(details ? { error, details } : { error })
+    }
+    return { updated: true, tx_hash: result.txHash }
+  })
+
   // ── GET /hybrid/:address/signers — the ACCOUNT's signer set (#1079) ───────
   //
   // The agent-scoped twin lives in agent-delegations.ts (#887); this one is
@@ -171,31 +277,17 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     '/hybrid/:address/signers',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const address = request.params.address
-      if (!isValidAddress(address)) {
-        return reply.code(400).send({ error: 'Invalid address' })
-      }
-      const chainId = Number(request.query.chain_id)
-      if (!Number.isFinite(chainId)) {
-        return reply.code(400).send({ error: 'chain_id is required' })
-      }
-      // Ownership: the account must be one of the user's own safes rows.
-      const owned = await pool.query(
-        `SELECT 1 FROM user_safes
-         WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3
-           AND account_type = 'delegator_hybrid'`,
-        [sub, address, chainId],
-      )
-      if (owned.rows.length === 0) {
-        return reply.code(404).send({ error: 'Account not found' })
-      }
-      const owner = await loadHybridOwnerConfig(sub, address, chainId)
-      if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
+      // Same resolution as the management routes below — one copy, so the
+      // read and the write can never disagree about who owns an account.
+      const resolved = await resolveOwnedHybridAccount(sub, request.params.address, request.query.chain_id)
+      if (!resolved.ok) return reply.code(resolved.status).send({ error: resolved.error })
+
+      const { accountAddress, chainId, config } = resolved.account
       return {
-        account_address: address,
+        account_address: accountAddress,
         chain_id: chainId,
-        owner_address: owner.config.ownerAddress ?? null,
-        passkeys: (owner.config.passkeys ?? []).map((p) => ({
+        owner_address: config.ownerAddress ?? null,
+        passkeys: (config.passkeys ?? []).map((p) => ({
           key_id: p.keyId,
           x: `0x${p.x.toString(16)}`,
           y: `0x${p.y.toString(16)}`,

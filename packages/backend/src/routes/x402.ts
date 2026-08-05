@@ -687,6 +687,8 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           metadata: { network, settlement_scheme: 'eip3009' },
           executionRail: 'delegation',
           delegationHash: fundingAuth.delegationHash,
+          // #1059: on the funding leg the budget IS the signed instrument.
+          budgetDelegationHash: fundingAuth.delegationHash,
           preparedUserOp: serializeUserOp(fundingAuth.prepared.userOperation),
           conflictTarget: 'x402_idempotency_key',
         })
@@ -805,6 +807,9 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         metadata: { network, settlement_scheme: 'erc7710' },
         executionRail: 'delegation',
         delegationHash: built.childHash,
+        // #1059: the CHILD is signed, but the parent budget does the metering —
+        // recorded uniformly so the accounting feed never parses prepared_user_op.
+        budgetDelegationHash: budget.delegation_hash,
         preparedUserOp: serializeUserOp({
           child: built.child,
           budget: JSON.parse(budget.delegation_json),

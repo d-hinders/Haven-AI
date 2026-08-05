@@ -276,6 +276,21 @@ describe('machine payment routes', () => {
     )
   })
 
+  it('receipts join the intent so settlement_scheme is agent-visible (#1063 finding)', async () => {
+    mockQuery.mockResolvedValueOnce(authRow()).mockResolvedValueOnce({ rows: [] })
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?limit=5',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    // The scheme lives in payment_intents.machine_metadata (#946); without
+    // this join the QA delegation leg has nowhere to read which branch ran.
+    const sql = String(mockQuery.mock.calls.at(-1)![0])
+    expect(sql).toContain("machine_metadata->>'settlement_scheme'")
+    expect(sql).toContain('LEFT JOIN payment_intents')
+  })
+
   it('lists recent receipts without returning payment proof headers', async () => {
     mockQuery
       .mockResolvedValueOnce(authRow())
@@ -311,6 +326,7 @@ describe('machine payment routes', () => {
           confirmed_at: '2026-05-15T12:00:00.000Z',
           created_at: '2026-05-15T12:00:01.000Z',
           updated_at: '2026-05-15T12:00:01.000Z',
+          settlement_scheme: 'eip3009',
         }],
       })
 
@@ -324,6 +340,7 @@ describe('machine payment routes', () => {
     expect(response.json()).toEqual({
       receipts: [{
         id: 'evidence-1',
+        settlement_scheme: 'eip3009',
         payment_id: PAYMENT_ID,
         payment_intent_id: PAYMENT_ID,
         approval_request_id: null,

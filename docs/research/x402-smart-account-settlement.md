@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/lib/allowance-module.ts
   - packages/backend/src/lib/sweep.ts
   - packages/backend/src/lib/machine-payment-evidence.ts
-last-verified: "2026-07-18"
+last-verified: "2026-08-05"
 ---
 
 # Research — Smart-account-native x402 settlement (removing the funding leg)

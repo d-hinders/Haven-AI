@@ -277,9 +277,13 @@ export default function AgentDetailClient({ agentId }: Props) {
   const { balance: delegateBalance, hasRecoverableUsdc } = useDelegateBalance(
     agent && agent.status !== 'revoked' ? agentId : null,
   )
-  const strandedSummary = delegateBalance && delegateBalance.usdc_atomic !== '0'
-    ? `${delegateBalance.usdc} USDC`
-    : null
+  // #1098: the human field can be absent while atomic is set (a partial API
+  // response mid-load) — "Recover undefined USDC" is worse than the generic
+  // copy, so the summary requires BOTH fields.
+  const strandedSummary =
+    delegateBalance && delegateBalance.usdc_atomic !== '0' && delegateBalance.usdc
+      ? `${delegateBalance.usdc} USDC`
+      : null
   const managedDelegates = useMemo(
     () => (agent?.delegate_address && agent.status !== 'revoked' ? [agent.delegate_address] : []),
     [agent?.delegate_address, agent?.status],

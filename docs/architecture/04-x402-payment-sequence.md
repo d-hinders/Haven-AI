@@ -16,7 +16,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-04"
+last-verified: "2026-08-05"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -334,6 +334,16 @@ SDKs gained delegation-rail merchant reach with no client change:
 | the merchant address | **erc7710 direct settlement** (unchanged) | the delegation chain, redeemed in-band |
 | the agent's own delegate EOA (+ required `merchantPayTo`) | **EIP-3009 fallback** | a standard header from the delegate EOA |
 
+**The erc7710 `X-PAYMENT` header is x402 v2-shaped (#1064):** alongside the
+scheme payload it ECHOES the accepted requirements entry (`accepted`:
+scheme/network/amount/payTo/asset/maxTimeoutSeconds +
+`extra.assetTransferMethod: 'erc7710'`) — @x402/core v2 merchants match the
+echo field-for-field before touching the chain, and the quoted
+`maxTimeoutSeconds` must round-trip (stored at authorize; pre-#1064 intents
+echo the 300 default their child expiry was built with). The v1 payload-only
+shape made every v2 merchant reject with a generic failure — caught by the
+#1064 QA leg's first live run.
+
 An explicit `settlementScheme` field is validated against that shape on every
 rail, so a confused client fails loudly instead of silently getting the wrong
 flow. Native-token x402 is still rejected on this rail (no ERC20 transfer to
@@ -366,6 +376,13 @@ can pay with a short-lived hot balance beats one that cannot pay at all;
 erc7710 stays the long-term goal. The exposure is bounded by exact-amount
 funding, the capped header window, the delegate-balance monitor, and the
 rail-agnostic sweep (which recovers residuals to the treasury Hybrid).
+
+(Treasury-op note, shared machinery: ops against the treasury Hybrid pin its
+DEPLOYED address; for a still-counterfactual account — a zero-agent account
+enrolling its first backup signer — the op instead carries initCode derived
+from the full stored signer config, with the derived address checked against
+the stored pin. Deploy and the signer change ride one sponsored op; no
+relayer draw on that path.)
 
 **Hardening on the authorize path** ([#961](https://github.com/d-hinders/Haven-AI/issues/961)):
 an idempotent retry **resumes** — `sign_data` is reconstructed from the stored

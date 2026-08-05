@@ -108,9 +108,19 @@ describe('assembleSettlementPayload + header (#830)', () => {
     const payload = assembleSettlementPayload(
       84532, built.child, ('0x' + 'ef'.repeat(65)) as `0x${string}`, signedBudget, DELEGATE_ACCT,
     )
-    const header = encodeXPaymentHeader('base-sepolia', payload)
+    const header = encodeXPaymentHeader('base-sepolia', payload, {
+      amount: '1000',
+      payTo: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
+      asset: USDC as `0x${string}`,
+      maxTimeoutSeconds: 300,
+    })
     const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8'))
-    expect(decoded).toMatchObject({ x402Version: 1, scheme: 'exact', network: 'base-sepolia' })
+    // v2 since #1064: the accepted echo rides alongside the scheme payload.
+    expect(decoded).toMatchObject({ x402Version: 2, scheme: 'exact', network: 'base-sepolia' })
+    expect(decoded.accepted).toMatchObject({
+      scheme: 'exact', amount: '1000', maxTimeoutSeconds: 300,
+      extra: { assetTransferMethod: 'erc7710' },
+    })
     expect(decoded.payload.delegator.toLowerCase()).toBe(DELEGATE_ACCT.toLowerCase())
   })
 })

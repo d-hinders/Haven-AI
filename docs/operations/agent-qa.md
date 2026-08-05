@@ -172,17 +172,22 @@ The deterministic harness runs seven scenarios in order:
 | `x402-settle` | A small x402 payment settles through the dev demo merchant |
 | `x402-sweep-recovery` | Verify-without-settle strands a small USDC balance; with the dev sweep floor at 0 (`SWEEP_MIN_USDC=0`) a gasless sweep returns it to the Safe |
 | `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and no residual may sit at or above the 1 USDC sweep floor. **Skips** without `QA_DELEGATION_*` |
+| `delegation-lifecycle` | Authority can be TAKEN AWAY: on a **throwaway per-run identity** (funded ~0.006 USDC from the standing delegation identity, then abandoned) — grant → activate (relayer-deploys) → within-budget payment settles → replace leaves **exactly one** active row (the #1053-finding-4 transactional-activate regression) → owner-signed revoke → the same payment shape is refused **403 "no active budget delegation"**, never a 502 (a 502 would mean authority was still offered to the chain). Ephemeral keys, all signing client-side |
+| `x402-erc7710-settle` | The delegation rail's PRIMARY x402 path: authorize (payTo = merchant) builds a narrowed child delegation, the delegate signs it, `POST /x402/:id/settle` wraps the header, and the MERCHANT redeems `[child, budget]` on-chain — treasury pays the merchant **directly**, budget metered by the settlement itself (treasury −amount exactly), **delegate EOA untouched** (no funding leg — the #713 stranded-funds class structurally absent). Needs `MERCHANT_X402_ERC7710=1` + `MERCHANT_ERC7710_DELEGATION_MANAGER` on the dev merchant; skips (→ run FAILS under #1066) with that exact remedy when the merchant is 3009-only |
 | `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
 
-The harness exits non-zero if any non-skipped scenario fails. **Skips are
-loud, not silent (#1044):** a green run with skipped legs prints a
-`green-with-skips:` block naming each unexercised leg, the qa-dev workflow's
-*Coverage completeness* step turns that into a run-page warning (visible to
-the promotion gate's `qa-freshness`, which annotates the promotion PR), and
-once every leg's identity is provisioned the repo variable
-`QA_REQUIRE_ALL_LEGS=1` flips skips from footnote to failure. Until that
-flip, read "green" as "every EXECUTED leg passed" — the completeness step
-says which legs never ran. Its Markdown
+The harness exits non-zero if any non-skipped scenario fails. **A skip IS a
+failure (#1066).** Since every leg's identity is provisioned (#1063) and the
+sweep floor is zeroed on dev, the repo variable `QA_REQUIRE_ALL_LEGS=1` is
+SET and the *Coverage completeness* step is blocking: a run that skips any
+leg goes red and names it. A reappearing skip means a broken precondition —
+drained QA treasury, expired credential, a reverted dev env var — never a
+missing identity; fix the precondition, don't loosen the gate. To retire a
+leg that is genuinely obsolete, delete its scenario file in the SAME PR that
+removes the thing it proved (money-path review applies) — the gate must
+never be re-loosened to accommodate a leg nobody deleted. Historical note
+(#1044): before the flip, skips were a run-page warning and "green" meant
+"every EXECUTED leg passed". Its Markdown
 scenario table is an evidence starter, not a complete report: copy it into
 [`_run-report-template.md`](../bug-reports/_run-report-template.md) and add run
 metadata, exact command and exit code, preflight, artifacts, public evidence,
@@ -278,11 +283,33 @@ The repository needs these encrypted Actions secrets:
 - `QA_PAYMENT_TO`
 - `QA_DEMO_MERCHANT_URL`
 
-Optional, for the delegation-rail EIP-3009 bridge scenario (the run skips it
-when they are absent):
+And, for the two delegation-rail EIP-3009 legs (`x402-delegation-3009`,
+`x402-delegation-3009-sweep` — the run skips them, and the Coverage
+completeness step warns, when either is absent):
 
 - `QA_DELEGATION_AGENT_API_KEY`
 - `QA_DELEGATION_DELEGATE_PRIVATE_KEY`
+
+**The delegation-rail QA identity (#1063).** Provisioned 2026-08-05 on the
+dev backend: a dedicated QA user owning a Hybrid DeleGator treasury on Base
+Sepolia with an **open (unpinned) 5 USDC/day budget delegation**. Open rather
+than pinned is structural, not preference: 3009-mode funds the delegate EOA
+from the budget, and a recipient-pinned delegation cannot pay the EOA — a
+pinned identity would make both legs skip for a third reason. The treasury
+holds testnet USDC (~0.9 at provisioning; each leg spends ~0.001/run).
+
+- **Top-up:** send Base Sepolia USDC
+  (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the treasury address in
+  the operator's `~/.haven/qa-delegation.env` (`QA_DELEGATION_TREASURY`) —
+  any source works; the budget refills itself daily.
+- **Rotation:** the full identity (user credentials, owner key, delegate key,
+  API key, treasury address) lives in the operator's
+  `~/.haven/qa-delegation.env`. To rotate the delegate key: create a fresh
+  agent for the same account (new delegate + API key), update both repo
+  secrets, revoke the old agent. To rotate everything: re-provision a fresh
+  identity (signup → hybrid account → agent → open-budget grant → activate →
+  fund), update the secrets, and update the env file. Never reuse
+  `RELAYER_PRIVATE_KEY`, `SETTLEMENT_PRIVATE_KEY`, or any non-QA key.
 
 If the dotenv file contains exactly those five required entries, upload them
 with:

@@ -7,7 +7,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-07-27"
+last-verified: "2026-08-05"
 ---
 
 # Branch & release flow

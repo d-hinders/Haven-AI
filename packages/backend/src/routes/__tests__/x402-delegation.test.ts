@@ -334,6 +334,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
           id: INTENT_ID, status: 'pending_signature', execution_rail: 'delegation',
           prepared_user_op: JSON.parse(preparedState), chain_id: 84532,
           x402_resource_url: 'https://merchant.example/resource',
+          to_address: '0x' + 'cc'.repeat(20), amount_raw: '1000', token_address: USDC,
         }] })
       }
       if (/FROM agent_passports/.test(String(sql))) return Promise.resolve({ rows: passportRows })
@@ -364,10 +365,16 @@ describe('x402 delegation-rail settlement (#830)', () => {
     const res = await settleOk()
     expect(res.statusCode).toBe(200)
     const decoded = JSON.parse(Buffer.from(res.json().payment_header, 'base64').toString('utf8'))
-    expect(Object.keys(decoded).sort()).toEqual(['network', 'payload', 'scheme', 'x402Version'])
+    // v2 since #1064: the accepted-requirements echo rides alongside the
+    // scheme payload — @x402/core v2 merchants match it field-for-field.
+    expect(Object.keys(decoded).sort()).toEqual(['accepted', 'network', 'payload', 'scheme', 'x402Version'])
     expect(Object.keys(decoded.payload).sort()).toEqual([
       'delegationManager', 'delegator', 'permissionContext',
     ])
+    expect(Object.keys(decoded.accepted).sort()).toEqual([
+      'amount', 'asset', 'extra', 'maxTimeoutSeconds', 'network', 'payTo', 'scheme',
+    ])
+    expect(decoded.accepted.extra).toEqual({ assetTransferMethod: 'erc7710' })
   })
 
   it('settle assembles the X-PAYMENT header and flips to submitted; Haven submits nothing', async () => {
@@ -388,6 +395,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
           id: INTENT_ID, status: 'pending_signature', execution_rail: 'delegation',
           prepared_user_op: JSON.parse(preparedState), chain_id: 84532,
           x402_resource_url: 'https://merchant.example/resource',
+          to_address: '0x' + 'cc'.repeat(20), amount_raw: '1000', token_address: USDC,
         }] })
       }
       return Promise.resolve({ rows: [] })
@@ -403,7 +411,10 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(body.status).toBe('submitted')
     // The header decodes to an exact-scheme erc7710 payload:
     const decoded = JSON.parse(Buffer.from(body.payment_header, 'base64').toString('utf8'))
-    expect(decoded).toMatchObject({ x402Version: 1, scheme: 'exact', network: 'eip155:84532' })
+    expect(decoded).toMatchObject({ x402Version: 2, scheme: 'exact', network: 'eip155:84532' })
+    // Old stored state (no maxTimeoutSeconds) echoes the 300 default the
+    // child expiry was built with — replay-resume of pre-#1064 intents.
+    expect(decoded.accepted.maxTimeoutSeconds).toBe(300)
     expect(decoded.payload.delegator.toLowerCase()).toBe(DELEGATE_ACCT.toLowerCase())
     // The intent flipped to submitted:
     expect(mockQuery.mock.calls.some((c) => /status = 'submitted'/.test(String(c[0])))).toBe(true)

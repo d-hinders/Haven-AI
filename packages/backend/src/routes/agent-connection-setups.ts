@@ -147,6 +147,7 @@ interface UserSafeRow {
   safe_address: string
   name: string
   chain_id: number
+  account_type: string | null
 }
 
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
@@ -175,6 +176,19 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       const safe = await resolveUserSafe(sub, request.body.safe_id)
       if (!safe) {
         return reply.code(400).send({ error: 'Haven wallet is required' })
+      }
+
+      // #1074: on the delegation rail each budget is its own signed grant and
+      // the approval step only ever grants ONE — a multi-allowance setup can
+      // never be approved (verifyDelegationSetupAuthority requires every
+      // allowance to match an active delegation). Fail at CREATE with the
+      // remedy, not at approval with a dead end. The legacy Safe rail keeps
+      // multi-token allowances unchanged.
+      if (safe.account_type === 'delegator_hybrid' && (parsed.allowances?.length ?? 0) > 1) {
+        return reply.code(400).send({
+          error:
+            'This account uses one budget per agent — send a single allowance, then add more budgets from the agent page after setup.',
+        })
       }
 
       const setupId = crypto.randomUUID()
@@ -828,10 +842,11 @@ async function resolveUserSafe(userId: string, safeId?: string): Promise<{
   safe_address: string
   name: string
   chain_id: number
+  account_type: string | null
 } | null> {
   if (safeId) {
     const result = await pool.query<UserSafeRow>(
-      `SELECT id, safe_address, name, chain_id
+      `SELECT id, safe_address, name, chain_id, account_type
        FROM user_safes
        WHERE id = $1 AND user_id = $2
        LIMIT 1`,
@@ -840,7 +855,7 @@ async function resolveUserSafe(userId: string, safeId?: string): Promise<{
     return result.rows[0] ?? null
   }
   const result = await pool.query<UserSafeRow>(
-    `SELECT id, safe_address, name, chain_id
+    `SELECT id, safe_address, name, chain_id, account_type
      FROM user_safes
      WHERE user_id = $1 AND is_default = true
      LIMIT 1`,

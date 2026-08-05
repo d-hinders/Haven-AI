@@ -28,7 +28,8 @@
  * never touched the bridge. So it reads the payment evidence back and requires
  * the 3009 SHAPE:
  *
- *   - `challenge_payload.settlement_scheme === 'eip3009'` — the branch that ran.
+ *   - `settlement_scheme === 'eip3009'` — the branch that ran (from the intent,
+ *     joined into the evidence row; challenge_payload is the raw 402 body).
  *   - `settlement_address === the delegate EOA` — Haven's own transfer went to
  *     the FUNDING target, not the merchant. This is the two-leg signature, and
  *     on erc7710 it is the merchant instead.
@@ -235,7 +236,7 @@ export const x402Delegation3009: Scenario = {
       )
     }
 
-    const scheme = receipt.challenge_payload?.settlement_scheme
+    const scheme = receipt.settlement_scheme
     if (scheme !== 'eip3009') {
       // The most important failure this scenario can report: it means the agent
       // took erc7710 (or the scheme was not recorded), so the bridge is

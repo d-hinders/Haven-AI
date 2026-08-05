@@ -75,10 +75,13 @@ deployed that way today.
   covers the money-path code being promoted** — if a money-path file changed
   after the newest green run, the gate fails and names it. Since
   [#1044](https://github.com/d-hinders/Haven-AI/issues/1044) the gate also
-  distinguishes green from green-with-SKIPS: when the covering run skipped a
-  scenario leg (an unprovisioned optional identity), the promotion PR gets a
-  warning that the certified coverage is partial — visible, not blocking,
-  until the repo variable `QA_REQUIRE_ALL_LEGS=1` flips skips to failures.
+  treats a skipped leg as a FAILURE: since #1066 the repo variable
+  `QA_REQUIRE_ALL_LEGS=1` is set and qa-dev's Coverage completeness step is
+  blocking, so a run that skips any leg goes red and names it. Since #1063
+  the delegation-rail QA identity is provisioned and forwarded to the
+  harness — a reappearing skip means a broken precondition (drained QA
+  treasury, expired credential, reverted env var), never a missing identity
+  (see agent-qa.md, which also documents how to legitimately retire a leg).
   A **money-path `hotfix/*`** blocks outright: the harness tests a *deployed* backend and a
   hotfix is deployed nowhere until it merges, so no automatic evidence about it
   can exist. Bypass in both cases: the `qa-override` label, with a comment

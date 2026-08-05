@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/lib/sweep.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402.ts
-last-verified: "2026-08-04"
+last-verified: "2026-08-05"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract

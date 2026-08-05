@@ -46,6 +46,7 @@ interface AcceptsEntry {
   payTo?: string
   asset?: string
   network?: string
+  maxTimeoutSeconds?: number
   extra?: { assetTransferMethod?: string }
 }
 interface PaymentRequired {
@@ -178,6 +179,9 @@ export const x402Erc7710Settle: Scenario = {
       amount: amountAtomic.toString(),
       asset: erc7710Entry.asset ?? SEPOLIA_USDC,
       network: erc7710Entry.network ?? 'base-sepolia',
+      // The v2 header echoes the accepted entry field-for-field — the quoted
+      // timeout must round-trip or the merchant rejects the echo.
+      maxTimeoutSeconds: erc7710Entry.maxTimeoutSeconds,
     })
     if (!auth.ok || !auth.data.payment_id) {
       return fail(`authorize failed (${auth.status}): ${JSON.stringify(auth.data).slice(0, 200)}`)

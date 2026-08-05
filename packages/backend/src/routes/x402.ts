@@ -754,6 +754,9 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           budget: JSON.parse(budget.delegation_json),
           delegateAccountAddress,
           network,
+          // Echoed back to the merchant in the v2 X-PAYMENT header — must be
+          // the QUOTED value, and the child's expiry was derived from it.
+          maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
         }),
         conflictTarget: 'x402_idempotency_key',
       })
@@ -1473,8 +1476,12 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         prepared_user_op: unknown
         chain_id: number
         x402_resource_url: string | null
+        to_address: string
+        amount_raw: string
+        token_address: string
       }>(
-        `SELECT id, status, execution_rail, prepared_user_op, chain_id, x402_resource_url
+        `SELECT id, status, execution_rail, prepared_user_op, chain_id, x402_resource_url,
+                to_address, amount_raw, token_address
          FROM payment_intents
          WHERE id = $1 AND agent_id = $2`,
         [id, agent.id],
@@ -1497,6 +1504,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           budget: Parameters<typeof assembleSettlementPayload>[3]
           delegateAccountAddress: `0x${string}`
           network: string
+          maxTimeoutSeconds?: number
         }
         // #946 guard: a 3009-mode funding intent stores a prepared UserOp, not
         // an erc7710 {child, budget} settlement state. Refuse it here
@@ -1537,7 +1545,14 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           state.budget,
           state.delegateAccountAddress,
         )
-        const header = encodeXPaymentHeader(state.network, payload)
+        const header = encodeXPaymentHeader(state.network, payload, {
+          amount: intent.amount_raw,
+          payTo: intent.to_address as `0x${string}`,
+          asset: intent.token_address as `0x${string}`,
+          // Pre-#1064 intents stored no echo value; 300 is the same default
+          // the child expiry was built with, so the echo stays consistent.
+          maxTimeoutSeconds: state.maxTimeoutSeconds ?? 300,
+        })
 
         // #976: the agent's own passport reference, so it can PRESENT rather
         // than have the merchant DISCOVER. Deliberately in Haven's response and

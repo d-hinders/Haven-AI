@@ -55,6 +55,8 @@ export interface X402AuthorizeBody {
   amount: string // atomic units
   asset: string // token contract address
   network: string // CAIP-2 (e.g. eip155:84532) or x402 network name
+  /** Echoed to the merchant in the v2 header — pass the QUOTED value (#1064). */
+  maxTimeoutSeconds?: number
 }
 
 export interface ApiResponse<T> {

@@ -1,12 +1,14 @@
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockGet, mockPost, mockSignUserOp, mockSigner, mockOnDevice } = vi.hoisted(() => ({
+const { mockGet, mockPost, mockSignUserOp, mockSigner, mockOnDevice, mockRemember, mockCreatePasskey } = vi.hoisted(() => ({
   mockGet: vi.fn(),
   mockPost: vi.fn(),
   mockSignUserOp: vi.fn(),
   mockSigner: vi.fn(),
   mockOnDevice: vi.fn(),
+  mockRemember: vi.fn(),
+  mockCreatePasskey: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({ api: { get: mockGet, post: mockPost } }))
@@ -14,6 +16,11 @@ vi.mock('@/lib/signer', () => ({
   useActiveSigner: () => mockSigner(),
   hasPasskeyCredentialOnDevice: (id: string) => mockOnDevice(id),
   credentialIdFromKeyId: (k: string) => k,
+  rememberPasskeyCredentialOnDevice: (id: string) => mockRemember(id),
+}))
+vi.mock('@/lib/passkey', () => ({
+  createPasskey: mockCreatePasskey,
+  base64UrlDecode: () => new Uint8Array([0x11]),
 }))
 vi.mock('@/lib/delegationPasskeySigner', () => ({ signUserOpWithPasskey: mockSignUserOp }))
 
@@ -35,6 +42,8 @@ beforeEach(() => {
   mockSigner.mockReturnValue(null)
   mockOnDevice.mockReset()
   mockOnDevice.mockReturnValue(false)
+  mockRemember.mockReset()
+  mockCreatePasskey.mockReset()
   mockGet.mockResolvedValue(SIGNERS)
 })
 
@@ -59,6 +68,26 @@ describe('useAccountSigners is account-scoped (#1089)', () => {
     const second = renderHook(() => useAccountSigners(SAFE_ADDRESS, 84532, 'x@y.z'))
     await waitFor(() => expect(second.result.current.signers).not.toBeNull())
     expect(second.result.current.passkeyElsewhere).toBe(false)
+  })
+
+  // #1097 follow-up: a backup enrolled HERE must be marked on-device, or the
+  // cross-device hint immediately misreads it as living elsewhere.
+  it('marks a freshly enrolled backup passkey as on this device', async () => {
+    mockCreatePasskey.mockResolvedValue({ credentialId: 'cred-1', publicKey: { x: '0x1', y: '0x2' } })
+    mockPost.mockImplementation((url: string) =>
+      url.includes('/prepare')
+        ? Promise.resolve({ signature_scheme: 'webauthn_userop', user_operation: { nonce: '1n' } })
+        : Promise.resolve({ updated: true }),
+    )
+    mockSignUserOp.mockResolvedValue('0x' + 'ab'.repeat(200))
+
+    const { result } = renderHook(() => useAccountSigners(SAFE_ADDRESS, 84532, 'x@y.z'))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.enrollBackupPasskey()
+      expect(res.ok).toBe(true)
+    })
+    expect(mockRemember).toHaveBeenCalledWith('cred-1')
   })
 
   it('surfaces a retryable error instead of hiding a failed fetch forever', async () => {

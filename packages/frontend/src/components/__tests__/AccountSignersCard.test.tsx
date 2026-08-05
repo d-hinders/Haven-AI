@@ -152,7 +152,9 @@ describe('AccountSignersCard (#888)', () => {
           account_address: '0x' + 'aa'.repeat(20),
           chain_id: 84532,
           owner_address: '0x' + 'ee'.repeat(20),
-          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+          // Passkey-free on purpose: with any passkey present the optimistic
+          // fallback keeps `ready` true, so this state can't carry one (#1097).
+          passkeys: [],
         },
       }),
     )

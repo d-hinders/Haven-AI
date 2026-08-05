@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toHex, type Address } from 'viem'
 import { api } from '@/lib/api'
-import { useActiveSigner } from '@/lib/signer'
+import { useActiveSigner, rememberPasskeyCredentialOnDevice } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import { signPreparedAccountOp } from '@/lib/hybridAccountOps'
 import { createPasskey, base64UrlDecode } from '@/lib/passkey'
@@ -127,7 +127,7 @@ export function useAccountSigners(safeAddress: string, chainId: number, userEmai
       if (isPasskeyCancellation(err)) return { ok: false, reason: 'cancelled' }
       return { ok: false, reason: 'failed', message: err instanceof Error ? err.message : undefined }
     }
-    return run({
+    const result = await run({
       action: 'add_passkey',
       passkey: {
         key_id: toHex(base64UrlDecode(created.credentialId)),
@@ -135,6 +135,11 @@ export function useAccountSigners(safeAddress: string, chainId: number, userEmai
         y: created.publicKey.y,
       },
     })
+    // The credential was just created HERE — record that, or the #1097
+    // cross-device hint (and pickSigningPath's on-device preference)
+    // misreads a backup enrolled on this device as living elsewhere.
+    if (result.ok) rememberPasskeyCredentialOnDevice(created.credentialId)
+    return result
   }, [run, userEmail])
 
   const enrollOwnerWallet = useCallback(

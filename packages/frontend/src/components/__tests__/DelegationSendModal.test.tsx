@@ -21,7 +21,16 @@ const PROPS = {
 }
 
 function base(overrides: Record<string, unknown> = {}) {
-  return { busy: false, ready: true, send: vi.fn().mockResolvedValue({ ok: true, txHash: '0xfeed' }), ...overrides }
+  return {
+    busy: false,
+    loaded: true,
+    loadError: false,
+    reload: vi.fn(),
+    ready: true,
+    passkeyElsewhere: false,
+    send: vi.fn().mockResolvedValue({ ok: true, txHash: '0xfeed' }),
+    ...overrides,
+  }
 }
 
 beforeEach(() => {
@@ -70,13 +79,30 @@ describe('DelegationSendModal (#1083)', () => {
     expect(mockToast.error).not.toHaveBeenCalled()
   })
 
-  // #1097: !ready is only reachable for owner-only accounts — the copy names
-  // the wallet; cross-device passkeys are a hint on a WORKING send instead.
-  it('names the owner wallet as the blocker when not ready', () => {
+  // #1097: with the signer set LOADED, !ready is only reachable for owner-only
+  // accounts — the copy names the wallet; cross-device passkeys are a hint on
+  // a WORKING send instead.
+  it('names the owner wallet as the blocker when loaded but not ready', () => {
     mockUseSend.mockReturnValue(base({ ready: false }))
     render(<DelegationSendModal {...PROPS} />)
     expect(screen.getByText(/Connect the account.s owner wallet/)).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('claims no blocker while the signer set is still loading', () => {
+    mockUseSend.mockReturnValue(base({ loaded: false, ready: false }))
+    render(<DelegationSendModal {...PROPS} />)
+    expect(screen.queryByText(/Connect the account.s owner wallet/)).toBeNull()
+  })
+
+  it('a failed signer fetch is a retryable error, not owner-wallet advice', () => {
+    const reload = vi.fn()
+    mockUseSend.mockReturnValue(base({ loaded: false, loadError: true, ready: false, reload }))
+    render(<DelegationSendModal {...PROPS} />)
+    expect(screen.queryByText(/Connect the account.s owner wallet/)).toBeNull()
+    expect(screen.getByText(/could not load/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(reload).toHaveBeenCalled()
   })
 
   it('shows the cross-device hint when ready but the passkey is elsewhere', () => {

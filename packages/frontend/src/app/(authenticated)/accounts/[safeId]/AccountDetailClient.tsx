@@ -17,7 +17,7 @@ import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useUserSafes } from '@/hooks/useUserSafes'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import SendModal from '@/components/SendModal'
-import AccountSignersCard, { AccountSignersReadOnly } from '@/components/AccountSignersCard'
+import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
@@ -468,21 +468,16 @@ export default function AccountDetailClient() {
         )}
       </Card>
 
-      {/* #1079: account-level recovery for delegation accounts — the entire
-          backup/recovery UI used to render only inside an agent page, so an
-          account with zero agents had no path to enrol a backup passkey.
-          Management reuses the agent-scoped routes when an agent exists;
-          otherwise the signer set is shown read-only. */}
+      {/* #1089: Backup & recovery is an ACCOUNT capability and this is its
+          single home — fully interactive from the moment the account exists
+          (the #1081 by-address routes need no agent), which is when the #908
+          two-signer floor matters most. */}
       {safe.account_type === 'delegator_hybrid' ? (
-        recoveryAgent ? (
-          <AccountSignersCard
-            agentId={recoveryAgent.id}
-            chainId={chainId}
-            userEmail={user?.email ?? ''}
-          />
-        ) : !agentsLoading ? (
-          <AccountSignersReadOnly safeAddress={safe.safe_address} chainId={chainId} />
-        ) : null
+        <AccountSignersCard
+          accountAddress={safe.safe_address}
+          chainId={chainId}
+          userEmail={user?.email ?? ''}
+        />
       ) : null}
 
       {/* Account info */}

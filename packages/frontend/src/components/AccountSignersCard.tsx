@@ -1,126 +1,45 @@
 'use client'
 
 /**
- * Backup & recovery signers for a delegation-rail account (#888, epic #836).
+ * Backup & recovery signers for a delegation-rail account (#888/#1089,
+ * epic #836).
  *
  * Outcome-language signer management: see the ways this account can be
  * approved, add a backup (so a lost device isn't a lost account), remove one.
  * The words passkey/EOA/addKey/signer never lead — it's "ways to approve",
  * "this device", "a wallet". Every change is one signature by an existing
  * signer; Haven signs nothing.
+ *
+ * ACCOUNT-scoped since #1089 (via the #1081 by-address routes): recovery is
+ * an account capability, works with zero agents, and the account page is its
+ * single home — the agent page links here instead of duplicating controls.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { isAddress } from 'viem'
+import { CircleHelp } from 'lucide-react'
 import { useAccountSigners } from '@/hooks/useAccountSigners'
-import { api } from '@/lib/api'
-import type { HybridAccountSigners } from '@/lib/signer'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
+import { Icon } from './ui/Icon'
+import { Modal } from './ui/Modal'
 import { useToast } from './ui/Toast'
 import { truncateAddress } from '@/components/haven'
 
 interface Props {
-  agentId: string
+  accountAddress: string
   chainId: number
   userEmail: string
 }
 
-/**
- * Display-only signer list for a delegation account with NO agent yet (#1079).
- *
- * Signer MANAGEMENT is no longer agent-scoped on the backend: #1081 added
- * `POST /accounts/hybrid/:address/signers/{prepare,submit}` alongside the
- * agent-scoped routes, so an account with no agent CAN now enrol a backup or
- * add an owner wallet. This component has not been wired to them yet — the
- * remaining gap is frontend only (#1089), not a missing capability. Until that
- * lands this stays a read-only view over the by-address signers route.
- */
-export function AccountSignersReadOnly({
-  safeAddress,
-  chainId,
-}: {
-  safeAddress: string
-  chainId: number
-}) {
-  const [signers, setSigners] = useState<HybridAccountSigners | null>(null)
-  const [failed, setFailed] = useState(false)
-
-  const load = useCallback(async () => {
-    try {
-      setSigners(
-        await api.get<HybridAccountSigners>(
-          `/accounts/hybrid/${safeAddress}/signers?chain_id=${chainId}`,
-        ),
-      )
-      setFailed(false)
-    } catch {
-      setSigners(null)
-      setFailed(true)
-    }
-  }, [chainId, safeAddress])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  if (signers === null && !failed) return null
-
-  return (
-    <Card hover={false} className="mt-6 p-5 md:p-6">
-      <div>
-        <h2 className="text-base font-semibold text-[var(--v2-ink)]">Backup &amp; recovery</h2>
-        <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-          These are the ways this account can be approved. Connect an agent to add or remove one.
-        </p>
-      </div>
-
-      {failed ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
-          <p className="text-sm text-[var(--v2-ink-2)]">
-            Haven could not load how this account is approved.
-          </p>
-          <Button size="sm" variant="ghost" onClick={() => void load()}>
-            Try again
-          </Button>
-        </div>
-      ) : signers ? (
-        <Card.Section divided className="mt-4">
-          {signers.owner_address ? (
-            <div className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-[var(--v2-ink)]">A connected wallet</p>
-                <p className="truncate text-xs text-[var(--v2-ink-muted)]">
-                  {truncateAddress(signers.owner_address)}
-                </p>
-              </div>
-            </div>
-          ) : null}
-          {signers.passkeys.map((pk, i) => (
-            <div key={pk.key_id} className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-[var(--v2-ink)]">
-                  {i === 0 ? 'Face ID / Touch ID' : `Backup ${i}`}
-                </p>
-                <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
-                  {truncateAddress(pk.key_id)}
-                </p>
-              </div>
-            </div>
-          ))}
-        </Card.Section>
-      ) : null}
-    </Card>
-  )
-}
-
-export default function AccountSignersCard({ agentId, chainId, userEmail }: Props) {
+export default function AccountSignersCard({ accountAddress, chainId, userEmail }: Props) {
   const { signers, busy, ready, enrollBackupPasskey, enrollOwnerWallet, removePasskey, removeOwner } =
-    useAccountSigners(agentId, chainId, userEmail)
+    useAccountSigners(accountAddress, chainId, userEmail)
   const { toast } = useToast()
   const [walletAddr, setWalletAddr] = useState('')
   const [showWallet, setShowWallet] = useState(false)
+  const [showRecoveryHelp, setShowRecoveryHelp] = useState(false)
 
   const wayCount = useMemo(
     () => (signers ? signers.passkeys.length + (signers.owner_address ? 1 : 0) : 0),
@@ -233,37 +152,46 @@ export default function AccountSignersCard({ agentId, chainId, userEmail }: Prop
 
       {!ready ? (
         <p className="mt-3 text-xs text-[var(--v2-ink-muted)]">
-          Connect your account owner wallet to change how this account is approved.
+          {signers.passkeys.length > 0
+            ? "This account's Face ID / Touch ID lives on another device. Open Haven there — or connect the account's owner wallet — to change how this account is approved."
+            : 'Connect your account owner wallet to change how this account is approved.'}
         </p>
       ) : null}
 
       <Card.Section className="mt-4">
-        <details className="group">
-          <summary className="cursor-pointer list-none text-sm font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
-            Lost a device?
-          </summary>
-          <div className="mt-2 space-y-2 text-sm leading-relaxed text-[var(--v2-ink-muted)]">
-            <p>
-              Open Haven on a device that still has a working approval — a backup Face ID, or the
-              wallet you added. Add a replacement for the device you lost so you&apos;re back to two
-              ways to approve, then remove the lost one above.
-            </p>
-            <p>
-              Haven can&apos;t do this for you: every change is approved by a signer you already
-              hold. If an account ever has just one way to approve and that&apos;s lost, it can&apos;t
-              be recovered — by you or by us. That&apos;s why the backup above matters.{' '}
-              <a
-                href="https://docs.haven.xyz/product/account-recovery"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
-              >
-                How recovery works
-              </a>
-            </p>
-          </div>
-        </details>
+        {/* #1089: a standard help affordance (ui/Modal), not a raw <details>. */}
+        <button
+          type="button"
+          onClick={() => setShowRecoveryHelp(true)}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]"
+        >
+          <Icon icon={CircleHelp} size={16} />
+          Lost a device?
+        </button>
       </Card.Section>
+
+      <Modal open={showRecoveryHelp} onClose={() => setShowRecoveryHelp(false)} title="Lost a device?">
+        <div className="space-y-2 text-sm leading-relaxed text-[var(--v2-ink-muted)]">
+          <p>
+            Open Haven on a device that still has a working approval — a backup Face ID, or the
+            wallet you added. Add a replacement for the device you lost so you&apos;re back to two
+            ways to approve, then remove the lost one.
+          </p>
+          <p>
+            Haven can&apos;t do this for you: every change is approved by a signer you already
+            hold. If an account ever has just one way to approve and that&apos;s lost, it can&apos;t
+            be recovered — by you or by us. That&apos;s why the backup matters.{' '}
+            <a
+              href="https://docs.haven.xyz/product/account-recovery"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
+            >
+              How recovery works
+            </a>
+          </p>
+        </div>
+      </Modal>
     </Card>
   )
 }

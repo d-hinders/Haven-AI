@@ -207,8 +207,8 @@ agent-scoped (`/agents/:id/account-signers/{prepare,submit}`, #888) and
 account-scoped (`POST /accounts/hybrid/:address/signers/{prepare,submit}`), the
 latter so an account with **zero agents** can enrol its second signer before
 anything else exists — which is when the ≥2-signer floor (#908) matters most.
-(That capability is API-level today; the account-page card is read-only until
-the #1089 frontend wiring lands.)
+Since #1089 the account page is the single interactive home for signer
+management (agent pages link there), wired to these by-address routes.
 The two surfaces differ only in how the account is resolved: agent lookup
 versus an owner-scoped `(address, chain)` lookup on `user_safes`. Authority
 rules, the ≥2-signer refusal, the calldata encoding and the signed-op matching

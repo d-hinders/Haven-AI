@@ -33,7 +33,7 @@ import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import EditAgentModal, { type EditAgentModalMode } from '@/components/EditAgentModal'
 import DelegationBudgetCard, { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
-import AccountSignersCard from '@/components/AccountSignersCard'
+import Link from 'next/link'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import {
@@ -548,7 +548,28 @@ export default function AgentDetailClient({ agentId }: Props) {
               onBudgetChange={refetch}
             />
           </div>
-          <AccountSignersCard agentId={agentId} chainId={chainId} userEmail={user?.email ?? ''} />
+          {/* #1089: Backup & recovery is an ACCOUNT capability — its single
+              home is the account page. A second copy of the controls here
+              implied the signer set was agent-scoped; link instead. */}
+          {currentAgent.safe_id ? (
+            <Card hover={false} className="mt-6 p-5 md:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-[var(--v2-ink)]">Backup &amp; recovery</h2>
+                  <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
+                    The ways this account can be approved are managed on the account page.
+                  </p>
+                </div>
+                <Link
+                  href={`/accounts/${currentAgent.safe_id}`}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
+                >
+                  Manage on the account page
+                  <Icon icon={ArrowRight} size={16} />
+                </Link>
+              </div>
+            </Card>
+          ) : null}
         </>
       ) : null}
       {/* Session-rail banner + recipients card retired with the rail (#834);

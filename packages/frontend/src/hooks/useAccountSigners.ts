@@ -1,7 +1,11 @@
 'use client'
 
 /**
- * Account signer management for the delegation rail (#888, epic #836).
+ * Account signer management for the delegation rail (#888/#1081/#1089).
+ *
+ * ACCOUNT-scoped since #1089: signer changes go through the #1081 by-address
+ * routes, so recovery works before any agent exists — the account page is the
+ * single home for Backup & recovery.
  *
  * The recovery substrate: enroll a backup passkey (or an EOA owner), remove a
  * passkey or the owner — each an ACCOUNT op (addKey/removeKey/
@@ -30,7 +34,7 @@ interface PrepareResponse {
   user_operation: Record<string, unknown>
 }
 
-export function useAccountSigners(agentId: string, chainId: number, userEmail: string) {
+export function useAccountSigners(accountAddress: string, chainId: number, userEmail: string) {
   const [signers, setSigners] = useState<AccountSigners | null>(null)
   const [loadError, setLoadError] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -46,13 +50,15 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
   // stranding the account at a permanent null signer set (#1079).
   const reload = useCallback(async () => {
     try {
-      setSigners(await api.get<AccountSigners>(`/agents/${agentId}/account-signers`))
+      setSigners(
+        await api.get<AccountSigners>(`/accounts/hybrid/${accountAddress}/signers?chain_id=${chainId}`),
+      )
       setLoadError(false)
     } catch {
       setSigners(null)
       setLoadError(true)
     }
-  }, [agentId])
+  }, [accountAddress, chainId])
 
   useEffect(() => {
     void reload()
@@ -94,12 +100,13 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
         // Tell the backend which signer this device will use — gas estimation
         // is shaped by the signature kind, and only the device knows what is
         // available.
-        const prep = await api.post<PrepareResponse>(`/agents/${agentId}/account-signers/prepare`, {
+        const prep = await api.post<PrepareResponse>(
+          `/accounts/hybrid/${accountAddress}/signers/prepare?chain_id=${chainId}`, {
           ...body,
           signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
         })
         const signature = await signPrepared(prep)
-        await api.post(`/agents/${agentId}/account-signers/submit`, {
+        await api.post(`/accounts/hybrid/${accountAddress}/signers/submit?chain_id=${chainId}`, {
           ...body,
           signature,
           user_operation: prep.user_operation,
@@ -119,7 +126,7 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
         setBusy(false)
       }
     },
-    [agentId, reload, signPrepared, signingPath],
+    [accountAddress, chainId, reload, signPrepared, signingPath],
   )
 
   /** Enroll a backup passkey — a fresh WebAuthn credential on this device. */

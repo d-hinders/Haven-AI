@@ -76,13 +76,24 @@ export const FIXTURE_SAFE = {
   is_default: true,
   created_at: '2026-05-01T10:00:00.000Z',
 }
+// A delegation-rail account so /accounts/<id> evidence shows the #1089
+// Backup & recovery card (single home) with a real signer set.
+export const FIXTURE_DELEGATION_SAFE = {
+  id: 'safe-delegation',
+  name: 'Passkey account',
+  safe_address: '0x2222222222222222222222222222222222222222',
+  chain_id: 84532,
+  is_default: false,
+  account_type: 'delegator_hybrid',
+  created_at: '2026-07-01T10:00:00.000Z',
+}
 export const FIXTURE_USER = {
   id: 'user-fixture',
   name: 'Screenshot Fixture',
   email: 'fixture@haven.test',
   wallet_address: null,
   safe_address: FIXTURE_SAFE.safe_address,
-  safes: [FIXTURE_SAFE],
+  safes: [FIXTURE_SAFE, FIXTURE_DELEGATION_SAFE],
   currency_preference: 'USD',
   created_at: '2026-05-01T10:00:00.000Z',
 }
@@ -284,6 +295,14 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (mode === 'empty') return null
   const [pathname] = apiPath.split('?')
   if (pathname === '/chains') return { deployable: [FIXTURE_SAFE.chain_id] }
+  if (/^\/accounts\/hybrid\/0x[0-9a-fA-F]{40}\/signers$/.test(pathname)) {
+    return {
+      account_address: FIXTURE_DELEGATION_SAFE.safe_address,
+      chain_id: FIXTURE_DELEGATION_SAFE.chain_id,
+      owner_address: null,
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+    }
+  }
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
   if (pathname.startsWith('/balances/')) return FIXTURE_BALANCES

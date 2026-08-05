@@ -10,7 +10,7 @@ vi.mock('@/components/ui/Toast', () => ({
 
 const AccountSignersCard = (await import('../AccountSignersCard')).default
 
-const PROPS = { agentId: 'a1', chainId: 84532, userEmail: 'x@y.z' }
+const PROPS = { accountAddress: '0x' + 'aa'.repeat(20), chainId: 84532, userEmail: 'x@y.z' }
 
 function base(overrides: Record<string, unknown> = {}) {
   return {
@@ -109,12 +109,37 @@ describe('AccountSignersCard (#888)', () => {
     expect(ownerRemove.disabled).toBe(true)
   })
 
-  it('surfaces the honest "Lost a device?" recovery explainer', async () => {
+  it('surfaces the honest "Lost a device?" recovery explainer in a modal (#1089)', async () => {
     mockUseSigners.mockReturnValue(base())
     render(<AccountSignersCard {...PROPS} />)
-    expect(screen.getByText('Lost a device?')).toBeTruthy()
+    // The non-custody statement is behind a standard help affordance now —
+    // click to open the modal; the copy itself must survive intact.
+    fireEvent.click(screen.getByText('Lost a device?'))
     expect(screen.getByText(/Haven can.t do this for you/)).toBeTruthy()
+    expect(screen.getByText(/can.t\s*be recovered — by you or by us/)).toBeTruthy()
     expect(screen.getByRole('link', { name: 'How recovery works' }).getAttribute('href')).toContain('/product/account-recovery')
+  })
+
+  it('names the REAL blocker when not ready: passkey on another device vs no wallet (#1089)', async () => {
+    // Passkeys exist but none reachable here -> point at the other device.
+    mockUseSigners.mockReturnValue(base({ ready: false }))
+    const { unmount } = render(<AccountSignersCard {...PROPS} />)
+    expect(screen.getByText(/lives on another device/)).toBeTruthy()
+    unmount()
+    // Owner-only account -> the wallet really is the blocker.
+    mockUseSigners.mockReturnValue(
+      base({
+        ready: false,
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.getByText(/Connect your account owner wallet/)).toBeTruthy()
   })
 
   it('renders nothing while signers are loading (null)', () => {

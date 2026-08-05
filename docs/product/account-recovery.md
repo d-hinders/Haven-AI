@@ -51,13 +51,13 @@ explicitly acknowledge that losing it loses the account — Haven records that
 choice. (On testnets this rule does not apply.)
 
 **Haven nudges you to add a backup right after signup.** It is dismissible, and
-you can add one at any time from **Backup & recovery** on the account's page
-(it also appears on any agent that uses the account).
+you can add one at any time from **Backup & recovery** on the account's page —
+it works from the moment the account exists, before any agent (agent pages
+link there).
 
 ## Add a backup (do this early)
 
-On the account's page (or any of its agents), open **Backup & recovery** and
-choose one:
+On the account's page, open **Backup & recovery** and choose one:
 
 - **Add a backup with Face ID / Touch ID** — creates a second passkey. On the
   same device it's a second credential; on a *different* device (your phone as
@@ -76,7 +76,7 @@ Each takes one approval from a signer you already have.
 
 1. Open Haven on a device that still has a working signer (your backup passkey,
    or the wallet you enrolled).
-2. Go to **Backup & recovery** on the account's page (or any of its agents).
+2. Go to **Backup & recovery** on the account's page.
 3. **Add a replacement** for the device you lost (a new passkey on the device
    you're on now), so you're back to two ways to approve.
 4. **Remove** the lost signer from the list.

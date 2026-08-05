@@ -129,6 +129,10 @@ Probes:
 - `ops:check-delegation` — every PINNED contract (manager, entry point,
   factory, Hybrid impl, 8 enforcers) is live bytecode on every enabled
   chain. Run on deploy and daily; exit 1 = stop before any rail use.
+- `ops:check-mainnet-reconciliation` — the read-only 8453 probe (#1067):
+  /health, relayer-monitor liveness + low-water, and (in the prod shell)
+  the lingering-delegate scan. The mainnet canary procedure that uses it:
+  [`mainnet-canary.md`](mainnet-canary.md).
 
 ## 4. Anti-lock-in: fork-and-pin policy + re-evaluation tripwires
 

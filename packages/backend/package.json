@@ -24,7 +24,8 @@
     "ops:check-delegate-balances": "tsx scripts/check-delegate-balances.ts",
     "db:schema-smoke": "tsx scripts/db-schema-smoke.ts",
     "pilot:fortnox": "tsx scripts/fortnox-sandbox-validation.ts",
-    "ops:register-passport-schema": "tsx scripts/register-passport-schema.ts"
+    "ops:register-passport-schema": "tsx scripts/register-passport-schema.ts",
+    "ops:check-mainnet-reconciliation": "tsx scripts/check-mainnet-reconciliation.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

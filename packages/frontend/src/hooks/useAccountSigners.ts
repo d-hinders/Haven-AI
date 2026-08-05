@@ -10,6 +10,10 @@
  * nothing. Haven's ≥2-signer rule is surfaced as a clean 409 (the chain
  * itself refuses only removing the LAST signer, the #884
  * CannotRemoveLastSigner finding), so the UI never has to guess.
+ *
+ * Account-scoped (#1089) — calls `/accounts/hybrid/:address/signers/*` (#1081)
+ * rather than the agent-scoped twin, so a fresh account with zero agents can
+ * still enrol the second signer the #908 mainnet floor requires.
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -30,7 +34,7 @@ interface PrepareResponse {
   user_operation: Record<string, unknown>
 }
 
-export function useAccountSigners(agentId: string, chainId: number, userEmail: string) {
+export function useAccountSigners(safeAddress: string, chainId: number, userEmail: string) {
   const [signers, setSigners] = useState<AccountSigners | null>(null)
   const [loadError, setLoadError] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -46,13 +50,15 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
   // stranding the account at a permanent null signer set (#1079).
   const reload = useCallback(async () => {
     try {
-      setSigners(await api.get<AccountSigners>(`/agents/${agentId}/account-signers`))
+      setSigners(
+        await api.get<AccountSigners>(`/accounts/hybrid/${safeAddress}/signers?chain_id=${chainId}`),
+      )
       setLoadError(false)
     } catch {
       setSigners(null)
       setLoadError(true)
     }
-  }, [agentId])
+  }, [safeAddress, chainId])
 
   useEffect(() => {
     void reload()
@@ -94,12 +100,15 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
         // Tell the backend which signer this device will use — gas estimation
         // is shaped by the signature kind, and only the device knows what is
         // available.
-        const prep = await api.post<PrepareResponse>(`/agents/${agentId}/account-signers/prepare`, {
-          ...body,
-          signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
-        })
+        const prep = await api.post<PrepareResponse>(
+          `/accounts/hybrid/${safeAddress}/signers/prepare?chain_id=${chainId}`,
+          {
+            ...body,
+            signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
+          },
+        )
         const signature = await signPrepared(prep)
-        await api.post(`/agents/${agentId}/account-signers/submit`, {
+        await api.post(`/accounts/hybrid/${safeAddress}/signers/submit?chain_id=${chainId}`, {
           ...body,
           signature,
           user_operation: prep.user_operation,
@@ -119,7 +128,7 @@ export function useAccountSigners(agentId: string, chainId: number, userEmail: s
         setBusy(false)
       }
     },
-    [agentId, reload, signPrepared, signingPath],
+    [safeAddress, chainId, reload, signPrepared, signingPath],
   )
 
   /** Enroll a backup passkey — a fresh WebAuthn credential on this device. */

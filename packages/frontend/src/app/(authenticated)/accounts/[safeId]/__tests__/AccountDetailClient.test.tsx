@@ -73,6 +73,14 @@ vi.mock('@/components/ConfirmDialog', () => ({
   default: () => null,
 }))
 
+vi.mock('@/components/AccountSignersCard', () => ({
+  default: (props: { safeAddress?: string; agentId?: string }) => (
+    <div data-testid="account-signers-card" data-safe-address={props.safeAddress} data-agent-id={props.agentId}>
+      Backup &amp; recovery
+    </div>
+  ),
+}))
+
 import AccountDetailClient from '../AccountDetailClient'
 
 const SAFE = {
@@ -274,5 +282,35 @@ describe('AccountDetailClient', () => {
 
     expect(screen.getByText('100.00 USDC.e per day · Last activity 2h ago')).toBeInTheDocument()
     expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+  })
+
+  // #1089: backup & recovery is an account capability — it must work before
+  // any agent exists, not gate on one.
+  it('renders backup & recovery for a delegation account with zero agents', () => {
+    mockUseAuth.mockReturnValue({
+      user: {
+        id: 'user-1',
+        name: 'Ada',
+        email: 'ada@example.com',
+        wallet_address: '0x5555555555555555555555555555555555555555',
+        safes: [{ ...SAFE, account_type: 'delegator_hybrid' }],
+      },
+      activeSafe: { ...SAFE, account_type: 'delegator_hybrid' },
+      setActiveSafe: vi.fn(),
+      loading: false,
+      passkeys: [],
+    })
+    mockUseAgents.mockReturnValue({
+      agents: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+
+    render(<AccountDetailClient />)
+
+    const card = screen.getByTestId('account-signers-card')
+    expect(card).toHaveAttribute('data-safe-address', SAFE.safe_address)
+    expect(card).not.toHaveAttribute('data-agent-id')
   })
 })

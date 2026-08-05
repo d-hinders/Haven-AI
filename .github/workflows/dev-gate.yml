@@ -59,6 +59,9 @@ jobs:
     env:
       # A green money-flow run must be no older than this many hours. Override with a
       # repo variable if the dev cadence changes. Default 30h covers a missed nightly.
+      # Explicit repo variable since #1066 (set to 30) — the promotion window
+      # is a deliberate, reviewable number, not a fallback. The `|| '30'`
+      # stays as a fail-safe against accidental variable deletion only.
       FRESHNESS_HOURS: ${{ vars.QA_FRESHNESS_HOURS || '30' }}
     steps:
       # fetch-depth: 0 — the gate diffs the QA run's commit against the

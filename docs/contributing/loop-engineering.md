@@ -9,7 +9,7 @@ covers:
   - .github/workflows/ci.yml
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/code-quality-loop.md
-last-verified: "2026-07-25"
+last-verified: "2026-08-05"
 ---
 
 # Loop Engineering (oracle-grounded automated loops)

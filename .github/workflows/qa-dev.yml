@@ -84,16 +84,16 @@ jobs:
           exit 1
       # #1044: a green run that SKIPPED legs is partial coverage, and the
       # dev->main promotion gate keys on this run's conclusion. This step turns
-      # the run.ts skip marker into a step-level failure that (a) annotates the
-      # run page and (b) is visible to qa-freshness via the jobs API -- while
-      # continue-on-error keeps the run green, because blocking promotion on an
-      # unprovisioned OPTIONAL leg would be the opposite over-claim.
+      # the run.ts skip marker into a step-level FAILURE. Blocking since #1066:
+      # every leg is provisioned (#1063 closed the last legitimate skip), so a
+      # skip now means a broken credential or a drained identity -- red is the
+      # honest color. To retire a leg for real, delete its scenario in the same
+      # PR that removes the need for it (see agent-qa.md), never re-loosen this.
       - name: Coverage completeness
         if: success()
-        continue-on-error: true
         run: |
           if grep -q "green-with-skips:" qa-run.log; then
-            echo "::warning::money-flow QA is green with SKIPPED legs -- coverage is partial (#1044):"
+            echo "::error::money-flow QA SKIPPED legs -- coverage is partial, and every leg is expected to run (#1066):"
             grep -A10 "green-with-skips:" qa-run.log | sed -n "2,11p"
             exit 1
           fi

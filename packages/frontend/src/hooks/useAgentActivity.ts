@@ -84,8 +84,10 @@ export function useAgentActivity(agentId: string | null) {
         api.get<{ activity: ActivityItem[] }>(`/agent-activity/${agentId}/activity`),
         api.get<AgentStats>(`/agent-activity/${agentId}/stats`),
       ])
-      setActivity(activityRes.activity)
-      setStats(statsRes)
+      // A 200 whose body omits `activity` must not void the array the page
+      // filters over — that crashed /agents/[agentId] outright (#1075).
+      setActivity(activityRes?.activity ?? [])
+      setStats(statsRes ?? null)
     } catch {
       // Silently fail
     } finally {
@@ -113,8 +115,8 @@ export function useActivityFeed() {
       const data = await api.get<{ activity: ActivityItem[]; pending_approvals: number }>(
         '/agent-activity/feed',
       )
-      setActivity(data.activity)
-      setPendingApprovals(data.pending_approvals)
+      setActivity(data?.activity ?? [])
+      setPendingApprovals(data?.pending_approvals ?? 0)
     } catch {
       // Silently fail
     } finally {

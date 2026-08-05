@@ -822,7 +822,7 @@ export default function ConnectAgent2Modal({
                 </p>
               )}
 
-              <label className="flex items-start gap-2 rounded-[10px] border border-dashed border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              <label className="flex items-start gap-2 py-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
                 <input
                   type="checkbox"
                   checked={issuePassport}
@@ -830,9 +830,9 @@ export default function ConnectAgent2Modal({
                   className="mt-0.5"
                 />
                 <span>
-                  Issue an Agent Passport — a signed record that this agent was issued by Haven,
-                  bound to this wallet, and revocable at any time. Haven covers the small on-chain
-                  fee to issue it.
+                  Optional: issue an Agent Passport — a signed record that this agent was issued
+                  by Haven, bound to this wallet, and revocable at any time. Haven covers the
+                  small on-chain fee to issue it.
                 </span>
               </label>
 
@@ -876,6 +876,13 @@ export default function ConnectAgent2Modal({
                     label: 'Approve actions',
                     value: 'Payments above budget',
                     helper: 'Haven will ask you before requests above the remaining budget move money.',
+                  },
+                  {
+                    label: 'Agent Passport',
+                    value: issuePassport ? 'Issue on approval' : 'Not requested',
+                    helper: issuePassport
+                      ? 'A signed, revocable record that this agent was issued by Haven — governance, not spend authority.'
+                      : 'You can issue one later from the agent page.',
                   },
                 ]}
               />

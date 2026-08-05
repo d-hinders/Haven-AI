@@ -79,11 +79,13 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
         <div>
           <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent Passport</h2>
           <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-            A signed record that this agent was issued by Haven, bound to this account, and
+            A signed record that this agent was issued by Haven, bound to this wallet, and
             revocable at any time.
           </p>
         </div>
-        <StatusBadge tone={headline.tone}>{headline.label}</StatusBadge>
+        <StatusBadge tone={headline.tone} className="shrink-0">
+          {headline.label}
+        </StatusBadge>
       </div>
 
       {passport ? (
@@ -115,7 +117,7 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
                     href={explorerHref}
                     target="_blank"
                     rel="noreferrer"
-                    className="font-medium text-[var(--v2-brand)] hover:underline"
+                    className="rounded-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
                   >
                     View transaction
                   </a>

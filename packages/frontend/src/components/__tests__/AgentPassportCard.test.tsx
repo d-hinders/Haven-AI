@@ -40,6 +40,12 @@ describe('AgentPassportCard (#1072)', () => {
     expect(document.body.textContent).not.toMatch(/verified/i)
   })
 
+  it('keeps the header status badge from shrinking/wrapping next to the title (mobile regression)', () => {
+    mockUseAgentPassport.mockReturnValue(state())
+    render(<AgentPassportCard agentId="agent-1" />)
+    expect(screen.getByText('Not issued').className).toMatch(/shrink-0/)
+  })
+
   it('hides the issue action for a revoked agent', () => {
     mockUseAgentPassport.mockReturnValue(state())
     render(<AgentPassportCard agentId="agent-1" agentRevoked />)

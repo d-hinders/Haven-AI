@@ -482,6 +482,29 @@ describe('ConnectAgent2Modal', () => {
     expect(body.issue_passport).toBe(true)
   })
 
+  it('confirms the passport choice on the review step before submitting (#1072)', async () => {
+    renderModal()
+
+    fireEvent.change(screen.getByLabelText('Agent name'), {
+      target: { value: 'Research Agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    if (!screen.queryByPlaceholderText('Amount')) {
+      fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    }
+    fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+
+    // Unchecked by default — review step must say so, not stay silent.
+    fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+    expect(screen.getByText('Not requested')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /issue an agent passport/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+    expect(screen.getByText('Issue on approval')).toBeInTheDocument()
+  })
+
   it('exposes local MCP only as an Advanced opt-in and sends local_mcp when chosen', async () => {
     renderModal()
 

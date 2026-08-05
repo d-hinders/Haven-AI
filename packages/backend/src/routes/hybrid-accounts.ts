@@ -26,6 +26,8 @@ import {
   type SignerActionAccount,
   type SignerActionBody,
 } from '../lib/hybrid-signer-actions.js'
+import { prepareTransfer, submitTransfer, type TransferBody } from '../lib/hybrid-transfers.js'
+import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { loadHybridOwnerConfig } from '../lib/hybrid-account-config.js'
 
 interface CreateHybridBody {
@@ -265,6 +267,46 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       return reply.code(status).send(details ? { error, details } : { error })
     }
     return { updated: true, tx_hash: result.txHash }
+  })
+
+  // ── Owner-initiated send (#1083) ──────────────────────────────────────────
+  // The rail's "Send": the treasury executes an ERC-20 transfer as a
+  // sponsored account op the OWNER signs — same prepare/submit +
+  // calldata-pinning discipline as signer changes, same device-decides
+  // signature scheme (#1086). Works on a COUNTERFACTUAL account (#1106:
+  // deploy + transfer ride one sponsored op).
+  app.post<{
+    Params: { address: string }
+    Querystring: { chain_id?: string }
+    Body: TransferBody
+  }>('/hybrid/:address/transfers/prepare', { config: moneyPathRateLimit }, async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const resolved = await resolveOwnedHybridAccount(sub, request.params.address, request.query.chain_id)
+    if (!resolved.ok) return reply.code(resolved.status).send({ error: resolved.error })
+
+    const result = await prepareTransfer(resolved.account, request.body ?? {})
+    if (!result.ok) {
+      const { status, error, details } = result.failure
+      return reply.code(status).send(details ? { error, details } : { error })
+    }
+    return result.prepared
+  })
+
+  app.post<{
+    Params: { address: string }
+    Querystring: { chain_id?: string }
+    Body: TransferBody & { signature?: string; user_operation?: unknown }
+  }>('/hybrid/:address/transfers/submit', { config: moneyPathRateLimit }, async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const resolved = await resolveOwnedHybridAccount(sub, request.params.address, request.query.chain_id)
+    if (!resolved.ok) return reply.code(resolved.status).send({ error: resolved.error })
+
+    const result = await submitTransfer(resolved.account, request.body ?? {})
+    if (!result.ok) {
+      const { status, error, details } = result.failure
+      return reply.code(status).send(details ? { error, details } : { error })
+    }
+    return { submitted: true, tx_hash: result.txHash }
   })
 
   // ── GET /hybrid/:address/signers — the ACCOUNT's signer set (#1079) ───────

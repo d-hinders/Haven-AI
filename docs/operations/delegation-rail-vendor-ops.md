@@ -48,6 +48,9 @@ only one:
   sponsored op: it draws relayer gas balance, and a drained relayer blocks
   **grants**, not payments. Same alerting as every other relayer chain.
 - **The merchant / facilitator** — erc7710 x402 settlement, below.
+- Owner-initiated **sends** (#1083) and signer changes are also
+  paymaster-sponsored account ops — roughly one warm-op cost each; they
+  draw the same policy budget as payments.
 
 **x402 sponsorship depends on the settlement scheme (#946).** The scheme is
 chosen per payment from the `payTo` shape (or an explicit `settlementScheme`)

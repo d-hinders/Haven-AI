@@ -381,3 +381,115 @@ describe('remove_owner — enrolling a wallet is not a one-way door (#1087)', ()
     expect(mockQuery.mock.calls.some(([sql]) => /owner_address = NULL/.test(String(sql)))).toBe(false)
   })
 })
+
+describe('owner-initiated send (#1083)', () => {
+  let app: FastifyInstance
+  const PK1 = { keyId: '0x' + '11'.repeat(32), x: 1n, y: 2n }
+  const OWNER_EOA = '0x' + 'ee'.repeat(20)
+  const TOKEN = '0x' + '05'.repeat(20)
+  const TO = '0x' + '06'.repeat(20)
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(routes, { prefix: '/accounts' })
+  })
+  afterAll(async () => app.close())
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockLoadOwner.mockReset()
+    mockTreasury.mockReset()
+    mockQuery.mockResolvedValue({ rows: [] })
+  })
+
+  function ownedAccount(config: { ownerAddress?: string; passkeys?: typeof PK1[] }) {
+    mockQuery.mockImplementation((sql: string) =>
+      /FROM user_safes/.test(String(sql))
+        ? Promise.resolve({ rows: [{ '?column?': 1 }] })
+        : Promise.resolve({ rows: [] }),
+    )
+    mockLoadOwner.mockResolvedValue({ userSafeId: 'safe-1', config, singleSignerWaiverAt: null })
+  }
+
+  function mockPrepared() {
+    mockTreasury.mockResolvedValueOnce({
+      treasuryAddress: ACCOUNT,
+      prepareCall: vi.fn().mockResolvedValue({
+        userOperation: { sender: ACCOUNT, nonce: 1n, callData: '0xffff' },
+        userOpHash: '0x' + 'ee'.repeat(32),
+        signingTypedData: { domain: { name: 'HybridDeleGator' }, types: {}, primaryType: 'PackedUserOperation', message: {} },
+      }),
+      submitCall: vi.fn().mockResolvedValue({ txHash: '0x' + 'ff'.repeat(32) }),
+    })
+  }
+
+  const prepareUrl = `/accounts/hybrid/${ACCOUNT}/transfers/prepare?chain_id=84532`
+  const submitUrl = `/accounts/hybrid/${ACCOUNT}/transfers/submit?chain_id=84532`
+  const BODY = { token_address: TOKEN, to: TO, amount_atomic: '250000' }
+
+  it('prepares a passkey-signable transfer — device decides the scheme (#1086)', async () => {
+    ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] })
+    mockPrepared()
+    const res = await app.inject({
+      method: 'POST', url: prepareUrl,
+      payload: { ...BODY, signature_scheme: 'webauthn_userop' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().signature_scheme).toBe('webauthn_userop')
+    expect(res.json().user_op_hash).toBeTruthy()
+    expect(mockTreasury.mock.calls[0][0]).toMatchObject({ signWith: 'passkey' })
+  })
+
+  it('rejects garbage transfer input before any op is prepared', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    for (const bad of [
+      { ...BODY, to: 'not-an-address' },
+      { ...BODY, to: '0x' + '00'.repeat(20) },
+      { ...BODY, amount_atomic: '0' },
+      { ...BODY, amount_atomic: '-5' },
+      { ...BODY, token_address: 'nope' },
+    ]) {
+      const res = await app.inject({ method: 'POST', url: prepareUrl, payload: bad })
+      expect(res.statusCode).toBe(400)
+    }
+    expect(mockTreasury).not.toHaveBeenCalled()
+  })
+
+  it('submit pins the tx to the SIGNED calldata — a mismatched user_operation is refused', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    const res = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: {
+        ...BODY,
+        signature: '0x' + 'ab'.repeat(80),
+        user_operation: { sender: ACCOUNT, callData: '0xdeadbeef' },
+      },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/does not match the requested transfer/)
+    expect(mockTreasury).not.toHaveBeenCalled()
+  })
+
+  it('submit relays the signed op and returns the tx hash', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockPrepared()
+    const { encodeFunctionData } = await import('viem')
+    const callData = encodeFunctionData({
+      abi: [{ name: 'transfer', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }], outputs: [{ type: 'bool' }] }],
+      functionName: 'transfer',
+      args: [TO, 250000n],
+    })
+    const res = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: { ...BODY, signature: '0x' + 'ab'.repeat(80), user_operation: { sender: ACCOUNT, callData } },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ submitted: true, tx_hash: '0x' + 'ff'.repeat(32) })
+  })
+
+  it("404s an account the caller does not own", async () => {
+    mockQuery.mockResolvedValue({ rows: [] })
+    const res = await app.inject({ method: 'POST', url: prepareUrl, payload: BODY })
+    expect(res.statusCode).toBe(404)
+    expect(mockTreasury).not.toHaveBeenCalled()
+  })
+})

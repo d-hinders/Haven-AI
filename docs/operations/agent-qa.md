@@ -278,11 +278,33 @@ The repository needs these encrypted Actions secrets:
 - `QA_PAYMENT_TO`
 - `QA_DEMO_MERCHANT_URL`
 
-Optional, for the delegation-rail EIP-3009 bridge scenario (the run skips it
-when they are absent):
+And, for the two delegation-rail EIP-3009 legs (`x402-delegation-3009`,
+`x402-delegation-3009-sweep` — the run skips them, and the Coverage
+completeness step warns, when either is absent):
 
 - `QA_DELEGATION_AGENT_API_KEY`
 - `QA_DELEGATION_DELEGATE_PRIVATE_KEY`
+
+**The delegation-rail QA identity (#1063).** Provisioned 2026-08-05 on the
+dev backend: a dedicated QA user owning a Hybrid DeleGator treasury on Base
+Sepolia with an **open (unpinned) 5 USDC/day budget delegation**. Open rather
+than pinned is structural, not preference: 3009-mode funds the delegate EOA
+from the budget, and a recipient-pinned delegation cannot pay the EOA — a
+pinned identity would make both legs skip for a third reason. The treasury
+holds testnet USDC (~0.9 at provisioning; each leg spends ~0.001/run).
+
+- **Top-up:** send Base Sepolia USDC
+  (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the treasury address in
+  the operator's `~/.haven/qa-delegation.env` (`QA_DELEGATION_TREASURY`) —
+  any source works; the budget refills itself daily.
+- **Rotation:** the full identity (user credentials, owner key, delegate key,
+  API key, treasury address) lives in the operator's
+  `~/.haven/qa-delegation.env`. To rotate the delegate key: create a fresh
+  agent for the same account (new delegate + API key), update both repo
+  secrets, revoke the old agent. To rotate everything: re-provision a fresh
+  identity (signup → hybrid account → agent → open-budget grant → activate →
+  fund), update the secrets, and update the env file. Never reuse
+  `RELAYER_PRIVATE_KEY`, `SETTLEMENT_PRIVATE_KEY`, or any non-QA key.
 
 If the dotenv file contains exactly those five required entries, upload them
 with:

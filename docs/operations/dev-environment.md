@@ -79,6 +79,9 @@ deployed that way today.
   scenario leg (an unprovisioned optional identity), the promotion PR gets a
   warning that the certified coverage is partial — visible, not blocking,
   until the repo variable `QA_REQUIRE_ALL_LEGS=1` flips skips to failures.
+  Since #1063 the delegation-rail QA identity is provisioned and forwarded to
+  the harness, so a full run executes all seven legs — a reappearing skip
+  now means a broken credential, not a missing one (see agent-qa.md).
   A **money-path `hotfix/*`** blocks outright: the harness tests a *deployed* backend and a
   hotfix is deployed nowhere until it merges, so no automatic evidence about it
   can exist. Bypass in both cases: the `qa-override` label, with a comment

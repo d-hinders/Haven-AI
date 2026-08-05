@@ -21,6 +21,7 @@ import { x402Sweep } from './scenarios/x402-sweep.js'
 import { x402Delegation3009 } from './scenarios/x402-delegation-3009.js'
 import { x402Delegation3009Sweep } from './scenarios/x402-delegation-3009-sweep.js'
 import { x402Erc7710Settle } from './scenarios/x402-erc7710-settle.js'
+import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
 
 // Deterministic, no-LLM scenarios run in order — seven money-flow invariants:
 // within-budget settle, over-budget queue, x402 over-budget reject, x402 settle,
@@ -40,6 +41,7 @@ const SCENARIOS: Scenario[] = [
   x402Delegation3009,
   x402Delegation3009Sweep,
   x402Erc7710Settle,
+  delegationLifecycle,
 ]
 
 async function main(): Promise<void> {

@@ -23,6 +23,8 @@ import {
   redactVendorSecrets,
   resolveExecutionRail,
   serializeUserOp,
+  sessionRailRetired,
+  isRetiredRailIntent,
 } from '../lib/execution-rail.js'
 import {
   prepareDelegationPayment,
@@ -287,17 +289,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       ...railState,
       chainId: agent.chain_id,
     })
-    if (railDecision.rail === 'session_key') {
-      // ── Session rail RETIRED (#834, epic #821) ─────────────────────────
-      // The typed seam stays for reversibility, but no session machinery
-      // remains behind it: schedules, rotation, and Smart Sessions prepare/
-      // submit are deleted. Accounts still marked session_key re-onboard on
-      // the delegation rail. Fail-closed: refuse loudly, write nothing.
-      return reply.code(410).send({
-        error:
-          'The session rail is retired — re-onboard this account on the delegation rail ' +
-          '(POST /accounts/hybrid, then grant a budget) to keep paying.',
-      })
+    if (railDecision.rail === 'retired_session') {
+      // #993: retirement decided in the seam, refusal produced there too.
+      const retired = sessionRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
     }
 
     // 5. On-chain allowance check. Read the allowance and chain time together:
@@ -495,12 +490,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // authorize time, so a signature can never be checked against the wrong
       // scheme. Session-rail intents are RETIRED (#834): any still-pending
       // one is refused before anything is verified or written.
-      if (intent.execution_rail === 'session_key') {
-        return reply.code(410).send({
-          error:
-            'The session rail is retired — this intent can no longer execute. ' +
-            'Re-onboard the account on the delegation rail and authorize again.',
-        })
+      if (isRetiredRailIntent(intent.execution_rail)) {
+        const retired = sessionRailRetired('intent')
+        return reply.code(retired.statusCode).send(retired.body)
       }
       const isDelegationRail = intent.execution_rail === 'delegation'
 

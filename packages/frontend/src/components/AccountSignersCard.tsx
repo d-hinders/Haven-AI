@@ -58,7 +58,8 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
     async (result: Promise<{ ok: boolean; reason?: string; message?: string }>, okMsg: string) => {
       const r = await result
       if (r.ok) toast.success(okMsg)
-      else if (r.reason === 'cancelled') toast.error('Cancelled.')
+      // #1085: neutral, not error — the user changed their mind.
+    else if (r.reason === 'cancelled') toast.info('Signature was cancelled.')
       else if (r.reason === 'blocked') toast.error(r.message ?? 'That change is not allowed.')
       else toast.error('Something went wrong. Try again.')
     },

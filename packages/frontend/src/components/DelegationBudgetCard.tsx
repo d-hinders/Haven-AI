@@ -102,7 +102,11 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
       if (result.ok) {
         toast.success('Budget stopped.')
         onBudgetChange?.()
-      } else if (result.reason === 'cancelled') toast.error('Signature was cancelled.')
+      } else if (result.reason === 'cancelled') {
+        // #1085: a dismissed sheet is a decision, not a failure — neutral
+        // tone, matching BudgetGrantAction's inline treatment.
+        toast.info('Signature was cancelled.')
+      }
       else toast.error('Could not stop the budget. Try again.')
     },
     [onBudgetChange, revoke, toast],

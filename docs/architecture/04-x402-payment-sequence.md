@@ -299,20 +299,26 @@ restricts who may redeem; pinning `to` to the first entry (the pre-#1061
 behaviour) silently contradicted a multi-entry caveat and would have failed for
 every facilitator but the first.
 
-Stated honestly: no live path populates the redeemer list today, because
-`routes/x402.ts` does not yet parse facilitator addresses out of the 402
-challenge's `requirements.extra`. **Every settlement child is therefore a bearer
-instrument** — whoever holds it can redeem it — within hard bounds that are the
-actual guarantee:
+Since [#1058](https://github.com/d-hinders/Haven-AI/issues/1058) the redeemer
+list IS populated in practice: the client forwards the 402 entry's
+`extra.facilitatorAddresses` (MetaMask's erc7710 shape, validated 1–16
+addresses) into `POST /x402/authorize`, the child's redeemer caveat is built
+from the normalized addresses, and the **verbatim** strings are stored with the
+settle state and echoed in the v2 X-PAYMENT header's accepted entry — required,
+because @x402/core's v2 matcher demands the advertised `extra` as a subset of
+the echo. The demo merchant advertises its settlement account this way, so the
+QA leg exercises the pinned path end-to-end.
+
+When a merchant advertises **no** facilitators there is nothing to pin and the
+child remains a bearer instrument — whoever holds it can redeem it — within
+hard bounds that are the actual guarantee:
 
 - the **exact** payment amount (`erc20TransferAmount` scope),
 - **pinned to the merchant** `payTo`,
 - an expiry of **≤600 s**.
 
 The ceiling of that exposure is "the merchant gets paid without delivering",
-never loss of funds beyond the quoted amount. Wiring `requirements.extra`
-through so the redeemer caveat is populated in practice is tracked as
-[#1058](https://github.com/d-hinders/Haven-AI/issues/1058).
+never loss of funds beyond the quoted amount.
 
 ### Settlement-scheme reality and the EIP-3009 bridge
 
@@ -351,9 +357,16 @@ pin or meter). The chosen scheme is recorded on the intent
 (`machine_metadata.settlement_scheme`, alongside `network`) so 3009-mode usage
 is auditable and its eventual retirement measurable — as of #1061 the
 **erc7710 branch records it too**, so the accounting feed can tell the two
-schemes apart without parsing `prepared_user_op`. (`delegation_hash` still
-carries different semantics per scheme; giving it an honest column is
-[#1059](https://github.com/d-hinders/Haven-AI/issues/1059).)
+schemes apart without parsing `prepared_user_op`. Since
+[#1059](https://github.com/d-hinders/Haven-AI/issues/1059) the hash semantics
+are honest too: `delegation_hash` records the instrument the agent **signed**
+for the intent (the settlement CHILD on erc7710, the budget on the 3009
+funding leg and on direct `/payments` transfers), while
+**`budget_delegation_hash`** always records the METERING budget — the same
+question answered uniformly, so the accounting feed's attribution reads one
+column regardless of scheme (exposed per receipt in
+`/machine-payments/receipts`). NULL on legacy-rail intents and on rows
+predating migration 053; derived backfill was deliberately skipped.
 
 **How 3009-mode works.** EIP-3009 (`transferWithAuthorization`) is ECDSA-based —
 the fund-holder must be an **EOA** that signs (USDC rejects EIP-1271 for it),

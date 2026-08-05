@@ -583,6 +583,12 @@ export interface CreatePaymentIntentInput {
   sessionUserOp?: string
   /** The delegation authorizing a delegation-rail intent (#829/#830). */
   delegationHash?: string
+  /**
+   * The METERING budget behind the intent (#1059) — uniform across schemes,
+   * unlike `delegationHash` (the signed instrument: child on erc7710, budget
+   * elsewhere). Coincides with `delegationHash` except on erc7710.
+   */
+  budgetDelegationHash?: string
   /** Pre-serialized prepared redemption/settlement state for delegation intents. */
   preparedUserOp?: string
   /**
@@ -613,7 +619,7 @@ export async function createPaymentIntent(
     allowanceNonce, signHash, resourceUrl, category, merchantAddress,
     challengeId, idempotencyKey, metadata,
     executionRail, sessionPermissionId, sessionUserOp,
-    delegationHash, preparedUserOp, conflictTarget,
+    delegationHash, budgetDelegationHash, preparedUserOp, conflictTarget,
   } = input
 
   // conflictTarget is a strict union mapped through an allowlist — never raw
@@ -630,10 +636,10 @@ export async function createPaymentIntent(
       payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
       machine_idempotency_key, machine_metadata,
       execution_rail, session_permission_id, session_user_op,
-      delegation_hash, prepared_user_op, expires_at
+      delegation_hash, budget_delegation_hash, prepared_user_op, expires_at
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
       'pending_signature', $13, $14, $15, $16, $17,
-      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, NOW() + interval '10 minutes')
+      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NOW() + interval '10 minutes')
     ON CONFLICT (agent_id, ${conflictColumn})
       WHERE ${conflictColumn} IS NOT NULL
         AND status NOT IN ('failed', 'expired')
@@ -650,7 +656,7 @@ export async function createPaymentIntent(
       rail, resourceUrl, merchantAddress?.toLowerCase() ?? null, challengeId ?? null,
       idempotencyKey ?? null, metadata != null ? JSON.stringify(metadata) : null,
       executionRail ?? null, sessionPermissionId ?? null, sessionUserOp ?? null,
-      delegationHash ?? null, preparedUserOp ?? null,
+      delegationHash ?? null, budgetDelegationHash ?? null, preparedUserOp ?? null,
     ],
   )
 

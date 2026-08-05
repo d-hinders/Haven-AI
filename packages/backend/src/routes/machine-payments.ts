@@ -148,11 +148,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
-function mapEvidence(row: MachinePaymentEvidenceRow & { settlement_scheme?: string | null }) {
+function mapEvidence(
+  row: MachinePaymentEvidenceRow & {
+    settlement_scheme?: string | null
+    budget_delegation_hash?: string | null
+  },
+) {
   return {
     id: row.id,
     /** Which settlement branch ran (eip3009 | erc7710), from the intent (#946). */
     settlement_scheme: row.settlement_scheme ?? null,
+    /** The metering budget, uniform across schemes (#1059) — null on the
+     *  legacy rail and on intents predating the column. */
+    budget_delegation_hash: row.budget_delegation_hash ?? null,
     payment_id: row.payment_intent_id ?? row.approval_request_id,
     payment_intent_id: row.payment_intent_id,
     approval_request_id: row.approval_request_id,
@@ -524,8 +532,9 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     // (eip3009 bridge vs erc7710 direct) is unverifiable without it. Found
     // by the first real run of the delegation QA leg (#1063): the scenario
     // had nowhere to read the scheme from.
-    const result = await pool.query<MachinePaymentEvidenceRow & { settlement_scheme: string | null }>(
-      `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme
+    const result = await pool.query<MachinePaymentEvidenceRow & { settlement_scheme: string | null; budget_delegation_hash: string | null }>(
+      `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
+              pi.budget_delegation_hash
        FROM machine_payment_evidence e
        LEFT JOIN payment_intents pi ON pi.id = e.payment_intent_id
        WHERE e.agent_id = $1
@@ -893,7 +902,23 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         return reply.code(404).send({ error: 'Payment not found' })
       }
 
-      return reply.code(202).send({ evidence: mapEvidence(evidence) })
+      // The INSERT…RETURNING row has no intent join — look the two intent
+      // fields up so this echo reports the same truth the receipts list does
+      // (previously both always echoed null here, #1118 review NB2).
+      let intentFields: { settlement_scheme?: string | null; budget_delegation_hash?: string | null } = {}
+      if (evidence.payment_intent_id) {
+        try {
+          const intentRes = await pool.query<{ settlement_scheme: string | null; budget_delegation_hash: string | null }>(
+            `SELECT machine_metadata->>'settlement_scheme' AS settlement_scheme, budget_delegation_hash
+             FROM payment_intents WHERE id = $1`,
+            [evidence.payment_intent_id],
+          )
+          intentFields = intentRes.rows[0] ?? {}
+        } catch {
+          // Echo enrichment only — never fail the 202 over it.
+        }
+      }
+      return reply.code(202).send({ evidence: mapEvidence({ ...evidence, ...intentFields }) })
     } catch (err) {
       const marker = err instanceof Error ? err.message : String(err)
       if (marker === 'payment_not_confirmed') {

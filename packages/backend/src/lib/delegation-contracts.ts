@@ -34,6 +34,7 @@ export interface DelegationContracts {
     timestamp: `0x${string}`
     limitedCalls: `0x${string}`
     erc20TransferAmount: `0x${string}`
+    redeemer: `0x${string}`
   }
 }
 
@@ -68,6 +69,10 @@ const CONTRACTS: Record<number, DelegationContracts> = {
       timestamp: '0x1046bb45C8d673d4ea75321280DB34899413c069',
       limitedCalls: '0x04658B29F6b82ed55274221a06Fc97D318E25416',
       erc20TransferAmount: '0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc',
+      // #1058: pinned 2026-08-05 — bytecode byte-identical to 84532 (no
+      // chain-scoped immutables), both chains checked against two
+      // independent RPCs (base.org + publicnode) that agreed.
+      redeemer: '0xE144b0b2618071B4E56f746313528a669c7E65c5',
     },
   },
   84532: {
@@ -84,6 +89,7 @@ const CONTRACTS: Record<number, DelegationContracts> = {
       timestamp: '0x1046bb45C8d673d4ea75321280DB34899413c069',
       limitedCalls: '0x04658B29F6b82ed55274221a06Fc97D318E25416',
       erc20TransferAmount: '0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc',
+      redeemer: '0xE144b0b2618071B4E56f746313528a669c7E65c5',
     },
   },
 }

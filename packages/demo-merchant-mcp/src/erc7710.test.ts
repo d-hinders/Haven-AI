@@ -158,6 +158,30 @@ describe('demo merchant experimental erc7710 rail', () => {
       payTo: MERCHANT,
       extra: { assetTransferMethod: ERC7710_TRANSFER_METHOD },
     })
+    // The mock client names no redeemer — nothing must be advertised, so a
+    // payer never pins a caveat to an address that will not redeem.
+    expect(paymentRequired.accepts[1].extra).not.toHaveProperty('facilitatorAddresses')
+  })
+
+  // #1058: when the settlement client names its redeemer, the erc7710 option
+  // advertises it so payers can pin their child delegation's redeemer caveat.
+  it('advertises the redeemer as extra.facilitatorAddresses when the client names one', async () => {
+    const REDEEMER = '0x2222222222222222222222222222222222222222' as const
+    const erc7710Client = { ...mockErc7710Client(), redeemerAddress: REDEEMER }
+    const { url } = await startServer({
+      erc7710Client,
+      options: { erc7710: { delegationManager: DELEGATION_MANAGER } },
+    })
+    const unpaid = await postBuyVpn(url)
+    const paymentRequired = await unpaid.json() as PaymentRequired
+
+    expect(unpaid.status).toBe(402)
+    expect(paymentRequired.accepts[1].extra).toEqual({
+      assetTransferMethod: ERC7710_TRANSFER_METHOD,
+      facilitatorAddresses: [REDEEMER],
+    })
+    // The eip3009 option stays untouched — facilitators are erc7710-only.
+    expect(paymentRequired.accepts[0].extra).toEqual({ name: 'USD Coin', version: '2' })
   })
 
   it('verifies by simulation, settles via redeemDelegations, and invoices the delegator as payer', async () => {

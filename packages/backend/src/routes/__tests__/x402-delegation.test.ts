@@ -128,13 +128,83 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(body.sign_data.signature_scheme).toBe('eip712_delegation')
     expect(body.sign_data.typed_data.domain.name).toBe('DelegationManager')
     expect(body.sign_data.instructions).toMatch(/X-PAYMENT header/)
-    // The intent was pinned to the delegation rail:
+    // The intent was pinned to the delegation rail, and the METERING budget
+    // is recorded uniformly (#1059): delegation_hash carries the signed CHILD,
+    // budget_delegation_hash the parent budget — never equal on erc7710.
     expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
       executionRail: 'delegation',
       preparedUserOp: expect.any(String),
+      budgetDelegationHash: `0x${'12'.repeat(32)}`,
     }))
+    const call = mockCreateIntent.mock.calls[0][0] as { delegationHash: string; budgetDelegationHash: string }
+    expect(call.delegationHash).not.toBe(call.budgetDelegationHash)
     // No allowance/funding query ran — there is no funding leg on this rail:
     expect(mockQuery.mock.calls.some((c) => /allowance/i.test(String(c[0])))).toBe(false)
+  })
+
+  // ── #1058: facilitator redeemers ─────────────────────────────────────────
+  it('authorize pins the child to forwarded facilitators and stores them verbatim', async () => {
+    mockSelect.mockResolvedValueOnce({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    const facilitators = ['0x' + 'Fa'.repeat(20)] // mixed case: stored verbatim, caveat normalized
+
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ facilitatorAddresses: facilitators }),
+    })
+    expect(res.statusCode).toBe(201)
+    const stored = JSON.parse(
+      (mockCreateIntent.mock.calls[0][0] as { preparedUserOp: string }).preparedUserOp,
+    )
+    // The echo source is the VERBATIM client value…
+    expect(stored.facilitatorAddresses).toEqual(facilitators)
+    // …and the child grew a redeemer caveat (one more than a bare build).
+    const bare = await (async () => {
+      mockSelect.mockResolvedValueOnce({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+      mockCreateIntent.mockResolvedValueOnce({ id: 'pi_other', status: 'pending_signature', expires_at: 'x' })
+      await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody(),
+      })
+      return JSON.parse((mockCreateIntent.mock.calls[1][0] as { preparedUserOp: string }).preparedUserOp)
+    })()
+    expect(stored.child.caveats.length).toBe(bare.child.caveats.length + 1)
+  })
+
+  it('authorize 400s malformed facilitatorAddresses — garbage cannot half-pin a child', async () => {
+    for (const bad of [[], ['not-an-address'], 'x', new Array(17).fill('0x' + 'aa'.repeat(20))]) {
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ facilitatorAddresses: bad }),
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/facilitatorAddresses/)
+    }
+  })
+
+  it('authorize 400s facilitatorAddresses on the 3009 funding shape — no redeemer there', async () => {
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({
+        payTo: DELEGATE_EOA,
+        merchantPayTo: MERCHANT,
+        facilitatorAddresses: ['0x' + 'fa'.repeat(20)],
+      }),
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/erc7710 direct settlement only/)
   })
 
   it('authorize rejects native-token x402 on the delegation rail (characterization, #946)', async () => {
@@ -193,6 +263,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
       merchantAddress: MERCHANT.toLowerCase(),
       metadata: expect.objectContaining({ settlement_scheme: 'eip3009' }),
       delegationHash: PREPARED.delegationHash,
+      // #1059: on the funding leg the budget IS the signed instrument.
+      budgetDelegationHash: PREPARED.delegationHash,
     }))
     // The funding redemption targeted the EOA with the exact amount:
     expect(mockPrepareFunding).toHaveBeenCalledWith(
@@ -420,6 +492,49 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockQuery.mock.calls.some((c) => /status = 'submitted'/.test(String(c[0])))).toBe(true)
   })
 
+  // #1058: stored facilitators ride the accepted echo — the v2 matcher
+  // requires the merchant's advertised extra as a subset of it.
+  it('settle echoes stored facilitatorAddresses in the accepted extra', async () => {
+    const childFixture = JSON.parse(JSON.stringify(buildBudgetDelegation({
+      agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+      delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+      budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+    })))
+    const facilitators = ['0x' + 'Fa'.repeat(20)]
+    const preparedState = {
+      child: childFixture,
+      budget: signedBudget,
+      delegateAccountAddress: DELEGATE_ACCT,
+      network: 'eip155:84532',
+      maxTimeoutSeconds: 120,
+      facilitatorAddresses: facilitators,
+    }
+    mockQuery.mockImplementation((sql: string) => {
+      if (/SELECT id, status, execution_rail/.test(String(sql))) {
+        return Promise.resolve({ rows: [{
+          id: INTENT_ID, status: 'pending_signature', execution_rail: 'delegation',
+          prepared_user_op: preparedState, chain_id: 84532,
+          x402_resource_url: 'https://merchant.example/resource',
+          to_address: '0x' + 'cc'.repeat(20), amount_raw: '1000', token_address: USDC,
+        }] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+
+    const res = await app.inject({
+      method: 'POST', url: `/x402/${INTENT_ID}/settle`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: await signChild(childFixture) },
+    })
+    expect(res.statusCode).toBe(200)
+    const decoded = JSON.parse(Buffer.from(res.json().payment_header, 'base64').toString('utf8'))
+    expect(decoded.accepted.maxTimeoutSeconds).toBe(120)
+    expect(decoded.accepted.extra).toEqual({
+      assetTransferMethod: 'erc7710',
+      facilitatorAddresses: facilitators,
+    })
+  })
+
   // ── #976: present inline, verify authoritatively ─────────────────────────
   describe('passport reference on settle (#976)', () => {
     const UID = '0x' + 'ab'.repeat(32)
@@ -642,6 +757,53 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(body.sign_data.typed_data.domain.name).toBe('DelegationManager')
     expect(mockSelect).not.toHaveBeenCalled()
     expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
+  // #1058: replaying a key after the merchant rotated its facilitators would
+  // hand back a child pinned to the OLD redeemer — dead at the merchant's
+  // matcher. 409 so the client re-keys.
+  it('a facilitator rotation on the same key 409s instead of replaying a stale child', async () => {
+    const child = JSON.parse(JSON.stringify(buildBudgetDelegation({
+      agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+      delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+      budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+    })))
+    withHourlyCapQueries([{
+      ...PENDING_3009_ROW,
+      to_address: MERCHANT.toLowerCase(),
+      prepared_user_op: {
+        child, budget: signedBudget, delegateAccountAddress: DELEGATE_ACCT,
+        network: 'eip155:84532', facilitatorAddresses: ['0x' + '77'.repeat(20)],
+      },
+      machine_metadata: null,
+    }])
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({
+        idempotencyKey: 'k-1',
+        facilitatorAddresses: ['0x' + '88'.repeat(20)], // rotated
+      }),
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/facilitator_addresses/)
+    // Same facilitators still replay fine:
+    withHourlyCapQueries([{
+      ...PENDING_3009_ROW,
+      to_address: MERCHANT.toLowerCase(),
+      prepared_user_op: {
+        child, budget: signedBudget, delegateAccountAddress: DELEGATE_ACCT,
+        network: 'eip155:84532', facilitatorAddresses: ['0x' + '77'.repeat(20)],
+      },
+      machine_metadata: null,
+    }])
+    const same = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ idempotencyKey: 'k-1', facilitatorAddresses: ['0x' + '77'.repeat(20)] }),
+    })
+    expect(same.statusCode).toBe(201)
+    expect(same.json().idempotent_replay).toBe(true)
   })
 
   it('a concurrent-claim conflict RESUMES the winner instead of a bare 409 (#961)', async () => {

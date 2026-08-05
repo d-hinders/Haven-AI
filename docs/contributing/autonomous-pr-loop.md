@@ -238,10 +238,27 @@ The blast radius is bounded on purpose — the dev backend serves only Base
 Sepolia (`HAVEN_DEPLOY_CHAIN_IDS`), relayer keys are per-chain, and every
 credential in that environment is a testnet throwaway — but "bounded" is not
 "zero": the honest reading is that dev-deploy risk is **accepted**, not
-covered. Hardening options (pin the harness checkout to a reviewed ref, scope
-the QA secrets, restrict the `haven_api_url` dispatch input) are tracked in
-#1047; if the dev environment ever holds non-testnet value, that issue stops
-being optional.
+covered.
+
+The #1047 hardening decision, recorded: the `haven_api_url` dispatch input is
+now **validated to be an `https://<app>.up.railway.app` origin** (whole-string
+match, control characters rejected) and logged with the dispatching actor.
+Stated precisely: that constrains the override to *Railway's* deploy surface,
+not Haven's — Railway is multi-tenant, so a write-access attacker could still
+aim at a Railway app they control; what the check removes is the quiet
+arbitrary-endpoint path, and the log names who aimed where. Two residuals are
+accepted and named: (a) tightening to an exact-hostname allowlist is the next
+step if this risk stops being acceptable; (b) a `workflow_dispatch` on an
+arbitrary ref runs *that ref's* copy of `qa-dev.yml` with repo secrets —
+inherent to repo-level secrets plus write access; the durable fix is moving
+the `QA_*` secrets into a GitHub *environment* restricted to `dev`/`main`. Pinning the harness checkout to a reviewed ref was
+**considered and rejected**: the harness must co-evolve with the rail it
+proves (a pinned ref goes stale silently, weakening exactly the coverage the
+freshness gate certifies), and the compensating control is where it belongs —
+on-chain and in scope: every QA credential is a testnet throwaway, the
+delegation identity's budget is capped by its own caveat enforcers, and the
+dev backend serves Base Sepolia only. If the dev environment ever holds
+non-testnet value, that trade-off must be re-taken.
 
 Money-path **classification is unchanged**: `ship-next` still routes such a diff
 to `money.md`, still requires characterization tests before changing existing

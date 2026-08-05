@@ -2478,6 +2478,16 @@ export const openapiSpec = {
           payment_intent_id: { anyOf: [uuid, { type: 'null' }] },
           approval_request_id: { anyOf: [uuid, { type: 'null' }] },
           rail: { type: 'string' },
+          settlement_scheme: {
+            type: ['string', 'null'],
+            description:
+              'Which settlement branch ran (eip3009 | erc7710), from the intent (#946). Null on legacy-rail receipts.',
+          },
+          budget_delegation_hash: {
+            type: ['string', 'null'],
+            description:
+              'The metering budget delegation, uniform across schemes (#1059). Null on the legacy rail and on intents predating migration 053.',
+          },
           proof_status: {
             type: 'string',
             enum: ['payment_confirmed', 'merchant_response_observed', 'protocol_receipt_attached'],

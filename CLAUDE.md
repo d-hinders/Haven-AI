@@ -162,7 +162,8 @@ x402 settlement branches on the account's rail, and the merchant-facing scheme d
 **Delegation rail (new accounts) — ERC-7710 direct settlement:**
 ```
 Agent encounters HTTP 402 → POST /x402/authorize (rail resolved from agent auth) →
-Haven builds a settlement CHILD delegation (exact amount, payee pin, short expiry)
+Haven builds a settlement CHILD delegation (exact amount, payee pin, short expiry,
+  and a redeemer pin to the 402's advertised `extra.facilitatorAddresses` when present, #1058)
   re-delegated from the agent's budget delegation → agent signs the EIP-712 typed data →
 POST /x402/:id/settle → Haven assembles the merchant X-PAYMENT header (MetaMask x402
   `erc7710` payload) → agent retries → merchant redeems the [child, budget] chain and

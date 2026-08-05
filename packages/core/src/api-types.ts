@@ -1497,6 +1497,10 @@ export type components = {
             payment_intent_id?: string | null;
             approval_request_id?: string | null;
             rail: string;
+            /** @description Which settlement branch ran (eip3009 | erc7710), from the intent (#946). Null on legacy-rail receipts. */
+            settlement_scheme?: string | null;
+            /** @description The metering budget delegation, uniform across schemes (#1059). Null on the legacy rail and on intents predating migration 053. */
+            budget_delegation_hash?: string | null;
             /** @enum {string} */
             proof_status: "payment_confirmed" | "merchant_response_observed" | "protocol_receipt_attached";
             tx_hash: string;

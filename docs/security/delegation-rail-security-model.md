@@ -236,7 +236,12 @@ likewise a **device** decision, never an account-shape decision: a mixed
 account (EOA owner *and* passkeys) accepts either signer on-chain, so the
 client requests the scheme it can actually produce (`signature_scheme` on the
 prepare routes, validated server-side against the real signer set) — enrolling
-a backup wallet never disables the passkey path.
+a backup wallet never disables the passkey path. When no enrolled passkey is
+marked on the current device, the client still requests the passkey scheme
+(the browser's cross-device WebAuthn flow is a real signing path) and the UI
+shows an informational "may be on another device" hint next to the working
+action rather than a false blocker (#1097) — availability copy must never
+overstate what is actually gated.
 
 **The honest limit, stated plainly:** a **single-signer account has no recovery**
 — if its only signer is lost, the account is unreachable by the user *and* by

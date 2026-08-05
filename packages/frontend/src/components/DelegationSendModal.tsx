@@ -28,7 +28,7 @@ interface Props {
 }
 
 export default function DelegationSendModal({ open, onClose, accountAddress, chainId, onSent }: Props) {
-  const { busy, ready, send } = useDelegationSend(accountAddress, chainId)
+  const { busy, loaded, loadError, reload, ready, passkeyElsewhere, send } = useDelegationSend(accountAddress, chainId)
   const { toast } = useToast()
 
   const tokens = useMemo(
@@ -108,10 +108,28 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
           aria-label="Recipient address"
           className="font-mono"
         />
-        {!ready ? (
+        {loadError ? (
           <p className="text-xs text-[var(--v2-ink-muted)]">
-            This account&apos;s Face ID / Touch ID lives on another device. Open Haven there — or
-            connect the account&apos;s owner wallet — to send.
+            Haven could not load how this account approves.{' '}
+            <button type="button" className="underline" onClick={() => void reload()}>
+              Try again
+            </button>
+          </p>
+        ) : null}
+        {loaded && !ready ? (
+          // #1097: with the signer set loaded, this is only reachable for
+          // owner-only accounts (the optimistic passkey fallback keeps
+          // `ready` true otherwise) — the wallet really is the blocker.
+          <p className="text-xs text-[var(--v2-ink-muted)]">
+            Connect the account&apos;s owner wallet to send.
+          </p>
+        ) : null}
+        {ready && passkeyElsewhere ? (
+          // #1097: hint on a WORKING send — the ceremony may hand off to the
+          // device that holds the passkey.
+          <p className="text-xs text-[var(--v2-ink-muted)]">
+            This account&apos;s Face ID / Touch ID may be on another device — your browser will
+            guide you there when you approve.
           </p>
         ) : null}
         <div className="flex justify-end gap-2 pt-1">

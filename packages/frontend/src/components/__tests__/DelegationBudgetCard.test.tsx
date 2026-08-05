@@ -103,4 +103,25 @@ describe('DelegationBudgetCard (#833)', () => {
     const { container } = render(<DelegationBudgetCard {...PROPS} />)
     expect(container.textContent).toBe('')
   })
+
+  it('notifies onBudgetChange after a successful revoke — the page summary reads a different source (#1090)', async () => {
+    mockGet.mockReturnValue([budget()])
+    mockRevoke.mockResolvedValue({ ok: true })
+    const onBudgetChange = vi.fn()
+    render(<DelegationBudgetCard {...PROPS} onBudgetChange={onBudgetChange} />)
+    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy())
+    fireEvent.click(screen.getByText('Stop'))
+    await waitFor(() => expect(onBudgetChange).toHaveBeenCalled())
+  })
+
+  it('does NOT notify onBudgetChange when the revoke fails', async () => {
+    mockGet.mockReturnValue([budget()])
+    mockRevoke.mockResolvedValue({ ok: false, reason: 'failed' })
+    const onBudgetChange = vi.fn()
+    render(<DelegationBudgetCard {...PROPS} onBudgetChange={onBudgetChange} />)
+    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy())
+    fireEvent.click(screen.getByText('Stop'))
+    await waitFor(() => expect(mockRevoke).toHaveBeenCalled())
+    expect(onBudgetChange).not.toHaveBeenCalled()
+  })
 })

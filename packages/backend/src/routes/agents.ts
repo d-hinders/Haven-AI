@@ -21,6 +21,7 @@ import {
   PASSPORT_CHAIN_IDS,
 } from '../lib/passport/index.js'
 import { formatTokenValue } from '../lib/tokens.js'
+import { deriveDelegationAllowances } from '../lib/delegation-budget-view.js'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ interface AgentRow {
   safe_address: string | null
   safe_name: string | null
   safe_chain_id: number | null
+  account_type: string | null
   api_key_prefix: string | null
   status: string
   created_at: string
@@ -129,9 +131,19 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       allowancesByAgent.set(row.agent_id, existing)
     }
 
+    // Delegation-rail agents derive their budget from ACTIVE delegations —
+    // agent_allowances is a frozen onboarding mirror on that rail (#1090).
+    const delegationAgentIds = agentResult.rows
+      .filter((a) => a.account_type === 'delegator_hybrid')
+      .map((a) => a.id)
+    const derivedByAgent = await deriveDelegationAllowances(delegationAgentIds)
+
     const agents = agentResult.rows.map((agent) => ({
       ...agent,
-      allowances: allowancesByAgent.get(agent.id) ?? [],
+      allowances:
+        agent.account_type === 'delegator_hybrid'
+          ? (derivedByAgent.get(agent.id) ?? [])
+          : (allowancesByAgent.get(agent.id) ?? []),
     }))
 
     return { agents }
@@ -165,6 +177,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const agent = agentResult.rows[0]
     if (!agent) {
       return reply.code(404).send({ error: 'Agent not found' })
+    }
+
+    if (agent.account_type === 'delegator_hybrid') {
+      // Live budget = the active delegations, not the onboarding mirror (#1090).
+      const derived = await deriveDelegationAllowances([id])
+      return { ...agent, allowances: derived.get(id) ?? [] }
     }
 
     const allowanceResult = await pool.query<AllowanceRow>(

@@ -220,3 +220,52 @@ describe('dashboard routes', () => {
     ])
   })
 })
+
+describe('dashboard derives delegation-rail budgets from active delegations (#1090)', () => {
+  let app: FastifyInstance
+  let token: string
+  const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(dashboardRoutes, { prefix: '/dashboard' })
+    token = app.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })
+  })
+  afterAll(async () => app.close())
+
+  it('a delegator_hybrid agent reports the active delegation, not the frozen mirror', async () => {
+    portfolioMocks.fetchPortfolioForSafe.mockResolvedValue({ totalUsd: 0, totalEur: 0 })
+    transactionMocks.fetchSafeTransactions.mockResolvedValue({ transactions: [] })
+    transactionMocks.mergeX402Transactions.mockResolvedValue([])
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('AS has_first_agent_payment')) return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
+      if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) return Promise.resolve({ rows: [SAFE] })
+      if (sql.includes('FROM agents a')) {
+        return Promise.resolve({ rows: [{ ...AGENT, account_type: 'delegator_hybrid' }] })
+      }
+      if (sql.includes("status IN ('pending', 'approved')")) return Promise.resolve({ rows: [{ count: '0' }] })
+      if (sql.includes('FROM agent_allowances')) {
+        // The frozen onboarding mirror — must NOT be what the dashboard shows.
+        return Promise.resolve({ rows: [{ agent_id: AGENT.id, token_symbol: 'USDC', allowance_amount: '10.00', reset_period_min: 1440 }] })
+      }
+      if (sql.includes('FROM agent_delegations')) {
+        return Promise.resolve({ rows: [{ id: 'd-1', agent_id: AGENT.id, chain_id: 84532, token_address: SEPOLIA_USDC, budget_atomic: '1000000', period_seconds: 86_400 }] })
+      }
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
+      if (sql.includes('GROUP BY token_symbol')) return Promise.resolve({ rows: [] })
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+
+    const response = await app.inject({
+      method: 'GET', url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(200)
+    const agent = response.json().agents.find((a: { id: string }) => a.id === AGENT.id)
+    expect(agent.allowances).toEqual([
+      { tokenSymbol: 'USDC', allowanceAmount: '1.00', resetPeriodMin: 1440 },
+    ])
+  })
+})

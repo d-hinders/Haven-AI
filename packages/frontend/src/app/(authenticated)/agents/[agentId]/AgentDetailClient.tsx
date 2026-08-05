@@ -545,6 +545,7 @@ export default function AgentDetailClient({ agentId }: Props) {
               agentId={agentId}
               chainId={chainId}
               tokens={recipientTokens}
+              onBudgetChange={refetch}
             />
           </div>
           <AccountSignersCard agentId={agentId} chainId={chainId} userEmail={user?.email ?? ''} />

@@ -532,7 +532,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     // (eip3009 bridge vs erc7710 direct) is unverifiable without it. Found
     // by the first real run of the delegation QA leg (#1063): the scenario
     // had nowhere to read the scheme from.
-    const result = await pool.query<MachinePaymentEvidenceRow & { settlement_scheme: string | null }>(
+    const result = await pool.query<MachinePaymentEvidenceRow & { settlement_scheme: string | null; budget_delegation_hash: string | null }>(
       `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
               pi.budget_delegation_hash
        FROM machine_payment_evidence e
@@ -902,7 +902,23 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         return reply.code(404).send({ error: 'Payment not found' })
       }
 
-      return reply.code(202).send({ evidence: mapEvidence(evidence) })
+      // The INSERT…RETURNING row has no intent join — look the two intent
+      // fields up so this echo reports the same truth the receipts list does
+      // (previously both always echoed null here, #1118 review NB2).
+      let intentFields: { settlement_scheme?: string | null; budget_delegation_hash?: string | null } = {}
+      if (evidence.payment_intent_id) {
+        try {
+          const intentRes = await pool.query<{ settlement_scheme: string | null; budget_delegation_hash: string | null }>(
+            `SELECT machine_metadata->>'settlement_scheme' AS settlement_scheme, budget_delegation_hash
+             FROM payment_intents WHERE id = $1`,
+            [evidence.payment_intent_id],
+          )
+          intentFields = intentRes.rows[0] ?? {}
+        } catch {
+          // Echo enrichment only — never fail the 202 over it.
+        }
+      }
+      return reply.code(202).send({ evidence: mapEvidence({ ...evidence, ...intentFields }) })
     } catch (err) {
       const marker = err instanceof Error ? err.message : String(err)
       if (marker === 'payment_not_confirmed') {

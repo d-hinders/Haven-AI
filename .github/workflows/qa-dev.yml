@@ -39,6 +39,32 @@ jobs:
   money-flow:
     runs-on: ubuntu-latest
     steps:
+      # #1047: the dispatch override points the harness — WITH the QA payment
+      # secrets in env — at an arbitrary backend. Constrain it to Haven's own
+      # deploy surface (a Railway origin) and put the actor + URL in the log,
+      # so a dispatch can never quietly hand the QA credentials to an
+      # attacker-controlled endpoint.
+      - name: Validate haven_api_url override
+        if: github.event.inputs.haven_api_url != ''
+        env:
+          OVERRIDE_URL: ${{ github.event.inputs.haven_api_url }}
+          DISPATCH_ACTOR: ${{ github.actor }}
+        run: |
+          # Whole-string [[ =~ ]] — NOT grep, which matches per line and lets
+          # a crafted multi-line input (API dispatches can carry \n) pass on
+          # one matching line while fetch()'s URL parser strips the newline
+          # and sends the secrets elsewhere (review catch on #1117).
+          if [[ "$OVERRIDE_URL" == *[![:print:]]* ]]; then
+            echo "::error::haven_api_url override contains control characters — rejected (#1047)."
+            exit 1
+          fi
+          if [[ ! "$OVERRIDE_URL" =~ ^https://[a-z0-9-]+\.up\.railway\.app/?$ ]]; then
+            echo "::error::haven_api_url override must be an https://<app>.up.railway.app origin (#1047)."
+            exit 1
+          fi
+          # Log AFTER validation — an unvalidated echo is a workflow-command
+          # injection surface via embedded ::-directives.
+          echo "::notice::qa-dev dispatched with haven_api_url override '$OVERRIDE_URL' by $DISPATCH_ACTOR"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:

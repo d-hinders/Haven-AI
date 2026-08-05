@@ -12,7 +12,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluate, matchesGlob, moneyPathFiles, loadMoneyPathGlobs, completenessWarningFromJobs } from './qa-freshness.mjs'
+import { evaluate, matchesGlob, moneyPathFiles, loadMoneyPathGlobs, completenessWarningFromJobs, greenRunQueryArgs, selectDiffBase } from './qa-freshness.mjs'
 
 const HOUR = 3_600_000
 const NOW = Date.parse('2026-07-27T12:00:00Z')
@@ -254,5 +254,68 @@ describe('completeness warning (#1044)', () => {
     ] }]), null)
     assert.equal(completenessWarningFromJobs([{ steps: [] }]), null)
     assert.equal(completenessWarningFromJobs(undefined), null)
+  })
+})
+
+// #1047 part 3 — the WIRING decisions main() feeds the pure core with. The
+// core was pinned; these two choices (which runs count as evidence, which SHA
+// the coverage diff anchors to) were not, and both are load-bearing.
+describe('wiring — run-list filters (#1047)', () => {
+  test('evidence is ONLY dev-branch successes of qa-dev.yml, newest first', () => {
+    const args = greenRunQueryArgs('d-hinders/Haven-AI')
+    const arg = (flag) => args[args.indexOf(flag) + 1]
+    assert.equal(arg('--workflow'), 'qa-dev.yml')
+    // Always dev — a hotfix has no valid evidence of its own, and a green run
+    // on any other branch exercised different code.
+    assert.equal(arg('--branch'), 'dev')
+    assert.equal(arg('--status'), 'success')
+    assert.equal(arg('--limit'), '1')
+    assert.equal(arg('--repo'), 'd-hinders/Haven-AI')
+    // headSha is what the coverage diff anchors to; dropping it from the JSON
+    // fields would silently turn the coverage rule into fail-closed-always.
+    assert.match(arg('--json'), /headSha/)
+  })
+})
+
+describe('wiring — diff-base selection (#1047)', () => {
+  test('an ordinary branch anchors to the green run commit; merge-base is not consulted', () => {
+    let mergeBaseCalls = 0
+    const base = selectDiffBase({
+      sourceBranch: 'dev',
+      latestGreenRun: { headSha: 'run-sha' },
+      resolveMergeBaseWithMain: () => {
+        mergeBaseCalls += 1
+        return 'wrong'
+      },
+    })
+    assert.equal(base, 'run-sha')
+    assert.equal(mergeBaseCalls, 0)
+  })
+
+  test('a hotfix anchors to its merge-base with main, never the run commit', () => {
+    const base = selectDiffBase({
+      sourceBranch: 'hotfix/urgent',
+      latestGreenRun: { headSha: 'run-sha' },
+      resolveMergeBaseWithMain: () => 'mb-sha',
+    })
+    assert.equal(base, 'mb-sha')
+  })
+
+  test('no green run -> null anchor -> the caller fails closed', () => {
+    const base = selectDiffBase({
+      sourceBranch: 'dev',
+      latestGreenRun: null,
+      resolveMergeBaseWithMain: () => 'unused',
+    })
+    assert.equal(base, null)
+  })
+
+  test('an unresolvable hotfix merge-base stays null — never a silent fallback to the run', () => {
+    const base = selectDiffBase({
+      sourceBranch: 'hotfix/urgent',
+      latestGreenRun: { headSha: 'run-sha' },
+      resolveMergeBaseWithMain: () => null,
+    })
+    assert.equal(base, null)
   })
 })

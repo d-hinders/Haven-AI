@@ -18,9 +18,9 @@
  * (`routes/payments.ts` never consults `agent_allowances` on this rail).
  */
 
-import pool from '../db.js'
 import { getChainData } from '@haven_ai/core'
 import { formatTokenValue } from './tokens.js'
+import { listActiveDelegations } from '../infra/repositories/delegation-budgets.js'
 
 export interface DerivedAllowance {
   id: string
@@ -29,15 +29,6 @@ export interface DerivedAllowance {
   token_symbol: string
   allowance_amount: string
   reset_period_min: number
-}
-
-interface ActiveDelegationRow {
-  id: string
-  agent_id: string
-  chain_id: number
-  token_address: string
-  budget_atomic: string
-  period_seconds: number
 }
 
 function tokenView(chainId: number, tokenAddress: string): { symbol: string; decimals: number } {
@@ -64,14 +55,8 @@ export async function deriveDelegationAllowances(
 ): Promise<Map<string, DerivedAllowance[]>> {
   const derived = new Map<string, DerivedAllowance[]>()
   if (agentIds.length === 0) return derived
-  const result = await pool.query<ActiveDelegationRow>(
-    `SELECT id, agent_id, chain_id, token_address, budget_atomic, period_seconds
-     FROM agent_delegations
-     WHERE agent_id = ANY($1) AND status = 'active'
-     ORDER BY created_at ASC`,
-    [agentIds],
-  )
-  for (const row of result.rows) {
+  const rows = await listActiveDelegations(agentIds)
+  for (const row of rows) {
     const { symbol, decimals } = tokenView(row.chain_id, row.token_address)
     const existing = derived.get(row.agent_id) ?? []
     existing.push({

@@ -21,7 +21,7 @@ covers:
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
-last-verified: "2026-07-18"
+last-verified: "2026-08-05"
 ---
 
 # Haven Product & UX Guide

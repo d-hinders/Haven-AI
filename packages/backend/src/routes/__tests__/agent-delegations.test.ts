@@ -83,7 +83,7 @@ function mockDb(opts: {
       return Promise.resolve({ rows: [{ next_version: opts.version ?? 1 }] })
     }
     // loadHybridOwnerConfig (#885): the account row, then its passkey set.
-    if (/SELECT id, owner_address FROM user_safes/.test(s)) {
+    if (/SELECT id, owner_address, single_signer_waiver_at FROM user_safes/.test(s)) {
       // owner === null AND no passkeys → account row still exists (so the
       // config loader can look up passkeys); a truly-missing row is opts.owner
       // === undefined with no passkeys handled below via the null return.

@@ -14,11 +14,12 @@
  * that way. Two copies of a spend-authority rule is how they drift.
  */
 
-import { encodeFunctionData } from 'viem'
+import { encodeFunctionData, zeroAddress } from 'viem'
 import type { Address, Hex } from 'viem'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   addAccountPasskey,
+  clearAccountOwnerAddress,
   removeAccountPasskey,
   setAccountOwnerAddress,
 } from '../infra/repositories/hybrid-signers.js'
@@ -26,6 +27,7 @@ import { getChain } from './chains.js'
 import type { HybridOwnerConfig } from './hybrid-provisioning.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
 import { redactVendorSecrets } from './execution-rail.js'
+import { signerFloorError } from './mainnet-gate.js'
 
 export const HYBRID_SIGNER_ABI = [
   { name: 'addKey', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: '_keyId', type: 'string' }, { name: '_x', type: 'uint256' }, { name: '_y', type: 'uint256' }], outputs: [] },
@@ -33,7 +35,7 @@ export const HYBRID_SIGNER_ABI = [
   { name: 'transferOwnership', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'newOwner', type: 'address' }], outputs: [] },
 ] as const
 
-export type SignerAction = 'add_passkey' | 'remove_passkey' | 'add_owner'
+export type SignerAction = 'add_passkey' | 'remove_passkey' | 'add_owner' | 'remove_owner'
 
 export interface SignerActionBody {
   action?: SignerAction
@@ -48,6 +50,13 @@ export interface SignerActionAccount {
   chainId: number
   userSafeId: string
   config: HybridOwnerConfig
+  /**
+   * The account's recorded single-signer waiver (#908), when loaded. Consulted
+   * only by removals that would drop a value-bearing account below the signer
+   * floor — the SAME waiver provisioning honours, so "may this account run
+   * single-signer on mainnet" has exactly one answer.
+   */
+  singleSignerWaiverAt?: string | null
 }
 
 /** Vendor errors echo the bundler URL (which embeds the API key) — #764. */
@@ -117,10 +126,11 @@ export function encodeSignerAction(
       return { error: 'No such passkey on this account' }
     }
     if (signerCount - 1 < 2) {
+      // Haven's floor is ≥2 so recovery always exists; the chain itself only
+      // refuses removing the LAST signer (#884 CannotRemoveLastSigner) — do
+      // not claim the stricter rule is on-chain.
       return {
-        error:
-          'Removing this would leave fewer than two ways to approve — add a backup first. ' +
-          'The account itself enforces this on-chain.',
+        error: 'Removing this would leave fewer than two ways to approve — add a backup first.',
       }
     }
     return { data: encodeFunctionData({ abi: HYBRID_SIGNER_ABI, functionName: 'removeKey', args: [keyId] }) }
@@ -139,7 +149,53 @@ export function encodeSignerAction(
     }
     return { data: encodeFunctionData({ abi: HYBRID_SIGNER_ABI, functionName: 'transferOwnership', args: [body.owner_address as Address] }) }
   }
-  return { error: 'action must be add_passkey, remove_passkey or add_owner' }
+  if (body.action === 'remove_owner') {
+    // #1087: enrolling an owner must not be a one-way door. On-chain this is
+    // transferOwnership(address(0)) — the "no EOA owner" encoding, the same
+    // zero address `add_owner` refuses as INPUT (there it would enrol a
+    // non-signer; here it is the removal itself).
+    if (!owner.config.ownerAddress) {
+      return { error: 'This account has no wallet owner to remove' }
+    }
+    if (passkeys.length === 0) {
+      return {
+        error:
+          'Removing the wallet would leave no way to approve anything — it is the only signer. ' +
+          'Add a passkey first. The account itself refuses this on-chain.',
+      }
+    }
+    return { data: encodeFunctionData({ abi: HYBRID_SIGNER_ABI, functionName: 'transferOwnership', args: [zeroAddress] }) }
+  }
+  return { error: 'action must be add_passkey, remove_passkey, add_owner or remove_owner' }
+}
+
+/**
+ * The #908 mainnet floor applied to owner removal (decision recorded on
+ * #1087): on a value-bearing chain, dropping to a single signer is permitted
+ * only when the account carries the SAME recorded single-signer waiver that
+ * provisioning honours — otherwise refused before any op is prepared.
+ * Testnets are unaffected, so the passkey-only → add owner → remove owner
+ * round-trip stays cheap on dev.
+ */
+function removeOwnerFloorFailure(
+  account: SignerActionAccount,
+  body: SignerActionBody,
+): SignerChangeFailure | null {
+  if (body.action !== 'remove_owner') return null
+  const signersAfterRemoval = (account.config.passkeys ?? []).length
+  const floor = signerFloorError({
+    chainId: account.chainId,
+    signerCount: signersAfterRemoval,
+    waiverAcknowledged: Boolean(account.singleSignerWaiverAt),
+  })
+  if (!floor) return null
+  return {
+    status: 409,
+    error:
+      'Removing the wallet would leave this account with a single signer on a chain where real ' +
+      'funds move. Add a backup passkey first, or record the single-signer waiver the account ' +
+      'was provisioned without.',
+  }
 }
 
 export type SignerChangeFailure = { status: 409 | 400 | 502; error: string; details?: string }
@@ -181,6 +237,9 @@ export async function prepareSignerChange(
 ): Promise<{ ok: true; prepared: PreparedSignerChange } | { ok: false; failure: SignerChangeFailure }> {
   const encoded = encodeSignerAction(body, { config: account.config })
   if ('error' in encoded) return { ok: false, failure: { status: 409, error: encoded.error } }
+
+  const floorFailure = removeOwnerFloorFailure(account, body)
+  if (floorFailure) return { ok: false, failure: floorFailure }
 
   const resolved = resolveSignatureScheme(body.signature_scheme, account.config)
   if ('error' in resolved) return { ok: false, failure: { status: 409, error: resolved.error } }
@@ -248,6 +307,11 @@ export async function submitSignerChange(
   // from what the owner actually signed.
   const encoded = encodeSignerAction(body, { config: account.config })
   if ('error' in encoded) return { ok: false, failure: { status: 409, error: encoded.error } }
+
+  // Public entry point — the floor must hold here too, not just at prepare.
+  const floorFailure = removeOwnerFloorFailure(account, body)
+  if (floorFailure) return { ok: false, failure: floorFailure }
+
   const callData = String((user_operation as { callData?: string }).callData ?? '')
   if (!callData.toLowerCase().includes(encoded.data.slice(2).toLowerCase())) {
     return {
@@ -284,6 +348,8 @@ export async function submitSignerChange(
       await removeAccountPasskey(account.userSafeId, String(body.passkey.key_id))
     } else if (body.action === 'add_owner') {
       await setAccountOwnerAddress(account.userSafeId, String(body.owner_address))
+    } else if (body.action === 'remove_owner') {
+      await clearAccountOwnerAddress(account.userSafeId)
     }
     return { ok: true, txHash: result.txHash }
   } catch (err) {

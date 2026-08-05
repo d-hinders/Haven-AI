@@ -17,7 +17,7 @@ covers:
   - packages/frontend/src/lib/hosted-connect.ts
   - packages/frontend/src/lib/passkey.ts
   - packages/frontend/src/lib/signer.ts
-last-verified: "2026-07-26"
+last-verified: "2026-08-05"
 ---
 
 # Haven UX Copy Guidelines

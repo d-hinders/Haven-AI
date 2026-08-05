@@ -116,7 +116,7 @@ export function AccountSignersReadOnly({
 }
 
 export default function AccountSignersCard({ agentId, chainId, userEmail }: Props) {
-  const { signers, busy, ready, enrollBackupPasskey, enrollOwnerWallet, removePasskey } =
+  const { signers, busy, ready, enrollBackupPasskey, enrollOwnerWallet, removePasskey, removeOwner } =
     useAccountSigners(agentId, chainId, userEmail)
   const { toast } = useToast()
   const [walletAddr, setWalletAddr] = useState('')
@@ -162,7 +162,19 @@ export default function AccountSignersCard({ agentId, chainId, userEmail }: Prop
             <div className="min-w-0">
               <p className="text-sm font-medium text-[var(--v2-ink)]">A connected wallet</p>
               <p className="truncate text-xs text-[var(--v2-ink-muted)]">{truncateAddress(signers.owner_address)}</p>
+              <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+                If you remove it, your passkeys become the only ways to approve — and to recover this
+                account.
+              </p>
             </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy || !ready || wayCount < 2}
+              onClick={() => void handle(removeOwner(), 'Wallet removed.')}
+            >
+              Remove
+            </Button>
           </div>
         ) : null}
         {signers.passkeys.map((pk, i) => (

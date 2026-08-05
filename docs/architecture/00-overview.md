@@ -60,7 +60,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-04"
+last-verified: "2026-08-05"
 ---
 
 # Haven — Architecture Overview
@@ -95,7 +95,7 @@ with no funding leg and no approval queue. Deep dive:
 | `@haven/backend` | Fastify API: auth, Haven wallets/Safes, agents, allowances, approvals, payments, x402/MPP, receipts, catalog, reporting (incl. the live Fortnox feed adapter, `lib/reporting/`), and [OpenAPI](05-agent-api-openapi.md). |
 | `@haven/frontend` | Next.js dashboard: onboarding, wallets, agent rules, approvals, activity, custody/recovery, catalog, and guarded reporting. |
 | `@haven_ai/sdk` | TypeScript agent client plus shared signing, x402, sweep, and payment-state primitives used by direct integrations and the MCP/signer packages. |
-| `@haven_ai/connect` | Connector CLI: generates the delegate key and API key locally, registers the public signing address/proof and API-key hash, stores local credentials, writes runtime config, and returns the user to Haven for wallet approval. |
+| `@haven_ai/connect` | Connector CLI: generates the delegate key and API key locally, registers the public signing address/proof and API-key hash, stores local credentials, writes runtime config, and returns the user to Haven to approve the agent's authority (wallet approval on the legacy rail; budget-delegation signature on the delegation rail). |
 | `@haven_ai/mcp-server` | Hosted MCP — authenticates the agent API key, constructs unsigned payloads, and relays signed requests; never receives the delegate private signing key. |
 | `@haven_ai/signer` | Local edge signer — holds the delegate key, signs only. Funding relay sends `{ payment_id, signature }` to hosted MCP; paid MCP-tool completion can also send a signed, merchant-bound `payment_header` for settlement/evidence. |
 | `@haven_ai/mcp` | Fully-local MCP — tool orchestration and signing share one local process, while still using the configured Haven API/relayer and external chain or merchant; **advanced opt-in** (`--local`), not the default. |
@@ -118,8 +118,10 @@ Code and Codex. Details and trade-offs:
 
 Dashboard creates a pending setup → user runs the setup prompt locally →
 connector generates both credentials locally, registers proof and public
-metadata, stores credentials, and configures the runtime → user approves the
-on-chain agent rules in Haven → the agent can pay. Current contracts:
+metadata, stores credentials, and configures the runtime → user approves in
+the Haven modal (a wallet approval on the legacy Safe rail; on the delegation
+rail the budget-delegation signature itself, which also activates the agent —
+#1069/#1076) → the agent can pay. Current contracts:
 [hosted MCP connect](06-hosted-mcp-connect-flow.md) and
 [edge signer](07-edge-signer.md).
 

@@ -10,7 +10,7 @@ const SAFE = '0x' + 'ab'.repeat(20)
 
 function mock(safe: { id: string; owner_address: string | null } | null, passkeys: Array<{ key_id: string; public_key_x: string; public_key_y: string }> = []) {
   mockQuery.mockImplementation((sql: string) => {
-    if (/SELECT id, owner_address FROM user_safes/.test(String(sql))) {
+    if (/SELECT id, owner_address, single_signer_waiver_at FROM user_safes/.test(String(sql))) {
       return Promise.resolve({ rows: safe ? [safe] : [] })
     }
     if (/FROM hybrid_account_passkeys/.test(String(sql))) {

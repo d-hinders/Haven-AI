@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/lib/hybrid-account-config.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-04"
+last-verified: "2026-08-05"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -168,6 +168,15 @@ and the backup removes the lost one and enrols a replacement. The user-facing
 walkthrough is [account-recovery.md](../product/account-recovery.md); the
 independent-of-Haven path is [exit/README.md](../exit/README.md).
 
+**The signer set is symmetric (#1087):** enrolling an EOA owner is not a
+one-way door — `remove_owner` encodes `transferOwnership(address(0))` through
+the same prepare/submit path and returns the account to passkey-only. Refused
+before any op is prepared when the wallet is the account's only signer; on a
+value-bearing chain a removal that would drop the account to a single signer
+is additionally gated by the **same recorded single-signer waiver provisioning
+honours** (#908 floor — decision recorded on #1087), so "may this account run
+single-signer on mainnet" has exactly one answer.
+
 **Recovery invariants (non-custody preserved through recovery):**
 
 - **Haven can never change an account's signer set.** Every `addKey`/`removeKey`/
@@ -198,6 +207,8 @@ agent-scoped (`/agents/:id/account-signers/{prepare,submit}`, #888) and
 account-scoped (`POST /accounts/hybrid/:address/signers/{prepare,submit}`), the
 latter so an account with **zero agents** can enrol its second signer before
 anything else exists — which is when the ≥2-signer floor (#908) matters most.
+(That capability is API-level today; the account-page card is read-only until
+the #1089 frontend wiring lands.)
 The two surfaces differ only in how the account is resolved: agent lookup
 versus an owner-scoped `(address, chain)` lookup on `user_safes`. Authority
 rules, the ≥2-signer refusal, the calldata encoding and the signed-op matching

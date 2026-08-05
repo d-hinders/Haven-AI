@@ -112,6 +112,7 @@ An agent is a **permissioned actor** = identity + delegate address + on-chain po
 
 - `allowance_amount` and `reset_period_min` map directly to the on-chain AllowanceModule. On the **delegation rail** the same `allowances` array in API payloads is a derived VIEW of the agent's **active** `agent_delegations` rows (#1090) — `agent_allowances` is only written at connection setup on that rail and is never read back for display, and enforcement is the on-chain delegation either way.
 - Payments that fit within the remaining on-chain allowance auto-execute; payments that exceed it are queued for the user to approve manually. There is no separate off-chain `requires_approval_above` knob and no monthly/per-tx limit on the agent itself.
+- **Lifecycle:** connect-modal agents are created `pending_approval` and flip to `active` inside the FIRST budget approval — the wallet-approval transaction on the legacy rail, the first budget-grant activation on the delegation rail (#1069). Direct `POST /agents` creations start `active`.
 - **Recipient pinning:** on the delegation rail, an agent's allowed recipient lives in the delegation's caveat enforcers (per-budget recipient pin), not a separate table. The session-rail `agent_recipients` table + route were dropped in #880 (dead after the #834 retirement).
 - Category-based / protocol-based / per-hour-rate policies (x402, MPP categories, etc.) are **future work** (Phase 2), not implemented today.
 

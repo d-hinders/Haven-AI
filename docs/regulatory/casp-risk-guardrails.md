@@ -146,7 +146,10 @@ Haven backend
 > The reference is deliberately NOT placed in the `X-PAYMENT` payload, so it
 > cannot alter the authenticated payment context or any leg's authority. Absent
 > (`null`) is a normal answer, and a lookup **error** degrades to `null` rather
-> than affecting the payment.
+> than affecting the payment. (The header itself is x402 v2-shaped since
+> #1064 — it additionally echoes the accepted requirements entry, which is
+> public payment metadata the merchant already quoted: no new data class, no
+> authority change.)
 
 > **Current state (2026-07-18, #956):** agents may report the MERCHANT's own
 > receipt after a settled payment (`POST /machine-payments/:id/merchant-receipt`,

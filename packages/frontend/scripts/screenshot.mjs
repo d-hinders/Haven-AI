@@ -333,6 +333,27 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
     }
   }
+  if (pathname.startsWith('/agents/') && pathname.endsWith('/passport')) {
+    // Agent Passport status (#1072). Only agent-research carries one — the
+    // other fixture agents render the "no passport, opt in" state, which is
+    // the normal case since issuance is opt-in.
+    if (pathname === `/agents/${FIXTURE_AGENTS[0].id}/passport`) {
+      return {
+        passport: {
+          status: 'anchored', assurance_level: 0,
+          attestation_uid: '0x' + '22'.repeat(32),
+          tx_hash: `0x${'c3'.repeat(32)}`, chain_id: FIXTURE_SAFE.chain_id,
+          attempts: 1, last_error: null,
+          requested_at: '2026-06-02T10:05:00.000Z', anchored_at: '2026-06-02T10:05:12.000Z',
+        },
+        standing: {
+          agentId: FIXTURE_AGENTS[0].id, standing: 'active', anchor: 'anchored',
+          attestationUid: '0x' + '22'.repeat(32), chainLagging: false, revocationConfirmedAt: null,
+        },
+      }
+    }
+    return { passport: null, standing: null }
+  }
   return null
 }
 

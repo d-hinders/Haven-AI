@@ -452,6 +452,36 @@ describe('ConnectAgent2Modal', () => {
     expect(modalText).not.toMatch(/delegate_key|private_key|privateKey|sk_agent_/)
   })
 
+  it('omits issue_passport by default (#1072)', async () => {
+    renderModal()
+    await fillAndCreateSetup()
+    const body = mockApiPost.mock.calls[0][1] as Record<string, unknown>
+    expect(body.issue_passport).toBeUndefined()
+  })
+
+  it('sends issue_passport when the passport opt-in is checked (#1072)', async () => {
+    renderModal()
+
+    fireEvent.change(screen.getByLabelText('Agent name'), {
+      target: { value: 'Research Agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    if (!screen.queryByPlaceholderText('Amount')) {
+      fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+    }
+    fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /issue an agent passport/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create setup prompt' }))
+      await Promise.resolve()
+    })
+
+    const body = mockApiPost.mock.calls[0][1] as Record<string, unknown>
+    expect(body.issue_passport).toBe(true)
+  })
+
   it('exposes local MCP only as an Advanced opt-in and sends local_mcp when chosen', async () => {
     renderModal()
 

@@ -21,6 +21,12 @@ import { normalizeAgentAllowances } from '../lib/agent-allowance-validation.js'
 import { getTokenAllowance, getTokensForDelegate } from '../lib/allowance-module.js'
 import { getChain } from '../lib/chains.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
+import {
+  requestPassport,
+  issuePassportBestEffort,
+  isPassportConfigured,
+  PASSPORT_CHAIN_IDS,
+} from '../lib/passport/index.js'
 
 interface AllowanceInput {
   token_address: string
@@ -37,6 +43,13 @@ interface CreateSetupBody {
   allowances?: AllowanceInput[]
   /** Advanced opt-in: generate a connector command for the fully-local MCP topology. */
   local_mcp?: boolean
+  /**
+   * Opt in to an L0 Agent Passport (#972), mirroring `POST /agents`'
+   * `issue_passport`. Absent/false is the DEFAULT and normal case. Recorded on
+   * the setup row now and acted on at `/register` time, since the connector
+   * flow has no `agents` row to hang the flag on until then (#1072).
+   */
+  issue_passport?: boolean
 }
 
 interface ResolveSetupBody {
@@ -117,6 +130,8 @@ interface SetupRow {
   safe_chain_id: number
   /** 'delegator_hybrid' = delegation rail (#1073); 'safe' = legacy AllowanceModule. */
   account_type: string | null
+  /** Passport opt-in recorded at setup creation, acted on at /register (#1072). */
+  issue_passport: boolean
 }
 
 interface AllowanceRow {
@@ -181,10 +196,10 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           `INSERT INTO agent_connection_setups (
              id, user_id, safe_id, name, description, runtime, status,
              setup_token_hash, setup_token_prefix, setup_token_expires_at,
-             challenge_id, challenge_message, challenge_expires_at
+             challenge_id, challenge_message, challenge_expires_at, issue_passport
            )
            VALUES ($1, $2, $3, $4, $5, $6, 'awaiting_connection',
-                   $7, $8, $9, $10, $11, $12)`,
+                   $7, $8, $9, $10, $11, $12, $13)`,
           [
             setupId,
             sub,
@@ -198,6 +213,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             challengeId,
             challengeMessage,
             expiresAt,
+            parsed.issuePassport,
           ],
         )
         for (const allowance of parsed.allowances) {
@@ -281,6 +297,9 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     let apiKeyPrefix = ''
     let delegateAddress = ''
     let hostedMcpUrlValue = ''
+    let issuePassportForSetup = false
+    let setupChainId = 0
+    let setupUserId = ''
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
@@ -345,6 +364,9 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       }
       setupId = setup.id
       hostedMcpUrlValue = hostedMcpUrl()
+      issuePassportForSetup = setup.issue_passport === true
+      setupChainId = setup.safe_chain_id
+      setupUserId = setup.user_id
 
       const agentResult = await client.query<{ id: string }>(
         `INSERT INTO agents (
@@ -414,6 +436,29 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       client.release()
     }
 
+    // Opt-in passport (#972/#1072). Deliberately AFTER the transaction commits
+    // and outside any try that could turn a passport problem into a failed
+    // registration — same discipline as POST /agents. `issuePassportForSetup`
+    // was recorded when the setup was created; the agent row (and its chain)
+    // only exists now.
+    const passportChainId =
+      issuePassportForSetup && PASSPORT_CHAIN_IDS.has(setupChainId) ? setupChainId : null
+    if (passportChainId != null) {
+      try {
+        await requestPassport(agentId, passportChainId)
+        if (isPassportConfigured(passportChainId)) {
+          issuePassportBestEffort(agentId, setupUserId)
+        } else {
+          request.log.info(
+            { agentId, chainId: passportChainId },
+            'passport requested but schema not registered — deferred to the sweep',
+          )
+        }
+      } catch (err) {
+        request.log.warn({ err, agentId }, 'passport request failed; agent registered')
+      }
+    }
+
     return reply.code(201).send({
       setup_id: setupId,
       agent_id: agentId,
@@ -424,6 +469,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       delegate_address: delegateAddress,
       hosted_mcp_url: hostedMcpUrlValue,
       next_action: 'return_to_haven_for_wallet_approval',
+      passport_requested: passportChainId != null,
     })
   })
 
@@ -744,6 +790,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
   runtime: string | null
   allowances: AllowanceInput[]
   localMcp: boolean
+  issuePassport: boolean
 } | null {
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   if (!name) {
@@ -770,6 +817,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     runtime,
     allowances: allowances.value,
     localMcp: body.local_mcp === true,
+    issuePassport: body.issue_passport === true,
   }
 }
 
@@ -1215,7 +1263,7 @@ function setupSelectSql(where: string): string {
                  s.challenge_expires_at, s.delegate_address, s.proof_signature,
                  s.api_key_prefix, s.connector_version, s.connector_context,
                  s.install_status, s.approval_status, s.safe_tx_hash, s.tx_hash,
-                 s.failure_reason,
+                 s.failure_reason, s.issue_passport,
                  us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
                  us.account_type
           FROM agent_connection_setups s

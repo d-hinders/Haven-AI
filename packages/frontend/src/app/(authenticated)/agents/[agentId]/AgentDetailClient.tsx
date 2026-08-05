@@ -33,6 +33,7 @@ import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import EditAgentModal, { type EditAgentModalMode } from '@/components/EditAgentModal'
 import DelegationBudgetCard, { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
+import AgentPassportCard from '@/components/AgentPassportCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import {
@@ -623,6 +624,8 @@ export default function AgentDetailClient({ agentId }: Props) {
           helper="Payments waiting on you"
         />
       </div>
+
+      <AgentPassportCard agentId={agentId} agentRevoked={isRevoked} />
 
       <div className="mt-6 space-y-6">
           <AgentRulesSummary

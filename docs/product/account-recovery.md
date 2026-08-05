@@ -6,7 +6,7 @@ covers:
   - packages/frontend/src/hooks/useAccountSigners.ts
   - packages/frontend/src/components/onboarding/RecoveryNudge.tsx
   - packages/backend/src/routes/agent-delegations.ts
-last-verified: "2026-08-04"
+last-verified: "2026-08-05"
 ---
 
 # Account recovery (delegation-rail accounts)
@@ -60,7 +60,11 @@ On an agent's page, open **Backup & recovery** and choose one:
   well as your laptop) it's true device redundancy. One prompt, no transaction
   you pay for.
 - **Add a wallet** — enrols a browser wallet address as an owner. Useful if you
-  already keep a hardware or browser wallet.
+  already keep a hardware or browser wallet. Adding a wallet is reversible:
+  **Remove** next to it takes the account back to passkey-only. You can't
+  remove it while it's your only way to approve, and on mainnet dropping to a
+  single signer needs the same explicit single-signer acknowledgment as
+  creating a single-signer account.
 
 Each takes one approval from a signer you already have.
 

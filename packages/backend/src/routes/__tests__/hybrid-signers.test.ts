@@ -95,13 +95,20 @@ describe('account-scoped signer management (#1081)', () => {
   })
 
   /** Owned account with the given signer set. */
-  function ownedAccount(config: { ownerAddress?: string; passkeys?: typeof PK1[] }) {
+  function ownedAccount(
+    config: { ownerAddress?: string; passkeys?: typeof PK1[] },
+    opts: { waiverAt?: string | null } = {},
+  ) {
     mockQuery.mockImplementation((sql: string) =>
       /FROM user_safes/.test(String(sql))
         ? Promise.resolve({ rows: [{ '?column?': 1 }] })
         : Promise.resolve({ rows: [] }),
     )
-    mockLoadOwner.mockResolvedValue({ userSafeId: 'safe-1', config })
+    mockLoadOwner.mockResolvedValue({
+      userSafeId: 'safe-1',
+      config,
+      singleSignerWaiverAt: opts.waiverAt ?? null,
+    })
   }
 
   function mockPrepared() {
@@ -232,5 +239,145 @@ describe('account-scoped signer management (#1081)', () => {
     expect(res.statusCode).toBe(400)
     expect(res.json().error).toMatch(/signature is required/)
     expect(mockLoadOwner).not.toHaveBeenCalled()
+  })
+})
+
+describe('remove_owner — enrolling a wallet is not a one-way door (#1087)', () => {
+  let app: FastifyInstance
+  const PK1 = { keyId: '0x' + '11'.repeat(32), x: 1n, y: 2n }
+  const OWNER_EOA = '0x' + 'ee'.repeat(20)
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(routes, { prefix: '/accounts' })
+  })
+  afterAll(async () => app.close())
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockLoadOwner.mockReset()
+    mockTreasury.mockReset()
+    mockQuery.mockResolvedValue({ rows: [] })
+  })
+
+  function ownedAccount(
+    config: { ownerAddress?: string; passkeys?: typeof PK1[] },
+    opts: { waiverAt?: string | null } = {},
+  ) {
+    mockQuery.mockImplementation((sql: string) =>
+      /FROM user_safes/.test(String(sql))
+        ? Promise.resolve({ rows: [{ '?column?': 1 }] })
+        : Promise.resolve({ rows: [] }),
+    )
+    mockLoadOwner.mockResolvedValue({
+      userSafeId: 'safe-1',
+      config,
+      singleSignerWaiverAt: opts.waiverAt ?? null,
+    })
+  }
+
+  function mockPrepared() {
+    mockTreasury.mockResolvedValueOnce({
+      treasuryAddress: ACCOUNT,
+      prepareCall: vi.fn().mockResolvedValue({
+        userOperation: { sender: ACCOUNT, nonce: 1n, callData: '0xffff' },
+        userOpHash: '0x' + 'ee'.repeat(32),
+        signingTypedData: { domain: { name: 'HybridDeleGator' }, types: {}, primaryType: 'PackedUserOperation', message: {} },
+      }),
+      submitCall: vi.fn().mockResolvedValue({ txHash: '0x' + 'ff'.repeat(32) }),
+    })
+  }
+
+  it('prepares transferOwnership(address(0)) on a testnet account with a passkey remaining', async () => {
+    ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] })
+    mockPrepared()
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/prepare?chain_id=84532`,
+      payload: { action: 'remove_owner' },
+    })
+    expect(res.statusCode).toBe(200)
+    // Owner still exists → legacy default scheme is the owner's EIP-712.
+    expect(res.json().signature_scheme).toBe('eip712_userop')
+    expect(mockTreasury).toHaveBeenCalled()
+  })
+
+  it('refuses when the wallet is the only signer — before any op is prepared', async () => {
+    ownedAccount({ ownerAddress: OWNER_EOA })
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/prepare?chain_id=84532`,
+      payload: { action: 'remove_owner' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/only signer/)
+    expect(mockTreasury).not.toHaveBeenCalled()
+  })
+
+  it('refuses on a value-bearing chain when removal would drop below the #908 floor without a waiver', async () => {
+    ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] }) // 1 signer after removal
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/prepare?chain_id=8453`,
+      payload: { action: 'remove_owner' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/single signer/)
+    expect(mockTreasury).not.toHaveBeenCalled()
+  })
+
+  it('permits the mainnet drop when the account carries the recorded single-signer waiver', async () => {
+    ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] }, { waiverAt: '2026-08-01T00:00:00Z' })
+    mockPrepared()
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/prepare?chain_id=8453`,
+      payload: { action: 'remove_owner' },
+    })
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('refuses when there is no wallet owner to remove', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/prepare?chain_id=84532`,
+      payload: { action: 'remove_owner' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/no wallet owner/)
+  })
+
+  it('submit clears user_safes.owner_address only when the signed calldata IS the removal', async () => {
+    ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] })
+    mockPrepared()
+    const { encodeFunctionData, zeroAddress } = await import('viem')
+    const { HYBRID_SIGNER_ABI } = await import('../../lib/hybrid-signer-actions.js')
+    const callData = encodeFunctionData({
+      abi: HYBRID_SIGNER_ABI,
+      functionName: 'transferOwnership',
+      args: [zeroAddress],
+    })
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/submit?chain_id=84532`,
+      payload: {
+        action: 'remove_owner',
+        signature: '0x' + 'ab'.repeat(80),
+        user_operation: { sender: ACCOUNT, callData },
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ updated: true, tx_hash: '0x' + 'ff'.repeat(32) })
+    const clear = mockQuery.mock.calls.find(([sql]) => /owner_address = NULL/.test(String(sql)))
+    expect(clear?.[1]).toEqual(['safe-1'])
+  })
+
+  it('submit with mismatched calldata neither submits nor clears the owner', async () => {
+    ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] })
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/submit?chain_id=84532`,
+      payload: {
+        action: 'remove_owner',
+        signature: '0x' + 'ab'.repeat(80),
+        user_operation: { sender: ACCOUNT, callData: '0xdeadbeef' },
+      },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(mockTreasury).not.toHaveBeenCalled()
+    expect(mockQuery.mock.calls.some(([sql]) => /owner_address = NULL/.test(String(sql)))).toBe(false)
   })
 })

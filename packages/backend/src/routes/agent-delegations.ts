@@ -159,6 +159,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           chainId: agent.chain_id,
           userSafeId: owner.userSafeId,
           config: owner.config,
+          singleSignerWaiverAt: owner.singleSignerWaiverAt,
         },
         request.body ?? {},
       )
@@ -191,6 +192,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           chainId: agent.chain_id,
           userSafeId: owner.userSafeId,
           config: owner.config,
+          singleSignerWaiverAt: owner.singleSignerWaiverAt,
         },
         request.body ?? {},
       )

@@ -25,6 +25,7 @@ function base(overrides: Record<string, unknown> = {}) {
     enrollBackupPasskey: vi.fn().mockResolvedValue({ ok: true }),
     enrollOwnerWallet: vi.fn().mockResolvedValue({ ok: true }),
     removePasskey: vi.fn().mockResolvedValue({ ok: true }),
+    removeOwner: vi.fn().mockResolvedValue({ ok: true }),
     reload: vi.fn(),
     ...overrides,
   }
@@ -62,10 +63,50 @@ describe('AccountSignersCard (#888)', () => {
       }),
     )
     render(<AccountSignersCard {...PROPS} />)
-    const remove = screen.getByText('Remove') as HTMLButtonElement
+    // Owner row renders first (#1087 added its Remove); the passkey row's is second.
+    const removes = screen.getAllByText('Remove') as HTMLButtonElement[]
+    const remove = removes[1]
     expect(remove.disabled).toBe(false)
     fireEvent.click(remove)
     await waitFor(() => expect(removePasskey).toHaveBeenCalledWith('0x' + '11'.repeat(32)))
+  })
+
+  it('the wallet owner can be removed when a passkey remains (#1087)', async () => {
+    const removeOwner = vi.fn().mockResolvedValue({ ok: true })
+    mockUseSigners.mockReturnValue(
+      base({
+        removeOwner,
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    // Recovery-accurate copy on the row:
+    expect(screen.getByText(/passkeys become the only ways to approve/)).toBeTruthy()
+    const [ownerRemove] = screen.getAllByText('Remove') as HTMLButtonElement[]
+    expect(ownerRemove.disabled).toBe(false)
+    fireEvent.click(ownerRemove)
+    await waitFor(() => expect(removeOwner).toHaveBeenCalled())
+  })
+
+  it('the wallet owner cannot be removed when it is the only way to approve', async () => {
+    mockUseSigners.mockReturnValue(
+      base({
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    const [ownerRemove] = screen.getAllByText('Remove') as HTMLButtonElement[]
+    expect(ownerRemove.disabled).toBe(true)
   })
 
   it('surfaces the honest "Lost a device?" recovery explainer', async () => {

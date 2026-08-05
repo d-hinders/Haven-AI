@@ -62,3 +62,14 @@ export async function setAccountOwnerAddress(
     [ownerAddress.toLowerCase(), userSafeId],
   )
 }
+
+/** Clear the EOA owner after an on-chain transferOwnership(address(0)) (#1087). */
+export async function clearAccountOwnerAddress(
+  userSafeId: string,
+  executor: Executor = pool,
+): Promise<void> {
+  await executor.query(
+    `UPDATE user_safes SET owner_address = NULL WHERE id = $1`,
+    [userSafeId],
+  )
+}

@@ -357,9 +357,16 @@ pin or meter). The chosen scheme is recorded on the intent
 (`machine_metadata.settlement_scheme`, alongside `network`) so 3009-mode usage
 is auditable and its eventual retirement measurable — as of #1061 the
 **erc7710 branch records it too**, so the accounting feed can tell the two
-schemes apart without parsing `prepared_user_op`. (`delegation_hash` still
-carries different semantics per scheme; giving it an honest column is
-[#1059](https://github.com/d-hinders/Haven-AI/issues/1059).)
+schemes apart without parsing `prepared_user_op`. Since
+[#1059](https://github.com/d-hinders/Haven-AI/issues/1059) the hash semantics
+are honest too: `delegation_hash` records the instrument the agent **signed**
+for the intent (the settlement CHILD on erc7710, the budget on the 3009
+funding leg and on direct `/payments` transfers), while
+**`budget_delegation_hash`** always records the METERING budget — the same
+question answered uniformly, so the accounting feed's attribution reads one
+column regardless of scheme (exposed per receipt in
+`/machine-payments/receipts`). NULL on legacy-rail intents and on rows
+predating migration 053; derived backfill was deliberately skipped.
 
 Since #717 every relayer-paid leg (allowance transfers, sweeps, deploys)
 also runs under a per-identity **relayer gas budget** (`relayer_gas_events`,

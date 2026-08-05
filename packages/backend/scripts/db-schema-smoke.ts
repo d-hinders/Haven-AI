@@ -143,14 +143,14 @@ const QUERIES: SmokeQuery[] = [
             AND recipient_address IS NOT DISTINCT FROM LOWER($3)`,
   },
   {
-    name: 'payments: delegation intent insert (rail + delegation pinned, #829)',
+    name: 'payments: delegation intent insert (rail + delegation pinned, #829; budget hash #1059)',
     sql: `INSERT INTO payment_intents (
             agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
             to_address, amount_raw, amount_human, delegate_address,
             allowance_nonce, sign_hash,
-            execution_rail, delegation_hash, prepared_user_op,
+            execution_rail, delegation_hash, budget_delegation_hash, prepared_user_op,
             status, expires_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
             'pending_signature', NOW() + interval '10 minutes')
           RETURNING *`,
   },

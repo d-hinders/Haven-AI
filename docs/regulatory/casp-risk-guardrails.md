@@ -125,6 +125,9 @@ Haven backend
 > **redeemer-pinned**: when the merchant's 402 advertises
 > `extra.facilitatorAddresses`, only those addresses can redeem the child —
 > narrowing, never widening, who can execute the settlement Haven prepared.
+> Since #1059 every delegation-rail intent also records `budget_delegation_hash`
+> — the metering budget, uniform across schemes — so attribution in the
+> accounting feed never depends on parsing prepared execution state.
 > Since #717 relayer-paid operations run under per-identity gas budgets
 > (429 on over-cap, spend recorded per agent/user for attribution) — an
 > availability control on the shared gas sponsor, deliberately fail-open on

@@ -238,9 +238,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
           to_address, amount_raw, amount_human, delegate_address,
           allowance_nonce, sign_hash,
-          execution_rail, delegation_hash, prepared_user_op,
+          execution_rail, delegation_hash, budget_delegation_hash, prepared_user_op,
           status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
           'pending_signature', NOW() + interval '10 minutes')
         RETURNING *`,
         [
@@ -250,6 +250,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           0, // AllowanceModule-only concept; unused on this rail
           authorization.prepared.userOpHash,
           'delegation',
+          authorization.delegationHash,
+          // #1059: direct transfers redeem the budget itself — same value,
+          // written to both so consumers read ONE column across schemes.
           authorization.delegationHash,
           serializeUserOp(authorization.prepared.userOperation),
         ],

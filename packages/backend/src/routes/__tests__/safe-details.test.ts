@@ -138,3 +138,34 @@ describe('Safe details routes', () => {
     expect(mockGetSafeDetails).not.toHaveBeenCalled()
   })
 })
+
+describe('non-Safe accounts answer cleanly (#1107)', () => {
+  let app: FastifyInstance
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(safeDetailRoutes, { prefix: '/safe' })
+  })
+  afterAll(async () => app.close())
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockGetSafeDetails.mockReset()
+  })
+
+  it('a delegator_hybrid account gets a 409, never a Safe-ABI probe that 500s', async () => {
+    const token = app.jwt.sign({ sub: 'user-1', email: 't@e.com' }, { expiresIn: '1h' })
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ id: 'safe-1', chain_id: 84532, account_type: 'delegator_hybrid' }],
+    })
+    const response = await app.inject({
+      method: 'GET',
+      url: `/safe/${SAFE_ADDRESS}/details?chain_id=84532`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/not a Safe/)
+    // The Safe ABI is never probed against a Hybrid:
+    expect(mockGetSafeDetails).not.toHaveBeenCalled()
+  })
+})

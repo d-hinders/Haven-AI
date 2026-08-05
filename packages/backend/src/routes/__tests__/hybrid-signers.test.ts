@@ -476,7 +476,7 @@ describe('owner-initiated send (#1083)', () => {
     const callData = encodeFunctionData({
       abi: [{ name: 'transfer', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }], outputs: [{ type: 'bool' }] }],
       functionName: 'transfer',
-      args: [TO, 250000n],
+      args: [TO as `0x${string}`, 250000n],
     })
     const res = await app.inject({
       method: 'POST', url: submitUrl,

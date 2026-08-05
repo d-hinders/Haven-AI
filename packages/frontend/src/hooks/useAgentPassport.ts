@@ -36,6 +36,13 @@ export interface UseAgentPassportResult {
   passport: AgentPassport | null
   standing: AgentPassportStanding | null
   loading: boolean
+  /**
+   * The lookup itself failed (network/5xx) — NOT the same as "no passport".
+   * The card must render a retryable error, never the authoritative empty
+   * state, or a transient outage reads as "Not issued" with a live Issue
+   * button (review finding on #1112).
+   */
+  loadError: boolean
   issuing: boolean
   issueError: string | null
   issuePassport: () => Promise<void>
@@ -53,6 +60,7 @@ const EMPTY: AgentPassportResponse = { passport: null, standing: null }
 export function useAgentPassport(agentId: string | null): UseAgentPassportResult {
   const [data, setData] = useState<AgentPassportResponse>(EMPTY)
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const [issuing, setIssuing] = useState(false)
   const [issueError, setIssueError] = useState<string | null>(null)
   // Guards issuePassport's own refetch against a stale write if `agentId`
@@ -70,9 +78,12 @@ export function useAgentPassport(agentId: string | null): UseAgentPassportResult
       const res = await api.get<AgentPassportResponse>(`/agents/${agentId}/passport`)
       if (agentIdRef.current === agentId) {
         setData({ passport: res.passport ?? null, standing: res.standing ?? null })
+        setLoadError(false)
       }
     } catch {
-      if (agentIdRef.current === agentId) setData(EMPTY)
+      // Keep whatever we last knew rather than overwriting with EMPTY — the
+      // error flag is what the card renders on.
+      if (agentIdRef.current === agentId) setLoadError(true)
     } finally {
       if (agentIdRef.current === agentId) setLoading(false)
     }
@@ -81,20 +92,25 @@ export function useAgentPassport(agentId: string | null): UseAgentPassportResult
   useEffect(() => {
     if (!agentId) {
       setData(EMPTY)
+      setLoadError(false)
       return
     }
     // Clear immediately so a stale passport from the previous agent can't
     // briefly render during client-side navigation.
     setData(EMPTY)
+    setLoadError(false)
     setLoading(true)
     let ignore = false
     api
       .get<AgentPassportResponse>(`/agents/${agentId}/passport`)
       .then((res) => {
-        if (!ignore) setData({ passport: res.passport ?? null, standing: res.standing ?? null })
+        if (!ignore) {
+          setData({ passport: res.passport ?? null, standing: res.standing ?? null })
+          setLoadError(false)
+        }
       })
       .catch(() => {
-        if (!ignore) setData(EMPTY)
+        if (!ignore) setLoadError(true)
       })
       .finally(() => {
         if (!ignore) setLoading(false)
@@ -125,6 +141,7 @@ export function useAgentPassport(agentId: string | null): UseAgentPassportResult
     passport: data.passport,
     standing: data.standing,
     loading,
+    loadError,
     issuing,
     issueError,
     issuePassport,

@@ -54,6 +54,38 @@ describe('useAgentPassport', () => {
     expect(result.current.standing?.anchor).toBe('not_anchored')
   })
 
+  // #1112 review finding 1: a failed LOOKUP must be distinguishable from
+  // "no passport" — the card renders a retry on it, never the empty state.
+  it('a failed lookup sets loadError instead of masquerading as no-passport', async () => {
+    mockApiGet.mockRejectedValueOnce(new Error('network down'))
+    const { result } = renderHook(() => useAgentPassport('agent-1'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.loadError).toBe(true)
+    expect(result.current.passport).toBeNull()
+
+    // refetch recovers and clears the flag.
+    mockApiGet.mockResolvedValueOnce({ passport: passport(), standing: standing() })
+    await act(async () => {
+      await result.current.refetch()
+    })
+    expect(result.current.loadError).toBe(false)
+    expect(result.current.passport?.status).toBe('anchored')
+  })
+
+  it('a failed refetch keeps the last known data alongside the error flag', async () => {
+    mockApiGet.mockResolvedValueOnce({ passport: passport(), standing: standing() })
+    const { result } = renderHook(() => useAgentPassport('agent-1'))
+    await waitFor(() => expect(result.current.passport?.status).toBe('anchored'))
+
+    mockApiGet.mockRejectedValueOnce(new Error('boom'))
+    await act(async () => {
+      await result.current.refetch()
+    })
+    expect(result.current.loadError).toBe(true)
+    // Stale-but-real beats blank: the card keeps rendering what we knew.
+    expect(result.current.passport?.status).toBe('anchored')
+  })
+
   it('surfaces an anchored passport', async () => {
     mockApiGet.mockResolvedValueOnce({ passport: passport(), standing: standing() })
     const { result } = renderHook(() => useAgentPassport('agent-1'))

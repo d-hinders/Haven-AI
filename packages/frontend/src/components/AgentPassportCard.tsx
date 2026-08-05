@@ -55,13 +55,34 @@ function standingBadge(standing: 'active' | 'suspended' | 'revoked' | 'unknown')
 }
 
 export default function AgentPassportCard({ agentId, agentRevoked = false }: Props) {
-  const { passport, standing, loading, issuing, issueError, issuePassport } = useAgentPassport(agentId)
+  const { passport, standing, loading, loadError, issuing, issueError, issuePassport, refetch } = useAgentPassport(agentId)
 
   if (loading && !passport && !standing) {
     return (
       <Card hover={false} className="mt-6 p-5 md:p-6">
         <Skeleton variant="text" className="h-5 w-32" />
         <Skeleton className="mt-3 h-16 rounded-lg" />
+      </Card>
+    )
+  }
+
+  // A failed LOOKUP must never render as the authoritative "Not issued" state
+  // (with a live Issue button, no less) — say what actually happened and
+  // offer a retry.
+  if (loadError && !passport && !standing) {
+    return (
+      <Card hover={false} className="mt-6 p-5 md:p-6">
+        <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent Passport</h2>
+        <p className="mt-2 text-sm text-[var(--v2-ink-muted)]">
+          Couldn&apos;t load passport status.{' '}
+          <button
+            type="button"
+            className="rounded-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            onClick={() => void refetch()}
+          >
+            Try again
+          </button>
+        </p>
       </Card>
     )
   }

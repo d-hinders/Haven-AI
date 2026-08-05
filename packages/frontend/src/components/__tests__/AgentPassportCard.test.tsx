@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const { mockUseAgentPassport, mockIssuePassport } = vi.hoisted(() => ({
@@ -17,6 +17,7 @@ function state(overrides: Record<string, unknown> = {}) {
     passport: null,
     standing: null,
     loading: false,
+    loadError: false,
     issuing: false,
     issueError: null,
     issuePassport: mockIssuePassport,
@@ -31,6 +32,39 @@ beforeEach(() => {
 })
 
 describe('AgentPassportCard (#1072)', () => {
+  // #1112 review finding 1: a lookup failure must never wear the "Not issued"
+  // costume — no empty-state copy, no live Issue button, a retry instead.
+  it('renders a retryable error — not the opt-in state — when the lookup failed', () => {
+    const refetch = vi.fn()
+    mockUseAgentPassport.mockReturnValue(state({ loadError: true, refetch }))
+    render(<AgentPassportCard agentId="agent-1" />)
+    expect(screen.getByText(/Couldn.t load passport status/)).toBeTruthy()
+    expect(screen.queryByText(/has no passport/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Issue a passport/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(refetch).toHaveBeenCalled()
+  })
+
+  it('a refetch failure with known data keeps rendering the passport, not the error card', () => {
+    mockUseAgentPassport.mockReturnValue(state({
+      loadError: true,
+      passport: {
+        status: 'anchored', assurance_level: 0,
+        attestation_uid: '0x' + '11'.repeat(32),
+        tx_hash: '0x' + 'aa'.repeat(32), chain_id: 84532,
+        attempts: 1, last_error: null,
+        requested_at: '2026-06-02T10:00:00.000Z', anchored_at: '2026-06-02T10:00:12.000Z',
+      },
+      standing: {
+        agentId: 'agent-1', standing: 'active', anchor: 'anchored',
+        attestationUid: '0x' + '11'.repeat(32), chainLagging: false, revocationConfirmedAt: null,
+      },
+    }))
+    render(<AgentPassportCard agentId="agent-1" />)
+    expect(screen.queryByText(/Couldn.t load passport status/)).toBeNull()
+    expect(screen.getByText('Issued')).toBeTruthy()
+  })
+
   it('renders the opt-in state when the agent has no passport', () => {
     mockUseAgentPassport.mockReturnValue(state())
     render(<AgentPassportCard agentId="agent-1" />)

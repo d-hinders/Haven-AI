@@ -128,11 +128,16 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(body.sign_data.signature_scheme).toBe('eip712_delegation')
     expect(body.sign_data.typed_data.domain.name).toBe('DelegationManager')
     expect(body.sign_data.instructions).toMatch(/X-PAYMENT header/)
-    // The intent was pinned to the delegation rail:
+    // The intent was pinned to the delegation rail, and the METERING budget
+    // is recorded uniformly (#1059): delegation_hash carries the signed CHILD,
+    // budget_delegation_hash the parent budget — never equal on erc7710.
     expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
       executionRail: 'delegation',
       preparedUserOp: expect.any(String),
+      budgetDelegationHash: `0x${'12'.repeat(32)}`,
     }))
+    const call = mockCreateIntent.mock.calls[0][0] as { delegationHash: string; budgetDelegationHash: string }
+    expect(call.delegationHash).not.toBe(call.budgetDelegationHash)
     // No allowance/funding query ran — there is no funding leg on this rail:
     expect(mockQuery.mock.calls.some((c) => /allowance/i.test(String(c[0])))).toBe(false)
   })
@@ -258,6 +263,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
       merchantAddress: MERCHANT.toLowerCase(),
       metadata: expect.objectContaining({ settlement_scheme: 'eip3009' }),
       delegationHash: PREPARED.delegationHash,
+      // #1059: on the funding leg the budget IS the signed instrument.
+      budgetDelegationHash: PREPARED.delegationHash,
     }))
     // The funding redemption targeted the EOA with the exact amount:
     expect(mockPrepareFunding).toHaveBeenCalledWith(

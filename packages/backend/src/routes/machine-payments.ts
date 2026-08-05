@@ -148,11 +148,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
-function mapEvidence(row: MachinePaymentEvidenceRow & { settlement_scheme?: string | null }) {
+function mapEvidence(
+  row: MachinePaymentEvidenceRow & {
+    settlement_scheme?: string | null
+    budget_delegation_hash?: string | null
+  },
+) {
   return {
     id: row.id,
     /** Which settlement branch ran (eip3009 | erc7710), from the intent (#946). */
     settlement_scheme: row.settlement_scheme ?? null,
+    /** The metering budget, uniform across schemes (#1059) — null on the
+     *  legacy rail and on intents predating the column. */
+    budget_delegation_hash: row.budget_delegation_hash ?? null,
     payment_id: row.payment_intent_id ?? row.approval_request_id,
     payment_intent_id: row.payment_intent_id,
     approval_request_id: row.approval_request_id,
@@ -525,7 +533,8 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     // by the first real run of the delegation QA leg (#1063): the scenario
     // had nowhere to read the scheme from.
     const result = await pool.query<MachinePaymentEvidenceRow & { settlement_scheme: string | null }>(
-      `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme
+      `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
+              pi.budget_delegation_hash
        FROM machine_payment_evidence e
        LEFT JOIN payment_intents pi ON pi.id = e.payment_intent_id
        WHERE e.agent_id = $1

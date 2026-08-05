@@ -341,6 +341,7 @@ describe('machine payment routes', () => {
       receipts: [{
         id: 'evidence-1',
         settlement_scheme: 'eip3009',
+        budget_delegation_hash: null,
         payment_id: PAYMENT_ID,
         payment_intent_id: PAYMENT_ID,
         approval_request_id: null,

@@ -307,6 +307,44 @@ export function completenessWarningFromJobs(jobs) {
   return null
 }
 
+/**
+ * The exact `gh run list` query the gate trusts (#1047 wiring test): always
+ * dev's runs — a hotfix has no valid evidence of its own — always this
+ * workflow, only successes, newest one.
+ */
+export function greenRunQueryArgs(repo) {
+  return [
+    'run',
+    'list',
+    '--repo',
+    repo,
+    '--workflow',
+    'qa-dev.yml',
+    '--branch',
+    'dev',
+    '--status',
+    'success',
+    '--limit',
+    '1',
+    '--json',
+    'createdAt,headSha,databaseId',
+  ]
+}
+
+/**
+ * Which SHA the coverage diff is anchored to (#1047 wiring test): a hotfix
+ * diffs against its merge-base with main (two-dot against main's tip would
+ * blame it for every money-path change main gained since it branched); every
+ * other branch diffs against the newest green run's commit. `null` when the
+ * anchor cannot be established — the caller fails closed on null.
+ * `resolveMergeBaseWithMain` is a thunk so the git call only happens on the
+ * hotfix path.
+ */
+export function selectDiffBase({ sourceBranch, latestGreenRun, resolveMergeBaseWithMain }) {
+  if (sourceBranch.startsWith('hotfix/')) return resolveMergeBaseWithMain()
+  return latestGreenRun?.headSha ?? null
+}
+
 // ---------------------------------------------------------------------------
 // CLI — the IO shell. Everything above is pure and tested.
 // ---------------------------------------------------------------------------
@@ -315,23 +353,8 @@ function gh(args) {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).trim()
 }
 
-function latestGreenRunFor(repo, branch) {
-  const out = gh([
-    'run',
-    'list',
-    '--repo',
-    repo,
-    '--workflow',
-    'qa-dev.yml',
-    '--branch',
-    branch,
-    '--status',
-    'success',
-    '--limit',
-    '1',
-    '--json',
-    'createdAt,headSha,databaseId',
-  ])
+function latestGreenRunFor(repo) {
+  const out = gh(greenRunQueryArgs(repo))
   const rows = JSON.parse(out || '[]')
   return rows.length ? rows[0] : null
 }
@@ -378,11 +401,10 @@ function main() {
 
   const globs = loadMoneyPathGlobs()
 
-  // Always dev's runs: a hotfix has no valid evidence of its own (see the header),
-  // so there is nothing to look up on that branch.
+  // Always dev's runs — the decision lives in greenRunQueryArgs, pinned by test.
   let latestGreenRun = null
   try {
-    latestGreenRun = latestGreenRunFor(repo, 'dev')
+    latestGreenRun = latestGreenRunFor(repo)
     if (latestGreenRun?.databaseId) {
       try {
         const jobsOut = gh([
@@ -407,8 +429,11 @@ function main() {
   // hotfix for every money-path change main gained since it branched, naming
   // files it never touched — which trains operators to reach for qa-override on
   // exactly the branch type with the weakest coverage.
-  const isHotfix = sourceBranch.startsWith('hotfix/')
-  const base = isHotfix ? mergeBase('origin/main', headSha) : latestGreenRun?.headSha
+  const base = selectDiffBase({
+    sourceBranch,
+    latestGreenRun,
+    resolveMergeBaseWithMain: () => mergeBase('origin/main', headSha),
+  })
   const changed = changedFilesSince(base, headSha)
   const changedMoneyPathFiles = changed === null ? null : moneyPathFiles(changed, globs)
 

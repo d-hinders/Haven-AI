@@ -39,6 +39,22 @@ jobs:
   money-flow:
     runs-on: ubuntu-latest
     steps:
+      # #1047: the dispatch override points the harness — WITH the QA payment
+      # secrets in env — at an arbitrary backend. Constrain it to Haven's own
+      # deploy surface (a Railway origin) and put the actor + URL in the log,
+      # so a dispatch can never quietly hand the QA credentials to an
+      # attacker-controlled endpoint.
+      - name: Validate haven_api_url override
+        if: github.event.inputs.haven_api_url != ''
+        env:
+          OVERRIDE_URL: ${{ github.event.inputs.haven_api_url }}
+          DISPATCH_ACTOR: ${{ github.actor }}
+        run: |
+          echo "::notice::qa-dev dispatched with haven_api_url override '$OVERRIDE_URL' by $DISPATCH_ACTOR"
+          if ! printf '%s' "$OVERRIDE_URL" | grep -Eq '^https://[a-z0-9-]+\.up\.railway\.app/?$'; then
+            echo "::error::haven_api_url override must be an https://<app>.up.railway.app origin — the QA secrets only ever authenticate against Haven deployments (#1047)."
+            exit 1
+          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:

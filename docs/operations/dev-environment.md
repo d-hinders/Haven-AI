@@ -82,6 +82,10 @@ deployed that way today.
   harness — a reappearing skip means a broken precondition (drained QA
   treasury, expired credential, reverted env var), never a missing identity
   (see agent-qa.md, which also documents how to legitimately retire a leg).
+  Since #1047 a `workflow_dispatch` override of `haven_api_url` is validated
+  against Haven's own deploy surface (an `https://<app>.up.railway.app`
+  origin) and logged with the dispatching actor — the QA secrets can no
+  longer be pointed at an arbitrary endpoint.
   A **money-path `hotfix/*`** blocks outright: the harness tests a *deployed* backend and a
   hotfix is deployed nowhere until it merges, so no automatic evidence about it
   can exist. Bypass in both cases: the `qa-override` label, with a comment

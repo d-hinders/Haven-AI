@@ -1,3 +1,4 @@
+import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { ethers } from 'ethers'
 import { buildX402ExpectedMessage } from '@haven_ai/sdk'
@@ -1398,6 +1399,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           0n,
           agent.delegate_address,
           signature,
+          { agentId: agent.id, userId: agent.user_id },
         )
 
         const fiatValues = await getFiatValuesForTokenAmount(
@@ -1450,6 +1452,11 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           explorer_url: getExplorerUrl(agent.chain_id, 'tx', txHash),
         })
       } catch (err) {
+        // #717: over-budget = refused before submission — 429, intent stays
+        // pending for retry.
+        if (err instanceof RelayerBudgetExceededError) {
+          return reply.code(429).send({ payment_id: intent.id, status: intent.status, error: err.message })
+        }
         const errorMsg = err instanceof Error ? err.message : String(err)
         await pool.query(
           `UPDATE payment_intents

@@ -1,3 +1,4 @@
+import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import { config } from '../config.js'
@@ -1387,8 +1388,18 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
 
     let txHash: string
     try {
-      ;({ txHash } = await relaySweepAuthorization(expected, signature))
+      ;({ txHash } = await relaySweepAuthorization(expected, signature, { agentId: agent.id, userId: agent.user_id }))
     } catch (err) {
+      if (err instanceof RelayerBudgetExceededError) {
+        // #717: refused before submission — release the claim back to
+        // 'prepared' so the sweep can be retried after the window; 'failed'
+        // would strand the funds path.
+        await pool.query(
+          `UPDATE delegate_sweeps SET status = 'prepared' WHERE id = $1 AND status = 'submitting'`,
+          [row.id],
+        )
+        return reply.code(429).send({ error: err.message })
+      }
       const errorMsg = err instanceof Error ? err.message : String(err)
       await pool.query(
         `UPDATE delegate_sweeps SET status = 'failed', error_message = $1 WHERE id = $2 AND status = 'submitting'`,

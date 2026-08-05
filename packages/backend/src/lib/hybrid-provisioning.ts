@@ -123,6 +123,8 @@ export async function ensureHybridDeployed(
    * wrong address and deploy a spurious account.
    */
   expectedAddress?: Address,
+  /** #717: who this deploy is billed to (relayer gas budget + attribution). */
+  attribution?: { agentId?: string | null; userId?: string | null },
 ): Promise<EnsureDeployedResult> {
   if (expectedAddress) {
     const client = createPublicClient({
@@ -146,6 +148,19 @@ export async function ensureHybridDeployed(
     throw new Error('hybrid provisioning: account reports no factory args to deploy with')
   }
 
+  // #717: budget check BEFORE the relayer signs — over-cap throws (429 at
+  // the route); lazy import keeps the pure derivation path free of db wiring.
+  const { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend } = await import('./relayer-spend-guard.js')
+  await assertRelayerBudget('hybrid_deploy', attribution ?? {})
+  // Attempt row before broadcast: bursts see each other, and the row exists
+  // even when tx.wait() throws on a reverted deploy (ethers v6).
+  const spendId = await recordRelayerSpend({
+    operation: 'hybrid_deploy',
+    chainId,
+    agentId: attribution?.agentId,
+    userId: attribution?.userId,
+  })
+
   // Lazy import: the relayer wiring pulls ethers + env config; keep the pure
   // derivation path (compute…) free of it for tests and scripts.
   const { getRelayer, getRelayerFeeOverrides, withRelayerSendLock } = await import('./relayer.js')
@@ -157,7 +172,18 @@ export async function ensureHybridDeployed(
   const tx = await withRelayerSendLock(chainId, () =>
     relayer.sendTransaction({ to: factory, data: factoryData, ...overrides }),
   )
-  const receipt = await tx.wait()
+  let receipt
+  try {
+    receipt = await tx.wait()
+  } finally {
+    // Stamp the hash whatever happened — a reverting deploy burned gas too,
+    // and ethers v6 throws out of wait() on revert.
+    await finishRelayerSpend(spendId, {
+      txHash: tx.hash,
+      gasUsed: receipt ? BigInt(receipt.gasUsed.toString()) : null,
+      effectiveGasPrice: receipt?.gasPrice != null ? BigInt(receipt.gasPrice.toString()) : null,
+    })
+  }
   if (!receipt || receipt.status !== 1) {
     throw new Error(`hybrid deploy transaction reverted (${tx.hash})`)
   }

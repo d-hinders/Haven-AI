@@ -122,6 +122,9 @@ describe('non-custody: the relay is non-discretionary', () => {
       0n,
       AGENT.delegate_address,
       SIGNATURE,
+      // #717: attribution rides along — it feeds the gas budget/metrics and
+      // is not a signed parameter, so it does not weaken the verbatim claim.
+      { agentId: AGENT.id, userId: AGENT.user_id },
     )
   })
 })

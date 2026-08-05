@@ -1,3 +1,4 @@
+import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import {
   Contract,
@@ -231,6 +232,10 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         ZeroAddress,
       ])
 
+      // #717: one deploy budget per user covers the whole route (signer
+      // deploy + proxy deploy ride the same cap) — checked before the
+      // relayer signs anything.
+      await assertRelayerBudget('safe_deploy', { userId: sub })
       await warnIfRelayerLow(chain_id)
       const relayer = getRelayer(chain_id)
       await ensurePasskeySignerDeployed({
@@ -265,6 +270,11 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         return reply.code(503).send({ error: 'Safe deployment collided; please try again later' })
       }
 
+      // #717: attempt row BEFORE broadcast (bursts see each other; the row
+      // survives a throw-on-revert wait). NOTE: the passkey-signer factory tx
+      // above shares this row's cap but its own gas is not itemised — a known
+      // undercount in attribution, not in the cap.
+      const spendId = await recordRelayerSpend({ operation: 'safe_deploy', chainId: chain_id, userId: sub })
       // Broadcast under the per-chain send lock so the deploy can't race
       // another relayer submission for the same EOA nonce (#692/#718).
       const tx = await withRelayerSendLock(chain_id, () =>
@@ -274,7 +284,19 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
           saltNonce,
         ),
       )
-      const receipt = await tx.wait()
+      let receipt
+      try {
+        receipt = await tx.wait()
+      } finally {
+        // The local receipt type only declares `logs` (address extraction);
+        // the gas fields exist on the real ethers receipt.
+        const gasReceipt = receipt as unknown as { gasUsed?: { toString(): string }; gasPrice?: { toString(): string } } | null
+        await finishRelayerSpend(spendId, {
+          txHash: tx.hash,
+          gasUsed: gasReceipt?.gasUsed != null ? BigInt(gasReceipt.gasUsed.toString()) : null,
+          effectiveGasPrice: gasReceipt?.gasPrice != null ? BigInt(gasReceipt.gasPrice.toString()) : null,
+        })
+      }
       if (!receipt) {
         throw new Error('Safe deployment transaction did not return a receipt')
       }
@@ -304,6 +326,9 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         } catch (rollbackError) {
           request.log.error({ err: rollbackError }, 'Failed to roll back passkey safe deployment transaction')
         }
+      }
+      if (error instanceof RelayerBudgetExceededError) {
+        return reply.code(429).send({ error: error.message })
       }
       if (isInsufficientFundsError(error)) {
         return reply.code(503).send({ error: 'Relayer is temporarily unfunded; please try again later' })

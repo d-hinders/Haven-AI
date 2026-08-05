@@ -7,6 +7,7 @@
  * All functions accept a chainId to select the correct RPC and contract addresses.
  */
 
+import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, type RelayerAttribution } from './relayer-spend-guard.js'
 import { ethers } from 'ethers'
 import { config, relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from './chains.js'
@@ -247,7 +248,12 @@ export async function executeAllowanceTransfer(
   payment: bigint,
   delegate: string,
   signature: string,
+  /** #717: who this transfer is billed to (relayer gas budget + attribution). */
+  attribution?: RelayerAttribution,
 ): Promise<{ txHash: string }> {
+  // #717: budget check before any relayer work — over-cap throws
+  // RelayerBudgetExceededError (routes map it to 429).
+  await assertRelayerBudget('allowance_transfer', attribution ?? {})
   const relayer = getRelayerWallet(chainId)
   const contract = getContract(chainId, relayer)
   const args = [safe, token, to, amount, paymentToken, payment, delegate, signature] as const
@@ -277,6 +283,14 @@ export async function executeAllowanceTransfer(
   // a base-fee spike can't strand the tx and block the nonce lane. The
   // confirmation wait below stays OUTSIDE the lock — only the nonce-read→
   // broadcast window is exclusive.
+  // #717: the attempt row lands BEFORE broadcast so concurrent bursts see
+  // each other in the count; the receipt stamps it below.
+  const spendId = await recordRelayerSpend({
+    operation: 'allowance_transfer',
+    chainId,
+    agentId: attribution?.agentId,
+    userId: attribution?.userId,
+  })
   const tx = await withRelayerSendLock(chainId, async () => {
     const feeOverrides = await getRelayerFeeOverrides(provider)
     return contract.executeAllowanceTransfer(...args, feeOverrides)
@@ -286,6 +300,11 @@ export async function executeAllowanceTransfer(
   // poll by hash with a timeout, then assert it didn't revert. The nonce is then
   // confirmed-visible on this provider for the next transfer's read.
   const receipt = await provider.waitForTransaction(tx.hash, 1, 90_000)
+  await finishRelayerSpend(spendId, {
+    txHash: tx.hash,
+    gasUsed: receipt ? BigInt(receipt.gasUsed.toString()) : null,
+    effectiveGasPrice: receipt?.gasPrice != null ? BigInt(receipt.gasPrice.toString()) : null,
+  })
   if (!receipt) {
     throw new Error(`Allowance transfer ${tx.hash} not confirmed within 90s`)
   }

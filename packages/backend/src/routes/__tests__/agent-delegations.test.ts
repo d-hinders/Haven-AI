@@ -382,7 +382,7 @@ describe('delegation lifecycle API (#828)', () => {
         payload: { signature: '0x' + 'ab'.repeat(65) },
       })
       expect(res.statusCode).toBe(200)
-      expect(mockEnsureDeployed).toHaveBeenCalledWith(84532, { ownerAddress: OWNER }, TREASURY)
+      expect(mockEnsureDeployed).toHaveBeenCalledWith(84532, expect.objectContaining({ ownerAddress: OWNER }), TREASURY, { agentId: AGENT_ID, userId: 'user-1' })
     })
 
     it('502s WITHOUT activating when the deploy fails — grant stays pending, retryable (#860)', async () => {
@@ -422,7 +422,7 @@ describe('delegation lifecycle API (#828)', () => {
       expect(mockEnsureDeployed).toHaveBeenCalledWith(84532, {
         ownerAddress: undefined,
         passkeys: [{ keyId: 'cred-1', x: 0x11n, y: 0x22n }],
-      }, TREASURY)
+      }, TREASURY, { agentId: AGENT_ID, userId: 'user-1' })
     })
 
     it('#908: blocks activation for a single-signer MAINNET account without a recorded waiver', async () => {

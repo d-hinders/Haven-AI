@@ -66,15 +66,23 @@ describe('buildSettlementDelegation (#830)', () => {
     expect(built.expiresAt - NOW).toBeLessThanOrEqual(MAX_SETTLEMENT_WINDOW_SECONDS + 2)
   })
 
-  it('adds a redeemer caveat when facilitators are named', () => {
+  it('adds a REDEEMER caveat pinned to our enforcer, terms naming the facilitator (#1058)', () => {
     const facilitator = ('0x' + '77'.repeat(20)) as `0x${string}`
     const built = buildSettlementDelegation(req({ redeemers: [facilitator] }))
     const pins = getDelegationContracts(84532)
-    // Redeemer enforcer address from the kit env (not in our pin set) — assert
-    // one extra caveat vs the no-redeemer build.
     const withoutRedeemer = buildSettlementDelegation(req())
     expect(built.child.caveats.length).toBe(withoutRedeemer.child.caveats.length + 1)
-    expect(pins).toBeDefined()
+    // The added caveat IS the RedeemerEnforcer we pin (#825 drift guard now
+    // covers it), and its terms encode the facilitator — count alone would
+    // pass with any caveat.
+    const redeemerCaveat = built.child.caveats.find(
+      (c) => c.enforcer.toLowerCase() === pins.enforcers.redeemer.toLowerCase(),
+    )
+    expect(redeemerCaveat).toBeDefined()
+    expect(redeemerCaveat!.terms.toLowerCase()).toContain(facilitator.slice(2).toLowerCase())
+    expect(withoutRedeemer.child.caveats.some(
+      (c) => c.enforcer.toLowerCase() === pins.enforcers.redeemer.toLowerCase(),
+    )).toBe(false)
   })
 
   it('the signing payload targets the pinned manager (agent signs this)', () => {
@@ -122,5 +130,43 @@ describe('assembleSettlementPayload + header (#830)', () => {
       extra: { assetTransferMethod: 'erc7710' },
     })
     expect(decoded.payload.delegator.toLowerCase()).toBe(DELEGATE_ACCT.toLowerCase())
+  })
+
+  // #1058: @x402/core's v2 matcher requires the merchant's advertised extra to
+  // be a SUBSET of the echo — advertised facilitators must round-trip VERBATIM.
+  it('echoes facilitatorAddresses verbatim in the accepted extra when present', () => {
+    const built = buildSettlementDelegation(req())
+    const payload = assembleSettlementPayload(
+      84532, built.child, ('0x' + 'ef'.repeat(65)) as `0x${string}`, signedBudget, DELEGATE_ACCT,
+    )
+    const facilitators = ['0x' + 'Fa'.repeat(20)] // deliberately mixed-case: echo must not normalize
+    const header = encodeXPaymentHeader('base-sepolia', payload, {
+      amount: '1000',
+      payTo: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
+      asset: USDC as `0x${string}`,
+      maxTimeoutSeconds: 300,
+      facilitatorAddresses: facilitators,
+    })
+    const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8'))
+    expect(decoded.accepted.extra).toEqual({
+      assetTransferMethod: 'erc7710',
+      facilitatorAddresses: facilitators,
+    })
+  })
+
+  it('omits the facilitatorAddresses key entirely when none were advertised', () => {
+    const built = buildSettlementDelegation(req())
+    const payload = assembleSettlementPayload(
+      84532, built.child, ('0x' + 'ef'.repeat(65)) as `0x${string}`, signedBudget, DELEGATE_ACCT,
+    )
+    const header = encodeXPaymentHeader('base-sepolia', payload, {
+      amount: '1000',
+      payTo: ('0x' + 'cc'.repeat(20)) as `0x${string}`,
+      asset: USDC as `0x${string}`,
+      maxTimeoutSeconds: 300,
+      facilitatorAddresses: [],
+    })
+    const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8'))
+    expect(decoded.accepted.extra).toEqual({ assetTransferMethod: 'erc7710' })
   })
 })

@@ -91,14 +91,13 @@ export function buildSettlementDelegation(req: X402SettlementRequest): BuiltSett
     // the grant would silently fail for every facilitator but the first
     // (#1053 review, finding 2).
     //
-    // HONEST GUARANTEE (#1053 review, finding 1): no live path populates
-    // `req.redeemers` today — routes/x402.ts does not parse facilitator
-    // addresses out of the 402's `requirements.extra`, so every child
-    // delegation is currently a BEARER instrument within its bounds:
-    // exact amount, payee-pinned, ≤600s expiry. The ceiling of that
-    // exposure is "merchant gets paid without delivering", never fund
-    // loss. Wiring `extra` through is tracked as a follow-up; until then
-    // this comment is the guarantee, not the caveat.
+    // #1058: `req.redeemers` is populated when the client forwards the
+    // 402's `extra.facilitatorAddresses` (MetaMask's erc7710 shape) into
+    // authorize — the child is then redeemable ONLY by those addresses.
+    // When a merchant advertises no facilitators there is nothing to pin
+    // and the child remains a bearer instrument within its bounds (exact
+    // amount, payee-pinned, ≤600s expiry) — exposure ceiling "merchant
+    // gets paid without delivering", never fund loss (#1053 finding 1).
     to: '0x0000000000000000000000000000000000000a11' as Address, // ANY_BENEFICIARY
     parentDelegation: req.budgetDelegation,
     scope: {
@@ -149,6 +148,13 @@ export interface X402AcceptedEcho {
   payTo: Address
   asset: Address
   maxTimeoutSeconds: number
+  /**
+   * #1058: echoed VERBATIM from the merchant's advertised entry when present.
+   * @x402/core's v2 matcher requires the advertised `extra` to be a SUBSET of
+   * this echo (`objectContainsSubset`) — a facilitator-advertising merchant
+   * rejects any header that omits these.
+   */
+  facilitatorAddresses?: string[]
 }
 
 /**
@@ -177,7 +183,12 @@ export function encodeXPaymentHeader(
       payTo: accepted.payTo,
       maxTimeoutSeconds: accepted.maxTimeoutSeconds,
       asset: accepted.asset,
-      extra: { assetTransferMethod: 'erc7710' },
+      extra: {
+        assetTransferMethod: 'erc7710',
+        ...(accepted.facilitatorAddresses && accepted.facilitatorAddresses.length > 0
+          ? { facilitatorAddresses: accepted.facilitatorAddresses }
+          : {}),
+      },
     },
     payload,
   }

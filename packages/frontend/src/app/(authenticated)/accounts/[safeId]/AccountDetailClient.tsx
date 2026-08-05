@@ -161,7 +161,10 @@ export default function AccountDetailClient() {
     loading: detailsLoading,
     error: detailsError,
     refetch: refetchDetails,
-  } = useSafeDetails(safeAddress, { chainId })
+    // #1107: a delegator_hybrid account has no Safe contract — fetching Safe
+    // details 500s and pollutes every console session on the default rail.
+    // The signer set (Backup & recovery card) is that rail's approval story.
+  } = useSafeDetails(safe?.account_type === 'delegator_hybrid' ? null : safeAddress, { chainId })
 
   const {
     totalUsd,

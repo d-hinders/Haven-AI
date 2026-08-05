@@ -525,3 +525,88 @@ describe('agent payloads carry the rail (#1069/#1071 class)', () => {
     }
   })
 })
+
+describe('delegation-rail budget view derives from active delegations (#1090)', () => {
+  // agent_allowances is written once at connection setup and never on budget
+  // updates — a frozen onboarding mirror. The summary payloads must read the
+  // ACTIVE agent_delegations rows, or every view shows the onboarding budget
+  // forever. Legacy AllowanceModule agents keep the mirror verbatim.
+  const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+  const AGENT_BASE = {
+    id: 'agent-1', name: 'A', description: null, delegate_address: VALID_DELEGATE,
+    safe_id: 'safe-1', safe_address: '0x' + '22'.repeat(20), safe_name: 'Main',
+    safe_chain_id: 84532, api_key_prefix: 'sk_a', status: 'active',
+    created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null, has_stranded_funds: false,
+  }
+  const STALE_MIRROR = {
+    id: 'al-1', agent_id: 'agent-1', token_address: SEPOLIA_USDC,
+    token_symbol: 'USDC', allowance_amount: '10.00', reset_period_min: 1440,
+  }
+
+  beforeEach(() => {
+    mockQuery.mockReset()
+  })
+
+  function mockReads(opts: {
+    accountType: string | null
+    delegations?: Array<Record<string, unknown>>
+  }) {
+    mockQuery.mockImplementation(async (sql: string) => {
+      const s = String(sql)
+      if (/FROM agents a/.test(s)) {
+        return { rows: [{ ...AGENT_BASE, account_type: opts.accountType }] }
+      }
+      if (/FROM agent_allowances/.test(s)) return { rows: [STALE_MIRROR] }
+      if (/FROM agent_delegations/.test(s)) return { rows: opts.delegations ?? [] }
+      return { rows: [] }
+    })
+  }
+
+  async function getAgents(url: string) {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    return app.inject({ method: 'GET', url })
+  }
+
+  const ACTIVE_DELEGATION = {
+    id: 'd-1', agent_id: 'agent-1', chain_id: 84532, token_address: SEPOLIA_USDC,
+    budget_atomic: '1000000', period_seconds: 86_400,
+  }
+
+  it('list: a delegation agent reports the ACTIVE delegation, not the frozen mirror', async () => {
+    mockReads({ accountType: 'delegator_hybrid', delegations: [ACTIVE_DELEGATION] })
+    const res = await getAgents('/agents')
+    expect(res.statusCode).toBe(200)
+    const [agent] = res.json().agents
+    expect(agent.allowances).toEqual([{
+      id: 'd-1', agent_id: 'agent-1', token_address: SEPOLIA_USDC,
+      token_symbol: 'USDC', allowance_amount: '1.00', reset_period_min: 1440,
+    }])
+  })
+
+  it('by-id: same derivation, and a revoked-only agent reports NO budget', async () => {
+    mockReads({ accountType: 'delegator_hybrid', delegations: [] })
+    const res = await getAgents('/agents/agent-1')
+    expect(res.statusCode).toBe(200)
+    expect(res.json().allowances).toEqual([])
+  })
+
+  it('legacy agents return the agent_allowances rows byte-identically — the derivation must not leak onto that rail', async () => {
+    mockReads({ accountType: null, delegations: [ACTIVE_DELEGATION] })
+    const res = await getAgents('/agents')
+    expect(res.json().agents[0].allowances).toEqual([STALE_MIRROR])
+    // And the delegations table is never consulted for a legacy-only listing:
+    expect(mockQuery.mock.calls.some((c) => /FROM agent_delegations/.test(String(c[0])))).toBe(false)
+  })
+
+  it('an unlisted token degrades to a generic view instead of dropping the budget', async () => {
+    mockReads({
+      accountType: 'delegator_hybrid',
+      delegations: [{ ...ACTIVE_DELEGATION, token_address: '0x' + '99'.repeat(20), budget_atomic: '2000000000000000000' }],
+    })
+    const res = await getAgents('/agents/agent-1')
+    const [allowance] = res.json().allowances
+    expect(allowance.token_symbol).toBe('TOKEN')
+    expect(allowance.allowance_amount).toBe('2.00')
+  })
+})

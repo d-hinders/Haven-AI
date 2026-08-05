@@ -31,6 +31,13 @@ interface Props {
   agentId: string
   chainId: number
   tokens: TokenOption[]
+  /**
+   * Fires after a successful grant or revoke (#1090): the agent-page budget
+   * SUMMARY reads a different source (useAgents) than this card's live
+   * delegations, so the parent must refetch or the summary stays stale until
+   * remount.
+   */
+  onBudgetChange?: () => void
 }
 
 /**
@@ -45,7 +52,7 @@ const PERIODS: Array<{ label: string; seconds: number }> = [
   { label: 'per month', seconds: 2_592_000 },
 ]
 
-export default function DelegationBudgetCard({ agentId, chainId, tokens }: Props) {
+export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudgetChange }: Props) {
   const { budgets, grant, revoke, busy, ready, signersError, reloadSigners } =
     useDelegationBudget(agentId, chainId)
   const { toast } = useToast()
@@ -86,16 +93,19 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens }: Props
     setAmount('')
     setRecipient('')
     toast.success('Budget set — it refills itself every period.')
-  }, [toast])
+    onBudgetChange?.()
+  }, [onBudgetChange, toast])
 
   const handleRevoke = useCallback(
     async (hash: string) => {
       const result = await revoke(hash)
-      if (result.ok) toast.success('Budget stopped.')
-      else if (result.reason === 'cancelled') toast.error('Signature was cancelled.')
+      if (result.ok) {
+        toast.success('Budget stopped.')
+        onBudgetChange?.()
+      } else if (result.reason === 'cancelled') toast.error('Signature was cancelled.')
       else toast.error('Could not stop the budget. Try again.')
     },
-    [revoke, toast],
+    [onBudgetChange, revoke, toast],
   )
 
   if (budgets === null) return null

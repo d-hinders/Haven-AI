@@ -3,6 +3,7 @@ import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import { fetchPortfolioForSafe } from '../lib/portfolio.js'
+import { deriveDelegationAllowances } from '../lib/delegation-budget-view.js'
 import {
   compareTransactions,
   type EnrichedTransaction,
@@ -30,6 +31,7 @@ interface AgentRow {
   safe_id: string | null
   safe_name: string | null
   safe_chain_id: number | null
+  account_type: string | null
 }
 
 interface AllowanceRow {
@@ -111,7 +113,8 @@ export default async function dashboardRoutes(
         [sub],
       ),
       pool.query<AgentRow>(
-        `SELECT a.id, a.name, a.status, a.safe_id, us.name AS safe_name, us.chain_id AS safe_chain_id
+        `SELECT a.id, a.name, a.status, a.safe_id, us.name AS safe_name, us.chain_id AS safe_chain_id,
+                us.account_type
          FROM agents a
          LEFT JOIN user_safes us ON us.id = a.safe_id
          WHERE a.user_id = $1
@@ -173,6 +176,16 @@ export default async function dashboardRoutes(
       const existing = allowancesByAgent.get(row.agent_id) ?? []
       existing.push(row)
       allowancesByAgent.set(row.agent_id, existing)
+    }
+
+    // Delegation-rail agents: the live budget is the active delegation set,
+    // not the frozen agent_allowances onboarding mirror (#1090).
+    const delegationAgentIds = agents
+      .filter((agent) => agent.account_type === 'delegator_hybrid')
+      .map((agent) => agent.id)
+    const derivedByAgent = await deriveDelegationAllowances(delegationAgentIds)
+    for (const agentId of delegationAgentIds) {
+      allowancesByAgent.set(agentId, derivedByAgent.get(agentId) ?? [])
     }
 
     const currentPortfolio = await Promise.all(

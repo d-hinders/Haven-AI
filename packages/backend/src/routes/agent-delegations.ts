@@ -25,6 +25,7 @@
  * dashboard (#833) renders exactly what is and isn't live.
  */
 
+import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import { encodeFunctionData } from 'viem'
 import type { Hex, Address } from 'viem'
@@ -382,6 +383,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           agent.chain_id,
           owner.config,
           agent.treasury_address as Address,
+          { agentId: agent.agent_id, userId: sub },
         )
         if (deployed.address.toLowerCase() !== String(agent.treasury_address).toLowerCase()) {
           // The stored owner no longer derives the stored account — refuse
@@ -389,6 +391,9 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           return reply.code(500).send({ error: 'Account derivation mismatch — contact support' })
         }
       } catch (err) {
+        if (err instanceof RelayerBudgetExceededError) {
+          return reply.code(429).send({ error: err.message })
+        }
         return reply.code(502).send({
           error: 'Could not deploy the account for this budget — try again',
           details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),

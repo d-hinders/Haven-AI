@@ -361,6 +361,14 @@ schemes apart without parsing `prepared_user_op`. (`delegation_hash` still
 carries different semantics per scheme; giving it an honest column is
 [#1059](https://github.com/d-hinders/Haven-AI/issues/1059).)
 
+Since #717 every relayer-paid leg (allowance transfers, sweeps, deploys)
+also runs under a per-identity **relayer gas budget** (`relayer_gas_events`,
+migration 054): over-cap requests get a 429 with the intent left pending —
+never burned to failed — and every submitted relayer tx is recorded with its
+receipt's gas numbers for cost attribution. Availability guard, not a funds
+gate: it fails open on database errors because funds stay caveat-gated
+on-chain either way.
+
 **How 3009-mode works.** EIP-3009 (`transferWithAuthorization`) is ECDSA-based —
 the fund-holder must be an **EOA** that signs (USDC rejects EIP-1271 for it),
 which neither Hybrid can do — so 3009-mode redeems the budget delegation to

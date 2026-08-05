@@ -123,6 +123,8 @@ export async function ensureHybridDeployed(
    * wrong address and deploy a spurious account.
    */
   expectedAddress?: Address,
+  /** #717: who this deploy is billed to (relayer gas budget + attribution). */
+  attribution?: { agentId?: string | null; userId?: string | null },
 ): Promise<EnsureDeployedResult> {
   if (expectedAddress) {
     const client = createPublicClient({
@@ -146,6 +148,11 @@ export async function ensureHybridDeployed(
     throw new Error('hybrid provisioning: account reports no factory args to deploy with')
   }
 
+  // #717: budget check BEFORE the relayer signs — over-cap throws (429 at
+  // the route); lazy import keeps the pure derivation path free of db wiring.
+  const { assertRelayerBudget, recordRelayerSpend } = await import('./relayer-spend-guard.js')
+  await assertRelayerBudget('hybrid_deploy', attribution ?? {})
+
   // Lazy import: the relayer wiring pulls ethers + env config; keep the pure
   // derivation path (compute…) free of it for tests and scripts.
   const { getRelayer, getRelayerFeeOverrides, withRelayerSendLock } = await import('./relayer.js')
@@ -158,6 +165,16 @@ export async function ensureHybridDeployed(
     relayer.sendTransaction({ to: factory, data: factoryData, ...overrides }),
   )
   const receipt = await tx.wait()
+  // #717: submitted = spent — a reverting deploy burned relayer gas too.
+  await recordRelayerSpend({
+    operation: 'hybrid_deploy',
+    chainId,
+    agentId: attribution?.agentId,
+    userId: attribution?.userId,
+    txHash: tx.hash,
+    gasUsed: receipt ? BigInt(receipt.gasUsed.toString()) : null,
+    effectiveGasPrice: receipt?.gasPrice != null ? BigInt(receipt.gasPrice.toString()) : null,
+  })
   if (!receipt || receipt.status !== 1) {
     throw new Error(`hybrid deploy transaction reverted (${tx.hash})`)
   }

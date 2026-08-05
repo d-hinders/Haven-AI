@@ -1,3 +1,4 @@
+import { assertRelayerBudget, recordRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import { Contract, TypedDataEncoder } from 'ethers'
 import pool from '../db.js'
@@ -277,6 +278,8 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
     }
 
     try {
+      // #717: exec budget per user, checked before the relayer signs.
+      await assertRelayerBudget('safe_exec', { userId: sub })
       await warnIfRelayerLow(body.chain_id)
       const relayer = getRelayer(body.chain_id)
       await ensurePasskeySignerDeployed({
@@ -377,13 +380,28 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
           gasLimit: getRelayExecGasLimit(estimatedGas),
         }),
       )
-      await tx.wait()
+      const execReceipt = (await tx.wait()) as unknown as {
+        gasUsed?: { toString(): string }
+        gasPrice?: { toString(): string }
+      } | null
+      // #717: submitted = spent, success or revert.
+      await recordRelayerSpend({
+        operation: 'safe_exec',
+        chainId: body.chain_id,
+        userId: sub,
+        txHash: tx.hash,
+        gasUsed: execReceipt?.gasUsed != null ? BigInt(execReceipt.gasUsed.toString()) : null,
+        effectiveGasPrice: execReceipt?.gasPrice != null ? BigInt(execReceipt.gasPrice.toString()) : null,
+      })
 
       return reply.code(201).send({
         tx_hash: tx.hash,
         chain_id: body.chain_id,
       })
     } catch (error) {
+      if (error instanceof RelayerBudgetExceededError) {
+        return reply.code(429).send({ error: error.message })
+      }
       if (isInsufficientFundsError(error)) {
         return reply.code(503).send({ error: 'Relayer is temporarily unfunded; please try again later' })
       }

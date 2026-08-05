@@ -18,6 +18,7 @@ import { formatEther } from 'ethers'
 import { relayerPrivateKeyForChain } from '../config.js'
 import { getChain, SUPPORTED_CHAIN_IDS } from './chains.js'
 import { getRelayer, RELAYER_LOW_BALANCE_WEI } from './relayer.js'
+import { relayerSpendSummary } from './relayer-spend-guard.js'
 
 export interface RelayerBalanceStatus {
   chainId: number
@@ -124,5 +125,23 @@ export async function runRelayerBalanceMonitor(log: MonitorLogger): Promise<void
         'relayer balance read failed',
       )
     }
+  }
+
+  // #717: cost attribution rides the same hourly scan — per-chain/per-op
+  // relayer spend over the trailing 24h, so "who is burning the gas" is a
+  // log query, not an incident investigation. Best-effort like the alerts.
+  try {
+    const summary = await relayerSpendSummary(24)
+    if (summary.length > 0) {
+      log.info(
+        { scope: 'relayer-balance-monitor', spend24h: summary },
+        'relayer spend, trailing 24h (per chain/operation)',
+      )
+    }
+  } catch (err) {
+    log.warn(
+      { scope: 'relayer-balance-monitor', err: err instanceof Error ? err.message : String(err) },
+      'relayer spend summary failed (scan unaffected)',
+    )
   }
 }

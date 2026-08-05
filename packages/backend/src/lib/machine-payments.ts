@@ -1,3 +1,4 @@
+import { RelayerBudgetExceededError } from './relayer-spend-guard.js'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { type AgentContext } from '../middleware/agentAuth.js'
@@ -1019,6 +1020,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       0n,
       agent.delegate_address,
       signature,
+      { agentId: agent.id, userId: agent.user_id },
     )
 
     const fiatValues = await getFiatValuesForTokenAmount(
@@ -1065,6 +1067,20 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       },
     }
   } catch (err) {
+    // #717: an over-budget refusal happened BEFORE anything was submitted —
+    // 429 and leave the intent pending so a later retry can execute; burning
+    // it to 'failed' would punish the caller twice.
+    if (err instanceof RelayerBudgetExceededError) {
+      return {
+        statusCode: 429,
+        body: {
+          success: false,
+          payment_id: intent.id,
+          status: 'pending_signature',
+          error: err.message,
+        },
+      }
+    }
     const errorMsg = err instanceof Error ? err.message : String(err)
     await pool.query(
       `UPDATE payment_intents

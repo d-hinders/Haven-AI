@@ -1,3 +1,4 @@
+import { assertRelayerBudget, recordRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import {
   Contract,
@@ -231,6 +232,10 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         ZeroAddress,
       ])
 
+      // #717: one deploy budget per user covers the whole route (signer
+      // deploy + proxy deploy ride the same cap) — checked before the
+      // relayer signs anything.
+      await assertRelayerBudget('safe_deploy', { userId: sub })
       await warnIfRelayerLow(chain_id)
       const relayer = getRelayer(chain_id)
       await ensurePasskeySignerDeployed({
@@ -275,6 +280,18 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         ),
       )
       const receipt = await tx.wait()
+      // The local receipt type only declares `logs` (address extraction);
+      // the gas fields exist on the real ethers receipt.
+      const gasReceipt = receipt as unknown as { gasUsed?: { toString(): string }; gasPrice?: { toString(): string } } | null
+      // #717: submitted = spent, success or revert.
+      await recordRelayerSpend({
+        operation: 'safe_deploy',
+        chainId: chain_id,
+        userId: sub,
+        txHash: tx.hash,
+        gasUsed: gasReceipt?.gasUsed != null ? BigInt(gasReceipt.gasUsed.toString()) : null,
+        effectiveGasPrice: gasReceipt?.gasPrice != null ? BigInt(gasReceipt.gasPrice.toString()) : null,
+      })
       if (!receipt) {
         throw new Error('Safe deployment transaction did not return a receipt')
       }
@@ -304,6 +321,9 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         } catch (rollbackError) {
           request.log.error({ err: rollbackError }, 'Failed to roll back passkey safe deployment transaction')
         }
+      }
+      if (error instanceof RelayerBudgetExceededError) {
+        return reply.code(429).send({ error: error.message })
       }
       if (isInsufficientFundsError(error)) {
         return reply.code(503).send({ error: 'Relayer is temporarily unfunded; please try again later' })

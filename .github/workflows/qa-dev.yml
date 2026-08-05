@@ -53,6 +53,10 @@ jobs:
           QA_AGENT_API_KEY: ${{ secrets.QA_AGENT_API_KEY }}
           QA_DELEGATE_PRIVATE_KEY: ${{ secrets.QA_DELEGATE_PRIVATE_KEY }}
           QA_PAYMENT_TO: ${{ secrets.QA_PAYMENT_TO }}
+          # Delegation-rail QA identity (#1063): open-budget Hybrid treasury on
+          # Base Sepolia. Without BOTH of these the two delegation legs skip.
+          QA_DELEGATION_AGENT_API_KEY: ${{ secrets.QA_DELEGATION_AGENT_API_KEY }}
+          QA_DELEGATION_DELEGATE_PRIVATE_KEY: ${{ secrets.QA_DELEGATION_DELEGATE_PRIVATE_KEY }}
           QA_DEMO_MERCHANT_URL: ${{ secrets.QA_DEMO_MERCHANT_URL }}
           # Flake budget (#578): the harness is idempotent-safe to re-run, so a transient
           # testnet RPC hiccup gets one more shot before the run is called red. Bump via a

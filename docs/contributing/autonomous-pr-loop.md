@@ -241,10 +241,17 @@ credential in that environment is a testnet throwaway — but "bounded" is not
 covered.
 
 The #1047 hardening decision, recorded: the `haven_api_url` dispatch input is
-now **validated against Haven's own deploy surface** (an
-`https://<app>.up.railway.app` origin) and logged with the dispatching actor —
-a dispatch can no longer point the harness, with the QA secrets in env, at an
-arbitrary endpoint. Pinning the harness checkout to a reviewed ref was
+now **validated to be an `https://<app>.up.railway.app` origin** (whole-string
+match, control characters rejected) and logged with the dispatching actor.
+Stated precisely: that constrains the override to *Railway's* deploy surface,
+not Haven's — Railway is multi-tenant, so a write-access attacker could still
+aim at a Railway app they control; what the check removes is the quiet
+arbitrary-endpoint path, and the log names who aimed where. Two residuals are
+accepted and named: (a) tightening to an exact-hostname allowlist is the next
+step if this risk stops being acceptable; (b) a `workflow_dispatch` on an
+arbitrary ref runs *that ref's* copy of `qa-dev.yml` with repo secrets —
+inherent to repo-level secrets plus write access; the durable fix is moving
+the `QA_*` secrets into a GitHub *environment* restricted to `dev`/`main`. Pinning the harness checkout to a reviewed ref was
 **considered and rejected**: the harness must co-evolve with the rail it
 proves (a pinned ref goes stale silently, weakening exactly the coverage the
 freshness gate certifies), and the compensating control is where it belongs —

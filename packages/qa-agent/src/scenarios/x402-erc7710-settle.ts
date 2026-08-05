@@ -20,9 +20,10 @@
  *     whole flow — the property that makes epic #713's stranded-funds class
  *     structurally absent on this path.
  *
- * The SDK deliberately plays no part: HavenClient has no erc7710 support
- * (that gap is #1058), so this leg drives the raw API — which is also the
- * merchant-facing contract the scheme ships as.
+ * The SDK deliberately plays no part: HavenClient has no erc7710 support,
+ * so this leg drives the raw API — which is also the merchant-facing
+ * contract the scheme ships as. (SDK-side erc7710 remains an open gap;
+ * #1058 covered the redeemer-pin wiring, not the client.)
  *
  * Idempotent-safe under QA_MAX_ATTEMPTS: every attempt mints a fresh intent
  * via a unique resource nonce; amounts are at the existing legs' scale.
@@ -184,8 +185,11 @@ export const x402Erc7710Settle: Scenario = {
       maxTimeoutSeconds: erc7710Entry.maxTimeoutSeconds,
       // #1058: forward the merchant's advertised facilitators verbatim — the
       // child delegation becomes redeemable ONLY by them, and the merchant's
-      // v2 matcher requires them back in the echo.
-      facilitatorAddresses: erc7710Entry.extra?.facilitatorAddresses,
+      // v2 matcher requires them back in the echo. An advertised EMPTY array
+      // pins nothing; treat it as absent rather than tripping the 400.
+      facilitatorAddresses: erc7710Entry.extra?.facilitatorAddresses?.length
+        ? erc7710Entry.extra.facilitatorAddresses
+        : undefined,
     })
     if (!auth.ok || !auth.data.payment_id) {
       return fail(`authorize failed (${auth.status}): ${JSON.stringify(auth.data).slice(0, 200)}`)

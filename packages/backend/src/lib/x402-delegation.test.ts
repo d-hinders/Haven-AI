@@ -66,15 +66,23 @@ describe('buildSettlementDelegation (#830)', () => {
     expect(built.expiresAt - NOW).toBeLessThanOrEqual(MAX_SETTLEMENT_WINDOW_SECONDS + 2)
   })
 
-  it('adds a redeemer caveat when facilitators are named', () => {
+  it('adds a REDEEMER caveat pinned to our enforcer, terms naming the facilitator (#1058)', () => {
     const facilitator = ('0x' + '77'.repeat(20)) as `0x${string}`
     const built = buildSettlementDelegation(req({ redeemers: [facilitator] }))
     const pins = getDelegationContracts(84532)
-    // Redeemer enforcer address from the kit env (not in our pin set) — assert
-    // one extra caveat vs the no-redeemer build.
     const withoutRedeemer = buildSettlementDelegation(req())
     expect(built.child.caveats.length).toBe(withoutRedeemer.child.caveats.length + 1)
-    expect(pins).toBeDefined()
+    // The added caveat IS the RedeemerEnforcer we pin (#825 drift guard now
+    // covers it), and its terms encode the facilitator — count alone would
+    // pass with any caveat.
+    const redeemerCaveat = built.child.caveats.find(
+      (c) => c.enforcer.toLowerCase() === pins.enforcers.redeemer.toLowerCase(),
+    )
+    expect(redeemerCaveat).toBeDefined()
+    expect(redeemerCaveat!.terms.toLowerCase()).toContain(facilitator.slice(2).toLowerCase())
+    expect(withoutRedeemer.child.caveats.some(
+      (c) => c.enforcer.toLowerCase() === pins.enforcers.redeemer.toLowerCase(),
+    )).toBe(false)
   })
 
   it('the signing payload targets the pinned manager (agent signs this)', () => {

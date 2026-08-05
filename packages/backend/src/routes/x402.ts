@@ -203,6 +203,7 @@ function existingX402IntentMismatch(
     amountRaw: string
     tokenAddress: string
     network: string
+    facilitatorAddresses?: string[]
   },
 ): string | null {
   const existingResource = existing.x402_resource_url ?? existing.payment_resource_url
@@ -223,6 +224,18 @@ function existingX402IntentMismatch(
 
   const existingNetwork = x402MetadataNetwork(existing.machine_metadata)
   if (existingNetwork && existingNetwork !== requested.network) return 'network'
+
+  // #1058: a replay after the merchant rotated its advertised facilitators
+  // would hand back a child pinned to the OLD redeemer — internally
+  // consistent but dead on arrival at the merchant's matcher. 409 so the
+  // client re-keys. 3009-mode state has no facilitators key; treat absent
+  // and undefined as equal.
+  const state = existing.prepared_user_op as { facilitatorAddresses?: string[] } | null | undefined
+  const existingFacilitators = Array.isArray(state?.facilitatorAddresses) ? state.facilitatorAddresses : null
+  const requestedFacilitators = requested.facilitatorAddresses ?? null
+  if (JSON.stringify(existingFacilitators) !== JSON.stringify(requestedFacilitators)) {
+    return 'facilitator_addresses'
+  }
 
   return null
 }
@@ -385,6 +398,14 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           error: 'facilitatorAddresses must be 1-16 valid addresses (the erc7710 challenge entry\'s extra.facilitatorAddresses)',
         })
       }
+      if (agent.execution_rail !== 'delegation') {
+        // Same scheme confusion the erc7710 settlementScheme rejection above
+        // fails loudly on — a legacy-rail client believing a redeemer pin
+        // exists must not silently proceed unpinned.
+        return reply.code(400).send({
+          error: 'facilitatorAddresses applies to erc7710 direct settlement, which requires a delegation-rail account',
+        })
+      }
     }
 
     // 2. Resolve token from asset address (shared with the MPP core).
@@ -506,6 +527,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           amountRaw: amountRaw.toString(),
           tokenAddress,
           network,
+          facilitatorAddresses,
         })
         if (mismatch) {
           return { code: 409, body: {
@@ -869,6 +891,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           amountRaw: amountRaw.toString(),
           tokenAddress,
           network,
+          facilitatorAddresses,
         })
         if (mismatch) {
           return reply.code(409).send({

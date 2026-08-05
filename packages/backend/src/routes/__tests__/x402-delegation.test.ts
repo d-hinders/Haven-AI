@@ -752,6 +752,53 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 
+  // #1058: replaying a key after the merchant rotated its facilitators would
+  // hand back a child pinned to the OLD redeemer — dead at the merchant's
+  // matcher. 409 so the client re-keys.
+  it('a facilitator rotation on the same key 409s instead of replaying a stale child', async () => {
+    const child = JSON.parse(JSON.stringify(buildBudgetDelegation({
+      agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
+      delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
+      budgetAtomic: 100_000n, periodSeconds: 86_400, startDate: NOW - 60, expiresAt: NOW + 300, version: 1,
+    })))
+    withHourlyCapQueries([{
+      ...PENDING_3009_ROW,
+      to_address: MERCHANT.toLowerCase(),
+      prepared_user_op: {
+        child, budget: signedBudget, delegateAccountAddress: DELEGATE_ACCT,
+        network: 'eip155:84532', facilitatorAddresses: ['0x' + '77'.repeat(20)],
+      },
+      machine_metadata: null,
+    }])
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({
+        idempotencyKey: 'k-1',
+        facilitatorAddresses: ['0x' + '88'.repeat(20)], // rotated
+      }),
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/facilitator_addresses/)
+    // Same facilitators still replay fine:
+    withHourlyCapQueries([{
+      ...PENDING_3009_ROW,
+      to_address: MERCHANT.toLowerCase(),
+      prepared_user_op: {
+        child, budget: signedBudget, delegateAccountAddress: DELEGATE_ACCT,
+        network: 'eip155:84532', facilitatorAddresses: ['0x' + '77'.repeat(20)],
+      },
+      machine_metadata: null,
+    }])
+    const same = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ idempotencyKey: 'k-1', facilitatorAddresses: ['0x' + '77'.repeat(20)] }),
+    })
+    expect(same.statusCode).toBe(201)
+    expect(same.json().idempotent_replay).toBe(true)
+  })
+
   it('a concurrent-claim conflict RESUMES the winner instead of a bare 409 (#961)', async () => {
     withHourlyCapQueries([]) // pre-check: nothing yet
     mockPrepareFunding.mockResolvedValueOnce(PREPARED)

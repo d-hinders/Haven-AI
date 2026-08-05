@@ -20,24 +20,15 @@
  *   properties, not style".
  */
 
-import type { QueryResult, QueryResultRow } from 'pg'
 import pool from '../../db.js'
+import { withTransaction, type Executor } from '../transaction.js'
 
-/**
- * Anything that can run a query: the app's `db.ts` default export, a raw
- * `pg.Pool`, or a `PoolClient` inside a transaction.
- *
- * Structural rather than `Pool | PoolClient` because `db.ts` exports a thin
- * wrapper, not a `pg.Pool`. Typing the capability instead of the concrete class
- * is also what lets a caller pass a transaction client — the point of taking an
- * explicit executor in the first place.
- */
-export interface Executor {
-  query<R extends QueryResultRow = QueryResultRow>(
-    sql: string,
-    values?: unknown[],
-  ): Promise<QueryResult<R>>
-}
+// Re-exported: `Executor` was declared here first (#972) and several passport
+// modules import it from this path. It now lives in `infra/transaction.ts`
+// alongside `withTransaction` (#985); this keeps those importers working
+// without a rename sweep that would add nothing.
+export type { Executor }
+
 
 export type PassportStatus = 'pending' | 'anchored' | 'failed'
 
@@ -121,32 +112,6 @@ export async function findAgentFacts(
  * recovers instead of wedging the passport forever.
  */
 
-/**
- * Run `fn` inside a transaction. When the executor can hand out a dedicated
- * connection (the `db.ts` pool wrapper), BEGIN/COMMIT run on that single
- * client — issuing BEGIN through the pool would hit a different connection
- * per statement. A caller that already holds a transaction client passes it
- * straight through and `fn` runs inline on it.
- */
-async function withTransaction<T>(
-  db: Executor,
-  fn: (tx: Executor) => Promise<T>,
-): Promise<T> {
-  const connectable = db as Executor & { connect?: () => Promise<{ query: Executor['query']; release: () => void }> }
-  if (typeof connectable.connect !== 'function') return fn(db)
-  const client = await connectable.connect()
-  try {
-    await client.query('BEGIN')
-    const result = await fn(client)
-    await client.query('COMMIT')
-    return result
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {})
-    throw err
-  } finally {
-    client.release()
-  }
-}
 
 export type ClaimOutcome = 'claimed' | 'not_claimed' | 'eoa_already_bound'
 

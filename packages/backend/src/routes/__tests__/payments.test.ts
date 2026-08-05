@@ -346,6 +346,42 @@ describe('payment routes', () => {
     expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
   })
 
+  // #717 (review B1 on #1119): this route claims the intent to 'submitted'
+  // BEFORE executing — a budget 429 must release that claim or the row is
+  // stuck unretryable forever, worse than any failure mode it replaced.
+  it('releases the submitted claim on a relayer-budget 429 — the intent stays retryable', async () => {
+    allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
+    const { RelayerBudgetExceededError } = await import('../../lib/relayer-spend-guard.js')
+    allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(
+      new RelayerBudgetExceededError('allowance_transfer', 60, 60),
+    )
+
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] }) // the 'submitted' claim
+      .mockResolvedValueOnce({ rows: [] }) // the release back to pending
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/payments/${PAYMENT_ID}/sign`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: SIGNATURE },
+    })
+
+    expect(response.statusCode).toBe(429)
+    expect(response.json()).toMatchObject({ payment_id: PAYMENT_ID, status: 'pending_signature' })
+    const release = mockQuery.mock.calls.find((c) =>
+      /SET status = 'pending_signature'/.test(String(c[0])),
+    )
+    expect(release).toBeTruthy()
+    expect(String(release![0])).toContain("status = 'submitted'")
+    expect(String(release![0])).toContain('tx_hash IS NULL')
+    // Nothing burned it to failed:
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'failed'/.test(String(c[0])))).toBe(false)
+  })
+
   it('creates base evidence after a protocol payment is confirmed', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
     allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })

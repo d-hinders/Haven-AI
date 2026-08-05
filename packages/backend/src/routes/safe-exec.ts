@@ -1,4 +1,4 @@
-import { assertRelayerBudget, recordRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
+import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import { Contract, TypedDataEncoder } from 'ethers'
 import pool from '../db.js'
@@ -375,24 +375,25 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
       // explicit gas limit so relayed batched admin flows don't under-gas.
       // Broadcast under the per-chain send lock so the exec can't race another
       // relayer submission for the same EOA nonce (#692/#718).
+      // #717: attempt row BEFORE broadcast; the signer-deploy tx above shares
+      // the cap but is not gas-itemised (known attribution undercount).
+      const spendId = await recordRelayerSpend({ operation: 'safe_exec', chainId: body.chain_id, userId: sub })
       const tx = await withRelayerSendLock(body.chain_id, () =>
         safe.execTransaction(...execArgs, {
           gasLimit: getRelayExecGasLimit(estimatedGas),
         }),
       )
-      const execReceipt = (await tx.wait()) as unknown as {
-        gasUsed?: { toString(): string }
-        gasPrice?: { toString(): string }
-      } | null
-      // #717: submitted = spent, success or revert.
-      await recordRelayerSpend({
-        operation: 'safe_exec',
-        chainId: body.chain_id,
-        userId: sub,
-        txHash: tx.hash,
-        gasUsed: execReceipt?.gasUsed != null ? BigInt(execReceipt.gasUsed.toString()) : null,
-        effectiveGasPrice: execReceipt?.gasPrice != null ? BigInt(execReceipt.gasPrice.toString()) : null,
-      })
+      type GasReceipt = { gasUsed?: { toString(): string }; gasPrice?: { toString(): string } }
+      let execReceipt: GasReceipt | null = null
+      try {
+        execReceipt = (await tx.wait()) as unknown as GasReceipt | null
+      } finally {
+        await finishRelayerSpend(spendId, {
+          txHash: tx.hash,
+          gasUsed: execReceipt?.gasUsed != null ? BigInt(execReceipt.gasUsed.toString()) : null,
+          effectiveGasPrice: execReceipt?.gasPrice != null ? BigInt(execReceipt.gasPrice.toString()) : null,
+        })
+      }
 
       return reply.code(201).send({
         tx_hash: tx.hash,

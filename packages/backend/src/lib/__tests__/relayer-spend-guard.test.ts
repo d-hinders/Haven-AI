@@ -6,6 +6,7 @@ vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery
 const {
   assertRelayerBudget,
   recordRelayerSpend,
+  finishRelayerSpend,
   RelayerBudgetExceededError,
 } = await import('../relayer-spend-guard.js')
 
@@ -29,7 +30,7 @@ describe('assertRelayerBudget (#717)', () => {
   })
 
   it('throws RelayerBudgetExceededError at the cap — refusal, not silence', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [{ cnt: '12' }] })
+    mockQuery.mockResolvedValueOnce({ rows: [{ cnt: '30' }] })
     await expect(assertRelayerBudget('sweep', { agentId: 'agent-1' })).rejects.toBeInstanceOf(
       RelayerBudgetExceededError,
     )
@@ -45,11 +46,11 @@ describe('assertRelayerBudget (#717)', () => {
 
   it('a non-positive env cap is IGNORED, never a silent disable', async () => {
     process.env.RELAYER_MAX_SWEEPS_PER_AGENT_PER_HOUR = '0'
-    mockQuery.mockResolvedValueOnce({ rows: [{ cnt: '11' }] })
-    // Default cap 12 applies: 11 < 12 → allowed. A '0' that disabled the
+    mockQuery.mockResolvedValueOnce({ rows: [{ cnt: '29' }] })
+    // Default cap 30 applies: 29 < 30 → allowed. A '0' that disabled the
     // guard would also allow — the distinguishing case is below.
     await assertRelayerBudget('sweep', { agentId: 'agent-1' })
-    mockQuery.mockResolvedValueOnce({ rows: [{ cnt: '12' }] })
+    mockQuery.mockResolvedValueOnce({ rows: [{ cnt: '30' }] })
     await expect(assertRelayerBudget('sweep', { agentId: 'agent-1' })).rejects.toBeInstanceOf(
       RelayerBudgetExceededError,
     )
@@ -74,28 +75,38 @@ describe('assertRelayerBudget (#717)', () => {
   })
 })
 
-describe('recordRelayerSpend (#717)', () => {
+describe('recordRelayerSpend + finishRelayerSpend (#717)', () => {
   beforeEach(() => mockQuery.mockReset())
 
-  it('records the receipt numbers and the derived cost', async () => {
+  it('the attempt row is inserted PRE-broadcast and returns its id', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [{ id: 'evt-1' }] })
+    const id = await recordRelayerSpend({ operation: 'safe_deploy', chainId: 84532, userId: 'user-1' })
+    expect(id).toBe('evt-1')
+    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
+    expect(sql).toContain('RETURNING id')
+    expect(params).toEqual([84532, 'safe_deploy', null, 'user-1', null, null, null, null])
+  })
+
+  it('finish stamps the hash + receipt numbers and derives the cost', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [] })
-    await recordRelayerSpend({
-      operation: 'safe_deploy',
-      chainId: 84532,
-      userId: 'user-1',
+    await finishRelayerSpend('evt-1', {
       txHash: '0xabc',
       gasUsed: 100_000n,
       effectiveGasPrice: 2_000_000_000n,
     })
     const [, params] = mockQuery.mock.calls[0] as [string, unknown[]]
-    expect(params).toEqual([
-      84532, 'safe_deploy', null, 'user-1', '0xabc',
-      '100000', '2000000000', (100_000n * 2_000_000_000n).toString(),
-    ])
+    expect(params).toEqual(['evt-1', '0xabc', '100000', '2000000000', (100_000n * 2_000_000_000n).toString()])
   })
 
-  it('never throws — a metrics failure must not fail the payment', async () => {
+  it('finish is a no-op for a null id (failed insert) — never throws', async () => {
+    await finishRelayerSpend(null, { txHash: '0x1' })
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  it('neither call throws on db errors — metrics must not fail payments', async () => {
     mockQuery.mockRejectedValueOnce(new Error('insert failed'))
-    await recordRelayerSpend({ operation: 'sweep', chainId: 84532, agentId: 'a' })
+    expect(await recordRelayerSpend({ operation: 'sweep', chainId: 84532, agentId: 'a' })).toBeNull()
+    mockQuery.mockRejectedValueOnce(new Error('update failed'))
+    await finishRelayerSpend('evt-1', { txHash: '0x1' })
   })
 })

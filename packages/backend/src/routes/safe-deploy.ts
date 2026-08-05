@@ -1,4 +1,4 @@
-import { assertRelayerBudget, recordRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
+import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import {
   Contract,
@@ -270,6 +270,11 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         return reply.code(503).send({ error: 'Safe deployment collided; please try again later' })
       }
 
+      // #717: attempt row BEFORE broadcast (bursts see each other; the row
+      // survives a throw-on-revert wait). NOTE: the passkey-signer factory tx
+      // above shares this row's cap but its own gas is not itemised — a known
+      // undercount in attribution, not in the cap.
+      const spendId = await recordRelayerSpend({ operation: 'safe_deploy', chainId: chain_id, userId: sub })
       // Broadcast under the per-chain send lock so the deploy can't race
       // another relayer submission for the same EOA nonce (#692/#718).
       const tx = await withRelayerSendLock(chain_id, () =>
@@ -279,19 +284,19 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
           saltNonce,
         ),
       )
-      const receipt = await tx.wait()
-      // The local receipt type only declares `logs` (address extraction);
-      // the gas fields exist on the real ethers receipt.
-      const gasReceipt = receipt as unknown as { gasUsed?: { toString(): string }; gasPrice?: { toString(): string } } | null
-      // #717: submitted = spent, success or revert.
-      await recordRelayerSpend({
-        operation: 'safe_deploy',
-        chainId: chain_id,
-        userId: sub,
-        txHash: tx.hash,
-        gasUsed: gasReceipt?.gasUsed != null ? BigInt(gasReceipt.gasUsed.toString()) : null,
-        effectiveGasPrice: gasReceipt?.gasPrice != null ? BigInt(gasReceipt.gasPrice.toString()) : null,
-      })
+      let receipt
+      try {
+        receipt = await tx.wait()
+      } finally {
+        // The local receipt type only declares `logs` (address extraction);
+        // the gas fields exist on the real ethers receipt.
+        const gasReceipt = receipt as unknown as { gasUsed?: { toString(): string }; gasPrice?: { toString(): string } } | null
+        await finishRelayerSpend(spendId, {
+          txHash: tx.hash,
+          gasUsed: gasReceipt?.gasUsed != null ? BigInt(gasReceipt.gasUsed.toString()) : null,
+          effectiveGasPrice: gasReceipt?.gasPrice != null ? BigInt(gasReceipt.gasPrice.toString()) : null,
+        })
+      }
       if (!receipt) {
         throw new Error('Safe deployment transaction did not return a receipt')
       }

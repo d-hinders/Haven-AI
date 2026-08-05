@@ -644,10 +644,17 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           to: intent.to_address,
         })
       } catch (err) {
-        // #717: over-budget = refused before submission — 429 and leave the
-        // intent pending for a later retry, never burn it to 'failed'.
+        // #717: over-budget = refused before ANY broadcast. This route claims
+        // the intent to 'submitted' before executing (step 3), so release the
+        // claim or the row is stuck unretryable forever — the one place a 429
+        // would otherwise be WORSE than the old burn-to-failed (#1119 review B1).
         if (err instanceof RelayerBudgetExceededError) {
-          return reply.code(429).send({ payment_id: intent.id, status: intent.status, error: err.message })
+          await pool.query(
+            `UPDATE payment_intents SET status = 'pending_signature'
+             WHERE id = $1 AND status = 'submitted' AND tx_hash IS NULL`,
+            [intent.id],
+          )
+          return reply.code(429).send({ payment_id: intent.id, status: 'pending_signature', error: err.message })
         }
         // 6. Failure. Session-rail (bundler) errors echo the request URL,
         // which embeds the API key — scrub before persisting or responding.

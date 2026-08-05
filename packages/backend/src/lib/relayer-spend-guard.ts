@@ -13,15 +13,21 @@
  *   the identity's submitted operations in the window; over the cap throws
  *   `RelayerBudgetExceededError` (routes map it to 429). Caps are env-tunable
  *   with deliberate defaults far above organic use.
- * - `recordRelayerSpend` — run when a tx is SUBMITTED, updated gas numbers
- *   from the receipt. Best-effort: metrics must never fail a payment.
+ * - `recordRelayerSpend` — insert the attempt row BEFORE broadcast (it
+ *   counts toward the cap immediately, closing the burst window where N
+ *   concurrent requests all read the pre-insert count), then
+ *   `finishRelayerSpend` stamps the tx hash + receipt gas numbers — which
+ *   also survives ethers v6's throw-on-revert, where an after-the-wait
+ *   insert never runs. Both best-effort: metrics must never fail a payment.
  *
  * Failure direction is deliberate and the opposite of the money-path gates:
  * a database error in the COUNT fails OPEN (warn + allow). This guard
  * protects availability; failing closed would let a DB hiccup take down the
  * exact operations it exists to keep up, while funds stay gated on-chain
- * either way. An attacker cannot exploit the fail-open without first taking
- * down Postgres — at which point nothing here works anyway.
+ * either way. The honest caveat: a partially degraded database (statement
+ * timeouts, lock contention on this COUNT) fails open exactly under the
+ * load where protection matters most — repeated fail-open warns in the
+ * logs are a signal to act on, not noise.
  *
  * Attempt-level throttling (pre-submission spam that never reaches the
  * relayer) stays with the route-layer rate limits; this guard counts what
@@ -81,7 +87,11 @@ const RULES: Record<RelayerOperation, BudgetRule> = {
     identity: 'agent_id',
     windowMinutes: 60,
     envVar: 'RELAYER_MAX_SWEEPS_PER_AGENT_PER_HOUR',
-    defaultCap: 12,
+    // 30, not lower: qa-dev fires on every dev deploy and runs ~2 sweeps per
+    // run on ONE reused agent — a busy merge day must not trip the guard and
+    // stale the freshness signal (#1119 review N4). Still bounds abuse: a
+    // sweep costs pennies of gas, and the window is an hour.
+    defaultCap: 30,
   },
 }
 
@@ -164,20 +174,23 @@ export interface RelayerSpendRecord extends RelayerAttribution {
 }
 
 /**
- * Record a submitted relayer tx. Call at submission (counts toward the cap
- * immediately — a landing-but-reverting tx burns gas too); pass the receipt
- * numbers when you have them. Best-effort: never throws.
+ * Record a relayer attempt. Call BEFORE broadcast — the row counts toward
+ * the cap immediately (closing the concurrent-burst window), and it exists
+ * even when the wait later throws (ethers v6 rejects `tx.wait()` on revert).
+ * Returns the row id for `finishRelayerSpend`, or null when the insert
+ * failed. Never throws.
  */
-export async function recordRelayerSpend(record: RelayerSpendRecord): Promise<void> {
+export async function recordRelayerSpend(record: RelayerSpendRecord): Promise<string | null> {
   const costWei =
     record.gasUsed != null && record.effectiveGasPrice != null
       ? (record.gasUsed * record.effectiveGasPrice).toString()
       : null
   try {
-    await pool.query(
+    const res = await pool.query<{ id: string }>(
       `INSERT INTO relayer_gas_events
         (chain_id, operation, agent_id, user_id, tx_hash, gas_used, effective_gas_price, cost_wei)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
       [
         record.chainId,
         record.operation,
@@ -189,9 +202,41 @@ export async function recordRelayerSpend(record: RelayerSpendRecord): Promise<vo
         costWei,
       ],
     )
+    return res.rows[0]?.id ?? null
   } catch (err) {
     console.warn(
       `relayer-spend-guard: could not record ${record.operation} spend (${err instanceof Error ? err.message : String(err)})`,
+    )
+    return null
+  }
+}
+
+/**
+ * Stamp the broadcast tx hash and (when available) receipt gas numbers onto
+ * a pre-recorded attempt. Best-effort: never throws.
+ */
+export async function finishRelayerSpend(
+  id: string | null,
+  fields: { txHash?: string | null; gasUsed?: bigint | null; effectiveGasPrice?: bigint | null },
+): Promise<void> {
+  if (!id) return
+  const costWei =
+    fields.gasUsed != null && fields.effectiveGasPrice != null
+      ? (fields.gasUsed * fields.effectiveGasPrice).toString()
+      : null
+  try {
+    await pool.query(
+      `UPDATE relayer_gas_events
+       SET tx_hash = COALESCE($2, tx_hash),
+           gas_used = COALESCE($3, gas_used),
+           effective_gas_price = COALESCE($4, effective_gas_price),
+           cost_wei = COALESCE($5, cost_wei)
+       WHERE id = $1`,
+      [id, fields.txHash ?? null, fields.gasUsed?.toString() ?? null, fields.effectiveGasPrice?.toString() ?? null, costWei],
+    )
+  } catch (err) {
+    console.warn(
+      `relayer-spend-guard: could not finish spend record ${id} (${err instanceof Error ? err.message : String(err)})`,
     )
   }
 }

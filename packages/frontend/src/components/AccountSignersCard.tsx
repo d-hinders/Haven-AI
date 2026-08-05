@@ -38,6 +38,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
     loadError,
     busy,
     ready,
+    passkeyElsewhere,
     enrollBackupPasskey,
     enrollOwnerWallet,
     removePasskey,
@@ -178,10 +179,20 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
           ) : null}
 
           {!ready ? (
+            // #1097: with passkeys present the optimistic fallback keeps
+            // `ready` true, so this state only occurs for owner-only
+            // accounts — the wallet really is the blocker.
             <p className="mt-3 text-xs text-[var(--v2-ink-muted)]">
-              {signers.owner_address
-                ? 'Connect your account owner wallet to change how this account is approved.'
-                : "This account's passkey isn't on this device. Open Haven on the device where it lives to change how this account is approved."}
+              Connect your account owner wallet to change how this account is approved.
+            </p>
+          ) : null}
+          {ready && passkeyElsewhere ? (
+            // #1097: signing works, but the ceremony may hand off to the
+            // device that holds the passkey — say so BEFORE the browser's
+            // QR dialog surprises them.
+            <p className="mt-3 text-xs text-[var(--v2-ink-muted)]">
+              This account&apos;s Face ID / Touch ID may be on another device — your browser will
+              guide you there when you approve.
             </p>
           ) : null}
 

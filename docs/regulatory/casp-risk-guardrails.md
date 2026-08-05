@@ -121,7 +121,10 @@ Haven backend
 > rail's merchant leg described above. In both schemes Haven prepares and
 > relays only; no leg is authorised by Haven policy alone. Recipient-pinned
 > budgets cannot fund the EOA and are therefore erc7710-only — the fallback
-> never weakens an on-chain pin.
+> never weakens an on-chain pin. Since #1058 the settlement child can also be
+> **redeemer-pinned**: when the merchant's 402 advertises
+> `extra.facilitatorAddresses`, only those addresses can redeem the child —
+> narrowing, never widening, who can execute the settlement Haven prepared.
 
 > **Current state (2026-07-27, #976):** the erc7710 settle response carries a
 > `passport` reference — `{ attestation_uid, chain_id }`, plus an optional

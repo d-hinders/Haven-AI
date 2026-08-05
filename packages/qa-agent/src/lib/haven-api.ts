@@ -57,6 +57,10 @@ export interface X402AuthorizeBody {
   network: string // CAIP-2 (e.g. eip155:84532) or x402 network name
   /** Echoed to the merchant in the v2 header — pass the QUOTED value (#1064). */
   maxTimeoutSeconds?: number
+  /** #1058: the challenge entry's extra.facilitatorAddresses, forwarded
+   *  VERBATIM — pins the settlement child's redeemer caveat and rides the
+   *  header echo (the v2 matcher requires it as a subset). */
+  facilitatorAddresses?: string[]
 }
 
 export interface ApiResponse<T> {

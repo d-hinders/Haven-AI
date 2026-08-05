@@ -44,6 +44,19 @@ export function pickSigningPath(
   return null
 }
 
+/**
+ * True when the account has passkeys but none is marked on THIS device
+ * (#1097): signing still works — the optimistic fallback hands the ceremony
+ * to the browser, which offers its cross-device (QR) flow — but the user
+ * deserves a heads-up that the sheet may point at another device. This is a
+ * HINT condition, never a gate: removing the fallback would strand every
+ * legitimate cross-device signer.
+ */
+export function passkeyLikelyElsewhere(signers: AccountSigners | null): boolean {
+  if (!signers || signers.passkeys.length === 0) return false
+  return !signers.passkeys.some((p) => hasPasskeyCredentialOnDevice(credentialIdFromKeyId(p.key_id)))
+}
+
 export interface DelegationBudget {
   id: string
   token_address: string

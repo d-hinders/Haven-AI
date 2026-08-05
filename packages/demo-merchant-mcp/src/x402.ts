@@ -156,6 +156,10 @@ export interface Erc7710SettlementClient {
    *  delegation does not authorize the transfer or the delegator cannot fund it. */
   simulateRedeemDelegations(call: Erc7710RedeemCall): Promise<void>
   submitRedeemDelegations(call: Erc7710RedeemCall): Promise<Hex>
+  /** #1058: the account that actually calls redeemDelegations. When set it is
+   *  advertised as `extra.facilitatorAddresses` (MetaMask's erc7710 shape) so
+   *  payers can pin their settlement child's redeemer caveat to it. */
+  redeemerAddress?: Address
 }
 
 export interface SettledPayment {
@@ -403,7 +407,14 @@ export function createX402PaymentProcessor(
   }
 
   return {
-    buildPaymentRequired: (params) => buildPaymentRequired({ ...params, erc7710: Boolean(options.erc7710) }),
+    buildPaymentRequired: (params) =>
+      buildPaymentRequired({
+        ...params,
+        erc7710: Boolean(options.erc7710),
+        facilitatorAddresses: settlementClient.erc7710?.redeemerAddress
+          ? [settlementClient.erc7710.redeemerAddress]
+          : undefined,
+      }),
     paymentRequiredHeader: encodePaymentRequiredHeader,
     paymentResponseHeader: encodePaymentResponseHeader,
 
@@ -488,6 +499,7 @@ export function createViemSettlementClient(params: {
     },
 
     erc7710: {
+      redeemerAddress: account.address,
       // Verification-by-simulation from the settlement (redeemer) account; a
       // delegation that does not cover the transfer, or a delegator that cannot
       // fund it, makes the simulated USDC transfer revert.
@@ -519,6 +531,9 @@ export function buildPaymentRequired(params: {
   resource: string
   description: string
   erc7710?: boolean
+  /** #1058: advertised on the erc7710 option only — payers pin their child
+   *  delegation's redeemer caveat to these, and must echo them verbatim. */
+  facilitatorAddresses?: Address[]
 }): PaymentRequired {
   const eip3009Option: PaymentRequirements = {
     scheme: 'exact',
@@ -535,7 +550,12 @@ export function buildPaymentRequired(params: {
   if (params.erc7710 === true) {
     accepts.push({
       ...eip3009Option,
-      extra: { assetTransferMethod: ERC7710_TRANSFER_METHOD },
+      extra: {
+        assetTransferMethod: ERC7710_TRANSFER_METHOD,
+        ...(params.facilitatorAddresses && params.facilitatorAddresses.length > 0
+          ? { facilitatorAddresses: params.facilitatorAddresses }
+          : {}),
+      },
     })
   }
   return {

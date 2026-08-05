@@ -30,11 +30,12 @@ interface Props {
 /**
  * Display-only signer list for a delegation account with NO agent yet (#1079).
  *
- * Signer MANAGEMENT (add/remove) rides the agent-scoped
- * `/agents/:id/account-signers/*` routes — an account without an agent has no
- * management path today, and building account-level management routes is out
- * of scope here. This read-only view uses the by-address signers route so the
- * account's approval methods are at least visible before the first agent.
+ * Signer MANAGEMENT is no longer agent-scoped on the backend: #1081 added
+ * `POST /accounts/hybrid/:address/signers/{prepare,submit}` alongside the
+ * agent-scoped routes, so an account with no agent CAN now enrol a backup or
+ * add an owner wallet. This component has not been wired to them yet — the
+ * remaining gap is frontend only (#1089), not a missing capability. Until that
+ * lands this stays a read-only view over the by-address signers route.
  */
 export function AccountSignersReadOnly({
   safeAddress,

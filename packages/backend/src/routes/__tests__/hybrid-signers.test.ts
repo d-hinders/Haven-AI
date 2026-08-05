@@ -1,9 +1,10 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
-const { mockQuery, mockLoadOwner } = vi.hoisted(() => ({
+const { mockQuery, mockLoadOwner, mockTreasury } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockLoadOwner: vi.fn(),
+  mockTreasury: vi.fn(),
 }))
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 vi.mock('../../middleware/auth.js', () => ({
@@ -14,6 +15,14 @@ vi.mock('../../middleware/auth.js', () => ({
 vi.mock('../../lib/hybrid-account-config.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/hybrid-account-config.js')>()
   return { ...actual, loadHybridOwnerConfig: mockLoadOwner }
+})
+vi.mock('../../lib/delegation-rail.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/delegation-rail.js')>()
+  return {
+    ...actual,
+    delegationRailBundlerUrl: () => 'https://bundler.test/rpc',
+    createTreasuryOps: (...a: unknown[]) => mockTreasury(...a),
+  }
 })
 
 const routes = (await import('../hybrid-accounts.js')).default
@@ -63,5 +72,165 @@ describe('GET /accounts/hybrid/:address/signers (#1079)', () => {
 
     const noChain = await app.inject({ method: 'GET', url: `/accounts/hybrid/${ACCOUNT}/signers` })
     expect(noChain.statusCode).toBe(400)
+  })
+})
+
+describe('account-scoped signer management (#1081)', () => {
+  let app: FastifyInstance
+  const PK1 = { keyId: '0x' + '11'.repeat(32), x: 1n, y: 2n }
+  const PK2 = { keyId: '0x' + '22'.repeat(32), x: 3n, y: 4n }
+  const NEW_PK = { key_id: '0x' + '33'.repeat(32), x: '0x1', y: '0x2' }
+  const OWNER_EOA = '0x' + 'ee'.repeat(20)
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(routes, { prefix: '/accounts' })
+  })
+  afterAll(async () => app.close())
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockLoadOwner.mockReset()
+    mockTreasury.mockReset()
+    mockQuery.mockResolvedValue({ rows: [] })
+  })
+
+  /** Owned account with the given signer set. */
+  function ownedAccount(config: { ownerAddress?: string; passkeys?: typeof PK1[] }) {
+    mockQuery.mockImplementation((sql: string) =>
+      /FROM user_safes/.test(String(sql))
+        ? Promise.resolve({ rows: [{ '?column?': 1 }] })
+        : Promise.resolve({ rows: [] }),
+    )
+    mockLoadOwner.mockResolvedValue({ userSafeId: 'safe-1', config })
+  }
+
+  function mockPrepared() {
+    mockTreasury.mockResolvedValueOnce({
+      treasuryAddress: ACCOUNT,
+      prepareCall: vi.fn().mockResolvedValue({
+        userOperation: { sender: ACCOUNT, nonce: 1n, callData: '0xffff' },
+        userOpHash: '0x' + 'ee'.repeat(32),
+        signingTypedData: { domain: { name: 'HybridDeleGator' }, types: {}, primaryType: 'PackedUserOperation', message: {} },
+      }),
+      submitCall: vi.fn().mockResolvedValue({ txHash: '0x' + 'ff'.repeat(32) }),
+    })
+  }
+
+  const prepareUrl = `/accounts/hybrid/${ACCOUNT}/signers/prepare?chain_id=84532`
+
+  it('enrols a backup passkey with NO agent in the picture — the whole point of #1081', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockPrepared()
+    const res = await app.inject({ method: 'POST', url: prepareUrl, payload: { action: 'add_passkey', passkey: NEW_PK } })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().signature_scheme).toBe('webauthn_userop')
+    expect(res.json().user_op_hash).toBeTruthy()
+    // Prepared against the ACCOUNT address, resolved from the URL — no agent.
+    expect(mockTreasury.mock.calls[0][0]).toMatchObject({ accountAddress: ACCOUNT, chainId: 84532 })
+  })
+
+  it('honours the requested signer on a multi-signer account (the #1086 rule, shared not re-implemented)', async () => {
+    ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] })
+    mockPrepared()
+    const res = await app.inject({
+      method: 'POST', url: prepareUrl,
+      payload: { action: 'add_passkey', passkey: NEW_PK, signature_scheme: 'webauthn_userop' },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().signature_scheme).toBe('webauthn_userop')
+    // Gas is estimated for the signer that will actually sign.
+    expect(mockTreasury.mock.calls[0][0]).toMatchObject({ signWith: 'passkey' })
+  })
+
+  it('refuses a scheme the account cannot satisfy', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    const res = await app.inject({
+      method: 'POST', url: prepareUrl,
+      payload: { action: 'add_passkey', passkey: NEW_PK, signature_scheme: 'eip712_userop' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/no EOA owner to sign with/)
+    expect(mockTreasury).not.toHaveBeenCalled()
+  })
+
+  it('applies the SAME >=2-signer floor as the agent-scoped route', async () => {
+    ownedAccount({ passkeys: [PK1, PK2] })
+    const res = await app.inject({
+      method: 'POST', url: prepareUrl,
+      payload: { action: 'remove_passkey', passkey: { key_id: PK1.keyId } },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/fewer than two ways to approve/)
+    expect(mockTreasury).not.toHaveBeenCalled()
+  })
+
+  it("404s an account the caller does not own, before any signer work", async () => {
+    mockQuery.mockResolvedValue({ rows: [] })
+    const res = await app.inject({ method: 'POST', url: prepareUrl, payload: { action: 'add_passkey', passkey: NEW_PK } })
+    expect(res.statusCode).toBe(404)
+    expect(mockLoadOwner).not.toHaveBeenCalled()
+    expect(mockTreasury).not.toHaveBeenCalled()
+  })
+
+  it('submit pins the DB sync to the SIGNED calldata', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/submit?chain_id=84532`,
+      payload: {
+        action: 'add_passkey', passkey: NEW_PK,
+        signature: '0x' + 'ab'.repeat(80),
+        user_operation: { sender: ACCOUNT, callData: '0xdeadbeef' },
+      },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/does not match the requested signer change/)
+    // Nothing was written and nothing was submitted on-chain.
+    expect(mockTreasury).not.toHaveBeenCalled()
+    expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO hybrid_account_passkeys/.test(String(sql)))).toBe(false)
+  })
+
+  it('submit enrols the passkey and syncs storage to the signed op', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockPrepared()
+    // callData must contain the addKey calldata the route re-derives.
+    const { encodeFunctionData } = await import('viem')
+    const { HYBRID_SIGNER_ABI } = await import('../../lib/hybrid-signer-actions.js')
+    const callData = encodeFunctionData({
+      abi: HYBRID_SIGNER_ABI,
+      functionName: 'addKey',
+      args: [NEW_PK.key_id, BigInt(NEW_PK.x), BigInt(NEW_PK.y)],
+    })
+
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/submit?chain_id=84532`,
+      payload: {
+        action: 'add_passkey', passkey: NEW_PK,
+        signature: '0x' + 'ab'.repeat(80),
+        user_operation: { sender: ACCOUNT, callData },
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ updated: true, tx_hash: '0x' + 'ff'.repeat(32) })
+    // Storage tracks the chain: the new key is recorded against this account.
+    const insert = mockQuery.mock.calls.find(([sql]) =>
+      /INSERT INTO hybrid_account_passkeys/.test(String(sql)),
+    )
+    expect(insert?.[1]).toEqual(['safe-1', NEW_PK.key_id, NEW_PK.x, NEW_PK.y])
+  })
+
+  it('a malformed envelope is a 400 before the account is even resolved', async () => {
+    // Precedence regression (#1081 review): extracting the checks must not
+    // turn a malformed-body 400 into a config 409.
+    mockQuery.mockResolvedValue({ rows: [] }) // account would 404
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/submit?chain_id=84532`,
+      payload: { action: 'add_passkey', passkey: NEW_PK, user_operation: { callData: '0x' } },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/signature is required/)
+    expect(mockLoadOwner).not.toHaveBeenCalled()
   })
 })

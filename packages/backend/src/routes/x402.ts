@@ -1,7 +1,8 @@
 import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { ethers } from 'ethers'
-import { buildX402ExpectedMessage } from '@haven_ai/sdk'
+import { hashTypedData } from 'viem'
+import { buildX402ExpectedMessage, type X402ExpectedContext } from '@haven_ai/sdk'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
@@ -90,16 +91,10 @@ interface X402ApprovalRow {
   machine_challenge_id: string | null
 }
 
-interface X402ExpectedContext {
-  paymentId: string
-  payloadHash: string
-  resourceUrl: string
-  merchantTo: string
-  amount: string
-  asset: string
-  network: string
-  expiresAt?: string
-}
+// Deliberately the SDK's type, not a local copy: the edge signer rebuilds this
+// message from @haven_ai/sdk, so a divergent backend copy would silently sign a
+// message no signer can reconstruct. The local clone had already gone stale
+// against the v2 typedDataHash field (#1138).
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -131,6 +126,32 @@ function chainIdFromX402Network(network: string): number | null {
   return null
 }
 
+/**
+ * EIP-712 digest of the payload the account actually validates (#1138).
+ *
+ * On the delegation rail `payloadHash` is the bare ERC-4337 UserOp hash, which
+ * the account does NOT validate — so binding it alone tells the edge signer
+ * nothing about the typed data it is being asked to sign. Committing to this
+ * digest inside the Haven-signed expected context is what keeps the signer's
+ * verify-then-sign property intact on this rail.
+ */
+function typedDataDigest(typedData: unknown): string | undefined {
+  if (!typedData || typeof typedData !== 'object') return undefined
+  try {
+    return hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+  } catch (err) {
+    // Unhashable typed data is a backend defect, not a client error, and it is
+    // not survivable: the edge signer re-derives this same digest and would
+    // refuse the payload anyway. Fail here with a message that says so, rather
+    // than letting a raw viem type error surface as an opaque 500.
+    throw new Error(
+      'Failed to hash the delegation-rail signing payload for the x402 expected context. ' +
+        'sign_data.typed_data must be a complete EIP-712 payload (domain, types, primaryType, message). ' +
+        `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+}
+
 async function signX402ExpectedContext(context: X402ExpectedContext) {
   const privateKey = process.env.X402_BINDING_PRIVATE_KEY
   if (!privateKey) {
@@ -143,7 +164,10 @@ async function signX402ExpectedContext(context: X402ExpectedContext) {
   const wallet = new ethers.Wallet(privateKey)
   const message = buildX402ExpectedMessage(context)
   return {
-    version: 1 as const,
+    // Derived from the context, never chosen here: a v2 context carries a
+    // typed-data commitment and a v1 one does not. Announcing a version the
+    // message does not match is precisely the downgrade the signer rejects.
+    version: (context.typedDataHash ? 2 : 1) as 1 | 2,
     message,
     signature: await wallet.signMessage(message),
     signer: wallet.address,
@@ -595,6 +619,10 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           asset: tokenAddress,
           network,
           expiresAt: existing.expires_at as string,
+          // #1138: a replay re-issues the SAME sign_data, so it must re-issue
+          // the same commitment — otherwise a replayed delegation-rail intent
+          // would hand back a v1 binding the signer refuses to sign under.
+          typedDataHash: typedDataDigest(sign_data.typed_data),
         })
         return { code: 201, body: {
           payment_id: existing.id,
@@ -729,6 +757,9 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           asset: tokenAddress,
           network,
           expiresAt: intent.expires_at,
+          // #1138: commit to the typed data, not just the 4337 hash — the
+          // signer signs the former and can only verify what is bound.
+          typedDataHash: typedDataDigest(fundingAuth.prepared.signingTypedData),
         })
         return reply.code(201).send({
           payment_id: intent.id,

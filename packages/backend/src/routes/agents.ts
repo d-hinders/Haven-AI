@@ -1,6 +1,5 @@
 import { FastifyInstance } from 'fastify'
 import crypto from 'crypto'
-import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import {
   normalizeAgentAllowance,
@@ -22,6 +21,29 @@ import {
 } from '../lib/passport/index.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import { deriveDelegationAllowances } from '../lib/delegation-budget-view.js'
+import {
+  agentExistsForUser,
+  createAgentWithAllowances,
+  deleteAgentAllowance,
+  deleteRevokedAgent,
+  findAgentForUserAllStatuses,
+  findAgentIdStatusForUser,
+  findDefaultUserSafeId,
+  findDelegateAgentForUserExcludingRevoked,
+  findNonRevokedAgentIdByDelegate,
+  findUserSafeIdForUser,
+  listAgentsForUserAllStatuses,
+  listAllowancesForAgent,
+  listAllowancesForAgentUnordered,
+  listAllowancesForAgents,
+  pauseAgent,
+  resumeAgent,
+  revokeAgent,
+  rotateAgentApiKey,
+  updateAgentProfile,
+  upsertAgentAllowance,
+  type AgentAllowanceRow,
+} from '../infra/repositories/agents.js'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -50,39 +72,6 @@ interface UpdateAgentBody {
   description?: string
 }
 
-interface SafeInfoRow {
-  safe_address: string | null
-  safe_name: string | null
-  safe_chain_id: number | null
-}
-
-interface AgentRow {
-  id: string
-  user_id: string
-  name: string
-  description: string | null
-  delegate_address: string | null
-  safe_id: string | null
-  safe_address: string | null
-  safe_name: string | null
-  safe_chain_id: number | null
-  account_type: string | null
-  api_key_prefix: string | null
-  status: string
-  created_at: string
-  mcp_last_seen_at: string | null
-  has_stranded_funds: boolean
-}
-
-interface AllowanceRow {
-  id: string
-  agent_id: string
-  token_address: string
-  token_symbol: string
-  allowance_amount: string
-  reset_period_min: number
-}
-
 // ── Routes ─────────────────────────────────────────────────────────
 
 export default async function agentRoutes(app: FastifyInstance): Promise<void> {
@@ -92,40 +81,19 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    const agentResult = await pool.query<AgentRow>(
-      `SELECT a.id, a.name, a.description, a.delegate_address,
-              a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
-              us.account_type,
-              a.api_key_prefix, a.status, a.created_at,
-              (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
-              EXISTS(
-                SELECT 1 FROM machine_payment_reconciliation_events mpre
-                JOIN payment_intents pi ON pi.id = mpre.payment_intent_id
-                WHERE pi.agent_id = a.id
-                  AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-                  AND mpre.status = 'open'
-              ) AS has_stranded_funds
-       FROM agents a
-       LEFT JOIN user_safes us ON a.safe_id = us.id
-       WHERE a.user_id = $1
-       ORDER BY a.created_at DESC`,
-      [sub],
-    )
+    // ALL statuses on purpose — pending_approval agents are surfaced (#1069).
+    const agentRows = await listAgentsForUserAllStatuses(sub)
 
-    if (agentResult.rows.length === 0) {
+    if (agentRows.length === 0) {
       return { agents: [] }
     }
 
-    const agentIds = agentResult.rows.map((a) => a.id)
+    const agentIds = agentRows.map((a) => a.id)
 
-    const allowanceResult = await pool.query<AllowanceRow>(
-      `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
-       FROM agent_allowances WHERE agent_id = ANY($1) ORDER BY created_at ASC`,
-      [agentIds],
-    )
+    const allowanceRows = await listAllowancesForAgents(agentIds)
 
-    const allowancesByAgent = new Map<string, AllowanceRow[]>()
-    for (const row of allowanceResult.rows) {
+    const allowancesByAgent = new Map<string, AgentAllowanceRow[]>()
+    for (const row of allowanceRows) {
       const existing = allowancesByAgent.get(row.agent_id) ?? []
       existing.push(row)
       allowancesByAgent.set(row.agent_id, existing)
@@ -133,12 +101,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
     // Delegation-rail agents derive their budget from ACTIVE delegations —
     // agent_allowances is a frozen onboarding mirror on that rail (#1090).
-    const delegationAgentIds = agentResult.rows
+    const delegationAgentIds = agentRows
       .filter((a) => a.account_type === 'delegator_hybrid')
       .map((a) => a.id)
     const derivedByAgent = await deriveDelegationAllowances(delegationAgentIds)
 
-    const agents = agentResult.rows.map((agent) => ({
+    const agents = agentRows.map((agent) => ({
       ...agent,
       allowances:
         agent.account_type === 'delegator_hybrid'
@@ -154,27 +122,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
 
-    const agentResult = await pool.query<AgentRow>(
-      `SELECT a.id, a.name, a.description, a.delegate_address,
-              a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
-              us.account_type,
-              a.api_key_prefix, a.status, a.created_at,
-              (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
-              EXISTS(
-                SELECT 1 FROM machine_payment_reconciliation_events mpre
-                JOIN payment_intents pi ON pi.id = mpre.payment_intent_id
-                WHERE pi.agent_id = a.id
-                  AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-                  AND mpre.status = 'open'
-              ) AS has_stranded_funds
-       FROM agents a
-       LEFT JOIN user_safes us ON a.safe_id = us.id
-       WHERE a.user_id = $1 AND a.id = $2
-       LIMIT 1`,
-      [sub, id],
-    )
-
-    const agent = agentResult.rows[0]
+    // Same ALL-statuses rule as the list (#1069).
+    const agent = await findAgentForUserAllStatuses(id, sub)
     if (!agent) {
       return reply.code(404).send({ error: 'Agent not found' })
     }
@@ -185,15 +134,11 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       return { ...agent, allowances: derived.get(id) ?? [] }
     }
 
-    const allowanceResult = await pool.query<AllowanceRow>(
-      `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
-       FROM agent_allowances WHERE agent_id = $1 ORDER BY created_at ASC`,
-      [id],
-    )
+    const allowances = await listAllowancesForAgent(id)
 
     return {
       ...agent,
-      allowances: allowanceResult.rows,
+      allowances,
     }
   })
 
@@ -202,20 +147,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
 
-    const agentResult = await pool.query<{
-      delegate_address: string | null
-      safe_chain_id: number | null
-      safe_address: string | null
-    }>(
-      `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.safe_address, us.account_type
-       FROM agents a
-       LEFT JOIN user_safes us ON a.safe_id = us.id
-       WHERE a.user_id = $1 AND a.id = $2 AND a.status != 'revoked'
-       LIMIT 1`,
-      [sub, id],
-    )
-
-    const agent = agentResult.rows[0]
+    // Excludes revoked — the one status-scoped agent read (see the repository).
+    const agent = await findDelegateAgentForUserExcludingRevoked(id, sub)
     if (!agent) {
       return reply.code(404).send({ error: 'Agent not found' })
     }
@@ -269,29 +202,17 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     // Validate safe_id belongs to the user (if provided)
     let resolvedSafeId: string | null = null
     if (safe_id) {
-      const safeCheck = await pool.query(
-        'SELECT id FROM user_safes WHERE id = $1 AND user_id = $2',
-        [safe_id, sub],
-      )
-      if (safeCheck.rows.length === 0) {
+      const ownedSafeId = await findUserSafeIdForUser(safe_id, sub)
+      if (!ownedSafeId) {
         return reply.code(400).send({ error: 'Invalid Safe — not found or not yours' })
       }
       resolvedSafeId = safe_id
     } else {
-      const defaultSafe = await pool.query(
-        'SELECT id FROM user_safes WHERE user_id = $1 AND is_default = true LIMIT 1',
-        [sub],
-      )
-      if (defaultSafe.rows.length > 0) {
-        resolvedSafeId = defaultSafe.rows[0].id
-      }
+      resolvedSafeId = await findDefaultUserSafeId(sub)
     }
 
-    const existing = await pool.query(
-      'SELECT id FROM agents WHERE user_id = $1 AND delegate_address = $2 AND status != $3',
-      [sub, delegate_address.toLowerCase(), 'revoked'],
-    )
-    if (existing.rows.length > 0) {
+    const existingAgentId = await findNonRevokedAgentIdByDelegate(sub, delegate_address.toLowerCase())
+    if (existingAgentId) {
       return reply
         .code(409)
         .send({ error: 'An active agent with this delegate address already exists' })
@@ -304,51 +225,20 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     // rotate-key path, which already slices 12.
     const apiKeyPrefix = apiKey.slice(0, 12)
 
-    const client = await pool.connect()
     try {
-      await client.query('BEGIN')
-
-      const agentResult = await client.query<AgentRow>(
-        `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, safe_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, name, description, delegate_address, safe_id, api_key_prefix, status, created_at,
-                   NULL::timestamptz AS mcp_last_seen_at`,
-        [sub, name.trim(), description?.trim() ?? null, delegate_address.toLowerCase(), apiKeyHash, apiKeyPrefix, resolvedSafeId],
+      const { agent, safeInfo, savedAllowances } = await createAgentWithAllowances(
+        {
+          userId: sub,
+          name: name.trim(),
+          description: description?.trim() ?? null,
+          delegateAddress: delegate_address.toLowerCase(),
+          apiKeyHash,
+          apiKeyPrefix,
+          safeId: resolvedSafeId,
+        },
+        normalizedAllowances.value,
       )
-      const agent = agentResult.rows[0]
-      const safeInfoResult = resolvedSafeId
-        ? await client.query<SafeInfoRow>(
-            `SELECT safe_address, name AS safe_name, chain_id AS safe_chain_id
-             FROM user_safes WHERE id = $1`,
-            [resolvedSafeId],
-          )
-        : null
-      const safeInfo = safeInfoResult?.rows[0] ?? {
-        safe_address: null,
-        safe_name: null,
-        safe_chain_id: null,
-      }
 
-      const savedAllowances: AllowanceRow[] = []
-      if (normalizedAllowances.value.length > 0) {
-        for (const a of normalizedAllowances.value) {
-          const res = await client.query<AllowanceRow>(
-            `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
-             VALUES ($1, $2, $3, $4, $5)
-             RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
-            [
-              agent.id,
-              a.token_address,
-              a.token_symbol,
-              a.allowance_amount,
-              a.reset_period_min,
-            ],
-          )
-          savedAllowances.push(res.rows[0])
-        }
-      }
-
-      await client.query('COMMIT')
       emitFunnelEvent(sub, 'agent_created', { agent_id: agent.id })
       if (savedAllowances.length > 0) {
         emitFunnelEvent(sub, 'allowance_granted', { agent_id: agent.id })
@@ -397,15 +287,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         passport_requested: passportChainId != null,
       })
     } catch (err) {
-      await client.query('ROLLBACK')
       if (isUniqueDelegateConflict(err)) {
         return reply
           .code(409)
           .send({ error: 'An active agent with this delegate address already exists' })
       }
       throw err
-    } finally {
-      client.release()
     }
   })
 
@@ -417,38 +304,22 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       const { id } = request.params
       const { name, description } = request.body
 
-      const result = await pool.query<AgentRow>(
-        `WITH updated AS (
-           UPDATE agents
-           SET name        = COALESCE($3, name),
-               description = COALESCE($4, description),
-               updated_at  = NOW()
-           WHERE id = $1 AND user_id = $2
-           RETURNING id, name, description, delegate_address, safe_id, api_key_prefix, status, created_at
-         )
-         SELECT updated.id, updated.name, updated.description, updated.delegate_address,
-                updated.safe_id, us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
-                us.account_type,
-                updated.api_key_prefix, updated.status, updated.created_at,
-                (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = updated.id) AS mcp_last_seen_at
-         FROM updated
-         LEFT JOIN user_safes us ON updated.safe_id = us.id`,
-        [id, sub, name?.trim() ?? null, description?.trim() ?? null],
+      const updated = await updateAgentProfile(
+        id,
+        sub,
+        name?.trim() ?? null,
+        description?.trim() ?? null,
       )
 
-      if (result.rows.length === 0) {
+      if (!updated) {
         return reply.code(404).send({ error: 'Agent not found' })
       }
 
-      const allowanceResult = await pool.query<AllowanceRow>(
-        `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
-         FROM agent_allowances WHERE agent_id = $1`,
-        [id],
-      )
+      const allowances = await listAllowancesForAgentUnordered(id)
 
       return {
-        ...result.rows[0],
-        allowances: allowanceResult.rows,
+        ...updated,
+        allowances,
       }
     },
   )
@@ -458,19 +329,11 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
 
-    const result = await pool.query(
-      `DELETE FROM agents
-       WHERE id = $1 AND user_id = $2 AND status = 'revoked'
-       RETURNING id`,
-      [id, sub],
-    )
+    const deleted = await deleteRevokedAgent(id, sub)
 
-    if (result.rows.length === 0) {
-      const existing = await pool.query(
-        'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
-        [id, sub],
-      )
-      if (existing.rows.length === 0) {
+    if (!deleted) {
+      const exists = await agentExistsForUser(id, sub)
+      if (!exists) {
         return reply.code(404).send({ error: 'Agent not found' })
       }
       return reply.code(409).send({ error: 'Only revoked agents can be deleted' })
@@ -486,14 +349,9 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       const { sub } = request.user as { sub: string }
       const { id } = request.params
 
-      const result = await pool.query(
-        `UPDATE agents SET status = 'revoked', updated_at = NOW()
-         WHERE id = $1 AND user_id = $2 AND status IN ('active', 'paused')
-         RETURNING id`,
-        [id, sub],
-      )
+      const revoked = await revokeAgent(id, sub)
 
-      if (result.rows.length === 0) {
+      if (!revoked) {
         return reply
           .code(404)
           .send({ error: 'Agent not found or cannot be revoked' })
@@ -530,19 +388,11 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       const newKeyHash = crypto.createHash('sha256').update(newKey).digest('hex')
       const prefix = newKey.slice(0, 12)
 
-      const result = await pool.query(
-        `UPDATE agents SET api_key_hash = $1, api_key_prefix = $2, updated_at = NOW()
-         WHERE id = $3 AND user_id = $4 AND status = 'active'
-         RETURNING id`,
-        [newKeyHash, prefix, id, sub],
-      )
+      const rotated = await rotateAgentApiKey(newKeyHash, prefix, id, sub)
 
-      if (result.rows.length === 0) {
-        const existing = await pool.query(
-          'SELECT id, status FROM agents WHERE id = $1 AND user_id = $2',
-          [id, sub],
-        )
-        if (existing.rows.length === 0) {
+      if (!rotated) {
+        const existing = await findAgentIdStatusForUser(id, sub)
+        if (!existing) {
           return reply.code(404).send({ error: 'Agent not found' })
         }
         return reply.code(409).send({ error: 'Agent is not active' })
@@ -559,14 +409,9 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       const { sub } = request.user as { sub: string }
       const { id } = request.params
 
-      const result = await pool.query(
-        `UPDATE agents SET status = 'paused', updated_at = NOW()
-         WHERE id = $1 AND user_id = $2 AND status = 'active'
-         RETURNING id`,
-        [id, sub],
-      )
+      const paused = await pauseAgent(id, sub)
 
-      if (result.rows.length === 0) {
+      if (!paused) {
         return reply
           .code(404)
           .send({ error: 'Agent not found or cannot be paused' })
@@ -583,14 +428,9 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       const { sub } = request.user as { sub: string }
       const { id } = request.params
 
-      const result = await pool.query(
-        `UPDATE agents SET status = 'active', updated_at = NOW()
-         WHERE id = $1 AND user_id = $2 AND status = 'paused'
-         RETURNING id`,
-        [id, sub],
-      )
+      const resumed = await resumeAgent(id, sub)
 
-      if (result.rows.length === 0) {
+      if (!resumed) {
         return reply
           .code(404)
           .send({ error: 'Agent not found or cannot be resumed' })
@@ -617,36 +457,25 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: normalizedAllowance.error })
     }
 
-    const agentCheck = await pool.query<{ id: string; status: string }>(
-      'SELECT id, status FROM agents WHERE id = $1 AND user_id = $2',
-      [id, sub],
-    )
-    if (agentCheck.rows.length === 0) {
+    const agentCheck = await findAgentIdStatusForUser(id, sub)
+    if (!agentCheck) {
       return reply.code(404).send({ error: 'Agent not found' })
     }
-    if (agentCheck.rows[0].status === 'pending_approval') {
+    if (agentCheck.status === 'pending_approval') {
       return reply
         .code(409)
         .send({ error: 'Agent rules are pending wallet approval and cannot be changed here' })
     }
-    if (agentCheck.rows[0].status === 'revoked') {
+    if (agentCheck.status === 'revoked') {
       return reply
         .code(409)
         .send({ error: 'Revoked agent rules cannot be changed' })
     }
 
-    const { token_address, token_symbol, allowance_amount, reset_period_min } = normalizedAllowance.value
-    const result = await pool.query<AllowanceRow>(
-      `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount, reset_period_min)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (agent_id, token_address)
-       DO UPDATE SET allowance_amount = $4, reset_period_min = $5, token_symbol = $3, updated_at = NOW()
-       RETURNING id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min`,
-      [id, token_address, token_symbol, allowance_amount, reset_period_min],
-    )
+    const saved = await upsertAgentAllowance(id, normalizedAllowance.value)
 
     return {
-      ...result.rows[0],
+      ...saved,
       // #802: with an enabled budget schedule, this edit takes effect on-chain
       // Session schedules are retired (#834); the warning slot stays null for
       // response-shape compatibility until clients drop it.
@@ -665,30 +494,24 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: normalizedTokenAddress.error })
       }
 
-      const agentCheck = await pool.query<{ id: string; status: string }>(
-        'SELECT id, status FROM agents WHERE id = $1 AND user_id = $2',
-        [id, sub],
-      )
-      if (agentCheck.rows.length === 0) {
+      const agentCheck = await findAgentIdStatusForUser(id, sub)
+      if (!agentCheck) {
         return reply.code(404).send({ error: 'Agent not found' })
       }
-      if (agentCheck.rows[0].status === 'pending_approval') {
+      if (agentCheck.status === 'pending_approval') {
         return reply
           .code(409)
           .send({ error: 'Agent rules are pending wallet approval and cannot be changed here' })
       }
-      if (agentCheck.rows[0].status === 'revoked') {
+      if (agentCheck.status === 'revoked') {
         return reply
           .code(409)
           .send({ error: 'Revoked agent rules cannot be changed' })
       }
 
-      const result = await pool.query(
-        'DELETE FROM agent_allowances WHERE agent_id = $1 AND token_address = $2 RETURNING id',
-        [id, normalizedTokenAddress.value],
-      )
+      const deleted = await deleteAgentAllowance(id, normalizedTokenAddress.value)
 
-      if (result.rows.length === 0) {
+      if (!deleted) {
         return reply.code(404).send({ error: 'Allowance not found' })
       }
 

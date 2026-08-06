@@ -620,6 +620,12 @@ Haven's "Add funds" feature embeds a link to a licensed third-party on-ramp prov
 
 ## Payment-Related Merge Checklist
 
+> Since #995, all payment/x402/machine-payment SQL lives in
+> `packages/backend/src/infra/repositories/` (routes and libs hold control flow
+> only), and every settlement statement is PREPARE-checked against the real
+> schema in CI via `db-schema-smoke` — a schema/query drift on the money path
+> now fails the build instead of 500ing in production.
+
 Before merging any payment-related, agent-authority, Safe, SDK, x402/MPP, or relayer change, verify:
 
 - [ ] Haven does not store user private keys.

@@ -31,6 +31,18 @@ export interface DerivedAllowance {
   reset_period_min: number
 }
 
+/**
+ * The same derived row plus the raw atomic budget (#1135): the agent-facing
+ * `/machine-payments/allowances` endpoint reports remaining spend authority in
+ * atomic units, so it needs the budget before formatting. ONE derivation —
+ * {@link deriveDelegationAllowances} is a projection of this.
+ */
+export interface DerivedDelegationBudget extends DerivedAllowance {
+  chain_id: number
+  budget_atomic: string
+  period_seconds: number
+}
+
 function tokenView(chainId: number, tokenAddress: string): { symbol: string; decimals: number } {
   try {
     const token = getChainData(chainId).tokens.find(
@@ -46,14 +58,14 @@ function tokenView(chainId: number, tokenAddress: string): { symbol: string; dec
 }
 
 /**
- * The allowances-shaped budget view for a set of delegation-rail agents,
- * derived from their ACTIVE delegations. Agents with no active delegation map
- * to an empty array (post-revoke the views correctly say "no budget set").
+ * The full budget view for a set of delegation-rail agents, derived from
+ * their ACTIVE delegations. Agents with no active delegation map to an empty
+ * array (post-revoke the views correctly say "no budget set").
  */
-export async function deriveDelegationAllowances(
+export async function deriveDelegationBudgets(
   agentIds: string[],
-): Promise<Map<string, DerivedAllowance[]>> {
-  const derived = new Map<string, DerivedAllowance[]>()
+): Promise<Map<string, DerivedDelegationBudget[]>> {
+  const derived = new Map<string, DerivedDelegationBudget[]>()
   if (agentIds.length === 0) return derived
   const rows = await listActiveDelegations(agentIds)
   for (const row of rows) {
@@ -62,12 +74,42 @@ export async function deriveDelegationAllowances(
     existing.push({
       id: row.id,
       agent_id: row.agent_id,
+      chain_id: row.chain_id,
       token_address: row.token_address,
       token_symbol: symbol,
       allowance_amount: formatTokenValue(row.budget_atomic, decimals),
       reset_period_min: Math.round(row.period_seconds / 60),
+      budget_atomic: row.budget_atomic,
+      period_seconds: row.period_seconds,
     })
     derived.set(row.agent_id, existing)
   }
   return derived
+}
+
+/**
+ * The allowances-shaped projection the dashboard/agents surfaces consume —
+ * kept byte-identical to the pre-#1135 shape (their responses spread these
+ * rows straight into JSON, so extra fields here would leak into their wire
+ * contract).
+ */
+export async function deriveDelegationAllowances(
+  agentIds: string[],
+): Promise<Map<string, DerivedAllowance[]>> {
+  const rich = await deriveDelegationBudgets(agentIds)
+  const narrow = new Map<string, DerivedAllowance[]>()
+  for (const [agentId, rows] of rich) {
+    narrow.set(
+      agentId,
+      rows.map(({ id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min }) => ({
+        id,
+        agent_id,
+        token_address,
+        token_symbol,
+        allowance_amount,
+        reset_period_min,
+      })),
+    )
+  }
+  return narrow
 }

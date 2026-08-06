@@ -479,6 +479,8 @@ Implementation rule:
 
 > If Haven's backend and database disappeared, the user's Safe permissions and restrictions should still be understandable, revocable, and enforceable on-chain.
 
+**The agent-facing spend-authority report is rail-aware and grants nothing (#1135).** `GET /machine-payments/allowances` — the endpoint behind the SDK's readiness signal — is a read/reporting mirror per rail: on the legacy rail it reads the live AllowanceModule state on-chain; on the delegation rail it derives remaining budget from the agent's own active, owner-signed delegations (the same #1090 derivation the dashboard uses, so the two surfaces cannot disagree); a retired session-rail account gets the #993 fail-closed 410 rather than a state read. Enforcement is unchanged by this endpoint on every rail — the AllowanceModule and the delegation caveats remain the gates, and an over-budget delegation redemption reverts on-chain rather than being queued by Haven.
+
 ### Make All Agent Authority User-Approved
 
 Agent authority should only be created through:

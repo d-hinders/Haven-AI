@@ -401,6 +401,110 @@ describe('machine payment routes', () => {
     })
   })
 
+  describe('GET /allowances — rail-aware (#1135)', () => {
+    const SEPOLIA_USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
+    const DELEGATION_AGENT = {
+      ...AGENT,
+      chain_id: 84532,
+      execution_rail: 'delegation',
+      account_type: 'delegator_hybrid',
+    }
+
+    function mockDelegationReads(delegations: Array<Record<string, unknown>>) {
+      mockQuery.mockImplementation(async (sql: unknown) => {
+        const s = String(sql)
+        if (/FROM agents a/.test(s)) return { rows: [DELEGATION_AGENT] }
+        if (/FROM agent_delegations/.test(s)) return { rows: delegations }
+        return { rows: [] }
+      })
+    }
+
+    it('delegation rail: remaining = the ACTIVE delegation period budget, no AllowanceModule read, frozen mirror never consulted', async () => {
+      mockDelegationReads([{
+        id: 'd-1',
+        agent_id: AGENT.id,
+        chain_id: 84532,
+        token_address: SEPOLIA_USDC,
+        budget_atomic: '10000000',
+        period_seconds: 86_400,
+      }])
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({
+        agent_id: AGENT.id,
+        safe_address: AGENT.safe_address,
+        delegate_address: AGENT.delegate_address,
+        chain_id: 84532,
+        allowances: [{
+          id: 'd-1',
+          token_address: SEPOLIA_USDC,
+          token_symbol: 'USDC',
+          configured_amount: '10.00',
+          reset_period_min: 1440,
+          onchain: {
+            amount: '10000000',
+            spent: '0',
+            remaining: '10000000',
+            effective_spent: '0',
+            reset_time_min: 1440,
+            last_reset_min: 0,
+            nonce: 0,
+            is_reset_pending: false,
+          },
+        }],
+      })
+      // No Safe, no AllowanceModule on this rail — the contract read must not run.
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+      expect(allowanceMocks.getLatestBlockTimeSec).not.toHaveBeenCalled()
+      // agent_allowances is a frozen onboarding mirror on this rail (#1090) —
+      // consulting it would report the onboarding budget forever.
+      expect(mockQuery.mock.calls.some((c) => /FROM agent_allowances/.test(String(c[0])))).toBe(false)
+    })
+
+    it('delegation rail: NO active budget returns an empty allowances array — derived readiness stays needs_approval', async () => {
+      mockDelegationReads([])
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({
+        agent_id: AGENT.id,
+        safe_address: AGENT.safe_address,
+        delegate_address: AGENT.delegate_address,
+        chain_id: 84532,
+        allowances: [],
+      })
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    })
+
+    it('session_key rail: 410 fail-closed — no state read on the retired rail (#834/#993)', async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [{ ...AGENT, execution_rail: 'session_key' }] })
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toMatch(/session rail is retired/)
+      // The refusal is produced from the auth context alone: no allowance
+      // config read, no delegation read, no on-chain read.
+      expect(mockQuery.mock.calls.some((c) => /FROM agent_allowances|FROM agent_delegations/.test(String(c[0])))).toBe(false)
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    })
+  })
+
   it('receipts join the intent so settlement_scheme is agent-visible (#1063 finding)', async () => {
     mockQuery.mockResolvedValueOnce(authRow()).mockResolvedValueOnce({ rows: [] })
     const response = await app.inject({

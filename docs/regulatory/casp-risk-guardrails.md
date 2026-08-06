@@ -128,6 +128,10 @@ Haven backend
 > Since #1059 every delegation-rail intent also records `budget_delegation_hash`
 > — the metering budget, uniform across schemes — so attribution in the
 > accounting feed never depends on parsing prepared execution state.
+> Since #1139 every migration in the mainnet-money table set carries a
+> structural `down()` (proven by an up-then-down-all run against a real
+> schema) — rollback is operator tooling, never runner behavior, and the
+> additive-by-design philosophy is unchanged.
 > Since #717 relayer-paid operations run under per-identity gas budgets
 > (429 on over-cap, spend recorded per agent/user for attribution) — an
 > availability control on the shared gas sponsor, deliberately fail-open on

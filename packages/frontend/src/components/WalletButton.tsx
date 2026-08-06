@@ -14,7 +14,7 @@ import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
-import { useActiveSigner } from '@/lib/signer'
+import { useActiveSigner, hybridPasskeyOnDevice } from '@/lib/signer'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { truncateAddress } from '@/components/haven'
 
@@ -73,6 +73,13 @@ interface AddressSection {
 interface PopoverProps {
   primary: AddressSection
   secondary?: AddressSection
+  /**
+   * #1126: identifies the ACTIVE passkey/device without an address — Hybrid
+   * passkeys are raw P256 coordinates on the account contract and have no
+   * on-chain address of their own; showing the treasury address here implied
+   * the credential owned it.
+   */
+  signingWith?: { label: string; keyId: string }
   unavailablePasskey?: boolean
   open: boolean
   onClose: () => void
@@ -93,6 +100,7 @@ interface PopoverProps {
 function WalletPopover({
   primary,
   secondary,
+  signingWith,
   unavailablePasskey = false,
   open,
   onClose,
@@ -196,6 +204,15 @@ function WalletPopover({
           </p>
         )}
         {renderAddressSection(primary)}
+        {signingWith ? (
+          <div className="py-2">
+            <p className="text-xs text-[var(--v2-ink-muted)]">Signing with</p>
+            <p className="text-sm font-medium text-[var(--v2-ink)]">{signingWith.label}</p>
+            <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
+              {truncateAddress(signingWith.keyId)}
+            </p>
+          </div>
+        ) : null}
         {secondary && renderAddressSection(secondary, true)}
       </div>
 
@@ -380,7 +397,7 @@ export default function WalletButton() {
                 className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
                 <AddressAvatar address={passkeySigner.address} />
-                <span>{passkeyAlias ?? 'Passkey ready'}</span>
+                <span>{passkeyAlias ?? 'Passkey'}</span>
               </button>
 
               <WalletPopover
@@ -405,6 +422,20 @@ export default function WalletButton() {
 
         if (delegatorSigner) {
           const accountAlias = getOwnerAlias(delegatorSigner.accountAddress)
+          // #1126: name the enrolled-on-this-device credential the same way
+          // AccountSignersCard does — Face ID / Touch ID for the primary,
+          // Backup {i} for later enrollments. No address: Hybrid passkeys
+          // have none.
+          const onDeviceKey = hybridPasskeyOnDevice(delegatorSigner.signers)
+          const keyIndex = onDeviceKey
+            ? delegatorSigner.signers.passkeys.findIndex((pk) => pk.key_id === onDeviceKey.key_id)
+            : -1
+          const signingWith = onDeviceKey
+            ? {
+                label: keyIndex === 0 ? 'Face ID / Touch ID' : `Backup ${keyIndex}`,
+                keyId: onDeviceKey.key_id,
+              }
+            : undefined
           const connectedWallet =
             connected && account
               ? {
@@ -426,16 +457,17 @@ export default function WalletButton() {
                 className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
                 <AddressAvatar address={delegatorSigner.accountAddress} />
-                <span>Passkey ready</span>
+                <span>Passkey</span>
               </button>
 
               <WalletPopover
                 primary={{
-                  label: 'Haven account (passkey)',
+                  label: 'Haven account',
                   address: delegatorSigner.accountAddress,
                   chainName: safeChainName,
                   displayName: accountAlias,
                 }}
+                signingWith={signingWith}
                 secondary={connectedWallet}
                 open={popoverOpen}
                 onClose={() => setPopoverOpen(false)}

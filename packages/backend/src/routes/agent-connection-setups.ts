@@ -846,7 +846,11 @@ async function verifyDelegationSetupAuthority(
   allowances: AllowanceRow[],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const active = await listActiveDelegationBudgets(setup.agent_id ?? '')
+    // agent_id is guaranteed by the caller's precondition; if that ever
+    // breaks, an empty list (dev's null-param behavior) beats a uuid-cast
+    // error dressed up as "could not confirm" (#1125 review nit).
+    if (!setup.agent_id) return { ok: false as const, error: 'This connection is not approved yet.' }
+    const active = await listActiveDelegationBudgets(setup.agent_id)
 
     for (const allowance of allowances) {
       const match = active.find(

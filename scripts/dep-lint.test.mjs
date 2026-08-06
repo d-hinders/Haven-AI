@@ -228,3 +228,15 @@ test('the committed baseline covers the live scan (checked-in state is green)', 
     'committed baseline is stale — run `npm run lint:deps:update`',
   )
 })
+
+test('pg-only-in-infra exempts EXACTLY infra/db.ts, not the rest of infra/ (#1125 review)', async () => {
+  const require = createRequire(import.meta.url)
+  const config = require(join(REPO_ROOT, '.dependency-cruiser.cjs'))
+  const rule = config.forbidden.find((r) => r.name === 'pg-only-in-infra')
+  assert.ok(rule, 'pg-only-in-infra rule missing')
+  const pathNot = new RegExp(rule.from.pathNot)
+  assert.ok(pathNot.test('packages/backend/src/infra/db.ts'), 'shared home must be exempt')
+  assert.ok(pathNot.test('packages/backend/src/infra/repositories/agents.ts'), 'repositories must be exempt')
+  assert.ok(!pathNot.test('packages/backend/src/infra/dbx.ts'), 'near-miss filename must NOT be exempt')
+  assert.ok(!pathNot.test('packages/backend/src/lib/anything.ts'), 'lib/ must NOT be exempt')
+})

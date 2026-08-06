@@ -376,8 +376,11 @@ receipt's gas numbers for cost attribution. Availability guard, not a funds
 gate: it fails open on database errors because funds stay caveat-gated
 on-chain either way.
 
-Since #993 the x402 authorize entry point also runs the retired-session
-gate: a session-marked account gets the seam's 410 (nothing written) before
+Since #1130 agent authentication ahead of every x402 call distinguishes a
+pending agent (`403 agent_pending_approval`, actionable) from a bad key
+(`401`) — the compound misdiagnosis from #1129's URL confusion is now
+separable. Since #993 the x402 authorize entry point also runs the
+retired-session gate: a session-marked account gets the seam's 410 (nothing written) before
 either scheme branch — it can no longer slip into the legacy AllowanceModule
 flow below.
 

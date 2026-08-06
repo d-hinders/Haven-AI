@@ -1127,7 +1127,16 @@ export function hostedMcpUrl(request: FastifyRequest): string {
   const explicit = process.env.HAVEN_HOSTED_MCP_URL ?? process.env.NEXT_PUBLIC_HAVEN_MCP_URL
   if (explicit) return explicit.replace(/\/+$/, '')
   const self = apiBaseUrl(request)
-  if (new URL(self).host === PRODUCTION_API_HOST) {
+  // A malformed self-URL (scheme-less HAVEN_API_URL, weird Host header) must
+  // yield the ACTIONABLE config error, not a masked TypeError-500 (#1136
+  // review) — treat unparseable as not-production.
+  let selfHost: string | null = null
+  try {
+    selfHost = new URL(self).host
+  } catch {
+    selfHost = null
+  }
+  if (selfHost === PRODUCTION_API_HOST) {
     return DEFAULT_HOSTED_MCP_URL
   }
   throw new HostedMcpConfigError(

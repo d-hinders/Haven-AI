@@ -72,3 +72,21 @@ for how the environments are wired, see
 - [ ] Watch prod error logs for a few minutes. If anything is off, **roll back**
       (Railway redeploy-previous / Vercel instant rollback) and, if a migration is
       implicated, restore from the pre-deploy snapshot.
+
+## Production deploy drift (open, 2026-08-06)
+
+Verify the frontend on `haven-ai-frontend.vercel.app` — **not** on
+`haven-ai-frontend-git-main-…vercel.app`. The latter is Vercel's branch alias for
+`main`, and it is currently misleading in two ways at once: it serves a
+different build from the production alias, and its `/api/*` proxies to the **dev**
+backend (`/api/chains` returns the dev backend's response), which means the newest
+`main` deployment was built with Preview-scope env vars. So a "prod smoke" run
+there would be testing dev.
+
+Related and unresolved: `main` has not moved since **2026-06-26**, so production
+is well behind `dev`, and the production alias serves a build whose backend
+predates the `/chains` route. Before the next promotion, confirm in the Vercel
+project settings which branch is set as **Production Branch** and which
+deployment the production domain is assigned to — a promotion merge is only
+guaranteed to reach production if `main` pushes actually produce Production
+deployments.

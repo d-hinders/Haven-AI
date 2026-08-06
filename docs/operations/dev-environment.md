@@ -30,7 +30,7 @@ how to configure it. For the branch workflow that feeds it, see
 
 | Service | Platform | Deploys from | Notes |
 |---|---|---|---|
-| Frontend | **Vercel** (dev project) | **per-PR preview deployments** | **No stable dev URL** — you test on the PR's own preview link (its Vercel check). The Preview scope sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend, so every preview link is the same dev environment on a different domain. |
+| Frontend | **Vercel** | `dev` branch alias + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, always the newest `dev` build). Per-PR previews exist alongside it. There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
 | Backend / API | **Railway** (dev project) | `dev` branch | Own isolated Postgres — never the prod DB. |
 | Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend. |
 | Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. EIP-3009 by default; the experimental ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
@@ -52,6 +52,13 @@ deployed that way today.
   deployment of `dev` HEAD, and proxies to the dev backend. Per-PR preview links
   exist alongside it (the PR's Vercel check) and are what you use to test *that
   PR's build* — they are a different domain each time.
+  **You will not find this URL under Vercel → Domains**, and that is expected:
+  that page lists only *assigned* domains (production + custom). Branch aliases
+  are generated automatically for any branch that has a deployment — open a
+  `dev` deployment under **Deployments** and they are listed on the deployment
+  itself. Vercel truncates the alias for long branch names, so copy it from
+  there rather than hand-building it. The alias is **public** — no login gate —
+  so treat the link as sharing the dev stack.
   **The consequence that bites:** **passkeys are bound to the exact domain they
   were created on**, so a passkey made on one PR preview is unreachable on the
   next (the browser offers only the "use another device" QR, which is
@@ -65,6 +72,11 @@ deployed that way today.
   backend**: on it, dev-only features are missing and passkey onboarding dies
   with "Relayer is temporarily unfunded" (old code targets Gnosis, whose relayer
   is intentionally unfunded).
+  ⚠️ `haven-ai-frontend-git-main-…vercel.app` is **not production**. It is the
+  branch alias for `main`, and as of 2026-08-06 it serves a different build from
+  the production alias *and* proxies to the **dev** backend — see
+  [`promoting-dev-to-main.md`](promoting-dev-to-main.md) § *Production deploy
+  drift*. Use the production alias above when you mean production.
   ⚠️ `haven-dev.vercel.app` is a *different* app
   ("HAVEN Project" Vite SPA), not Haven's dashboard.
 - Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public).

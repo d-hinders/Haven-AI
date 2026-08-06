@@ -58,7 +58,7 @@ promotion — see [Automation & gating](#automation--gating).
 | Demo merchant | `https://demo-merchant-dev-84e4.up.railway.app` |
 | Chain | Base Sepolia (`84532`) |
 | USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
-| Frontend | `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app` — the branch-tracking preview of `dev` (stable). ⚠️ never `haven-ai-frontend.vercel.app` (prod alias → prod backend; passkeys are domain-bound) |
+| Frontend | `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app` — the branch-tracking preview of `dev` (stable hostname, always the newest `dev` build; verified 2026-08-06). ⚠️ never `haven-ai-frontend.vercel.app` (prod alias → prod backend; passkeys are domain-bound), and ⚠️ never the `-git-main-` alias, which is **not** production and currently proxies to the dev backend |
 
 The seed and money-flow harness are Node processes that call the backend
 directly. They do not depend on browser CORS. The live UI smoke drives a real

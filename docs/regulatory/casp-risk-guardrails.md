@@ -41,7 +41,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-05"
+last-verified: "2026-08-06"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -476,7 +476,7 @@ Implementation rule:
 
 **The dashboard's signing surfaces are rail-honest (#1079).** The signer layer types the two authorities apart: a Safe transaction can only be signed by a `SafeCapableSigner` (EOA or Safe passkey), never by a Hybrid account's passkey — the compiler enforces the exclusion at every Safe-shaped call site (send, approval execution, owner changes, AllowanceModule edits), and Safe-only controls are hidden on delegation accounts rather than dead-ending at a signer they cannot use. This is a UI/type-layer hardening only; the on-chain authority model above is unchanged.
 
-**Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** Both connect-setup approval routes work this way (`routes/agent-connection-setups.ts`): the legacy `wallet-approval` reads the live AllowanceModule state on-chain, and the delegation rail's `budget-approval` reads the agent's own active, owner-signed delegations. The latter takes an empty request body precisely so that no amount, recipient, or hash a caller supplies can influence the outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. A pinned recipient is accepted where the reviewed budget was unpinned, because that is strictly narrower authority than the user approved (#1073). Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
+**Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** Both connect-setup approval routes work this way (`routes/agent-connection-setups.ts`): the legacy `wallet-approval` reads the live AllowanceModule state on-chain, and the delegation rail's `budget-approval` reads the agent's own active, owner-signed delegations. The latter takes an empty request body precisely so that no amount, recipient, or hash a caller supplies can influence the outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. A pinned recipient is accepted where the reviewed budget was unpinned, because that is strictly narrower authority than the user approved (#1073). (#985 moved this route's SQL into `infra/repositories/agent-connection-setups.ts`; the verification itself — reading live AllowanceModule state, and reading the agent's own active owner-signed delegations — still runs in the route and is unchanged. The approval write is now one locked, guarded function, so the checks and the write it protects cannot be run apart.) Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
 
 ### Keep Agent Spend Authority Narrow
 

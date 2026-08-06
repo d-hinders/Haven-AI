@@ -1931,3 +1931,271 @@ describe('cancel cannot orphan a live delegation-rail agent (#1073)', () => {
     await app.close()
   })
 })
+
+/**
+ * Characterization for the query paths #985 extracts into
+ * `infra/repositories/agent-connection-setups.ts`.
+ *
+ * Written BEFORE the extraction, deliberately asserting the SQL shape and the
+ * parameter POSITIONS rather than only the HTTP result: the point of a
+ * characterization suite for a data-access refactor is to fail if a query's
+ * scoping, ordering or transaction discipline changes, and an assertion that
+ * only reads the status code cannot see any of that.
+ *
+ * These paths were the coverage holes — every pre-existing test passed an
+ * explicit `safe_id`, so the default-wallet query had never been executed by
+ * the suite at all.
+ */
+describe('data access characterization (#985)', () => {
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientRelease.mockReset()
+    mockClientQuery.mockResolvedValue({ rows: [] })
+    mockConnect.mockResolvedValue({
+      query: (...args: unknown[]) => mockClientQuery(...args),
+      release: mockClientRelease,
+    })
+    mockGetTokenAllowance.mockReset()
+    mockGetTokensForDelegate.mockReset()
+    mockRequestPassport.mockReset().mockResolvedValue(true)
+    mockIssueBestEffort.mockReset()
+  })
+
+  it('falls back to the default Haven wallet when no safe_id is supplied', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', runtime: 'claude-code', allowances: [ALLOWANCE] },
+    })
+
+    expect(response.statusCode).toBe(201)
+    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
+    expect(String(sql)).toContain('FROM user_safes')
+    // The tenant predicate is asserted in the SQL, not merely in the params:
+    // the params come from the CALL SITE and stay `['user-1']` even if the
+    // `user_id` clause is deleted from the query — a mutation that silently
+    // returns another tenant's default wallet. Assert the clause itself.
+    expect(String(sql)).toContain('WHERE user_id = $1')
+    expect(String(sql)).toContain('is_default = true')
+    expect(params).toEqual(['user-1'])
+    await app.close()
+  })
+
+  it('scopes an explicit safe_id to the calling user', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', safe_id: SAFE.id, runtime: 'claude-code', allowances: [ALLOWANCE] },
+    })
+
+    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
+    expect(String(sql)).toContain('WHERE id = $1 AND user_id = $2')
+    expect(params).toEqual([SAFE.id, 'user-1'])
+    await app.close()
+  })
+
+  it('reads a setup for its owner only — user_id is part of every user-facing lookup', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValue({ rows: [] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${SETUP.id}`,
+      headers: { authorization: 'Bearer user-jwt' },
+    })
+
+    expect(response.statusCode).toBe(404)
+    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
+    expect(String(sql)).toContain('s.id = $1 AND s.user_id = $2')
+    expect(params).toEqual([SETUP.id, 'user-1'])
+    await app.close()
+  })
+
+  it('records connector version and runtime on resolve, and skips the write when neither is sent', async () => {
+    const app = await buildApp()
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('UPDATE agent_connection_setups')) return { rows: [] }
+      if (String(sql).includes('agent_connection_setup_allowances')) return { rows: [ALLOWANCE] }
+      return { rows: [SETUP] }
+    })
+
+    await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/resolve',
+      payload: { setup_token: 'hv_setup_abc', connector_version: '0.1.0', runtime: 'claude-code' },
+    })
+
+    const update = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agent_connection_setups'),
+    )
+    expect(update).toBeTruthy()
+    expect(String(update?.[0])).toContain('COALESCE($2, connector_version)')
+    expect(update?.[1]).toEqual([SETUP.id, '0.1.0', 'claude-code'])
+
+    mockQuery.mockClear()
+    await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/resolve',
+      payload: { setup_token: 'hv_setup_abc' },
+    })
+    expect(
+      mockQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agent_connection_setups')),
+    ).toBe(false)
+
+    await app.close()
+  })
+
+  it('rolls back and writes nothing when registration fails validation inside the transaction', async () => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: [SETUP] }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_abc',
+        challenge_id: SETUP.challenge_id,
+        delegate_address: DELEGATE_ADDRESS,
+        proof_signature: `0x${'1'.repeat(130)}`,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    const statements = mockClientQuery.mock.calls.map(([sql]) => String(sql))
+    expect(statements).toContain('BEGIN')
+    expect(statements).toContain('ROLLBACK')
+    expect(statements).not.toContain('COMMIT')
+    expect(statements.some((sql) => /INSERT INTO agents/.test(sql))).toBe(false)
+    expect(mockClientRelease).toHaveBeenCalled()
+    await app.close()
+  })
+
+  it('locks the setup row before consuming the token on register', async () => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: [SETUP] }
+      return { rows: [] }
+    })
+
+    await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: { setup_token: 'hv_setup_abc', challenge_id: 'wrong', delegate_address: DELEGATE_ADDRESS,
+        proof_signature: `0x${'1'.repeat(130)}`, api_key_hash: API_KEY_HASH, api_key_prefix: API_KEY_PREFIX },
+    })
+
+    const select = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('FROM agent_connection_setups'),
+    )
+    expect(String(select?.[0])).toContain('FOR UPDATE OF s')
+    expect(String(select?.[0])).toContain('s.setup_token_hash = $1')
+    await app.close()
+  })
+
+  /**
+   * Every early exit inside the register transaction must ROLLBACK, not COMMIT.
+   * Asserted branch by branch rather than once: the refactor routes all of them
+   * through a single mechanism, and a table here is what proves the mechanism
+   * did not quietly convert one of them into a committed empty transaction.
+   */
+  it.each([
+    ['setup not found under the lock', {}, 401, null],
+    ['setup already consumed', {}, 409, { ...SETUP, setup_token_consumed_at: '2026-01-01T00:00:00.000Z' }],
+    ['setup no longer awaiting connection', {}, 409, { ...SETUP, status: 'connected_local' }],
+    ['expired setup token', {}, 410, { ...SETUP, setup_token_expires_at: '2000-01-01T00:00:00.000Z' }],
+    ['invalid challenge', { challenge_id: 'wrong' }, 400, SETUP],
+    ['malformed signing address', { delegate_address: 'not-an-address' }, 400, SETUP],
+    ['invalid proof signature', { proof_signature: `0x${'9'.repeat(130)}` }, 400, SETUP],
+    ['malformed api key hash', { api_key_hash: 'short' }, 400, SETUP],
+    ['malformed api key prefix', { api_key_prefix: 42 }, 400, SETUP],
+  ])('rolls back the register transaction on %s', async (_label, override, expected, row) => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: row ? [row] : [] }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_abc',
+        challenge_id: SETUP.challenge_id,
+        delegate_address: DELEGATE_ADDRESS,
+        proof_signature: `0x${'1'.repeat(130)}`,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+        ...override,
+      },
+    })
+
+    expect(response.statusCode).toBe(expected)
+    const statements = mockClientQuery.mock.calls.map(([sql]) => String(sql))
+    expect(statements).toContain('ROLLBACK')
+    expect(statements).not.toContain('COMMIT')
+    expect(statements.some((sql) => /INSERT INTO agents/.test(sql))).toBe(false)
+    await app.close()
+  })
+
+  it('authenticates an install-status report by API key against the setup and allowed agent states', async () => {
+    const app = await buildApp()
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('JOIN agents a')) return { rows: [{ ...CONNECTED_SETUP }] }
+      if (String(sql).includes('UPDATE agent_connection_setups')) {
+        return { rows: [{ install_status: { hosted_mcp_configured: true } }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/install-status`,
+      headers: { authorization: 'Bearer sk_agent_live_key' },
+      payload: { hosted_mcp_configured: true },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const auth = mockQuery.mock.calls.find(([sql]) => String(sql).includes('JOIN agents a'))
+    expect(String(auth?.[0])).toContain('WHERE s.id = $1 AND a.api_key_hash = $2')
+    expect((auth?.[1] as unknown[])[0]).toBe(SETUP.id)
+    expect((auth?.[1] as unknown[]).slice(2)).toEqual(['pending_approval', 'active', 'paused'])
+    await app.close()
+  })
+
+  it('reads the active delegations for a budget approval scoped to the setup agent', async () => {
+    const app = await buildApp()
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_delegations')) return { rows: [] }
+      if (String(sql).includes('agent_connection_setup_allowances')) return { rows: [ALLOWANCE] }
+      return { rows: [{ ...CONNECTED_SETUP, account_type: 'delegator_hybrid' }] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/budget-approval`,
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: {},
+    })
+
+    expect(response.statusCode).toBe(409)
+    const read = mockQuery.mock.calls.find(([sql]) => String(sql).includes('FROM agent_delegations'))
+    expect(String(read?.[0])).toContain("status = 'active'")
+    expect(read?.[1]).toEqual(['agent-1'])
+    await app.close()
+  })
+})

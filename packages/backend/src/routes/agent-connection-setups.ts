@@ -1,7 +1,12 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import crypto from 'crypto'
 import { ethers } from 'ethers'
-import pool from '../db.js'
+import * as setups from '../infra/repositories/agent-connection-setups.js'
+import type {
+  AllowanceRow,
+  SetupRow,
+  UserSafeRow,
+} from '../infra/repositories/agent-connection-setups.js'
 import { authMiddleware } from '../middleware/auth.js'
 import {
   SETUP_TOKEN_TTL_MINUTES,
@@ -101,64 +106,23 @@ interface WalletApprovalBody {
   confirmation_status?: 'confirmed' | 'receipt_timeout'
 }
 
-interface SetupRow {
-  id: string
-  user_id: string
-  agent_id: string | null
-  safe_id: string
-  name: string
-  description: string | null
-  runtime: string | null
-  status: string
-  setup_token_expires_at: string
-  setup_token_consumed_at: string | null
-  challenge_id: string
-  challenge_message: string
-  challenge_expires_at: string
-  delegate_address: string | null
-  proof_signature: string | null
-  api_key_prefix: string | null
-  connector_version: string | null
-  connector_context: Record<string, unknown>
-  install_status: Record<string, unknown>
-  approval_status: string
-  safe_tx_hash: string | null
-  tx_hash: string | null
-  failure_reason: string | null
-  safe_address: string
-  safe_name: string
-  safe_chain_id: number
-  /** 'delegator_hybrid' = delegation rail (#1073); 'safe' = legacy AllowanceModule. */
-  account_type: string | null
-  /** Passport opt-in recorded at setup creation, acted on at /register (#1072). */
-  issue_passport: boolean
-}
-
-interface AllowanceRow {
-  id?: string
-  token_address: string
-  token_symbol: string
-  allowance_amount: string
-  reset_period_min: number
-}
-
-interface UserSafeRow {
-  id: string
-  safe_address: string
-  name: string
-  chain_id: number
-  account_type: string | null
-}
-
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
 export const CONNECTOR_PACKAGE = '@haven_ai/connect@alpha'
-const WALLET_APPROVAL_STATES = new Set([
-  'connected_local',
-  'awaiting_wallet_approval',
-  'approval_in_progress',
-  'proposed',
-  'active',
-])
+
+/**
+ * Refuse a request from inside a transaction.
+ *
+ * `withTransaction` rolls back on a throw and commits on a normal return, so a
+ * guard that wants to answer the caller AND abandon the transaction has to
+ * throw. Returning early would commit — for these routes an empty transaction,
+ * but the next guard added after a write would silently keep it. Making refusal
+ * a throw keeps "we did not proceed" and "nothing was written" the same fact.
+ */
+class SetupRefusal extends Error {
+  constructor(readonly statusCode: number, message: string) {
+    super(message)
+  }
+}
 
 export default async function agentConnectionSetupRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: CreateSetupBody }>(
@@ -203,55 +167,23 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         expiresAt,
       })
 
-      const client = await pool.connect()
-      try {
-        await client.query('BEGIN')
-        await client.query(
-          `INSERT INTO agent_connection_setups (
-             id, user_id, safe_id, name, description, runtime, status,
-             setup_token_hash, setup_token_prefix, setup_token_expires_at,
-             challenge_id, challenge_message, challenge_expires_at, issue_passport
-           )
-           VALUES ($1, $2, $3, $4, $5, $6, 'awaiting_connection',
-                   $7, $8, $9, $10, $11, $12, $13)`,
-          [
-            setupId,
-            sub,
-            safe.id,
-            parsed.name,
-            parsed.description,
-            parsed.runtime,
-            hashSetupSecret(setupToken),
-            setupToken.slice(0, 20),
-            expiresAt,
-            challengeId,
-            challengeMessage,
-            expiresAt,
-            parsed.issuePassport,
-          ],
-        )
-        for (const allowance of parsed.allowances) {
-          await client.query(
-            `INSERT INTO agent_connection_setup_allowances (
-               setup_id, token_address, token_symbol, allowance_amount, reset_period_min
-             )
-             VALUES ($1, $2, $3, $4, $5)`,
-            [
-              setupId,
-              allowance.token_address,
-              allowance.token_symbol,
-              allowance.allowance_amount,
-              allowance.reset_period_min,
-            ],
-          )
-        }
-        await client.query('COMMIT')
-      } catch (err) {
-        await client.query('ROLLBACK')
-        throw err
-      } finally {
-        client.release()
-      }
+      await setups.insertSetupWithAllowances(
+        {
+          id: setupId,
+          userId: sub,
+          safeId: safe.id,
+          name: parsed.name,
+          description: parsed.description,
+          runtime: parsed.runtime,
+          setupTokenHash: hashSetupSecret(setupToken),
+          setupTokenPrefix: setupToken.slice(0, 20),
+          expiresAt,
+          challengeId,
+          challengeMessage,
+          issuePassport: parsed.issuePassport,
+        },
+        parsed.allowances,
+      )
 
       const apiUrl = apiBaseUrl(request)
       const command = buildConnectorCommand(setupToken, apiUrl, parsed.runtime, parsed.localMcp)
@@ -281,13 +213,10 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     }
 
     if (request.body.connector_version || request.body.runtime) {
-      await pool.query(
-        `UPDATE agent_connection_setups
-         SET connector_version = COALESCE($2, connector_version),
-             runtime = COALESCE($3, runtime),
-             updated_at = NOW()
-         WHERE id = $1`,
-        [setup.id, stringOrNull(request.body.connector_version), stringOrNull(request.body.runtime)],
+      await setups.updateConnectorMetadata(
+        setup.id,
+        stringOrNull(request.body.connector_version),
+        stringOrNull(request.body.runtime),
       )
     }
 
@@ -314,140 +243,100 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     let issuePassportForSetup = false
     let setupChainId = 0
     let setupUserId = ''
-    const client = await pool.connect()
     try {
-      await client.query('BEGIN')
-      const setupResult = await client.query<SetupRow>(
-        `${setupSelectSql('s.setup_token_hash = $1')} FOR UPDATE OF s`,
-        [hashSetupSecret(request.body.setup_token)],
-      )
-      const setup = setupResult.rows[0]
-      if (!setup) {
-        await client.query('ROLLBACK')
-        return reply.code(401).send({ error: 'Invalid setup token' })
-      }
-      if (setup.status !== 'awaiting_connection' || setup.setup_token_consumed_at) {
-        await client.query('ROLLBACK')
-        return reply.code(409).send({ error: 'Setup is not awaiting connection' })
-      }
-      if (isExpired(setup.setup_token_expires_at) || isExpired(setup.challenge_expires_at)) {
-        await client.query('ROLLBACK')
-        return reply.code(410).send({ error: 'Setup token expired' })
-      }
-      if (request.body.challenge_id !== setup.challenge_id) {
-        await client.query('ROLLBACK')
-        return reply.code(400).send({ error: 'Invalid challenge' })
-      }
-      if (!isValidAddress(request.body.delegate_address)) {
-        await client.query('ROLLBACK')
-        return reply.code(400).send({ error: 'Valid public signing address is required' })
-      }
-      delegateAddress = request.body.delegate_address.toLowerCase()
-      if (!verifySetupProof(setup.challenge_message, request.body.proof_signature, delegateAddress)) {
-        await client.query('ROLLBACK')
-        return reply.code(400).send({ error: 'Invalid proof signature' })
-      }
-      if (!isValidSha256Hash(request.body.api_key_hash)) {
-        await client.query('ROLLBACK')
-        return reply.code(400).send({ error: 'Valid API key hash is required' })
-      }
-      if (!isValidApiKeyPrefix(request.body.api_key_prefix)) {
-        await client.query('ROLLBACK')
-        return reply.code(400).send({ error: 'Valid API key prefix is required' })
-      }
+      await setups.inTransaction(async (tx) => {
+        const setup = await setups.lockSetupByTokenHash(
+          hashSetupSecret(request.body.setup_token),
+          tx,
+        )
+        if (!setup) throw new SetupRefusal(401, 'Invalid setup token')
+        if (setup.status !== 'awaiting_connection' || setup.setup_token_consumed_at) {
+          throw new SetupRefusal(409, 'Setup is not awaiting connection')
+        }
+        if (isExpired(setup.setup_token_expires_at) || isExpired(setup.challenge_expires_at)) {
+          throw new SetupRefusal(410, 'Setup token expired')
+        }
+        if (request.body.challenge_id !== setup.challenge_id) {
+          throw new SetupRefusal(400, 'Invalid challenge')
+        }
+        if (!isValidAddress(request.body.delegate_address)) {
+          throw new SetupRefusal(400, 'Valid public signing address is required')
+        }
+        delegateAddress = request.body.delegate_address.toLowerCase()
+        if (!verifySetupProof(setup.challenge_message, request.body.proof_signature, delegateAddress)) {
+          throw new SetupRefusal(400, 'Invalid proof signature')
+        }
+        if (!isValidSha256Hash(request.body.api_key_hash)) {
+          throw new SetupRefusal(400, 'Valid API key hash is required')
+        }
+        if (!isValidApiKeyPrefix(request.body.api_key_prefix)) {
+          throw new SetupRefusal(400, 'Valid API key prefix is required')
+        }
 
-      const existing = await client.query(
-        `SELECT id FROM agents
-         WHERE user_id = $1 AND lower(delegate_address) = $2 AND status != 'revoked'
-         LIMIT 1`,
-        [setup.user_id, delegateAddress],
-      )
-      if (existing.rows.length > 0) {
-        await client.query('ROLLBACK')
-        return reply.code(409).send({ error: 'An agent with this signing address already exists' })
-      }
-
-      apiKeyPrefix = request.body.api_key_prefix
-      const connectorContext = sanitizeConnectorContext(request.body.connector_context)
-      const initialInstallStatus = {
-        hosted_mcp_configured: false,
-        local_signer_configured: false,
-        local_mcp_configured: false,
-        local_mcp_acknowledged: false,
-        restart_required: Boolean(request.body.install_capabilities?.restart_required),
-      }
-      setupId = setup.id
-      hostedMcpUrlValue = hostedMcpUrl()
-      issuePassportForSetup = setup.issue_passport === true
-      setupChainId = setup.safe_chain_id
-      setupUserId = setup.user_id
-
-      const agentResult = await client.query<{ id: string }>(
-        `INSERT INTO agents (
-           user_id, name, description, delegate_address, api_key_hash,
-           api_key_prefix, safe_id, status
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_approval')
-         RETURNING id`,
-        [
+        const existingAgentId = await setups.findActiveAgentIdByDelegate(
           setup.user_id,
-          setup.name,
-          setup.description,
           delegateAddress,
-          request.body.api_key_hash,
-          apiKeyPrefix,
-          setup.safe_id,
-        ],
-      )
-      agentId = agentResult.rows[0].id
+          tx,
+        )
+        if (existingAgentId) {
+          throw new SetupRefusal(409, 'An agent with this signing address already exists')
+        }
 
-      await client.query(
-        `INSERT INTO agent_allowances (
-           agent_id, token_address, token_symbol, allowance_amount, reset_period_min
-         )
-         SELECT $1, token_address, token_symbol, allowance_amount, reset_period_min
-         FROM agent_connection_setup_allowances
-         WHERE setup_id = $2`,
-        [agentId, setupId],
-      )
+        apiKeyPrefix = request.body.api_key_prefix
+        const connectorContext = sanitizeConnectorContext(request.body.connector_context)
+        const initialInstallStatus = {
+          hosted_mcp_configured: false,
+          local_signer_configured: false,
+          local_mcp_configured: false,
+          local_mcp_acknowledged: false,
+          restart_required: Boolean(request.body.install_capabilities?.restart_required),
+        }
+        setupId = setup.id
+        hostedMcpUrlValue = hostedMcpUrl()
+        issuePassportForSetup = setup.issue_passport === true
+        setupChainId = setup.safe_chain_id
+        setupUserId = setup.user_id
 
-      await client.query(
-        `UPDATE agent_connection_setups
-         SET agent_id = $2,
-             status = 'connected_local',
-             delegate_address = $3,
-             proof_signature = $4,
-             api_key_prefix = $5,
-             connector_version = COALESCE($6, connector_version),
-             runtime = COALESCE($7, runtime),
-             connector_context = $8::jsonb,
-             install_status = $9::jsonb,
-             setup_token_consumed_at = NOW(),
-             updated_at = NOW()
-         WHERE id = $1`,
-        [
-          setupId,
-          agentId,
-          delegateAddress,
-          request.body.proof_signature,
-          apiKeyPrefix,
-          stringOrNull(request.body.connector_version),
-          stringOrNull(request.body.runtime),
-          JSON.stringify(connectorContext),
-          JSON.stringify(initialInstallStatus),
-        ],
-      )
-      await client.query('COMMIT')
-      emitFunnelEvent(setup.user_id, 'agent_created', { agent_id: agentId, via: 'connection_setup' })
-      emitFunnelEvent(setup.user_id, 'allowance_granted', { agent_id: agentId, via: 'connection_setup' })
+        agentId = await setups.insertPendingAgent(
+          {
+            userId: setup.user_id,
+            name: setup.name,
+            description: setup.description,
+            delegateAddress,
+            apiKeyHash: request.body.api_key_hash,
+            apiKeyPrefix,
+            safeId: setup.safe_id,
+          },
+          tx,
+        )
+
+        await setups.copySetupAllowancesToAgent(agentId, setupId, tx)
+
+        await setups.markSetupRegistered(
+          {
+            setupId,
+            agentId,
+            delegateAddress,
+            proofSignature: request.body.proof_signature,
+            apiKeyPrefix,
+            connectorVersion: stringOrNull(request.body.connector_version),
+            runtime: stringOrNull(request.body.runtime),
+            connectorContext,
+            installStatus: initialInstallStatus,
+          },
+          tx,
+        )
+      })
+      emitFunnelEvent(setupUserId, 'agent_created', { agent_id: agentId, via: 'connection_setup' })
+      emitFunnelEvent(setupUserId, 'allowance_granted', { agent_id: agentId, via: 'connection_setup' })
     } catch (err) {
-      await client.query('ROLLBACK')
+      if (err instanceof SetupRefusal) {
+        return reply.code(err.statusCode).send({ error: err.message })
+      }
       if (isUniqueDelegateConflict(err)) {
         return reply.code(409).send({ error: 'An agent with this signing address already exists' })
       }
       throw err
-    } finally {
-      client.release()
     }
 
     // Opt-in passport (#972/#1072). Deliberately AFTER the transaction commits
@@ -679,26 +568,17 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       }
 
       const installStatus = sanitizeInstallStatus(request.body)
-      const result = await pool.query<SetupRow>(
-        `UPDATE agent_connection_setups
-         SET install_status = install_status || $2::jsonb,
-             connector_version = COALESCE($3, connector_version),
-             runtime = COALESCE($4, runtime),
-             updated_at = NOW()
-         WHERE id = $1
-         RETURNING install_status`,
-        [
-          setup.id,
-          JSON.stringify(installStatus),
-          stringOrNull(request.body.connector_version),
-          stringOrNull(request.body.runtime),
-        ],
+      const merged = await setups.mergeInstallStatus(
+        setup.id,
+        installStatus,
+        stringOrNull(request.body.connector_version),
+        stringOrNull(request.body.runtime),
       )
 
       return {
         setup_id: setup.id,
         status: setup.status,
-        install_status: result.rows[0]?.install_status ?? installStatus,
+        install_status: merged ?? installStatus,
       }
     },
   )
@@ -708,89 +588,54 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     { preHandler: authMiddleware },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const client = await pool.connect()
       try {
-        await client.query('BEGIN')
-        const setupResult = await client.query<SetupRow>(
-          `${setupSelectSql('s.id = $1 AND s.user_id = $2')} FOR UPDATE OF s`,
-          [request.params.setupId, sub],
-        )
-        const setup = setupResult.rows[0]
-        if (!setup) {
-          await client.query('ROLLBACK')
-          return reply.code(404).send({ error: 'Setup not found' })
-        }
-        if (
-          setup.status === 'active' ||
-          setup.status === 'approval_in_progress' ||
-          setup.status === 'proposed' ||
-          setup.safe_tx_hash ||
-          setup.tx_hash
-        ) {
-          await client.query('ROLLBACK')
-          return reply.code(409).send({ error: 'Approved agents must be paused or revoked from the agent page' })
-        }
-        if (!['awaiting_connection', 'connected_local', 'awaiting_wallet_approval'].includes(setup.status)) {
-          await client.query('ROLLBACK')
-          return reply.code(409).send({ error: 'Setup cannot be cancelled' })
-        }
-        // #1073: the guards above read the SETUP's own state, which on the
-        // delegation rail can lag the authority itself. The grant activates
-        // the agent in its own transaction, and this rail never writes
-        // safe_tx_hash/tx_hash — so a setup whose budget is already signed
-        // still looks cancellable here. Cancelling it would report "this
-        // setup can no longer connect an agent" while leaving a live,
-        // spend-capable agent behind, and the revoke below is scoped to
-        // 'pending_approval' so it would not catch it either.
-        // Ask the agent, not the setup.
-        if (setup.agent_id) {
-          const agent = await client.query<{ status: string }>(
-            `SELECT status FROM agents WHERE id = $1 AND user_id = $2`,
-            [setup.agent_id, sub],
-          )
-          const agentStatus = agent.rows[0]?.status
-          if (agentStatus === 'active' || agentStatus === 'paused') {
-            await client.query('ROLLBACK')
-            return reply
-              .code(409)
-              .send({ error: 'Approved agents must be paused or revoked from the agent page' })
+        await setups.inTransaction(async (tx) => {
+          const setup = await setups.lockSetupForUser(request.params.setupId, sub, tx)
+          if (!setup) throw new SetupRefusal(404, 'Setup not found')
+          if (
+            setup.status === 'active' ||
+            setup.status === 'approval_in_progress' ||
+            setup.status === 'proposed' ||
+            setup.safe_tx_hash ||
+            setup.tx_hash
+          ) {
+            throw new SetupRefusal(409, 'Approved agents must be paused or revoked from the agent page')
           }
-        }
+          if (!['awaiting_connection', 'connected_local', 'awaiting_wallet_approval'].includes(setup.status)) {
+            throw new SetupRefusal(409, 'Setup cannot be cancelled')
+          }
+          // #1073: the guards above read the SETUP's own state, which on the
+          // delegation rail can lag the authority itself. The grant activates
+          // the agent in its own transaction, and this rail never writes
+          // safe_tx_hash/tx_hash — so a setup whose budget is already signed
+          // still looks cancellable here. Cancelling it would report "this
+          // setup can no longer connect an agent" while leaving a live,
+          // spend-capable agent behind, and the revoke below is scoped to
+          // 'pending_approval' so it would not catch it either.
+          // Ask the agent, not the setup.
+          if (setup.agent_id) {
+            const agentStatus = await setups.findAgentStatus(setup.agent_id, sub, tx)
+            if (agentStatus === 'active' || agentStatus === 'paused') {
+              throw new SetupRefusal(
+                409,
+                'Approved agents must be paused or revoked from the agent page',
+              )
+            }
+          }
 
-        const cancelled = await client.query<{ id: string }>(
-          `UPDATE agent_connection_setups
-           SET status = 'cancelled',
-               setup_token_consumed_at = COALESCE(setup_token_consumed_at, NOW()),
-               updated_at = NOW()
-           WHERE id = $1
-             AND user_id = $2
-             AND status IN ('awaiting_connection', 'connected_local', 'awaiting_wallet_approval')
-             AND safe_tx_hash IS NULL
-             AND tx_hash IS NULL
-           RETURNING id`,
-          [setup.id, sub],
-        )
-        if (cancelled.rows.length === 0) {
-          await client.query('ROLLBACK')
-          return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
-        }
-        if (setup.agent_id) {
-          await client.query(
-            `UPDATE agents
-             SET status = 'revoked',
-                 api_key_hash = NULL,
-                 api_key_prefix = NULL,
-                 updated_at = NOW()
-             WHERE id = $1 AND user_id = $2 AND status = 'pending_approval'`,
-            [setup.agent_id, sub],
-          )
-        }
-        await client.query('COMMIT')
+          const cancelled = await setups.cancelSetup(setup.id, sub, tx)
+          if (!cancelled) {
+            throw new SetupRefusal(409, 'Setup state changed; refresh and try again')
+          }
+          if (setup.agent_id) {
+            await setups.revokePendingAgent(setup.agent_id, sub, tx)
+          }
+        })
       } catch (err) {
-        await client.query('ROLLBACK')
+        if (err instanceof SetupRefusal) {
+          return reply.code(err.statusCode).send({ error: err.message })
+        }
         throw err
-      } finally {
-        client.release()
       }
 
       return { success: true }
@@ -837,59 +682,21 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
 
 const LOCAL_MCP_RUNTIMES = new Set(['claude-code', 'codex-cli', 'codex-desktop'])
 
-async function resolveUserSafe(userId: string, safeId?: string): Promise<{
-  id: string
-  safe_address: string
-  name: string
-  chain_id: number
-  account_type: string | null
-} | null> {
-  if (safeId) {
-    const result = await pool.query<UserSafeRow>(
-      `SELECT id, safe_address, name, chain_id, account_type
-       FROM user_safes
-       WHERE id = $1 AND user_id = $2
-       LIMIT 1`,
-      [safeId, userId],
-    )
-    return result.rows[0] ?? null
-  }
-  const result = await pool.query<UserSafeRow>(
-    `SELECT id, safe_address, name, chain_id, account_type
-     FROM user_safes
-     WHERE user_id = $1 AND is_default = true
-     LIMIT 1`,
-    [userId],
-  )
-  return result.rows[0] ?? null
+async function resolveUserSafe(userId: string, safeId?: string): Promise<UserSafeRow | null> {
+  return setups.findUserSafe(userId, safeId)
 }
 
 async function loadSetupByToken(setupToken: string | undefined): Promise<SetupRow | null> {
   if (!setupToken || typeof setupToken !== 'string') return null
-  const result = await pool.query<SetupRow>(
-    setupSelectSql('s.setup_token_hash = $1'),
-    [hashSetupSecret(setupToken)],
-  )
-  return result.rows[0] ?? null
+  return setups.findSetupByTokenHash(hashSetupSecret(setupToken))
 }
 
 async function loadSetupForUser(setupId: string, userId: string): Promise<SetupRow | null> {
-  const result = await pool.query<SetupRow>(
-    setupSelectSql('s.id = $1 AND s.user_id = $2'),
-    [setupId, userId],
-  )
-  return result.rows[0] ?? null
+  return setups.findSetupForUser(setupId, userId)
 }
 
 async function loadSetupAllowances(setupId: string): Promise<AllowanceRow[]> {
-  const result = await pool.query<AllowanceRow>(
-    `SELECT id, token_address, token_symbol, allowance_amount, reset_period_min
-     FROM agent_connection_setup_allowances
-     WHERE setup_id = $1
-     ORDER BY created_at ASC`,
-    [setupId],
-  )
-  return result.rows
+  return setups.listSetupAllowances(setupId)
 }
 
 function validateWalletApprovalBody(
@@ -903,7 +710,7 @@ function validateWalletApprovalBody(
   if (setup.status === 'cancelled' || setup.status === 'expired' || setup.status === 'failed') {
     return { ok: false, statusCode: 409, error: 'Setup cannot be approved' }
   }
-  if (!WALLET_APPROVAL_STATES.has(setup.status)) {
+  if (!setups.WALLET_APPROVAL_STATES.has(setup.status)) {
     const expired = setup.status === 'awaiting_connection' && isExpired(setup.setup_token_expires_at)
     return {
       ok: false,
@@ -980,7 +787,7 @@ function validateBudgetApprovalPreconditions(
   if (setup.status === 'cancelled' || setup.status === 'expired' || setup.status === 'failed') {
     return { ok: false, statusCode: 409, error: 'Setup cannot be approved' }
   }
-  if (!WALLET_APPROVAL_STATES.has(setup.status)) {
+  if (!setups.WALLET_APPROVAL_STATES.has(setup.status)) {
     const expired = setup.status === 'awaiting_connection' && isExpired(setup.setup_token_expires_at)
     return {
       ok: false,
@@ -1012,19 +819,10 @@ async function verifyDelegationSetupAuthority(
   allowances: AllowanceRow[],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const active = await pool.query<{
-      token_address: string
-      budget_atomic: string
-      period_seconds: number
-    }>(
-      `SELECT token_address, budget_atomic, period_seconds
-       FROM agent_delegations
-       WHERE agent_id = $1 AND status = 'active'`,
-      [setup.agent_id],
-    )
+    const active = await setups.listActiveDelegations(setup.agent_id)
 
     for (const allowance of allowances) {
-      const match = active.rows.find(
+      const match = active.find(
         (row) => row.token_address.toLowerCase() === allowance.token_address.toLowerCase(),
       )
       if (!match) {
@@ -1125,105 +923,9 @@ function isTransientSetupAuthorityVerification(error: string): boolean {
 
 async function persistWalletApprovalState(
   setup: SetupRow,
-  input: {
-    status: 'approval_in_progress' | 'proposed' | 'active'
-    approvalStatus: 'submitted' | 'proposed' | 'confirmed'
-    txHash: string | null | undefined
-    safeTxHash: string | null | undefined
-    failureReason: string | null
-    activateAgent: boolean
-  },
+  input: setups.ApprovalStateInput,
 ): Promise<SetupRow | null> {
-  let nextSetup: SetupRow | null = null
-  const client = await pool.connect()
-  try {
-    await client.query('BEGIN')
-    const setupResult = await client.query<SetupRow>(
-      `${setupSelectSql('s.id = $1 AND s.user_id = $2')} FOR UPDATE OF s`,
-      [setup.id, setup.user_id],
-    )
-    const locked = setupResult.rows[0]
-    if (!locked) {
-      await client.query('ROLLBACK')
-      return null
-    }
-    if (
-      locked.status === 'cancelled' ||
-      locked.status === 'expired' ||
-      locked.status === 'failed'
-    ) {
-      await client.query('ROLLBACK')
-      return null
-    }
-    if (locked.status === 'active') {
-      await client.query('COMMIT')
-      return locked
-    }
-    if (!WALLET_APPROVAL_STATES.has(locked.status)) {
-      await client.query('ROLLBACK')
-      return null
-    }
-    if (
-      locked.safe_tx_hash &&
-      input.safeTxHash &&
-      locked.safe_tx_hash.toLowerCase() !== input.safeTxHash.toLowerCase()
-    ) {
-      await client.query('ROLLBACK')
-      return null
-    }
-    if (
-      locked.tx_hash &&
-      input.txHash &&
-      locked.tx_hash.toLowerCase() !== input.txHash.toLowerCase()
-    ) {
-      await client.query('ROLLBACK')
-      return null
-    }
-
-    nextSetup = {
-      ...locked,
-      status: input.status,
-      approval_status: input.approvalStatus,
-      tx_hash: input.txHash ?? locked.tx_hash,
-      safe_tx_hash: input.safeTxHash ?? locked.safe_tx_hash,
-      failure_reason: input.failureReason,
-    }
-    await client.query(
-      `UPDATE agent_connection_setups
-       SET status = $3,
-           approval_status = $4,
-           tx_hash = $5,
-           safe_tx_hash = $6,
-           failure_reason = $7,
-           updated_at = NOW()
-       WHERE id = $1 AND user_id = $2`,
-      [
-        setup.id,
-        setup.user_id,
-        input.status,
-        input.approvalStatus,
-        nextSetup.tx_hash,
-        nextSetup.safe_tx_hash,
-        input.failureReason,
-      ],
-    )
-    if (input.activateAgent && nextSetup.agent_id) {
-      await client.query(
-        `UPDATE agents
-         SET status = 'active',
-             updated_at = NOW()
-         WHERE id = $1 AND user_id = $2 AND status IN ('pending_approval', 'active')`,
-        [nextSetup.agent_id, nextSetup.user_id],
-      )
-    }
-    await client.query('COMMIT')
-  } catch (err) {
-    await client.query('ROLLBACK')
-    throw err
-  } finally {
-    client.release()
-  }
-  return nextSetup
+  return setups.applyApprovalState(setup, input)
 }
 
 async function authenticateInstallStatus(
@@ -1234,11 +936,7 @@ async function authenticateInstallStatus(
   const setupToken = request.body?.setup_token ??
     (typeof headerSetupToken === 'string' ? headerSetupToken : undefined)
     if (setupToken) {
-      const result = await pool.query<SetupRow>(
-        setupSelectSql('s.id = $1 AND s.setup_token_hash = $2'),
-        [setupId, hashSetupSecret(setupToken)],
-      )
-      const setup = result.rows[0]
+      const setup = await setups.findSetupByIdAndTokenHash(setupId, hashSetupSecret(setupToken))
       if (!setup) return null
       if (
         setup.setup_token_consumed_at ||
@@ -1252,40 +950,9 @@ async function authenticateInstallStatus(
 
   const apiKey = extractAgentApiKey(request)
   if (!apiKey) return null
-  const result = await pool.query<SetupRow>(
-    `SELECT s.id, s.user_id, s.agent_id, s.safe_id, s.name, s.description,
-            s.runtime, s.status, s.setup_token_expires_at,
-            s.setup_token_consumed_at, s.challenge_id, s.challenge_message,
-            s.challenge_expires_at, s.delegate_address, s.proof_signature,
-            s.api_key_prefix, s.connector_version, s.connector_context,
-            s.install_status, s.approval_status, s.safe_tx_hash, s.tx_hash,
-            s.failure_reason,
-            us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id
-     FROM agent_connection_setups s
-     JOIN user_safes us ON us.id = s.safe_id
-     JOIN agents a ON a.id = s.agent_id
-     WHERE s.id = $1 AND a.api_key_hash = $2 AND a.status IN ($3, $4, $5)
-     LIMIT 1`,
-    [setupId, apiKeyHash(apiKey), 'pending_approval', 'active', 'paused'],
-  )
-  return result.rows[0] ?? null
+  return setups.findSetupByAgentApiKeyHash(setupId, apiKeyHash(apiKey))
 }
 
-function setupSelectSql(where: string): string {
-  return `SELECT s.id, s.user_id, s.agent_id, s.safe_id, s.name, s.description,
-                 s.runtime, s.status, s.setup_token_expires_at,
-                 s.setup_token_consumed_at, s.challenge_id, s.challenge_message,
-                 s.challenge_expires_at, s.delegate_address, s.proof_signature,
-                 s.api_key_prefix, s.connector_version, s.connector_context,
-                 s.install_status, s.approval_status, s.safe_tx_hash, s.tx_hash,
-                 s.failure_reason, s.issue_passport,
-                 us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
-                 us.account_type
-          FROM agent_connection_setups s
-          JOIN user_safes us ON us.id = s.safe_id
-          WHERE ${where}
-          LIMIT 1`
-}
 
 function buildConnectorSetupResponse(setup: SetupRow, allowances: AllowanceRow[]) {
   return {

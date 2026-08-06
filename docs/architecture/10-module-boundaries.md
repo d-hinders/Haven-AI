@@ -11,8 +11,9 @@ covers:
   - packages/backend/src/lib/execution-rail.ts
   - packages/backend/src/lib/reporting/**
   - packages/backend/src/lib/fee/**
+  - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-07-26"
+last-verified: "2026-08-05"
 ---
 
 # Module Boundaries
@@ -110,7 +111,7 @@ Only the subset checkable against today's tree is enabled — a rule about
 |---|---|---|
 | 1. `domain/` is pure | ◐ `core-stays-pure` covers the shared kernel (#983); the backend's own `domain/` still to come | the `domain/` directory (#998) |
 | 2. `modules/` may not import `http/` | ✗ | the `modules/` directories (#992 / #996 / #997) |
-| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra` | zeroed by #985 / #988 / #995 |
+| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra` | #985 landed the convention + first route; #988 / #995 remain |
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes` | zeroed by #994 |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (#998) |
 | 6. Cross-module imports go through `index.ts` | ✅ scoped to `lib/{reporting,fee}/` | widens as modules land; zeroed by #998 |
@@ -194,17 +195,27 @@ to satisfy a bad rule is worse than having no rule.
 
 ## Today
 
-Current state as of 2026-07-25, recorded so progress is measurable:
+Current state as of 2026-08-05, recorded so progress is measurable:
 
 | Signal | Today | Target |
 |---|---|---|
-| `lib/` layout | 51 non-test files sitting flat in `lib/`; `reporting/` and `fee/` are the only module directories | Every file inside a module |
-| Largest route | `routes/x402.ts`, 1532 lines | Under ~250 lines |
-| `pool.query` call sites | 256, across 44 non-test files | Zero outside `infra/repositories/` |
+| `lib/` layout | 51 non-test files sitting flat in `lib/`; `reporting/`, `fee/` and `passport/` are the only module directories | Every file inside a module |
+| Largest route | `routes/x402.ts`, 1583 lines | Under ~250 lines |
+| Inline SQL call sites | 344 `.query` calls across 48 non-test files outside `db/` and `infra/repositories/` | Zero outside `infra/repositories/` |
 | Chain SDK imported in `routes/` | 10 non-test route files | Zero |
-| Rail branching outside the seam | 11+ non-test sites | Zero outside `rails/` |
-| Boundary enforcement | `npm run lint:deps`, blocking, 66 violations baselined (#982) | Baseline deleted, rules unconditional (#999) |
+| Rail branching outside the seam | 10 non-test sites — 4 genuine dispatch, 4 retired-rail residue (#993), 2 passport fact derivation | Zero outside `rails/` |
+| Boundary enforcement | `npm run lint:deps`, blocking, 65 violations baselined (#982) | Baseline deleted, rules unconditional (#999) |
 | Dependency cycles | **0** — asserted absolutely, never baselined | 0 |
+
+> **The baseline is a file-edge count, and that is a real limit.**
+> `pg-only-in-infra` fires once per file that imports `db.ts`, whatever that
+> file's query volume — `routes/agent-connection-setups.ts` was 1 violation and
+> 56 `.query` call sites (24 statements plus 32 BEGIN/COMMIT/ROLLBACK; the
+> distinction matters when comparing counts, and #985 removed all of them). So the baseline held flat at 66 from 2026-07-26 while inline SQL
+> grew from 256 call sites to 344 in the same set of files. Read the ratchet as
+> "no new offending *files*", never as "the debt is not growing"
+> ([#999](https://github.com/d-hinders/Haven-AI/issues/999) tracks fixing the
+> measure itself).
 
 Reproduce these from `packages/backend/src`:
 

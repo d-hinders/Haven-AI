@@ -15,15 +15,10 @@
  * here, so it is never defaulted or inferred.
  */
 
-import type { QueryResult, QueryResultRow } from 'pg'
 import pool from '../../db.js'
+import type { Executor } from '../transaction.js'
 
-export interface Executor {
-  query<R extends QueryResultRow = QueryResultRow>(
-    sql: string,
-    values?: unknown[],
-  ): Promise<QueryResult<R>>
-}
+export type { Executor }
 
 /** Record a newly enrolled passkey against the account. */
 export async function addAccountPasskey(

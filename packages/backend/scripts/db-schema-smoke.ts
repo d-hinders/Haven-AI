@@ -34,6 +34,31 @@ import {
   LIST_REVOCATIONS_DUE_SQL,
   LIST_STUCK_REVOCATIONS_SQL,
 } from '../src/infra/repositories/agent-passports.js'
+import {
+  CANCEL_SETUP_SQL,
+  COPY_SETUP_ALLOWANCES_SQL,
+  FIND_ACTIVE_AGENT_BY_DELEGATE_SQL,
+  FIND_DEFAULT_USER_SAFE_SQL,
+  ACTIVATE_AGENT_SQL,
+  FIND_AGENT_STATUS_SQL,
+  FIND_SETUP_BY_AGENT_API_KEY_SQL,
+  FIND_SETUP_BY_ID_AND_TOKEN_HASH_SQL,
+  FIND_SETUP_BY_TOKEN_HASH_SQL,
+  FIND_SETUP_FOR_USER_SQL,
+  FIND_USER_SAFE_BY_ID_SQL,
+  INSERT_AGENT_SQL,
+  INSERT_SETUP_ALLOWANCE_SQL,
+  INSERT_SETUP_SQL,
+  LIST_ACTIVE_DELEGATIONS_SQL,
+  LIST_SETUP_ALLOWANCES_SQL,
+  LOCK_SETUP_BY_TOKEN_HASH_SQL,
+  LOCK_SETUP_FOR_USER_SQL,
+  MARK_SETUP_REGISTERED_SQL,
+  MERGE_INSTALL_STATUS_SQL,
+  REVOKE_PENDING_AGENT_SQL,
+  UPDATE_APPROVAL_STATE_SQL,
+  UPDATE_CONNECTOR_METADATA_SQL,
+} from '../src/infra/repositories/agent-connection-setups.js'
 
 interface SmokeQuery {
   name: string
@@ -45,6 +70,32 @@ interface SmokeQuery {
  * Keep each verbatim from its source so the check tracks the real query.
  */
 const QUERIES: SmokeQuery[] = [
+  // Connect Agent 2 setup flow (#985). IMPORTED from the repository, so these
+  // track the real queries — this is the first block extraction made reachable
+  // by this script at all; before #985 every one of them was inline in a route.
+  { name: 'setup: find by token hash', sql: FIND_SETUP_BY_TOKEN_HASH_SQL },
+  { name: 'setup: find for user (tenant-scoped)', sql: FIND_SETUP_FOR_USER_SQL },
+  { name: 'setup: lock for user (FOR UPDATE)', sql: LOCK_SETUP_FOR_USER_SQL },
+  { name: 'setup: lock by token hash on register (FOR UPDATE)', sql: LOCK_SETUP_BY_TOKEN_HASH_SQL },
+  { name: 'setup: find by id + token hash (install status header path)', sql: FIND_SETUP_BY_ID_AND_TOKEN_HASH_SQL },
+  { name: 'setup: find agent status during cancel', sql: FIND_AGENT_STATUS_SQL },
+  { name: 'setup: activate agent on approval', sql: ACTIVATE_AGENT_SQL },
+  { name: 'setup: find by agent API key (install status)', sql: FIND_SETUP_BY_AGENT_API_KEY_SQL },
+  { name: 'setup: find user safe by id', sql: FIND_USER_SAFE_BY_ID_SQL },
+  { name: 'setup: find default user safe', sql: FIND_DEFAULT_USER_SAFE_SQL },
+  { name: 'setup: list allowances', sql: LIST_SETUP_ALLOWANCES_SQL },
+  { name: 'setup: list active delegations for budget approval', sql: LIST_ACTIVE_DELEGATIONS_SQL },
+  { name: 'setup: find active agent by delegate', sql: FIND_ACTIVE_AGENT_BY_DELEGATE_SQL },
+  { name: 'setup: insert', sql: INSERT_SETUP_SQL },
+  { name: 'setup: insert allowance', sql: INSERT_SETUP_ALLOWANCE_SQL },
+  { name: 'setup: update connector metadata', sql: UPDATE_CONNECTOR_METADATA_SQL },
+  { name: 'setup: insert pending agent on register', sql: INSERT_AGENT_SQL },
+  { name: 'setup: copy setup allowances to agent', sql: COPY_SETUP_ALLOWANCES_SQL },
+  { name: 'setup: mark registered (token consumed)', sql: MARK_SETUP_REGISTERED_SQL },
+  { name: 'setup: merge install status', sql: MERGE_INSTALL_STATUS_SQL },
+  { name: 'setup: apply approval state', sql: UPDATE_APPROVAL_STATE_SQL },
+  { name: 'setup: cancel (guarded)', sql: CANCEL_SETUP_SQL },
+  { name: 'setup: revoke pending agent on cancel', sql: REVOKE_PENDING_AGENT_SQL },
   {
     // Every authenticated agent request runs this, and it is where
     // `agent.chain_id` comes from — the value machine-payments.ts then uses for

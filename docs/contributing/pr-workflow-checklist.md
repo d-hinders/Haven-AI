@@ -1,8 +1,22 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .github/workflows/**
+  - .github/pull_request_template.md
+  - package.json
+  - .agents/skills/haven-agent-workflow/references/reviewer.md
+  - .agents/skills/haven-agent-workflow/references/design-reviewer.md
+last-verified: "2026-08-05"
+---
+
 # PR Workflow Checklist
 
 Use this checklist for feature branches so PRs stay mergeable, reviewable, and deployable.
 
 ## Branch Model
+
+> Canonical reference: [`branch-and-release-flow.md`](branch-and-release-flow.md) — the full dev → prod lifecycle, issue closing, and prod-promotion tracking. The summary below is the gist.
 
 Haven uses a `dev` integration branch in front of `main`:
 
@@ -10,7 +24,8 @@ Haven uses a `dev` integration branch in front of `main`:
   PR into `dev`, and let it merge there once green. `dev` is the shared
   integration branch and deploys to the **dev environment** (Railway + Vercel).
 - **`dev → main` is a separate promotion step** (a human-opened PR). Merging to
-  `main` deploys to **production**.
+  `main` deploys to **production** — follow the
+  [`dev → main` promotion checklist](../operations/promoting-dev-to-main.md).
 - **`hotfix/* → main` is the only direct-to-`main` path**, for emergency fixes
   that can't wait for the dev cycle.
 - The **`dev-gate`** workflow (`.github/workflows/dev-gate.yml`) enforces this:
@@ -65,6 +80,8 @@ Good split examples:
 - Include a merge-readiness section using the template below for non-trivial PRs.
 - Run the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` for the surfaces the diff touches.
 - If browser verification is skipped for UI, routing, modal, setup-flow, or animation work, add the smallest headless equivalent that covers the skipped risk and name it in the PR.
+- For frontend diffs touching a rendered route or a shared primitive, attach rendered-screen evidence (`npm run screenshot -w packages/frontend -- <routes>`, desktop + mobile PNGs) and get a `haven-design-reviewer` pass over the screenshots in addition to `haven-reviewer` — a finding from either pauses auto-merge (`ship-playbooks/frontend.md`).
+- If the PR adds a `ui/` or `haven/` primitive, document it on `/design-system` in the same PR — the *Design-system coupling (strict)* check blocks on a missing showcase entry — on every PR, however it was opened ([#1023](https://github.com/d-hinders/Haven-AI/issues/1023)) — and a sticky comment explains the finding. Check locally with `npm run design:coupling -w packages/frontend -- --strict`; escape: `// design-system-exempt: <reason>`.
 - If SDK/API behavior, credential semantics, x402/MPP behavior, setup prompts, or product language changes, review generated credential files, `.env` examples, SDK snippets, demo scripts, and skill bundles.
 - Use `haven-reviewer` before requesting review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
 - If this PR includes a follow-up commit that fixes a bug the original commits introduced, the fix commit must include the smallest regression test (typically a vitest case) that would have caught it. If no such test is practical, document why in the commit body. Every recent "Address reviewer findings" commit that compounded into durable quality landed 2–4 targeted vitest cases alongside the fix.
@@ -76,7 +93,8 @@ Good split examples:
 - Re-run the relevant local checks if the branch changed after review.
 - If the PR started stacked, re-open or retarget it so the final merge path is into `dev`.
 - Verify that merging this PR will trigger the expected deployment branch.
-- For money movement, agent authority, SDK payment APIs, generated credential artifacts, x402/MPP, or shared contract changes, confirm a risk-specific review happened even if CI is green.
+- For money movement, agent authority, SDK payment APIs, generated credential artifacts, x402/MPP, or shared contract changes, confirm a risk-specific review happened even if CI is green. The `money-path` label selects the `ship-playbooks/money.md` bar (characterization tests first, CASP guardrails) but does not pause the merge (#1024); DB migrations are hard-gated by an independent code-owner review, and `dev → main` promotion is gated on a green money-flow QA run that covers the promoted money-path code (#1030).
+- If the PR intentionally changes what `/design-system` renders, regenerate the visual-regression baselines via the *Update visual baselines* workflow_dispatch on the PR branch (never commit macOS-rendered baselines), and confirm the *Design visual regression* check is green on the head SHA before calling the PR shipped.
 
 ## Merge Readiness Report
 
@@ -101,10 +119,11 @@ Use the smallest reliable set that matches the change.
 
 | Change type | Commands |
 | --- | --- |
-| Docs, prompts, or PR template only | `git diff --check` |
+| Docs, prompts, or PR template only | `git diff --check` and `npm run docs:check` (front-matter + `covers` globs + agent-skill alignment) |
+| Any source file | `npm run docs:coupling` — the strict contract-doc gate, keyed on **code**, so the docs row above never covers the pure-code PR that needs it |
 | Payment, Safe, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
-| Backend/API | `npm run typecheck -w packages/backend` and `npm run test -w packages/backend` |
-| Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run test -w packages/frontend`, and `npm run build -w packages/frontend` |
+| Backend/API | `npm run typecheck -w packages/backend`, `npm run test -w packages/backend`, and `npm run lint:deps` (dependency boundaries, #982) |
+| Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run design:lint -w packages/frontend`, `npm run lint:copy`, `npm run test -w packages/frontend`, and `npm run build -w packages/frontend` |
 | SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, and `npm run build -w packages/sdk` |
 | Cross-package or release-risk | `npm run quality` |
 | Browser UX or routing | Relevant unit/build checks plus `npm run test:e2e:desktop -w packages/frontend` when the local Playwright server is working |
@@ -112,8 +131,11 @@ Use the smallest reliable set that matches the change.
 Notes:
 
 - `npm run quality` means typecheck, unit tests, and builds across workspaces.
-- Docs-only CI treats Markdown, `.claude/agents/*.md`, and `.github/pull_request_template.md` as non-code. Editing `.github/workflows/*.yml` triggers full workflow checks.
-- Frontend lint is not a required gate yet because `next lint` currently prompts for ESLint setup. Add lint only after a dedicated non-interactive lint migration.
+- Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with one exception: editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Editing `.github/workflows/*.yml` triggers full workflow checks.
+- Frontend ESLint (`next lint`) is still not a required gate because it currently prompts for ESLint setup; add it only after a dedicated non-interactive lint migration. The blocking frontend gates that DO exist are design-lint (part of *Frontend checks*), the *Banned product-copy terms* copy lint (#902), and the *Design visual regression* job (#897) — both shrink-only-baseline lints fail on NEW violations only.
+- The backend has an equivalent shrink-only-baseline gate: **dependency-boundary lint** (#982), a blocking step inside *Backend checks* enforcing `docs/architecture/10-module-boundaries.md` with the baseline at `packages/backend/dep-lint-baseline.json`. Like the frontend baselines it fails on NEW violations only — fix the boundary rather than running `npm run lint:deps:update`. `no-circular` is the exception: it is asserted absolutely and a cycle may never be baselined.
+- Auto-merge is gated by the required checks in the **"Haven automerge rules"** ruleset (per-surface checks plus *Design visual regression* and *Banned product-copy terms*) — see `docs/contributing/autonomous-pr-loop.md` §One-time setup. A "blocking" job not in that list is advisory in practice.
+- Every PR also gets two sticky comments: doc↔code coupling (docs whose `covers:` match changed code the PR didn't touch — update the flagged doc in the same PR) and design-system coupling. The doc↔code comment is advisory **except** for docs marked `contract: true`, which the separate *Contract-doc coupling* check blocks on (#646). Reproduce it locally with `npm run docs:coupling` — the bare `node scripts/docs/coupling-gate.mjs` always exits 0 and will not tell you what CI says.
 - Playwright desktop smoke is useful but currently known to be unreliable in some local environments; call out skipped or failed browser checks in the PR description.
 
 ## Team Habits That Help

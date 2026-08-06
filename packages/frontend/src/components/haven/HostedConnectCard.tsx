@@ -1,5 +1,7 @@
 'use client'
 
+import { Check, ChevronRight, Folder, Lock, Zap } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useCopyTimeout } from '@/hooks/useCopyTimeout'
 import { Card } from '@/components/ui/Card'
@@ -99,7 +101,11 @@ export function HostedConnectCard({
   tryItPrompt = DEFAULT_TRY_IT_PROMPT,
   lastSeenAt,
 }: HostedConnectCardProps) {
+  // Null in a non-production build with no NEXT_PUBLIC_HAVEN_MCP_URL (#1129):
+  // the card then renders an explicit not-configured state instead of a
+  // snippet that embeds the production URL and cannot work.
   const resolvedUrl = useMemo(() => resolveHostedMcpUrl(hostedUrl), [hostedUrl])
+  const notConfigured = resolvedUrl == null
 
   const isConnected = Boolean(lastSeenAt)
 
@@ -130,11 +136,17 @@ export function HostedConnectCard({
   )
 
   const snippet = useMemo(
-    () => (activeId ? buildHostedConnectSnippet(activeId, credential, resolvedUrl) : null),
+    () =>
+      activeId && resolvedUrl != null
+        ? buildHostedConnectSnippet(activeId, credential, resolvedUrl)
+        : null,
     [activeId, credential, resolvedUrl],
   )
   const setupPrompt = useMemo(
-    () => (activeId ? buildHostedSetupPrompt(activeId, credential, resolvedUrl) : null),
+    () =>
+      activeId && resolvedUrl != null
+        ? buildHostedSetupPrompt(activeId, credential, resolvedUrl)
+        : null,
     [activeId, credential, resolvedUrl],
   )
 
@@ -152,6 +164,7 @@ export function HostedConnectCard({
   }, [])
 
   const handleTestConnection = useCallback(async () => {
+    if (resolvedUrl == null) return
     setProbeState({ status: 'pending' })
     const result = await probeHostedConnection(credential.api_key, resolvedUrl)
     setProbeState(result)
@@ -203,7 +216,7 @@ export function HostedConnectCard({
   }, [setupPrompt, activeId, markCopiedSetupPrompt, onCopySigningKey, onCredentialSaved])
 
   const handleOpenDeepLink = useCallback(() => {
-    if (!activeId || !hasDeepLink(activeId)) return
+    if (!activeId || !hasDeepLink(activeId) || resolvedUrl == null) return
     const url = buildDeepLink(activeId, credential, resolvedUrl)
     window.open(url, '_self')
   }, [activeId, credential, resolvedUrl])
@@ -242,16 +255,7 @@ export function HostedConnectCard({
           role="status"
           aria-label="Agent connected"
         >
-          <svg
-            aria-hidden="true"
-            className="h-3.5 w-3.5 shrink-0 text-[var(--v2-success)]"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.5}
-          >
-            <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <Icon icon={Check} className="h-3.5 w-3.5 shrink-0 text-[var(--v2-success)]" />
           <span className="text-[12px] font-medium text-[var(--v2-success)]">
             Connected &middot; last seen {formatRelativeTime(lastSeenAt)}
           </span>
@@ -266,7 +270,29 @@ export function HostedConnectCard({
         </p>
       )}
 
-      {(!isConnected || showSetupSteps) && (
+      {/* Not-configured state (#1129): a non-production build with no
+          NEXT_PUBLIC_HAVEN_MCP_URL has no hosted MCP to point at — say so
+          plainly where the runtime picker and snippet would render, instead
+          of emitting config that silently targets the production server. */}
+      {notConfigured && (!isConnected || showSetupSteps) && (
+        <div
+          role="alert"
+          className="mt-3 rounded-[10px] border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-3 py-2.5"
+        >
+          <p className="text-[12px] font-semibold text-[var(--v2-warning)]">
+            Hosted connect is not configured for this environment
+          </p>
+          <p className="mt-1 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+            This build has no hosted MCP endpoint, so a connect snippet cannot be generated. Set{' '}
+            <code className="font-mono text-xs">NEXT_PUBLIC_HAVEN_MCP_URL</code> to this
+            environment&rsquo;s hosted MCP endpoint, or connect the agent with the local connector
+            (<code className="font-mono text-xs">--local</code>) instead. The production endpoint
+            is only offered on the production deploy.
+          </p>
+        </div>
+      )}
+
+      {!notConfigured && (!isConnected || showSetupSteps) && (
         <>
           <p className="mt-1.5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
             Pick the app your agent runs in. The connection token goes to Haven; the signing key
@@ -394,19 +420,13 @@ export function HostedConnectCard({
                       config yourself or copy only the signing key.
                     </span>
                   </span>
-                  <svg
-                    aria-hidden="true"
+                  <Icon
+                    icon={ChevronRight}
                     className={
                       'mt-1 h-3.5 w-3.5 shrink-0 text-[var(--v2-ink-3)] transition-transform ' +
                       (showManualSetup ? 'rotate-90' : '')
                     }
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                  >
-                    <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  />
                 </button>
 
                 {showManualSetup && (
@@ -449,19 +469,14 @@ export function HostedConnectCard({
                         </h5>
                         <SigningKeyChip
                           icon={
-                            <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                              <rect x="4" y="11" width="16" height="9" rx="2" />
-                              <path d="M8 11V8a4 4 0 1 1 8 0v3" strokeLinecap="round" />
-                            </svg>
+                            <Icon icon={Lock} className="h-3 w-3" />
                           }
                         >
                           stays local
                         </SigningKeyChip>
                         <SigningKeyChip
                           icon={
-                            <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
-                              <path d="M5 12l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
+                            <Icon icon={Check} className="h-3 w-3" />
                           }
                         >
                           follows agent rules
@@ -500,16 +515,7 @@ export function HostedConnectCard({
                     {active.id === 'other' && (
                       <details className="group">
                         <summary className="flex cursor-pointer list-none items-center gap-1 text-[12px] font-medium text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]">
-                          <svg
-                            aria-hidden="true"
-                            className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={2.5}
-                          >
-                            <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
+                          <Icon icon={ChevronRight} className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
                           Self-hosted / local server (advanced)
                         </summary>
                         <div className="mt-2 rounded-[8px] border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2.5 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
@@ -635,15 +641,7 @@ function OneClickChip({ active }: { active: boolean }) {
           : 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand-strong)]')
       }
     >
-      <svg
-        aria-hidden="true"
-        className="h-2.5 w-2.5"
-        viewBox="0 0 24 24"
-        fill="currentColor"
-        strokeLinejoin="round"
-      >
-        <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" />
-      </svg>
+      <Icon icon={Zap} className="h-2.5 w-2.5 fill-current" />
       1-click
     </span>
   )
@@ -695,11 +693,11 @@ function DestinationPathBlock({ paths }: { paths: { label: string; path: string 
       className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-white"
       aria-label="Where to save"
     >
-      <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-1.5">
+      <Card.Header padding="none" className="px-3 py-1.5">
         <span className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
           {isMulti ? 'Save to one of' : 'Save to'}
         </span>
-      </div>
+      </Card.Header>
       <ul className="divide-y divide-[var(--v2-border)]">
         {paths.map((p) => (
           <DestinationPathRow key={`${p.label}-${p.path}`} path={p} showLabel={isMulti} />
@@ -756,18 +754,7 @@ function DestinationPathRow({
 
 function FolderIcon({ className }: { className?: string }) {
   return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
-    </svg>
+    <Icon icon={Folder} className={className ?? ''} />
   )
 }
 

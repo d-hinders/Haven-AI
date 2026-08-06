@@ -83,7 +83,15 @@ jobs:
           full=false
 
           while IFS= read -r file; do
+            # CLAUDE.md mirrors backend contracts (the API surface table and the
+            # chain registry) that packages/backend/src/docs-drift pins. A
+            # CLAUDE.md-only edit must therefore run the backend suite even
+            # though it is Markdown — otherwise the drift test never guards it.
             case "$file" in
+              CLAUDE.md)
+                code=true
+                backend=true
+                ;;
               *.md|docs/*|AGENTS.md|LICENSE|LICENSE.*)
                 continue
                 ;;
@@ -93,6 +101,13 @@ jobs:
               .github/workflows/*.yml|.github/workflows/*.yaml|package.json|package-lock.json|tsconfig*.json)
                 code=true
                 full=true
+                ;;
+              # The dependency-boundary gate (#982) lives outside packages/ but
+              # polices packages/backend. Without this case, weakening a rule or
+              # the ratchet script would ship without the gate ever running.
+              .dependency-cruiser.cjs|scripts/dep-lint.mjs|scripts/dep-lint.test.mjs|scripts/lib/ratchet.mjs|scripts/generate-api-types.mjs)
+                code=true
+                backend=true
                 ;;
               packages/frontend/*)
                 code=true
@@ -168,6 +183,23 @@ jobs:
             echo "cli=$cli"
             echo "full=$full"
           } >> "$GITHUB_OUTPUT"
+
+  # Unconditional by design (#1030). These tests cover repo-level CI config —
+  # the money-path glob list and the money-flow QA freshness gate that replaced
+  # the in-session money-path approval pause (#1024). They must run on EVERY PR,
+  # not behind a surface filter: the whole failure being fixed is a money-path
+  # safeguard that nobody noticed was wrong. Dependency-free, ~1s, no npm ci.
+  ci_config_checks:
+    name: Repo CI config checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: Money-path list + QA freshness gate
+        run: node --test scripts/ci/*.test.mjs
 
   sdk_checks:
     name: SDK checks
@@ -263,6 +295,23 @@ jobs:
       - name: Type-check backend
         run: npm run typecheck -w packages/backend
 
+      - name: Dependency-boundary lint (#982)
+        # Blocking, shrink-only ratchet over the module-boundary rules in
+        # docs/architecture/10-module-boundaries.md. Runs early — it takes ~2s
+        # and a boundary break should fail before the slower suites. The unit
+        # tests run alongside it because a gate that cannot fire is worse than
+        # no gate (the chain-SDK rule silently passed during development).
+        run: |
+          npm run lint:deps
+          npm run lint:deps:test
+
+      - name: DB schema smoke (migrations + money-path query PREPARE, #773)
+        # Applies every migration to the real Postgres service, then PREPAREs the
+        # curated money-path queries so column/type drift fails here instead of
+        # in dev. Mocked route tests never validate SQL against the schema —
+        # this is how the agents.safe_address join reached dev (#757).
+        run: npm run db:schema-smoke -w packages/backend
+
       - name: OpenAPI drift check
         # Surfaces the openapi spec drift assertions as a named step so a
         # failure is immediately visible in the workflow summary. The same
@@ -270,6 +319,12 @@ jobs:
         # this step exists to make drift failures unambiguous on the GitHub
         # PR check list without scanning a 100+ line test output.
         run: npm run test -w packages/backend -- src/openapi/spec.test.ts
+
+      - name: Generated api-types drift check (#984)
+        # Blocking: packages/core/src/api-types.ts is generated from the
+        # OpenAPI spec and committed; editing the spec without regenerating
+        # fails here. Fix with `npm run generate:api-types`.
+        run: npm run check:api-types
 
       - name: Run backend unit tests
         run: npm run test -w packages/backend
@@ -455,6 +510,9 @@ jobs:
       - name: Type-check frontend
         run: npm run typecheck -w packages/frontend
 
+      - name: Design-system drift gate
+        run: npm run design:lint -w packages/frontend
+
       - name: Run frontend unit tests
         run: npm run test -w packages/frontend
 
@@ -535,9 +593,62 @@ jobs:
             output/playwright/html-report
           if-no-files-found: ignore
 
+  design_visual:
+    name: Design visual regression
+    needs: [changes, frontend_checks]
+    if: always() && needs.changes.outputs.frontend == 'true' && needs.frontend_checks.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-next-build
+          path: packages/frontend/.next
+
+      - name: Restore Playwright browser cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: packages/frontend
+
+      # Blocking visual guard (#897): /design-system pixel-compared against
+      # committed Linux baselines. Intended changes: regenerate via the
+      # "Update visual baselines" workflow (workflow_dispatch on the branch).
+      - name: Visual regression — /design-system
+        run: npm run test:visual -w packages/frontend
+        env:
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Upload visual diff artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-diffs
+          path: output/playwright/test-results
+          retention-days: 7
+
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, cli_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks]
+    needs: [changes, sdk_checks, cli_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ci_config_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -548,6 +659,16 @@ jobs:
 
           if [ "${{ needs.changes.result }}" != "success" ]; then
             echo "Change detection result: ${{ needs.changes.result }}"
+            exit 1
+          fi
+
+          # Checked BEFORE the docs-only early exit below: these cover the
+          # money-path glob list and the money-flow QA gate (#1030), which are
+          # repo config, not a code surface. A docs-only PR can absolutely break
+          # them — and short-circuiting past them is how a money-path safeguard
+          # goes unnoticed, which is the failure #1030 exists to close.
+          if [ "${{ needs.ci_config_checks.result }}" != "success" ]; then
+            echo "Repo CI config checks result: ${{ needs.ci_config_checks.result }}"
             exit 1
           fi
 

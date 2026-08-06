@@ -3,7 +3,8 @@ import { FastifyInstance, FastifyRequest } from 'fastify'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { getExplorerUrl } from '../lib/chains.js'
-import { isAddress as isValidAddress } from '../lib/address.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
+import { demoRateLimit } from '../middleware/rate-limit.js'
 
 const RAIL = 'mpp_demo'
 const VERSION = '2026-05-12'
@@ -113,7 +114,7 @@ function marketSummary(payment: PaymentIntentReceiptRow, receiptId: string, reus
 }
 
 export default async function demoMppRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/market-summary', async (request, reply) => {
+  app.get('/market-summary', { config: demoRateLimit }, async (request, reply) => {
     const recipient = demoRecipient()
     if (!recipient) {
       return reply.code(503).send({
@@ -265,7 +266,7 @@ export default async function demoMppRoutes(app: FastifyInstance): Promise<void>
     return reply.code(200).send(marketSummary(payment, receiptId))
   })
 
-  app.get('/', async (request) => {
+  app.get('/', { config: demoRateLimit }, async (request) => {
     const recipient = demoRecipient()
     const resourceUrl = buildResourceUrl(request)
     return {

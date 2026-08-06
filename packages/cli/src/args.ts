@@ -12,6 +12,7 @@ export interface ParsedArgs {
     safe?: string
     agent?: string
     limit?: number
+    offset?: number
     direction?: 'in' | 'out'
     format?: string
     from?: string
@@ -21,7 +22,7 @@ export interface ParsedArgs {
 }
 
 const VALUE_FLAGS = new Set([
-  '--api', '--email', '--safe', '--agent', '--limit', '--direction',
+  '--api', '--email', '--safe', '--agent', '--limit', '--offset', '--direction',
   '--format', '--from', '--to', '--company',
 ])
 
@@ -52,6 +53,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
         const n = Number(value)
         if (!Number.isInteger(n) || n <= 0) throw new Error('--limit must be a positive integer')
         flags.limit = n
+      } else if (arg === '--offset') {
+        const n = Number(value)
+        if (!Number.isInteger(n) || n < 0) throw new Error('--offset must be a non-negative integer')
+        flags.offset = n
       } else if (arg === '--direction') {
         if (value !== 'in' && value !== 'out') throw new Error('--direction must be "in" or "out"')
         flags.direction = value
@@ -89,7 +94,7 @@ export function helpText(): string {
     '  agents list             List your agents',
     '  agents show <id>        Show one agent + its budget',
     '  budget show <agentId>   Show an agent\'s configured budget',
-    '  activity list [--safe <id>] [--agent <id>] [--direction in|out] [--limit <n>]',
+    '  activity list [--safe <id|address>] [--agent <id>] [--direction in|out] [--limit <n>] [--offset <n>]',
     '  activity export [filters]   Emit CSV to stdout (--format csv, default)',
     '  activity export --format sie [--from <ISO>] [--to <ISO>] [--company <name>]',
     '                          Bookkeeping-ready SIE 4I (Fortnox/Visma/Bokio)',

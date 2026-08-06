@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev -w packages/backend\" \"npm run dev -w packages/frontend\"",
-    "build": "npm run build -w packages/sdk && npm run build -w packages/connect && npm run build -w packages/mcp && npm run build -w packages/mcp-server && npm run build -w packages/signer && npm run build -w packages/cli && npm run build -w packages/backend && npm run build -w packages/frontend",
+    "build": "npm run build -w packages/core && npm run build -w packages/sdk && npm run build -w packages/connect && npm run build -w packages/mcp && npm run build -w packages/mcp-server && npm run build -w packages/signer && npm run build -w packages/cli && npm run build -w packages/backend && npm run build -w packages/frontend",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
@@ -19,7 +19,19 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "quality": "npm run typecheck && npm run test:unit && npm run build",
     "test:e2e": "npm run test:e2e -w packages/frontend",
-    "release:bump": "node scripts/release-bump.mjs"
+    "release:bump": "node scripts/release-bump.mjs",
+    "docs:check": "node scripts/docs/validate-frontmatter.mjs && node scripts/docs/validate-agent-skills.mjs",
+    "docs:new": "node scripts/docs/new-doc.mjs",
+    "docs:coupling": "node scripts/docs/coupling-gate.mjs --strict --out=/dev/null",
+    "docs:test": "node --test scripts/docs/*.test.mjs",
+    "lint:copy": "node scripts/frontend-copy-lint.mjs",
+    "lint:copy:update": "node scripts/frontend-copy-lint.mjs --update",
+    "lint:copy:test": "node --test scripts/frontend-copy-lint.test.mjs",
+    "lint:deps": "node scripts/dep-lint.mjs",
+    "lint:deps:update": "node scripts/dep-lint.mjs --update",
+    "lint:deps:test": "node --test scripts/dep-lint.test.mjs",
+    "generate:api-types": "node scripts/generate-api-types.mjs",
+    "check:api-types": "node scripts/generate-api-types.mjs --check"
   },
   "overrides": {
     "axios": "^1.16.1",
@@ -29,6 +41,8 @@
     "postcss": "^8.5.15"
   },
   "devDependencies": {
-    "concurrently": "^9.0.0"
+    "concurrently": "^9.0.0",
+    "dependency-cruiser": "^18.1.0",
+    "openapi-typescript": "^7.13.0"
   }
 }

@@ -58,7 +58,9 @@ describe('buildAgentCredential', () => {
 
   it('includes schema, version, and non-custodial guidance notes', () => {
     const { json } = buildAgentCredential(BASE_INPUT)
-    expect(json.$schema).toMatch(/agent-credential/i)
+    // Ownership-neutral URN, not a haven.ai URL (we don't own that domain — #594).
+    expect(json.$schema).toBe('urn:haven:schema:agent-credential:v1')
+    expect(json.$schema).not.toMatch(/haven\.ai/i)
     expect(json.version).toBe(1)
     expect(json.type).toBe('haven.agent_credential')
     // Notes exist so a future reader of the JSON understands the trust model.

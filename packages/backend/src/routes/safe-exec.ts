@@ -1,11 +1,12 @@
+import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import { Contract, TypedDataEncoder } from 'ethers'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
 import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
-import { getRelayer, warnIfRelayerLow } from '../lib/relayer.js'
-import { isAddress as isValidAddress } from '../lib/address.js'
+import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../lib/relayer.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 
 const HEX_RE = /^0x([0-9a-fA-F]{2})*$/
 const DECIMAL_RE = /^\d+$/
@@ -178,6 +179,7 @@ function getRelayExecGasLimit(estimatedGas: bigint | null): bigint {
 }
 
 async function ensurePasskeySignerDeployed(args: {
+  chainId: number
   relayer: ReturnType<typeof getRelayer>
   factoryAddress: string
   signerAddress: string
@@ -197,10 +199,14 @@ async function ensurePasskeySignerDeployed(args: {
     args.relayer,
   ) as unknown as PasskeySignerFactoryContract
 
-  const tx = await signerFactory.createSigner(
-    BigInt(args.x),
-    BigInt(args.y),
-    BigInt(args.verifierAddress),
+  // Broadcast under the per-chain send lock so the signer deploy can't race
+  // another relayer submission for the same EOA nonce (#692/#718).
+  const tx = await withRelayerSendLock(args.chainId, () =>
+    signerFactory.createSigner(
+      BigInt(args.x),
+      BigInt(args.y),
+      BigInt(args.verifierAddress),
+    ),
   )
   await tx.wait()
 }
@@ -272,9 +278,12 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
     }
 
     try {
+      // #717: exec budget per user, checked before the relayer signs.
+      await assertRelayerBudget('safe_exec', { userId: sub })
       await warnIfRelayerLow(body.chain_id)
       const relayer = getRelayer(body.chain_id)
       await ensurePasskeySignerDeployed({
+        chainId: body.chain_id,
         relayer,
         factoryAddress: chain.passkey.factoryAddress,
         signerAddress: expectedSignerAddress,
@@ -364,16 +373,36 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
       // Contract-signature validation plus module setup calls can be expensive.
       // Use the provider estimate when available, otherwise fall back to a high
       // explicit gas limit so relayed batched admin flows don't under-gas.
-      const tx = await safe.execTransaction(...execArgs, {
-        gasLimit: getRelayExecGasLimit(estimatedGas),
-      })
-      await tx.wait()
+      // Broadcast under the per-chain send lock so the exec can't race another
+      // relayer submission for the same EOA nonce (#692/#718).
+      // #717: attempt row BEFORE broadcast; the signer-deploy tx above shares
+      // the cap but is not gas-itemised (known attribution undercount).
+      const spendId = await recordRelayerSpend({ operation: 'safe_exec', chainId: body.chain_id, userId: sub })
+      const tx = await withRelayerSendLock(body.chain_id, () =>
+        safe.execTransaction(...execArgs, {
+          gasLimit: getRelayExecGasLimit(estimatedGas),
+        }),
+      )
+      type GasReceipt = { gasUsed?: { toString(): string }; gasPrice?: { toString(): string } }
+      let execReceipt: GasReceipt | null = null
+      try {
+        execReceipt = (await tx.wait()) as unknown as GasReceipt | null
+      } finally {
+        await finishRelayerSpend(spendId, {
+          txHash: tx.hash,
+          gasUsed: execReceipt?.gasUsed != null ? BigInt(execReceipt.gasUsed.toString()) : null,
+          effectiveGasPrice: execReceipt?.gasPrice != null ? BigInt(execReceipt.gasPrice.toString()) : null,
+        })
+      }
 
       return reply.code(201).send({
         tx_hash: tx.hash,
         chain_id: body.chain_id,
       })
     } catch (error) {
+      if (error instanceof RelayerBudgetExceededError) {
+        return reply.code(429).send({ error: error.message })
+      }
       if (isInsufficientFundsError(error)) {
         return reply.code(503).send({ error: 'Relayer is temporarily unfunded; please try again later' })
       }

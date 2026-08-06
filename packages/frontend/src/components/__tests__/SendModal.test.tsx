@@ -13,6 +13,8 @@ vi.mock('@/hooks/useSendTransaction', () => ({
 
 vi.mock('@/lib/signer', () => ({
   useActiveSigner: (args: unknown) => mockUseActiveSigner(args),
+  // Real predicate shape (#1079): narrows away the delegator_passkey variant.
+  isSafeCapableSigner: (s: { type?: string } | null) => s !== null && s.type !== 'delegator_passkey',
 }))
 
 vi.mock('@/hooks/useSafeOperationGate', () => ({
@@ -92,7 +94,7 @@ describe('SendModal', () => {
     expect(screen.getByText('From')).toBeInTheDocument()
     expect(screen.getAllByText('Operating wallet').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Alice').length).toBeGreaterThan(0)
-    expect(screen.getByText('0x2222...2222')).toBeInTheDocument()
+    expect(screen.getByText('0x2222…2222')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Copy recipient address' })).toBeInTheDocument()
     expect(screen.getByText('Approve with')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approve and send' })).toBeInTheDocument()
@@ -226,7 +228,7 @@ describe('SendModal', () => {
 
     expect(screen.getByRole('heading', { name: 'Review payment' })).toBeInTheDocument()
     expect(screen.getAllByText('Acme Services').length).toBeGreaterThan(0)
-    expect(screen.getByText('0x2222...2222')).toBeInTheDocument()
+    expect(screen.getByText('0x2222…2222')).toBeInTheDocument()
   })
 
   it('refreshes data when a completed payment is closed from the header', async () => {

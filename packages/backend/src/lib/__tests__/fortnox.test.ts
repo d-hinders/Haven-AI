@@ -46,7 +46,10 @@ describe('buildFortnoxAuthorizeUrl', () => {
     const url = new URL(buildFortnoxAuthorizeUrl(CREDS, 'state123'))
     expect(url.searchParams.get('client_id')).toBe('cid')
     expect(url.searchParams.get('redirect_uri')).toBe('https://app/cb')
-    expect(url.searchParams.get('scope')).toBe('bookkeeping')
+    // #496 widened the scope (supplier invoices + suppliers), and #498 added
+    // inbox + connectfile for receipt attachment (upload + file connection —
+    // connectfile requirement proven live, error 2000663).
+    expect(url.searchParams.get('scope')).toBe('bookkeeping supplierinvoice supplier archive inbox connectfile')
     expect(url.searchParams.get('state')).toBe('state123')
     expect(url.searchParams.get('response_type')).toBe('code')
     expect(url.searchParams.get('access_type')).toBe('offline')

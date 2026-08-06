@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 type Tone = 'neutral' | 'brand' | 'success' | 'warning' | 'danger'
+type Size = 'default' | 'compact' | 'inline'
 
 interface EmptyStateProps {
   icon?: ReactNode
@@ -9,6 +10,13 @@ interface EmptyStateProps {
   title: string
   body?: ReactNode
   action?: ReactNode
+  /**
+   * `default` — page/section-level empty state (roomy, icon halo).
+   * `compact` — in-card previews and side columns (tighter padding + type).
+   * `inline` — a one-line dashed placeholder inside dense content (renders
+   * the title only; icon/body/action belong to the larger sizes).
+   */
+  size?: Size
   className?: string
 }
 
@@ -46,27 +54,48 @@ export function EmptyState({
   title,
   body,
   action,
+  size = 'default',
   className = '',
 }: EmptyStateProps) {
   const palette = TONE_CLASSES[tone]
+  const shell =
+    'rounded-[10px] border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] text-center'
+
+  if (size === 'inline') {
+    return (
+      <div className={`${shell} px-3 py-2.5 text-xs text-[var(--v2-ink-3)] ${className}`}>
+        {title}
+      </div>
+    )
+  }
+
+  const isCompact = size === 'compact'
   return (
-    <div
-      className={`rounded-[10px] border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] px-6 py-10 text-center ${className}`}
-    >
+    <div className={`${shell} ${isCompact ? 'p-6' : 'px-6 py-10'} ${className}`}>
       {icon && (
         <div
-          className={`mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-full ring-4 ${palette.iconBg} ${palette.iconColor} ${palette.halo}`}
+          className={`mx-auto flex items-center justify-center rounded-full ring-4 ${
+            isCompact ? 'mb-3 h-8 w-8' : 'mb-4 h-10 w-10'
+          } ${palette.iconBg} ${palette.iconColor} ${palette.halo}`}
         >
-          <span className="inline-flex h-5 w-5 items-center justify-center">{icon}</span>
+          <span className={`inline-flex items-center justify-center ${isCompact ? 'h-4 w-4' : 'h-5 w-5'}`}>
+            {icon}
+          </span>
         </div>
       )}
-      <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>
+      <h3 className={`text-sm text-[var(--v2-ink)] ${isCompact ? 'font-medium' : 'font-semibold'}`}>
+        {title}
+      </h3>
       {body && (
-        <div className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">
+        <div
+          className={`mx-auto mt-2 max-w-sm leading-relaxed text-[var(--v2-ink-2)] ${
+            isCompact ? 'text-xs' : 'text-sm'
+          }`}
+        >
           {body}
         </div>
       )}
-      {action && <div className="mt-5">{action}</div>}
+      {action && <div className={isCompact ? 'mt-4' : 'mt-5'}>{action}</div>}
     </div>
   )
 }

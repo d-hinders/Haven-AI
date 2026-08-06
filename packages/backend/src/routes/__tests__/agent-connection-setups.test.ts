@@ -33,6 +33,20 @@ vi.mock('../../lib/allowance-module.js', () => ({
   getTokensForDelegate: (...args: unknown[]) => mockGetTokensForDelegate(...args),
 }))
 
+// Mirrors agents.test.ts: the passport module is mocked so the register-path
+// opt-in (#1072) can be tested directly, including the "never breaks
+// registration" guarantee it inherits from POST /agents (#972).
+const { mockRequestPassport, mockIssueBestEffort } = vi.hoisted(() => ({
+  mockRequestPassport: vi.fn(),
+  mockIssueBestEffort: vi.fn(),
+}))
+vi.mock('../../lib/passport/index.js', () => ({
+  requestPassport: (...a: unknown[]) => mockRequestPassport(...a),
+  issuePassportBestEffort: (...a: unknown[]) => mockIssueBestEffort(...a),
+  isPassportConfigured: () => true,
+  PASSPORT_CHAIN_IDS: new Set([84532]),
+}))
+
 const SAFE = {
   id: 'safe-1',
   safe_address: '0x2222222222222222222222222222222222222222',
@@ -90,6 +104,25 @@ const DELEGATE_ADDRESS = '0x3333333333333333333333333333333333333333'
 const TX_HASH = `0x${'a'.repeat(64)}`
 const SAFE_TX_HASH = `0x${'b'.repeat(64)}`
 const ALLOWANCE_MODULE_ADDRESS = '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134'
+
+/** Suite-wide hosted MCP URL (#1129) — see the root beforeEach note. */
+const TEST_HOSTED_MCP_URL = 'https://hosted-mcp.test.haven/v1'
+/** The production backend host that (alone) still earns the built-in default. */
+const PROD_API_URL = 'https://havenbackend-production-8a00.up.railway.app'
+const PROD_DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
+
+// #1129: with HAVEN_HOSTED_MCP_URL / NEXT_PUBLIC_HAVEN_MCP_URL unset, a
+// non-production self-URL (inject resolves to localhost) is a hard
+// configuration error on /resolve and /register. The whole file therefore
+// pins an explicit hosted MCP URL so every describe stays representative of
+// a correctly configured deployment; the resolution matrix itself is covered
+// by the dedicated "hosted MCP URL resolution (#1129)" describe, which
+// overrides/unsets these per case.
+beforeEach(() => {
+  delete process.env.HAVEN_API_URL
+  delete process.env.NEXT_PUBLIC_HAVEN_MCP_URL
+  process.env.HAVEN_HOSTED_MCP_URL = TEST_HOSTED_MCP_URL
+})
 
 const CONNECTED_SETUP = {
   ...SETUP,
@@ -172,8 +205,10 @@ describe('agent connection setup routes', () => {
     })
     mockGetTokenAllowance.mockReset()
     mockGetTokensForDelegate.mockReset()
-    delete process.env.HAVEN_API_URL
-    delete process.env.HAVEN_HOSTED_MCP_URL
+    mockRequestPassport.mockReset().mockResolvedValue(true)
+    mockIssueBestEffort.mockReset()
+    // Env vars (HAVEN_API_URL, HAVEN_HOSTED_MCP_URL, …) are pinned by the
+    // root-level beforeEach above (#1129).
   })
 
   it('creates a pending setup with a returned-once token stored only as a hash', async () => {
@@ -225,6 +260,31 @@ describe('agent connection setup routes', () => {
       ALLOWANCE.allowance_amount,
       ALLOWANCE.reset_period_min,
     ])
+
+    await app.close()
+  })
+
+  it('persists the passport opt-in on the setup row for /register to act on later (#1072)', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        allowances: [ALLOWANCE],
+        issue_passport: true,
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    const insertSetup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO agent_connection_setups'),
+    )
+    const params = insertSetup?.[1] as unknown[]
+    expect(params[12]).toBe(true)
 
     await app.close()
   })
@@ -719,6 +779,133 @@ describe('agent connection setup routes', () => {
     expect(insertAgent?.[1]).toContain(API_KEY_HASH)
     expect(JSON.stringify(mockClientQuery.mock.calls)).not.toContain(wallet.privateKey)
     expect(mockClientQuery).toHaveBeenCalledWith('COMMIT')
+
+    await app.close()
+  })
+
+  /**
+   * #1072: the connector flow could not opt in at all — `issue_passport` had
+   * no path from setup creation through to the agent that /register creates.
+   * This pins the flag actually reaching `requestPassport`/
+   * `issuePassportBestEffort`, mirroring the POST /agents coverage in
+   * agents.test.ts so the two entry points are held to the same bar.
+   */
+  it('requests a passport at register time when the setup opted in on an eligible chain', async () => {
+    const app = await buildApp()
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    const passportSetup = { ...SETUP, issue_passport: true, safe_chain_id: 84532 }
+    const proof = await wallet.signMessage(passportSetup.challenge_message)
+
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [passportSetup] }
+      }
+      if (String(sql).includes('SELECT id FROM agents')) {
+        return { rows: [] }
+      }
+      if (String(sql).includes('INSERT INTO agents')) {
+        return { rows: [{ id: 'agent-1' }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_test',
+        challenge_id: passportSetup.challenge_id,
+        delegate_address: wallet.address,
+        proof_signature: proof,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().passport_requested).toBe(true)
+    expect(mockRequestPassport).toHaveBeenCalledWith('agent-1', 84532)
+    expect(mockIssueBestEffort).toHaveBeenCalledWith('agent-1', 'user-1')
+
+    await app.close()
+  })
+
+  it('does not request a passport unless the setup explicitly opted in', async () => {
+    const app = await buildApp()
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    // SETUP carries no issue_passport flag — the normal, unchanged case.
+    const proof = await wallet.signMessage(SETUP.challenge_message)
+
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [SETUP] }
+      }
+      if (String(sql).includes('SELECT id FROM agents')) {
+        return { rows: [] }
+      }
+      if (String(sql).includes('INSERT INTO agents')) {
+        return { rows: [{ id: 'agent-1' }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_test',
+        challenge_id: SETUP.challenge_id,
+        delegate_address: wallet.address,
+        proof_signature: proof,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().passport_requested).toBe(false)
+    expect(mockRequestPassport).not.toHaveBeenCalled()
+    expect(mockIssueBestEffort).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('registers the agent even when passport issuance throws', async () => {
+    const app = await buildApp()
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    const passportSetup = { ...SETUP, issue_passport: true, safe_chain_id: 84532 }
+    const proof = await wallet.signMessage(passportSetup.challenge_message)
+    mockRequestPassport.mockRejectedValue(new Error('passport table missing'))
+
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [passportSetup] }
+      }
+      if (String(sql).includes('SELECT id FROM agents')) {
+        return { rows: [] }
+      }
+      if (String(sql).includes('INSERT INTO agents')) {
+        return { rows: [{ id: 'agent-1' }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_test',
+        challenge_id: passportSetup.challenge_id,
+        delegate_address: wallet.address,
+        proof_signature: proof,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().agent_status).toBe('pending_approval')
+    expect(mockClientQuery.mock.calls.some(([sql]) => /ROLLBACK/.test(String(sql)))).toBe(false)
 
     await app.close()
   })
@@ -1418,6 +1605,801 @@ describe('agent connection setup routes', () => {
     expect(response.statusCode).toBe(400)
     expect(mockQuery).not.toHaveBeenCalled()
 
+    await app.close()
+  })
+})
+
+describe('setup allowance cap on the delegation rail (#1074)', () => {
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientQuery.mockResolvedValue({ rows: [] })
+    mockConnect.mockResolvedValue({
+      query: (...args: unknown[]) => mockClientQuery(...args),
+      release: vi.fn(),
+    })
+  })
+
+  const SECOND_ALLOWANCE = { ...ALLOWANCE, token_address: '0x' + '3b'.repeat(20), token_symbol: 'EURe' }
+
+  it('rejects >1 allowance on a delegator_hybrid wallet at CREATE — not as a dead end at approval', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [{ ...SAFE, account_type: 'delegator_hybrid' }] })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', runtime: 'claude_code', allowances: [ALLOWANCE, SECOND_ALLOWANCE] },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toMatch(/one budget per agent/)
+    // Nothing was persisted:
+    expect(mockClientQuery.mock.calls.some((c) => /INSERT INTO agent_connection_setups/.test(String(c[0])))).toBe(false)
+  })
+
+  it('a single allowance on the delegation rail is accepted', async () => {
+    const app = await buildApp()
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM user_safes')) return { rows: [{ ...SAFE, account_type: 'delegator_hybrid' }] }
+      return { rows: [] }
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', runtime: 'claude_code', allowances: [ALLOWANCE] },
+    })
+    expect(response.statusCode).toBe(201)
+  })
+
+  it('the legacy Safe rail still accepts multiple allowances — unchanged', async () => {
+    const app = await buildApp()
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM user_safes')) return { rows: [{ ...SAFE, account_type: null }] }
+      return { rows: [] }
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', runtime: 'claude_code', allowances: [ALLOWANCE, SECOND_ALLOWANCE] },
+    })
+    expect(response.statusCode).toBe(201)
+  })
+})
+
+describe('delegation-rail budget approval (#1073)', () => {
+  const DELEGATION_SETUP = { ...CONNECTED_SETUP, account_type: 'delegator_hybrid' }
+  /** The signed budget that satisfies ALLOWANCE: same token, amount, period. */
+  const MATCHING_DELEGATION = {
+    token_address: ALLOWANCE.token_address.toLowerCase(),
+    budget_atomic: ALLOWANCE.allowance_amount,
+    period_seconds: ALLOWANCE.reset_period_min * 60,
+  }
+
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientRelease.mockReset()
+    mockClientQuery.mockResolvedValue({ rows: [] })
+    mockConnect.mockResolvedValue({
+      query: (...args: unknown[]) => mockClientQuery(...args),
+      release: mockClientRelease,
+    })
+  })
+
+  async function buildApp(): Promise<FastifyInstance> {
+    const app = Fastify()
+    await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
+    await app.ready()
+    return app
+  }
+
+  function approve(app: FastifyInstance) {
+    return app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/budget-approval`,
+      payload: {},
+    })
+  }
+
+  it('activates the setup and the agent once the owner-signed budget exists', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+      .mockResolvedValueOnce({ rows: [MATCHING_DELEGATION] })
+    mockWalletApprovalPersist(DELEGATION_SETUP)
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ setup_id: SETUP.id, status: 'active' })
+
+    // No Safe transaction is recorded on this rail — the signature IS the
+    // approval, and there is no tx hash to carry.
+    const setupUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agent_connection_setups'),
+    )
+    expect(setupUpdate?.[1]).toEqual([SETUP.id, 'user-1', 'active', 'confirmed', null, null, null])
+    const agentUpdate = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agents'),
+    )
+    expect(String(agentUpdate?.[0])).toContain("status = 'active'")
+
+    await app.close()
+  })
+
+  it('refuses to activate when no signed budget exists — the client cannot assert one', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/not been approved yet/)
+    // Nothing written: no transaction was even opened.
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('refuses a signed budget that does not match the amount the user reviewed', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+      .mockResolvedValueOnce({
+        rows: [{ ...MATCHING_DELEGATION, budget_atomic: '99000000' }],
+      })
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/budget does not match/)
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('refuses a signed budget whose period does not match the setup', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+      .mockResolvedValueOnce({
+        // Weekly instead of the daily budget the user reviewed.
+        rows: [{ ...MATCHING_DELEGATION, period_seconds: 604_800 }],
+      })
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/reset period does not match/)
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('rejects a legacy Safe account — that rail approves with a wallet transaction', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [{ ...CONNECTED_SETUP, account_type: 'safe' }] })
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/wallet transaction/)
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+
+  it('requires the local connection before the budget can approve the setup', async () => {
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ ...DELEGATION_SETUP, status: 'awaiting_connection' }] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+
+    const response = await approve(app)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/Local connection is required/)
+    expect(mockConnect).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+})
+
+describe('delegation-rail budget approval — credential hygiene (#1073)', () => {
+  it('refuses credential material even though the body is ignored', async () => {
+    const app = Fastify()
+    await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
+    await app.ready()
+    mockQuery.mockReset()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/budget-approval`,
+      payload: { private_key: '0xsecret' },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(mockQuery).not.toHaveBeenCalled()
+
+    await app.close()
+  })
+})
+
+describe('cancel cannot orphan a live delegation-rail agent (#1073)', () => {
+  const DELEGATION_SETUP = { ...CONNECTED_SETUP, account_type: 'delegator_hybrid' }
+
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientRelease.mockReset()
+    mockClientQuery.mockResolvedValue({ rows: [] })
+    mockConnect.mockResolvedValue({
+      query: (...args: unknown[]) => mockClientQuery(...args),
+      release: mockClientRelease,
+    })
+  })
+
+  async function buildApp(): Promise<FastifyInstance> {
+    const app = Fastify()
+    await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
+    await app.ready()
+    return app
+  }
+
+  it('refuses to cancel once the budget signature has activated the agent', async () => {
+    // The regression this guards: on this rail the grant activates the agent
+    // in its OWN transaction, and no safe_tx_hash/tx_hash is ever written, so
+    // the setup still looks cancellable. Cancelling would have reported "this
+    // setup can no longer connect an agent" while leaving a live, spending
+    // agent behind — the revoke is scoped to 'pending_approval' and misses it.
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [DELEGATION_SETUP] }
+      }
+      if (String(sql).includes('SELECT status FROM agents')) {
+        return { rows: [{ status: 'active' }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/cancel`,
+      payload: {},
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/paused or revoked from the agent page/)
+    expect(mockClientQuery).toHaveBeenCalledWith('ROLLBACK')
+    // The setup must NOT have been marked cancelled.
+    expect(
+      mockClientQuery.mock.calls.some(([sql]) =>
+        String(sql).includes("SET status = 'cancelled'"),
+      ),
+    ).toBe(false)
+
+    await app.close()
+  })
+
+  it('still cancels a setup whose agent never became active', async () => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [DELEGATION_SETUP] }
+      }
+      if (String(sql).includes('SELECT status FROM agents')) {
+        return { rows: [{ status: 'pending_approval' }] }
+      }
+      if (String(sql).includes("SET status = 'cancelled'")) {
+        return { rows: [{ id: SETUP.id }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/cancel`,
+      payload: {},
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(mockClientQuery).toHaveBeenCalledWith('COMMIT')
+
+    await app.close()
+  })
+
+  it('accepts a PINNED budget as satisfying the setup — narrower authority is safe', async () => {
+    // The one comparison verifyDelegationSetupAuthority deliberately skips.
+    // A recipient-pinned budget grants strictly LESS than the unpinned budget
+    // the setup described, so it must still activate rather than 409.
+    const app = await buildApp()
+    mockQuery
+      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
+      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+      .mockResolvedValueOnce({
+        rows: [{
+          token_address: ALLOWANCE.token_address.toLowerCase(),
+          budget_atomic: ALLOWANCE.allowance_amount,
+          period_seconds: ALLOWANCE.reset_period_min * 60,
+          recipient_address: '0x' + 'cc'.repeat(20),
+        }],
+      })
+    mockWalletApprovalPersist(DELEGATION_SETUP)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/budget-approval`,
+      payload: {},
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ status: 'active' })
+
+    await app.close()
+  })
+})
+
+/**
+ * Characterization for the query paths #985 extracts into
+ * `infra/repositories/agent-connection-setups.ts`.
+ *
+ * Written BEFORE the extraction, deliberately asserting the SQL shape and the
+ * parameter POSITIONS rather than only the HTTP result: the point of a
+ * characterization suite for a data-access refactor is to fail if a query's
+ * scoping, ordering or transaction discipline changes, and an assertion that
+ * only reads the status code cannot see any of that.
+ *
+ * These paths were the coverage holes — every pre-existing test passed an
+ * explicit `safe_id`, so the default-wallet query had never been executed by
+ * the suite at all.
+ */
+describe('data access characterization (#985)', () => {
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientRelease.mockReset()
+    mockClientQuery.mockResolvedValue({ rows: [] })
+    mockConnect.mockResolvedValue({
+      query: (...args: unknown[]) => mockClientQuery(...args),
+      release: mockClientRelease,
+    })
+    mockGetTokenAllowance.mockReset()
+    mockGetTokensForDelegate.mockReset()
+    mockRequestPassport.mockReset().mockResolvedValue(true)
+    mockIssueBestEffort.mockReset()
+  })
+
+  it('falls back to the default Haven wallet when no safe_id is supplied', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', runtime: 'claude-code', allowances: [ALLOWANCE] },
+    })
+
+    expect(response.statusCode).toBe(201)
+    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
+    expect(String(sql)).toContain('FROM user_safes')
+    // The tenant predicate is asserted in the SQL, not merely in the params:
+    // the params come from the CALL SITE and stay `['user-1']` even if the
+    // `user_id` clause is deleted from the query — a mutation that silently
+    // returns another tenant's default wallet. Assert the clause itself.
+    expect(String(sql)).toContain('WHERE user_id = $1')
+    expect(String(sql)).toContain('is_default = true')
+    expect(params).toEqual(['user-1'])
+    await app.close()
+  })
+
+  it('scopes an explicit safe_id to the calling user', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+
+    await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', safe_id: SAFE.id, runtime: 'claude-code', allowances: [ALLOWANCE] },
+    })
+
+    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
+    expect(String(sql)).toContain('WHERE id = $1 AND user_id = $2')
+    expect(params).toEqual([SAFE.id, 'user-1'])
+    await app.close()
+  })
+
+  it('reads a setup for its owner only — user_id is part of every user-facing lookup', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValue({ rows: [] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${SETUP.id}`,
+      headers: { authorization: 'Bearer user-jwt' },
+    })
+
+    expect(response.statusCode).toBe(404)
+    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
+    expect(String(sql)).toContain('s.id = $1 AND s.user_id = $2')
+    expect(params).toEqual([SETUP.id, 'user-1'])
+    await app.close()
+  })
+
+  it('records connector version and runtime on resolve, and skips the write when neither is sent', async () => {
+    const app = await buildApp()
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('UPDATE agent_connection_setups')) return { rows: [] }
+      if (String(sql).includes('agent_connection_setup_allowances')) return { rows: [ALLOWANCE] }
+      return { rows: [SETUP] }
+    })
+
+    await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/resolve',
+      payload: { setup_token: 'hv_setup_abc', connector_version: '0.1.0', runtime: 'claude-code' },
+    })
+
+    const update = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agent_connection_setups'),
+    )
+    expect(update).toBeTruthy()
+    expect(String(update?.[0])).toContain('COALESCE($2, connector_version)')
+    expect(update?.[1]).toEqual([SETUP.id, '0.1.0', 'claude-code'])
+
+    mockQuery.mockClear()
+    await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/resolve',
+      payload: { setup_token: 'hv_setup_abc' },
+    })
+    expect(
+      mockQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agent_connection_setups')),
+    ).toBe(false)
+
+    await app.close()
+  })
+
+  it('rolls back and writes nothing when registration fails validation inside the transaction', async () => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: [SETUP] }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_abc',
+        challenge_id: SETUP.challenge_id,
+        delegate_address: DELEGATE_ADDRESS,
+        proof_signature: `0x${'1'.repeat(130)}`,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    const statements = mockClientQuery.mock.calls.map(([sql]) => String(sql))
+    expect(statements).toContain('BEGIN')
+    expect(statements).toContain('ROLLBACK')
+    expect(statements).not.toContain('COMMIT')
+    expect(statements.some((sql) => /INSERT INTO agents/.test(sql))).toBe(false)
+    expect(mockClientRelease).toHaveBeenCalled()
+    await app.close()
+  })
+
+  it('locks the setup row before consuming the token on register', async () => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: [SETUP] }
+      return { rows: [] }
+    })
+
+    await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: { setup_token: 'hv_setup_abc', challenge_id: 'wrong', delegate_address: DELEGATE_ADDRESS,
+        proof_signature: `0x${'1'.repeat(130)}`, api_key_hash: API_KEY_HASH, api_key_prefix: API_KEY_PREFIX },
+    })
+
+    const select = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('FROM agent_connection_setups'),
+    )
+    expect(String(select?.[0])).toContain('FOR UPDATE OF s')
+    expect(String(select?.[0])).toContain('s.setup_token_hash = $1')
+    await app.close()
+  })
+
+  /**
+   * Every early exit inside the register transaction must ROLLBACK, not COMMIT.
+   * Asserted branch by branch rather than once: the refactor routes all of them
+   * through a single mechanism, and a table here is what proves the mechanism
+   * did not quietly convert one of them into a committed empty transaction.
+   */
+  it.each([
+    ['setup not found under the lock', {}, 401, null],
+    ['setup already consumed', {}, 409, { ...SETUP, setup_token_consumed_at: '2026-01-01T00:00:00.000Z' }],
+    ['setup no longer awaiting connection', {}, 409, { ...SETUP, status: 'connected_local' }],
+    ['expired setup token', {}, 410, { ...SETUP, setup_token_expires_at: '2000-01-01T00:00:00.000Z' }],
+    ['invalid challenge', { challenge_id: 'wrong' }, 400, SETUP],
+    ['malformed signing address', { delegate_address: 'not-an-address' }, 400, SETUP],
+    ['invalid proof signature', { proof_signature: `0x${'9'.repeat(130)}` }, 400, SETUP],
+    ['malformed api key hash', { api_key_hash: 'short' }, 400, SETUP],
+    ['malformed api key prefix', { api_key_prefix: 42 }, 400, SETUP],
+  ])('rolls back the register transaction on %s', async (_label, override, expected, row) => {
+    const app = await buildApp()
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: row ? [row] : [] }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_abc',
+        challenge_id: SETUP.challenge_id,
+        delegate_address: DELEGATE_ADDRESS,
+        proof_signature: `0x${'1'.repeat(130)}`,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+        ...override,
+      },
+    })
+
+    expect(response.statusCode).toBe(expected)
+    const statements = mockClientQuery.mock.calls.map(([sql]) => String(sql))
+    expect(statements).toContain('ROLLBACK')
+    expect(statements).not.toContain('COMMIT')
+    expect(statements.some((sql) => /INSERT INTO agents/.test(sql))).toBe(false)
+    await app.close()
+  })
+
+  it('authenticates an install-status report by API key against the setup and allowed agent states', async () => {
+    const app = await buildApp()
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('JOIN agents a')) return { rows: [{ ...CONNECTED_SETUP }] }
+      if (String(sql).includes('UPDATE agent_connection_setups')) {
+        return { rows: [{ install_status: { hosted_mcp_configured: true } }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/install-status`,
+      headers: { authorization: 'Bearer sk_agent_live_key' },
+      payload: { hosted_mcp_configured: true },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const auth = mockQuery.mock.calls.find(([sql]) => String(sql).includes('JOIN agents a'))
+    expect(String(auth?.[0])).toContain('WHERE s.id = $1 AND a.api_key_hash = $2')
+    expect((auth?.[1] as unknown[])[0]).toBe(SETUP.id)
+    expect((auth?.[1] as unknown[]).slice(2)).toEqual(['pending_approval', 'active', 'paused'])
+    await app.close()
+  })
+
+  it('reads the active delegations for a budget approval scoped to the setup agent', async () => {
+    const app = await buildApp()
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_delegations')) return { rows: [] }
+      if (String(sql).includes('agent_connection_setup_allowances')) return { rows: [ALLOWANCE] }
+      return { rows: [{ ...CONNECTED_SETUP, account_type: 'delegator_hybrid' }] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${SETUP.id}/budget-approval`,
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: {},
+    })
+
+    expect(response.statusCode).toBe(409)
+    const read = mockQuery.mock.calls.find(([sql]) => String(sql).includes('FROM agent_delegations'))
+    expect(String(read?.[0])).toContain("status = 'active'")
+    expect(read?.[1]).toEqual(['agent-1'])
+    await app.close()
+  })
+})
+
+/**
+ * Hosted MCP URL resolution matrix (#1129).
+ *
+ * A non-production backend must never hand out the PRODUCTION hosted MCP URL
+ * as a silent default: the hosted MCP relays to exactly one backend fixed at
+ * deploy time, so a dev/local-issued sk_agent_ key sent there is looked up in
+ * the prod database and 401s with a message blaming the key. The rule under
+ * test: explicit variable wins → prod self-URL earns the built-in default →
+ * everything else is a LOUD 500 configuration error naming the variable, and
+ * — on /register — one that fires BEFORE the transaction so the one-shot
+ * setup token is not consumed and no agent row is half-created.
+ */
+describe('hosted MCP URL resolution (#1129)', () => {
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientRelease.mockReset()
+    mockClientQuery.mockResolvedValue({ rows: [] })
+    mockConnect.mockResolvedValue({
+      query: (...args: unknown[]) => mockClientQuery(...args),
+      release: mockClientRelease,
+    })
+    mockRequestPassport.mockReset().mockResolvedValue(true)
+    mockIssueBestEffort.mockReset()
+  })
+
+  function mockResolveQueries() {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('UPDATE agent_connection_setups')) return { rows: [] }
+      if (String(sql).includes('agent_connection_setup_allowances')) return { rows: [ALLOWANCE] }
+      return { rows: [SETUP] }
+    })
+  }
+
+  function resolvePayload() {
+    return { setup_token: 'hv_setup_abc', connector_version: '0.1.0', runtime: 'claude-code' }
+  }
+
+  async function injectResolve(app: FastifyInstance) {
+    return app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/resolve',
+      payload: resolvePayload(),
+    })
+  }
+
+  /** Full happy-path register mocks + payload — with config present it 201s. */
+  async function registerSetup() {
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    const proof = await wallet.signMessage(SETUP.challenge_message)
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: [SETUP] }
+      if (String(sql).includes('SELECT id FROM agents')) return { rows: [] }
+      if (String(sql).includes('INSERT INTO agents')) return { rows: [{ id: 'agent-1' }] }
+      return { rows: [] }
+    })
+    return {
+      setup_token: 'hv_setup_abc',
+      challenge_id: SETUP.challenge_id,
+      delegate_address: wallet.address,
+      proof_signature: proof,
+      api_key_hash: API_KEY_HASH,
+      api_key_prefix: API_KEY_PREFIX,
+    }
+  }
+
+  it('an explicitly set HAVEN_HOSTED_MCP_URL always wins, on resolve and register (trailing slash stripped)', async () => {
+    process.env.HAVEN_HOSTED_MCP_URL = 'https://dev-mcp.example.test/v1/'
+
+    const app = await buildApp()
+    mockResolveQueries()
+    const resolveResponse = await injectResolve(app)
+    expect(resolveResponse.statusCode).toBe(200)
+    expect(resolveResponse.json().hosted_mcp_url).toBe('https://dev-mcp.example.test/v1')
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: await registerSetup(),
+    })
+    expect(registerResponse.statusCode).toBe(201)
+    expect(registerResponse.json().hosted_mcp_url).toBe('https://dev-mcp.example.test/v1')
+    await app.close()
+  })
+
+  it('NEXT_PUBLIC_HAVEN_MCP_URL is honoured as the explicit fallback variable', async () => {
+    delete process.env.HAVEN_HOSTED_MCP_URL
+    process.env.NEXT_PUBLIC_HAVEN_MCP_URL = 'https://mcp-from-public-var.test/v1'
+
+    const app = await buildApp()
+    mockResolveQueries()
+    const response = await injectResolve(app)
+    expect(response.statusCode).toBe(200)
+    expect(response.json().hosted_mcp_url).toBe('https://mcp-from-public-var.test/v1')
+    await app.close()
+  })
+
+  it('unset variables + production self-URL still serve the built-in default — prod needs no config change', async () => {
+    delete process.env.HAVEN_HOSTED_MCP_URL
+    process.env.HAVEN_API_URL = PROD_API_URL
+
+    const app = await buildApp()
+    mockResolveQueries()
+    const resolveResponse = await injectResolve(app)
+    expect(resolveResponse.statusCode).toBe(200)
+    expect(resolveResponse.json().hosted_mcp_url).toBe(PROD_DEFAULT_HOSTED_MCP_URL)
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: await registerSetup(),
+    })
+    expect(registerResponse.statusCode).toBe(201)
+    expect(registerResponse.json().hosted_mcp_url).toBe(PROD_DEFAULT_HOSTED_MCP_URL)
+    await app.close()
+  })
+
+  it('unset variables + dev self-URL fail register with a 500 naming the variable — and write NOTHING', async () => {
+    delete process.env.HAVEN_HOSTED_MCP_URL
+    process.env.HAVEN_API_URL = 'https://havenbackend-dev-8b95.up.railway.app'
+
+    const app = await buildApp()
+    // Identical mocks/payload to the 201 happy path — proving the refusal is
+    // the configuration guard, not some validation failure.
+    const payload = await registerSetup()
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload,
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().error).toContain('HAVEN_HOSTED_MCP_URL')
+    expect(response.json().error).toContain('--local')
+    expect(response.json().error).toContain('havenbackend-dev-8b95.up.railway.app')
+    // The guard fires BEFORE the transaction opens: the setup token was not
+    // locked or consumed, no agent row was inserted — not even BEGIN ran.
+    expect(mockConnect).not.toHaveBeenCalled()
+    expect(mockClientQuery).not.toHaveBeenCalled()
+    await app.close()
+  })
+
+  it('unset variables + dev self-URL fail resolve with the same 500, before the connector-metadata write', async () => {
+    delete process.env.HAVEN_HOSTED_MCP_URL
+    process.env.HAVEN_API_URL = 'https://havenbackend-dev-8b95.up.railway.app'
+
+    const app = await buildApp()
+    mockResolveQueries()
+    const response = await injectResolve(app)
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().error).toContain('HAVEN_HOSTED_MCP_URL')
+    // The payload carried connector_version/runtime, so a pass-through would
+    // have written connector metadata — the config error must precede it.
+    expect(
+      mockQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agent_connection_setups')),
+    ).toBe(false)
+    await app.close()
+  })
+
+  it('unset variables + localhost self-URL fail the same way — local dev is pointed at --local, not at prod', async () => {
+    delete process.env.HAVEN_HOSTED_MCP_URL
+    // No HAVEN_API_URL: the self-URL falls back to the request host, which is
+    // localhost under inject — exactly the local-dev backend case.
+
+    const app = await buildApp()
+    mockResolveQueries()
+    const resolveResponse = await injectResolve(app)
+    expect(resolveResponse.statusCode).toBe(500)
+    expect(resolveResponse.json().error).toContain('HAVEN_HOSTED_MCP_URL')
+    expect(resolveResponse.json().error).toContain('--local')
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: await registerSetup(),
+    })
+    expect(registerResponse.statusCode).toBe(500)
+    expect(registerResponse.json().error).toContain('HAVEN_HOSTED_MCP_URL')
+    expect(mockConnect).not.toHaveBeenCalled()
     await app.close()
   })
 })

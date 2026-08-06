@@ -40,6 +40,15 @@ const UINT96_MAX = (1n << 96n) - 1n
  * One fuzzed allowance case, tagged with the seed and a candidate block time
  * so any divergence is fully reproducible from its `seed`.
  */
+// Fixed minute-since-epoch anchor (~2025) so generated cases — and therefore
+// any reported divergence — are fully reproducible from the seed ALONE. The
+// arithmetic under test is clock-source-free, so anchoring to wall-clock time
+// bought nothing and cost replayability: the same seed produced different
+// cases on different days, which is exactly what a differential harness must
+// not do (a failure reported on Monday could not be reproduced on Tuesday).
+// Mirrors the frontend harness's BASE_NOW_MIN; see loop-engineering.md §5.
+const BASE_NOW_MIN = 29_000_000
+
 export interface AllowanceCase {
   seed: number
   info: AllowanceInfo
@@ -75,9 +84,9 @@ export function* generateAllowanceCases(
     const resetTimeMin =
       rng() < 0.25 ? 0 : randInt(rng, 1, 0xffff)
 
-    // lastResetMin: uint32 minutes-since-epoch in a realistic recent range.
-    const nowMin = Math.floor(Date.now() / 1000 / 60)
-    const lastResetMin = randInt(rng, nowMin - 10 * 24 * 60, nowMin)
+    // lastResetMin: uint32 minutes-since-epoch in a realistic range around the
+    // fixed anchor (never wall-clock — see BASE_NOW_MIN).
+    const lastResetMin = randInt(rng, BASE_NOW_MIN - 10 * 24 * 60, BASE_NOW_MIN)
 
     const nonce = randInt(rng, 0, 0xffff)
 
@@ -93,7 +102,7 @@ export function* generateAllowanceCases(
     const boundarySec = (lastResetMin + resetTimeMin) * 60
     const jitter = randInt(rng, -120, 120)
     const blockTimeSec = resetTimeMin === 0
-      ? Math.floor(Date.now() / 1000)
+      ? BASE_NOW_MIN * 60
       : boundarySec + jitter
 
     yield { seed, info, blockTimeSec }

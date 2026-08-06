@@ -9,7 +9,25 @@ const { mockQuery } = vi.hoisted(() => ({
 vi.mock('../../db.js', () => ({
   default: {
     query: (...args: unknown[]) => mockQuery(...args),
+    // The create path opens a transaction client; route its queries to the same
+    // mock so BEGIN/INSERT/COMMIT/ROLLBACK are observable in mockQuery.calls.
+    connect: async () => ({
+      query: (...args: unknown[]) => mockQuery(...args),
+      release: () => {},
+    }),
   },
+}))
+
+// The passport module is mocked so the creation-path guarantee can be tested
+// directly: a passport problem must never fail, delay, or roll back the agent.
+const { mockRequestPassport, mockIssueBestEffort } = vi.hoisted(() => ({
+  mockRequestPassport: vi.fn(),
+  mockIssueBestEffort: vi.fn(),
+}))
+vi.mock('../../lib/passport/index.js', () => ({
+  requestPassport: (...a: unknown[]) => mockRequestPassport(...a),
+  issuePassportBestEffort: (...a: unknown[]) => mockIssueBestEffort(...a),
+  PASSPORT_CHAIN_IDS: new Set([84532]),
 }))
 
 vi.mock('../../middleware/auth.js', () => ({
@@ -32,6 +50,8 @@ const VALID_ALLOWANCE = {
 describe('agent routes', () => {
   beforeEach(() => {
     mockQuery.mockReset()
+    mockRequestPassport.mockReset().mockResolvedValue(true)
+    mockIssueBestEffort.mockReset()
   })
 
   it('fetches one agent with allowances and null mcp_last_seen_at when never called', async () => {
@@ -78,7 +98,11 @@ describe('agent routes', () => {
       allowances: [{ id: 'allowance-1', token_symbol: 'USDC' }],
       mcp_last_seen_at: null,
     })
-    expect(String(mockQuery.mock.calls[0][0])).toContain("a.status != 'pending_approval'")
+    // #1069: pending_approval agents are SURFACED, not hidden — an abandoned
+    // setup used to leave the user with "Agents 0" and no route back to an
+    // agent that exists. The list/detail include them; the UI badges them
+    // 'Needs setup' and links to the page where the budget grant activates.
+    expect(String(mockQuery.mock.calls[0][0])).not.toContain("pending_approval")
     expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', 'agent-1'])
 
     await app.close()
@@ -115,7 +139,11 @@ describe('agent routes', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.json().mcp_last_seen_at).toBe(lastSeenAt)
-    expect(String(mockQuery.mock.calls[0][0])).toContain("a.status != 'pending_approval'")
+    // #1069: pending_approval agents are SURFACED, not hidden — an abandoned
+    // setup used to leave the user with "Agents 0" and no route back to an
+    // agent that exists. The list/detail include them; the UI badges them
+    // 'Needs setup' and links to the page where the budget grant activates.
+    expect(String(mockQuery.mock.calls[0][0])).not.toContain("pending_approval")
 
     await app.close()
   })
@@ -133,7 +161,11 @@ describe('agent routes', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({ agents: [] })
-    expect(String(mockQuery.mock.calls[0][0])).toContain("a.status != 'pending_approval'")
+    // #1069: pending_approval agents are SURFACED, not hidden — an abandoned
+    // setup used to leave the user with "Agents 0" and no route back to an
+    // agent that exists. The list/detail include them; the UI badges them
+    // 'Needs setup' and links to the page where the budget grant activates.
+    expect(String(mockQuery.mock.calls[0][0])).not.toContain("pending_approval")
 
     await app.close()
   })
@@ -271,6 +303,7 @@ describe('agent routes', () => {
           reset_period_min: 1440,
         }],
       })
+      .mockResolvedValueOnce({ rows: [] }) // schedule-state lookup (#802) — no schedule
 
     const response = await app.inject({
       method: 'POST',
@@ -384,5 +417,197 @@ describe('agent routes', () => {
     expect(mockQuery).toHaveBeenCalledTimes(1)
 
     await app.close()
+  })
+})
+
+/**
+ * The headline acceptance criterion of #972: creating an agent must succeed
+ * even when the passport path fails. Reviewer finding #4 — the code was correct
+ * on manual read but had ZERO regression protection, so nothing would catch a
+ * refactor that moved this before COMMIT or let the error escape.
+ */
+describe('agent creation — passport opt-in never breaks creation', () => {
+  // This block is a sibling of `describe('agent routes')`, so it needs its own
+  // reset — the other block's beforeEach does not reach here.
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockRequestPassport.mockReset().mockResolvedValue(true)
+    mockIssueBestEffort.mockReset()
+  })
+
+  /** Mock the create path's queries: safe lookup, BEGIN, INSERT, safe info, COMMIT. */
+  function mockCreateFlow() {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (/SELECT id FROM user_safes/.test(sql)) return { rows: [{ id: 'safe-1' }] }
+      if (/INSERT INTO agents/.test(sql)) {
+        return { rows: [{ id: 'agent-1', name: 'A', description: null, delegate_address: VALID_DELEGATE, safe_id: 'safe-1', api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', mcp_last_seen_at: null }] }
+      }
+      if (/SELECT safe_address, name AS safe_name/.test(sql)) {
+        return { rows: [{ safe_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 84532 }] }
+      }
+      return { rows: [] }
+    })
+  }
+
+  const body = { name: 'A', delegate_address: VALID_DELEGATE, safe_id: 'safe-1', issue_passport: true }
+
+  it('returns 201 even when requestPassport THROWS', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockCreateFlow()
+    mockRequestPassport.mockRejectedValue(new Error('passport table missing'))
+
+    const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().id).toBe('agent-1')
+    // Never rolled back.
+    expect(mockQuery.mock.calls.some(([sql]) => /ROLLBACK/.test(String(sql)))).toBe(false)
+  })
+
+  it('returns 201 even when issuePassportBestEffort throws synchronously', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockCreateFlow()
+    mockIssueBestEffort.mockImplementation(() => { throw new Error('boom') })
+
+    const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
+    expect(res.statusCode).toBe(201)
+    expect(mockQuery.mock.calls.some(([sql]) => /ROLLBACK/.test(String(sql)))).toBe(false)
+  })
+
+  it('does not request a passport unless explicitly opted in', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockCreateFlow()
+
+    const res = await app.inject({
+      method: 'POST', url: '/agents',
+      payload: { name: 'A', delegate_address: VALID_DELEGATE, safe_id: 'safe-1' },
+    })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().passport_requested).toBe(false)
+    expect(mockRequestPassport).not.toHaveBeenCalled()
+  })
+
+  it('skips the opt-in on an unsupported chain instead of creating a doomed row', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (/SELECT id FROM user_safes/.test(sql)) return { rows: [{ id: 'safe-1' }] }
+      if (/INSERT INTO agents/.test(sql)) return { rows: [{ id: 'agent-1', name: 'A', description: null, delegate_address: VALID_DELEGATE, safe_id: 'safe-1', api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', mcp_last_seen_at: null }] }
+      if (/SELECT safe_address, name AS safe_name/.test(sql)) {
+        return { rows: [{ safe_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 100 }] } // Gnosis — unsupported
+      }
+      return { rows: [] }
+    })
+
+    const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().passport_requested).toBe(false)
+    expect(mockRequestPassport).not.toHaveBeenCalled()
+  })
+})
+
+describe('agent payloads carry the rail (#1069/#1071 class)', () => {
+  it('every user_safes JOIN in the agents repository selects account_type — AgentPanel and EditAgentModal branch on it', async () => {
+    // Third instance of the same mine: the fix landed in GET /agents/:id, but
+    // AgentPanel (dashboard/agents list) reads GET /agents, whose SELECT
+    // omitted account_type — so delegation agents opened the legacy Safe
+    // budget editor with a permanently dead "Update budget" button. Pin the
+    // field in EVERY user_safes join in the agents SQL, like auth.test.ts
+    // does for auth.ts. (#988 moved the SQL verbatim from routes/agents.ts
+    // into infra/repositories/agents.ts; this pin follows it there.)
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync(new URL('../../infra/repositories/agents.ts', import.meta.url), 'utf8')
+    const selects = src.match(/SELECT[\s\S]*?JOIN user_safes[^\n]*/g) ?? []
+    expect(selects.length).toBeGreaterThanOrEqual(4)
+    for (const sel of selects) {
+      expect(sel, `user_safes JOIN missing account_type: ${sel.slice(0, 80)}`).toContain('account_type')
+    }
+  })
+})
+
+describe('delegation-rail budget view derives from active delegations (#1090)', () => {
+  // agent_allowances is written once at connection setup and never on budget
+  // updates — a frozen onboarding mirror. The summary payloads must read the
+  // ACTIVE agent_delegations rows, or every view shows the onboarding budget
+  // forever. Legacy AllowanceModule agents keep the mirror verbatim.
+  const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+  const AGENT_BASE = {
+    id: 'agent-1', name: 'A', description: null, delegate_address: VALID_DELEGATE,
+    safe_id: 'safe-1', safe_address: '0x' + '22'.repeat(20), safe_name: 'Main',
+    safe_chain_id: 84532, api_key_prefix: 'sk_a', status: 'active',
+    created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null, has_stranded_funds: false,
+  }
+  const STALE_MIRROR = {
+    id: 'al-1', agent_id: 'agent-1', token_address: SEPOLIA_USDC,
+    token_symbol: 'USDC', allowance_amount: '10.00', reset_period_min: 1440,
+  }
+
+  beforeEach(() => {
+    mockQuery.mockReset()
+  })
+
+  function mockReads(opts: {
+    accountType: string | null
+    delegations?: Array<Record<string, unknown>>
+  }) {
+    mockQuery.mockImplementation(async (sql: string) => {
+      const s = String(sql)
+      if (/FROM agents a/.test(s)) {
+        return { rows: [{ ...AGENT_BASE, account_type: opts.accountType }] }
+      }
+      if (/FROM agent_allowances/.test(s)) return { rows: [STALE_MIRROR] }
+      if (/FROM agent_delegations/.test(s)) return { rows: opts.delegations ?? [] }
+      return { rows: [] }
+    })
+  }
+
+  async function getAgents(url: string) {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    return app.inject({ method: 'GET', url })
+  }
+
+  const ACTIVE_DELEGATION = {
+    id: 'd-1', agent_id: 'agent-1', chain_id: 84532, token_address: SEPOLIA_USDC,
+    budget_atomic: '1000000', period_seconds: 86_400,
+  }
+
+  it('list: a delegation agent reports the ACTIVE delegation, not the frozen mirror', async () => {
+    mockReads({ accountType: 'delegator_hybrid', delegations: [ACTIVE_DELEGATION] })
+    const res = await getAgents('/agents')
+    expect(res.statusCode).toBe(200)
+    const [agent] = res.json().agents
+    expect(agent.allowances).toEqual([{
+      id: 'd-1', agent_id: 'agent-1', token_address: SEPOLIA_USDC,
+      token_symbol: 'USDC', allowance_amount: '1.00', reset_period_min: 1440,
+    }])
+  })
+
+  it('by-id: same derivation, and a revoked-only agent reports NO budget', async () => {
+    mockReads({ accountType: 'delegator_hybrid', delegations: [] })
+    const res = await getAgents('/agents/agent-1')
+    expect(res.statusCode).toBe(200)
+    expect(res.json().allowances).toEqual([])
+  })
+
+  it('legacy agents return the agent_allowances rows byte-identically — the derivation must not leak onto that rail', async () => {
+    mockReads({ accountType: null, delegations: [ACTIVE_DELEGATION] })
+    const res = await getAgents('/agents')
+    expect(res.json().agents[0].allowances).toEqual([STALE_MIRROR])
+    // And the delegations table is never consulted for a legacy-only listing:
+    expect(mockQuery.mock.calls.some((c) => /FROM agent_delegations/.test(String(c[0])))).toBe(false)
+  })
+
+  it('an unlisted token degrades to a generic view instead of dropping the budget', async () => {
+    mockReads({
+      accountType: 'delegator_hybrid',
+      delegations: [{ ...ACTIVE_DELEGATION, token_address: '0x' + '99'.repeat(20), budget_atomic: '2000000000000000000' }],
+    })
+    const res = await getAgents('/agents/agent-1')
+    const [allowance] = res.json().allowances
+    expect(allowance.token_symbol).toBe('TOKEN')
+    expect(allowance.allowance_amount).toBe('2.00')
   })
 })

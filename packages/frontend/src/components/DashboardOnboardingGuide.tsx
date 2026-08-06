@@ -2,6 +2,8 @@
 
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
+import { Check } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 type StepStatus = 'complete' | 'active' | 'locked'
 
@@ -122,7 +124,7 @@ export default function DashboardOnboardingGuide({
     <section className="v2-animate-fade-in rounded-[14px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)]">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--v2-brand)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--v2-brand)]">
             Get started
           </p>
           <h2 className="mt-1 text-lg font-semibold tracking-tight text-[var(--v2-ink)]">
@@ -203,7 +205,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand)] text-[11px] font-semibold text-white v2-tabular"
+        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand)] text-xs font-semibold text-white v2-tabular"
       >
         {number}
       </span>
@@ -212,7 +214,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-border-strong)] text-[11px] font-semibold text-[var(--v2-ink-3)] v2-tabular"
+      className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-border-strong)] text-xs font-semibold text-[var(--v2-ink-3)] v2-tabular"
     >
       {number}
     </span>
@@ -221,15 +223,6 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
 
 function CheckIcon(): ReactNode {
   return (
-    <svg
-      className="h-4 w-4"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-      aria-hidden="true"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-    </svg>
+    <Icon icon={Check} className="h-4 w-4" />
   )
 }

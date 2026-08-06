@@ -1,5 +1,6 @@
 'use client'
 
+import { Table } from '@/components/ui/Table'
 import { type ReactNode } from 'react'
 import Link from 'next/link'
 import { useUserSafes } from '@/hooks/useUserSafes'
@@ -32,7 +33,7 @@ function resetLabel(mins: number): string {
 
 function OnChainBadge() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-success-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-success)]">
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-success-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-success)]">
       🔒 on-chain
     </span>
   )
@@ -40,7 +41,7 @@ function OnChainBadge() {
 
 function AdvisoryBadge() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-[11px] font-medium text-[var(--v2-ink-3)]">
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink-3)]">
       ⓘ not on-chain
     </span>
   )
@@ -132,38 +133,38 @@ function SafeControlCard({ safe, agents }: { safe: UserSafe; agents: Agent[] }) 
         ) : data.size === 0 ? (
           <p className="text-sm text-[var(--v2-ink-3)]">No on-chain agent allowances on this Safe.</p>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-[var(--v2-border)]">
-            <table className="w-full text-sm">
-              <thead className="bg-[var(--v2-table-header-bg)] text-left text-xs text-[var(--v2-ink-3)]">
+          <div className="overflow-x-auto rounded-lg border border-[var(--v2-border)]">
+            <Table className="text-sm">
+              <Table.Head collapseBelowMd={false}>
                 <tr>
-                  <th className="px-3 py-2 font-medium">Agent / delegate</th>
-                  <th className="px-3 py-2 font-medium">Token</th>
-                  <th className="px-3 py-2 font-medium">Limit</th>
-                  <th className="px-3 py-2 font-medium">Spent</th>
-                  <th className="px-3 py-2 font-medium">Resets</th>
+                  <Table.HeaderCell align="left">Agent / delegate</Table.HeaderCell>
+                  <Table.HeaderCell align="left">Token</Table.HeaderCell>
+                  <Table.HeaderCell align="left">Limit</Table.HeaderCell>
+                  <Table.HeaderCell align="left">Spent</Table.HeaderCell>
+                  <Table.HeaderCell align="left">Resets</Table.HeaderCell>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--v2-border)]">
+              </Table.Head>
+              <Table.Body>
                 {[...data.entries()].flatMap(([delegate, info]) => {
                   const agent = agentByDelegate.get(delegate)
                   return info.allowances.map((al) => {
                     const sym = tokenSymbol(al.token, safe.chain_id)
                     return (
                       <tr key={`${delegate}-${al.token}`}>
-                        <td className="px-3 py-2">
+                        <td className="px-4 py-3">
                           <span className="text-[var(--v2-ink)]">{agent?.name ?? 'Unmanaged delegate'}</span>
                           <span className="ml-1 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(delegate)}</span>
                         </td>
-                        <td className="px-3 py-2 text-[var(--v2-ink-2)]">{sym}</td>
-                        <td className="px-3 py-2 text-[var(--v2-ink-2)]">{formatAllowanceForToken(al.amount.toString(), safe.chain_id, sym)}</td>
-                        <td className="px-3 py-2 text-[var(--v2-ink-2)]">{formatAllowanceForToken(al.spent.toString(), safe.chain_id, sym)}</td>
-                        <td className="px-3 py-2 text-[var(--v2-ink-2)]">{resetLabel(al.resetTimeMin)}</td>
+                        <td className="px-4 py-3 text-[var(--v2-ink-2)]">{sym}</td>
+                        <td className="px-4 py-3 text-[var(--v2-ink-2)]">{formatAllowanceForToken(al.amount.toString(), safe.chain_id, sym)}</td>
+                        <td className="px-4 py-3 text-[var(--v2-ink-2)]">{formatAllowanceForToken(al.spent.toString(), safe.chain_id, sym)}</td>
+                        <td className="px-4 py-3 text-[var(--v2-ink-2)]">{resetLabel(al.resetTimeMin)}</td>
                       </tr>
                     )
                   })
                 })}
-              </tbody>
-            </table>
+              </Table.Body>
+            </Table>
           </div>
         )}
         <p className="mt-2 text-xs text-[var(--v2-ink-3)]">

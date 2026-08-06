@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { exact } from 'x402/schemes'
 import { privateKeyToAccount } from 'viem/accounts'
-import { signHash, addressFromKey, verifySignature } from './signer.js'
+import { signHash, signUserOpTypedDataForDelegation, addressFromKey, verifySignature } from './signer.js'
 import { verifyPaymentReceipt, type PaymentReceipt, type ReceiptVerification } from './receipt.js'
 import type {
   HavenClientConfig,
@@ -94,6 +94,7 @@ const CHAIN_EXPLORER_TX: Record<number, string> = {
 // BASE_TOKENS). Add a chain here to make its USDC sweepable.
 const CHAIN_USDC: Record<number, string> = {
   8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  84532: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
 }
 
 function buildExplorerUrl(chainId: number | undefined, txHash: string): string {
@@ -527,6 +528,17 @@ export class HavenClient {
     if (!raw.sign_data?.hash) {
       throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
     }
+    // #946: a delegation-rail funding intent signs the ACCOUNT's EIP-712 typed
+    // data — the keyless/hosted flow's edge signer only raw-ECDSA-signs a
+    // payload hash, which the account would reject at the bundler AFTER the
+    // intent is claimed. Fail loudly here instead of confusingly there.
+    if (raw.sign_data.signature_scheme !== undefined) {
+      throw new HavenSigningError(
+        `This account's x402 funding intent requires signature scheme '${raw.sign_data.signature_scheme}', ` +
+          'which the hosted/keyless signer flow does not support yet. Use the local SDK flow ' +
+          '(HavenClient with delegateKey) for delegation-rail x402 payments.',
+      )
+    }
     if (!raw.x402_expected_auth) {
       throw new HavenApiError('No x402 expected-context binding returned from x402/authorize', 500, raw)
     }
@@ -571,6 +583,47 @@ export class HavenClient {
     }
 
     return signature
+  }
+
+  /**
+   * Sign a payment's `sign_data` with the correct scheme for its rail.
+   *
+   * Dispatching on the server-provided scheme means a caller never has to
+   * know which rail an account is on; an unknown scheme is a hard error,
+   * never a guessed signature. The session rail's 'eip191_userop' is retired
+   * (#834) — the backend refuses those intents with HTTP 410 before any
+   * sign_data reaches a client, so encountering it here is a hard error too.
+   */
+  private async signForData(signData: {
+    hash: string
+    signature_scheme?: string
+    typed_data?: unknown
+  }): Promise<string> {
+    if (!this.delegateKey) {
+      throw new HavenSigningError(
+        'Cannot sign without a delegateKey. Pass the private key in HavenClient config, or sign externally.',
+      )
+    }
+    const scheme = signData.signature_scheme
+    if (scheme === 'eip191_userop') {
+      throw new HavenSigningError(
+        "The session rail is retired — 'eip191_userop' intents can no longer be signed. Re-onboard the account on the delegation rail.",
+      )
+    }
+    if (scheme === 'eip712_userop') {
+      if (!signData.typed_data) {
+        throw new HavenSigningError(
+          'sign_data.signature_scheme is eip712_userop but typed_data is missing — refusing to sign the bare hash (the account would reject it).',
+        )
+      }
+      return signUserOpTypedDataForDelegation(this.delegateKey, signData.typed_data as never)
+    }
+    if (scheme === undefined) {
+      return signHash(this.delegateKey, signData.hash) // legacy AllowanceModule rail
+    }
+    throw new HavenSigningError(
+      `Unknown sign_data.signature_scheme '${scheme}' — refusing to guess a signing scheme. Update @haven_ai/sdk.`,
+    )
   }
 
   /**
@@ -720,10 +773,14 @@ export class HavenClient {
     // ── 2. Sweep native ETH ─────────────────────────────────────────
     const ethBalance = await provider.getBalance(delegateAddress)
     if (ethBalance > 0n) {
-      // Reserve gas for the native transfer itself.
-      const gasPrice = (await provider.getFeeData()).gasPrice ?? 1_000_000n
+      // Reserve gas for the native transfer. An EIP-1559 (type-2) tx is billed up
+      // to maxFeePerGas, not gasPrice, so reserve against that — with a buffer for
+      // base-fee drift between estimation and inclusion — or the send reverts with
+      // "insufficient funds for intrinsic transaction cost".
+      const fee = await provider.getFeeData()
+      const effectiveGasPrice = fee.maxFeePerGas ?? fee.gasPrice ?? 1_000_000n
       const gasLimit = 21_000n
-      const gasCost = gasPrice * gasLimit
+      const gasCost = effectiveGasPrice * gasLimit * 2n
       const ethToSend = ethBalance > gasCost ? ethBalance - gasCost : 0n
       if (ethToSend > 0n) {
         const tx = await wallet.sendTransaction({ to: safeAddress, value: ethToSend })
@@ -1056,7 +1113,7 @@ export class HavenClient {
     if (!raw.sign_data?.hash) {
       throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
     }
-    const sig = signHash(this.delegateKey!, raw.sign_data.hash)
+    const sig = await this.signForData(raw.sign_data)
 
     // 4. Submit signature (reuse existing payments/:id/sign endpoint)
     const execResult = await this.post<RawSignResponse>(
@@ -1518,7 +1575,46 @@ export class HavenClient {
       protocolReceiptHeader: retryResponse.headers.get('PAYMENT-RESPONSE') ?? undefined,
     })
 
+    await this.reportMerchantReceipt(receipt.paymentId, retryResponse)
+
     return retryResponse
+  }
+
+  /**
+   * #956: capture the merchant's OWN receipt when the paid response carries
+   * one, and report it to Haven so the reporting feed can attach it next to
+   * the Haven-generated payment evidence (#498). Two supported signals on the
+   * paid response:
+   *
+   *   x-receipt-json: base64-encoded JSON receipt document (inline)
+   *   x-receipt-url:  https URL to the receipt document (reference)
+   *
+   * Strictly best-effort: absence is the normal case, and no failure here may
+   * ever affect the completed payment — the response is already paid for.
+   */
+  private async reportMerchantReceipt(paymentId: string, response: Response): Promise<void> {
+    try {
+      const inlineB64 = response.headers.get('x-receipt-json')
+      const url = response.headers.get('x-receipt-url')
+      if (!inlineB64 && !url) return
+
+      let body: Record<string, unknown> | null = null
+      if (inlineB64) {
+        // Mirror the backend's 64KB decoded cap exactly (base64 inflates 4/3)
+        // — don't ship what the server will reject.
+        if (inlineB64.length > Math.ceil((64 * 1024 * 4) / 3)) return
+        const decoded = JSON.parse(Buffer.from(inlineB64, 'base64').toString('utf8')) as unknown
+        if (decoded && typeof decoded === 'object') body = { json: decoded }
+      } else if (url && url.startsWith('https://') && url.length <= 2048) {
+        body = { url }
+      }
+      if (!body) return
+
+      await this.post(`/machine-payments/${paymentId}/merchant-receipt`, body)
+    } catch {
+      // Best-effort by contract — a malformed header or a capture-endpoint
+      // hiccup never surfaces to the caller of a successful payment.
+    }
   }
 
   /**
@@ -1621,6 +1717,9 @@ export class HavenClient {
         protocolReceiptHeaderName: protocolReceiptHeader ? 'PAYMENT-RESPONSE' : undefined,
         protocolReceiptHeader,
       })
+      // #956: the hosted-MCP completion path is a successful paid retry too —
+      // capture the merchant's receipt exactly like the local flow does.
+      await this.reportMerchantReceipt(evidenceContext.paymentId, surfaced)
     }
 
     return {
@@ -1756,7 +1855,7 @@ export class HavenClient {
       throw new HavenApiError('No sign_hash returned from machine payment authorization', 500, raw)
     }
 
-    const sig = signHash(this.delegateKey!, raw.sign_data.hash)
+    const sig = await this.signForData(raw.sign_data)
     const execResult = await this.post<RawSignResponse>(
       `/payments/${raw.payment_id}/sign`,
       { signature: sig },
@@ -1892,6 +1991,10 @@ export class HavenClient {
         retryResponse.headers.get('MACHINE-PAYMENT-RESPONSE') ??
         undefined,
     })
+
+    // #956: a successful machine-payment retry can carry a merchant receipt
+    // too — same capture contract as the x402 paths.
+    await this.reportMerchantReceipt(receipt.paymentId, retryResponse)
 
     return retryResponse
   }
@@ -3000,10 +3103,26 @@ export class HavenClient {
       const data = await res.json()
 
       if (!res.ok) {
+        const record = data as Record<string, unknown>
+        const errorText = typeof record.error === 'string' ? record.error : undefined
+        // agentAuth's structured refusals (#1130: agent_pending_approval,
+        // agent_paused) carry their guidance as `detail` (singular) — without
+        // this fallback the operator sees a bare error code and none of the
+        // actionable text.
+        const rawDetails = record.details ?? record.detail
+        const detailsText =
+          typeof rawDetails === 'string'
+            ? rawDetails
+            : rawDetails != null
+              ? JSON.stringify(rawDetails)
+              : undefined
+        // Surface the backend's `details` alongside the generic `error` —
+        // otherwise messages like "On-chain execution failed" mask the actual
+        // revert reason (#684). The full body is still attached for callers.
         const message =
-          (data as Record<string, unknown>).error as string
-          ?? (data as Record<string, unknown>).details as string
-          ?? `API request failed`
+          errorText && detailsText
+            ? `${errorText}: ${detailsText}`
+            : errorText ?? detailsText ?? `API request failed`
         throw new HavenApiError(message, res.status, data)
       }
 

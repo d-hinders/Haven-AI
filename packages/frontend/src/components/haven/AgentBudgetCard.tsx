@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react'
 import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Trash2 } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 export type AgentBudgetRow = {
   id?: string
@@ -47,11 +50,7 @@ export function AgentBudgetCard({
 
       <div className={`${compact ? 'mt-2 space-y-1.5' : 'mt-4 space-y-2'}`}>
         {isEmpty ? (
-          <div
-            className={`flex items-center justify-center rounded-lg border border-dashed border-[var(--v2-border)] bg-[var(--v2-surface)] ${compact ? 'px-3 py-2 text-xs' : 'px-3 py-3 text-sm'} text-[var(--v2-ink-3)]`}
-          >
-            {emptyLabel}
-          </div>
+          <EmptyState size="inline" title={emptyLabel} />
         ) : (
           budgets.map((row) => (
             <div
@@ -69,12 +68,7 @@ export function AgentBudgetCard({
                     aria-label={`Remove ${row.tokenSymbol} budget`}
                     className="rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
                   >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6l-1 14H6L5 6" />
-                      <path d="M10 11v6M14 11v6" />
-                      <path d="M9 6V4h6v2" />
-                    </svg>
+                    <Icon icon={Trash2} className="h-[13px] w-[13px]" />
                   </button>
                 )}
               </div>

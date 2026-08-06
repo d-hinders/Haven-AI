@@ -1,3 +1,25 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - docs/product/README.md
+  - docs/regulatory/casp-risk-guardrails.md
+  - packages/frontend/src/app/page.tsx
+  - packages/frontend/src/app/how-it-works/**
+  - packages/frontend/src/app/protocols/**
+  - packages/frontend/src/app/onboarding/**
+  - packages/frontend/src/components/ConnectAgent2Modal.tsx
+  - packages/frontend/src/components/UsingYourAgentInfo.tsx
+  - packages/frontend/src/components/haven/HostedConnectCard.tsx
+  - packages/frontend/src/lib/agent-credential.ts
+  - packages/frontend/src/lib/agent-handoff.ts
+  - packages/frontend/src/lib/chains.ts
+  - packages/frontend/src/lib/hosted-connect.ts
+  - packages/frontend/src/lib/passkey.ts
+  - packages/frontend/src/lib/signer.ts
+last-verified: "2026-08-05"
+---
+
 # Haven UX Copy Guidelines
 
 Haven’s UX copy should make agentic stablecoin payments feel simple, safe, and approachable. The product is built on advanced crypto infrastructure, but the user-facing language should focus on what the user is doing, what they control, and what happens next.
@@ -8,7 +30,12 @@ Write for users first, not for the protocol.
 
 Avoid exposing implementation details unless they are necessary for trust, transparency, or advanced users. Haven can use Safe, passkeys, smart accounts, modules, spending policies, and relayers under the hood, but most onboarding and product copy should describe the user-facing outcome.
 
-For payment execution, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP, merchant, fiat/card, swap, yield, or advice copy, also apply `docs/regulatory/casp-risk-guardrails.md`. Product copy must not imply that Haven holds funds, controls keys, transfers money on the user's behalf, manages a portfolio, acts as a payment processor, or gives agents unrestricted wallet access.
+For payment execution, agent authority, Safe setup, relaying, SDK payment APIs,
+x402/MPP, merchant, fiat/card, swap, yield, treasury, reporting/accounting, tax,
+or advice copy, also apply `docs/regulatory/casp-risk-guardrails.md`. Product
+copy must not imply that Haven holds funds, controls keys, transfers money on
+the user's behalf, manages a portfolio, makes accounting or tax judgments, acts
+as a payment processor, or gives agents unrestricted wallet access.
 
 Good:
 - “Your Haven account is ready”
@@ -28,7 +55,16 @@ Avoid:
 - “Haven holds your funds”
 - “Haven manages your wallet”
 - “Haven transfers money for you”
+- “Haven executes payments on your behalf”
 - “Haven is your payment processor”
+- “Haven gave you the private key”
+- “Haven signs and settles the payment”
+- “Haven signs from your account”
+- “Haven signed the transfer”
+
+Say who actually authorizes the action: a user-held or agent-held key signs,
+while Haven may validate and relay the signed request. An API key identifies the
+agent but cannot authorize a payment by itself.
 
 ## Tone
 
@@ -62,12 +98,12 @@ Avoid leading with:
 
 Safe can be shown later in account details, transaction details, advanced settings, or developer-facing documentation.
 
-### Use “Haven wallet” when referring to where funds are held
+### Use “Haven wallet” for where the user's treasury funds are held
 
 Prefer:
 - “Create your Haven wallet”
 - “Add funds to your Haven wallet”
-- “This is where you hold the funds your agents can spend”
+- “This is where you hold the funds available to your agent rules”
 
 Avoid:
 - “Deploy your Safe”
@@ -91,13 +127,15 @@ The user does not need to understand ownership architecture during onboarding.
 
 ### Use “passkey” but anchor it in familiar actions
 
-It is okay to mention passkeys, but connect them to Face ID / Touch ID and the user benefit.
+It is okay to mention passkeys. Say “passkey” first, then connect it to familiar
+examples such as Face ID, Touch ID, Windows Hello, or a device PIN.
 
 Preferred:
-- “Use Face ID / Touch ID”
+- “Use a passkey”
+- “Approve with Face ID, Touch ID, Windows Hello, or your device PIN”
 - “Create a secure passkey to approve actions in your Haven account”
 - “Fastest option. Creates a secure passkey.”
-- “Continue with Face ID / Touch ID”
+- “Continue with a passkey”
 
 Avoid:
 - “Create a passkey for this browser”
@@ -105,7 +143,10 @@ Avoid:
 - “Passkey-backed signer”
 - “WebAuthn credential”
 
-Do not over-explain device/browser limitations unless necessary. Most users will use synced passkeys through Apple Passwords or Google Password Manager, so avoid copy that implies the passkey only works on one device.
+Do not promise that a passkey is either synced across devices or restricted to
+one device. Haven currently relies on local browser enrollment metadata before
+offering passkey approval. When approval is unavailable, state which enrolled
+device or browser the user should return to and give a concrete recovery action.
 
 ### Use “agent rules” or “agent budgets” instead of “spending policies”
 
@@ -113,7 +154,7 @@ Preferred:
 - “Set agent rules”
 - “Create agent budgets”
 - “Choose how much an agent can spend, who it can pay, and what it can pay for”
-- “It can now make payments within the rules you set”
+- “Payment requests made through Haven are checked against the rules you set”
 
 Avoid:
 - “Spending policies”
@@ -123,19 +164,55 @@ Avoid:
 
 “Spending policies” can be used in more advanced contexts, but onboarding and landing pages should prefer “rules” or “budgets”.
 
-### Use “credential” carefully
+### Call the reporting attachment a "payment evidence document", not a "receipt"
 
-“Credential” is acceptable when describing what is given to an agent, but avoid making it sound overly technical.
+The document the reporting feed attaches (#498) is generated by Haven from
+settlement evidence — it is NOT the merchant's own receipt. Those rarely exist
+for agent payments today; when they do, #956 (shipped) attaches the merchant's
+own receipt as a **second, separately labelled** document, so the two must never
+share a name. Partner feedback (2026-07-16) showed that plain "receipt"/"kvitto"
+reads as the merchant's document and overpromises.
 
 Preferred:
-- “Add your Haven credential to Claude, GPT, or your own agent”
+- "Payment evidence document" / "betalningsbevis"
+- "A verifiable record of the payment, generated by Haven"
+- "Underlag" when the audience is Swedish accounting (with the Haven-generated
+  framing nearby)
+
+Avoid:
+- Bare "receipt" / "kvitto" where it can be read as the merchant's document
+- Implying the merchant issued the attachment
+
+### Separate authentication from payment signing
+
+“Haven credential” or “Haven setup” may describe the complete agent handoff, but
+do not present it as one secret with payment authority. The setup can contain
+two distinct credentials:
+
+- The API key identifies the agent to Haven. It cannot authorize a payment by
+  itself.
+- The private signing key authorizes payments locally and stays with the user or
+  agent runtime. Haven's backend must never receive it.
+
+Preferred:
 - “Connect your agent”
-- “Your agent can now make payments within your rules”
+- “Add your Haven setup to Claude Code, Codex, or your own agent”
+- “The API key identifies your agent but cannot spend by itself”
+- “The private signing key stays with your agent runtime”
+- “Haven checks the agent's payment requests against your rules”
 
 Avoid:
 - “Generate credentials”
 - “Hand the credential to your agent”
 - “Drop the credential into your agent”
+- “The API key can make payments”
+- “The Haven credential signs payments”
+- “Haven generated/gave you the private key”
+
+In advanced setup, recovery, and x402 copy, disclose that the private signing key
+controls any funds already held in the agent wallet. Pausing or revoking Safe
+funding does not recover that balance; present sweep or recovery as a separate
+action where relevant.
 
 ## Copy examples
 
@@ -144,14 +221,14 @@ Avoid:
 Preferred:
 
 ```text
-Choose your network and sign-in method
+Choose your network and approval method
 
 Select where to create your account, then choose how you want to approve actions.
 
 Network
 Base
 
-Use Face ID / Touch ID
+Use a passkey
 Fastest option. Creates a secure passkey.
 
 Connect a wallet instead
@@ -168,7 +245,7 @@ Choose a network, then pick how you want to access your account.
 Network
 Base
 
-Use Face ID / Touch ID
+Use a passkey
 Fastest option. Creates a secure passkey.
 
 Connect a wallet instead
@@ -180,11 +257,11 @@ Use an existing crypto wallet.
 Preferred:
 
 ```text
-Use Face ID or Touch ID
+Use a passkey
 
 Create a secure passkey to approve actions in your Haven account.
 
-Continue with Face ID / Touch ID
+Continue with a passkey
 ```
 
 Avoid:
@@ -198,9 +275,9 @@ Create a passkey for this browser, enroll it with Haven, and deploy a Safe that 
 Preferred:
 
 ```text
-Your Haven account is ready
+You're in
 
-Your account is live on Base. You can now add funds, create agent budgets, and start making payments.
+Your Haven account is live on Base. Add funds, set agent budgets, and you're ready to pay.
 
 Account address
 0x...
@@ -224,22 +301,22 @@ Your non-custodial smart account is live on Base.
 Preferred step labels:
 
 ```text
-Creating passkey
-Preparing your account
-Creating your Haven wallet
-Finishing setup
+Creating your passkey
+Saving it to your account
+Bringing your account online
+Tying it to Haven
 ```
 
 Preferred helper text:
 
 ```text
-Approve the prompt to create your secure passkey.
+Approve your device's passkey prompt.
 
-Saving your sign-in method to your Haven account.
+Saving your approval method to your Haven account.
 
-Creating your Haven wallet.
+Creating your on-chain Haven account.
 
-Linking your wallet to your Haven account.
+Linking your on-chain account to your Haven profile.
 ```
 
 Avoid:
@@ -261,19 +338,19 @@ Preferred:
 Sign up with your email. No credit card and no setup call needed.
 
 02 — Choose how you sign in
-Use Face ID / Touch ID or connect your wallet. Either way, you stay in control of your account.
+Use a passkey or connect your wallet. Either way, you stay in control of your account.
 
 03 — Set up your Haven wallet
-We create your Haven wallet in the background. This is where you hold the funds your agents can spend.
+We create your Haven wallet in the background. This is where you hold your main funds and set what agents can request.
 
 04 — Add funds
-Add USDC, EURe, or another supported token to start making payments.
+Add a supported token such as USDC on your selected network to start making payments.
 
 05 — Set agent rules
 Choose how much an agent can spend, who it can pay, and what it can pay for.
 
 06 — Connect your agent
-Add your Haven credential to Claude, GPT, or your own agent. It can now make payments within the rules you set.
+Add your Haven setup to Claude Code, Codex, or your own agent. Haven checks its payment requests against the rules you set.
 ```
 
 ## Technical term mapping
@@ -296,9 +373,23 @@ Use this mapping when replacing technical language with product-facing language.
 | Deploy | Create / set up |
 | Spending policy | Agent rule / agent budget |
 | Allowance module | Rules / budget controls |
-| Session key | Agent credential / Haven credential |
-| Transaction hash | Setup transaction |
-| Wallet address / Safe address | Account address |
+| API key | Agent identity / API key; never payment authority |
+| Delegate private key / session key | Private signing key (advanced setup and recovery copy) |
+| Complete credential bundle | Haven setup / Haven credential |
+| Transaction hash during onboarding | Setup transaction |
+| Transaction hash in advanced or transaction detail | Transaction ID / explorer link |
+| Safe address in primary account UI | Account address / Haven wallet address |
+| Agent delegate address | Agent wallet address (advanced and recovery copy) |
+| Connected or recipient wallet address | Wallet address when the control or destination distinction matters |
+
+## Enforcement
+
+These guidelines are enforced on frontend copy, not just documented. `npm run lint:copy` (`scripts/frontend-copy-lint.mjs`) scans user-facing source (`packages/frontend/src/app/**` + `components/**`) for the unambiguous **multi-word** banned phrases drawn from this guide and **fails the PR on any new occurrence** (#902). It is deliberately conservative — only multi-word phrases, never bare words like "safe"/"owner"/"deploy" — so false positives stay near zero. Its `BANNED` list is a superset of the mapping table (it also covers e.g. "policy engine", "smart contract wallet", "webauthn credential"), and it does **not** reach `packages/backend/**` or the i18n catalogs under `src/lib/i18n/messages/**` — rules about strings that live there are documentation-only.
+
+- **Ratcheting baseline.** Existing debt is captured in `packages/frontend/copy-lint-baseline.json` (file → phrase → count); counts may only **shrink**. A new banned term, or growth of an existing count, fails. After cleaning some up, run `npm run lint:copy:update` to tighten the ratchet. Do the same — with reviewer sign-off — for a genuinely intentional addition.
+- **Escape hatch.** For a legitimate advanced/developer-facing surface where the technical term is correct, add `// copy-lint-ignore` on the offending line (or the line directly above). Use it sparingly; it is for developer surfaces, not a way around writing good user copy.
+- Docs under `docs/product` are separately checked by the Vale `Haven.Terminology` rule (`.vale.ini`). Vale is **advisory** — `level: suggestion`, and the docs workflow runs it `continue-on-error` — so it nudges, it does not block.
+- Where the lint and this guide disagree, **this guide wins**. Known divergence: the lint rewrites "session key(s)" to "agent credential(s)", which pulls copy toward the very framing "Separate authentication from payment signing" warns against; the correct replacement is "private signing key" per the mapping table.
 
 ## Writing rules
 
@@ -308,10 +399,30 @@ Use this mapping when replacing technical language with product-facing language.
 4. Explain control and safety in plain language.
 5. Avoid crypto jargon in onboarding unless it is necessary.
 6. Use “Haven account” and “Haven wallet” consistently.
-7. Mention passkeys, but connect them to Face ID / Touch ID.
+7. Mention passkeys first, then use the user's biometric or device PIN as a familiar example.
 8. Use “rules” and “budgets” for agent spending controls.
 9. Keep advanced details available, but not central.
 10. Prefer confidence over over-explanation.
+
+## Money and authority copy
+
+For payments, budgets, approvals, revocation, recovery, and sweeps, make the
+relevant facts explicit:
+
+- Who or which agent is acting.
+- Which Haven wallet and network are involved.
+- The amount and asset.
+- The recipient, merchant, or allowed scope.
+- Which rule applies and whether user approval is required.
+- What has already happened and what happens next.
+- How the user can reject, pause, revoke, stop, recover, or sweep funds.
+
+Do not imply that every agent payment requires user approval. Distinguish
+automatic requests within the Haven flow from actions that are waiting for the
+user. Likewise, do not say an agent “can only pay within your limits” without
+scoping the claim: Safe-originated funding is constrained by the user's
+on-chain rules, while a private signing key can separately control funds already
+held in the agent wallet.
 
 ## Product positioning in copy
 
@@ -322,21 +433,46 @@ Haven should communicate three things consistently:
 Examples:
 - “You approve actions.”
 - “You set the rules.”
-- “Your agent can only pay within your limits.”
+- “Haven checks agent payment requests against your rules.”
 
-### 2. Agents can pay, but only with limits
+### 2. Agent payments follow explicit rules
 
 Examples:
-- “Set how much an agent can spend.”
+- “Set an agent budget.”
 - “Choose who it can pay.”
-- “Payments stay within the rules you set.”
+- “Safe funding stays within the on-chain rules you set.”
 
 ### 3. Setup should feel simple
 
 Examples:
-- “No wallet extension needed.”
+- “Use a passkey — no wallet extension needed.”
 - “Create a secure passkey.”
 - “Your account is ready.”
 - “Add funds and start making payments.”
 
 The overall copy should make Haven feel like a safe, modern, agent-native finance product, not a crypto wallet setup flow.
+
+## Known implementation copy gaps
+
+The following shipped strings do not meet this guide and are not approved
+precedents:
+
+- The homepage, `UsingYourAgentInfo.tsx`, and the protocol marketing pages use
+  absolute rules/credential claims or say or imply that Haven gives users a
+  private key or signs and settles payments. The homepage also says that if a
+  credential leaks "your funds stay exactly where they were", which contradicts
+  the disclosure required above: a leaked private signing key controls funds
+  already held in the agent wallet, and rotation does not recover them.
+- `PasskeyEnrollFlow.tsx` says the passkey private key is usable only on the
+  current device, which overstates what WebAuthn guarantees.
+- The homepage and the How it works page advertise EURe and Gnosis Chain even
+  though current account creation offers Base and Base Sepolia, where USDC is
+  the payment-token example.
+- The "payment evidence document" rule above is not yet reflected in shipped
+  strings: the generated underlag PDF is titled "HAVEN PAYMENT RECEIPT", the
+  approval and send surfaces label it "Payment receipt", and "betalningsbevis"
+  appears nowhere in the Swedish catalog. The rule is also unenforced — most of
+  the drift sits in `packages/backend/**` and the i18n catalogs, which the copy
+  lint does not scan.
+
+Correct these in product-copy changes; do not weaken this guide to match them.

@@ -1,5 +1,7 @@
 'use client'
 
+import { LoaderCircle, X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -143,10 +145,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
             aria-label="Close"
             className="-mr-1 rounded-md p-1.5 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <Icon icon={X} className="h-4 w-4" />
           </button>
         </div>
 
@@ -183,10 +182,8 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
                   >
                     {rotating ? (
                       <span className="flex items-center gap-1.5">
-                        <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a10 10 0 100 10z" />
-                        </svg>
+                        {/* Heavier stroke: matches the original spinner's ring weight. */}
+                        <Icon icon={LoaderCircle} className="animate-spin h-3.5 w-3.5" strokeWidth={3} />
                         Rotating…
                       </span>
                     ) : (

@@ -26,15 +26,34 @@ export interface ReportingTransaction {
   fxAt: string | null
   /** The underlag to attach (verifiable receipt / evidence). */
   receiptRef: string
+  /** The merchant's own receipt when captured (#956) — attached as a second file. */
+  merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
   /** A *suggestion* only (the user's per-merchant override) — never an asserted account. */
   suggestedAccount?: string | null
+}
+
+/**
+ * Normalize a pg timestamptz passthrough (Date at runtime despite the string
+ * type) to ISO. Tolerant: an unparseable value passes through as-is — fxAt is
+ * provenance metadata and must never be able to crash the feed.
+ */
+function toIso(value: string | null): string | null {
+  if (value == null) return null
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? String(value) : d.toISOString()
 }
 
 /** Reduce a canonical entry to the non-asserting feed shape. */
 export function toReportingTransaction(entry: AccountingEntry): ReportingTransaction {
   return {
     paymentId: entry.paymentId,
-    settledAt: entry.settledAt,
+    // The type says ISO string, but the entry builder hands through pg's
+    // timestamptz values, which arrive as Date objects at runtime — found
+    // live on the first real feed (tx.settledAt.slice is not a function).
+    // Normalize at this boundary so every connector downstream gets the
+    // contract the type promises. fxAt is the same passthrough (mpe.fx_at,
+    // rendered on the #498 receipt underlag) — same normalization.
+    settledAt: new Date(entry.settledAt).toISOString(),
     direction: entry.direction,
     counterparty: { address: entry.counterparty.address, name: entry.counterparty.name },
     resourceUrl: entry.resourceUrl,
@@ -43,8 +62,9 @@ export function toReportingTransaction(entry: AccountingEntry): ReportingTransac
     amountSek: entry.amountSek,
     fxRate: entry.fxRate,
     fxSource: entry.fxSource,
-    fxAt: entry.fxAt,
+    fxAt: toIso(entry.fxAt),
     receiptRef: entry.receiptRef,
+    merchantReceipt: entry.merchantReceipt ?? null,
     suggestedAccount: entry.account ?? null,
   }
 }

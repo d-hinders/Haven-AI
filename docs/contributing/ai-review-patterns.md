@@ -1,8 +1,25 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .agents/skills/haven-agent-workflow/references/reviewer.md
+  - docs/contributing/ai-agent-workflow.md
+  - packages/frontend/src/lib/allowance-format.ts
+  - packages/frontend/src/lib/__tests__/allowance-format.test.ts
+  - packages/frontend/src/lib/signer.ts
+  - packages/frontend/src/hooks/useSafeOperationGate.ts
+  - packages/frontend/src/app/globals.css
+  - packages/frontend/src/components/OnchainActionGate.tsx
+  - packages/frontend/src/components/NetworkGate.tsx
+  - packages/frontend/src/components/EditAgentModal.tsx
+last-verified: "2026-07-12"
+---
+
 # AI Review Patterns
 
 Use this as shared memory for PR review feedback that was worth fixing. Keep it pattern-based, not PR-based, so future agents can apply it to new surfaces.
 
-The patterns below are also the items checked by the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` and the **Recurring traps** must-check list in `.claude/agents/haven-reviewer.md`. The three lists should stay in sync.
+The patterns below are also the items checked by the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` and the **Recurring traps** must-check list in the canonical reviewer role. The three lists should stay in sync.
 
 ## Data Semantics
 
@@ -21,6 +38,8 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - Avoid optional hook or function arguments when missing values make the old call compile but fail at runtime. Make required context required in TypeScript.
 - Audit all callers after changing hook signatures, response fields, status values, or API payloads.
 - Async hooks that fetch keyed data must ignore late responses from older keys. Use a generation guard or abort signal when address, chain, agent id, filters, or enabled state can change while a request is in flight.
+- Add a staggered-resolution regression test for the smallest risky key change;
+  an older request resolving last must not overwrite current state.
 - Prefer explicit response fields over matching on free-text reason strings. If a free-text fallback is necessary, document it as temporary.
 - When SDK or API behavior changes, review generated examples, credential handoff files, demo scripts, and skill bundles for stale instructions.
 - When renaming technical fields to product-facing names, keep compatibility aliases when external users or generated artifacts may already depend on the old env var or field.
@@ -47,6 +66,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 ## Shared UI And Cross-Surface Consistency
 
 - If the same movement, transaction row, status badge, contact row, or money summary appears in multiple places, prefer one shared component or utility.
+- **Pattern absorption (2nd occurrence, not the 12th).** When a diff writes the same markup shape a *second* time — a header band, badge, row, empty-state, inline `<svg>`, address slice — or re-creates something a `ui/`/`haven/` primitive already covers, extract it into a primitive and add a `/design-system` entry in that same PR. Catching the second occurrence is what prevents the debt clusters #859 cleaned retroactively; the new primitive trips the design-system coupling gate (#898) by design. Flag a diff that duplicates a shape instead of absorbing it — unless the author states the two uses will genuinely diverge.
 - Keep dashboard, account detail, agent detail, transaction history, approvals, and design-system examples aligned after changing shared presentation.
 - If a temporary frontend shim or preview backfill is added, label it clearly and avoid letting it redefine backend-owned totals or durable semantics.
 
@@ -63,6 +83,8 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - Separate the sign before formatting bigint magnitudes. BigInt `%` preserves sign, so a naive `${quotient}.${remainder}` on a negative input renders as `"-5.-5"`. Format magnitude, then re-attach the sign.
 - Reject scientific-notation strings explicitly. `Number("1e20").toFixed(4)` silently loses precision near `MAX_SAFE_INTEGER`; pass the original through unchanged so the upstream problem stays visible instead of producing a wrong-looking number.
 - A single shared formatter must own both the raw-bigint and already-decimal input paths. Callers should not be able to reintroduce the bug by passing the "other" shape. See `packages/frontend/src/lib/allowance-format.ts` as the canonical example.
+- Formatter tests must cover negative inputs, zero, scientific notation, and
+  both raw-bigint and already-decimal input shapes.
 
 ## Counter And Summary Buckets
 
@@ -96,12 +118,20 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 
 ## Inline Gate Placement
 
-- `OnchainActionGate` and `NetworkGate` notices render **above** the action row, not inside the `flex-1` wrapper that holds the action button. Nesting the notice inside `flex-1` pushes the primary action out of line with its siblings when the gate triggers.
-- Standard pattern: `<OnchainActionNotice />` above the Cancel/Confirm row, with `showNotice={false}` on the gate so it does not double-render. Match the layout used in `SendModal` and `ApprovalQueue`.
+- When using a separate `<OnchainActionNotice />`, render it **above** the action
+  row and set `showNotice={false}` on `OnchainActionGate` so the gate does not
+  double-render it. Do not put the notice inside the `flex-1` action wrapper;
+  `EditAgentModal` is the canonical hoisted-notice pattern.
+- `NetworkGate` is intentionally different: its mismatch hint and replacement
+  network action render in place around the gated action. Do not force that
+  replacement UI into the separate-notice pattern.
 
 ## Multi-Entrypoint Parity
 
-- Payment, x402/MPP, MCP, SDK, and demo flows often expose the same capability through multiple entrypoints. A fix in one path is incomplete until header, tool-argument, SDK-helper, direct API, and demo paths share the same validated state or have explicit parity tests.
+- Payment, x402/MPP, MCP, SDK, hosted/local signing, and demo flows often expose
+  the same capability through multiple entrypoints. A fix in one path is
+  incomplete until header, tool-argument, SDK-helper, signing, direct API, and
+  demo paths share the same validated state or have explicit parity tests.
 - Do not verify payment or authority in one layer and then make a downstream handler rediscover it from a different payload shape. Pass the verified payment state through the request context or a shared helper.
 - When adding an entrypoint, test the smallest cross-path case that would fail if one path still read stale arguments, stale headers, or a different status field.
 
@@ -128,6 +158,12 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - If browser verification is skipped for UI, routing, modal, animation, or setup-flow work, the PR must name why and include a headless equivalent for the skipped risk.
 - The headless equivalent should match the risk: class stability for animation, shared formatter output for cross-surface display, gated rendering for loading flashes, and render/state tests for empty or populated setup states.
 - Do not use "browser skipped" as a blanket waiver for visual or interaction risk on primary money movement or agent authority flows.
+
+## Green-Gate Evidence
+
+- A gate that reports on a file list can report success on an **empty** list, and that reads identically to a clean pass. Before recording a check as green in the PR body, confirm the run actually saw the candidate diff.
+- Flag a PR whose Local Checks quote a gate's success message when the gate's default range could not have included the change — a committed-only range run before the commit, a `paths`-filtered job on a non-matching PR, a check run in the wrong worktree.
+- Run the **CI-equivalent** form, not the convenient one. `node scripts/docs/coupling-gate.mjs` is advisory and always exits 0; `npm run docs:coupling` is what CI runs. A local invocation that cannot fail is not evidence that CI will pass (#1076 → #1077).
 
 ## Test Gaps Worth Catching
 

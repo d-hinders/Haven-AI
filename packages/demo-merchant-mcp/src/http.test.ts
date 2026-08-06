@@ -193,6 +193,15 @@ describe('demo merchant MCP x402 flow', () => {
     expect(text).toContain('Köp bekräftat')
     expect(text).toContain(TX_HASH)
 
+    // #956: the paid response carries the merchant's own receipt machine-
+    // readably, and it is the SAME invoice the confirmation text renders.
+    const receiptHeader = paid.headers.get('x-receipt-json')
+    expect(receiptHeader).toBeTruthy()
+    const receipt = JSON.parse(Buffer.from(receiptHeader!, 'base64').toString('utf8'))
+    expect(receipt.status).toBe('Betald')
+    expect(receipt.blockkedje_referens).toContain(TX_HASH)
+    expect(text).toContain(receipt.fakturanummer)
+
     const duplicate = await postMcp(url, {
       jsonrpc: '2.0',
       id: 5,

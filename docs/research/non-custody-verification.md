@@ -1,3 +1,15 @@
+---
+owner: "@d-hinders"
+status: research
+covers:
+  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/lib/relayer.ts
+  - packages/backend/src/lib/execution-rail.ts
+  - packages/backend/src/lib/__tests__/non-custody.invariants.test.ts
+  - packages/frontend/src/lib/revoke-agent.ts
+last-verified: "2026-07-26"
+---
+
 # Design — make non-custody provable (CI invariants + "verify your control")
 
 > Status: **design proposal.** Forward-looking; no implementation yet. Turns the
@@ -28,10 +40,17 @@ What the codebase shows today:
 
 - **No key storage.** No `private_key` / `seed` / `mnemonic` / `secret_key`
   column exists in any migration. ✅
-- **One server signer, gas-only.** The only `new Wallet(...)` from env in
-  production is the relayer ([`relayer.ts`](../../packages/backend/src/lib/relayer.ts):27);
-  every other `new Wallet` is in tests. The relayer pays gas; it is not a Safe
-  owner or an allowance delegate.
+- **Two server signers, neither able to spend.** The relayer
+  ([`relayer.ts`](../../packages/backend/src/lib/relayer.ts):27) pays gas; it is
+  not a Safe owner or an allowance delegate. Since #974 there is a second:
+  [`lib/passport/receipt.ts`](../../packages/backend/src/lib/passport/receipt.ts)
+  signs L0 passport verification receipts. It is a **message signer only** — no
+  provider, no `sendTransaction`, and a dedicated key
+  (`PASSPORT_RECEIPT_SIGNING_KEY`) that is never the relayer's, because its
+  address is *published* for merchants to pin. Every other `new Wallet` is in
+  tests. The invariant is unchanged in substance — neither signer can move value
+  — but it is now an explicit two-name allow-list rather than a count, so adding
+  a third is a decision someone has to make on purpose.
 - **Agent secret is identity, hashed at rest.** `agents.api_key_hash` +
   `api_key_prefix` exist; a legacy plaintext `agents.api_key` column lingers
   (nullable). Per policy, "API auth is identity, signature is authority" — but
@@ -52,7 +71,7 @@ blocks merge and points at the guardrail it would break.
 |---|---|---|---|
 | 1 | No key/seed storage | Scan all migrations + entity types for `private_key\|seed\|mnemonic\|secret_key` column names → must be empty | Red Line #1/#2; "no private key storage table" |
 | 2 | No plaintext key material at rest | Assert agent secrets are stored hashed; fail if a new column matches a secret-value pattern without `_hash` | Red Line #3 |
-| 3 | Single, gas-only server signer | Static check: the only env-derived `new Wallet(` in `src/` (excluding tests) is the relayer; assert relayer address is never written as a Safe owner or allowance `delegate` in any code path | "no signer capable of spending"; Hard Invariants |
+| 3 | No server signer capable of spending | Static check: the env-derived `new Wallet(` sites in `src/` (excluding tests) are EXACTLY `lib/relayer.ts` and `lib/passport/receipt.ts` — an exhaustive allow-list, so a third is a deliberate decision. Assert the relayer address is never written as a Safe owner or allowance `delegate`, and that the receipt signer stays message-only (no provider, no `sendTransaction`, never the relayer key) | "no signer capable of spending"; Hard Invariants |
 | 4 | Authn ≠ authz on spend paths | Contract test: payment / relay endpoints reject a request that is authenticated (valid bearer) but carries no delegate/owner signature | Red Line #3; "Separate Authentication From Authorisation" |
 | 5 | On-chain is the final gate | Test that an over-allowance payment is queued for approval, never silently settled — i.e. the DB is not the only limit | Red Line #4 |
 | 6 | No discretionary mutation in relay | Test that the relay path does not alter recipient/amount/token/route after signature | "Treat Relaying As Non-Discretionary" |
@@ -67,6 +86,26 @@ recorded, not implicit.
 relying on reviewer memory — exactly the "maintain evidence" the doc asks for,
 and the strongest possible answer to a CASP perimeter question. Zero UX, zero
 fund movement.
+
+### Session-key rail extension (#736, ADR #719 Stage 2)
+
+> **Historical (#834):** the session rail is retired and the modules named
+> below are deleted. Invariants 5–10 live on in their delegation-rail
+> equivalents — see the mapping table in
+> [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
+
+The ERC-4337 rail (Safe7579 + Smart Sessions) kept the same perimeter —
+Haven constructs, the customer signs — and `non-custody.invariants.test.ts`
+pinned the specific mechanisms:
+
+| # | Invariant | Pin |
+|---|---|---|
+| 5 | The Safe "owner" the rail derives accounts from cannot sign | `watchOnlyOwner` in `session-rail.ts` — every owner sign method bound to a loud refusal |
+| 6 | No viem key-derived signer server-side | `privateKeyToAccount` (and mnemonic/HD variants) absent from production `src/` |
+| 7 | Session UserOps carry client signatures only | `submitSessionTransfer` takes the signature as an argument; nothing in the rail produces one |
+| 8 | Session config is owner-signed, never relayer-submitted | `session-policies.ts` / `session-rotation.ts` / `execution-rail.ts` are signer-free and never reference the relayer |
+| 9 | The bundler credential has one auditable choke point | `SESSION_RAIL_BUNDLER_URL` read only in `execution-rail.ts` |
+| 10 | The paymaster sponsors gas, never value | Wired as a sponsorship client only; no token-paymaster surface |
 
 ## Part 2 — "Verify your control" (dashboard)
 

@@ -1,36 +1,32 @@
-# CODEOWNERS — money-path carve-out for the autonomous PR loop (policy A).
+# CODEOWNERS — minimal money-path hard gate.
 #
-# Purpose: with branch protection's "Require review from Code Owners" enabled,
-# ONLY PRs that touch the paths below require a code-owner approval. The loop
-# (/ship-next) will NOT auto-merge those — they wait for a human merge. Every
-# other PR (docs, tests, non-money refactors) can reviewer-gated auto-merge on
-# green CI.
+# Only DB migrations require a code-owner review in GitHub. Migrations are
+# irreversible in production, so they keep an independent second approval (from
+# a collaborator other than the PR author — GitHub's self-approval rule).
 #
-# Owners: every repo collaborator with write access — ANY ONE of them approving
-# satisfies the required review. Keep this in sync with the collaborator list as
-# the team changes. See docs/contributing/autonomous-pr-loop.md.
+# All OTHER money-path changes (x402 / payments / machine-payments /
+# payment-coverage / allowance-module / agentAuth / release tooling) are NOT
+# hard-gated here, and as of #1024 they are not gated in-session either.
 #
-# Keep the path list tight: it is the human-in-the-loop boundary for money
-# movement, auth, and schema.
+# The pause that used to exist applied ONLY to PRs opened through ship-next; a
+# hand-written money-path PR merged on green CI alone. That made the canonical
+# workflow more expensive than bypassing it while protecting nothing on the
+# bypass path — and the "approval" was usually the PR author's own, which is
+# exactly what GitHub disallows for the migrations gate above.
+#
+# What protects the money path now is automatic and tool-independent:
+#   1. this file, for irreversible schema changes;
+#   2. the `qa-freshness` job in .github/workflows/dev-gate.yml, which refuses a
+#      dev -> main promotion without a recent GREEN money-flow QA run on `dev`.
+#
+# Gate 2 is load-bearing. Since #1030 it verifies that the green run actually
+# COVERED the promoted money-path code (not merely that some recent run exists),
+# and it judges `hotfix/* -> main` on that branch's own evidence. It still only
+# bites while listed in `main`'s required status checks, and `qa-override`
+# remains a deliberate, logged bypass. See "Be precise about what gate 2 proves"
+# in docs/contributing/autonomous-pr-loop.md. If it is dropped from the ruleset,
+# restore it or widen the paths below.
+#
+# See docs/contributing/autonomous-pr-loop.md ("Money-path safety model").
 
-# Payment / policy money path
-/packages/backend/src/routes/x402.ts                        @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/routes/x402-resources.ts              @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/routes/payments.ts                    @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/routes/machine-payments.ts            @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/lib/machine-payments.ts               @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/lib/payment-coverage.ts               @d-hinders @AntonioSaaranen @PhilipEriksson
-/packages/backend/src/lib/allowance-module.ts               @d-hinders @AntonioSaaranen @PhilipEriksson
-
-# Auth boundary
-/packages/backend/src/middleware/agentAuth.ts               @d-hinders @AntonioSaaranen @PhilipEriksson
-
-# Database schema — migrations are irreversible in prod
-/packages/backend/src/db/migrations/                        @d-hinders @AntonioSaaranen @PhilipEriksson
-
-# Release tooling — version/dep integrity across published packages
-/scripts/release-bump.mjs                                   @d-hinders @AntonioSaaranen @PhilipEriksson
-/.github/workflows/publish.yml                              @d-hinders @AntonioSaaranen @PhilipEriksson
-
-# This carve-out config itself
-/.github/CODEOWNERS                                         @d-hinders @AntonioSaaranen @PhilipEriksson
+/packages/backend/src/db/migrations/   @d-hinders @AntonioSaaranen @PhilipEriksson

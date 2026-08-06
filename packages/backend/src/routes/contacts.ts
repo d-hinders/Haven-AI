@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { isAddress as isValidAddress } from '../lib/address.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 
 interface Contact {
   id: string

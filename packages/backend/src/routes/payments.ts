@@ -1,10 +1,13 @@
+import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
+import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { AgentPaymentNextAction, AgentPaymentPhase } from '../lib/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   getTokenAllowance,
   getLatestBlockTimeSec,
@@ -14,6 +17,19 @@ import {
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
+import {
+  deserializeUserOp,
+  loadExecutionRailState,
+  redactVendorSecrets,
+  resolveExecutionRail,
+  serializeUserOp,
+  sessionRailRetired,
+  isRetiredRailIntent,
+} from '../lib/execution-rail.js'
+import {
+  prepareDelegationPayment,
+  submitDelegationPayment,
+} from '../lib/delegation-authorization.js'
 import { getAgentPaymentResumeState } from '../lib/agent-payment-status.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../lib/receipt.js'
 import { quoteFee } from '../lib/fee/fee-module.js'
@@ -83,13 +99,19 @@ interface PaymentIntentRow {
   submitted_at: string | null
   confirmed_at: string | null
   expires_at: string
+  /** Execution rail pinned at authorize time; null = legacy AllowanceModule (#745). */
+  execution_rail?: string | null
+  /** Smart Sessions permissionId pinned at authorize time. */
+  session_permission_id?: string | null
+  /** Serialized prepared UserOperation for session-rail intents. */
+  session_user_op?: unknown
+  /** Which delegation authorized a delegation-rail intent (#829). */
+  delegation_hash?: string | null
+  /** Serialized prepared redemption UserOperation for delegation intents. */
+  prepared_user_op?: unknown
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
 
 /** Resolve a token symbol to its config for a specific chain. */
 function resolveToken(chainId: number, symbol: string) {
@@ -110,7 +132,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
   // ── POST / — Create payment intent ──────────────────────
 
-  app.post<{ Body: CreatePaymentBody }>('/', async (request, reply) => {
+  app.post<{ Body: CreatePaymentBody }>('/', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const { token, amount, to } = request.body
 
@@ -150,16 +172,126 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       return reply.code(400).send({ error: 'Amount must be greater than zero' })
     }
 
-    // 4. Policy check: verify agent has this token in their on-chain allowance config
-    const dbAllowance = await pool.query<{ allowance_amount: string }>(
-      `SELECT allowance_amount FROM agent_allowances
-       WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
-      [agent.id, tokenAddress],
-    )
-    if (dbAllowance.rows.length === 0) {
-      return reply.code(403).send({
-        error: `Agent is not configured for ${tokenConfig.symbol} payments`,
+    // 4. Resolve the execution rail first — the token-configuration gate is
+    // rail-specific.
+    //
+    // ── Retired-session gate (#993) — the marking alone decides; see
+    // lib/execution-rail.ts for the seam and the retirement record.
+    const railState = await loadExecutionRailState(agent)
+
+    // Policy check: session/legacy rails carry the per-token policy in
+    // agent_allowances (the AllowanceModule config), so a missing row means the
+    // token is not configured. The DELEGATION rail (#829) keeps NO allowance
+    // row — its authority is the signed budget delegation, checked in the
+    // delegation branch below (which returns its own 403 when no delegation
+    // authorizes this token/recipient). Applying the allowance gate there would
+    // wrongly reject a fully-configured delegation agent, so scope it out.
+    if (railState.safeExecutionRail !== 'delegation') {
+      const dbAllowance = await pool.query<{ allowance_amount: string }>(
+        `SELECT allowance_amount FROM agent_allowances
+         WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
+        [agent.id, tokenAddress],
+      )
+      if (dbAllowance.rows.length === 0) {
+        return reply.code(403).send({
+          error: `Agent is not configured for ${tokenConfig.symbol} payments`,
+        })
+      }
+    }
+
+    // ── Delegation rail (#829, epic #821) ────────────────────────────────
+    // The agent's signed delegation IS the policy: budget (with native
+    // refill), recipient and expiry are enforced ON-CHAIN by audited caveat
+    // enforcers during gas estimation. An out-of-policy payment therefore
+    // fails during prepare — before any state is written and before the
+    // agent is asked for a signature. No coverage arithmetic, no approval
+    // queue, no schedule machinery: the chain rules.
+    if (railState.safeExecutionRail === 'delegation') {
+      if (tokenAddress === ZERO_ADDRESS) {
+        return reply.code(400).send({
+          error: 'Native-token transfers are not supported on the delegation rail',
+        })
+      }
+      let authorization
+      try {
+        authorization = await prepareDelegationPayment(
+          { id: agent.id, chain_id: agent.chain_id, delegate_address: agent.delegate_address },
+          tokenAddress,
+          to.toLowerCase(),
+          amountRaw,
+        )
+      } catch (err) {
+        // Caveat rejection (budget/recipient/expiry) or bundler failure —
+        // both land here, both leave the database untouched.
+        return reply.code(502).send({
+          error: 'Delegation-rail authorization failed (on-chain policy or bundler)',
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+        })
+      }
+      if (!authorization) {
+        return reply.code(403).send({
+          error: `Agent has no active budget delegation for ${tokenConfig.symbol} to this recipient`,
+        })
+      }
+
+      const delegationResult = await pool.query<PaymentIntentRow>(
+        `INSERT INTO payment_intents (
+          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+          to_address, amount_raw, amount_human, delegate_address,
+          allowance_nonce, sign_hash,
+          execution_rail, delegation_hash, budget_delegation_hash, prepared_user_op,
+          status, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+          'pending_signature', NOW() + interval '10 minutes')
+        RETURNING *`,
+        [
+          agent.id, agent.user_id, agent.safe_address, agent.chain_id,
+          tokenConfig.symbol, tokenAddress, to.toLowerCase(),
+          amountRaw.toString(), amount, agent.delegate_address,
+          0, // AllowanceModule-only concept; unused on this rail
+          authorization.prepared.userOpHash,
+          'delegation',
+          authorization.delegationHash,
+          // #1059: direct transfers redeem the budget itself — same value,
+          // written to both so consumers read ONE column across schemes.
+          authorization.delegationHash,
+          serializeUserOp(authorization.prepared.userOperation),
+        ],
+      )
+      const delegationIntent = delegationResult.rows[0]
+
+      return reply.code(201).send({
+        payment_id: delegationIntent.id,
+        status: delegationIntent.status,
+        expires_at: delegationIntent.expires_at,
+        sign_data: {
+          hash: authorization.prepared.userOpHash,
+          signature_scheme: 'eip712_userop',
+          // The account validates THIS typed data (not the bare 4337 hash).
+          typed_data: authorization.prepared.signingTypedData,
+          components: {
+            account: authorization.prepared.delegateAccountAddress,
+            token: tokenAddress,
+            to: to.toLowerCase(),
+            amount: amountRaw.toString(),
+          },
+          instructions:
+            'Sign sign_data.typed_data with your delegate (agent) key using EIP-712 ' +
+            '(signTypedData; @haven_ai/sdk does this automatically). Then POST ' +
+            `/payments/${delegationIntent.id}/sign with { signature } — Haven relays it; ` +
+            'your budget delegation authorizes it on-chain.',
+        },
       })
+    }
+
+    const railDecision = resolveExecutionRail({
+      ...railState,
+      chainId: agent.chain_id,
+    })
+    if (railDecision.rail === 'retired_session') {
+      // #993: retirement decided in the seam, refusal produced there too.
+      const retired = sessionRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
     }
 
     // 5. On-chain allowance check. Read the allowance and chain time together:
@@ -310,6 +442,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
   app.post<{ Params: { id: string }; Body: SignPaymentBody }>(
     '/:id/sign',
+    { config: moneyPathRateLimit },
     async (request, reply) => {
       const agent = request.agent as AgentContext
       const { id } = request.params
@@ -339,6 +472,14 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         })
       }
 
+      // #993: the retired check comes BEFORE the expiry flip — an expired
+      // session intent previously got a status write on a path whose contract
+      // is 410-with-nothing-written (review finding on #1120).
+      if (isRetiredRailIntent(intent.execution_rail)) {
+        const retired = sessionRailRetired('intent')
+        return reply.code(retired.statusCode).send(retired.body)
+      }
+
       // Check expiry
       if (new Date(intent.expires_at) < new Date()) {
         await pool.query(
@@ -350,23 +491,43 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         return reply.code(410).send({ error: 'Payment intent has expired' })
       }
 
-      // 2. Verify signature matches delegate
-      let recoveredAddress: string
-      try {
-        recoveredAddress = recoverSigner(intent.sign_hash, signature)
-      } catch (err) {
-        return reply.code(400).send({
-          error: 'Invalid signature format',
-          details: err instanceof Error ? err.message : String(err),
-        })
-      }
+      // 2. Verify signature matches delegate. Delegation-rail intents sign the
+      // account's EIP-712 typed data; legacy intents sign the AllowanceModule
+      // transfer hash with raw ECDSA. The intent's rail was pinned at
+      // authorize time, so a signature can never be checked against the wrong
+      // scheme.
+      const isDelegationRail = intent.execution_rail === 'delegation'
 
-      if (recoveredAddress.toLowerCase() !== intent.delegate_address.toLowerCase()) {
-        return reply.code(403).send({
-          error: 'Signature does not match delegate address',
-          expected: intent.delegate_address,
-          recovered: recoveredAddress,
-        })
+      // Delegation-rail intents sign the prepared UserOperation with the
+      // ACCOUNT's EIP-712 scheme, which the delegate smart account itself
+      // validates in `validateUserOp`. That on-chain check IS the signature
+      // verification — strictly stronger than a local recover, and it cannot
+      // drift from the account's own rules. A bad signature is rejected by
+      // the bundler at submit; nothing moves. We therefore only shape-check
+      // here (a local EIP-712 reconstruction would add a second, weaker
+      // source of truth that could false-reject valid signatures).
+      if (isDelegationRail) {
+        if (!/^0x[0-9a-fA-F]{100,}$/.test(signature)) {
+          return reply.code(400).send({ error: 'Invalid signature format' })
+        }
+      } else {
+        let recoveredAddress: string
+        try {
+          recoveredAddress = recoverSigner(intent.sign_hash, signature)
+        } catch (err) {
+          return reply.code(400).send({
+            error: 'Invalid signature format',
+            details: err instanceof Error ? err.message : String(err),
+          })
+        }
+
+        if (recoveredAddress.toLowerCase() !== intent.delegate_address.toLowerCase()) {
+          return reply.code(403).send({
+            error: 'Signature does not match delegate address',
+            expected: intent.delegate_address,
+            recovered: recoveredAddress,
+          })
+        }
       }
 
       // 3. Atomically claim the pending intent before any on-chain execution.
@@ -408,19 +569,37 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         })
       }
 
-      // 4. Execute on-chain
+      // 4. Execute on-chain — on the rail the intent was authorized for.
       try {
-        const { txHash } = await executeAllowanceTransfer(
-          intent.chain_id,
-          intent.safe_address,
-          intent.token_address,
-          intent.to_address,
-          BigInt(intent.amount_raw),
-          ZERO_ADDRESS,
-          0n,
-          intent.delegate_address,
-          signature,
-        )
+        let txHash: string
+        if (isDelegationRail) {
+          // Replay the exact prepared redemption whose hash the agent signed;
+          // only the signature is stamped in. The caveat enforcers authorize
+          // it on-chain — no owner, relayer, or Haven key signs anything.
+          if (intent.prepared_user_op == null || !intent.delegation_hash) {
+            throw new Error('delegation-rail intent is missing its prepared UserOperation state')
+          }
+          const result = await submitDelegationPayment(
+            { chain_id: intent.chain_id, delegate_address: intent.delegate_address },
+            deserializeUserOp(intent.prepared_user_op),
+            signature as `0x${string}`,
+          )
+          txHash = result.txHash
+        } else {
+          const result = await executeAllowanceTransfer(
+            intent.chain_id,
+            intent.safe_address,
+            intent.token_address,
+            intent.to_address,
+            BigInt(intent.amount_raw),
+            ZERO_ADDRESS,
+            0n,
+            intent.delegate_address,
+            signature,
+            { agentId: intent.agent_id, userId: intent.user_id },
+          )
+          txHash = result.txHash
+        }
 
         const fiatValues = await getFiatValuesForTokenAmount(
           intent.token_symbol,
@@ -462,8 +641,21 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           to: intent.to_address,
         })
       } catch (err) {
-        // 6. Failure
-        const errorMsg = err instanceof Error ? err.message : String(err)
+        // #717: over-budget = refused before ANY broadcast. This route claims
+        // the intent to 'submitted' before executing (step 3), so release the
+        // claim or the row is stuck unretryable forever — the one place a 429
+        // would otherwise be WORSE than the old burn-to-failed (#1119 review B1).
+        if (err instanceof RelayerBudgetExceededError) {
+          await pool.query(
+            `UPDATE payment_intents SET status = 'pending_signature'
+             WHERE id = $1 AND status = 'submitted' AND tx_hash IS NULL`,
+            [intent.id],
+          )
+          return reply.code(429).send({ payment_id: intent.id, status: 'pending_signature', error: err.message })
+        }
+        // 6. Failure. Session-rail (bundler) errors echo the request URL,
+        // which embeds the API key — scrub before persisting or responding.
+        const errorMsg = redactVendorSecrets(err instanceof Error ? err.message : String(err))
         await pool.query(
           `UPDATE payment_intents
            SET status = 'failed', error_message = $1

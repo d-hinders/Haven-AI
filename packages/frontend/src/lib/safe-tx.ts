@@ -1,3 +1,4 @@
+import type { SafeCapableSigner } from './signer'
 import {
   encodeFunctionData,
   hashTypedData,
@@ -225,7 +226,9 @@ export function getSafeTxHash(
 
 /** Sign the Safe transaction using either an EOA or passkey-backed contract signer. */
 export async function signSafeTx(
-  signer: HavenUserSigner,
+  // #1079: the type says what the union cannot — a delegator_passkey never
+  // signs a Safe transaction; callers narrow via isSafeCapableSigner.
+  signer: SafeCapableSigner,
   safeAddress: Address,
   tx: SafeTxParams,
   chainId: number = DEFAULT_CHAIN_ID,
@@ -291,7 +294,7 @@ function normaliseSignatureV(sig: `0x${string}`): `0x${string}` {
 
 /** Execute the Safe transaction on-chain (threshold = 1) */
 export async function executeSafeTx(
-  signer: HavenUserSigner,
+  signer: SafeCapableSigner,
   publicClient: PublicClient,
   safeAddress: Address,
   tx: SafeTxParams,

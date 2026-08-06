@@ -1,14 +1,22 @@
 /**
- * Multi-chain configuration for the Haven frontend.
+ * Frontend chain configuration — client construction over the shared registry.
  *
- * Single source of truth for per-chain data: contract addresses,
- * tokens, explorer URLs, and Safe TX service URLs.
+ * The per-chain FACTS (identity, explorer/Safe URLs, contracts, passkey,
+ * token data) live in `@haven_ai/core` (#986) — ONE definition shared with
+ * the backend. This module adds what only the frontend owns: viem chain
+ * objects, the offered-chains policy (pickers), the build-time default
+ * chain, and the frontend's token Record representation (keyed by display
+ * symbol, in picker order).
+ *
+ * Purity proof: `__tests__/chains-registry-snapshot.test.ts` pins the fully
+ * resolved registry byte-for-byte against the pre-move fixture.
  */
 import type { Address } from 'viem'
-import { gnosis, base } from 'viem/chains'
+import { gnosis, base, baseSepolia } from 'viem/chains'
+import { getChainData, resolveToken } from '@haven_ai/core'
 
 // Re-export viem chain objects for convenience
-export { gnosis, base }
+export { gnosis, base, baseSepolia }
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -22,7 +30,7 @@ export interface FrontendChainConfig {
   chainId: number
   name: string
   shortName: string
-  viemChain: typeof gnosis | typeof base
+  viemChain: typeof gnosis | typeof base | typeof baseSepolia
   explorerUrl: string
   safeTxServiceUrl: string
   contracts: {
@@ -39,58 +47,39 @@ export interface FrontendChainConfig {
   tokens: Record<string, FrontendTokenConfig>
 }
 
-// ── Gnosis Chain (100) ────────────────────────────────────────────
+// ── Construction from the shared registry ─────────────────────────
 
-const GNOSIS_CONFIG: FrontendChainConfig = {
-  chainId: 100,
-  name: 'Gnosis Chain',
-  shortName: 'gnosis',
-  viemChain: gnosis,
-  explorerUrl: 'https://gnosisscan.io',
-  safeTxServiceUrl: 'https://api.safe.global/tx-service/gno',
-  contracts: {
-    safeProxyFactory: '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2',
-    safeSingletonL2: '0x3E5c63644E683549055b9Be8653de26E0B4CD36E',
-    fallbackHandler: '0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4',
-    allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
-    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
-  },
-  passkey: {
-    // TODO: source from safe-modules-deployments once the package exposes the Gnosis FCL verifier.
-    verifier: '0x445a0683e494ea0c5af3e83c5159fbe47cf9e765',
-  },
-  tokens: {
-    'xDAI': { symbol: 'xDAI', decimals: 18, address: null },
-    'EURe': { symbol: 'EURe', decimals: 18, address: '0xcB444e90D8198415266c6a2724b7900fb12FC56E' },
-    'USDC.e': { symbol: 'USDC.e', decimals: 6, address: '0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0' },
-  },
+/**
+ * Frontend-owned per-chain layer: the viem client object and the token
+ * PICKER ORDER (differs from the backend's native-first API order — e.g.
+ * Base lists USDC before ETH in pickers). Values come from core.
+ */
+const FRONTEND_CHAIN_LAYER: Record<number, { viemChain: FrontendChainConfig['viemChain']; tokenOrder: string[] }> = {
+  100: { viemChain: gnosis, tokenOrder: ['xDAI', 'EURe', 'USDC.e'] },
+  8453: { viemChain: base, tokenOrder: ['USDC', 'ETH'] },
+  84532: { viemChain: baseSepolia, tokenOrder: ['USDC', 'ETH'] },
 }
 
-// ── Base (8453) ───────────────────────────────────────────────────
-
-const BASE_CONFIG: FrontendChainConfig = {
-  chainId: 8453,
-  name: 'Base',
-  shortName: 'base',
-  viemChain: base,
-  explorerUrl: 'https://basescan.org',
-  safeTxServiceUrl: 'https://api.safe.global/tx-service/base',
-  contracts: {
-    // Base uses EIP-155 variant addresses for Safe v1.3.0
-    safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
-    safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
-    fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
-    // Same CREATE2 addresses on Base
-    allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
-    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
-  },
-  passkey: {
-    verifier: '0x0000000000000000000000000000000000000100',
-  },
-  tokens: {
-    'USDC': { symbol: 'USDC', decimals: 6, address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
-    'ETH': { symbol: 'ETH', decimals: 18, address: null },
-  },
+function buildFrontendChain(chainId: number): FrontendChainConfig {
+  const core = getChainData(chainId)
+  const layer = FRONTEND_CHAIN_LAYER[chainId]
+  const tokens: Record<string, FrontendTokenConfig> = {}
+  for (const symbol of layer.tokenOrder) {
+    const token = resolveToken(chainId, symbol)
+    if (!token) throw new Error(`chains: token ${symbol} missing from the shared registry for chain ${chainId}`)
+    tokens[symbol] = { symbol: token.symbol, decimals: token.decimals, address: token.address as Address | null }
+  }
+  return {
+    chainId: core.chainId,
+    name: core.name,
+    shortName: core.shortName,
+    viemChain: layer.viemChain,
+    explorerUrl: core.explorerUrl,
+    safeTxServiceUrl: core.safeTxServiceUrl,
+    contracts: core.contracts as FrontendChainConfig['contracts'],
+    passkey: { verifier: core.passkey.verifier as Address },
+    tokens,
+  }
 }
 
 // ── Registry ──────────────────────────────────────────────────────
@@ -101,25 +90,43 @@ const BASE_CONFIG: FrontendChainConfig = {
  * imported on Gnosis before we went Base-only) still renders without
  * crashing.
  */
-const CHAINS: Record<number, FrontendChainConfig> = {
-  100: GNOSIS_CONFIG,
-  8453: BASE_CONFIG,
-}
+const CHAINS: Record<number, FrontendChainConfig> = Object.fromEntries(
+  Object.keys(FRONTEND_CHAIN_LAYER).map((id) => [Number(id), buildFrontendChain(Number(id))]),
+)
+
+const BASE_CONFIG = CHAINS[8453]
+const BASE_SEPOLIA_CONFIG = CHAINS[84532]
+
+/**
+ * Every chain in the registry — including ones no longer *offered* in pickers
+ * (e.g. Gnosis). Surfaces that display historical data across chains (catalog,
+ * contacts, transactions) resolve against this, not the offered subset.
+ */
+export const ALL_CHAINS: FrontendChainConfig[] = Object.values(CHAINS)
 
 /**
  * Chains currently *offered to users* — network pickers, wallet
  * network-validation, and the wagmi connector list all derive from this.
  *
- * TEMPORARY: Base-only. Multichain is the long-term goal, but offering
- * multiple chains today confuses the single-account-flow UX. To re-enable
- * Gnosis (or add another chain) put its ID back in this list — the per-chain
- * config above is already in place, so that's the only change needed here.
+ * Multichain: both **Base mainnet (8453)** and **Base Sepolia (84532)** are
+ * selectable in every environment (network pickers, account creation, etc.).
+ * `NEXT_PUBLIC_HAVEN_CHAIN_ID` (build-time inlined, like `NEXT_PUBLIC_HAVEN_ENV`)
+ * sets the **default pre-selection** — the dev Vercel deploy sets `84532` so dev
+ * defaults to Base Sepolia; prod leaves it unset and defaults to Base mainnet.
+ * Both chains stay enabled regardless of the default.
+ *
+ * Note: each enabled chain needs a relayer funded on that chain for deploys /
+ * payments to succeed (Base Sepolia gas on the testnet relayer, Base mainnet gas
+ * on the mainnet relayer).
  */
-const ENABLED_CHAIN_IDS: number[] = [BASE_CONFIG.chainId]
+const CONFIGURED_CHAIN_ID = Number(process.env.NEXT_PUBLIC_HAVEN_CHAIN_ID ?? '')
+const ACTIVE_CHAIN: FrontendChainConfig = CHAINS[CONFIGURED_CHAIN_ID] ?? BASE_CONFIG
+
+const ENABLED_CHAIN_IDS: number[] = [BASE_CONFIG.chainId, BASE_SEPOLIA_CONFIG.chainId]
 
 export const SUPPORTED_CHAINS = ENABLED_CHAIN_IDS.map((id) => CHAINS[id])
 export const SUPPORTED_CHAIN_IDS = ENABLED_CHAIN_IDS
-export const DEFAULT_CHAIN_ID = BASE_CONFIG.chainId
+export const DEFAULT_CHAIN_ID = ACTIVE_CHAIN.chainId
 
 export function getChainConfig(chainId: number): FrontendChainConfig {
   const chain = CHAINS[chainId]

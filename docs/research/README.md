@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: research
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Haven — Research
 
 Forward-looking investigations and decision aids. Unlike `docs/architecture/`

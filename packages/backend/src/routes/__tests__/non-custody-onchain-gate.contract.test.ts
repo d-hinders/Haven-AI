@@ -81,6 +81,7 @@ describe('non-custody: the on-chain allowance is the final gate (Red Line #4)', 
     allowanceMocks.computeEffectiveAllowance.mockReturnValue(effective(0n)) // nothing left on-chain
     mockQuery
       .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy — resolved before the allowance guard (#835)
       .mockResolvedValueOnce(dbAllowanceRow())
       .mockResolvedValueOnce({ rows: [{ id: 'approval-1', status: 'pending', expires_at: '2099-01-01T00:00:00.000Z' }] })
 
@@ -104,6 +105,7 @@ describe('non-custody: the on-chain allowance is the final gate (Red Line #4)', 
     allowanceMocks.generateTransferHash.mockResolvedValue(`0x${'11'.repeat(32)}`)
     mockQuery
       .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy — resolved before the allowance guard (#835)
       .mockResolvedValueOnce(dbAllowanceRow())
       .mockResolvedValueOnce({ rows: [{ id: 'intent-1', status: 'pending_signature', expires_at: '2099-01-01T00:00:00.000Z' }] })
 
@@ -124,7 +126,8 @@ describe('non-custody: the on-chain allowance is the final gate (Red Line #4)', 
   it('refuses a token the agent has no on-chain allowance config for', async () => {
     mockQuery
       .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] }) // no agent_allowances row
+      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
+      .mockResolvedValueOnce({ rows: [] }) // no agent_allowances row → guard still 403s (#835)
 
     const res = await app.inject({
       method: 'POST',

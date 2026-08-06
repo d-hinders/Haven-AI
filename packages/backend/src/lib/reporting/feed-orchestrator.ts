@@ -16,11 +16,10 @@ import { claimSync, markPushed, markFailed, listSyncs, type FeedSyncRow } from '
 /**
  * The user's active connector = the first registered one they're connected to.
  *
- * Returns null in production today: no live connector is registered yet (the
- * Fortnox adapter #496/#498 is deferred — see `connector.ts` and
- * `docs/research/fortnox-non-asserting-feed.md`). So auto-feed and backfill are
- * inert no-ops until that follow-up lands; the surrounding machinery is fully
- * built and tested against the in-memory connector.
+ * The live Fortnox adapter (#496/#498/#956) IS registered at startup when
+ * Fortnox is configured (`registerConnector` in `src/index.ts`), so auto-feed
+ * and backfill deliver for real — live-proven against a Fortnox sandbox
+ * 2026-07-16/18. Returns null only when the user has no connected provider.
  */
 async function getActiveConnector(userId: string): Promise<AccountingConnector | null> {
   for (const connector of listConnectors()) {
@@ -48,7 +47,7 @@ export async function feedSettledPayment(userId: string, paymentId: string): Pro
   try {
     const result = await connector.pushTransaction(userId, tx)
     if (result.status === 'pushed' || result.status === 'skipped') {
-      await markPushed(userId, connector.provider, paymentId, result.externalRef)
+      await markPushed(userId, connector.provider, paymentId, result.externalRef, result.note ?? null)
     } else {
       await markFailed(userId, connector.provider, paymentId, result.reason ?? 'push_failed')
     }

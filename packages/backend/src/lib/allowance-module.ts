@@ -7,9 +7,12 @@
  * All functions accept a chainId to select the correct RPC and contract addresses.
  */
 
+import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, type RelayerAttribution } from './relayer-spend-guard.js'
 import { ethers } from 'ethers'
-import { config } from '../config.js'
+import { config, relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from './chains.js'
+import { recordAllowanceNonce } from './allowance-nonce-coordinator.js'
+import { withRelayerSendLock, getRelayerFeeOverrides } from './relayer.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -64,9 +67,13 @@ export function getProvider(chainId: number): ethers.JsonRpcProvider {
 export function getRelayerWallet(chainId: number): ethers.Wallet {
   let wallet = relayerWallets.get(chainId)
   if (!wallet) {
-    const key = config.relayerPrivateKey
+    // Per-chain key (RELAYER_PRIVATE_KEY_<chainId>) with global fallback, so a
+    // single backend can run isolated relayers per chain (#640).
+    const key = relayerPrivateKeyForChain(chainId)
     if (!key) {
-      throw new Error('RELAYER_PRIVATE_KEY environment variable is not set')
+      throw new Error(
+        `No relayer key for chain ${chainId} — set RELAYER_PRIVATE_KEY_${chainId} or RELAYER_PRIVATE_KEY`,
+      )
     }
     wallet = new ethers.Wallet(key, getProvider(chainId))
     relayerWallets.set(chainId, wallet)
@@ -241,21 +248,78 @@ export async function executeAllowanceTransfer(
   payment: bigint,
   delegate: string,
   signature: string,
+  /** #717: who this transfer is billed to (relayer gas budget + attribution). */
+  attribution?: RelayerAttribution,
 ): Promise<{ txHash: string }> {
+  // #717: budget check before any relayer work — over-cap throws
+  // RelayerBudgetExceededError (routes map it to 429).
+  await assertRelayerBudget('allowance_transfer', attribution ?? {})
   const relayer = getRelayerWallet(chainId)
   const contract = getContract(chainId, relayer)
+  const args = [safe, token, to, amount, paymentToken, payment, delegate, signature] as const
 
-  const tx = await contract.executeAllowanceTransfer(
-    safe,
-    token,
-    to,
-    amount,
-    paymentToken,
-    payment,
-    delegate,
-    signature,
-  )
+  // Preflight (#692): a stale allowance nonce — the signature was built against a
+  // nonce a prior transfer already consumed (cross-RPC propagation) — makes
+  // executeAllowanceTransfer revert with no reason. Static-call first so a doomed
+  // transfer never lands or burns gas. This turns a masked "On-chain execution
+  // failed" into a clear, retry-safe error: nothing was submitted, so re-reading
+  // the nonce and re-signing cannot double-spend.
+  try {
+    await contract.executeAllowanceTransfer.staticCall(...args)
+  } catch {
+    throw new Error(
+      'Allowance transfer would revert before submission — likely a stale allowance ' +
+        'nonce; re-read the allowance and re-sign before retrying.',
+    )
+  }
 
-  const receipt = await tx.wait()
-  return { txHash: receipt.hash }
+  const provider = relayer.provider
+  if (!provider) {
+    throw new Error(`Relayer provider not configured for chain ${chainId}`)
+  }
+
+  // Broadcast under the per-chain send lock so concurrent transfers can't
+  // populate the same relayer EOA nonce (#692/#718). Explicit fee headroom so
+  // a base-fee spike can't strand the tx and block the nonce lane. The
+  // confirmation wait below stays OUTSIDE the lock — only the nonce-read→
+  // broadcast window is exclusive.
+  // #717: the attempt row lands BEFORE broadcast so concurrent bursts see
+  // each other in the count; the receipt stamps it below.
+  const spendId = await recordRelayerSpend({
+    operation: 'allowance_transfer',
+    chainId,
+    agentId: attribution?.agentId,
+    userId: attribution?.userId,
+  })
+  const tx = await withRelayerSendLock(chainId, async () => {
+    const feeOverrides = await getRelayerFeeOverrides(provider)
+    return contract.executeAllowanceTransfer(...args, feeOverrides)
+  })
+
+  // tx.wait() can return null on a lagging RPC even when the tx confirmed (#690);
+  // poll by hash with a timeout, then assert it didn't revert. The nonce is then
+  // confirmed-visible on this provider for the next transfer's read.
+  const receipt = await provider.waitForTransaction(tx.hash, 1, 90_000)
+  await finishRelayerSpend(spendId, {
+    txHash: tx.hash,
+    gasUsed: receipt ? BigInt(receipt.gasUsed.toString()) : null,
+    effectiveGasPrice: receipt?.gasPrice != null ? BigInt(receipt.gasPrice.toString()) : null,
+  })
+  if (!receipt) {
+    throw new Error(`Allowance transfer ${tx.hash} not confirmed within 90s`)
+  }
+  if (receipt.status === 0) {
+    throw new Error(`Allowance transfer ${tx.hash} reverted`)
+  }
+
+  // Record the post-transfer nonce so the next build for this delegate waits for
+  // it to be visible before signing, avoiding the stale-nonce race (#692).
+  // Best-effort — never fail a confirmed transfer over the bookkeeping read.
+  try {
+    const { nonce } = await getTokenAllowance(chainId, safe, delegate, token)
+    recordAllowanceNonce(chainId, safe, delegate, token, nonce)
+  } catch {
+    // The preflight + retry still cover a stale next-read.
+  }
+  return { txHash: tx.hash }
 }

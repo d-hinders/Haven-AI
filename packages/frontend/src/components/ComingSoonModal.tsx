@@ -4,6 +4,8 @@ import { useRef } from 'react'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { Button } from '@/components/ui/Button'
+import { Plus } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 interface Props {
   open: boolean
@@ -42,9 +44,7 @@ export default function ComingSoonModal({ open, onClose, onReceive }: Props) {
 
         <div className="px-6 py-6">
           <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-[10px] border border-[var(--v2-brand)]/20 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
-            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m6-6H6" />
-            </svg>
+            <Icon icon={Plus} className="h-6 w-6" />
           </div>
           <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
             For now, use Receive to copy the correct Haven wallet address and send supported tokens on-chain.

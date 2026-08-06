@@ -1,6 +1,8 @@
 'use client'
 
 import { useRef, type ReactNode } from 'react'
+import { X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
@@ -54,10 +56,7 @@ export function SidePanel({
             aria-label="Close"
             className="-mr-1 rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <Icon icon={X} className="h-4 w-4" />
           </button>
         </div>
 

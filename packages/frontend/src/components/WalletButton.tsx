@@ -14,20 +14,21 @@ import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
-import { useActiveSigner } from '@/lib/signer'
+import { useActiveSigner, hybridPasskeyOnDevice } from '@/lib/signer'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
+import { truncateAddress } from '@/components/haven'
 
-function shortAddress(addr: string): string {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`
-}
-
+// Generative identicon gradient stops — decorative art hashed from an address
+// for visual variety, NOT design-system colour. These are data, not UI chrome,
+// so they legitimately stay literal (design-lint-disable-line per row) rather
+// than becoming ~18 meaningless tokens. See /design-system → "How to use this page".
 const AVATAR_PALETTES = [
-  ['#4f46e5', '#06b6d4', '#14b8a6'],
-  ['#0f766e', '#22c55e', '#facc15'],
-  ['#7c3aed', '#ec4899', '#f97316'],
-  ['#2563eb', '#8b5cf6', '#f43f5e'],
-  ['#0891b2', '#0ea5e9', '#6366f1'],
-  ['#059669', '#84cc16', '#06b6d4'],
+  ['#4f46e5', '#06b6d4', '#14b8a6'], // design-lint-disable-line
+  ['#0f766e', '#22c55e', '#facc15'], // design-lint-disable-line
+  ['#7c3aed', '#ec4899', '#f97316'], // design-lint-disable-line
+  ['#2563eb', '#8b5cf6', '#f43f5e'], // design-lint-disable-line
+  ['#0891b2', '#0ea5e9', '#6366f1'], // design-lint-disable-line
+  ['#059669', '#84cc16', '#06b6d4'], // design-lint-disable-line
 ] as const
 
 function hashAddress(address: string): number {
@@ -72,6 +73,13 @@ interface AddressSection {
 interface PopoverProps {
   primary: AddressSection
   secondary?: AddressSection
+  /**
+   * #1126: identifies the ACTIVE passkey/device without an address — Hybrid
+   * passkeys are raw P256 coordinates on the account contract and have no
+   * on-chain address of their own; showing the treasury address here implied
+   * the credential owned it.
+   */
+  signingWith?: { label: string; keyId: string }
   unavailablePasskey?: boolean
   open: boolean
   onClose: () => void
@@ -92,6 +100,7 @@ interface PopoverProps {
 function WalletPopover({
   primary,
   secondary,
+  signingWith,
   unavailablePasskey = false,
   open,
   onClose,
@@ -161,7 +170,7 @@ function WalletPopover({
             </div>
           ) : null}
           <span className="text-sm font-mono text-[var(--v2-ink)]">
-            {shortAddress(section.address)}
+            {truncateAddress(section.address)}
           </span>
         </div>
         <button
@@ -195,6 +204,15 @@ function WalletPopover({
           </p>
         )}
         {renderAddressSection(primary)}
+        {signingWith ? (
+          <div className="py-2">
+            <p className="text-xs text-[var(--v2-ink-muted)]">Signing with</p>
+            <p className="text-sm font-medium text-[var(--v2-ink)]">{signingWith.label}</p>
+            <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
+              {truncateAddress(signingWith.keyId)}
+            </p>
+          </div>
+        ) : null}
         {secondary && renderAddressSection(secondary, true)}
       </div>
 
@@ -267,6 +285,10 @@ export default function WalletButton() {
     chainId: activeSafe?.chain_id,
   })
   const passkeySigner = activeSigner?.type === 'passkey' ? activeSigner : null
+  // #1079: a Hybrid DeleGator account whose passkey is on this device gets the
+  // same "Passkey ready" pill — the reported symptom was this header reading
+  // "Connect wallet" for a passkey that had just signed a budget.
+  const delegatorSigner = activeSigner?.type === 'delegator_passkey' ? activeSigner : null
   const passkeyUnavailableOnDevice = useMemo(() => {
     const safeAddress = activeSafe?.safe_address.toLowerCase()
     if (!safeAddress || activeSafe?.chain_id === undefined || passkeySigner) {
@@ -375,7 +397,7 @@ export default function WalletButton() {
                 className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
                 <AddressAvatar address={passkeySigner.address} />
-                <span>{passkeyAlias ?? 'Passkey ready'}</span>
+                <span>{passkeyAlias ?? 'Passkey'}</span>
               </button>
 
               <WalletPopover
@@ -385,6 +407,67 @@ export default function WalletButton() {
                   chainName: safeChainName,
                   displayName: passkeyAlias,
                 }}
+                secondary={connectedWallet}
+                open={popoverOpen}
+                onClose={() => setPopoverOpen(false)}
+                onSwitchWallet={handleSwitchWallet}
+                onConnectWallet={openWalletConnect}
+                hasConnectedWallet={connected}
+                switching={pendingSwitch}
+                anchorRef={triggerRef}
+              />
+            </div>
+          )
+        }
+
+        if (delegatorSigner) {
+          const accountAlias = getOwnerAlias(delegatorSigner.accountAddress)
+          // #1126: name the enrolled-on-this-device credential the same way
+          // AccountSignersCard does — Face ID / Touch ID for the primary,
+          // Backup {i} for later enrollments. No address: Hybrid passkeys
+          // have none.
+          const onDeviceKey = hybridPasskeyOnDevice(delegatorSigner.signers)
+          const keyIndex = onDeviceKey
+            ? delegatorSigner.signers.passkeys.findIndex((pk) => pk.key_id === onDeviceKey.key_id)
+            : -1
+          const signingWith = onDeviceKey
+            ? {
+                label: keyIndex === 0 ? 'Face ID / Touch ID' : `Backup ${keyIndex}`,
+                keyId: onDeviceKey.key_id,
+              }
+            : undefined
+          const connectedWallet =
+            connected && account
+              ? {
+                  label: 'Connected wallet',
+                  address: account.address,
+                  chainName: chain?.name,
+                  displayName: getOwnerAlias(account.address),
+                }
+              : undefined
+
+          return (
+            <div className="relative">
+              <button
+                ref={triggerRef}
+                type="button"
+                onClick={() => setPopoverOpen((v) => !v)}
+                aria-haspopup="dialog"
+                aria-expanded={popoverOpen}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+              >
+                <AddressAvatar address={delegatorSigner.accountAddress} />
+                <span>Passkey</span>
+              </button>
+
+              <WalletPopover
+                primary={{
+                  label: 'Haven account',
+                  address: delegatorSigner.accountAddress,
+                  chainName: safeChainName,
+                  displayName: accountAlias,
+                }}
+                signingWith={signingWith}
                 secondary={connectedWallet}
                 open={popoverOpen}
                 onClose={() => setPopoverOpen(false)}
@@ -448,7 +531,7 @@ export default function WalletButton() {
                 <AddressAvatar address={account.address} />
               )}
               <span className={accountAlias ? undefined : 'font-mono'}>
-                {accountAlias ?? account.ensName ?? shortAddress(account.address)}
+                {accountAlias ?? account.ensName ?? truncateAddress(account.address)}
               </span>
             </button>
 

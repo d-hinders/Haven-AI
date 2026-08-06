@@ -1,41 +1,24 @@
 import type { ReactNode } from 'react'
-import type { AgentStatus } from '@/lib/payment-status'
+import type { ApiSchema } from '@haven_ai/core'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 
-export interface Transaction {
-  hash: string
-  type: 'native' | 'erc20' | 'internal'
-  from: string
-  to: string
-  value: string
-  valueFormatted: string
-  asset: string
-  decimals: number
-  direction: 'in' | 'out'
-  timestamp: number
-  blockNumber: number
-  isError: boolean
-  tokenAddress?: string
-  tokenSymbol?: string
-  agentName?: string
-  source?: 'direct' | 'x402' | 'mpp_demo'
-  x402ResourceUrl?: string | null
-  x402MerchantAddress?: string | null
-  paymentId?: string
-  paymentProofStatus?: string | null
-  paymentFlowStatus?: 'paid' | 'confirming_merchant' | 'needs_attention' | null
-  paymentAttentionReason?: 'merchant_retry_rejected_after_payment' | null
-  activityType?: 'delegate_sweep'
-  /** Book-time SEK value (#463); null for non-machine / unpriced transactions. */
-  amountSek?: string | null
-}
+/**
+ * Wire shapes come from `@haven_ai/core`'s generated API types (#984) — the
+ * OpenAPI spec is the single source; nothing here restates a response field.
+ * This module keeps the frontend's established names as aliases, plus the
+ * frontend-ONLY derived types (presentation overrides, client-side filter
+ * state) that extend the wire shapes rather than replacing them.
+ */
 
-export interface AggregatedTransaction extends Transaction {
-  chainId: number
-  safeId: string
-  safeAddress: string
-  safeName: string
-  agentId?: string
+/** Per-Safe page item (`GET /transactions/{safeAddress}`) — no Safe scope. */
+export type Transaction = ApiSchema<'TransactionBase'>
+
+/**
+ * Aggregated-feed item plus the frontend-only presentation overrides used by
+ * `TransactionsTable` when rendering non-transaction activity through the
+ * same primitive. Wire fields come from the generated `Transaction` schema.
+ */
+export interface AggregatedTransaction extends ApiSchema<'Transaction'> {
   /**
    * Optional status pill rendered inline beside the activity title. When set
    * it takes precedence over the default `isError` → "Failed" badge. Used by
@@ -63,24 +46,14 @@ export interface AggregatedTransaction extends Transaction {
   explorerUrl?: string | null
 }
 
-export interface TransactionsResponse {
-  transactions: Transaction[]
-  total: number
-  page: number
-  limit: number
-  pages: number
-}
+export type TransactionsResponse = ApiSchema<'TransactionsPageResponse'>
 
-export interface TransactionsFeedResponse {
+/** Feed response with the feed items widened to the presentation type. */
+export type TransactionsFeedResponse = Omit<ApiSchema<'TransactionsResponse'>, 'transactions'> & {
   transactions: AggregatedTransaction[]
-  total: number
-  offset: number
-  limit: number
-  hasMore: boolean
-  partialFailure: boolean
-  failedSafeIds: string[]
 }
 
+/** Client-side only — not a wire shape. */
 export interface TransactionFilterState {
   safeId?: string
   agentId?: string
@@ -92,63 +65,18 @@ export interface TransactionFilterState {
   direction?: 'in' | 'out'
 }
 
-export interface TransactionFilterSafeOption {
-  id: string
-  name: string
-  address: string
-  chainId: number
-}
+export type TransactionFilterOptionsResponse = ApiSchema<'TransactionFilterOptionsResponse'>
+export type TransactionFilterSafeOption = TransactionFilterOptionsResponse['safes'][number]
+export type TransactionFilterAgentOption = TransactionFilterOptionsResponse['agents'][number]
+export type TransactionFilterTokenOption = TransactionFilterOptionsResponse['tokens'][number]
 
-export interface TransactionFilterAgentOption {
-  id: string
-  name: string
-  status: AgentStatus
-}
+/**
+ * Wire item plus the `chainId` that `useBalances` grafts on client-side when
+ * the caller passed one — the route itself never returns it (#984 finding).
+ */
+export type BalanceItem = ApiSchema<'BalanceItem'> & { chainId?: number }
 
-export interface TransactionFilterTokenOption {
-  key: string
-  symbol: string
-  address: string | null
-  chainId: number
-  isNative: boolean
-}
-
-export interface TransactionFilterOptionsResponse {
-  safes: TransactionFilterSafeOption[]
-  agents: TransactionFilterAgentOption[]
-  tokens: TransactionFilterTokenOption[]
-}
-
-export interface BalanceItem {
-  symbol: string
-  address: string | null
-  balance: string
-  formatted: string
-  decimals: number
-  chainId?: number
-}
-
-export interface BalancesResponse {
-  balances: BalanceItem[]
-}
-
-export interface PortfolioBreakdown {
-  symbol: string
-  balance: string
-  formatted: string
-  usdValue: number
-  eurValue: number
-}
-
-export interface PortfolioResponse {
-  totalUsd: number
-  totalEur: number
-  breakdown: PortfolioBreakdown[]
-}
-
-export interface SafeDetails {
-  address: string
-  owners: string[]
-  threshold: number
-  nonce: number
-}
+export type BalancesResponse = ApiSchema<'BalancesResponse'>
+export type PortfolioBreakdown = ApiSchema<'PortfolioBreakdown'>
+export type PortfolioResponse = ApiSchema<'PortfolioResponse'>
+export type SafeDetails = ApiSchema<'SafeDetails'>

@@ -1,0 +1,50 @@
+{
+  "name": "@haven_ai/qa-agent",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Internal QA harness for the Haven dev environment (epic #573): deterministic money-flow scenarios + dev seeding. Not published.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "seed": "tsx src/seed.ts",
+    "qa:dev": "tsx src/run.ts",
+    "pilot:rig": "tsx src/pilot/rig-hello-userop.ts",
+    "pilot:provision": "tsx src/pilot/provision-pilot-safe.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "pilot:policies": "tsx src/pilot/policy-scenarios.ts",
+    "pilot:compare": "tsx src/pilot/compare-rails.ts",
+    "pilot:enable-agent-session": "tsx src/pilot/enable-agent-session.ts",
+    "pilot:dod-payment": "tsx src/pilot/dod-payment.ts",
+    "pilot:x402-7710-buyer": "tsx src/pilot/x402-7710-buyer.ts",
+    "pilot:delegation-spike": "tsx src/pilot/delegation-budget-spike.ts",
+    "pilot:provision-hybrid": "tsx src/pilot/provision-hybrid.ts",
+    "pilot:create-dod-agent": "tsx src/pilot/create-dod-agent.ts"
+  },
+  "keywords": [
+    "haven",
+    "qa",
+    "internal"
+  ],
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@haven_ai/sdk": "*",
+    "@metamask/smart-accounts-kit": "^1.6.0",
+    "@metamask/x402": "^0.2.0",
+    "@rhinestone/module-sdk": "^0.4.0",
+    "@x402/core": "^2.17.0",
+    "@x402/fetch": "^2.17.0",
+    "ethers": "^6.13.0",
+    "permissionless": "^0.3.6",
+    "viem": "^2.54.1"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.4"
+  }
+}

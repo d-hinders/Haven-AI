@@ -46,6 +46,36 @@ describe('Sidebar', () => {
     })
   })
 
+  it('renders three labeled clusters with the core money loop first (#858)', () => {
+    render(<Sidebar />)
+    const labels = ['Money', 'Agent tools', 'Admin'].map((l) => screen.getByText(l))
+    expect(labels).toHaveLength(3)
+    // Core loop order and routes unchanged (scoped to the nav — the logo also links to /dashboard):
+    const links = Array.from(document.querySelector('nav')!.querySelectorAll('a')).map((a) =>
+      a.getAttribute('href'),
+    )
+    const nav = links.filter((href) =>
+      ['/dashboard', '/accounts', '/transactions', '/agents', '/approvals', '/catalog', '/contacts', '/reporting', '/custody'].includes(href ?? ''),
+    )
+    expect(nav).toEqual([
+      '/dashboard', '/accounts', '/transactions', '/agents', '/approvals',
+      '/catalog', '/contacts',
+      '/reporting', '/custody',
+    ])
+    // The Money label precedes the Agent tools label in the DOM:
+    const money = screen.getByText('Money')
+    const tools = screen.getByText('Agent tools')
+    expect(money.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('keeps the live Approvals badge inside the core cluster', () => {
+    mockUseApprovals.mockReturnValue({ actionableCount: 3 })
+    render(<Sidebar />)
+    const approvals = screen.getByRole('link', { name: /Approvals/ })
+    expect(approvals).toHaveAttribute('href', '/approvals')
+    expect(approvals.textContent).toContain('3')
+  })
+
   it('opens profile from the bottom-left identity area', () => {
     render(<Sidebar />)
 

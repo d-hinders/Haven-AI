@@ -1,10 +1,12 @@
 'use client'
 
+import { Check, Clock, Copy, ExternalLink, Info, Users, X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { type Address } from 'viem'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useSendTransaction, type SendStatus } from '@/hooks/useSendTransaction'
-import { useActiveSigner } from '@/lib/signer'
+import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainTokens, type SendParams } from '@/lib/safe-tx'
 import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -77,10 +79,7 @@ function SendDetail({
               }}
               className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
             >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 8.25V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.25" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 10a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8Z" />
-              </svg>
+              <Icon icon={Copy} className="h-3.5 w-3.5" />
             </button>
           )}
         </dd>
@@ -99,15 +98,7 @@ function ResultIcon({ tone }: { tone: 'success' | 'warning' | 'danger' }) {
 
   return (
     <div className={`mb-5 flex h-14 w-14 items-center justify-center rounded-full border ${toneClass}`}>
-      <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={tone === 'warning' ? 1.5 : 2}>
-        {tone === 'success' ? (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-        ) : tone === 'warning' ? (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-        ) : (
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        )}
-      </svg>
+      <Icon icon={tone === 'success' ? Check : tone === 'warning' ? Clock : X} className="h-7 w-7" />
     </div>
   )
 }
@@ -162,10 +153,15 @@ export default function SendModal({
     safeAddress: safeAddressForHooks,
     chainId,
   })
-  const signer = useActiveSigner({
+  const activeSigner = useActiveSigner({
     safeAddress: safeAddressForHooks,
     chainId,
   })
+  // #1079: this surface signs SAFE transactions; a delegator_passkey cannot.
+  // The narrowed view keeps every downstream call type-honest — on delegation
+  // accounts these controls are hidden, so null here renders the same
+  // no-signer state as before.
+  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
   const operationGate = useSafeOperationGate({
     safeAddress: safeAddressForHooks,
     chainId,
@@ -443,9 +439,7 @@ export default function SendModal({
               aria-label="Close"
               className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <Icon icon={X} className="w-5 h-5" />
             </button>
           )}
         </div>
@@ -608,9 +602,7 @@ export default function SendModal({
                     onClick={() => { setShowContactPicker((v) => !v); setContactSearch('') }}
                     className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors flex items-center gap-1"
                   >
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-                    </svg>
+                    <Icon icon={Users} className="w-3 h-3" />
                     Saved recipients
                   </button>
                 )}
@@ -632,9 +624,7 @@ export default function SendModal({
                         onClick={() => { setSelectedContactName(null); setRecipient('') }}
                         className="text-[var(--v2-brand)]/60 hover:text-[var(--v2-brand-strong)] ml-0.5"
                       >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
+                        <Icon icon={X} className="w-3 h-3" />
                       </button>
                     </div>
                   </div>
@@ -666,18 +656,7 @@ export default function SendModal({
                   role="status"
                   className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-[var(--v2-ink-3)]"
                 >
-                  <svg
-                    aria-hidden="true"
-                    className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.75}
-                  >
-                    <circle cx="12" cy="12" r="9" />
-                    <path d="M12 11v5" strokeLinecap="round" />
-                    <circle cx="12" cy="8" r="0.6" fill="currentColor" />
-                  </svg>
+                  <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
                   <span>Saved recipients could not load. You can still paste a recipient address.</span>
                 </p>
               )}
@@ -795,7 +774,7 @@ export default function SendModal({
                                 {contact.name}
                               </p>
                               <p className="font-mono text-xs text-[var(--v2-ink-3)]">
-                                {contact.address.slice(0, 6)}...{contact.address.slice(-4)}
+                                {truncate(contact.address)}
                               </p>
                             </div>
                             {isSelected && (
@@ -993,9 +972,7 @@ export default function SendModal({
                   className="mb-6 inline-flex items-center gap-1 text-xs text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
                 >
                   View advanced approval details
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                  </svg>
+                  <Icon icon={ExternalLink} className="w-3 h-3" />
                 </a>
                 <Button
                   onClick={handleDone}

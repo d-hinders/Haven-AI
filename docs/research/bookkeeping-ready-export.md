@@ -1,3 +1,19 @@
+---
+owner: "@d-hinders"
+status: research
+covers:
+  - packages/backend/src/lib/accounting-entry.ts
+  - packages/backend/src/lib/machine-payment-evidence.ts
+  - packages/backend/src/lib/ledger-exporter.ts
+  - packages/backend/src/lib/sie-exporter.ts
+  - packages/backend/src/lib/bas-accounts.ts
+  - packages/backend/src/lib/vat.ts
+  - packages/backend/src/lib/fortnox.ts
+  - packages/backend/src/routes/accounting.ts
+  - packages/backend/src/routes/fortnox.ts
+last-verified: "2026-07-24"
+---
+
 # Architecture — bookkeeping-ready export (Fortnox / SIE / beyond)
 
 > **Superseded in direction by [epic #491](https://github.com/d-hinders/Haven-AI/issues/491)
@@ -7,7 +23,22 @@
 > liability risk. The shipped product **feeds drafts / source documents** into
 > the customer's tool and the accountant codes and confirms. The foundation here
 > (book-time FX, `AccountingEntry`) is reused; the "asserting" framing and copy
-> are not. See [`fortnox-non-asserting-feed.md`](fortnox-non-asserting-feed.md).
+> are not. See [`accounting-data-feed.md`](accounting-data-feed.md) for the #491
+> architecture record, and [`fortnox-non-asserting-feed.md`](fortnox-non-asserting-feed.md)
+> for the mechanism spike (#494) behind the object choice.
+>
+> **That feed is BUILT and live-proven (2026-07-16)**, not planned: #496 creates
+> unattested Fortnox **supplier invoices** (not vouchers — §9 guessed the other
+> way), #498 attaches the Haven-generated underlag PDF via the Fortnox inbox +
+> `supplierinvoicefileconnections`, and #956 attaches a merchant-issued receipt
+> as a second document (with a late-attach path for the x402 timing gap).
+>
+> **The asserting paths below were built, then switched off.** §7's SIE 4I
+> exporter and §9/§10-P2's Fortnox voucher push are real code
+> (`lib/sie-exporter.ts`, `lib/ledger-exporter.ts`, `lib/fortnox.ts`) now dark
+> behind `HAVEN_LEGACY_BOOKKEEPING_ENABLED` (off by default; the routes return
+> 410, #492). So read §7's "ship first/second" and §10's P0–P3 as
+> executed-then-reversed, not as an open plan.
 >
 > Original status: design proposal / business-thesis companion (historical).
 
@@ -140,7 +171,9 @@ the same `AccountingEntry` (SIE → DATEV → QuickBooks/Xero), matching the
   rather than inventing a VAT line. Surface the supplier country (from the
   merchant registry) so the treatment is explicit and the accountant can confirm.
 - **The Haven fee** is its own line (a Swedish-supplier service with standard
-  VAT) — already captured in the fee ledger (#386).
+  VAT). The fee ledger (#386) exists and writes a row per settled payment, but
+  the module is still dark (`HAVEN_FEE_ENABLED=false`, `quoteFee` returns zero),
+  so `fee_sek` is null today and no fee is charged.
 
 > Invariant: Haven produces *proposed* accounting records with explicit,
 > reviewable treatments — it is not a tax authority. The accountant remains in
@@ -149,8 +182,11 @@ the same `AccountingEntry` (SIE → DATEV → QuickBooks/Xero), matching the
 ## 9. Fortnox specifics
 
 - **Auth:** OAuth2 Authorization Code flow; register the integration in the
-  Fortnox Developer Portal for a client id/secret; the customer grants the
-  **Bookkeeping** scope.
+  Fortnox Developer Portal for a client id/secret. This doc assumed the
+  **Bookkeeping** scope alone; the shipped flow requests six —
+  `bookkeeping supplierinvoice supplier archive inbox connectfile` — because
+  `connectfile` is required for `supplierinvoicefileconnections` (proven live
+  2026-07-16: without it the upload succeeds but the connection POST 400s).
 - **Object:** create **Vouchers** (verifikationer) via the REST v3 API — balanced
   debit/credit lines per `AccountingEntry`. (Supplier-invoice objects are an
   alternative for the AP framing; vouchers are the most direct fit for settled

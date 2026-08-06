@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
 
@@ -291,9 +292,7 @@ export function ProtocolPlayground({ kind }: { kind: ProtocolKind }) {
           Live trace
         </div>
         {timeline.length === 0 ? (
-          <div className="rounded-[10px] border border-dashed border-[var(--v2-border-strong)] bg-white px-4 py-5 text-[13px] text-[var(--v2-ink-3)]">
-            The trace will populate as the flow plays.
-          </div>
+          <EmptyState size="inline" title="The trace will populate as the flow plays." className="bg-white" />
         ) : (
           <ol className="divide-y divide-[var(--v2-border)] overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-white">
             {timeline.map((event) => (

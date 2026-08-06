@@ -1,26 +1,46 @@
 'use client'
 
+import { Check, Copy, Info, Pencil, Search, Trash2, Users } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState, type FormEvent, type MouseEvent } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
+import { useContactChains } from '@/hooks/useContactChains'
+import { useChainScope } from '@/hooks/useActiveChain'
+import { getChainConfig } from '@/lib/chains'
 import { ApiRequestError } from '@/lib/api'
-import { truncate, isValidAddress } from '@/lib/format'
+import { isValidAddress } from '@/lib/format'
+import { Address } from '@/components/haven'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { Tooltip } from '@/components/ui/Tooltip'
+
+// Per-chain dot colour for the "Used on" badges (Base blue, Gnosis teal,
+// Base Sepolia amber to flag the testnet).
+const CHAIN_DOT: Record<number, string> = {
+  8453: 'var(--v2-chain-base)',
+  84532: 'var(--v2-chain-testnet)',
+  100: 'var(--v2-chain-gnosis)',
+}
+
+function chainDotColor(chainId: number): string {
+  return CHAIN_DOT[chainId] ?? 'var(--v2-ink-3)'
+}
+
+function chainName(chainId: number): string {
+  try {
+    return getChainConfig(chainId).name
+  } catch {
+    return `Chain ${chainId}`
+  }
+}
 
 function ContactIcon() {
   return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M15 19.128A8.97 8.97 0 0 0 18 19.5a8.96 8.96 0 0 0 4.121-.997 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003A6.374 6.374 0 0 0 12.75 14.25M15 19.128A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12.75 14.25A3.375 3.375 0 1 0 6 14.25a3.375 3.375 0 0 0 6.75 0Zm8.25-6a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"
-      />
-    </svg>
+    <Icon icon={Users} className="h-5 w-5" />
   )
 }
 
@@ -145,18 +165,7 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
             role="status"
             className="flex items-start gap-2 text-xs leading-relaxed text-[var(--v2-ink-3)]"
           >
-            <svg
-              aria-hidden="true"
-              className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.75}
-            >
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 11v5" strokeLinecap="round" />
-              <circle cx="12" cy="8" r="0.6" fill="currentColor" />
-            </svg>
+            <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
             <span>
               This address is already saved as{' '}
               <span className="font-medium text-[var(--v2-ink-2)]">{duplicateContact.name}</span>.
@@ -185,11 +194,12 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
 
 interface ContactRowProps {
   contact: Contact
+  chains: number[]
   onEdit: (contact: Contact) => void
   onDelete: (contact: Contact) => void
 }
 
-function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
+function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
   const [copied, setCopied] = useState(false)
 
   const copyAddress = async (event: MouseEvent) => {
@@ -205,9 +215,24 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
-        <Tooltip label={contact.address} mono>
-          <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(contact.address)}</p>
-        </Tooltip>
+        <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+          <Address value={contact.address} />
+        </p>
+        {chains.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">Used on</span>
+            {chains.map((id) => (
+              <span key={id} className="inline-flex items-center gap-1 text-xs text-[var(--v2-ink-2)]">
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-1.5 w-1.5 rounded-full"
+                  style={{ backgroundColor: chainDotColor(id) }}
+                />
+                {chainName(id)}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-1">
@@ -219,14 +244,9 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
           className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 sm:h-9 sm:w-9"
         >
           {copied ? (
-            <svg className="h-4 w-4 text-[var(--v2-success)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </svg>
+            <Icon icon={Check} className="h-4 w-4 text-[var(--v2-success)]" />
           ) : (
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 8.25V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.25" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 10a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8Z" />
-            </svg>
+            <Icon icon={Copy} className="h-4 w-4" />
           )}
         </button>
 
@@ -237,9 +257,7 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
           title="Edit contact"
           className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 sm:h-9 sm:w-9"
         >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
-          </svg>
+          <Icon icon={Pencil} className="h-4 w-4" />
         </button>
 
         <button
@@ -249,9 +267,7 @@ function ContactRow({ contact, onEdit, onDelete }: ContactRowProps) {
           title="Delete contact"
           className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 sm:h-9 sm:w-9"
         >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75v7.5m4.5-7.5v7.5M4.5 6.75h15m-12 0 .75 12A2.25 2.25 0 0 0 10.5 21h3a2.25 2.25 0 0 0 2.25-2.25l.75-12m-6-3h3a1.5 1.5 0 0 1 1.5 1.5v1.5h-6v-1.5a1.5 1.5 0 0 1 1.5-1.5Z" />
-          </svg>
+          <Icon icon={Trash2} className="h-4 w-4" />
         </button>
       </div>
     </div>
@@ -295,9 +311,9 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
         </p>
         <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
           <p className="text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
-          <Tooltip label={contact.address} mono>
-            <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(contact.address)}</p>
-          </Tooltip>
+          <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+            <Address value={contact.address} />
+          </p>
         </div>
         {error && (
           <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
@@ -319,16 +335,31 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
 
 export default function ContactsPage() {
   const { contacts, loading, error, refetch, addContact, updateContact, deleteContact } = useContacts()
+  const { chainsByAddress } = useContactChains()
+  // Contacts always show every chain — the active chain never collapses the
+  // list. This is an optional manual filter only (#634, epic #625).
+  const { scope, setScope } = useChainScope('all-chains')
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [editTarget, setEditTarget] = useState<Contact | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null)
 
-  const filtered = contacts.filter(
-    (contact) =>
+  const chainsFor = (address: string): number[] =>
+    chainsByAddress.get(address.toLowerCase()) ?? []
+
+  // Chains present across all contacts' activity — the options for the filter.
+  const filterableChains = Array.from(
+    new Set(contacts.flatMap((c) => chainsFor(c.address))),
+  ).sort((a, b) => a - b)
+
+  const filtered = contacts.filter((contact) => {
+    const matchesSearch =
       contact.name.toLowerCase().includes(search.toLowerCase()) ||
-      contact.address.toLowerCase().includes(search.toLowerCase()),
-  )
+      contact.address.toLowerCase().includes(search.toLowerCase())
+    if (!matchesSearch) return false
+    if (scope === 'all') return true
+    return chainsFor(contact.address).includes(scope)
+  })
 
   return (
     <div className="max-w-5xl">
@@ -343,25 +374,34 @@ export default function ContactsPage() {
       />
 
       {contacts.length > 0 && (
-        <div className="relative mb-4">
-          <label htmlFor="contacts-search" className="sr-only">Search contacts</label>
-          <svg
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--v2-ink-3)]"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-          </svg>
-          <Input
-            id="contacts-search"
-            type="text"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by name or address"
-            className="pl-9"
-          />
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <label htmlFor="contacts-search" className="sr-only">Search contacts</label>
+            <Icon icon={Search} className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--v2-ink-3)]" />
+            <Input
+              id="contacts-search"
+              type="text"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by name or address"
+              className="pl-9"
+            />
+          </div>
+          {filterableChains.length > 1 && (
+            <Select
+              aria-label="Filter contacts by network"
+              value={scope === 'all' ? 'all' : String(scope)}
+              onChange={(e) => setScope(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+              className="sm:max-w-[200px]"
+            >
+              <option value="all">All networks</option>
+              {filterableChains.map((id) => (
+                <option key={id} value={String(id)}>
+                  {chainName(id)}
+                </option>
+              ))}
+            </Select>
+          )}
         </div>
       )}
 
@@ -401,6 +441,7 @@ export default function ContactsPage() {
               <ContactRow
                 key={contact.id}
                 contact={contact}
+                chains={chainsFor(contact.address)}
                 onEdit={setEditTarget}
                 onDelete={setDeleteTarget}
               />
@@ -412,8 +453,16 @@ export default function ContactsPage() {
       {!loading && !error && contacts.length > 0 && filtered.length === 0 && (
         <EmptyState
           title="No matching contacts"
-          body={`No saved recipients match "${search}".`}
-          action={<Button variant="ghost" onClick={() => setSearch('')}>Clear search</Button>}
+          body={
+            scope !== 'all' && !search
+              ? `No saved recipients have activity on ${chainName(scope)}.`
+              : `No saved recipients match "${search}".`
+          }
+          action={
+            <Button variant="ghost" onClick={() => { setSearch(''); setScope('all') }}>
+              Clear filters
+            </Button>
+          }
         />
       )}
 

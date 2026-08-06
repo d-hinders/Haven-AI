@@ -16,12 +16,19 @@ const CHAIN_STYLES: Record<number, { dot: string; text: string; border: string; 
     border: 'border-[var(--v2-success)]/20',
     bg: 'bg-[var(--v2-success-soft)]',
   },
-  // Base — blue
+  // Base — sky-tinted pill (chain-identity tokens, see globals.css)
   8453: {
-    dot: 'bg-sky-500',
-    text: 'text-sky-700',
-    border: 'border-sky-200',
-    bg: 'bg-sky-50',
+    dot: 'bg-[var(--v2-chain-base-dot)]',
+    text: 'text-[var(--v2-chain-base-fg)]',
+    border: 'border-[var(--v2-chain-base-border)]',
+    bg: 'bg-[var(--v2-chain-base-bg)]',
+  },
+  // Base Sepolia — amber, to flag the testnet distinctly from Base mainnet
+  84532: {
+    dot: 'bg-[var(--v2-chain-testnet)]',
+    text: 'text-[var(--v2-chain-testnet-fg)]',
+    border: 'border-[var(--v2-chain-testnet-border)]',
+    bg: 'bg-[var(--v2-chain-testnet-bg)]',
   },
 }
 
@@ -49,7 +56,7 @@ export default function NetworkPill({ chainId, size = 'sm', className = '' }: Ne
 
   const style = CHAIN_STYLES[chainId] ?? FALLBACK_STYLE
   const padding = size === 'md' ? 'px-2 py-0.5' : 'px-1.5 py-0.5'
-  const textSize = size === 'md' ? 'text-[11px]' : 'text-[10px]'
+  const textSize = 'text-xs'
 
   return (
     <span

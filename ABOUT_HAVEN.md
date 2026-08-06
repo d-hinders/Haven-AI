@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: current
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-07-15"
+---
+
 # About Haven
 
 ## Product Summary
@@ -84,7 +91,12 @@ Haven can help construct and relay the transaction, but it must not alter the si
 
 The SDK supports `haven.fetch()`, quote-first helpers, and resume helpers for standard x402 and Haven machine-payment challenge flows.
 
-For standard x402 merchant payments, the delegate wallet is the merchant-facing payer because the merchant protocol verifies an EIP-3009 authorization from an externally owned account. The current flow is:
+How x402 settles depends on the account's rail:
+
+- **New (delegation-rail) accounts settle directly via ERC-7710** with **no funding leg**. The agent's budget delegation is the settlement instrument: it re-delegates a narrowed slice (exact amount, payee pin, short expiry) to the merchant, who redeems it so funds move account→merchant directly, metered on-chain by the same budget. No delegate hot balance, no sweep. The limit today is **merchant reach**: erc7710 needs facilitator-side support, which is still thin, so EIP-3009-only merchants are not yet reachable on this rail. The planned bridge is EIP-3009 support on the delegation rail (issue #946), which reintroduces a bounded, transient funding leg for interop.
+- **Legacy (AllowanceModule) accounts** use the EIP-3009 two-leg below, where the delegate wallet is the merchant-facing payer because the merchant protocol verifies an EIP-3009 authorization from an externally owned account.
+
+The legacy two-leg flow:
 
 1. Agent encounters an HTTP 402 challenge.
 2. Haven checks agent identity, wallet context, and remaining allowance.
@@ -93,7 +105,7 @@ For standard x402 merchant payments, the delegate wallet is the merchant-facing 
 5. The SDK retries the request with the standard `X-PAYMENT` header.
 6. Haven tracks funded, executed, failed, and stranded-payment states where relevant.
 
-This means the delegate key is a hot payment key and should be treated carefully. Keep x402 budgets small and reset-bound, rotate exposed keys, and reconcile/sweep stranded delegate balances before scaling high-volume payment traffic.
+On any funding-leg flow (the legacy rail today, and the #946 EIP-3009 bridge when it lands) the delegate key is a hot payment key and should be treated carefully. Keep x402 budgets small and reset-bound, rotate exposed keys, and reconcile/sweep stranded delegate balances before scaling high-volume payment traffic.
 
 Production merchant facilitation, Stripe MPP, fiat/card rails, and merchant settlement are not current production surfaces. Treat them as future or review-required work under `docs/regulatory/casp-risk-guardrails.md`.
 

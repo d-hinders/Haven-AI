@@ -1,3 +1,24 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/frontend/src/app/globals.css
+  - packages/frontend/tailwind.config.js
+  - packages/frontend/src/components/ui/**
+  - packages/frontend/src/app/layout.tsx
+  - packages/frontend/src/app/page.tsx
+  - packages/frontend/src/app/how-it-works/**
+  - packages/frontend/src/app/protocols/**
+  - packages/frontend/src/app/(authenticated)/design-system/**
+  - packages/frontend/src/components/marketing/**
+  - packages/frontend/src/components/sidebar/**
+  - packages/frontend/src/components/TopBar.tsx
+  - packages/frontend/src/components/haven/TransactionActivityRow.tsx
+  - packages/frontend/src/components/haven/TransactionMovement.tsx
+  - packages/frontend/src/components/transactions/**
+last-verified: "2026-07-13"
+---
+
 # Haven Design System
 
 This is the source of truth for Haven's current light visual language. Companion to the product UX guide (`docs/product/README.md`, which documents product doctrine, vocabulary, and IA — those rules **still apply**). If older docs mention a dark app surface system, **this document supersedes them**.
@@ -27,7 +48,7 @@ All tokens live as CSS custom properties at `:root` in `packages/frontend/src/ap
 |---|---|---|
 | `--v2-ink` | `#1a1f36` | Headings, primary text, amounts |
 | `--v2-ink-2` | `#525f7f` | Body text, secondary information |
-| `--v2-ink-3` | `#8898aa` | Tertiary text, eyebrows, captions |
+| `--v2-ink-3` | `#5d6c85` | Tertiary text, eyebrows, captions — AA-safe (≥4.5:1) on white and all tinted surfaces |
 | `--v2-ink-on-brand` | `#ffffff` | Text on brand‑colored or dark surfaces |
 
 ### Borders
@@ -52,11 +73,18 @@ Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do
 
 | Token | Value | Soft variant | Use |
 |---|---|---|---|
-| `--v2-success` | `#0e9f6e` | `--v2-success-soft` `#ecfdf5` | Settled, confirmed, incoming |
+| `--v2-success` | `#047857` | `--v2-success-soft` `#ecfdf5` | Settled, confirmed, incoming |
+| `--v2-debit` | `#0369a1` | `--v2-debit-soft` `#f0f9ff` | Outgoing / sent money (sibling to success; never a warning) |
 | `--v2-warning` | `#b54708` | `--v2-warning-soft` `#fef3c7` | 402 Payment Required, pending review |
 | `--v2-danger` | `#b42318` | `--v2-danger-soft` `#fef2f2` | Failed, destructive |
 
 Same rule as v1: **never repurpose a semantic color**.
+
+**Contrast guarantee:** every ink and semantic text token meets WCAG AA (≥4.5:1) against white, its own `-soft` background, and the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover). Guarded by `packages/frontend/src/__tests__/token-contrast.test.ts` — if you change a token, that test tells you whether it still clears the bar.
+
+### Chain identity
+
+`--v2-chain-*` (Base, Gnosis, testnet, plus `NetworkPill`'s sky/amber soft-pill scale) tells networks apart in `NetworkPill` and `NetworkSwitcher`. These are **identity** colours — deliberately outside the semantic rule above. Never reuse a chain colour to carry success/warning meaning, and never route money tone through them. Live swatches on `/design-system` → "Colour tokens".
 
 ### Radii
 
@@ -272,10 +300,12 @@ Animated, cycling state machine showing one payment lifecycle (Intent → Policy
 
 ## 5. Iconography
 
-- 14 / 16 / 20 px exactly (matches v1 rule).
-- Inline SVGs, `stroke-width="1.5"` for line icons, currentColor.
+- One family: **lucide-react**, rendered through the shared `Icon` wrapper (`components/ui/Icon.tsx`) — never a hand-rolled inline `<svg>`. Exemptions: brand marks in `components/brand` and marketing pages.
+- 14 / 16 / 20 px exactly (matches v1 rule); size via className (`h-4 w-4`) or the wrapper's numeric `size` prop.
+- `stroke-width` 1.5 everywhere, currentColor. Overrides require a call-site comment (see `/design-system` → Icons).
+- Decorative by default (`aria-hidden`); pass `label` only when the icon is the sole carrier of meaning.
 - No emoji in product UI or marketing.
-- Arrow chevrons (`→`) drawn in SVG, not unicode, so they animate consistently.
+- Arrow chevrons (`→`) come from lucide, not unicode, so they animate consistently.
 
 ---
 
@@ -352,3 +382,21 @@ The authenticated app has migrated from the old dark surface system onto the lig
 | `shadow-black/*` | `shadow-modal` or `shadow-card` | Use token shadows rather than black glow |
 
 Semantic colors keep their meaning: emerald/success, amber/warning, red/danger. Prefer the v2 semantic tokens (`success`, `warning`, `danger`) for new work.
+
+---
+
+## 9. Enforcement
+
+This system is enforced by automated gates (epic [#904](https://github.com/d-hinders/Haven-AI/issues/904)), not just documented. The authoritative process description lives in the [frontend ship-playbook](../contributing/ship-playbooks/frontend.md); in brief:
+
+| Gate | Catches | Posture |
+|---|---|---|
+| **design-lint** (`npm run design:lint -w packages/frontend`) | Token bypass (raw palette classes, hex colours, micro-fonts) **and** structural bypass (hand-rolled header bands, raw `<table>`/`<svg>`, address slices) | Blocking CI; shrink-only baseline |
+| **Visual regression** (`/design-system` snapshot suite) | Unreviewed pixel drift in any shared primitive | Blocking CI; Linux baselines |
+| **Design-system coupling** (`npm run design:coupling -w packages/frontend`) | A new `ui/`/`haven/` primitive missing from `/design-system` | **Blocking** on every PR (*Design-system coupling (strict)*, #1023); a sticky comment explains the finding |
+| **copy-lint** (`npm run lint:copy`) | Banned multi-word technical terms in user-facing copy | Blocking CI; shrink-only baseline |
+| **haven-design-reviewer** | Rendered-UX issues (visual weight, spacing rhythm, states, touch targets) reviewed from the screenshot evidence | Review pass; any finding pauses auto-merge |
+
+Marketing/landing surfaces are exempt from the lint gates (intentionally bespoke); the product app and `/design-system` stay fully gated.
+
+**Escape markers (reviewed exceptions).** One placement rule for the line-scanning gates: put the marker on the offending line **or the line directly above** — `design-lint-disable-line` (design-lint) and `// copy-lint-ignore` (copy-lint) both work either way (shared helper: `scripts/lib/lint-escapes.mjs`). The coupling gate's `// design-system-exempt: <reason>` is different by design — it exempts an *export*, sits as a trailing comment on the export line, and requires the colon + reason. Use escapes sparingly; each one is a standing reviewed exception.

@@ -1,8 +1,27 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .agents/skills/haven-agent-workflow/**
+  - .agents/skills/ship-next/**
+  - .claude/agents/**
+  - .claude/commands/ship-next.md
+  - .github/pull_request_template.md
+  - AGENTS.md
+  - docs/contributing/autonomous-pr-loop.md
+  - docs/contributing/ai-review-patterns.md
+last-verified: "2026-08-05"
+---
+
 # Haven AI Agent Workflow
 
 This repo uses one main session as the captain and a few narrow subagents as specialists.
 
 The captain is the main interactive session. It owns product judgment, git, shared files, final integration, and the branch or PR. Subagents are useful for isolated discovery, bounded implementation, and review.
+
+> **What is enforced vs. what this document adds ([#1025](https://github.com/d-hinders/Haven-AI/issues/1025)).** The mechanical standards are **CI required checks**, and the migrations gate is a `CODEOWNERS` **review rule** — different mechanisms, same property: they apply to every pull request whoever or whatever opened it. Nothing in this document is needed to make them apply, and no workflow choice skips them. The authoritative list, with its fork and promotion caveats, is the ruleset inventory in [`autonomous-pr-loop.md`](autonomous-pr-loop.md).
+>
+> Everything below is the layer CI **cannot** check: judgement, review, and the traps a diff walks into. `ship-next` is the default route through it because it is the fastest one, not because it is required. Working differently is fine and stays possible — it means owning an equivalent review yourself, and saying so in the pull request. There is deliberately no check for which workflow was used: enforce outcomes, never tooling.
 
 ## Default Delegation Policy
 
@@ -36,7 +55,7 @@ Use `docs/contributing/ai-review-patterns.md` as shared memory for recurring PR 
 
 Before final review, the captain should do a risk-specific self-check based on the changed surface:
 
-- regulatory perimeter: for payment execution, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP, merchant, fiat/card, swap, yield, or advice surfaces, apply `docs/regulatory/casp-risk-guardrails.md`
+- regulatory perimeter: for payment execution, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP, merchant, fiat/card, swap, yield, treasury, or advice surfaces, apply `docs/regulatory/casp-risk-guardrails.md`
 - transactions and feeds: raw vs formatted values, totals, dedupe, pagination, source labels, and cross-surface consistency
 - approvals and pending actions: status transitions, migrations or constraints, post-action copy, expiry, notification counts, and single vs multi-approval behavior
 - send, receive, contacts, and other modals: primary action hierarchy, scroll, z-index, close behavior, typing behavior, duplicate handling, and network context
@@ -45,7 +64,7 @@ Before final review, the captain should do a risk-specific self-check based on t
 - credential and setup surfaces: one-time credential visibility, modal reset behavior, in-flight action reset, identifier entropy, and setup-copy consistency
 - generated artifacts: credential files, SDK examples, demo scripts, and skill bundles stay aligned with current Haven capabilities, env vars, product language, and regulatory guardrails
 
-After a Claude or PR review, if a comment is both relevant and fixed, add the reusable pattern to `docs/contributing/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer prompt together. Do not add one-off preferences or obsolete implementation details.
+After an agent or PR review, if a comment is both relevant and fixed, add the reusable pattern to `docs/contributing/ai-review-patterns.md`, the Captain Self-Check Preflight, and the canonical reviewer role together. Do not add one-off preferences or obsolete implementation details.
 
 Workers can implement narrow slices, but the captain owns cross-surface consistency, shared abstractions, PR shape, final review judgment, and deciding which review comments become durable workflow memory.
 
@@ -60,8 +79,8 @@ Run only the items that match the changed surface. Skip the rest.
 - **Conditional Copy Predicates.** If the diff adds a string like `"This will replace…"`, `"Update budget"` vs `"Add budget"`, `"Resume"` vs `"Start"`: confirm there are tests for the no-match and exact-match branches of the predicate, and confirm the predicate matches on precise identity (token address or symbol), not on a broadened layout-driven boolean.
 - **Async Hook Requests.** If the diff changes a hook that fetches keyed data (address, chain, agent id, filters, or enabled state): confirm late responses from older keys cannot overwrite current state, and add a staggered-resolution test for the smallest risky key change.
 - **Signer Readiness Gates.** If the diff changes wallet, passkey, `useActiveSigner`, `useSafeOperationGate`, `OnchainActionGate`, `WalletButton`, or wallet-approval copy: confirm gated actions do not treat `address` or `isConnected` alone as signer readiness. EOA readiness must match the signer hook's `address && walletClient` requirement, and tests should cover address-present / walletClient-missing with a visible recovery action.
-- **Animation Discipline.** If the diff adds or moves CSS animations: grep that every new keyframe rule is wrapped in `@media (prefers-reduced-motion: no-preference)`, that pre-existing animations getting a prominent placement are also gated, and that the className stack on the animated element does not toggle one animation class while another remains.
-- **Inline Gate Placement.** If the diff renders `OnchainActionGate` or `NetworkGate`: confirm the notice is rendered **above** the action row, not inside the `flex-1` wrapper. Use `showNotice={false}` on the gate when rendering `<OnchainActionNotice />` separately.
+- **Animation Discipline.** If the diff adds or moves CSS animations: confirm every animation-bearing class or declaration is gated by `@media (prefers-reduced-motion: no-preference)`, including pre-existing animations moved into a prominent placement. Keyframes may remain at top level. Confirm the animated element's className stack does not toggle one animation class while another remains.
+- **Inline Gate Placement.** If the diff renders a separate `<OnchainActionNotice />`: confirm it sits **above** the action row, not inside the `flex-1` wrapper, and use `showNotice={false}` on `OnchainActionGate`. `NetworkGate` intentionally renders its mismatch hint and replacement network action in place; do not force it into the separate-notice pattern. Match the hoisted-notice layout in `EditAgentModal`.
 - **Cross-Surface Display Drift.** If the diff changes a value rendered in 2+ surfaces (dashboard preview + detail card + agent page + transactions): confirm there is one shared formatter, that the input carries chain/token context, and that the API response includes the metadata each row needs.
 - **Loading-State Inference.** If the diff infers onboarding or completion progress from a paginated preview list: reject and require an explicit `onboardingProgress.*` API field. Gate the dependent UI until **all** prerequisite hooks have resolved, not just the first one.
 - **Multi-Entrypoint Parity.** If the diff changes a payment, x402/MPP, MCP, SDK, demo merchant, or hosted/local signing path: confirm every supported entrypoint uses the same validated payment state or has a parity test. Header, tool-argument, SDK helper, and direct API paths must not drift.
@@ -69,6 +88,8 @@ Run only the items that match the changed surface. Skip the rest.
 - **Identifier Entropy.** If the diff adds or changes a displayed key prefix, setup token prefix, invoice number, nonce, or visual identifier: confirm the displayed prefix has enough entropy for the population it identifies and has collision or duplicate handling where needed.
 - **Credential Setup Copy.** If the diff changes setup copy, credential handoffs, signing-key guidance, or done-step instructions: confirm the copy is consistent across surfaces, leads with the user-facing safety property, and does not imply API credentials or Haven backend custody can spend.
 - **Browser Or Headless Verification.** If browser verification is skipped for UI or routing changes: name the reason and add a headless equivalent that covers the skipped risk.
+- **Green-Gate Evidence.** If you are about to record a gate as passing in the PR body: confirm the run actually saw the candidate diff. A check that reports on a file list can report success on an *empty* one, which reads identically to a clean pass — `node scripts/docs/coupling-gate.mjs` did exactly this when run before the commit, and "no covered docs implicated" went into #1076's Local Checks as evidence while a contract doc sat untouched. Run the strict, CI-equivalent form (`npm run docs:coupling`), and treat a gate that names zero inputs as unrun rather than green.
+- **Pattern Absorption.** If the diff writes a markup shape a **second** time — the same header band, badge, row, empty-state, inline `<svg>`, or address-truncation you (or an existing file) already wrote — or re-creates something a `ui/`/`haven/` primitive already covers: extract it into a `ui/`/`haven/` primitive **and** add a `/design-system` entry, in this same PR. The trigger is the 2nd occurrence, not the 12th — this is what would have prevented every debt cluster #859 had to clean retroactively. The new primitive trips the design-system coupling gate (#898) by design, which is how the "add a DS entry" half is machine-checked. If extraction is genuinely premature (the two uses will diverge), say so explicitly rather than silently duplicating.
 
 Run the matching items before invoking `haven-reviewer` so the reviewer finds fewer issues. If the reviewer surfaces a new trap family, add it to `docs/contributing/ai-review-patterns.md`, this preflight, and the reviewer agent's recurring-traps list together — the three should stay in sync.
 
@@ -117,6 +138,9 @@ Every non-trivial PR should end with a concise closeout:
 - changed files or surfaces
 - workflow used, including agents used or skipped with reason
 - checks run
+- browser verification or the headless equivalent used when browser verification was skipped
+- generated artifact and credential-handoff impact
+- CASP/MiCA guardrail status when relevant
 - what was intentionally left out
 - review status
 - merge-readiness report
@@ -144,11 +168,30 @@ For generated artifacts, pair implementation changes with output review. If SDK/
 
 ## How To Create Or Invoke Agents
 
-In Claude Code, project agents live in `.claude/agents/`. Restart Claude Code after adding or editing these files, or use `/agents` to manage them interactively. Invoke one explicitly with prompts like `Use the haven-explorer agent...`.
+Canonical role instructions live in `.agents/skills/haven-agent-workflow/references/`. Every client should use those role contracts even when its delegation mechanism differs.
 
-The `color:` fields in `.claude/agents/` are cosmetic Claude Code metadata. Codex and other tools can ignore them.
+In Claude Code, `.claude/agents/` contains thin adapters with Claude-specific tool, model, and color metadata. Restart Claude Code after changing the adapters, or use `/agents` to manage them interactively. Invoke a role explicitly with prompts like `Use the haven-explorer agent...`.
 
-In Codex, keep the same mental model even when agents are not stored as `.claude/agents` files. Ask the main session to spawn a read-only explorer, a bounded worker, or a reviewer, and include the same ownership contract in the prompt.
+In Codex and other clients with delegation support, ask the captain to spawn a read-only explorer, a bounded worker, or a reviewer and point it at the matching canonical role reference. When delegation is unavailable, perform a separate pass using the same role contract.
+
+### Skill discovery verification
+
+Portable project skills live under `.agents/skills/<name>/SKILL.md`. Run
+`npm run docs:check` to verify their metadata, references, portable-language
+boundary, and client-adapter targets.
+
+Skill catalogs are loaded at session start. After adding or changing a skill:
+
+- start a fresh Codex session rooted at the repository and invoke the skill by
+  name with a no-mutation request;
+- start a fresh Claude Code session and invoke the matching slash-command
+  adapter with a no-mutation request;
+- confirm the response follows the canonical skill's default and does not rely
+  on workflow text copied into the adapter.
+
+For example, ask `new-task` to report whether its default is backlog-only while
+explicitly forbidding issue creation. This checks discovery and argument
+forwarding without changing GitHub state.
 
 Example:
 
@@ -220,7 +263,19 @@ Example:
 Use the haven-reviewer agent to review the current diff for Haven product, UX, security, regression, and test risks. Findings first with file and line references.
 ```
 
+### `haven-doc-reviewer`
+
+Use after implementation when the diff touches code that some doc's `covers:` front-matter maps to (the coupling gate flags these on the PR). It reports specific stale, missing, or broken doc claims so the captain can update them before merge. The agent's findings are read-only suggestions, but **running it and acting on `covers:`-mapped findings is a hard definition-of-done step in the loop, not optional** — the captain must update the implicated docs (or genuinely re-verify and bump `last-verified`) in the same PR before opening it. Advisory here means the **docs↔code** coupling comment does not by itself block auto-merge (contract docs excepted), not that the step can be skipped. The *design-system* coupling gate is a different check and does block — see [`autonomous-pr-loop.md`](autonomous-pr-loop.md).
+
+Example:
+
+```text
+Use the haven-doc-reviewer agent to check whether `git diff origin/dev...HEAD` has invalidated any docs that cover the changed code. Findings first with the exact stale claim and the smallest correct update.
+```
+
 ## Default Feature Loop
+
+The canonical `ship-next` skill follows the narrower autonomous issue-to-PR loop in `docs/contributing/autonomous-pr-loop.md`. Treat it as an explicit specialized exception to the coordinator/explorer sequence below; its gates and closeout contract take precedence when invoked. Claude Code exposes it through the thin `/ship-next` command adapter.
 
 1. Start from a clean branch.
 2. Use `haven-workflow-coordinator` for non-trivial work to choose the agent plan and ownership boundaries. This is a default workflow decision, not something that depends on the user explicitly asking for parallel agents.
@@ -232,9 +287,10 @@ Use the haven-reviewer agent to review the current diff for Haven product, UX, s
 8. Run relevant build or test checks.
 9. Run the **Captain Self-Check Preflight** above for the surfaces the diff touches. Pair any skipped browser verification with a headless equivalent vitest.
 10. Ask `haven-reviewer` for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
-11. Let the captain fix final issues, commit, push, and open the PR.
-12. Add the PR closeout contract and merge-readiness report before calling the work complete.
-13. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur. Keep `docs/contributing/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer agent's recurring-traps list in sync.
+11. Ask `haven-doc-reviewer` for a doc-accuracy pass when the diff touches code mapped by some doc's `covers:` front-matter (the coupling gate flags these). Update the implicated docs before opening the PR.
+12. Let the captain fix final issues, commit, push, and open the PR.
+13. Add the PR closeout contract and merge-readiness report before calling the work complete.
+14. If external review finds a relevant issue that gets fixed, update the reusable review pattern memory when the issue is likely to recur. Keep `docs/contributing/ai-review-patterns.md`, the Captain Self-Check Preflight, and the reviewer agent's recurring-traps list in sync.
 
 ## Files The Captain Should Usually Own
 
@@ -287,7 +343,9 @@ Follow the Haven agent workflow:
 10. Ask workers to report needed shared changes instead of making them.
 11. Integrate each slice before starting broad follow-up work.
 12. Run relevant tests, type checks, builds, or browser checks when practical.
-13. Use haven-reviewer for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
+13. Run the **Captain Self-Check Preflight** for every changed surface, including a headless equivalent when browser verification is skipped.
+14. Use haven-reviewer for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
+15. Use haven-doc-reviewer when changed code matches a document's `covers:` front-matter, and update any stale claims it identifies.
 
 Gravity files the captain should usually own:
 - package files
@@ -312,7 +370,7 @@ For UI work, enforce the Haven UI instructions from AGENTS.md:
 - review copy against the UX copy guidelines
 - check mobile and desktop layouts when practical
 - use `docs/contributing/ai-review-patterns.md` for known reviewer traps before final review
-- use `docs/regulatory/casp-risk-guardrails.md` for payment, Safe, relayer, SDK payment API, x402/MPP, merchant, fiat/card, swap, yield, or advice work
+- use `docs/regulatory/casp-risk-guardrails.md` for payment, agent authority, Safe, relayer, SDK payment API, x402/MPP, merchant, fiat/card, swap, yield, treasury, or advice work
 
 Before implementation, briefly tell me:
 - which agents you will use, if any

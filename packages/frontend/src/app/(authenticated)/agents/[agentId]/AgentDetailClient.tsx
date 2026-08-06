@@ -1,5 +1,7 @@
 'use client'
 
+import { ArrowRight, EllipsisVertical } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useMemo, useState } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
@@ -28,8 +30,10 @@ import {
   failedOrRejectedStatus,
 } from '@/lib/payment-status'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
-import { useActiveSigner } from '@/lib/signer'
+import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import EditAgentModal, { type EditAgentModalMode } from '@/components/EditAgentModal'
+import DelegationBudgetCard, { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
+import AgentPassportCard from '@/components/AgentPassportCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import {
@@ -45,6 +49,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -272,9 +277,13 @@ export default function AgentDetailClient({ agentId }: Props) {
   const { balance: delegateBalance, hasRecoverableUsdc } = useDelegateBalance(
     agent && agent.status !== 'revoked' ? agentId : null,
   )
-  const strandedSummary = delegateBalance && delegateBalance.usdc_atomic !== '0'
-    ? `${delegateBalance.usdc} USDC`
-    : null
+  // #1098: the human field can be absent while atomic is set (a partial API
+  // response mid-load) — "Recover undefined USDC" is worse than the generic
+  // copy, so the summary requires BOTH fields.
+  const strandedSummary =
+    delegateBalance && delegateBalance.usdc_atomic !== '0' && delegateBalance.usdc
+      ? `${delegateBalance.usdc} USDC`
+      : null
   const managedDelegates = useMemo(
     () => (agent?.delegate_address && agent.status !== 'revoked' ? [agent.delegate_address] : []),
     [agent?.delegate_address, agent?.status],
@@ -290,10 +299,13 @@ export default function AgentDetailClient({ agentId }: Props) {
     : null
 
   const publicClient = usePublicClient({ chainId })
-  const signer = useActiveSigner({
+  const activeSigner = useActiveSigner({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,
   })
+  // Revoking here is a Safe transaction — only a Safe-capable signer applies.
+  // Delegation agents hide this path entirely (#1079).
+  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
   const operationGate = useSafeOperationGate({
     safeAddress: safeAddress ? (safeAddress as Address) : undefined,
     chainId,
@@ -310,7 +322,17 @@ export default function AgentDetailClient({ agentId }: Props) {
     setEditMode('agent')
     setEditOpen(true)
   }
+  const isDelegationAgent = agent?.account_type === 'delegator_hybrid'
   const openUpdateBudget = () => {
+    if (isDelegationAgent) {
+      // Routing fix (#1079): on the delegation rail the budget control is
+      // DelegationBudgetCard on this same page — EditAgentModal is the legacy
+      // AllowanceModule editor and can never succeed here. Scroll, don't open.
+      document
+        .getElementById(DELEGATION_BUDGET_CARD_ID)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
     setEditMode('budget')
     setEditOpen(true)
   }
@@ -371,6 +393,18 @@ export default function AgentDetailClient({ agentId }: Props) {
       amount,
       period: budgetPeriodLabel(allowance.reset_period_min),
     }
+  })
+  // #796/#804: recipients bind per token — the card gets EVERY configured
+  // token (a picker appears only when there is more than one).
+  const recipientTokens = currentAgent.allowances.flatMap((allowance) => {
+    if (!chainConfig) return []
+    const cfg = Object.values(chainConfig.tokens).find((t) => t.symbol === allowance.token_symbol)
+    if (!cfg) return []
+    return [{
+      address: (cfg.address ?? allowance.token_address) as string,
+      symbol: cfg.symbol,
+      decimals: cfg.decimals,
+    }]
   })
   const approvalCopy =
     budgetLines.length === 0
@@ -460,18 +494,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                   disabled={pendingAction !== null}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <svg
-                    className="h-4 w-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    aria-hidden="true"
-                  >
-                    <circle cx="12" cy="5" r="1.25" />
-                    <circle cx="12" cy="12" r="1.25" />
-                    <circle cx="12" cy="19" r="1.25" />
-                  </svg>
+                  <Icon icon={EllipsisVertical} className="h-4 w-4" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                   <DropdownMenuItem onSelect={openEditAgent}>Edit agent</DropdownMenuItem>
@@ -520,6 +543,34 @@ export default function AgentDetailClient({ agentId }: Props) {
         <PasskeyOtherDeviceNotice className="mt-4" />
       ) : null}
 
+      {currentAgent.account_type === 'delegator_hybrid' ? (
+        <>
+          <div id={DELEGATION_BUDGET_CARD_ID} className="scroll-mt-24">
+            <DelegationBudgetCard
+              agentId={agentId}
+              chainId={chainId}
+              tokens={recipientTokens}
+              onBudgetChange={refetch}
+            />
+          </div>
+          {/* #1089: backup & recovery moved to the account page — it's an
+              account capability, not an agent one. This is a pointer, not a
+              second copy of the controls. */}
+          {safe ? (
+            <Card hover={false} className="mt-6 p-2">
+              <Row
+                href={`/accounts/${safe.id}`}
+                title="Backup & recovery"
+                subtitle="Manage the ways this account can be approved"
+                trailing={<Icon icon={ArrowRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}
+              />
+            </Card>
+          ) : null}
+        </>
+      ) : null}
+      {/* Session-rail banner + recipients card retired with the rail (#834);
+          legacy AllowanceModule accounts manage budgets via EditAgentModal. */}
+
       {isPaused ? (
         <div className="mt-4">
           <ApprovalRequiredBanner title="Paused in Haven" tone="neutral" density="compact">
@@ -546,9 +597,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                 aria-label="Recover funds to your Haven wallet"
               >
                 Recover funds
-                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>
-                  <path d="M3.5 8h9M8.5 4l4.5 4-4.5 4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                <Icon icon={ArrowRight} className="h-3 w-3" />
               </a>
             </div>
           </ApprovalRequiredBanner>
@@ -579,6 +628,8 @@ export default function AgentDetailClient({ agentId }: Props) {
           helper="Payments waiting on you"
         />
       </div>
+
+      <AgentPassportCard agentId={agentId} agentRevoked={isRevoked} />
 
       <div className="mt-6 space-y-6">
           <AgentRulesSummary
@@ -650,7 +701,10 @@ export default function AgentDetailClient({ agentId }: Props) {
                       {pendingAction === 'resume' ? 'Resuming…' : 'Resume agent'}
                     </Button>
                   ) : null}
-                  {!isRevoked ? (
+                  {/* Safe revoke is an AllowanceModule teardown; on delegation
+                      agents the real path is DelegationBudgetCard's per-budget
+                      stop (#1079), so the Safe control is hidden there. */}
+                  {!isRevoked && !isDelegationAgent ? (
                     <Button
                       onClick={() => setConfirmAction('revoke')}
                       disabled={pendingAction !== null || revokeBlockedByOtherDevice}

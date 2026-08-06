@@ -1,5 +1,7 @@
 'use client'
 
+import { Check } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -8,11 +10,15 @@ import { api } from '@/lib/api'
 import { displayName } from '@/lib/user'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount } from 'wagmi'
-import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig, SUPPORTED_CHAINS } from '@/lib/chains'
+import { DEFAULT_CHAIN_ID, getExplorerUrl, getChainConfig } from '@/lib/chains'
+import { useDeployableChains } from '@/hooks/useDeployableChains'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { StepProgress } from '@/components/ui/StepProgress'
 import PasskeyEnrollFlow from './PasskeyEnrollFlow'
+import HybridEnrollFlow from './HybridEnrollFlow'
+import { RecoveryNudge } from '@/components/onboarding/RecoveryNudge'
 import type { User } from '@/context/AuthContext'
+import { truncateAddress } from '@/components/haven'
 
 type Step = 'choose-signer' | 'connect' | 'deploy' | 'done'
 type SignerMode = 'passkey' | 'eoa' | null
@@ -34,6 +40,25 @@ export default function OnboardingClient() {
   const [txHash, setTxHash] = useState('')
   const [safeAddress, setSafeAddress] = useState('')
   const [selectedChainId, setSelectedChainId] = useState(DEFAULT_CHAIN_ID)
+  // Delegation-rail onboarding (#886): dark-launched behind a flag, and only
+  // on chains where the rail is live (Base Sepolia during the pilot). When
+  // active, the passkey path creates a Hybrid account (counterfactual, zero
+  // tx) instead of deploying a Safe.
+  const delegationOnboarding =
+    process.env.NEXT_PUBLIC_DELEGATION_ONBOARDING === '1' && selectedChainId === 84532
+
+  // Only offer chains the backend actually serves deploys on (#679). If the
+  // current selection isn't served (e.g. the default is mainnet but this env
+  // only serves Base Sepolia), snap to the first served chain.
+  const { chains: deployableChains } = useDeployableChains()
+  useEffect(() => {
+    if (
+      deployableChains.length > 0 &&
+      !deployableChains.some((c) => c.chainId === selectedChainId)
+    ) {
+      setSelectedChainId(deployableChains[0].chainId)
+    }
+  }, [deployableChains, selectedChainId])
 
   const progressSteps = useMemo(() => {
     if (signerMode === 'eoa') {
@@ -117,6 +142,15 @@ export default function OnboardingClient() {
       setDeploying(false)
       setDeployStage(null)
     }
+  }
+
+  async function handleHybridComplete(args: { accountAddress: `0x${string}` }) {
+    setError('')
+    setSafeAddress(args.accountAddress)
+    setTxHash(EMPTY_TX_HASH) // counterfactual — deploys with the first budget (#860)
+    updateUser({ safe_address: args.accountAddress, wallet_address: null })
+    await refreshUser()
+    setStep('done')
   }
 
   async function handlePasskeyComplete(args: {
@@ -229,7 +263,7 @@ export default function OnboardingClient() {
                   onChange={(e) => setSelectedChainId(Number(e.target.value))}
                   className="w-full bg-transparent text-sm text-[var(--v2-ink)] outline-none cursor-pointer"
                 >
-                  {SUPPORTED_CHAINS.map((chain) => (
+                  {deployableChains.map((chain) => (
                     <option key={chain.chainId} value={chain.chainId}>
                       {chain.name}
                     </option>
@@ -293,7 +327,7 @@ export default function OnboardingClient() {
                   <div>
                     <span className="block text-xs text-[var(--v2-ink-3)] mb-1">Connected wallet</span>
                     <span className="text-sm font-mono text-[var(--v2-ink)]">
-                      {address?.slice(0, 6)}...{address?.slice(-4)}
+                      {address ? truncateAddress(address) : ''}
                     </span>
                   </div>
                   <ConnectButton.Custom>
@@ -316,7 +350,7 @@ export default function OnboardingClient() {
                   onChange={(e) => setSelectedChainId(Number(e.target.value))}
                   className="w-full bg-transparent text-sm text-[var(--v2-ink)] outline-none cursor-pointer"
                 >
-                  {SUPPORTED_CHAINS.map((chain) => (
+                  {deployableChains.map((chain) => (
                     <option key={chain.chainId} value={chain.chainId}>
                       {chain.name}
                     </option>
@@ -389,7 +423,7 @@ export default function OnboardingClient() {
                           }`}
                         >
                           <div
-                            className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium shrink-0 ${
+                            className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium shrink-0 ${
                               isActive
                                 ? 'bg-white text-[var(--v2-brand)]'
                                 : isDone
@@ -429,14 +463,25 @@ export default function OnboardingClient() {
 
           {step === 'deploy' && signerMode === 'passkey' && (
             <div key="deploy-passkey" className="v2-animate-step-rise">
-              <PasskeyEnrollFlow
-                user={user}
-                selectedChainId={selectedChainId}
-                onComplete={(args) => {
-                  void handlePasskeyComplete(args)
-                }}
-                onError={setError}
-              />
+              {delegationOnboarding ? (
+                <HybridEnrollFlow
+                  user={user}
+                  selectedChainId={selectedChainId}
+                  onComplete={(args) => {
+                    void handleHybridComplete(args)
+                  }}
+                  onError={setError}
+                />
+              ) : (
+                <PasskeyEnrollFlow
+                  user={user}
+                  selectedChainId={selectedChainId}
+                  onComplete={(args) => {
+                    void handlePasskeyComplete(args)
+                  }}
+                  onError={setError}
+                />
+              )}
             </div>
           )}
 
@@ -459,15 +504,8 @@ export default function OnboardingClient() {
                   />
                 </div>
                 <div className="animate-check-pop relative flex h-14 w-14 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] ring-1 ring-inset ring-[var(--v2-brand)]/25 shadow-[var(--v2-shadow-button)]">
-                  <svg
-                    className="h-7 w-7 text-[var(--v2-brand)]"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2.4}
-                  >
-                    <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  {/* Heavier stroke: the 56px success bloom check reads too light at 1.5. */}
+                  <Icon icon={Check} className="h-7 w-7 text-[var(--v2-brand)]" strokeWidth={2.4} />
                 </div>
               </div>
 
@@ -512,6 +550,12 @@ export default function OnboardingClient() {
                   </div>
                 )}
               </div>
+
+              {delegationOnboarding && signerMode === 'passkey' ? (
+                <div className="v2-animate-stagger" style={{ ['--v2-stagger-delay' as string]: '300ms' }}>
+                  <RecoveryNudge />
+                </div>
+              ) : null}
 
               <button
                 onClick={handleSetUpFirstAgent}

@@ -1,3 +1,13 @@
+/**
+ * Local (stdio) MCP tool handlers. This package runs in the AGENT OPERATOR'S
+ * OWN environment — it reads the local credential file and signs locally; the
+ * hosted backend is not in the loop for the merchant call. So `merchant_url`
+ * passed to `haven.fetch` below is NOT an SSRF surface: the agent is the
+ * principal paying a merchant IT chose, on its own machine — the same trust
+ * position as running `curl`. There is no server reflecting attacker input
+ * into an internal request. (Hosted, multi-tenant fetches live in mcp-server,
+ * which is where URL-hardening would matter.)
+ */
 import {
   AgentPaymentNextAction,
   HavenApiError,

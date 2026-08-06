@@ -29,3 +29,62 @@ jobs:
             exit 1
           fi
           echo "✅ Allowed: $SOURCE → main"
+
+  # Money-flow QA freshness gate (#578, hardened in #1030). Rather than run the
+  # money-moving harness inline on every promotion PR (which would burn testnet
+  # funds per-attempt and need the QA_* secrets in this PR-triggered workflow),
+  # require that a GREEN `qa-dev.yml` run already COVERS the money-path code
+  # being promoted — produced by the nightly schedule or the post-deploy
+  # repository_dispatch. The harness itself stays out of the hot path.
+  #
+  # The logic lives in scripts/ci/qa-freshness.mjs, not inline here, because
+  # this is what replaced the in-session money-path approval pause (#1024) and
+  # untestable bash was how both of its original gaps went unnoticed: the check
+  # was time-based rather than SHA-bound, and it was blind to `hotfix/*`
+  # entirely. That file is pure + unit-tested; this job is just its IO.
+  #
+  # Escape hatch, deliberately kept: a `qa-override` PR label skips the check
+  # (documented quarantine for a wedged testnet flake). It emits a ::warning::,
+  # which is the point — a named, logged bypass is a feature.
+  qa-freshness:
+    runs-on: ubuntu-latest
+    permissions:
+      # contents: read is REQUIRED — the job checks out the repo to diff the QA
+      # run's commit against the promotion head. Without it checkout fails, the
+      # job fails, and the promotion is blocked. Fail-closed, but for the wrong
+      # reason, so it would look like a real finding.
+      contents: read
+      actions: read
+      pull-requests: read
+    env:
+      # A green money-flow run must be no older than this many hours. Override with a
+      # repo variable if the dev cadence changes. Default 30h covers a missed nightly.
+      # Explicit repo variable since #1066 (set to 30) — the promotion window
+      # is a deliberate, reviewable number, not a fallback. The `|| '30'`
+      # stays as a fail-safe against accidental variable deletion only.
+      FRESHNESS_HOURS: ${{ vars.QA_FRESHNESS_HOURS || '30' }}
+    steps:
+      # fetch-depth: 0 — the gate diffs the QA run's commit against the
+      # promotion head. On a shallow clone that diff fails, and the script
+      # fails CLOSED rather than reading it as "nothing changed".
+      - uses: actions/checkout@v4
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'qa-override') }}
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'qa-override') }}
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: "Require a money-flow QA run covering the promoted money-path code"
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'qa-override') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci/qa-freshness.mjs
+
+      - name: "Note qa-override bypass"
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'qa-override') }}
+        run: echo "::warning::'qa-override' label present — skipping the money-flow freshness gate. Confirm a recent manual QA run before promoting."

@@ -5,6 +5,9 @@ import Link from 'next/link'
 import ApprovalNotifications from './ApprovalNotifications'
 import WalletButton from './WalletButton'
 import EnvBadge from './EnvBadge'
+import NetworkSwitcher from './NetworkSwitcher'
+import { ChevronLeft } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 interface TopBarProps {
   actionSlot?: React.ReactNode
@@ -37,23 +40,16 @@ export default function TopBar({ actionSlot }: TopBarProps) {
         {/* Spacer for mobile hamburger */}
         <div className="w-8 lg:hidden" />
         <EnvBadge />
+        <NetworkSwitcher />
         {back && (
           <Link
             href={back.href}
             className="group inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
           >
-            <svg
-              aria-hidden="true"
+            <Icon
+              icon={ChevronLeft}
               className="w-3.5 h-3.5 text-[var(--v2-ink-3)] group-hover:text-[var(--v2-ink-2)] transition-colors"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.75}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M10 12.5L5.5 8L10 3.5" />
-            </svg>
+            />
             <span>{back.label}</span>
           </Link>
         )}

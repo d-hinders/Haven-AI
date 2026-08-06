@@ -67,17 +67,25 @@ export async function claimSync(
   return { owned: false, status: state?.status ?? null }
 }
 
+/**
+ * Mark a claim delivered. `note` (#498) carries a non-fatal degradation on an
+ * otherwise successful push — e.g. "receipt attachment failed" — into the
+ * `error` column WITHOUT flipping the status: the push landed, so it must not
+ * become retryable (a retry would double-post the invoice), but the state
+ * stays observable in the Reporting UI, which renders the column per row.
+ */
 export async function markPushed(
   userId: string,
   provider: string,
   paymentId: string,
   externalRef: string | null,
+  note: string | null = null,
 ): Promise<void> {
   await pool.query(
     `UPDATE reporting_feed_syncs
-     SET status = 'pushed', external_ref = $4, error = NULL, updated_at = NOW()
+     SET status = 'pushed', external_ref = $4, error = $5, updated_at = NOW()
      WHERE provider = $2 AND payment_id = $3 AND user_id = $1`,
-    [userId, provider, paymentId, externalRef],
+    [userId, provider, paymentId, externalRef, note ? note.slice(0, 1000) : null],
   )
 }
 

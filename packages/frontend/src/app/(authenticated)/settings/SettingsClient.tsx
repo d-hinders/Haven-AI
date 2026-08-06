@@ -1,5 +1,6 @@
 'use client'
 
+import { Card } from '@/components/ui/Card'
 import { type ReactNode } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
@@ -23,12 +24,12 @@ function Section({
 }) {
   return (
     <section className={`rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] ${className}`}>
-      <div className="rounded-t-[10px] border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-6 py-5">
+      <Card.Header padding="spacious" className="rounded-t-[10px]">
         <h2 className="text-[13px] font-semibold uppercase tracking-widest text-[var(--v2-ink)]">{title}</h2>
         {description ? (
           <p className="mt-1 text-sm text-[var(--v2-ink-3)]">{description}</p>
         ) : null}
-      </div>
+      </Card.Header>
       <div className="divide-y divide-[var(--v2-border)]">{children}</div>
     </section>
   )
@@ -255,6 +256,20 @@ export default function SettingsClient() {
             label={t.settings.recovery.sessionsLabel}
             detail={t.settings.recovery.sessionsDetail}
             action={<StatusPill>{t.common.comingSoon}</StatusPill>}
+          />
+          <SettingRow
+            label={t.settings.recovery.exitPathLabel}
+            detail={t.settings.recovery.exitPathDetail}
+            action={
+              <a
+                href="/exit/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium text-[var(--v2-brand)] hover:underline"
+              >
+                {t.settings.recovery.exitPathLabel} →
+              </a>
+            }
           />
         </Section>
 

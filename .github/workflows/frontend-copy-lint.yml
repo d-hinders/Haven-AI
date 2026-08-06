@@ -1,0 +1,41 @@
+name: Frontend copy lint
+
+# BLOCKING (#902): fail the PR on NEW banned technical terms from
+# docs/product/copy-guidelines.md in user-facing frontend copy (app/ +
+# components/), beyond the shrink-only baseline
+# (packages/frontend/copy-lint-baseline.json). Existing debt passes; growth
+# fails. See docs/contributing/ship-playbooks/frontend.md.
+#
+# NO paths filter, on purpose: this check is required by the "Haven automerge
+# rules" ruleset, and a paths-filtered workflow never runs — so never reports —
+# on a non-matching PR, which deadlocks auto-merge waiting for it (bit on
+# #936). The run costs ~10s; always report instead.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-copy-lint-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  copy-lint:
+    name: Banned product-copy terms
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      # The matcher's own unit tests — a broken matcher should show red.
+      - name: Test the matcher
+        run: node --test scripts/frontend-copy-lint.test.mjs
+
+      # Blocking (#902): fails on NEW banned terms beyond the ratcheting baseline.
+      - name: Frontend copy lint
+        run: node scripts/frontend-copy-lint.mjs

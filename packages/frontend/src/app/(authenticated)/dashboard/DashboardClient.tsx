@@ -1,5 +1,7 @@
 'use client'
 
+import { ArrowLeftRight, Bot, ChevronRight, DollarSign, ShieldCheck, Wallet } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import type { Address } from 'viem'
@@ -117,12 +119,15 @@ function ConnectedAgentsSection({
 }) {
   return (
     <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
-        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Connected agents</h2>
-        <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-          View all
-        </Link>
-      </div>
+      <Card.Header
+        as="h2"
+        title="Connected agents"
+        actions={
+          <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
+            View all
+          </Link>
+        }
+      />
 
       {loading ? (
         <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading connected agents">
@@ -138,7 +143,8 @@ function ConnectedAgentsSection({
         </div>
       ) : unavailable ? (
         <div className="p-6">
-          <EmptyPreview
+          <EmptyState
+            size="compact"
             title="Agent preview unavailable"
             body="Haven could not verify which agents are connected right now."
             action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
@@ -146,34 +152,35 @@ function ConnectedAgentsSection({
         </div>
       ) : agents.length === 0 ? (
         <div className="p-6">
-          <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] p-6 text-center">
-            <p className="text-sm text-[var(--v2-ink)]">
-              {hasAnyAgents ? 'No connected agents right now' : 'No agents connected yet'}
-            </p>
-            <p className="mt-2 text-xs text-[var(--v2-ink-2)]">
-              {!hasAccounts
+          <EmptyState
+            size="compact"
+            title={hasAnyAgents ? 'No connected agents right now' : 'No agents connected yet'}
+            body={
+              !hasAccounts
                 ? 'Create a Haven account before connecting agents.'
                 : hasAnyAgents
                 ? 'Reconnect or create an agent to bring automated spending back online.'
-                : 'Create your first agent to give it payment credentials and spend limits.'}
-            </p>
-            <div className="mt-4 flex items-center justify-center gap-3">
-              {hasAccounts ? (
-                <>
-                  <Button onClick={onConnectAgent} size="sm">
-                    Connect agent
-                  </Button>
-                  <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-                    Go to Agents
+                : 'Create your first agent to give it payment credentials and spend limits.'
+            }
+            action={
+              <div className="flex items-center justify-center gap-3">
+                {hasAccounts ? (
+                  <>
+                    <Button onClick={onConnectAgent} size="sm">
+                      Connect agent
+                    </Button>
+                    <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
+                      Go to Agents
+                    </Link>
+                  </>
+                ) : (
+                  <Link href="/accounts" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
+                    Go to Accounts
                   </Link>
-                </>
-              ) : (
-                <Link href="/accounts" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-                  Go to Accounts
-                </Link>
-              )}
-            </div>
-          </div>
+                )}
+              </div>
+            }
+          />
         </div>
       ) : (
         <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
@@ -195,9 +202,7 @@ function ConnectedAgentsSection({
                 }
                 subtitle={buildSpendSummary(agent)}
                 trailing={
-                  <svg className="w-4 h-4 text-[var(--v2-ink-3)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
+                  <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)]" />
                 }
                 className="h-[72px] px-5"
               />
@@ -222,6 +227,7 @@ function DashboardHero({
   fundingStateKnown,
   watchingForDeposit,
   requiresOtherDevice,
+  canSend,
   onSend,
   onReceive,
   onAddFunds,
@@ -238,6 +244,8 @@ function DashboardHero({
   fundingStateKnown: boolean
   watchingForDeposit: boolean
   requiresOtherDevice: boolean
+  /** False when no linked account supports owner send (delegation-only, #1079). */
+  canSend: boolean
   onSend: () => void
   onReceive: () => void
   onAddFunds: () => void
@@ -317,10 +325,12 @@ function DashboardHero({
             // While balances are still loading, keep this neutral action order
             // so the hero does not briefly claim the account needs funds.
             <div className="flex flex-wrap gap-3">
-              <Button onClick={onSend} size="lg">
-                Send
-              </Button>
-              <Button onClick={onReceive} variant="ghost" size="lg">
+              {canSend ? (
+                <Button onClick={onSend} size="lg">
+                  Send
+                </Button>
+              ) : null}
+              <Button onClick={onReceive} variant={canSend ? 'ghost' : 'primary'} size="lg">
                 Receive
               </Button>
               <Button onClick={onAddFunds} variant="ghost" size="lg">
@@ -338,9 +348,11 @@ function DashboardHero({
               <Button onClick={onAddFunds} variant="ghost" size="lg">
                 Add funds
               </Button>
-              <Button onClick={onSend} variant="ghost" size="lg">
-                Send
-              </Button>
+              {canSend ? (
+                <Button onClick={onSend} variant="ghost" size="lg">
+                  Send
+                </Button>
+              ) : null}
             </div>
           )
         ) : (
@@ -420,34 +432,25 @@ function MetricCard({
 
 function AgentMarkIcon() {
   return (
-    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <rect x="5" y="8" width="14" height="10" rx="3" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v3M9.5 12h.01M14.5 12h.01M9 16h6" />
-    </svg>
+    <Icon icon={Bot} className="w-full h-full" />
   )
 }
 
 function SpendIcon() {
   return (
-    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m4-9.5c0-1.38-1.79-2.5-4-2.5s-4 1.12-4 2.5 1.79 2.5 4 2.5 4 1.12 4 2.5-1.79 2.5-4 2.5-4-1.12-4-2.5" />
-    </svg>
+    <Icon icon={DollarSign} className="w-full h-full" />
   )
 }
 
 function CheckIcon() {
   return (
-    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-    </svg>
+    <Icon icon={ShieldCheck} className="w-full h-full" />
   )
 }
 
 function WalletIcon() {
   return (
-    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9v3m13.5 3.75h.008v.008H16.5v-.008z" />
-    </svg>
+    <Icon icon={Wallet} className="w-full h-full" />
   )
 }
 
@@ -455,9 +458,7 @@ function EmptyTransactionsIcon() {
   // Arrows-in-out icon — mirrors the sidebar's "transactions" mark so the
   // empty state belongs to the same visual family.
   return (
-    <svg className="w-full h-full" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 7.5h11.25m0 0L15.75 4.5m3 3l-3 3M16.5 16.5H5.25m0 0l3-3m-3 3l3 3" />
-    </svg>
+    <Icon icon={ArrowLeftRight} className="w-full h-full" />
   )
 }
 
@@ -533,12 +534,15 @@ function TransactionsSection({
 }) {
   return (
     <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
-        <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Recent transactions</h2>
-        <Link href="/transactions" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-          View all
-        </Link>
-      </div>
+      <Card.Header
+        as="h2"
+        title="Recent transactions"
+        actions={
+          <Link href="/transactions" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
+            View all
+          </Link>
+        }
+      />
 
       {loading ? (
         <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading recent transactions">
@@ -557,7 +561,8 @@ function TransactionsSection({
         </div>
       ) : unavailable ? (
         <div className="p-6">
-          <EmptyPreview
+          <EmptyState
+            size="compact"
             title="Activity preview unavailable"
             body="Haven could not refresh recent payments right now."
             action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
@@ -599,10 +604,9 @@ function TransactionsSection({
                 <TransactionActivityRow
                   title={transactionTitle(tx)}
                   description={transactionMovement(tx, resolveAddress)}
-                  amount={`${tx.direction === 'in' ? '+' : '-'}${tx.valueFormatted} ${tx.asset}`}
-                  amountTone={
-                    tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
-                  }
+                  value={tx.valueFormatted}
+                  asset={tx.asset}
+                  failed={tx.isError}
                   status={recovery?.label ?? lifecycle?.label ?? (tx.isError ? 'Failed' : tx.direction === 'in' ? 'Received' : 'Sent')}
                   statusTone={recovery?.tone ?? lifecycle?.tone ?? (
                     tx.isError ? 'danger' : tx.direction === 'in' ? 'success' : 'neutral'
@@ -616,24 +620,6 @@ function TransactionsSection({
           })}
         </div>
       )}
-    </div>
-  )
-}
-
-function EmptyPreview({
-  title,
-  body,
-  action,
-}: {
-  title: string
-  body: string
-  action?: ReactNode
-}) {
-  return (
-    <div className="rounded-lg border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] p-6 text-center">
-      <p className="text-sm text-[var(--v2-ink)]">{title}</p>
-      <p className="mt-2 text-xs text-[var(--v2-ink-2)]">{body}</p>
-      {action ? <div className="mt-4">{action}</div> : null}
     </div>
   )
 }
@@ -683,6 +669,14 @@ export default function DashboardClient() {
   const defaultSafe = useMemo(
     () => activeSafe ?? safes.find((safe) => safe.is_default) ?? safes[0] ?? null,
     [activeSafe, safes],
+  )
+
+  // Owner-initiated send is a Safe transaction; the delegation rail has no
+  // implementation of it yet, so those accounts are excluded from the send
+  // flow entirely (#1079 — hidden, not disabled).
+  const sendCapableSafes = useMemo(
+    () => safes.filter((safe) => safe.account_type !== 'delegator_hybrid'),
+    [safes],
   )
 
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
@@ -839,13 +833,26 @@ export default function DashboardClient() {
       return
     }
 
+    // #1079: sending is a Safe transaction — delegation accounts have no
+    // owner-send yet (follow-up feature), so the send flow only ever sees
+    // Safe-rail accounts. The hero hides Send when none exist.
+    if (action === 'send') {
+      if (sendCapableSafes.length === 0) return
+      if (sendCapableSafes.length > 1) {
+        setPickerAction('send')
+        return
+      }
+      setActionSafeId(sendCapableSafes[0].id)
+      setSendOpen(true)
+      return
+    }
+
     if (safes.length > 1) {
       setPickerAction(action)
       return
     }
 
     setActionSafeId(defaultSafe?.id ?? null)
-    if (action === 'send') setSendOpen(true)
     if (action === 'receive') {
       setHasOpenedReceive(true)
       setReceiveOpen(true)
@@ -893,6 +900,7 @@ export default function DashboardClient() {
       fundingStateKnown={fundingStateKnown}
       watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
+      canSend={sendCapableSafes.length > 0}
       onSend={() => openHeroAction('send')}
       onReceive={() => openHeroAction('receive')}
       onAddFunds={() => openHeroAction('add-funds')}
@@ -1039,12 +1047,12 @@ export default function DashboardClient() {
       <DashboardActionPickerModal
         open={pickerAction !== null}
         action={pickerAction ?? 'send'}
-        safes={safes}
+        safes={pickerAction === 'send' ? sendCapableSafes : safes}
         onClose={() => setPickerAction(null)}
         onSelect={handleActionSafeSelected}
       />
 
-      {sendOpen && selectedActionSafe && (
+      {sendOpen && selectedActionSafe && selectedActionSafe.account_type !== 'delegator_hybrid' && (
         <SendModal
           open
           onClose={() => setSendOpen(false)}

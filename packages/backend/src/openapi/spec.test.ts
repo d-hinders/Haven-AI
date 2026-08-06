@@ -94,14 +94,11 @@ const KNOWN_UNDOCUMENTED_ROUTES: Array<{
     because: 'Dashboard-only audit view using dashboard JWT auth.',
   },
   {
-    method: 'GET',
-    path: '/transactions/filters',
-    because: 'Dashboard-only filter metadata using dashboard JWT auth.',
-  },
-  {
-    method: 'GET',
-    path: '/transactions/{safeAddress}',
-    because: 'Dashboard-only per-Safe view using dashboard JWT auth.',
+    method: 'POST',
+    path: '/x402/{id}/settle',
+    because:
+      'Delegation-rail x402 settlement (#830, epic #821). Behind the /x402 ' +
+      'darkened rail; documented in the OpenAPI spec in the epic docs sweep (#834).',
   },
 ]
 

@@ -1,12 +1,17 @@
+import { resolveExecutionRail, sessionRailRetired } from '../lib/execution-rail.js'
+import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
+import { config } from '../config.js'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
+import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import {
   authorizeMachinePayment,
   type MachinePaymentRail,
 } from '../lib/machine-payments.js'
 import { getAgentPaymentStatus, agentPaymentStatusHttpCode } from '../lib/agent-payment-status.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   attachMachinePaymentEvidence,
   type MachinePaymentEvidenceRow,
@@ -20,7 +25,7 @@ import {
 } from '../lib/allowance-module.js'
 import { getChain, getExplorerUrl } from '../lib/chains.js'
 import {
-  SWEEP_BASE_CHAIN_ID,
+  isSweepableChain,
   sweepUsdcAddress,
   type SweepAuthorization,
 } from '@haven_ai/sdk'
@@ -31,6 +36,8 @@ import {
   relaySweepAuthorization,
 } from '../lib/sweep.js'
 import { AgentPaymentPhase, AgentPaymentNextAction } from '../lib/agent-payment-taxonomy.js'
+import { captureMerchantReceipt } from '../lib/merchant-receipt.js'
+import { lateAttachMerchantReceipt } from '../lib/reporting/fortnox-connector.js'
 
 interface MachinePaymentChallengeBody {
   rail: MachinePaymentRail
@@ -143,9 +150,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
-function mapEvidence(row: MachinePaymentEvidenceRow) {
+function mapEvidence(
+  row: MachinePaymentEvidenceRow & {
+    settlement_scheme?: string | null
+    budget_delegation_hash?: string | null
+  },
+) {
   return {
     id: row.id,
+    /** Which settlement branch ran (eip3009 | erc7710), from the intent (#946). */
+    settlement_scheme: row.settlement_scheme ?? null,
+    /** The metering budget, uniform across schemes (#1059) — null on the
+     *  legacy rail and on intents predating the column. */
+    budget_delegation_hash: row.budget_delegation_hash ?? null,
     payment_id: row.payment_intent_id ?? row.approval_request_id,
     payment_intent_id: row.payment_intent_id,
     approval_request_id: row.approval_request_id,
@@ -204,10 +221,6 @@ function validateMppDemoChallenge(challenge: MachinePaymentChallengeBody): strin
     return 'MPP demo challenge has expired'
   }
   return null
-}
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
 }
 
 function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
@@ -515,11 +528,19 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       ? Math.min(Math.max(parsedLimit, 1), 100)
       : 25
 
-    const result = await pool.query<MachinePaymentEvidenceRow>(
-      `SELECT *
-       FROM machine_payment_evidence
-       WHERE agent_id = $1
-       ORDER BY created_at DESC
+    // settlement_scheme lives on the INTENT (#946 recorded it in
+    // machine_metadata for observability) — joined in here because the
+    // evidence row is what agents actually read, and "which branch ran"
+    // (eip3009 bridge vs erc7710 direct) is unverifiable without it. Found
+    // by the first real run of the delegation QA leg (#1063): the scenario
+    // had nowhere to read the scheme from.
+    const result = await pool.query<MachinePaymentEvidenceRow & { settlement_scheme: string | null; budget_delegation_hash: string | null }>(
+      `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
+              pi.budget_delegation_hash
+       FROM machine_payment_evidence e
+       LEFT JOIN payment_intents pi ON pi.id = e.payment_intent_id
+       WHERE e.agent_id = $1
+       ORDER BY e.created_at DESC
        LIMIT $2`,
       [agent.id, limit],
     )
@@ -542,9 +563,20 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
 
   // ── POST /send — Plain transfer (asset/recipient naming convention) ─────────
 
-  app.post<{ Body: SendBody }>('/send', async (request, reply) => {
+  app.post<{ Body: SendBody }>('/send', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const { asset, recipient, amount } = request.body
+
+    // #993 (review finding on #1120): the retired-rail refusal must hold on
+    // EVERY money entry point — /send previously never consulted the seam.
+    const sendRail = resolveExecutionRail({
+      safeExecutionRail: agent.execution_rail ?? null,
+      chainId: agent.chain_id,
+    })
+    if (sendRail.rail === 'retired_session') {
+      const retired = sessionRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
+    }
 
     // 1. Validate inputs
     if (!asset || !SUPPORTED_ASSETS.includes(asset as SendAsset)) {
@@ -760,7 +792,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     })
   })
 
-  app.post<{ Body: AuthorizeBody }>('/authorize', async (request, reply) => {
+  app.post<{ Body: AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const { challenge, signature } = request.body
 
@@ -793,13 +825,14 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         description: challenge.description,
       },
       signature,
-      // TODO: add a per-rail rate limit before exposing machine payments beyond this internal demo.
+      // Route-level per-credential rate limit added (#794, moneyPathRateLimit).
+      // A finer per-rail budget can layer on top if a rail ever needs its own cap.
     })
 
     return reply.code(result.statusCode).send(result.body)
   })
 
-  app.post<{ Body: EvidenceBody }>('/evidence', async (request, reply) => {
+  app.post<{ Body: EvidenceBody }>('/evidence', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const body = request.body
 
@@ -882,7 +915,23 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         return reply.code(404).send({ error: 'Payment not found' })
       }
 
-      return reply.code(202).send({ evidence: mapEvidence(evidence) })
+      // The INSERT…RETURNING row has no intent join — look the two intent
+      // fields up so this echo reports the same truth the receipts list does
+      // (previously both always echoed null here, #1118 review NB2).
+      let intentFields: { settlement_scheme?: string | null; budget_delegation_hash?: string | null } = {}
+      if (evidence.payment_intent_id) {
+        try {
+          const intentRes = await pool.query<{ settlement_scheme: string | null; budget_delegation_hash: string | null }>(
+            `SELECT machine_metadata->>'settlement_scheme' AS settlement_scheme, budget_delegation_hash
+             FROM payment_intents WHERE id = $1`,
+            [evidence.payment_intent_id],
+          )
+          intentFields = intentRes.rows[0] ?? {}
+        } catch {
+          // Echo enrichment only — never fail the 202 over it.
+        }
+      }
+      return reply.code(202).send({ evidence: mapEvidence({ ...evidence, ...intentFields }) })
     } catch (err) {
       const marker = err instanceof Error ? err.message : String(err)
       if (marker === 'payment_not_confirmed') {
@@ -911,7 +960,44 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     }
   })
 
-  app.post<{ Body: ReconciliationEventBody }>('/reconciliation-events', async (request, reply) => {
+  // ── POST /:id/merchant-receipt — capture the merchant's own receipt (#956) ──
+  //
+  // After a successful settlement retry the merchant may hand the agent its
+  // own receipt (invoice/VAT document). The agent reports it here; the
+  // reporting feed attaches it as a SECOND file next to the Haven-generated
+  // payment evidence (#498). Best-effort by design: absence is the normal
+  // case, and a failure here never affects the payment itself.
+  app.post<{ Params: { id: string }; Body: { url?: string; json?: unknown } }>(
+    '/:id/merchant-receipt',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const { url, json } = request.body ?? {}
+      const result = await captureMerchantReceipt({
+        paymentId: request.params.id,
+        agentId: agent.id,
+        url,
+        inlineJson: json,
+      })
+      if (!result.ok) return reply.code(result.code).send({ error: result.error })
+      if (result.stored) {
+        // #956 late attach: for x402 the feed has usually ALREADY pushed the
+        // invoice (it fires at funding confirmation; the merchant receipt
+        // arrives at the retry seconds later) — attach retroactively.
+        // Fire-and-forget: capture must never block or fail on feed state.
+        void lateAttachMerchantReceipt(result.userId, request.params.id, {
+          url: url ?? null,
+          inlineJson: json ?? null,
+        }).catch(() => {})
+      }
+      return reply.code(result.stored ? 201 : 200).send({
+        stored: result.stored,
+        ...(result.stored ? {} : { message: 'A merchant receipt is already recorded for this payment (first write wins).' }),
+      })
+    },
+  )
+
+  app.post<{ Body: ReconciliationEventBody }>('/reconciliation-events', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const {
       paymentId,
@@ -1067,12 +1153,12 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   // TransferWithAuthorization (delegate → the agent's own Safe) plus Haven's
   // binding signature. The edge signer signs it; /sweep/submit relays it. The
   // delegate never needs ETH and the hosted server never holds the key.
-  app.post('/sweep/prepare', async (request, reply) => {
+  app.post('/sweep/prepare', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
 
-    if (agent.chain_id !== SWEEP_BASE_CHAIN_ID) {
+    if (!isSweepableChain(agent.chain_id)) {
       return reply.code(422).send({
-        error: `Sweep is only supported on Base (chainId ${SWEEP_BASE_CHAIN_ID}). Agent chain is ${agent.chain_id}.`,
+        error: `Sweep is not supported on chain ${agent.chain_id}.`,
       })
     }
     if (!agent.delegate_address || !agent.safe_address) {
@@ -1097,6 +1183,27 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         asset: 'USDC',
         chain_id: agent.chain_id,
         message: 'No stranded USDC on the delegate wallet — nothing to recover.',
+      })
+    }
+
+    // Sweep dust floor (#700, corrected): only recover a stranded balance worth the
+    // gas — at least SWEEP_MIN_USDC. Smaller "dust" is left on the delegate, since
+    // the relayer gas to sweep it would exceed the value returned. No authorization
+    // is stored, so /sweep/submit can't relay a below-floor sweep either. Balances
+    // above the floor (including large ones) are recovered normally.
+    const minAtomic = ethers.parseUnits(config.sweepMinUsdc, USDC_DECIMALS)
+    if (balance < minAtomic) {
+      return reply.code(200).send({
+        below_min: true,
+        asset: 'USDC',
+        amount: ethers.formatUnits(balance, USDC_DECIMALS),
+        amount_atomic: balance.toString(),
+        min_usdc: config.sweepMinUsdc,
+        chain_id: agent.chain_id,
+        message:
+          `Stranded ${ethers.formatUnits(balance, USDC_DECIMALS)} USDC is below the sweep ` +
+          `floor of ${config.sweepMinUsdc} USDC — left on the delegate (recovering dust ` +
+          `would cost more gas than it returns).`,
       })
     }
 
@@ -1147,7 +1254,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   // Trusts nothing from the client payload: the authorization is re-derived from
   // the prepared row, the delegate signature is verified off-chain, and the
   // balance is re-read before the relayer spends gas.
-  app.post<{ Body: SweepSubmitBody }>('/sweep/submit', async (request, reply) => {
+  app.post<{ Body: SweepSubmitBody }>('/sweep/submit', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const body = request.body ?? {}
     const signature = body.signature
@@ -1293,8 +1400,18 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
 
     let txHash: string
     try {
-      ;({ txHash } = await relaySweepAuthorization(expected, signature))
+      ;({ txHash } = await relaySweepAuthorization(expected, signature, { agentId: agent.id, userId: agent.user_id }))
     } catch (err) {
+      if (err instanceof RelayerBudgetExceededError) {
+        // #717: refused before submission — release the claim back to
+        // 'prepared' so the sweep can be retried after the window; 'failed'
+        // would strand the funds path.
+        await pool.query(
+          `UPDATE delegate_sweeps SET status = 'prepared' WHERE id = $1 AND status = 'submitting'`,
+          [row.id],
+        )
+        return reply.code(429).send({ error: err.message })
+      }
       const errorMsg = err instanceof Error ? err.message : String(err)
       await pool.query(
         `UPDATE delegate_sweeps SET status = 'failed', error_message = $1 WHERE id = $2 AND status = 'submitting'`,

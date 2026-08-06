@@ -1,0 +1,66 @@
+name: Docs coupling gate
+
+# Phase 2 of the documentation-quality system (epic #642). On every PR, flags
+# docs whose `covers:` front-matter matches changed code that the PR did not
+# also touch. The comment job is advisory (exits 0, sticky comment); the
+# `contract` job (Phase 4, #646) reruns the gate in --strict mode and FAILS
+# when a doc marked `contract: true` is implicated but untouched — add it to
+# the ruleset's required checks WITHOUT a paths filter (the #933 lesson).
+# Plumbing lives in .github/actions/advisory-gate-comment (shared with
+# design-system-coupling.yml). See docs/contributing/docs-quality-system.md.
+
+on:
+  pull_request:
+
+concurrency:
+  group: docs-coupling-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  coupling:
+    name: Doc↔code coupling
+    # Repo guard: on fork PRs GITHUB_TOKEN is read-only regardless of the
+    # permissions block, so the sticky-comment steps would 403.
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - uses: ./.github/actions/advisory-gate-comment
+        with:
+          script: scripts/docs/coupling-gate.mjs
+          header: docs-coupling
+          out-file: coupling-comment.md
+
+  contract:
+    name: Contract-doc coupling
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Strict gate over contract docs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/docs/coupling-gate.mjs --strict --out=/dev/null

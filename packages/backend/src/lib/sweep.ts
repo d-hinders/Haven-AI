@@ -1,3 +1,4 @@
+import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, type RelayerAttribution } from './relayer-spend-guard.js'
 import { ethers } from 'ethers'
 import {
   buildSweepAuthorizationMessage,
@@ -8,6 +9,7 @@ import {
   type SweepExpectedAuth,
 } from '@haven_ai/sdk'
 import { getRelayerWallet } from './allowance-module.js'
+import { withRelayerSendLock } from './relayer.js'
 
 /**
  * Gasless delegate-sweep helpers (EIP-3009 `transferWithAuthorization`).
@@ -15,10 +17,20 @@ import { getRelayerWallet } from './allowance-module.js'
  * The delegate signs an off-chain authorization; the relayer submits it and pays
  * gas. The relayer is only the gas payer here — it is never a spender and holds
  * no allowance, so a relayer compromise cannot move user funds. See
- * docs/bug-reports/sweep-delegate-split-signer-gap.md.
+ * docs/archive/sweep-delegate-split-signer-gap.md.
  */
 
-/** How long a prepared authorization is valid for signing + relaying. */
+/**
+ * How long a prepared authorization is valid for signing + relaying.
+ *
+ * Window policy (#715, epic #713): a leaked signed sweep authorization is
+ * spendable until `validBefore`, so this must be as small as operationally
+ * safe. 300 s covers the whole prepared→client-signed→relayed→included path
+ * with margin for slow public RPCs and a relayer retry; anything meaningfully
+ * shorter starts failing legitimate sweeps on congested testnet RPCs. Bounded
+ * by a policy test (≤ 600 s, ≥ 60 s) so it cannot silently grow — widening it
+ * is an explicit, reviewed decision.
+ */
 export const SWEEP_VALIDITY_SECONDS = 300
 
 const USDC_TRANSFER_WITH_AUTHORIZATION_ABI = [
@@ -104,18 +116,52 @@ export function recoverSweepSigner(auth: SweepAuthorization, signature: string):
 export async function relaySweepAuthorization(
   auth: SweepAuthorization,
   signature: string,
+  /** #717: who this sweep is billed to (relayer gas budget + attribution). */
+  attribution?: RelayerAttribution,
 ): Promise<{ txHash: string }> {
+  await assertRelayerBudget('sweep', attribution ?? {})
+  // #717: attempt row before broadcast — bursts see each other in the count.
+  const spendId = await recordRelayerSpend({
+    operation: 'sweep',
+    chainId: auth.chainId,
+    agentId: attribution?.agentId,
+    userId: attribution?.userId,
+  })
   const relayer = getRelayerWallet(auth.chainId)
   const usdc = new ethers.Contract(auth.token, USDC_TRANSFER_WITH_AUTHORIZATION_ABI, relayer)
-  const tx = await usdc.transferWithAuthorization(
-    auth.from,
-    auth.to,
-    BigInt(auth.value),
-    BigInt(auth.validAfter),
-    BigInt(auth.validBefore),
-    auth.nonce,
-    signature,
+  // Serialise the broadcast with every other relayer submission on this chain
+  // so the sweep can't race a payment for the same EOA nonce (#692/#718).
+  const tx = await withRelayerSendLock(auth.chainId, () =>
+    usdc.transferWithAuthorization(
+      auth.from,
+      auth.to,
+      BigInt(auth.value),
+      BigInt(auth.validAfter),
+      BigInt(auth.validBefore),
+      auth.nonce,
+      signature,
+    ),
   )
-  const receipt = await tx.wait()
-  return { txHash: receipt.hash }
+  // `tx.wait()` can return null (or race) on a lagging RPC even when the tx has
+  // landed — which previously surfaced as a spurious "Sweep relay failed" while
+  // the funds had actually moved. Poll for the receipt by hash with a timeout,
+  // then assert it didn't revert. The tx is already broadcast and the EIP-3009
+  // nonce makes it idempotent, so we never re-submit.
+  const provider = relayer.provider
+  if (!provider) {
+    throw new Error(`Relayer provider not configured for chain ${auth.chainId}`)
+  }
+  const receipt = await provider.waitForTransaction(tx.hash, 1, 90_000)
+  await finishRelayerSpend(spendId, {
+    txHash: tx.hash,
+    gasUsed: receipt ? BigInt(receipt.gasUsed.toString()) : null,
+    effectiveGasPrice: receipt?.gasPrice != null ? BigInt(receipt.gasPrice.toString()) : null,
+  })
+  if (!receipt) {
+    throw new Error(`Sweep tx ${tx.hash} not confirmed within 90s`)
+  }
+  if (receipt.status === 0) {
+    throw new Error(`Sweep tx ${tx.hash} reverted`)
+  }
+  return { txHash: tx.hash }
 }

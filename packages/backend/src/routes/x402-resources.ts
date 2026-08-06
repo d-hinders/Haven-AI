@@ -25,8 +25,10 @@ import { ethers } from 'ethers'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getChain } from '../lib/chains.js'
+import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import { getProvider } from '../lib/allowance-module.js'
 import { formatTokenValue } from '../lib/tokens.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 
 // ── ABI for decoding AllowanceModule calldata ─────────────────────
 
@@ -77,10 +79,6 @@ interface VerifyBody {
   tx_hash: string
 }
 
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
-
 function isValidTxHash(hash: string): boolean {
   return /^0x[0-9a-fA-F]{64}$/.test(hash)
 }
@@ -113,7 +111,7 @@ export default async function x402ResourceRoutes(app: FastifyInstance): Promise<
         return reply.code(400).send({ error: 'price_amount must be an integer string (atomic units)' })
       }
 
-      const resolvedChainId = chain_id ?? 8453
+      const resolvedChainId = chain_id ?? DEFAULT_CHAIN_ID
 
       // Verify safe belongs to user (if provided)
       let safeAddress: string | null = null

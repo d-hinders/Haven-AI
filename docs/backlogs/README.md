@@ -1,6 +1,17 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .github/ISSUE_TEMPLATE/loop-task.md
+  - .github/ISSUE_TEMPLATE/loop-epic.md
+  - .agents/skills/ship-next/SKILL.md
+  - .github/CODEOWNERS
+last-verified: "2026-07-12"
+---
+
 # Backlogs moved to GitHub Issues
 
-The autonomous PR loop (`/ship-next` + `/loop`) used to read its queue from
+The autonomous PR loop (`ship-next`, repeated by a client loop when available) used to read its queue from
 `docs/backlogs/*.yml` tracks in this folder. **That mechanism is retired.**
 
 With the `dev` → `main` branch split and the merge rulesets, an in-repo status
@@ -16,8 +27,8 @@ The loop reads **GitHub Issues**. Two sources (see
 
 | Source | When | How to run |
 | --- | --- | --- |
-| **Standalone labeled issue** | a small, self-contained task | open an issue + add the **`code-quality`** label → `/loop /ship-next` |
-| **Epic + sub-issues** | a multi-PR plan that burns down together | open a parent issue with sub-issues → `/loop /ship-next epic=#<n>` |
+| **Standalone labeled issue** | a small, self-contained task | open an issue + add the **`code-quality`** label → run `ship-next` |
+| **Epic + sub-issues** | a multi-PR plan that burns down together | open a parent issue with sub-issues → run `ship-next epic=#<n>` |
 
 Issue state *is* the backlog state: an open issue with no PR is **ready**, an
 open issue with an open Haven PR is **in flight**, and a **closed** issue is
@@ -32,9 +43,18 @@ old YAML `scope:` field demanded. The **🔁 Loop task** issue template
 - **Scope** — one paragraph the implementer can act on without guessing: the
   change *and* its acceptance criteria.
 - **Files** — the file(s) the change should own (best-effort).
-- **Money-path?** — whether it touches x402 / machine-payments / payment-coverage
-  / allowance / migrations. Money-path issues are implemented by the loop but
-  **never auto-merged** — `.github/CODEOWNERS` routes them to a human merge.
+- **Surface** — which `area:*` / `money-path` label(s) apply, so `ship-next`
+  loads the right playbook (see `docs/contributing/ship-playbooks/README.md`).
+- **Money-path?** — whether it touches x402, machine-payments, payment-coverage,
+  allowances, the **delegation rail** or rail seam, the SDK signer, or
+  migrations. Don't work from this summary: the authoritative list is
+  [`.github/money-path-globs.json`](../../.github/money-path-globs.json), which
+  `labeler.yml` applies automatically and a test keeps in sync
+  ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)) — a prose copy is
+  how the delegation rail went unlabelled for months. The label selects the
+  `money.md` playbook and the characterization-test bar; it does not pause the
+  merge (#1024). Migrations require independent code-owner review and merge
+  through `.github/CODEOWNERS`.
 - **Characterization-first** — for a change to existing money-path behavior, pin
   the current behavior with a test before changing it.
 

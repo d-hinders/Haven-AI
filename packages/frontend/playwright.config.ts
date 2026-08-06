@@ -13,6 +13,17 @@ const webServerCommand = process.env.CI
 
 export default defineConfig({
   testDir: './e2e',
+  // The unmocked live smoke (e2e/live) runs only via playwright.live.config.ts
+  // against a real deployment — keep it out of the fast, fully-mocked suite.
+  testIgnore: [
+    '**/live/**',
+    // Visual-regression specs run only under the dedicated CI job (Linux
+    // baselines) — VISUAL_REGRESSION=1 opts in. See #897.
+    ...(process.env.VISUAL_REGRESSION === '1' ? [] : ['**/*.visual.spec.ts']),
+  ],
+  // Stable baseline paths (no {platform} suffix): baselines are ALWAYS
+  // Linux-rendered via the CI job / update workflow, never local macOS.
+  snapshotPathTemplate: '{testDir}/__screenshots__/{testFileName}/{arg}{ext}',
   timeout: 60_000,
   expect: {
     timeout: 15_000,

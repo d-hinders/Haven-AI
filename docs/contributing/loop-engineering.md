@@ -1,10 +1,26 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - packages/backend/src/loop-harness/**
+  - packages/backend/package.json
+  - packages/frontend/src/lib/loop-harness/**
+  - packages/frontend/package.json
+  - .github/workflows/ci.yml
+  - docs/contributing/autonomous-pr-loop.md
+  - docs/contributing/code-quality-loop.md
+last-verified: "2026-08-05"
+---
+
 # Loop Engineering (oracle-grounded automated loops)
 
-Last updated: 2026-06-13
+Last updated: 2026-07-18
 
-> **Disambiguation.** This is *not* the same thing as
-> [`code-quality-loop.md`](./code-quality-loop.md), which is a human-curated
-> cadence of small quality PRs (a backlog/completed ledger). This doc is about
+> **Disambiguation.** Haven uses “loop” in three ways:
+> [`code-quality-loop.md`](./code-quality-loop.md) is a human-curated discovery
+> method whose actionable queue is GitHub Issues;
+> [`autonomous-pr-loop.md`](./autonomous-pr-loop.md) describes the issue-driven
+> `/loop /ship-next` workflow; and this doc is about
 > **automated, oracle-grounded loops**: a coding agent generates adversarial
 > inputs, grades them against an independent oracle, and converges on fixes —
 > leaving behind a permanent differential test. They compose, but they are
@@ -74,6 +90,9 @@ loop-harness/
   <thing>-differential.test.ts   # equivalence ratchet + regression guards
 ```
 
+(The frontend copy keeps the differential test under `loop-harness/__tests__/`
+per that package's test-layout convention; the shape is otherwise identical.)
+
 - **Reference model** — the smallest faithful port of the intended behavior,
   derived independently from the source of truth (e.g. the contract). Document
   where it comes from. Note honestly if it is not machine-certified against the
@@ -99,8 +118,11 @@ can be verified. Therefore:
 
 - Generate cases from a **seed**, never `Math.random()`.
 - Do **not** anchor generated inputs to wall-clock time. Use a fixed epoch
-  constant (see `generators.ts` `BASE_NOW_MIN`) so a reported `seed` reproduces
-  the same case months later.
+  constant (`BASE_NOW_MIN`, in both harnesses' `generators.ts`) so a reported
+  `seed` reproduces the same case months later. Both harnesses now comply; the
+  backend's generator anchored to `Date.now()` until 2026-07-25, which made a
+  backend seed stable only within a run — a divergence found on one day could
+  not be replayed on the next. A regression test pins the property.
 - Surface the `seed` (and the minimal inputs) in the failure message.
 
 ## 6. Convergence model
@@ -123,8 +145,11 @@ A loop has a terminal state, and the harness encodes it:
   failure by weakening the assertion.** That is the classic reward-hack. The
   oracle is the contract; only humans change it.
 - **Financial surfaces:** run against a simulated/forked chain or a faithful
-  mock, never live funds. The loop produces *tests + a fix branch* — **no
-  auto-merge of money-moving code.** A human gates the merge.
+  mock, never live funds. The loop produces *tests + a fix branch* and **stops
+  there** — a test-generation campaign never merges its own money-path fix.
+  Note this is **this** loop's own rule, not a repo-wide gate: since
+  [#1024](https://github.com/d-hinders/Haven-AI/issues/1024) a money-path PR
+  does not pause for human approval on merge, so the restraint has to live here.
 - **Bound the campaign:** cap iterations and diff size so a stuck loop surfaces a
   "stuck, here's my diagnosis" report instead of a sprawling refactor.
 - **Classify the value honestly.** These allowance loops are *reliability /
@@ -136,8 +161,8 @@ A loop has a terminal state, and the harness encodes it:
 - Focused run:
   - Backend: `npm --prefix packages/backend run test:loop`
   - Frontend: `npm --prefix packages/frontend test -- src/lib/loop-harness`
-- The harness lives under the package's normal test glob, so **CI runs it on
-  every PR** — that is where the durable value is.
+- The harness lives under the package's normal test glob, so it runs whenever
+  CI's change detection selects that package's unit-test job.
 - As a recurring *active* campaign (only worth it while editing that surface or
   to widen coverage — re-running identical seeds on frozen code is a no-op):
   ```

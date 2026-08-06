@@ -1,6 +1,7 @@
 export { HavenClient } from './client.js'
 export { havenTools } from './tools.js'
-export { signHash, addressFromKey, verifySignature } from './signer.js'
+export { signHash,
+  signUserOpTypedDataForDelegation, addressFromKey, verifySignature } from './signer.js'
 
 export { verifyPaymentReceipt, RECEIPT_VERSION } from './receipt.js'
 export type { PaymentReceipt, ReceiptVerification } from './receipt.js'
@@ -100,9 +101,12 @@ export {
 export {
   SWEEP_BASE_CHAIN_ID,
   SWEEP_BASE_USDC_ADDRESS,
+  SWEEP_BASE_SEPOLIA_CHAIN_ID,
+  SWEEP_BASE_SEPOLIA_USDC_ADDRESS,
   TRANSFER_WITH_AUTHORIZATION_TYPES,
   sweepUsdcAddress,
   sweepUsdcDomain,
+  isSweepableChain,
   buildSweepTypedData,
   buildSweepAuthorizationMessage,
 } from './sweep.js'

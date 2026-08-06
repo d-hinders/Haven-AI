@@ -1,10 +1,18 @@
+---
+owner: "@d-hinders"
+status: research
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-07-18"
+---
+
 # Spike — Fortnox non-asserting feed mechanism (#494)
 
-> Status: **spike / design decision.** Resolves *how* Haven feeds a settled agent
-> payment into Fortnox as a non-asserting transaction (epic #491). Recommendation
-> below is high-confidence on ranking, but the final pick must be validated
-> against a Fortnox sandbox — that live step needs a Fortnox developer app and
-> can't be done from here.
+> Status: **VALIDATED LIVE 2026-07-16** against a Fortnox test environment
+> (developer app "Haven", sandbox company "Haven") via
+> `npm run pilot:fortnox` — the pilot runs the PRODUCTION connector code
+> (#496, `lib/reporting/fortnox-connector.ts`). Verdicts on every open
+> question are recorded at the bottom. The supplier-invoice recommendation
+> HELD.
 
 ## The question
 
@@ -102,6 +110,78 @@ ReportingTransaction {
 4. **Scopes** required (supplier invoice + file connection) on top of the existing
    Bookkeeping scope.
 5. Receipt **file-connection** flow end-to-end (`Inbox_v` upload → connect Id).
+
+## Sandbox verdicts (2026-07-16 — closes the open questions)
+
+1. **Unattested: CONFIRMED.** The API-created supplier invoice lands with
+   `Booked: false`, `VoucherNumber: null` — nothing is asserted until a human
+   attests and bookkeeps. The non-asserting invariant holds live.
+2. **Already-paid semantics: option (b), accepted.** The invoice carries an
+   open AP `Balance` (10.42 in the probe); the accountant reconciles the
+   payment leg when coding. `DueDate = InvoiceDate` and the comment says
+   "already settled on-chain". No dedicated "externally paid" creation path
+   surfaced; revisit only if accountants report friction.
+3. **Idempotency ref: CONFIRMED.** `ExternalInvoiceNumber = HAVEN-<paymentId>`
+   round-trips exactly on read-back. (The dedup ledger #497 remains the
+   idempotency guarantee; this is the belt to its braces.)
+4. **Scopes: CONFIRMED.** `bookkeeping supplierinvoice supplier archive` all
+   granted through consent (archive is pre-staged for #498 receipts).
+5. **Live gotcha (found by the probe, fixed in the adapter):** Fortnox rejects
+   several non-alphanumeric characters in `Comments` — middle dots and `://`
+   both trip error 2000359 ("Värdet innehåller ej tillåtna tecken"). The
+   adapter's `feedDescription` emits plain ASCII sentences and the resource
+   HOST rather than the full URL. The same restriction applies to the supplier
+   `Name` field (found on the first real feed — the app's canonical `…`
+   ellipsis in the address fallback tripped it; ASCII hyphen now).
+
+## Receipt attachment — the underlag (#498, built 2026-07-16)
+
+The mechanism chosen: render the **verifiable payment receipt** (#486) as a
+small dependency-free PDF (`lib/reporting/receipt-underlag.ts` — payment,
+book-time SEK + FX provenance, merchant, on-chain tx hash, authorization
+signature, and a pointer to independent verification via
+`verifyPaymentReceipt` in `@haven_ai/sdk`), then in the connector after the
+invoice is created:
+
+1. `POST /3/inbox` (multipart) — upload the PDF to the Fortnox Inbox.
+2. `POST /3/supplierinvoicefileconnections` — connect the returned `File.Id`
+   to the invoice's `GivenNumber`.
+
+Semantics locked by tests:
+
+- **Strictly best-effort.** The invoice is the delivered value; a missing
+  receipt or failed upload/connection NEVER fails the push. The degradation is
+  returned as `PushResult.note` and recorded by the orchestrator on the
+  (pushed) sync row's `error` column — observable in the Reporting UI, but not
+  retryable (a retry would double-post the invoice).
+- **Scope:** requires `inbox` (portal permission "Inkorg") AND `connectfile`
+  — proven live 2026-07-16: with only `supplierinvoice`+`inbox` the inbox
+  upload succeeds but the file-connection POST fails 400 "Har inte behörighet
+  för scope" [2000663], settling the API docs' ambiguity (they list supplier
+  invoice file connections under both scopes). `FORTNOX_SCOPE` widened;
+  connections consented before the widening degrade to note-only attachment
+  until the user reconnects.
+- **ASCII discipline** (gotcha 5) extends to the PDF text and filename.
+- **Merchant receipt as a second file (#956):** when the agent captured the
+  merchant's own receipt (the SDK reads `x-receipt-json`/`x-receipt-url` off
+  the paid response and reports it), the connector attaches it as a second
+  file connection on the same invoice — inline JSON rendered as a
+  provenance-bannered PDF, URL documents fetched under SSRF guards. Absence
+  is the normal case (no note); a failed merchant attach degrades to a note
+  exactly like the evidence attach. **Timing (found live, #965):** for x402
+  the feed pushes at the FUNDING confirmation while the merchant's receipt
+  reaches the agent only at the merchant retry seconds later — so the normal
+  x402 path is the LATE ATTACH: the capture endpoint retroactively attaches
+  onto the already-pushed invoice via the sync row's `external_ref`
+  (double-attach-guarded; failures degrade to a sync-row note). Sandbox
+  invoice 12 proves the full dual-attachment chain.
+
+Live validation: **Q5 CONFIRMED 2026-07-16** — `npm run pilot:fortnox` pushed
+an invoice with the underlag PDF attached and read the file connection back
+(`FileId` + filename on the invoice; visible under Bilagor in the sandbox UI).
+The same day's first run (before the `connectfile` grant) also proved the
+degradation semantics live: invoice pushed, attachment blocked, actionable
+note on the result — exactly the designed failure mode.
 
 ## References
 

@@ -1,3 +1,4 @@
+import { RelayerBudgetExceededError } from './relayer-spend-guard.js'
 import { ethers } from 'ethers'
 import pool from '../db.js'
 import { type AgentContext } from '../middleware/agentAuth.js'
@@ -19,6 +20,15 @@ import {
 } from './allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from './machine-payment-evidence.js'
 import { decideCoverage } from './payment-coverage.js'
+import { isAddress } from '@haven_ai/core'
+import {
+  loadExecutionRailState,
+  redactVendorSecrets,
+  resolveExecutionRail,
+  serializeUserOp,
+  sessionRailRetired,
+  isRetiredRailIntent,
+} from './execution-rail.js'
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
@@ -77,6 +87,12 @@ export interface PaymentIntentRow {
   machine_idempotency_key: string | null
   machine_metadata: unknown
   expires_at: string
+  /** Execution rail pinned at authorize time; null = legacy AllowanceModule (#745). */
+  execution_rail?: string | null
+  /** Smart Sessions permissionId pinned at authorize time. */
+  session_permission_id?: string | null
+  /** Serialized prepared UserOperation for session-rail intents (see execution-rail.ts). */
+  session_user_op?: unknown
 }
 
 interface ApprovalRequestRow {
@@ -97,9 +113,7 @@ interface ApprovalRequestRow {
   machine_metadata: unknown
 }
 
-export function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
+export { isAddress as isValidAddress } from '@haven_ai/core'
 
 export function normaliseAddress(addr: string): string {
   return ethers.getAddress(addr.toLowerCase())
@@ -263,6 +277,8 @@ async function currentPaymentIntentStatus(id: string, agent: AgentContext): Prom
 }
 
 function signData(intent: PaymentIntentRow, hash = intent.sign_hash, nonce = intent.allowance_nonce) {
+  // Legacy AllowanceModule shape (import-only accounts, #834 owner decision).
+  // Session-rail intents are retired and refused before sign_data is built.
   return {
     hash,
     components: {
@@ -397,6 +413,11 @@ async function returnExistingIntent(
   }
 
   if (existing.status === 'pending_signature') {
+    // Session-rail intents are retired (#834) — a still-pending one can no
+    // longer execute; the client must re-authorize on the delegation rail.
+    if (isRetiredRailIntent(existing.execution_rail)) {
+      return sessionRailRetired('intent')
+    }
     let existingHash = existing.sign_hash
     let existingNonce = existing.allowance_nonce
     const refreshedAllowance = await getTokenAllowance(
@@ -550,6 +571,22 @@ export interface CreatePaymentIntentInput {
   idempotencyKey: string | null
   /** Plain object — serialised to JSON here; pass null to store SQL NULL. */
   metadata: unknown | null
+  /** Pin the intent to a non-legacy rail (#745/#830). Omit for legacy. */
+  executionRail?: 'delegation'
+  /** The Smart Sessions permissionId pinned at authorize time. */
+  sessionPermissionId?: string
+  /** Pre-serialized prepared UserOperation (serializeUserOp) for session intents. */
+  sessionUserOp?: string
+  /** The delegation authorizing a delegation-rail intent (#829/#830). */
+  delegationHash?: string
+  /**
+   * The METERING budget behind the intent (#1059) — uniform across schemes,
+   * unlike `delegationHash` (the signed instrument: child on erc7710, budget
+   * elsewhere). Coincides with `delegationHash` except on erc7710.
+   */
+  budgetDelegationHash?: string
+  /** Pre-serialized prepared redemption/settlement state for delegation intents. */
+  preparedUserOp?: string
   /**
    * Which partial-unique index enforces idempotent dedup for this rail. x402
    * dedupes on `x402_idempotency_key`; MPP rails on `machine_idempotency_key`.
@@ -576,7 +613,9 @@ export async function createPaymentIntent(
   const {
     agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
     allowanceNonce, signHash, resourceUrl, category, merchantAddress,
-    challengeId, idempotencyKey, metadata, conflictTarget,
+    challengeId, idempotencyKey, metadata,
+    executionRail, sessionPermissionId, sessionUserOp,
+    delegationHash, budgetDelegationHash, preparedUserOp, conflictTarget,
   } = input
 
   // conflictTarget is a strict union mapped through an allowlist — never raw
@@ -591,10 +630,12 @@ export async function createPaymentIntent(
       allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
       x402_merchant_address, x402_idempotency_key,
       payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
-      machine_idempotency_key, machine_metadata, expires_at
+      machine_idempotency_key, machine_metadata,
+      execution_rail, session_permission_id, session_user_op,
+      delegation_hash, budget_delegation_hash, prepared_user_op, expires_at
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
       'pending_signature', $13, $14, $15, $16, $17,
-      $18, $19, $20, $21, $22, $23, NOW() + interval '10 minutes')
+      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NOW() + interval '10 minutes')
     ON CONFLICT (agent_id, ${conflictColumn})
       WHERE ${conflictColumn} IS NOT NULL
         AND status NOT IN ('failed', 'expired')
@@ -610,6 +651,8 @@ export async function createPaymentIntent(
       rail === 'x402' ? idempotencyKey ?? null : null,
       rail, resourceUrl, merchantAddress?.toLowerCase() ?? null, challengeId ?? null,
       idempotencyKey ?? null, metadata != null ? JSON.stringify(metadata) : null,
+      executionRail ?? null, sessionPermissionId ?? null, sessionUserOp ?? null,
+      delegationHash ?? null, budgetDelegationHash ?? null, preparedUserOp ?? null,
     ],
   )
 
@@ -638,13 +681,13 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
   if (!resourceUrl || typeof resourceUrl !== 'string') {
     return { statusCode: 400, body: { error: 'Resource URL is required' } }
   }
-  if (!payTo || !isValidAddress(payTo)) {
+  if (!payTo || !isAddress(payTo)) {
     return { statusCode: 400, body: { error: 'Valid payTo address is required' } }
   }
   payTo = normaliseAddress(payTo)
 
   if (merchantPayTo !== null) {
-    if (!merchantPayTo || !isValidAddress(merchantPayTo)) {
+    if (!merchantPayTo || !isAddress(merchantPayTo)) {
       return { statusCode: 400, body: { error: 'Valid merchantPayTo address is required' } }
     }
     merchantPayTo = normaliseAddress(merchantPayTo)
@@ -742,6 +785,16 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
         },
       }
     }
+  }
+
+  // ── Retired-session gate (#993) — the marking alone decides; see the seam.
+  const railDecision = resolveExecutionRail({
+    ...(await loadExecutionRailState(agent)),
+    chainId: agent.chain_id,
+  })
+  if (railDecision.rail === 'retired_session') {
+    // #993: retirement decided in the seam, refusal produced there too.
+    return sessionRailRetired('account')
   }
 
   let onChainAllowance
@@ -956,6 +1009,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       0n,
       agent.delegate_address,
       signature,
+      { agentId: agent.id, userId: agent.user_id },
     )
 
     const fiatValues = await getFiatValuesForTokenAmount(
@@ -1002,6 +1056,20 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       },
     }
   } catch (err) {
+    // #717: an over-budget refusal happened BEFORE anything was submitted —
+    // 429 and leave the intent pending so a later retry can execute; burning
+    // it to 'failed' would punish the caller twice.
+    if (err instanceof RelayerBudgetExceededError) {
+      return {
+        statusCode: 429,
+        body: {
+          success: false,
+          payment_id: intent.id,
+          status: 'pending_signature',
+          error: err.message,
+        },
+      }
+    }
     const errorMsg = err instanceof Error ? err.message : String(err)
     await pool.query(
       `UPDATE payment_intents

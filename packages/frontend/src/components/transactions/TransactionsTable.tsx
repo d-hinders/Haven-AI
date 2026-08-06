@@ -16,11 +16,11 @@ import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { DirectionMark, ExternalDetailsLink } from '@/components/haven'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { Tooltip } from '@/components/ui/Tooltip'
+import { Table } from '@/components/ui/Table'
+import { Amount } from '@/components/haven'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type AmountTone = 'success' | 'debit' | 'danger' | 'neutral'
 type SortColumn = 'date' | 'amount'
 type SortDirection = 'asc' | 'desc'
 
@@ -99,96 +99,6 @@ interface TransactionsTableProps {
   onSelect?: (tx: AggregatedTransaction) => void
 }
 
-// ─── Amount tone map ──────────────────────────────────────────────────────────
-
-// Outgoing amounts adopt the sibling `--v2-debit` colour so incoming + outgoing
-// read as a symmetric pair (green / sky) instead of green / neutral.
-const AMOUNT_TONE_CLASS: Record<AmountTone, string> = {
-  success: 'text-[var(--v2-success)]',
-  debit: 'text-[var(--v2-debit)]',
-  danger: 'text-[var(--v2-danger)]',
-  neutral: 'text-[var(--v2-ink)]',
-}
-
-// ─── Chevron sort indicator ────────────────────────────────────────────────────
-
-function SortChevron({ active, ascending }: { active: boolean; ascending: boolean }) {
-  return (
-    <svg
-      className={`ml-1 inline-block h-3 w-3 flex-shrink-0 transition-transform ${active ? 'opacity-100' : 'opacity-30'} ${active && ascending ? 'rotate-180' : ''}`}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2.5}
-      aria-hidden="true"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-    </svg>
-  )
-}
-
-// ─── Header band ──────────────────────────────────────────────────────────────
-
-// Tokenized so the header band reads as one design-system primitive across
-// every transaction list (history page, Safe detail, agent detail). The
-// `--v2-table-header-bg` token replaces the previous mix of page-bg and
-// surface-tint values that diverged per surface.
-const TH_BASE =
-  'bg-[var(--v2-table-header-bg)] border-b border-[var(--v2-table-row-border)] text-[11px] uppercase tracking-wide text-[var(--v2-table-header-ink)] px-4 py-3 font-medium'
-
-// Sticky behaviour only applies on the `page` variant. Negative top
-// compensates for <main>'s p-6/lg:p-8 padding so the pinned header sits
-// flush against the TopBar instead of below the padding.
-const TH_STICKY = 'sticky -top-6 lg:-top-8 z-20'
-
-function SortableHeader({
-  label,
-  column,
-  sort,
-  onSort,
-  loadedCount,
-  className = '',
-  align = 'left',
-  sticky,
-}: {
-  label: string
-  column: SortColumn
-  sort: SortState
-  onSort: (col: SortColumn) => void
-  loadedCount: number
-  className?: string
-  align?: 'left' | 'right'
-  sticky: boolean
-}) {
-  const active = sort.column === column
-  const ascending = active && sort.direction === 'asc'
-  const ariaSort: 'ascending' | 'descending' | 'none' = active
-    ? (sort.direction === 'asc' ? 'ascending' : 'descending')
-    : 'none'
-  const buttonAlign = align === 'right' ? 'w-full justify-end' : ''
-  const directionWord = active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'unsorted'
-  const tooltipLabel = `Sorts the ${loadedCount} loaded transaction${loadedCount === 1 ? '' : 's'} — use Load more to widen the set`
-  return (
-    <th
-      className={`${TH_BASE} ${sticky ? TH_STICKY : ''} ${className}`}
-      scope="col"
-      aria-sort={ariaSort}
-    >
-      <Tooltip label={tooltipLabel} side="bottom">
-        <button
-          type="button"
-          onClick={() => onSort(column)}
-          aria-label={`Sort by ${label}, currently ${directionWord}`}
-          className={`inline-flex items-center gap-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-1 rounded ${buttonAlign}`}
-        >
-          {label}
-          <SortChevron active={active} ascending={ascending} />
-        </button>
-      </Tooltip>
-    </th>
-  )
-}
-
 // ─── Loading skeleton ─────────────────────────────────────────────────────────
 
 function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY: string }) {
@@ -235,13 +145,13 @@ function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY:
 
   return (
     <div role="status" aria-busy="true" aria-live="polite" aria-label="Loading transactions">
-      <table className="w-full border-separate border-spacing-0">
-        <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-table-row-border)] [&>tr:last-child>td]:border-b-0">
+      <Table>
+        <Table.Body>
           {[0, 1, 2, 3].map((i) => (
             <tr key={i}>{columns.map((col) => renders[col](`${col}-${i}`))}</tr>
           ))}
-        </tbody>
-      </table>
+        </Table.Body>
+      </Table>
     </div>
   )
 }
@@ -311,67 +221,60 @@ export default function TransactionsTable({
     )
   }
 
-  const thStickyClass = isSticky ? TH_STICKY : ''
   const colSpan = columns.length
+  const sortTooltip = `Sorts the ${transactions.length} loaded transaction${
+    transactions.length === 1 ? '' : 's'
+  } — use Load more to widen the set`
+  const directionOf = (col: SortColumn): 'asc' | 'desc' | null =>
+    sort.column === col ? sort.direction : null
 
   return (
-    <table className="w-full border-separate border-spacing-0">
-      <thead className={`hidden md:table-header-group ${isSticky ? 'sticky -top-6 lg:-top-8 z-10' : ''}`}>
+    <Table>
+      <Table.Head sticky={isSticky}>
         <tr>
-          {showCol('direction') ? (
-            <th className={`${TH_BASE} ${thStickyClass} w-9`} scope="col" />
-          ) : null}
+          {showCol('direction') ? <Table.HeaderCell sticky={isSticky} className="w-9" /> : null}
           {showCol('activity') ? (
-            <th className={`${TH_BASE} ${thStickyClass} text-left`} scope="col">
+            <Table.HeaderCell sticky={isSticky} align="left">
               Activity
-            </th>
+            </Table.HeaderCell>
           ) : null}
           {showCol('initiator') ? (
-            <th
-              className={`${TH_BASE} ${thStickyClass} w-[120px] text-left hidden md:table-cell`}
-              scope="col"
-            >
+            <Table.HeaderCell sticky={isSticky} align="left" hideBelowMd className="w-[120px]">
               Initiator
-            </th>
+            </Table.HeaderCell>
           ) : null}
           {showCol('fromTo') ? (
-            <th
-              className={`${TH_BASE} ${thStickyClass} w-[140px] text-left hidden md:table-cell`}
-              scope="col"
-            >
+            <Table.HeaderCell sticky={isSticky} align="left" hideBelowMd className="w-[140px]">
               From / To
-            </th>
+            </Table.HeaderCell>
           ) : null}
           {showCol('date') ? (
-            <SortableHeader
+            <Table.SortableHeaderCell
               label="Date"
-              column="date"
-              sort={sort}
-              onSort={handleSort}
-              loadedCount={transactions.length}
-              className="w-[90px] hidden md:table-cell"
+              direction={directionOf('date')}
+              onSort={() => handleSort('date')}
+              tooltip={sortTooltip}
+              hideBelowMd
               sticky={isSticky}
+              className="w-[90px]"
             />
           ) : null}
           {showCol('amount') ? (
-            <SortableHeader
+            <Table.SortableHeaderCell
               label="Amount"
-              column="amount"
-              sort={sort}
-              onSort={handleSort}
-              loadedCount={transactions.length}
-              className="w-[110px] text-right"
+              direction={directionOf('amount')}
+              onSort={() => handleSort('amount')}
+              tooltip={sortTooltip}
               align="right"
               sticky={isSticky}
+              className="w-[110px]"
             />
           ) : null}
-          {showCol('link') ? (
-            <th className={`${TH_BASE} ${thStickyClass} w-8`} scope="col" />
-          ) : null}
+          {showCol('link') ? <Table.HeaderCell sticky={isSticky} className="w-8" /> : null}
         </tr>
-      </thead>
+      </Table.Head>
 
-      <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-table-row-border)] [&>tr:last-child>td]:border-b-0">
+      <Table.Body>
         {sorted.length === 0 ? (
           <tr>
             <td colSpan={colSpan} className="py-16 text-center">
@@ -404,15 +307,6 @@ export default function TransactionsTable({
           </tr>
         ) : (
           sorted.map((tx, index) => {
-            // Outgoing amounts intentionally stay neutral ink — the sky
-            // `--v2-debit` colour is reserved for the direction icon so
-            // the row reads as a calm number with a coloured marker,
-            // rather than a busy two-colour line.
-            const amountTone: AmountTone = tx.isError
-              ? 'danger'
-              : tx.direction === 'in'
-                ? 'success'
-                : 'neutral'
             const movement = transactionMovement(tx, resolveAddress, safeNamesByAddress)
             const initiator = transactionInitiator(tx)
             const lifecycleBadge = machinePaymentLifecyclePresentation(tx)
@@ -487,11 +381,12 @@ export default function TransactionsTable({
 
                 {showCol('amount') ? (
                   <td className={`w-[110px] px-4 ${padY} text-right`}>
-                    <span
-                      className={`v2-tabular text-sm font-semibold ${AMOUNT_TONE_CLASS[amountTone]}`}
-                    >
-                      {transactionAmount(tx)}
-                    </span>
+                    <Amount
+                      value={tx.valueFormatted}
+                      symbol={tx.asset}
+                      direction={tx.direction}
+                      failed={tx.isError}
+                    />
                   </td>
                 ) : null}
 
@@ -509,14 +404,7 @@ export default function TransactionsTable({
             )
           })
         )}
-      </tbody>
-    </table>
+      </Table.Body>
+    </Table>
   )
-}
-
-// ─── Helper functions ─────────────────────────────────────────────────────────
-
-function transactionAmount(tx: AggregatedTransaction): string {
-  const sign = tx.direction === 'in' ? '+' : '-'
-  return `${sign}${tx.valueFormatted} ${tx.asset}`
 }

@@ -134,6 +134,32 @@ describe('read commands', () => {
     expect(parsed[0].hash).toBe('0xa')
   })
 
+  it('resolves activity --safe by address to a safeId filter', async () => {
+    const api = fakeApi({
+      'GET /user/safes': { safes: [{ id: 's1', safe_address: '0xABC', chain_id: 100, name: 'Main', is_default: true }] },
+      'GET /transactions': { transactions: [] },
+    })
+    const { deps } = harness({ makeApi: () => api })
+    expect(await run(['activity', 'list', '--safe', '0xabc'], deps)).toBe(0)
+    const txCall = api.calls.find((c) => c.startsWith('GET /transactions'))
+    expect(txCall).toContain('safeId=s1')
+  })
+
+  it('passes --offset through to the transactions query', async () => {
+    const api = fakeApi({ 'GET /transactions': { transactions: [] } })
+    const { deps } = harness({ makeApi: () => api })
+    expect(await run(['activity', 'list', '--offset', '40'], deps)).toBe(0)
+    const txCall = api.calls.find((c) => c.startsWith('GET /transactions'))
+    expect(txCall).toContain('offset=40')
+  })
+
+  it('errors when activity --safe matches no wallet', async () => {
+    const api = fakeApi({ 'GET /user/safes': { safes: [] } })
+    const { deps, err } = harness({ makeApi: () => api })
+    expect(await run(['activity', 'list', '--safe', 'nope'], deps)).toBe(1)
+    expect(err.join('\n')).toContain('No wallet matches')
+  })
+
   it('exports SIE from the backend accounting endpoint', async () => {
     const sie = '#FLAGGA 0\r\n#SIETYP 4\r\n#VER "A" 1 20260619 "Soundside"\r\n'
     const { deps, out } = harness({ makeApi: () => fakeApi({ 'GET /accounting/export': sie }) })

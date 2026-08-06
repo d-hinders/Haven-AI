@@ -1,5 +1,7 @@
 'use client'
 
+import { ChevronRight } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useMemo, useState, useCallback, type ReactNode } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
@@ -17,8 +19,9 @@ import {
   type SendParams,
 } from '@/lib/safe-tx'
 import { getChainConfig, getExplorerUrl } from '@/lib/chains'
+import { Address as AddressDisplay } from '@/components/haven'
 import { timeAgo, timeUntil } from '@/lib/format'
-import { useActiveSigner } from '@/lib/signer'
+import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import {
   approvalRecipientLabel,
   approvalSourceLabel,
@@ -158,7 +161,7 @@ function ApprovalCard({
       hover={false}
       className={`overflow-hidden ${actionable ? 'border-[var(--v2-warning)]/25' : ''}`}
     >
-      <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
+      <Card.Header>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -178,7 +181,7 @@ function ApprovalCard({
             </p>
           ) : null}
         </div>
-      </div>
+      </Card.Header>
 
       <div className="space-y-5 p-5">
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.9fr)] lg:items-start">
@@ -223,14 +226,10 @@ function ApprovalCard({
               aria-expanded={disclosureOpen}
               onClick={toggleDisclosure}
             >
-              <svg
+              <Icon
+                icon={ChevronRight}
                 className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${disclosureOpen ? 'rotate-90' : ''}`}
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              />
               Where does the money go?
             </button>
             {disclosureOpen ? (
@@ -248,27 +247,17 @@ function ApprovalCard({
                 <div className="space-y-1.5">
                   <p className="text-xs text-[var(--v2-ink-3)]">
                     Agent spending wallet:{' '}
-                    <a
+                    <AddressDisplay
+                      value={approval.to_address}
                       href={getExplorerUrl(approval.chain_id, 'address', approval.to_address)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="v2-tabular font-medium text-[var(--v2-brand)] hover:underline"
-                    >
-                      {approval.to_address.slice(0, 6)}&hellip;{approval.to_address.slice(-4)}{' '}
-                      <span aria-hidden="true">↗</span>
-                    </a>
+                    />
                   </p>
                   <p className="text-xs text-[var(--v2-ink-3)]">
                     Merchant:{' '}
-                    <a
+                    <AddressDisplay
+                      value={approval.merchant_address!}
                       href={getExplorerUrl(approval.chain_id, 'address', approval.merchant_address!)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="v2-tabular font-medium text-[var(--v2-brand)] hover:underline"
-                    >
-                      {approval.merchant_address!.slice(0, 6)}&hellip;{approval.merchant_address!.slice(-4)}{' '}
-                      <span aria-hidden="true">↗</span>
-                    </a>
+                    />
                   </p>
                 </div>
               </div>
@@ -410,10 +399,15 @@ function ApprovalCardWithContext({
   }
   const { details: safeDetails } = useSafeDetails(safeAddress, { chainId })
   const publicClient = usePublicClient({ chainId })
-  const signer = useActiveSigner({
+  const activeSigner = useActiveSigner({
     safeAddress,
     chainId,
   })
+  // #1079: this surface signs SAFE transactions; a delegator_passkey cannot.
+  // The narrowed view keeps every downstream call type-honest — on delegation
+  // accounts these controls are hidden, so null here renders the same
+  // no-signer state as before.
+  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
   const operationGate = useSafeOperationGate({
     safeAddress,
     chainId,

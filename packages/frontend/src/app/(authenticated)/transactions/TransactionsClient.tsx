@@ -4,8 +4,11 @@ import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
+import { useChainScope } from '@/hooks/useActiveChain'
+import { getChainConfig } from '@/lib/chains'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
+import { Select } from '@/components/ui/Select'
 import {
   buildTransactionScopeSubtitle,
   buildTransactionSummary,
@@ -23,6 +26,14 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
+
+function chainName(chainId: number): string {
+  try {
+    return getChainConfig(chainId).name
+  } catch {
+    return `Chain ${chainId}`
+  }
+}
 
 export default function TransactionsClient() {
   const router = useRouter()
@@ -65,14 +76,23 @@ export default function TransactionsClient() {
     filters.safeId || filters.agentId || filters.tokenKey || filters.direction,
   )
 
-  // Client-side direction filter — the API doesn't yet support this dimension,
-  // so we filter the fetched page in memory. Honest UX caveat: when combined
-  // with paginated results this only filters what's loaded, same constraint
-  // as the client-side sort.
+  // Transactions follow the active chain by default and re-default when it
+  // switches; the network dropdown overrides to another chain or all (#620).
+  const { scope, setScope } = useChainScope('follow-active')
+  const chainIds = Array.from(new Set(userSafes.map((s) => s.chain_id))).sort((a, b) => a - b)
+  const showNetworkFilter = chainIds.length > 1
+
+  // Client-side direction + network filters — the API doesn't yet support these
+  // dimensions, so we filter the fetched page in memory. Honest UX caveat: when
+  // combined with paginated results this only filters what's loaded, same
+  // constraint as the client-side sort.
   const visibleTransactions = useMemo(() => {
-    if (!filters.direction) return transactions
-    return transactions.filter((tx) => tx.direction === filters.direction)
-  }, [transactions, filters.direction])
+    return transactions.filter((tx) => {
+      if (filters.direction && tx.direction !== filters.direction) return false
+      if (scope !== 'all' && tx.chainId !== scope) return false
+      return true
+    })
+  }, [transactions, filters.direction, scope])
 
   const safeNamesById = new Map(safes.map((safe) => [safe.id, safe.name]))
   const agentNamesById = new Map(agents.map((agent) => [agent.id, agent.name]))
@@ -195,6 +215,30 @@ export default function TransactionsClient() {
         error={filtersError}
         onChange={handleFilterChange}
       />
+
+      {showNetworkFilter && (
+        <div className="mt-3 flex items-center gap-2">
+          <label htmlFor="tx-network" className="text-xs font-medium text-[var(--v2-ink-3)]">
+            Network
+          </label>
+          <Select
+            id="tx-network"
+            aria-label="Filter transactions by network"
+            value={scope === 'all' ? 'all' : String(scope)}
+            onChange={(e) =>
+              setScope(e.target.value === 'all' ? 'all' : Number(e.target.value))
+            }
+            className="max-w-[200px]"
+          >
+            <option value="all">All networks</option>
+            {chainIds.map((id) => (
+              <option key={id} value={String(id)}>
+                {chainName(id)}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
 
       <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--v2-ink-3)]">

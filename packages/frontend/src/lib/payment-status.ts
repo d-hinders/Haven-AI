@@ -1,6 +1,6 @@
 import type { StatusTone } from '@/components/ui/StatusBadge'
 
-export type AgentStatus = 'active' | 'paused' | 'revoked'
+export type AgentStatus = 'active' | 'paused' | 'pending_approval' | 'revoked'
 
 export type ApprovalStatus =
   | 'pending'
@@ -26,6 +26,9 @@ export interface StatusPresentation {
 const AGENT_STATUS: Record<AgentStatus, StatusPresentation> = {
   active: { label: 'Connected', tone: 'success' },
   paused: { label: 'Paused', tone: 'warning' },
+  // #1069: setup started but no budget granted yet — the agent exists and is
+  // reachable, it just cannot pay. Warning, not danger: the fix is one step.
+  pending_approval: { label: 'Needs setup', tone: 'warning' },
   revoked: { label: 'Revoked', tone: 'danger' },
 }
 

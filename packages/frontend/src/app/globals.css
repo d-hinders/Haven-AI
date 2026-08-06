@@ -10,7 +10,9 @@
 
   --v2-ink: #1a1f36;
   --v2-ink-2: #525f7f;
-  --v2-ink-3: #8898aa;
+  /* AA-safe tertiary text: ≥4.5:1 on white AND the tinted surfaces
+     (--v2-surface / -2 / hover). Checked by token-contrast.test.ts. */
+  --v2-ink-3: #5d6c85;
   --v2-ink-on-brand: #ffffff;
 
   --v2-border: #e6ebf1;
@@ -20,18 +22,39 @@
   --v2-brand-strong: #4338ca;
   --v2-brand-soft: #eef2ff;
 
-  --v2-success: #0e9f6e;
+  --v2-success: #047857;
   --v2-success-soft: #ecfdf5;
   /* Sky / debit — used for outgoing transactions (send / debit) globally.
      Sibling to success on the cool side of the spectrum so incoming /
      outgoing read as a symmetric pair without clashing with brand-indigo. */
-  --v2-debit: #0284c7;
+  --v2-debit: #0369a1;
   --v2-debit-soft: #f0f9ff;
   --v2-warning: #b54708;
   --v2-warning-soft: #fef3c7;
   --v2-danger: #b42318;
   --v2-danger-soft: #fef2f2;
   --v2-modal-backdrop: rgba(26, 31, 54, 0.66);
+
+  /* ── Chain identity ─────────────────────────────────────────────────
+     Brand/identity colours that tell networks apart in NetworkPill and
+     NetworkSwitcher. Deliberately OUTSIDE the semantic-colour rule — they
+     identify a chain, they are not success/warning/etc. Values are preserved
+     exactly from the pre-token components (#875). NetworkSwitcher uses the
+     solid brand dot; NetworkPill uses a lighter tinted-pill treatment, so
+     Base carries both a brand dot (#0052FF) and a softer sky pill — unifying
+     the two into one Base hue is a deliberate follow-up, not done here. */
+  --v2-chain-base: #0052ff; /* NetworkSwitcher solid dot — Coinbase Base blue */
+  --v2-chain-gnosis: #3e9b8f; /* NetworkSwitcher solid dot — Gnosis teal */
+  --v2-chain-testnet: #f59e0b; /* Base Sepolia — amber, flags a testnet (dot, both surfaces) */
+  /* NetworkPill soft-pill — Base (sky family) */
+  --v2-chain-base-dot: #0ea5e9;
+  --v2-chain-base-fg: #0369a1;
+  --v2-chain-base-border: #bae6fd;
+  --v2-chain-base-bg: #f0f9ff;
+  /* NetworkPill soft-pill — testnet (amber family; dot reuses --v2-chain-testnet) */
+  --v2-chain-testnet-fg: #b45309;
+  --v2-chain-testnet-border: #fde68a;
+  --v2-chain-testnet-bg: #fffbeb;
 
   --v2-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
   --v2-shadow-card-raised: 0 2px 4px rgba(16, 24, 40, 0.06), 0 4px 12px rgba(16, 24, 40, 0.08);
@@ -65,7 +88,7 @@
      so the transactions surfaces (history page, Safe detail, agent detail)
      read as one primitive. */
   --v2-table-header-bg: #f6f9fc;
-  --v2-table-header-ink: #8898aa;
+  --v2-table-header-ink: #5d6c85;
   --v2-table-row-border: #e6ebf1;
   --v2-table-row-hover: #f0f4f9;
 

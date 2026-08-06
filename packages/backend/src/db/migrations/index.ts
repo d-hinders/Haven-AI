@@ -34,6 +34,25 @@ import * as dropLegacyPlaintextApiKey from './031_drop_legacy_plaintext_api_key.
 import * as accountEntitlements from './032_account_entitlements.js'
 import * as reportingFeedSyncs from './033_reporting_feed_syncs.js'
 import * as baseDefaultChain from './034_base_default_chain.js'
+import * as merchantCatalogSeedExpansion from './035_merchant_catalog_seed_expansion.js'
+import * as executionRail from './036_execution_rail.js'
+import * as merchantCatalogAssetTransferMethods from './037_merchant_catalog_asset_transfer_methods.js'
+import * as agentRecipients from './038_agent_recipients.js'
+import * as sessionScheduleWindow from './039_session_schedule_window.js'
+import * as hybridAccounts from './041_hybrid_accounts.js'
+import * as agentDelegations from './042_agent_delegations.js'
+import * as delegationIntents from './043_delegation_intents.js'
+import * as hybridAccountPasskeys from './044_hybrid_account_passkeys.js'
+import * as dropSessionRailTables from './045_drop_session_rail_tables.js'
+import * as singleSignerWaiver from './046_single_signer_waiver.js'
+import * as merchantReceipts from './047_merchant_receipts.js'
+import * as agentPassports from './048_agent_passports.js'
+import * as agentPassportRevocation from './049_agent_passport_revocation.js'
+import * as agentPassportRevocationIndex from './050_agent_passport_revocation_index.js'
+import * as agentPassportAddresses from './051_agent_passport_addresses.js'
+import * as agentConnectionSetupPassport from './052_agent_connection_setup_passport.js'
+import * as paymentIntentBudgetDelegationHash from './053_payment_intent_budget_delegation_hash.js'
+import * as relayerGasEvents from './054_relayer_gas_events.js'
 
 export interface Migration {
   version: string
@@ -81,4 +100,23 @@ export const migrations: Migration[] = [
   accountEntitlements,
   reportingFeedSyncs,
   baseDefaultChain,
+  merchantCatalogSeedExpansion,
+  executionRail,
+  merchantCatalogAssetTransferMethods,
+  agentRecipients,
+  sessionScheduleWindow,
+  hybridAccounts,
+  agentDelegations,
+  delegationIntents,
+  hybridAccountPasskeys,
+  dropSessionRailTables,
+  singleSignerWaiver,
+  merchantReceipts,
+  agentPassports,
+  agentPassportRevocation,
+  agentPassportRevocationIndex,
+  agentPassportAddresses,
+  agentConnectionSetupPassport,
+  paymentIntentBudgetDelegationHash,
+  relayerGasEvents,
 ]

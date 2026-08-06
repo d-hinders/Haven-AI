@@ -1,12 +1,15 @@
+import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { ethers } from 'ethers'
 import { buildX402ExpectedMessage } from '@haven_ai/sdk'
 import pool from '../db.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
+import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../lib/agent-payment-taxonomy.js'
 import { getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import { formatTokenValue } from '../lib/tokens.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   getTokenAllowance,
   getTokenBalance,
@@ -16,6 +19,7 @@ import {
   recoverSigner,
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
+import { waitForFreshAllowanceNonce } from '../lib/allowance-nonce-coordinator.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
 import {
   createMachineApproval,
@@ -24,11 +28,23 @@ import {
   type PaymentIntentRow,
 } from '../lib/machine-payments.js'
 import { decideCoverage } from '../lib/payment-coverage.js'
+import { passportReferenceFor } from '../lib/passport/x402-delivery.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import {
   agentPaymentStatusHttpCode,
   getAgentPaymentStatus,
 } from '../lib/agent-payment-status.js'
+import { redactVendorSecrets } from '../lib/execution-rail.js'
+import { selectDelegation, prepareDelegationPayment } from '../lib/delegation-authorization.js'
+import { userOpTypedData } from '../lib/delegation-rail.js'
+import { delegationSigningPayload, recoverDelegationSigner } from '../lib/delegation-policy.js'
+import { computeHybridAccountAddress } from '../lib/hybrid-provisioning.js'
+import {
+  buildSettlementDelegation,
+  assembleSettlementPayload,
+  encodeXPaymentHeader,
+} from '../lib/x402-delegation.js'
+import { serializeUserOp, deserializeUserOp, resolveExecutionRail, sessionRailRetired } from '../lib/execution-rail.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -49,6 +65,20 @@ interface X402AuthorizeBody {
   category?: string       // api_access, data, compute
   idempotencyKey?: string
   signature?: string      // delegate signature (optional — enables one-shot authorize+execute)
+  /**
+   * #946: explicit settlement-scheme request on the delegation rail
+   * ('erc7710' | 'eip3009'). Optional — the payTo shape (merchant vs the
+   * agent's own delegate EOA) already selects the scheme; when present this
+   * is validated against that shape so a confused client fails loudly
+   * instead of getting the wrong flow.
+   */
+  settlementScheme?: string
+  /**
+   * #1058: the erc7710 challenge entry's `extra.facilitatorAddresses`,
+   * forwarded VERBATIM. Pins the settlement child's redeemer caveat and is
+   * echoed in the v2 X-PAYMENT header's accepted entry.
+   */
+  facilitatorAddresses?: string[]
 }
 
 interface X402ApprovalRow {
@@ -72,10 +102,6 @@ interface X402ExpectedContext {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-
-function isValidAddress(addr: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(addr)
-}
 
 function isPositiveDecimalAtomicAmount(value: string): boolean {
   return DECIMAL_ATOMIC_AMOUNT_RE.test(value) && BigInt(value) > 0n
@@ -124,6 +150,27 @@ async function signX402ExpectedContext(context: X402ExpectedContext) {
   }
 }
 
+/**
+ * #961: the per-agent hourly x402 cap, enforced on EVERY rail. Returns the cap
+ * when exceeded (caller 429s), null when within it. On the delegation rail
+ * each authorize runs a sponsored bundler estimation, so this cap is also
+ * sponsorship-cost protection (#717 surface), not just API hygiene.
+ */
+async function agentHourlyX402CapExceeded(agentId: string): Promise<number | null> {
+  const agentConfig = await pool.query(
+    `SELECT max_x402_per_hour FROM agents WHERE id = $1`,
+    [agentId],
+  )
+  // 100 = default max x402 calls per hour (rate limit), NOT chain 100.
+  const maxPerHour = agentConfig.rows[0]?.max_x402_per_hour ?? 100
+  const recentCount = await pool.query(
+    `SELECT COUNT(*) as cnt FROM payment_intents
+     WHERE agent_id = $1 AND source = 'x402' AND created_at > NOW() - interval '1 hour'`,
+    [agentId],
+  )
+  return Number(recentCount.rows[0].cnt) >= maxPerHour ? maxPerHour : null
+}
+
 async function currentPaymentIntentStatus(id: string, agent: AgentContext): Promise<string> {
   const current = await pool.query<{ status: string }>(
     `SELECT status FROM payment_intents WHERE id = $1 AND agent_id = $2`,
@@ -157,6 +204,7 @@ function existingX402IntentMismatch(
     amountRaw: string
     tokenAddress: string
     network: string
+    facilitatorAddresses?: string[]
   },
 ): string | null {
   const existingResource = existing.x402_resource_url ?? existing.payment_resource_url
@@ -177,6 +225,18 @@ function existingX402IntentMismatch(
 
   const existingNetwork = x402MetadataNetwork(existing.machine_metadata)
   if (existingNetwork && existingNetwork !== requested.network) return 'network'
+
+  // #1058: a replay after the merchant rotated its advertised facilitators
+  // would hand back a child pinned to the OLD redeemer — internally
+  // consistent but dead on arrival at the merchant's matcher. 409 so the
+  // client re-keys. 3009-mode state has no facilitators key; treat absent
+  // and undefined as equal.
+  const state = existing.prepared_user_op as { facilitatorAddresses?: string[] } | null | undefined
+  const existingFacilitators = Array.isArray(state?.facilitatorAddresses) ? state.facilitatorAddresses : null
+  const requestedFacilitators = requested.facilitatorAddresses ?? null
+  if (JSON.stringify(existingFacilitators) !== JSON.stringify(requestedFacilitators)) {
+    return 'facilitator_addresses'
+  }
 
   return null
 }
@@ -255,8 +315,14 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       description,
       category,
       idempotencyKey,
+      maxTimeoutSeconds,
       signature,
     } = request.body
+      if (maxTimeoutSeconds !== undefined && (typeof maxTimeoutSeconds !== 'number' || !Number.isFinite(maxTimeoutSeconds))) {
+        // #1053 review (minor): a non-numeric value used to NaN through the
+        // clamp and surface as a 502; it is a caller error and gets a 400.
+        return reply.code(400).send({ error: 'maxTimeoutSeconds must be a finite number' })
+      }
     let { payTo } = request.body
     let { merchantPayTo } = request.body
 
@@ -307,6 +373,42 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'idempotencyKey must be a non-empty string up to 128 characters' })
     }
 
+    // #946: settlementScheme is validated for EVERY rail — a legacy-rail agent
+    // requesting erc7710 must fail loudly, not silently get the 3009 two-leg.
+    const { settlementScheme } = request.body
+    if (settlementScheme !== undefined && !['erc7710', 'eip3009'].includes(settlementScheme)) {
+      return reply.code(400).send({ error: "settlementScheme must be 'erc7710' or 'eip3009'" })
+    }
+    if (settlementScheme === 'erc7710' && agent.execution_rail !== 'delegation') {
+      return reply.code(400).send({
+        error: 'erc7710 settlement requires a delegation-rail account — the legacy AllowanceModule rail settles via EIP-3009 only',
+      })
+    }
+    // #1058: facilitator addresses pin the settlement child's redeemer caveat.
+    // Garbage here would either brick the child (unredeemable) or silently
+    // skip the pin — both are caller errors that must fail loudly.
+    const { facilitatorAddresses } = request.body
+    if (facilitatorAddresses !== undefined) {
+      if (
+        !Array.isArray(facilitatorAddresses) ||
+        facilitatorAddresses.length === 0 ||
+        facilitatorAddresses.length > 16 ||
+        facilitatorAddresses.some((a) => typeof a !== 'string' || !isValidAddress(a))
+      ) {
+        return reply.code(400).send({
+          error: 'facilitatorAddresses must be 1-16 valid addresses (the erc7710 challenge entry\'s extra.facilitatorAddresses)',
+        })
+      }
+      if (agent.execution_rail !== 'delegation') {
+        // Same scheme confusion the erc7710 settlementScheme rejection above
+        // fails loudly on — a legacy-rail client believing a redeemer pin
+        // exists must not silently proceed unpinned.
+        return reply.code(400).send({
+          error: 'facilitatorAddresses applies to erc7710 direct settlement, which requires a delegation-rail account',
+        })
+      }
+    }
+
     // 2. Resolve token from asset address (shared with the MPP core).
     const tokenResult = resolvePaymentToken(agent.chain_id, asset)
     if (!tokenResult.ok) {
@@ -320,6 +422,454 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
 
     // Human-readable amount for storage
     const amountHuman = formatTokenValue(amountRaw.toString(), tokenConfig.decimals)
+
+    // #993 (review finding on #1120): the retired-rail refusal must hold on
+    // EVERY money entry point, not just /payments — a session-marked account
+    // previously slipped into the legacy AllowanceModule x402 flow below.
+    const railDecision = resolveExecutionRail({
+      safeExecutionRail: agent.execution_rail ?? null,
+      chainId: agent.chain_id,
+    })
+    if (railDecision.rail === 'retired_session') {
+      const retired = sessionRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
+    }
+
+    // ── Delegation rail (#830, epic #821) — DIRECT settlement ──────────────
+    // The agent's budget delegation IS the settlement instrument: the delegate
+    // account re-delegates a narrowed slice (exact amount, payee pin, short
+    // expiry) to the merchant, who redeems the [child, budget] chain. The
+    // period budget is metered by the settlement itself — no funding leg, no
+    // delegate hot balance, no sweep (epic #713's class is gone on this rail).
+    if (agent.execution_rail === 'delegation') {
+      if (tokenAddress === ZERO_ADDRESS) {
+        return reply.code(400).send({ error: 'Native-token x402 is not supported on the delegation rail' })
+      }
+
+      // ── Scheme routing (#946) ────────────────────────────────────────────
+      // erc7710 direct settlement is the default and the destination; the
+      // EIP-3009 two-leg below is a deliberate, temporary interop bridge for
+      // facilitators that cannot redeem a delegation chain (RFC #791 §18).
+      // The payTo shape selects the scheme: the standard-x402 SDK contract
+      // sends payTo = the agent's own delegate EOA (the funding target) with
+      // merchantPayTo = the merchant, while erc7710 callers send the merchant
+      // as payTo. An explicit settlementScheme, when present, must agree.
+      const fundingShape = payTo.toLowerCase() === agent.delegate_address.toLowerCase()
+      if (settlementScheme === 'eip3009' && !fundingShape) {
+        return reply.code(400).send({
+          error: 'eip3009 settlement requires payTo = the agent delegate EOA (the funding target) and merchantPayTo = the merchant',
+        })
+      }
+      if (settlementScheme === 'erc7710' && fundingShape) {
+        return reply.code(400).send({
+          error: 'erc7710 settlement requires payTo = the merchant, not the agent delegate EOA',
+        })
+      }
+      if (facilitatorAddresses !== undefined && fundingShape) {
+        // #1058: on the 3009 two-leg the merchant settles via EIP-3009 — a
+        // redeemer pin is meaningless there and forwarding it means the
+        // client confused its schemes.
+        return reply.code(400).send({
+          error: 'facilitatorAddresses applies to erc7710 direct settlement only — the EIP-3009 funding leg has no redeemer',
+        })
+      }
+
+      // ── #961 hardening: cap, one-shot, replay — BEFORE any sponsored prepare ──
+      // One-shot authorize+execute is a legacy-rail convenience; on this rail
+      // the signature is typed data over prepared state that does not exist
+      // yet, so a provided signature can never be valid. Refuse loudly instead
+      // of silently minting a fresh intent per call.
+      if (signature !== undefined) {
+        return reply.code(400).send({
+          error:
+            'One-shot authorize+execute is not supported on the delegation rail — authorize first, ' +
+            'then sign the returned sign_data and submit it (POST /payments/:id/sign for EIP-3009 ' +
+            'funding, POST /x402/:id/settle for erc7710).',
+        })
+      }
+      // Idempotent replay must RESUME, never dead-end: reconstruct the signing
+      // payload from stored state instead of re-running an estimation. The
+      // unique index excludes rows whose STATUS is failed/expired — a
+      // past-expires_at row still holds the key until something flips its
+      // status, so the replay path lazily expires it (below) to free the key
+      // for a fresh create.
+      // NOTE: this helper must NOT return the Fastify reply through the
+      // async boundary — Reply is a thenable, so `await` on it resolves to
+      // undefined and the caller's falsy-check would double-execute the
+      // request (found by the #961 tests). It returns {code, body}; the
+      // caller sends.
+      const delegationReplay = async (
+        existing: Record<string, unknown>,
+      ): Promise<{ code: number; body: unknown } | null> => {
+        if (existing.status === 'confirmed' && existing.tx_hash) {
+          return { code: 200, body: {
+            success: true,
+            payment_id: existing.id,
+            status: existing.status,
+            tx_hash: existing.tx_hash,
+            chain_id: existing.chain_id ?? agent.chain_id,
+            safe_address: existing.safe_address,
+            payer: existing.safe_address,
+            token: existing.token_symbol,
+            amount: existing.amount_human,
+            to: existing.to_address,
+            merchant_to: existing.x402_merchant_address,
+            resource_url: existing.x402_resource_url,
+            explorer_url: getExplorerUrl(
+              (existing.chain_id as number) ?? agent.chain_id, 'tx', existing.tx_hash as string,
+            ),
+          } }
+        }
+        if (existing.status !== 'pending_signature') return null
+        if (new Date(existing.expires_at as string) < new Date()) {
+          // Lazy-expire: nothing else on the authorize path flips a stale
+          // pending row, and until its status changes the partial unique
+          // index still holds the idempotency key — every retry would loop
+          // on a bare 409 (found by review, #961 M2).
+          await pool.query(
+            `UPDATE payment_intents SET status = 'expired'
+             WHERE id = $1 AND agent_id = $2 AND status = 'pending_signature'`,
+            [existing.id, agent.id],
+          )
+          return null
+        }
+        const mismatch = existingX402IntentMismatch(existing, {
+          resourceUrl: url,
+          fundingTo: payTo,
+          merchantTo: merchantPayTo?.toLowerCase() ?? payTo.toLowerCase(),
+          amountRaw: amountRaw.toString(),
+          tokenAddress,
+          network,
+          facilitatorAddresses,
+        })
+        if (mismatch) {
+          return { code: 409, body: {
+            payment_id: existing.id,
+            status: existing.status,
+            error: `idempotencyKey already belongs to a different x402 ${mismatch}`,
+          } }
+        }
+        if (existing.prepared_user_op == null) return null
+        const state = deserializeUserOp(existing.prepared_user_op) as Record<string, unknown>
+        // The stored intent's chain is authoritative for the reconstructed
+        // typed data — agent.chain_id happens to equal it today (the network
+        // check pins it), but the sign_hash was computed against the intent.
+        const intentChainId = (existing.chain_id as number) ?? agent.chain_id
+        const accountAddress = await computeHybridAccountAddress(intentChainId, {
+          ownerAddress: agent.delegate_address as `0x${string}`,
+        })
+        const isErc7710State = Boolean(state?.child && state?.budget)
+        const sign_data = isErc7710State
+          ? {
+              hash: existing.sign_hash,
+              signature_scheme: 'eip712_delegation',
+              typed_data: delegationSigningPayload(
+                state.child as never, intentChainId,
+              ),
+              instructions:
+                'Sign sign_data.typed_data with your delegate (agent) key (EIP-712). Then POST ' +
+                `/x402/${existing.id}/settle with { signature } to receive the X-PAYMENT header.`,
+            }
+          : {
+              hash: existing.sign_hash,
+              signature_scheme: 'eip712_userop',
+              typed_data: userOpTypedData(state, accountAddress as `0x${string}`, intentChainId),
+              components: {
+                safe: agent.safe_address,
+                account: accountAddress,
+                token: existing.token_address,
+                to: existing.to_address,
+                amount: existing.amount_raw,
+              },
+              instructions:
+                'Sign sign_data.typed_data with your delegate (agent) key (EIP-712). Then POST ' +
+                `/payments/${existing.id}/sign with { signature } — the funding redemption moves ` +
+                'the exact amount to your delegate EOA; retry the merchant with your EIP-3009 header.',
+            }
+        const replayExpectedAuth = await signX402ExpectedContext({
+          paymentId: existing.id as string,
+          payloadHash: existing.sign_hash as string,
+          resourceUrl: url,
+          merchantTo: (existing.x402_merchant_address as string | null) ?? payTo.toLowerCase(),
+          amount: amountRaw.toString(),
+          asset: tokenAddress,
+          network,
+          expiresAt: existing.expires_at as string,
+        })
+        return { code: 201, body: {
+          payment_id: existing.id,
+          status: existing.status,
+          expires_at: existing.expires_at,
+          chain_id: agent.chain_id,
+          safe_address: agent.safe_address,
+          payer: agent.safe_address,
+          token: tokenConfig.symbol,
+          amount: existing.amount_human,
+          to: existing.to_address,
+          merchant_to: existing.x402_merchant_address ?? null,
+          resource_url: existing.x402_resource_url ?? url,
+          x402_expected_auth: replayExpectedAuth,
+          idempotent_replay: true,
+          sign_data,
+        } }
+      }
+      const findExistingByKey = async () => {
+        if (!idempotencyKey) return null
+        const existingResult = await pool.query(
+          `SELECT *
+           FROM payment_intents
+           WHERE agent_id = $1
+             AND (x402_idempotency_key = $2 OR machine_idempotency_key = $2)
+             AND COALESCE(payment_rail, source) = 'x402'
+             AND status <> 'failed'
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [agent.id, idempotencyKey],
+        )
+        return existingResult.rows[0] ?? null
+      }
+      const preExisting = await findExistingByKey()
+      if (preExisting) {
+        const replayed = await delegationReplay(preExisting)
+        if (replayed) return reply.code(replayed.code).send(replayed.body)
+      }
+
+      // Per-agent hourly cap — AFTER the replay lookup (a replay creates
+      // nothing and runs no estimation, so it must never be rate-limited;
+      // legacy-rail parity) but BEFORE any sponsored prepare, so the cap is
+      // sponsorship-cost protection too (#717 surface).
+      const delegationCap = await agentHourlyX402CapExceeded(agent.id)
+      if (delegationCap !== null) {
+        return reply.code(429).send({
+          error: `Rate limit exceeded: max ${delegationCap} x402 payments per hour`,
+          retry_after_seconds: 60,
+        })
+      }
+
+      if (fundingShape) {
+        // ── EIP-3009 fallback: delegation-metered funding leg (#946) ──────
+        // treasury ──(budget delegation)──▶ agent EOA, then the EOA signs the
+        // standard EIP-3009 header client-side and the facilitator settles
+        // EOA→merchant. The budget is metered at the funding hop (accepted
+        // bridge downside — see the issue); recipient-PINNED budgets cannot
+        // fund the EOA, so 3009-mode structurally requires an open budget
+        // (owner decision 2026-07-15: pinned agents are erc7710-only).
+        if (!merchantPayTo) {
+          return reply.code(400).send({
+            error: 'merchantPayTo is required for EIP-3009 x402 on the delegation rail — the ledger must record the real merchant, not the funding target',
+          })
+        }
+        let fundingAuth
+        try {
+          fundingAuth = await prepareDelegationPayment(
+            { id: agent.id, chain_id: agent.chain_id, delegate_address: agent.delegate_address },
+            tokenAddress,
+            payTo.toLowerCase(),
+            amountRaw,
+          )
+        } catch (err) {
+          // Caveat rejection (budget/expiry) or bundler failure — database untouched.
+          return reply.code(502).send({
+            error: 'Delegation-rail funding authorization failed (on-chain policy or bundler)',
+            details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+          })
+        }
+        if (!fundingAuth) {
+          return reply.code(403).send({
+            error:
+              `Agent has no delegation able to fund EIP-3009 settlement for ${tokenConfig.symbol}. ` +
+              '3009-mode needs an open (unpinned) budget delegation — merchant-pinned budgets settle via erc7710 only.',
+          })
+        }
+
+        const intent = await createPaymentIntent({
+          agent,
+          rail: 'x402',
+          payTo,
+          tokenSymbol: tokenConfig.symbol,
+          tokenAddress,
+          amountRaw,
+          amountHuman,
+          allowanceNonce: 0,
+          signHash: fundingAuth.prepared.userOpHash,
+          resourceUrl: url,
+          category: category ?? null,
+          merchantAddress: merchantPayTo.toLowerCase(),
+          challengeId: null,
+          idempotencyKey: idempotencyKey ?? null,
+          metadata: { network, settlement_scheme: 'eip3009' },
+          executionRail: 'delegation',
+          delegationHash: fundingAuth.delegationHash,
+          // #1059: on the funding leg the budget IS the signed instrument.
+          budgetDelegationHash: fundingAuth.delegationHash,
+          preparedUserOp: serializeUserOp(fundingAuth.prepared.userOperation),
+          conflictTarget: 'x402_idempotency_key',
+        })
+        if (!intent) {
+          // #961: a concurrent claim won the insert — resume THAT intent
+          // instead of dead-ending the client on a bare 409.
+          const winner = await findExistingByKey()
+          if (winner) {
+            const replayed = await delegationReplay(winner)
+            if (replayed) return reply.code(replayed.code).send(replayed.body)
+          }
+          return reply.code(409).send({ error: 'Idempotent replay in progress — retry the original request' })
+        }
+
+        // Mirror the legacy-rail 201 shape (chain/payer/merchant/expected-auth)
+        // so the standard-x402 SDK machinery — receipt mapping and the edge
+        // signer's expected-context binding check — works unchanged; only the
+        // signing scheme differs (the account's UserOp typed data).
+        const fundingExpectedAuth = await signX402ExpectedContext({
+          paymentId: intent.id,
+          payloadHash: fundingAuth.prepared.userOpHash,
+          resourceUrl: url,
+          merchantTo: merchantPayTo.toLowerCase(),
+          amount: amountRaw.toString(),
+          asset: tokenAddress,
+          network,
+          expiresAt: intent.expires_at,
+        })
+        return reply.code(201).send({
+          payment_id: intent.id,
+          status: intent.status,
+          expires_at: intent.expires_at,
+          chain_id: agent.chain_id,
+          safe_address: agent.safe_address,
+          payer: agent.safe_address,
+          token: tokenConfig.symbol,
+          amount: amountHuman,
+          to: payTo.toLowerCase(),
+          merchant_to: merchantPayTo.toLowerCase(),
+          resource_url: url,
+          x402_expected_auth: fundingExpectedAuth,
+          sign_data: {
+            hash: fundingAuth.prepared.userOpHash,
+            signature_scheme: 'eip712_userop',
+            // The account validates THIS typed data (not the bare 4337 hash).
+            typed_data: fundingAuth.prepared.signingTypedData,
+            components: {
+              safe: agent.safe_address,
+              account: fundingAuth.prepared.delegateAccountAddress,
+              token: tokenAddress,
+              to: payTo.toLowerCase(),
+              amount: amountRaw.toString(),
+            },
+            instructions:
+              'Sign sign_data.typed_data with your delegate (agent) key (EIP-712; ' +
+              '@haven_ai/sdk does this automatically). Then POST ' +
+              `/payments/${intent.id}/sign with { signature } — the funding redemption ` +
+              'moves the exact amount to your delegate EOA, after which you retry the ' +
+              'merchant with your EIP-3009 X-PAYMENT header. Sweep any residual.',
+          },
+        })
+      }
+
+      const budget = await selectDelegation(agent.id, tokenAddress, payTo.toLowerCase())
+      if (!budget) {
+        return reply.code(403).send({
+          error: `Agent has no active budget delegation for ${tokenConfig.symbol} to this merchant`,
+        })
+      }
+      let built
+      let delegateAccountAddress
+      try {
+        delegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
+          ownerAddress: agent.delegate_address as `0x${string}`,
+        })
+        built = buildSettlementDelegation({
+          chainId: agent.chain_id,
+          delegateAccountAddress: delegateAccountAddress as `0x${string}`,
+          budgetDelegation: JSON.parse(budget.delegation_json),
+          asset: tokenAddress as `0x${string}`,
+          amountAtomic: amountRaw,
+          payTo: payTo.toLowerCase() as `0x${string}`,
+          // #1058: pin the child to the merchant's advertised facilitators —
+          // normalized for the caveat; the VERBATIM strings are stored below
+          // for the header echo (the v2 matcher deep-equals them).
+          redeemers: facilitatorAddresses?.map((a) => normaliseAddress(a) as `0x${string}`),
+          // Reviewed (#1053 minor): validated numeric at the route top — a
+          // string here would NaN through the clamp into a 502.
+          maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
+        })
+      } catch (err) {
+        return reply.code(502).send({
+          error: 'Could not build the settlement delegation',
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+        })
+      }
+
+      const intent = await createPaymentIntent({
+        agent,
+        rail: 'x402',
+        payTo,
+        tokenSymbol: tokenConfig.symbol,
+        tokenAddress,
+        amountRaw,
+        amountHuman,
+        allowanceNonce: 0,
+        signHash: built.childHash,
+        resourceUrl: url,
+        category: category ?? null,
+        merchantAddress: (merchantPayTo ?? payTo).toLowerCase(),
+        challengeId: null,
+        idempotencyKey: idempotencyKey ?? null,
+        // #1053 review, finding 5 (the quick half): record the scheme like the
+        // 3009 path does, so the accounting feed can tell schemes apart without
+        // parsing prepared_user_op. The hash-semantics column is the follow-up.
+        metadata: { network, settlement_scheme: 'erc7710' },
+        executionRail: 'delegation',
+        delegationHash: built.childHash,
+        // #1059: the CHILD is signed, but the parent budget does the metering —
+        // recorded uniformly so the accounting feed never parses prepared_user_op.
+        budgetDelegationHash: budget.delegation_hash,
+        preparedUserOp: serializeUserOp({
+          child: built.child,
+          budget: JSON.parse(budget.delegation_json),
+          delegateAccountAddress,
+          network,
+          // Echoed back to the merchant in the v2 X-PAYMENT header — must be
+          // the QUOTED value, and the child's expiry was derived from it.
+          maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
+          // #1058: echoed verbatim; the child's redeemer caveat was built
+          // from these (normalized), so state and caveat stay one thing.
+          facilitatorAddresses,
+        }),
+        conflictTarget: 'x402_idempotency_key',
+      })
+      if (!intent) {
+        // #961: a concurrent claim won the insert — resume THAT intent
+        // instead of dead-ending the client on a bare 409.
+        const winner = await findExistingByKey()
+        if (winner) {
+          const replayed = await delegationReplay(winner)
+          if (replayed) return reply.code(replayed.code).send(replayed.body)
+        }
+        return reply.code(409).send({ error: 'Idempotent replay in progress — retry the original request' })
+      }
+
+      return reply.code(201).send({
+        payment_id: intent.id,
+        status: intent.status,
+        expires_at: intent.expires_at,
+        sign_data: {
+          hash: built.childHash,
+          signature_scheme: 'eip712_delegation',
+          typed_data: built.signingPayload,
+          components: {
+            account: delegateAccountAddress,
+            token: tokenAddress,
+            to: payTo.toLowerCase(),
+            amount: amountRaw.toString(),
+          },
+          instructions:
+            'Sign sign_data.typed_data with your delegate (agent) key (EIP-712; ' +
+            '@haven_ai/sdk signUserOpTypedDataForDelegation-style). Then POST ' +
+            `/x402/${intent.id}/settle with { signature } to receive the X-PAYMENT ` +
+            'header, and retry the merchant with it. The merchant settles directly.',
+        },
+      })
+    }
 
     if (idempotencyKey) {
       const existingResult = await pool.query(
@@ -359,6 +909,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           amountRaw: amountRaw.toString(),
           tokenAddress,
           network,
+          facilitatorAddresses,
         })
         if (mismatch) {
           return reply.code(409).send({
@@ -518,22 +1069,11 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    // 5. Rate limiting: max x402 payments per hour
-    const agentConfig = await pool.query(
-      `SELECT max_x402_per_hour FROM agents WHERE id = $1`,
-      [agent.id],
-    )
-    // 100 = default max x402 calls per hour (rate limit), NOT chain 100.
-    const maxPerHour = agentConfig.rows[0]?.max_x402_per_hour ?? 100
-
-    const recentCount = await pool.query(
-      `SELECT COUNT(*) as cnt FROM payment_intents
-       WHERE agent_id = $1 AND source = 'x402' AND created_at > NOW() - interval '1 hour'`,
-      [agent.id],
-    )
-    if (Number(recentCount.rows[0].cnt) >= maxPerHour) {
+    // 5. Rate limiting: max x402 payments per hour (#961: shared helper)
+    const exceededCap = await agentHourlyX402CapExceeded(agent.id)
+    if (exceededCap !== null) {
       return reply.code(429).send({
-        error: `Rate limit exceeded: max ${maxPerHour} x402 payments per hour`,
+        error: `Rate limit exceeded: max ${exceededCap} x402 payments per hour`,
         retry_after_seconds: 60,
       })
     }
@@ -557,6 +1097,27 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         details: err instanceof Error ? err.message : String(err),
       })
     }
+
+    // Proactively avoid the stale-nonce race (#692): if a prior transfer for this
+    // delegate just incremented the nonce, wait until that increment is visible
+    // before signing, so the sign_hash never targets an already-consumed nonce.
+    // Best-effort with a timeout fallback — the preflight + retry still cover it.
+    onChainAllowance.nonce = await waitForFreshAllowanceNonce(
+      agent.chain_id,
+      agent.safe_address,
+      agent.delegate_address,
+      tokenAddress,
+      onChainAllowance.nonce,
+      async () =>
+        (
+          await getTokenAllowance(
+            agent.chain_id,
+            agent.safe_address,
+            agent.delegate_address,
+            tokenAddress,
+          )
+        ).nonce,
+    )
 
     const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
 
@@ -776,6 +1337,21 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ error: 'x402 payment already exists but could not be loaded' })
     }
 
+    // Exact-amount funding invariant (#716, epic #713): the funding transfer
+    // must move EXACTLY the intent's recorded amount — never the request's.
+    // On an idempotency replay the intent is reloaded from the DB, and without
+    // this guard a replay carrying a different `amount` would execute the
+    // request's number while the record says otherwise (padding/mutation
+    // sneaking past the ledger). Fail closed on any mismatch.
+    if (BigInt(intent.amount_raw) !== amountRaw) {
+      return reply.code(409).send({
+        payment_id: intent.id,
+        error:
+          'Amount does not match the existing payment for this idempotency key — ' +
+          `stored ${intent.amount_raw}, requested ${amountRaw.toString()}`,
+      })
+    }
+
     // 11. If signature provided, execute immediately (one-shot mode)
     if (signature) {
       // Verify signature
@@ -835,6 +1411,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           0n,
           agent.delegate_address,
           signature,
+          { agentId: agent.id, userId: agent.user_id },
         )
 
         const fiatValues = await getFiatValuesForTokenAmount(
@@ -887,6 +1464,11 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
           explorer_url: getExplorerUrl(agent.chain_id, 'tx', txHash),
         })
       } catch (err) {
+        // #717: over-budget = refused before submission — 429, intent stays
+        // pending for retry.
+        if (err instanceof RelayerBudgetExceededError) {
+          return reply.code(429).send({ payment_id: intent.id, status: intent.status, error: err.message })
+        }
         const errorMsg = err instanceof Error ? err.message : String(err)
         await pool.query(
           `UPDATE payment_intents
@@ -952,6 +1534,151 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     })
   }
 
-  app.post<{ Body: X402AuthorizeBody }>('/', authorizeX402Handler)
-  app.post<{ Body: X402AuthorizeBody }>('/authorize', authorizeX402Handler)
+  app.post<{ Body: X402AuthorizeBody }>('/', { config: moneyPathRateLimit }, authorizeX402Handler)
+  app.post<{ Body: X402AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, authorizeX402Handler)
+
+  // ── POST /x402/:id/settle — delegation rail (#830) ───────────────────────
+  // The agent has signed the settlement child (EIP-712). Assemble the
+  // X-PAYMENT header and hand it back; the MERCHANT redeems the [child,
+  // budget] chain — Haven submits nothing, holds no key. The intent flips to
+  // 'submitted'; final settlement is observed via the merchant/receipt path.
+  app.post<{ Params: { id: string }; Body: { signature?: string } }>(
+    '/:id/settle',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const { id } = request.params
+      const { signature } = request.body ?? {}
+      if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
+        return reply.code(400).send({ error: 'A delegate EIP-712 signature is required' })
+      }
+
+      const row = await pool.query<{
+        id: string
+        status: string
+        execution_rail: string | null
+        prepared_user_op: unknown
+        chain_id: number
+        x402_resource_url: string | null
+        to_address: string
+        amount_raw: string
+        token_address: string
+      }>(
+        `SELECT id, status, execution_rail, prepared_user_op, chain_id, x402_resource_url,
+                to_address, amount_raw, token_address
+         FROM payment_intents
+         WHERE id = $1 AND agent_id = $2`,
+        [id, agent.id],
+      )
+      const intent = row.rows[0]
+      if (!intent) return reply.code(404).send({ error: 'Payment not found' })
+      if (intent.execution_rail !== 'delegation') {
+        return reply.code(409).send({ error: 'This payment is not a delegation-rail x402 settlement' })
+      }
+      if (intent.status !== 'pending_signature') {
+        return reply.code(409).send({ error: `Payment is ${intent.status}, expected pending_signature` })
+      }
+      if (intent.prepared_user_op == null) {
+        return reply.code(502).send({ error: 'Settlement state was lost — re-authorize' })
+      }
+
+      try {
+        const state = deserializeUserOp(intent.prepared_user_op) as {
+          child: Parameters<typeof assembleSettlementPayload>[1]
+          budget: Parameters<typeof assembleSettlementPayload>[3]
+          delegateAccountAddress: `0x${string}`
+          network: string
+          maxTimeoutSeconds?: number
+          facilitatorAddresses?: string[]
+        }
+        // #946 guard: a 3009-mode funding intent stores a prepared UserOp, not
+        // an erc7710 {child, budget} settlement state. Refuse it here
+        // structurally — otherwise a tolerant encoder could flip the intent to
+        // 'submitted' with a garbage header and no funding ever executed.
+        if (!state?.child || !state?.budget) {
+          return reply.code(409).send({
+            error:
+              'This intent settles via EIP-3009 (funding leg) — sign it via POST ' +
+              `/payments/${intent.id}/sign. /settle is for erc7710 direct settlement only.`,
+          })
+        }
+        // #1053 review, finding 3: the shape check above accepts any hex —
+        // '0x0' included — and the flip below burns the intent (a retry 409s
+        // on the status guard). Unlike payments.ts, the child delegation's
+        // typed data IS fully known server-side, so recover the signer and
+        // refuse a signature that is not the delegate's BEFORE anything
+        // becomes unrecoverable. 400, not 502: the client signed wrong and
+        // can re-sign the same sign_data.
+        let signer: string
+        try {
+          signer = await recoverDelegationSigner(state.child, intent.chain_id, signature as `0x${string}`)
+        } catch {
+          return reply.code(400).send({
+            error: 'The signature is not a valid EIP-712 signature over sign_data.typed_data',
+          })
+        }
+        if (signer.toLowerCase() !== agent.delegate_address.toLowerCase()) {
+          return reply.code(400).send({
+            error: 'The signature was not produced by this agent\'s delegate key over sign_data.typed_data',
+          })
+        }
+
+        const payload = assembleSettlementPayload(
+          intent.chain_id,
+          state.child,
+          signature as `0x${string}`,
+          state.budget,
+          state.delegateAccountAddress,
+        )
+        const header = encodeXPaymentHeader(state.network, payload, {
+          amount: intent.amount_raw,
+          payTo: intent.to_address as `0x${string}`,
+          asset: intent.token_address as `0x${string}`,
+          // Pre-#1064 intents stored no echo value; 300 is the same default
+          // the child expiry was built with, so the echo stays consistent.
+          maxTimeoutSeconds: state.maxTimeoutSeconds ?? 300,
+          facilitatorAddresses: state.facilitatorAddresses,
+        })
+
+        // #976: the agent's own passport reference, so it can PRESENT rather
+        // than have the merchant DISCOVER. Deliberately in Haven's response and
+        // NOT inside `payment_header` — that header is parsed by a merchant
+        // facilitator we do not control, and an unrecognised key is a rejection
+        // risk. Null when there is no anchored passport; a lookup ERROR is
+        // swallowed and yields null too.
+        //
+        // Computed BEFORE the UPDATE, and that ordering is the point (#976
+        // review). Between the UPDATE and this reply, `payment_header` is
+        // UNRECOVERABLE: it is emitted from this one place, and a retry hits
+        // the `status !== 'pending_signature'` guard above and 409s. There is
+        // no statement_timeout and no Fastify requestTimeout, so a wedged query
+        // in that window would strand a signed, submitted intent with no way to
+        // get its header. The reference needs nothing the UPDATE produces, so
+        // the window simply should not exist. A lookup error cannot fail the
+        // payment either way; a lookup HANG is what the ordering removes.
+        const passport = await passportReferenceFor(agent.id, { log: request.log })
+
+        await pool.query(
+          `UPDATE payment_intents
+           SET status = 'submitted', signature = $1, signed_at = NOW(), submitted_at = NOW()
+           WHERE id = $2 AND agent_id = $3 AND status = 'pending_signature'`,
+          [signature, id, agent.id],
+        )
+        return reply.code(200).send({
+          payment_id: id,
+          status: 'submitted',
+          // Retry the merchant with this header; it settles directly from your
+          // budget delegation (no funding leg).
+          payment_header: header,
+          resource_url: intent.x402_resource_url,
+          passport,
+        })
+      } catch (err) {
+        return reply.code(502).send({
+          error: 'Could not assemble the settlement payload',
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+        })
+      }
+    },
+  )
 }

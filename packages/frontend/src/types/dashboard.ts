@@ -1,46 +1,12 @@
-import type { AggregatedTransaction } from './transactions'
-import type { AgentStatus } from '@/lib/payment-status'
+import type { ApiSchema } from '@haven_ai/core'
 
-export interface DashboardAgentAllowance {
-  tokenSymbol: string
-  allowanceAmount: string
-  resetPeriodMin: number
-}
+/**
+ * Wire shapes from `@haven_ai/core`'s generated API types (#984). The old
+ * hand-written copy marked `actionableApprovals`/`onboardingProgress`
+ * optional — the route always emits both — and typed the preview agents with
+ * an unreachable 'revoked' status; the spec now records reality.
+ */
 
-export interface DashboardAgentPreview {
-  id: string
-  name: string
-  status: AgentStatus
-  safeId: string | null
-  safeName: string | null
-  safeChainId: number | null
-  allowances: DashboardAgentAllowance[]
-}
-
-export interface DashboardOverviewResponse {
-  totals: {
-    usd: number
-    eur: number
-  }
-  change: {
-    available: boolean
-    usdAmount: number
-    eurAmount: number
-    usdPercent: number
-    eurPercent: number
-  }
-  metrics: {
-    connectedAgents: number
-    monthlyAgentSpendUsd: number
-    monthlyAgentSpendEur: number
-    successfulTransactions: number
-    activeAccounts: number
-  }
-  actionableApprovals?: number
-  pendingApprovals: number
-  onboardingProgress?: {
-    hasFirstAgentPayment: boolean
-  }
-  agents: DashboardAgentPreview[]
-  transactions: AggregatedTransaction[]
-}
+export type DashboardAgentAllowance = ApiSchema<'DashboardAgentAllowance'>
+export type DashboardAgentPreview = ApiSchema<'DashboardAgentPreview'>
+export type DashboardOverviewResponse = ApiSchema<'DashboardOverviewResponse'>

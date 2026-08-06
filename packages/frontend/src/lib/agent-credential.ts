@@ -70,7 +70,13 @@ export interface AgentCredentialArtifact {
   filename: string
 }
 
-const SCHEMA_URL = 'https://haven.ai/schemas/agent-credential.v1.json'
+// Opaque, ownership-neutral identifier for the credential format, emitted as the
+// `$schema` field of the credential JSON. It is NEVER dereferenced — nothing
+// fetches it. Deliberately a URN, not a URL: Haven does not own `haven.ai`, so we
+// must not emit a `https://haven.ai/...` URL as if we controlled that domain
+// (see #594). Keep the `agent-credential` / `v1` tokens stable — they identify
+// the credential format version (bump to `:v2` only on a real format change).
+const SCHEMA_ID = 'urn:haven:schema:agent-credential:v1'
 
 function resolveNetworkName(chainId: number): string | null {
   try {
@@ -105,7 +111,7 @@ export function buildAgentCredential(input: HandoffInput): AgentCredentialArtifa
 
   const slug = slugify(agent.name)
   const json: AgentCredentialJson = {
-    $schema: SCHEMA_URL,
+    $schema: SCHEMA_ID,
     version: 1,
     type: 'haven.agent_credential',
     agent_id: agent.id,

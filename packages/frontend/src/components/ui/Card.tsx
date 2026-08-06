@@ -119,4 +119,64 @@ function CardSection({
   )
 }
 
-export const Card = Object.assign(CardRoot, { Section: CardSection })
+/**
+ * The grey header band on a card — title on a `--v2-surface` tint with a
+ * hairline bottom border. The canonical way to give a Card (or a padding-0
+ * card with a row list) a titled header; never hand-roll the band.
+ *
+ * Assumes the parent Card has no top padding and `overflow-hidden` (so the
+ * band's corners clip to the card radius). For a standalone header on a card
+ * without `overflow-hidden`, add `rounded-t-[10px]` via className.
+ *
+ * Slots: `title` (rendered in a heading — `as` picks the level), optional
+ * `description`, optional `actions` (right-aligned). For bespoke content
+ * (badges, balances, skeletons) pass `children` instead of the slots.
+ *
+ * Padding: `default` (px-5 py-4) for standard list-card headers, `spacious`
+ * (px-6 py-5) for page-level section cards (profile, settings), `none` when
+ * the caller owns padding via className.
+ */
+function CardHeader({
+  title,
+  as: Heading = 'h3',
+  description,
+  actions,
+  padding = 'default',
+  className = '',
+  children,
+}: {
+  title?: ReactNode
+  as?: 'h2' | 'h3'
+  description?: ReactNode
+  actions?: ReactNode
+  padding?: 'default' | 'spacious' | 'none'
+  className?: string
+  children?: ReactNode
+}) {
+  const paddingClass =
+    padding === 'spacious' ? 'px-6 py-5' : padding === 'none' ? '' : 'px-5 py-4'
+  return (
+    <div
+      className={`border-b border-[var(--v2-border)] bg-[var(--v2-surface)] ${paddingClass} ${className}`}
+    >
+      {title !== undefined || actions !== undefined ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            {title !== undefined ? (
+              <Heading className="text-sm font-semibold text-[var(--v2-ink)]">{title}</Heading>
+            ) : null}
+            {description !== undefined ? (
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{description}</p>
+            ) : null}
+          </div>
+          {actions !== undefined ? (
+            <div className="flex flex-shrink-0 items-center gap-2">{actions}</div>
+          ) : null}
+        </div>
+      ) : null}
+      {children}
+    </div>
+  )
+}
+
+export const Card = Object.assign(CardRoot, { Section: CardSection, Header: CardHeader })

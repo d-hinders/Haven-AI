@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import { forwardRef } from 'react'
+import { ArrowRight } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from 'react'
 
 type Variant = 'primary' | 'ghost' | 'tertiary' | 'danger'
@@ -54,9 +56,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     <>
       {children}
       {trailingIcon && (
-        <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75}>
-          <path d="M3.5 8h9M9 4.5L12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Icon icon={ArrowRight} className="w-3.5 h-3.5" />
       )}
     </>
   )

@@ -8,7 +8,9 @@ import {
   parsePaymentRequiredResponse,
   selectPaymentOption,
   selectStandardPaymentOption,
+  toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
 } from './x402.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 
@@ -47,6 +49,48 @@ function decodeHeader(header: string): unknown {
 describe('x402 helpers', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  // #715 (epic #713): the merchant controls maxTimeoutSeconds, and the x402
+  // library turns it straight into the EIP-3009 `validBefore`. Without a cap
+  // a leaked signed authorization stays spendable for as long as the merchant
+  // asked. Both enforcement points are pinned here.
+  describe('authorization-window clamp (#715)', () => {
+    function responseWithTimeout(maxTimeoutSeconds: unknown): Response {
+      const body = {
+        ...paymentRequired,
+        accepts: [{ ...accepted, maxTimeoutSeconds }],
+      }
+      return new Response(null, {
+        status: 402,
+        headers: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(body)) },
+      })
+    }
+
+    it('clamps an absurd merchant-requested window at parse time', () => {
+      const parsed = parsePaymentRequired(responseWithTimeout(365 * 24 * 3600))
+      expect(parsed.accepts[0].maxTimeoutSeconds).toBe(X402_MAX_AUTHORIZATION_WINDOW_SECONDS)
+    })
+
+    it('keeps sane windows untouched and defaults a missing one to 30 s', () => {
+      expect(parsePaymentRequired(responseWithTimeout(60)).accepts[0].maxTimeoutSeconds).toBe(60)
+      expect(
+        parsePaymentRequired(responseWithTimeout(undefined)).accepts[0].maxTimeoutSeconds,
+      ).toBe(30)
+    })
+
+    it('floors nonsense (zero/negative) at 1 s instead of producing dead windows', () => {
+      expect(parsePaymentRequired(responseWithTimeout(-5)).accepts[0].maxTimeoutSeconds).toBe(1)
+      expect(parsePaymentRequired(responseWithTimeout(0)).accepts[0].maxTimeoutSeconds).toBe(1)
+    })
+
+    it('clamps again at the pre-sign choke point for unparsed options', () => {
+      const requirements = toStandardPaymentRequirements(paymentRequired, {
+        ...accepted,
+        maxTimeoutSeconds: 999_999,
+      })
+      expect(requirements.maxTimeoutSeconds).toBe(X402_MAX_AUTHORIZATION_WINDOW_SECONDS)
+    })
   })
 
   it('parses base64 PAYMENT-REQUIRED headers synchronously', () => {
@@ -1402,5 +1446,180 @@ describe('x402 helpers', () => {
     expect(Object.keys(decoded).sort()).toEqual(['accepted', 'payload', 'x402Version'])
     expect(decoded.x402Version).toBe(2)
     expect(decoded.accepted).toEqual(accepted)
+  })
+})
+
+// ── #946: delegation-rail EIP-3009 fallback rides the standard flow ──────────
+//
+// The backend's 3009-mode authorize response differs from legacy only in the
+// signing scheme: sign_data carries `eip712_userop` + the account's typed
+// data (the funding redemption UserOp), and /payments/:id/sign submits the
+// sponsored redemption. The SDK must complete the SAME authorize→sign→retry
+// machinery, signing typed data instead of the bare hash.
+describe('delegation-rail 3009-mode (#946)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('signs eip712_userop typed data for the funding leg and completes the flow', async () => {
+    const delegateKey = `0x${'01'.repeat(32)}`
+    const txHash = `0x${'ab'.repeat(32)}`
+    const typedData = {
+      domain: {
+        chainId: 8453,
+        name: 'HybridDeleGator',
+        version: '1',
+        verifyingContract: '0x' + 'dd'.repeat(20),
+      },
+      types: {
+        PackedUserOperation: [
+          { name: 'sender', type: 'address' },
+          { name: 'nonce', type: 'uint256' },
+          { name: 'entryPoint', type: 'address' },
+        ],
+      },
+      primaryType: 'PackedUserOperation',
+      message: {
+        sender: '0x' + 'dd'.repeat(20),
+        nonce: '1',
+        entryPoint: '0x' + 'ee'.repeat(20),
+      },
+    }
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_946',
+      status: 'pending_signature',
+      expires_at: 'later',
+      chain_id: 8453,
+      safe_address: safeAddress,
+      payer: safeAddress,
+      token: 'USDC',
+      amount: '0.02',
+      to: delegateAddress,
+      merchant_to: accepted.payTo,
+      resource_url: paymentRequired.resource.url,
+      sign_data: {
+        hash: `0x${'56'.repeat(32)}`,
+        signature_scheme: 'eip712_userop',
+        typed_data: typedData,
+        components: {
+          safe: safeAddress,
+          token: accepted.asset,
+          to: delegateAddress,
+          amount: accepted.amount,
+        },
+        instructions: 'sign then POST /payments/pay_946/sign',
+      },
+    }), { status: 201 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_946',
+      status: 'confirmed',
+      tx_hash: txHash,
+      chain_id: 8453,
+      token: 'USDC',
+      amount: '0.02',
+      to: delegateAddress,
+    }), { status: 200 }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey,
+      baseUrl: 'https://haven.example',
+    })
+    const receipt = await haven.authorizeX402(paymentRequired)
+
+    expect(receipt.success).toBe(true)
+    expect(receipt.paymentId).toBe('pay_946')
+    expect(receipt.txHash).toBe(txHash)
+
+    // The authorize call followed the standard-x402 contract the backend's
+    // scheme routing keys on: payTo = the delegate EOA, merchantPayTo = merchant.
+    const authorizeBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+    expect(authorizeBody.payTo.toLowerCase()).toBe(delegateAddress.toLowerCase())
+    expect(authorizeBody.merchantPayTo).toBe(accepted.payTo)
+
+    // The signature posted to /payments/pay_946/sign is the TYPED-DATA
+    // signature (the account rejects a bare-hash one) — byte-identical to an
+    // independent signUserOpTypedDataForDelegation over the same payload.
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://haven.example/payments/pay_946/sign')
+    const signBody = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)
+    const { signUserOpTypedDataForDelegation } = await import('./signer.js')
+    expect(signBody.signature).toBe(
+      await signUserOpTypedDataForDelegation(delegateKey, typedData as never),
+    )
+  })
+})
+
+// ── #956: merchant-receipt capture after a successful paid retry ─────────────
+describe('merchant receipt capture (#956)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const INVOICE = { fakturanummer: 'FAK-2026-00042', totalt_inkl_moms: '0.02' }
+
+  function paidFlowMocks(retryHeaders: Record<string, string>) {
+    const txHash = `0x${'ab'.repeat(32)}`
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {
+      status: 402, headers: { 'Content-Type': 'application/json' },
+    }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_956',
+      status: 'pending_signature',
+      chain_id: 8453,
+      safe_address: safeAddress,
+      token: 'USDC', amount: '0.02', to: delegateAddress,
+      resource_url: paymentRequired.resource.url,
+      sign_data: { hash: `0x${'11'.repeat(32)}`, components: { safe: safeAddress }, instructions: 'sign' },
+    }), { status: 201 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_956', status: 'confirmed', tx_hash: txHash, chain_id: 8453,
+      token: 'USDC', amount: '0.02', to: delegateAddress,
+    }), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response('paid content', { status: 200, headers: retryHeaders }))
+    // evidence report + (maybe) receipt report:
+    fetchMock.mockResolvedValue(new Response('{}', { status: 200 }))
+    return fetchMock
+  }
+
+  it('reports an x-receipt-json receipt to Haven after the paid retry', async () => {
+    const fetchMock = paidFlowMocks({
+      'x-receipt-json': Buffer.from(JSON.stringify(INVOICE), 'utf8').toString('base64'),
+    })
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test', delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example',
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, { method: 'POST', body: '{}' })
+    const res = await haven.payX402Quote(quote)
+    expect(res.status).toBe(200)
+
+    const receiptCall = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes('/machine-payments/pay_956/merchant-receipt'))
+    expect(receiptCall).toBeDefined()
+    expect(JSON.parse((receiptCall![1] as RequestInit).body as string)).toEqual({ json: INVOICE })
+  })
+
+  it('a malformed receipt header is ignored — the paid response is untouched', async () => {
+    const fetchMock = paidFlowMocks({ 'x-receipt-json': '%%%not-base64-json%%%' })
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test', delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example',
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, { method: 'POST', body: '{}' })
+    const res = await haven.payX402Quote(quote)
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('paid content')
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/merchant-receipt'))).toBe(false)
+  })
+
+  it('no receipt headers → no capture call (absence is the normal case)', async () => {
+    const fetchMock = paidFlowMocks({})
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test', delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example',
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, { method: 'POST', body: '{}' })
+    await haven.payX402Quote(quote)
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/merchant-receipt'))).toBe(false)
   })
 })

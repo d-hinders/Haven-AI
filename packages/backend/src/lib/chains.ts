@@ -1,10 +1,24 @@
 /**
- * Multi-chain configuration registry.
+ * Backend chain configuration — environment wiring over the shared registry.
  *
- * Single source of truth for all per-chain data: RPC, explorer,
- * token configs, contract addresses, and Safe service URLs.
+ * The per-chain FACTS (identity, explorer/Safe URLs, contracts, passkey,
+ * token data) live in `@haven_ai/core` (#986) — ONE definition shared with
+ * the frontend. This module adds what only the backend knows: RPC URLs and
+ * explorer API credentials from `config.ts`, the explorer API provider
+ * selection, and the backend's token Record representation (keyed
+ * `USDCE`-style, native first — the balances API iterates in this order).
+ *
+ * Purity proof: `__tests__/chains-registry-snapshot.test.ts` pins the fully
+ * resolved registry byte-for-byte against the pre-move fixture.
  */
 import { config } from '../config.js'
+import {
+  CHAIN_REGISTRY,
+  getChainData,
+  isRegisteredChain,
+  type CoreChainConfig,
+  type CoreTokenConfig,
+} from '@haven_ai/core'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -46,118 +60,98 @@ export interface ChainConfig {
   tokenByAddress: Record<string, TokenConfig>
 }
 
-// ── Gnosis Chain (100) ────────────────────────────────────────────
+// ── Backend-only environment wiring per chain ─────────────────────
+//
+// RPC URLs and explorer API access are environment concerns (config.ts), and
+// the explorer API provider choice is a backend integration detail:
+// Blockscout v2 is used for Base because the v1 tokentx endpoint consistently
+// times out (HTTP 524) on Base, and Etherscan V2 requires a paid plan.
 
-const GNOSIS_TOKENS: Record<string, TokenConfig> = {
-  XDAI: {
-    symbol: 'xDAI',
-    decimals: 18,
-    address: null,
-    coingeckoId: 'xdai',
+interface BackendChainEnv {
+  rpcUrl: string
+  explorerApiUrl: string
+  explorerApiKey: string
+  explorerApiProvider: ExplorerApiProvider
+}
+
+const CHAIN_ENV: Record<number, BackendChainEnv> = {
+  100: {
+    rpcUrl: config.rpcUrl,
+    explorerApiUrl: 'https://api.etherscan.io/v2/api',
+    explorerApiKey: config.gnosisscanApiKey,
+    explorerApiProvider: 'etherscan-v2',
   },
-  EURE: {
-    symbol: 'EURe',
-    decimals: 18,
-    address: '0xcB444e90D8198415266c6a2724b7900fb12FC56E',
-    coingeckoId: 'monerium-eur-money',
+  8453: {
+    rpcUrl: config.rpcUrlBase,
+    explorerApiUrl: 'https://base.blockscout.com/api/v2',
+    explorerApiKey: '',
+    explorerApiProvider: 'blockscout-v2',
   },
-  USDCE: {
-    symbol: 'USDC.e',
-    decimals: 6,
-    address: '0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0',
-    coingeckoId: 'usd-coin',
+  84532: {
+    rpcUrl: config.rpcUrlBaseSepolia,
+    explorerApiUrl: 'https://base-sepolia.blockscout.com/api/v2',
+    explorerApiKey: '',
+    explorerApiProvider: 'blockscout-v2',
   },
 }
 
-const GNOSIS: ChainConfig = {
-  chainId: 100,
-  name: 'Gnosis Chain',
-  shortName: 'gnosis',
-  nativeCurrency: { name: 'xDAI', symbol: 'xDAI', decimals: 18 },
-  rpcUrl: config.rpcUrl,
-  explorerUrl: 'https://gnosisscan.io',
-  explorerApiUrl: 'https://api.etherscan.io/v2/api',
-  explorerApiKey: config.gnosisscanApiKey,
-  explorerApiProvider: 'etherscan-v2',
-  safeTxServiceUrl: 'https://api.safe.global/tx-service/gno',
-  contracts: {
-    safeProxyFactory: '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2',
-    safeSingletonL2: '0x3E5c63644E683549055b9Be8653de26E0B4CD36E',
-    fallbackHandler: '0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4',
-    allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
-    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
-  },
-  passkey: {
-    verifier: '0x445a0683e494ea0c5af3e83c5159fbe47cf9e765',
-    // SafeWebAuthnSignerFactory live deployment used by the frontend parity checks in PR #40.
-    factoryAddress: '0x1d31F259eE307358a26dFb23EB365939E8641195',
-  },
-  tokens: GNOSIS_TOKENS,
-  tokenByAddress: buildTokenByAddress(GNOSIS_TOKENS),
+// ── Construction from the shared registry ─────────────────────────
+
+/** Backend token-record key: display symbol upper-cased, dots stripped ('USDC.e' → 'USDCE'). */
+function backendTokenKey(symbol: string): string {
+  return symbol.replace(/\./g, '').toUpperCase()
 }
 
-// ── Base (8453) ───────────────────────────────────────────────────
-
-const BASE_TOKENS: Record<string, TokenConfig> = {
-  ETH: {
-    symbol: 'ETH',
-    decimals: 18,
-    address: null,
-    coingeckoId: 'ethereum',
-  },
-  USDC: {
-    symbol: 'USDC',
-    decimals: 6,
-    address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-    coingeckoId: 'usd-coin',
-  },
+function toTokenConfig(token: CoreTokenConfig): TokenConfig {
+  return {
+    symbol: token.symbol,
+    decimals: token.decimals,
+    address: token.address,
+    coingeckoId: token.coingeckoId,
+  }
 }
 
-const BASE: ChainConfig = {
-  chainId: 8453,
-  name: 'Base',
-  shortName: 'base',
-  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-  rpcUrl: config.rpcUrlBase,
-  explorerUrl: 'https://basescan.org',
-  // Blockscout v2 is used for Base: the v1 tokentx endpoint consistently
-  // times out (HTTP 524) on Base, and Etherscan V2 requires a paid plan.
-  // v2 uses per-endpoint REST URLs built from this base.
-  explorerApiUrl: 'https://base.blockscout.com/api/v2',
-  explorerApiKey: '',
-  explorerApiProvider: 'blockscout-v2',
-  safeTxServiceUrl: 'https://api.safe.global/tx-service/base',
-  contracts: {
-    // Base uses EIP-155 variant addresses for Safe v1.3.0
-    safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
-    safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
-    fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
-    // These are at the same CREATE2 addresses on Base
-    allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
-    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
-  },
-  passkey: {
-    verifier: '0x0000000000000000000000000000000000000100',
-    // SafeWebAuthnSignerFactory live deployment used by the frontend parity checks in PR #40.
-    factoryAddress: '0x1d31F259eE307358a26dFb23EB365939E8641195',
-  },
-  tokens: BASE_TOKENS,
-  tokenByAddress: buildTokenByAddress(BASE_TOKENS),
+function buildChainConfig(core: CoreChainConfig): ChainConfig {
+  const env = CHAIN_ENV[core.chainId]
+  if (!env) {
+    throw new Error(`chains: no backend environment wiring for chain ${core.chainId}`)
+  }
+  const tokens: Record<string, TokenConfig> = {}
+  for (const token of core.tokens) {
+    tokens[backendTokenKey(token.symbol)] = toTokenConfig(token)
+  }
+  return {
+    chainId: core.chainId,
+    name: core.name,
+    shortName: core.shortName,
+    nativeCurrency: core.nativeCurrency,
+    rpcUrl: env.rpcUrl,
+    explorerUrl: core.explorerUrl,
+    explorerApiUrl: env.explorerApiUrl,
+    explorerApiKey: env.explorerApiKey,
+    explorerApiProvider: env.explorerApiProvider,
+    safeTxServiceUrl: core.safeTxServiceUrl,
+    contracts: core.contracts,
+    passkey: core.passkey,
+    tokens,
+    tokenByAddress: buildTokenByAddress(tokens),
+  }
 }
 
 // ── Registry ──────────────────────────────────────────────────────
 
-const CHAINS: Record<number, ChainConfig> = {
-  100: GNOSIS,
-  8453: BASE,
-}
+const CHAINS: Record<number, ChainConfig> = Object.fromEntries(
+  Object.values(CHAIN_REGISTRY).map((core) => [core.chainId, buildChainConfig(core)]),
+)
 
 export const SUPPORTED_CHAIN_IDS = Object.keys(CHAINS).map(Number)
 
 export function getChain(chainId: number): ChainConfig {
   const chain = CHAINS[chainId]
   if (!chain) {
-    throw new Error(`Unsupported chain: ${chainId}. Supported: ${SUPPORTED_CHAIN_IDS.join(', ')}`)
+    // Same message shape as before the #986 move — callers surface it.
+    getChainData(chainId)
+    throw new Error(`Unsupported chain: ${chainId}`)
   }
   return chain
 }
@@ -172,7 +166,25 @@ export function getExplorerUrl(
 }
 
 export function isSupportedChain(chainId: number): boolean {
-  return chainId in CHAINS
+  return isRegisteredChain(chainId)
+}
+
+/**
+ * Whether this environment actually serves account **deploys** on a chain (#679).
+ * A chain can be in the registry (renders historical data) yet not be served for
+ * new deploys here — e.g. the dev backend serves only Base Sepolia. Driven by
+ * `config.deployChainIds`; an empty list means "all supported" (backward-compat).
+ */
+export function isDeployableChain(chainId: number): boolean {
+  if (!isSupportedChain(chainId)) return false
+  const allow = config.deployChainIds
+  return allow.length === 0 || allow.includes(chainId)
+}
+
+/** The chains this environment serves deploys on — for the frontend picker. */
+export function deployableChainIds(): number[] {
+  const allow = config.deployChainIds
+  return allow.length === 0 ? SUPPORTED_CHAIN_IDS : allow.filter(isSupportedChain)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────

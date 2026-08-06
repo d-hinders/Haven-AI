@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -12,6 +12,7 @@ const {
   mockUseSafeOperationGate,
   mockUseActiveSigner,
   mockUseDelegateBalance,
+  mockUseAgentPassport,
 } = vi.hoisted(() => ({
   mockUseAuth: vi.fn(),
   mockUseAgents: vi.fn(),
@@ -22,6 +23,7 @@ const {
   mockUseSafeOperationGate: vi.fn(),
   mockUseActiveSigner: vi.fn(),
   mockUseDelegateBalance: vi.fn(),
+  mockUseAgentPassport: vi.fn(),
 }))
 
 vi.mock('wagmi', () => ({
@@ -52,6 +54,10 @@ vi.mock('@/hooks/useDelegateBalance', () => ({
   useDelegateBalance: (...args: unknown[]) => mockUseDelegateBalance(...args),
 }))
 
+vi.mock('@/hooks/useAgentPassport', () => ({
+  useAgentPassport: (...args: unknown[]) => mockUseAgentPassport(...args),
+}))
+
 vi.mock('@/hooks/useSafeDetails', () => ({
   useSafeDetails: (...args: unknown[]) => mockUseSafeDetails(...args),
 }))
@@ -62,6 +68,8 @@ vi.mock('@/hooks/useSafeOperationGate', () => ({
 
 vi.mock('@/lib/signer', () => ({
   useActiveSigner: (...args: unknown[]) => mockUseActiveSigner(...args),
+  // Real predicate shape (#1079): narrows away the delegator_passkey variant.
+  isSafeCapableSigner: (s: { type?: string } | null) => s !== null && s.type !== 'delegator_passkey',
 }))
 
 vi.mock('@/components/OnchainActionGate', () => ({
@@ -77,7 +85,15 @@ vi.mock('@/components/PasskeyOtherDeviceNotice', () => ({
 }))
 
 vi.mock('@/components/EditAgentModal', () => ({
-  default: () => null,
+  // Renders a marker when open so routing tests can assert the modal did /
+  // did not open (#1079).
+  default: ({ open, mode }: { open: boolean; mode?: string }) =>
+    open ? <div data-testid="edit-agent-modal">{mode}</div> : null,
+}))
+
+vi.mock('@/components/DelegationBudgetCard', () => ({
+  default: () => <div>DelegationBudgetCard</div>,
+  DELEGATION_BUDGET_CARD_ID: 'delegation-budget-card',
 }))
 
 vi.mock('@/components/PaymentCredentialsModal', () => ({
@@ -176,6 +192,15 @@ describe('AgentDetailClient last-activity metadata', () => {
       hasStranded: false,
       hasRecoverableUsdc: false,
       loading: false,
+      refetch: vi.fn(),
+    })
+    mockUseAgentPassport.mockReturnValue({
+      passport: null,
+      standing: null,
+      loading: false,
+      issuing: false,
+      issueError: null,
+      issuePassport: vi.fn(),
       refetch: vi.fn(),
     })
   })
@@ -320,7 +345,7 @@ describe('AgentDetailClient last-activity metadata', () => {
 
     render(<AgentDetailClient agentId="agent-1" />)
 
-    expect(screen.getAllByText('Haven wallet 0x4444...4444').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Haven wallet 0x4444…4444').length).toBeGreaterThan(0)
   })
 
   it('uses stored agent wallet chain when the wallet is missing from auth state', () => {
@@ -377,5 +402,108 @@ describe('AgentDetailClient last-activity metadata', () => {
     })
     expect(screen.getByText('Base')).toBeInTheDocument()
     expect(screen.getByText('1.00 USDC per day')).toBeInTheDocument()
+  })
+
+  // ── Budget-affordance routing (#1079) ──────────────────────────────────
+
+  function mockDelegationAgent() {
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Delegation agent',
+          description: null,
+          delegate_address: '0x2222222222222222222222222222222222222222',
+          safe_id: 'safe-1',
+          safe_address: SAFE.safe_address,
+          safe_name: 'Main account',
+          status: 'active',
+          created_at: '2026-05-01T00:00:00Z',
+          mcp_last_seen_at: null,
+          allowances: [],
+          account_type: 'delegator_hybrid',
+        },
+      ],
+      loading: false,
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      revokeAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+  }
+
+  it('routes Update budget to the budget card — NOT EditAgentModal — on a delegation agent', () => {
+    mockDelegationAgent()
+    const scrollIntoView = vi.fn()
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update budget' }))
+
+    expect(screen.queryByTestId('edit-agent-modal')).not.toBeInTheDocument()
+    expect(scrollIntoView).toHaveBeenCalled()
+
+    // The empty-state "Add budget" affordance takes the same route.
+    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    expect(screen.queryByTestId('edit-agent-modal')).not.toBeInTheDocument()
+  })
+
+  // ── Backup & recovery pointer, not a second copy (#1089) ────────────────
+
+  it('points a delegation agent at the account page instead of rendering signer controls', () => {
+    mockDelegationAgent()
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const link = screen.getByRole('link', { name: /Backup & recovery/ })
+    expect(link).toHaveAttribute('href', '/accounts/safe-1')
+    // No enrollment controls on the agent page — those live only on the account page now.
+    expect(screen.queryByRole('button', { name: /Add a backup/ })).not.toBeInTheDocument()
+  })
+
+  it('hides the backup & recovery pointer on a legacy agent', () => {
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByRole('link', { name: /Backup & recovery/ })).not.toBeInTheDocument()
+  })
+
+  it('still opens EditAgentModal in budget mode on a legacy agent', () => {
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update budget' }))
+
+    expect(screen.getByTestId('edit-agent-modal')).toHaveTextContent('budget')
+  })
+
+  it('hides the Safe revoke control on a delegation agent, keeps it on a legacy agent', () => {
+    mockDelegationAgent()
+    const { unmount } = render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByRole('button', { name: 'Revoke agent budget' })).not.toBeInTheDocument()
+    unmount()
+
+    // Legacy fixture from beforeEach.
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Research agent',
+          description: null,
+          delegate_address: '0x2222222222222222222222222222222222222222',
+          safe_id: 'safe-1',
+          safe_address: SAFE.safe_address,
+          safe_name: 'Main account',
+          status: 'active',
+          created_at: '2026-05-01T00:00:00Z',
+          mcp_last_seen_at: null,
+          allowances: [],
+        },
+      ],
+      loading: false,
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      revokeAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('button', { name: 'Revoke agent budget' })).toBeInTheDocument()
   })
 })

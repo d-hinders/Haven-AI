@@ -1,0 +1,42 @@
+name: QA — live smoke (dev)
+
+# Manual only (#576): runs the UNMOCKED Playwright `live` smoke against a real
+# deployment URL, using the seeded QA identity to prove the deployed stack is
+# wired (frontend ↔ backend ↔ Postgres). No schedule and no merge gate yet
+# (that is Sub-issue 5, #578). Read-only — never moves funds.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: The deployed frontend URL to smoke (Vercel preview or dev)
+        required: true
+        type: string
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright (chromium)
+        run: npx playwright install --with-deps chromium
+        working-directory: packages/frontend
+      - name: Run live smoke
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ github.event.inputs.base_url }}
+          # Re-points the deployed frontend at the shared dev backend and logs in
+          # the seeded QA dashboard user. Testnet/dev-only secrets.
+          QA_HAVEN_API_URL: ${{ secrets.QA_HAVEN_API_URL }}
+          QA_USER_EMAIL: ${{ secrets.QA_USER_EMAIL }}
+          QA_USER_PASSWORD: ${{ secrets.QA_USER_PASSWORD }}
+        run: npm run test:e2e:live -w packages/frontend
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-live-report
+          path: output/playwright-live/html-report
+          retention-days: 7

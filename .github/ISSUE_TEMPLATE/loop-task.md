@@ -1,13 +1,13 @@
 ---
 name: "🔁 Loop task (code-quality)"
-about: A small, self-contained task for the autonomous PR loop (/ship-next). Auto-labeled code-quality so the loop picks it up.
+about: A small, self-contained task for the autonomous ship-next workflow. Auto-labeled code-quality so the loop picks it up.
 title: ""
 labels: ["code-quality"]
 assignees: []
 ---
 
 <!--
-This issue feeds the autonomous PR loop (/loop /ship-next). It is picked up
+This issue feeds the autonomous ship-next workflow. It is picked up
 automatically because of the `code-quality` label. Keep it small and
 self-contained — one PR's worth of work. See docs/contributing/autonomous-pr-loop.md.
 The loop will STOP and ask you to sharpen anything it can't implement safely,
@@ -32,11 +32,26 @@ AND its acceptance criteria. -->
 
 -
 
+## Surface
+
+<!-- Check all that apply, AND add the matching label(s) so ship-next can
+classify deterministically and load the right playbook. See
+docs/contributing/ship-playbooks/README.md. -->
+
+- [ ] `area:frontend` — UI in packages/frontend
+- [ ] `area:backend` — backend / API in packages/backend
+- [ ] `area:sdk` — SDK / connect / API contract / credentials
+- [ ] `area:mcp` — MCP server / signer / hosted MCP
+- [ ] `area:docs` — docs only
+- [ ] `money-path` — payments, agent authority, allowances, migrations
+
 ## Money-path?
 
-<!-- Check one. Money-path issues are implemented by the loop but NEVER
-auto-merged — .github/CODEOWNERS routes them to a human merge, and any change to
-existing money-path behavior must be characterization-tested first. -->
+<!-- The `money-path` Surface label above drives playbook routing and the
+testing bar. Set both consistently. Check one. Since #1024 a non-migration
+money-path change does NOT pause the merge; migrations still require
+independent code-owner review and merge. Changes to existing money-path
+behavior must be characterization-tested first. -->
 
-- [ ] No — docs / tests / non-money refactor (eligible for reviewer-gated auto-merge)
-- [ ] Yes — touches x402 / machine-payments / payment-coverage / allowance / migrations (human merge required)
+- [ ] No — docs / tests / non-money refactor
+- [ ] Yes — touches x402 / machine-payments / payment-coverage / allowance / migrations (loads `money.md`; migrations also require code-owner merge)

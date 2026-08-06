@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: archived
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Haven - Connect Agent 2 Local-Key Pairing
 
 > **ARCHIVED — shipped.** This is the detailed staged-pairing contract written to

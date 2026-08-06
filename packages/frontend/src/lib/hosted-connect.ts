@@ -16,11 +16,20 @@
 import type { AgentCredentialJson } from './agent-credential'
 
 /**
- * Default hosted MCP endpoint.
- * Override via `NEXT_PUBLIC_HAVEN_MCP_URL` at deploy time.
- * See `docs/operations/hosted-mcp.md`.
+ * The PRODUCTION hosted MCP endpoint. Served as a default ONLY in the
+ * production build (#1129): the hosted MCP relays to exactly one backend
+ * fixed at deploy time, so a dev/local dashboard embedding this URL in its
+ * config snippets points the agent's MCP client at the prod database and
+ * every call 401s with a message blaming the key. Non-production builds must
+ * set `NEXT_PUBLIC_HAVEN_MCP_URL` explicitly or the connect UI shows a
+ * not-configured state instead of a snippet that cannot work.
+ * See `docs/operations/hosted-mcp.md`. Mirrors the backend rule in
+ * `packages/backend/src/routes/agent-connection-setups.ts`.
  */
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
+
+/** The production backend host — the deploy identity that earns the default. */
+const PRODUCTION_API_HOST = 'havenbackend-production-8a00.up.railway.app'
 
 export type HostedClientId =
   | 'claude-code'
@@ -118,13 +127,43 @@ export interface HostedConnectSnippet {
 }
 
 /**
- * Resolve the hosted MCP base URL.
- * Env override wins so a Railway URL can be used before DNS is mapped.
+ * Whether this bundle is the production deploy (#1129). The frontend has no
+ * request context, so it keys on what it does have, both build-time inlined:
+ *
+ *   - `NEXT_PUBLIC_HAVEN_ENV` — the DEV-badge discriminator (`EnvBadge`, and
+ *     the #582 api-override gate). Production leaves it unset; any other
+ *     value marks a non-production build.
+ *   - `NEXT_PUBLIC_API_URL` — the backend this build proxies to. Local dev
+ *     (`http://localhost:3001`) leaves the env indicator unset too, so the
+ *     backend host is what separates "prod build" from "prod-looking local
+ *     build". Only the production backend host earns the default.
  */
-export function resolveHostedMcpUrl(envOverride?: string | null): string {
+function isProductionBuild(): boolean {
+  const env = process.env.NEXT_PUBLIC_HAVEN_ENV?.trim().toLowerCase()
+  if (env && env !== 'production' && env !== 'prod') return false
+  const api = process.env.NEXT_PUBLIC_API_URL?.trim()
+  if (!api) return false
+  try {
+    return new URL(api).host === PRODUCTION_API_HOST
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resolve the hosted MCP base URL, or `null` when this environment has none.
+ *
+ * Explicit override (`NEXT_PUBLIC_HAVEN_MCP_URL` or the argument) always wins
+ * — so a Railway URL can be used before DNS is mapped. The production default
+ * is served ONLY in the production build; a non-production build without the
+ * variable gets `null` on purpose (#1129), and the connect UI renders an
+ * explicit not-configured state instead of a snippet pointing at prod.
+ */
+export function resolveHostedMcpUrl(envOverride?: string | null): string | null {
   const fromEnv = envOverride ?? process.env.NEXT_PUBLIC_HAVEN_MCP_URL
-  const candidate = typeof fromEnv === 'string' && fromEnv.length > 0 ? fromEnv : DEFAULT_HOSTED_MCP_URL
-  return candidate.replace(/\/+$/, '')
+  if (typeof fromEnv === 'string' && fromEnv.length > 0) return fromEnv.replace(/\/+$/, '')
+  if (isProductionBuild()) return DEFAULT_HOSTED_MCP_URL
+  return null
 }
 
 /**
@@ -135,7 +174,9 @@ export function resolveHostedMcpUrl(envOverride?: string | null): string {
 export function buildHostedConnectSnippet(
   client: HostedClientId,
   credential: AgentCredentialJson,
-  hostedUrl: string = resolveHostedMcpUrl(),
+  // Required (#1129): resolveHostedMcpUrl() can be null in a non-production
+  // build, and the caller — not this builder — owns the not-configured state.
+  hostedUrl: string,
 ): HostedConnectSnippet {
   const bearer = `Bearer ${credential.api_key}`
   const authHeader = { Authorization: bearer }
@@ -498,7 +539,7 @@ type DeepLinkClient = 'cursor' | 'vscode' | 'vscode-insiders'
 export function buildDeepLink(
   client: DeepLinkClient,
   credential: AgentCredentialJson,
-  hostedUrl: string = resolveHostedMcpUrl(),
+  hostedUrl: string,
 ): string {
   const token = credential.api_key
 
@@ -604,7 +645,7 @@ function setupPromptLanguage(language: HostedConnectLanguage): string {
 export function buildHostedSetupPrompt(
   client: HostedClientId,
   credential: AgentCredentialJson,
-  hostedUrl: string = resolveHostedMcpUrl(),
+  hostedUrl: string,
 ): string {
   const option = HOSTED_CLIENT_REGISTRY.find((c) => c.id === client)
   const runtimeLabel = option?.label ?? client
@@ -742,7 +783,7 @@ export interface ProbeResult {
  */
 export async function probeHostedConnection(
   apiKey: string,
-  hostedUrl: string = resolveHostedMcpUrl(),
+  hostedUrl: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ProbeResult> {
   let res: Response

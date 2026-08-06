@@ -1,10 +1,16 @@
 // config.ts loads dotenv and validates required env vars — import first
 import { config } from './config.js'
 
-import Fastify, { type FastifyError } from 'fastify'
+import Fastify, { type FastifyError, type FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
+import rateLimit from '@fastify/rate-limit'
+import { rateLimitKeyFor } from './middleware/rate-limit.js'
 import { runMigrations } from './db/migrate.js'
+import { runDelegateBalanceMonitor } from './lib/delegate-balance-monitor.js'
+import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './lib/relayer-balance-monitor.js'
+import { runIfLeader, LEADER_LOCK_KEYS } from './lib/leader-lock.js'
+import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './lib/chains.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
 import balanceRoutes from './routes/balances.js'
@@ -13,6 +19,22 @@ import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
 import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
+import hybridAccountRoutes from './routes/hybrid-accounts.js'
+import agentDelegationRoutes from './routes/agent-delegations.js'
+import agentPassportRoutes from './routes/agent-passports.js'
+import {
+  setAnchor,
+  setAnchorRecovery,
+  anchorOnChain,
+  recoverAnchorFromReceipt,
+  setRevoker,
+  revokeOnChain,
+  setReceiptSigningKey,
+  retryPendingPassports,
+  reconcilePendingRevocations,
+  listStuckRevocations,
+} from './lib/passport/index.js'
+import passportVerifyRoutes from './routes/passport-verify.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
 import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
@@ -32,6 +54,9 @@ import analyticsRoutes from './routes/analytics.js'
 import accountingRoutes from './routes/accounting.js'
 import fortnoxRoutes from './routes/fortnox.js'
 import reportingRoutes from './routes/reporting.js'
+import { registerConnector } from './lib/reporting/connector.js'
+import { FortnoxConnector } from './lib/reporting/fortnox-connector.js'
+import { fortnoxConfigured } from './lib/fortnox-connection.js'
 import { refreshCatalog, type QueryableLike } from './lib/merchant-catalog.js'
 import { ingestDiscoveredCatalog } from './lib/catalog-discovery.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
@@ -91,6 +116,19 @@ await app.register(fastifyJwt, {
   secret: config.jwtSecret,
 })
 
+// Rate limiting (#794): registered non-global — only routes that opt in via
+// `config.rateLimit` (money-path writes and the public demo reads) are
+// limited; dashboard reads stay unthrottled. Keyed per presented credential
+// (Authorization or X-API-Key — see rateLimitKeyFor) so each agent gets its
+// own bucket regardless of network path; unauthenticated requests fall back
+// to per-IP (behind Railway's proxy that can collapse to the proxy IP —
+// acceptable for the public demo routes, where a shared throttle still beats
+// an open faucet).
+await app.register(rateLimit, {
+  global: false,
+  keyGenerator: (request: FastifyRequest) => rateLimitKeyFor(request),
+})
+
 await app.register(openapiRoutes)
 
 // Capture X-Haven-MCP-Tool header and write an agent_tool_invocations row
@@ -108,6 +146,8 @@ registerAgentLastSeenHook(app)
 // --- Routes ---
 app.get('/health', async (_request, reply) => {
   const start = Date.now()
+  // Cached from the hourly relayer scan — never a live RPC read on a probe.
+  const relayer = getRelayerBalanceStatus()
   try {
     await pool.query('SELECT 1')
     const dbLatencyMs = Date.now() - start
@@ -115,6 +155,7 @@ app.get('/health', async (_request, reply) => {
       status: 'ok',
       timestamp: new Date().toISOString(),
       db: { status: 'ok', latencyMs: dbLatencyMs },
+      relayer,
     }
   } catch (err) {
     reply.status(503)
@@ -122,9 +163,34 @@ app.get('/health', async (_request, reply) => {
       status: 'degraded',
       timestamp: new Date().toISOString(),
       db: { status: 'error', error: err instanceof Error ? err.message : String(err) },
+      relayer,
     }
   }
 })
+
+// Public chain config (#679): which chains this environment serves account
+// deploys on, so the onboarding / Add-account pickers offer only those. Not
+// sensitive — no auth.
+app.get('/chains', async () => {
+  return { deployable: deployableChainIds(), supported: SUPPORTED_CHAIN_IDS }
+})
+
+// L0 passport attestations are anchored AND revoked by the gas-only relayer
+// (#972 / #973). Both are governance metadata: EAS-only targets, zero value.
+setAnchor(anchorOnChain)
+setAnchorRecovery(recoverAnchorFromReceipt)
+setRevoker(revokeOnChain)
+// Receipts the merchant-facing verifier hands out (#974) are signed with a
+// DEDICATED key, never the relayer's: the relayer pays gas for user-authorised
+// transactions, while this one signs public assertions and its address is
+// published for pinning. Unset means verification is off, and the endpoint
+// fails closed rather than serving an unsigned receipt.
+// Refuses at boot if it IS the relayer key — the static invariant test reads
+// source, so only a runtime check can catch that operator copy-paste.
+setReceiptSigningKey(process.env.PASSPORT_RECEIPT_SIGNING_KEY ?? null, [
+  config.relayerPrivateKey,
+  ...SUPPORTED_CHAIN_IDS.map((id) => process.env[`RELAYER_PRIVATE_KEY_${id}`]),
+])
 
 await app.register(authRoutes, { prefix: '/auth' })
 await app.register(userRoutes, { prefix: '/user' })
@@ -134,6 +200,13 @@ await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
 await app.register(safeDetailRoutes, { prefix: '/safe' })
 await app.register(agentRoutes, { prefix: '/agents' })
+await app.register(hybridAccountRoutes, { prefix: '/accounts' })
+await app.register(agentDelegationRoutes, { prefix: '/agents' })
+await app.register(agentPassportRoutes, { prefix: '/agents' })
+// Public and unauthenticated (#974): the caller is a merchant deciding whether
+// to serve an agent, and it has no Haven account. Registered separately from
+// the dashboard-authed passport routes so the auth hook cannot be assumed.
+await app.register(passportVerifyRoutes, { prefix: '/passport' })
 await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
 await app.register(contactRoutes, { prefix: '/contacts' })
 await app.register(paymentRoutes, { prefix: '/payments' })
@@ -151,11 +224,26 @@ await app.register(analyticsRoutes, { prefix: '/analytics' })
 await app.register(accountingRoutes, { prefix: '/accounting' })
 await app.register(fortnoxRoutes, { prefix: '/accounting/fortnox' })
 await app.register(reportingRoutes, { prefix: '/accounting/reporting' })
+// #496: the live Fortnox feed adapter. Registering it flips hasLiveConnector()
+// → true, which removes the Reporting page's "preview" banner. Gated on env:
+// deployments without Fortnox credentials keep the feed inert (no-op), same
+// posture as before this landed.
+if (fortnoxConfigured()) {
+  registerConnector(new FortnoxConnector())
+}
 // Public demo — no auth hook, registered separately
 await app.register(demoMppRoutes, { prefix: '/demo/mpp' })
 
 // --- Start ---
 const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly
+const DELEGATE_MONITOR_INTERVAL_MS = 60 * 60 * 1000 // hourly (#714)
+// Every 5 minutes, not hourly: this sweep carries revocation reconciliation,
+// and the backoff schedule it drives starts at 30s. An hourly tick would flatten
+// that to an hour, leaving a revoked agent's attestation live on-chain far
+// longer than the retry policy intends (#973).
+const PASSPORT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
+/** A revoke still unreconciled after this long is an incident, not a retry. */
+const PASSPORT_STUCK_REVOKE_SECONDS = 60 * 60
 
 const start = async () => {
   try {
@@ -165,31 +253,134 @@ const start = async () => {
     await app.listen({ port: config.port, host: '0.0.0.0' })
     app.log.info(`Haven backend running on port ${config.port}`)
 
+    // Every periodic tick below runs behind a Postgres advisory lock
+    // (runIfLeader) so a multi-replica deployment executes each scan exactly
+    // once per tick instead of once per replica — the monitors' edge-trigger
+    // alert state is per-process memory, so N replicas would otherwise send
+    // up to N copies of every webhook alert.
+
     // Catalog price verification: probe listed merchants hourly so the
     // catalog never advertises stale prices or dead endpoints. Best-effort —
     // a failed run logs and waits for the next tick.
     const runCatalogRefresh = async () => {
-      // Opt-in: pull fresh candidates from the x402 Bazaar and probe-ingest
-      // them before re-verifying the catalog, so newly discovered merchants are
-      // included in the same run. Best-effort — discovery failure never blocks
-      // the refresh of already-listed entries.
-      if (config.catalogDiscoveryEnabled) {
-        try {
-          const discovery = await ingestDiscoveredCatalog(pool as unknown as QueryableLike)
-          app.log.info(discovery, 'Merchant catalog discovery complete')
-        } catch (err) {
-          app.log.warn({ err }, 'Merchant catalog discovery failed')
-        }
-      }
       try {
-        const { verified, degraded } = await refreshCatalog()
-        app.log.info({ verified, degraded }, 'Merchant catalog refreshed')
+        await runIfLeader(LEADER_LOCK_KEYS.catalogRefresh, async () => {
+          // Opt-in: pull fresh candidates from the x402 Bazaar and probe-ingest
+          // them before re-verifying the catalog, so newly discovered merchants are
+          // included in the same run. Best-effort — discovery failure never blocks
+          // the refresh of already-listed entries.
+          if (config.catalogDiscoveryEnabled) {
+            try {
+              const discovery = await ingestDiscoveredCatalog(pool as unknown as QueryableLike)
+              app.log.info(discovery, 'Merchant catalog discovery complete')
+            } catch (err) {
+              app.log.warn({ err }, 'Merchant catalog discovery failed')
+            }
+          }
+          const { verified, degraded } = await refreshCatalog()
+          app.log.info({ verified, degraded }, 'Merchant catalog refreshed')
+        })
       } catch (err) {
         app.log.warn({ err }, 'Merchant catalog refresh failed')
       }
     }
     void runCatalogRefresh()
     setInterval(runCatalogRefresh, CATALOG_REFRESH_INTERVAL_MS).unref()
+
+    // Delegate balance monitor (#714): hourly read-only scan of every active
+    // agent's delegate USDC balance — WARNs on lingering (sweepable) balances
+    // and on aggregate dust past the threshold. Best-effort: a failed scan
+    // logs and waits for the next tick. It never moves funds.
+    const runDelegateMonitor = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.delegateBalanceMonitor, async () => {
+          await runDelegateBalanceMonitor(app.log)
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Delegate balance monitor scan failed')
+      }
+    }
+    void runDelegateMonitor()
+    setInterval(runDelegateMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
+
+    // Relayer balance monitor: hourly read-only scan of the relayer EOA's
+    // native balance per served chain — structured warning + edge-triggered
+    // webhook alert below the low-water mark, cached status served by
+    // /health. The relayer going dry previously surfaced only as failing
+    // payments. Deliberately NOT behind runIfLeader: the scan result feeds
+    // each replica's own /health response, and the alert edge-trigger is the
+    // per-chain lowAlerted set inside the monitor, so duplicate alerts are
+    // bounded by replica count only on the low→ok→low transition.
+    const runRelayerMonitor = async () => {
+      try {
+        await runRelayerBalanceMonitor(app.log)
+      } catch (err) {
+        app.log.warn({ err }, 'Relayer balance monitor scan failed')
+      }
+    }
+    void runRelayerMonitor()
+    setInterval(runRelayerMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
+
+    // L0 passport anchor sweep (#972 / #973). Both halves of issuance are
+    // fire-and-forget by design — an EAS write must never block agent creation
+    // or an owner's revoke — which only holds because something later retries
+    // what the in-request attempt dropped. This is that something; without it
+    // "best-effort + retryable" is just "best-effort".
+    //
+    // The revocation half is the one that matters for safety: an agent revoked
+    // in Haven's DB whose attestation is still live on-chain is precisely the
+    // divergence #973 exists to close, and a merchant checking only the chain
+    // would still see it as valid. So a revoke that stays unreconciled past
+    // the alarm threshold is logged as an operational incident rather than
+    // retried silently forever.
+    // The three phases are INDEPENDENT. Sequencing them under one try/catch
+    // meant a throw in the issuance retry skipped both the revocation
+    // reconciliation and the stuck-revoke alarm for that tick — and since the
+    // queues are oldest-first, one poison row would be first on every tick and
+    // silence the safety-critical half permanently. The alarm especially must
+    // run even when everything above it is failing: that is when it matters.
+    const phase = async (name: string, fn: () => Promise<void>) => {
+      try {
+        await fn()
+      } catch (err) {
+        app.log.warn({ err, phase: name }, 'Passport sweep phase failed')
+      }
+    }
+
+    const runPassportSweep = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.passportSweep, async () => {
+          await phase('issuance', async () => {
+            const issuance = await retryPendingPassports()
+            if (issuance.attempted) app.log.info(issuance, 'Passport issuance retries')
+            if (issuance.needingAttention) {
+              app.log.warn(
+                { needingAttention: issuance.needingAttention },
+                'Passport issuance rows past the attention threshold — investigate, the backoff is capped',
+              )
+            }
+          })
+          await phase('revocation', async () => {
+            const revocations = await reconcilePendingRevocations()
+            if (revocations.attempted) app.log.info(revocations, 'Passport revocation reconciliation')
+          })
+          await phase('alarm', async () => {
+            const stuck = await listStuckRevocations(PASSPORT_STUCK_REVOKE_SECONDS)
+            if (stuck.length > 0) {
+              app.log.warn(
+                { count: stuck.length, agents: stuck.slice(0, 10) },
+                'Passport revocations unreconciled past threshold — agents revoked in Haven still hold a live attestation on-chain',
+              )
+            }
+          })
+        })
+      } catch (err) {
+        // Only leader-election itself reaches here now.
+        app.log.warn({ err }, 'Passport sweep failed')
+      }
+    }
+    void runPassportSweep()
+    setInterval(runPassportSweep, PASSPORT_SWEEP_INTERVAL_MS).unref()
   } catch (err) {
     app.log.error(err)
     process.exit(1)

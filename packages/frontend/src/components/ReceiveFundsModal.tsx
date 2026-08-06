@@ -7,10 +7,13 @@ import { truncate } from '@/lib/format'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import type { UserSafe } from '@/context/AuthContext'
 import { Button } from '@/components/ui/Button'
+import { Address } from '@/components/haven'
 import { Card } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useToast } from '@/components/ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 
 interface Props {
   open: boolean
@@ -43,7 +46,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
     QRCode.toDataURL(safe.safe_address, {
       margin: 1,
       width: 220,
-      color: { dark: '#1A2140', light: '#FFFFFF' },
+      color: { dark: '#1A2140', light: '#FFFFFF' }, // QR encoder needs literal hex for module colours — design-lint-disable-line
     })
       .then((url) => {
         if (!cancelled) setQrDataUrl(url)
@@ -92,9 +95,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
             aria-label="Close"
             className="-mr-1 rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
           >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon icon={X} className="h-5 w-5" />
           </button>
         </div>
 
@@ -120,9 +121,9 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
 
           <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
             <p className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet address</p>
-            <code className="mt-2 block break-all font-mono text-sm text-[var(--v2-ink)]">
-              {safeAddress}
-            </code>
+            <p className="mt-2 break-all text-sm text-[var(--v2-ink)]">
+              <Address value={safeAddress} truncate={false} />
+            </p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button onClick={copyAddress} size="sm">
                 {copied ? 'Address copied' : 'Copy address'}

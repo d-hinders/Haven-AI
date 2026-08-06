@@ -1,0 +1,57 @@
+name: Docs staleness audit
+
+# Phase 4 of the documentation-quality system (#646). Weekly: ranks docs whose
+# covered code changed after their `last-verified` date and upserts the report
+# into a single tracking issue — the standing "which doc is lying?" queue.
+# Report-only: it never fails, and it opens ONE issue it keeps updating rather
+# than spamming new ones.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    name: Docs staleness audit
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history — the audit counts commits since last-verified
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Run the audit
+        id: audit
+        run: |
+          node scripts/docs/audit-staleness.mjs --top=15 > report.txt
+          cat report.txt
+          {
+            echo 'report<<AUDIT_EOF'
+            cat report.txt
+            echo 'AUDIT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upsert the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ steps.audit.outputs.report }}
+        run: |
+          TITLE='Docs staleness audit (weekly)'
+          BODY="$(printf 'Automated weekly audit (#646). For each doc: re-verify it against the code and bump \`last-verified\`, or update it.\n\n```\n%s\n```\n\n_Regenerated every Monday by docs-audit.yml — do not edit by hand._' "$REPORT")"
+          NUMBER=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$TITLE\"" --json number --jq '.[0].number // empty')
+          if [ -n "$NUMBER" ]; then
+            gh issue edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --label documentation --body "$BODY"
+          fi

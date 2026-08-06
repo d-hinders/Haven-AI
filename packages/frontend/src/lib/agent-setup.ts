@@ -8,7 +8,7 @@ import {
   signSafeTx,
   SafeTxReceiptTimeoutError,
 } from './safe-tx'
-import type { HavenUserSigner } from './signer'
+import type { SafeCapableSigner } from './signer'
 
 /**
  * Outcome of the on-chain agent-setup batch:
@@ -28,7 +28,7 @@ export interface AgentSetupResult {
 }
 
 export interface ExecuteAgentSetupParams {
-  signer: HavenUserSigner
+  signer: SafeCapableSigner
   publicClient: PublicClient
   safeAddress: Address
   delegateAddress: Address
@@ -75,6 +75,7 @@ export async function executeAgentSetup(
     allowances,
     !moduleEnabled,
     nonce,
+    chainId,
   )
   const safeTxHash = getSafeTxHash(safeAddress, safeTx, chainId)
 

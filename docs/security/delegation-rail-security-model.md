@@ -1,0 +1,387 @@
+---
+owner: "@d-hinders"
+status: current
+contract: true
+covers:
+  - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/routes/hybrid-accounts.ts
+  - packages/backend/src/lib/hybrid-signer-actions.ts
+  - packages/backend/src/lib/hybrid-transfers.ts
+  - packages/backend/src/infra/repositories/hybrid-signers.ts
+  - packages/backend/src/lib/hybrid-account-config.ts
+  - packages/frontend/src/components/AccountSignersCard.tsx
+  - packages/qa-agent/src/pilot/delegation-budget-spike.ts
+last-verified: "2026-08-06"
+---
+
+# Delegation rail — security model & exit story (epic #821, gate G4)
+
+Design doc for issue #824. The delegation stack (Hybrid DeleGator accounts +
+MetaMask Delegation Framework) changes Haven's security model in three ways
+the Safe/session stack did not have; this doc names them, maps every existing
+non-custody invariant to its delegation-rail equivalent, fixes the custody
+semantics of the delegation object itself, and specifies the independent exit
+story with an acceptance test. (Since #834 the Smart Sessions **session rail
+is retired** — `session_key` accounts get HTTP 410 from the payment paths —
+so the "Safe/session stack" comparisons below are the mapping's historical
+baseline; the only other live rail is the legacy AllowanceModule path,
+import-only for existing Safes.) The implementation issues are #831 (CI
+invariants) and #832 (exit tool); this doc is their contract.
+
+Contracts in scope (Base Sepolia; mainnet addresses pinned at #825): 
+DelegationManager `0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3`, the Hybrid
+DeleGator implementation behind `toMetaMaskSmartAccount`, and the caveat
+enforcers referenced below — all Consensys Diligence-audited (Aug 2024 / Apr
+2025), deployed immutable, and forkable. Spike evidence:
+[`delegation-budget-rail-spike.md`](../research/delegation-budget-rail-spike.md).
+
+## 1. What changes vs the Safe/session stack
+
+1. **UUPS upgradeability.** A Hybrid DeleGator is a UUPS proxy whose upgrade
+   authority is the account's **own signers** — not Haven, not MetaMask. This
+   is a new surface (the Safe proxy pattern had owner-controlled masterCopy
+   semantics, but our stack never exercised it). Consequence: "who can
+   upgrade" becomes part of the custody perimeter and must be provable.
+2. **Authority is a held object, not account state.** A Smart Sessions grant
+   lives in account storage; a delegation is a **signed message the agent
+   holds**. Different theft model: exfiltrating a delegation (plus the
+   delegate key) is sufficient to spend — but only within the caveat stack.
+3. **The exit story loses Safe{Wallet}.** Haven's CASP/GTM line — "inspect
+   and revoke everything without us" — was demonstrable via a mature
+   third-party UI. On this stack it must be **rebuilt and demonstrated**
+   (§4) before any external user touches the rail.
+
+## 2. Invariant mapping (implemented — `non-custody.invariants.test.ts`, #831)
+
+Every invariant in `non-custody.invariants.test.ts` maps as follows. "CI"
+means a named check in the delegation-rail invariant suite; nothing is
+dropped.
+
+| # | Session/legacy invariant (baseline; session rail retired, #834) | Delegation-rail equivalent | Enforcement |
+|---|---|---|---|
+| 1 | No private-key/seed columns in the schema | Unchanged, plus: **no delegation-signing key columns** | CI (schema scan) |
+| 2 | Agent secrets stored hashed | Unchanged | CI (existing) |
+| 3 | Exactly one server-side signer: the gas-only relayer | **Zero** value-bearing server signers on this rail (no relayer leg exists); the sponsorship credential is the only vendor secret | CI (signer-construction scan scoped to the delegation rail) |
+| 4 | No server-side key generation | Unchanged — delegate keys and account owners are client-generated | CI (existing, extended to delegation modules) |
+| 5 | Session-rail owner is watch-only (refuses to sign) | Account interactions use a **watch-only owner**; Haven never holds a DeleGator signer | CI (watch-only pattern scan) |
+| 6 | No viem key-based signers server-side | Unchanged, extended to `smart-accounts-kit` call sites | CI |
+| 7 | UserOps submitted with caller-provided signature only | Redemptions submitted with **client-signed** UserOp/tx only; the backend constructs and relays, never signs | CI (the #737 pattern, delegation flavor) |
+| 8 | Session-config modules signer-free | Delegation lifecycle modules (grant/replace/revoke construction, #827/#828) are **signer-free and relayer-free**: they build payloads and typed data, never sign | CI (module import/AST scan) |
+| 9 | Bundler credential read in exactly one place | Unchanged (one choke point; `redactVendorSecrets` on every error surface) | CI (existing) |
+| 9a | *(new, #1061)* **Redaction covers the shapes vendors actually use** | `redactVendorSecrets` catches `apikey=`/`api_key=`/`api-key=`/`key=`/`token=`/`secret=` query params, URL basic-auth (`https://user:pass@host`), and key-in-path segments (`/rpc/<token>`, `/v2/<token>`) — not just the one `apikey=` spelling | Unit tests on the redactor |
+| 10 | Paymaster has no value-transfer surface | Unchanged — sponsorship pays gas only; proven in the spike (agent key held zero ETH and zero USDC) | CI + spike evidence |
+| 11 | *(new)* **No upgrade path from Haven code** | Haven's codebase contains no call site that can reach the account's UUPS upgrade function; upgrade authority = account signers only | CI (ABI/selector scan for `upgradeToAndCall` against DeleGator targets) |
+| 12 | *(new)* **Delegations are client-signed only** | No Haven code path calls `signDelegation`/EIP-712 delegation signing with a server-held key (pilot scripts with throwaway testnet keys excepted, path-scoped) | CI (import + call-site scan) |
+| 13 | *(new, #888)* **Signer changes are client-signed only** | Enrolling/removing a backup signer (`addKey`/`removeKey`/`transferOwnership`) is PREPARED by Haven and signed by an EXISTING account signer; the submit step pins the DB sync to the signed calldata. Haven holds no key that can change an account's signer set. Since #1081 this is one shared implementation reached by both the agent-scoped and account-scoped routes | CI (shared-core + both-routes + config-loader scan) |
+
+**Monitored-not-enforced:** enforcer/manager *contract immutability* is a
+property of the deployed bytecode, not our code — covered by pinning exact
+addresses with audit provenance (#825) and the #826 tripwires (framework repo
+activity, alternative 7710 implementations), not by CI.
+
+**Passport attestations (#970) — a new relayer use, still not value-bearing:**
+the L0 agent-passport anchor (`lib/passport/attestation.ts`) is the one place
+the relayer signs something other than gas on a user-authorised transaction —
+it submits EAS `attest`/`revoke` calls with Haven as issuer. That is governance
+metadata, not spend authority: the transaction targets the pinned EAS contract
+only, carries zero value, encodes no transfer, and involves no user key,
+delegation, or allowance (a test pins the target and the zero value). It does
+not add a value-bearing server signer, so invariant 3 stands. See
+[11-agent-passport-schema](../architecture/11-agent-passport-schema.md).
+
+**Relayer gas budgets (#717) — an availability control on the same signer:**
+every relayer-paid operation (deploys, execs, allowance transfers, sweeps)
+runs a per-identity window budget before the relayer signs (over-cap → 429,
+the intent/sweep left retryable, never burned) and records its submitted txs
+with receipt gas numbers (`relayer_gas_events`) for attribution. Direction of
+failure is the OPPOSITE of the money-path gates and deliberate: a database
+error fails **open**, because this guard protects the shared gas sponsor's
+availability while funds stay caveat-gated on-chain regardless — failing
+closed would let a DB hiccup take down the very operations it exists to keep
+up.
+
+## 3. Delegation custody semantics (#828's contract)
+
+**Where the signed delegation lives:** the agent receives it through the
+existing credential channel (same trust envelope as the agent API key).
+Haven stores a copy server-side for reconstruction, revocation targeting and
+observability. It is **not** key material — but it is spend-enabling in
+combination with the delegate key, so it is stored with the same care as
+`api_key_hash`-class data: encrypted at rest, never logged, never in error
+surfaces.
+
+**Leak analysis:**
+
+| Compromised | Attacker gets | Bounded by |
+|---|---|---|
+| Delegation object alone | Nothing — redemption requires the delegate key's signature | — |
+| Delegate key alone | Nothing beyond existing agent-credential risk — no delegation, no authority | — |
+| Both (agent fully compromised) | Spend **within the caveat stack**: ≤ period budget per period, only to pinned recipients, until expiry or revocation | `MultiTokenPeriodEnforcer` + `allowedCalldata` + `Timestamp`; owner kill-switch `disableDelegation` |
+| Haven fully compromised | Constructs malicious payloads but **cannot sign** grants, redemptions, or upgrades (invariants 3/5/7/11/12); worst case = denial of service | The perimeter this doc exists to prove |
+
+Blast radius on full agent compromise is therefore **identical in kind** to
+the retired session rail's (one period's budget per recipient) — with
+revocation one `disableDelegation` away.
+
+## 4. Exit story — design + acceptance test (#832's contract)
+
+**Claim to keep true:** *a user can enumerate and revoke every authority on
+their account, and recover control of the account itself, without Haven.*
+
+Design (minimum viable, in order of preference):
+
+1. **A statically hostable, open-source exit page** (no Haven backend): connect
+   the account's owner (passkey or EOA) → enumerate delegations Haven has
+   issued for the account (from public inputs: the account address + the
+   published caveat/enforcer addresses; delegations are off-chain objects, so
+   enumeration uses redemption events + `disabledDelegations` reads for state,
+   and Haven's published delegation-format doc for decoding) → one-click
+   `disableDelegation` per row → signer management (add/remove passkey/EOA).
+2. **A documented manual path** (published in Haven's public docs): the same
+   two operations via a block explorer with the DelegationManager ABI — exact
+   contract addresses, function names, and argument construction, written for
+   a technically competent user.
+
+**Honest limitation to document:** off-chain delegations that Haven issued but
+never surfaced cannot be *discovered* by a third party until first redemption
+— the exit page therefore also renders Haven's attested list when available,
+but the **revocation guarantee never depends on Haven**: `disableDelegation`
+works on any delegation the user can reconstruct, and rotating/removing the
+compromised delegate signer (or in the worst case moving funds out — the
+account's signers always can) is the universal backstop.
+
+**Acceptance test (verbatim from #824, verified in #832):** a person holding
+only their account credentials (passkey/EOA) and Haven's *public* docs — no
+Haven session, no Haven support — (a) enumerates the active authorities on a
+Base Sepolia test account, and (b) executes `disableDelegation` and confirms
+further redemption fails. Recorded as a walkthrough with tx links.
+
+## 5. Copy rules (per `copy-guidelines.md` + the #736 formulation bank)
+
+- MAY say: "your money stays in your own account", "budgets are enforced by
+  public, audited contracts — we can't override them", "you can revoke your
+  agent's budget yourself, even without Haven — here's how" (link §4).
+- MUST NOT say: "audit-ready", "your keys never leave your device" (passkey
+  platform semantics vary), anything implying Haven holds/controls funds, or
+  "MetaMask wallet" (the account uses MetaMask's *contracts*, not the wallet
+  product).
+- The exit path is a **published feature**, referenced from the dashboard
+  ("your exit path") — not fine print.
+
+## 6. Recovery & the signer-set model (shipped, epic #836)
+
+The interim single-passkey stance is retired — recovery shipped.
+
+**The model.** An account's authority is its **signer set**: one or more passkeys
+(P256) and/or one EOA owner. Any enrolled signer can add or remove others
+(`addKey` / `removeKey` / `transferOwnership` on the Hybrid). A **backup signer
+is the entire recovery story**: lose the device holding your primary passkey,
+and the backup removes the lost one and enrols a replacement. The user-facing
+walkthrough is [account-recovery.md](../product/account-recovery.md); the
+independent-of-Haven path is [exit/README.md](../exit/README.md).
+
+**Owner send (#1083) rides the same op discipline:** an owner-initiated
+transfer from the treasury is a sponsored account op the OWNER signs —
+prepare/submit split, the submitted UserOperation pinned to the re-derived
+transfer calldata, scheme chosen by the device (#1086), and no Haven-held key
+anywhere (invariants 5/7/12/13 unchanged). Sponsorship pays gas only; the
+transfer itself is bounded by nothing but the owner's signature, which is the
+point — it is the owner's own money.
+
+**The signer set is symmetric (#1087):** enrolling an EOA owner is not a
+one-way door — `remove_owner` encodes `transferOwnership(address(0))` through
+the same prepare/submit path and returns the account to passkey-only. Refused
+before any op is prepared when the wallet is the account's only signer; on a
+value-bearing chain a removal that would drop the account to a single signer
+is additionally gated by the **same recorded single-signer waiver provisioning
+honours** (#908 floor — decision recorded on #1087), so "may this account run
+single-signer on mainnet" has exactly one answer.
+
+**Recovery invariants (non-custody preserved through recovery):**
+
+- **Haven can never change an account's signer set.** Every `addKey`/`removeKey`/
+  `transferOwnership` is prepared by Haven and **signed by an existing signer**
+  (WebAuthn or EOA). Haven holds no key that can add, remove, or use a signer —
+  invariant 13, CI-enforced.
+- **The account enforces ≥1 signer on-chain** (`CannotRemoveLastSigner`, proven
+  in the #884 spike). Haven mirrors a **≥2** floor in the API as a clean refusal
+  so a user is nudged to add a backup before they can strip redundancy — the UI
+  never lets you approach a no-recovery state silently.
+- **Storage tracks the chain, not the reverse.** The stored signer set (which the
+  deploy/sign paths rebuild the account config from) is synced only *after* the
+  on-chain op confirms, and the submit step **pins the sync to the signed
+  calldata** — the DB can never record a signer the owner didn't actually sign.
+  (#985 moved `Executor` out of `infra/repositories/hybrid-signers.ts` into the
+  shared `infra/transaction.ts`; that is a declaration site, not a behaviour —
+  the queries, their ordering and the post-confirmation sync are unchanged.)
+- **UUPS upgrade authority stays with the signers** (invariant 11); recovery
+  changes signers, never the implementation.
+
+**Read surface (#1079).** The signer set is additionally readable at account
+level via `GET /accounts/hybrid/:address/signers` — owner-scoped (dashboard
+JWT + ownership check on `user_safes`) and returning **public-key material
+only** (`key_id`, P256 x/y, owner address). It powers login-time signer
+resolution and the account-level recovery card. It is a read: no route lets
+Haven — or this endpoint's caller — change a signer set without an existing
+signer's signature (invariant 13 unchanged).
+
+**Management surface (#1081).** Signer changes are reachable the same two ways:
+agent-scoped (`/agents/:id/account-signers/{prepare,submit}`, #888) and
+account-scoped (`POST /accounts/hybrid/:address/signers/{prepare,submit}`), the
+latter so an account with **zero agents** can enrol its second signer before
+anything else exists — which is when the ≥2-signer floor (#908) matters most.
+**The frontend now uses the account-scoped surface exclusively (#1089):**
+`AccountSignersCard` is the single home for backup & recovery, rendered on the
+account page for any `delegator_hybrid` account — including one with zero
+agents — and no longer duplicated on the agent page. The agent-scoped route
+stays live server-side (it is the same shared implementation below, just
+resolved differently) but has no remaining frontend caller.
+The two surfaces differ only in how the account is resolved: agent lookup
+versus an owner-scoped `(address, chain)` lookup on `user_safes`. Authority
+rules, the ≥2-signer refusal, the calldata encoding and the signed-op matching
+are **one implementation** (`lib/hybrid-signer-actions.ts`), because two copies
+of a spend-authority rule is how they drift apart. Invariant 13 is asserted
+against that shared core and against both routes reaching it. Client-side, signing selects the passkey whose credential is
+actually enrolled on the signing device rather than blindly `passkeys[0]`, so
+recovery with a backup key works from the backup device. UI surfaces treat a
+DISMISSED signing sheet as a neutral cancel, never an error (#1085) — a user
+changing their mind is not a failure mode. Scheme selection is
+likewise a **device** decision, never an account-shape decision: a mixed
+account (EOA owner *and* passkeys) accepts either signer on-chain, so the
+client requests the scheme it can actually produce (`signature_scheme` on the
+prepare routes, validated server-side against the real signer set) — enrolling
+a backup wallet never disables the passkey path. When no enrolled passkey is
+marked on the current device, the client still requests the passkey scheme
+(the browser's cross-device WebAuthn flow is a real signing path) and the UI
+shows an informational "may be on another device" hint next to the working
+action rather than a false blocker (#1097) — availability copy must never
+overstate what is actually gated.
+
+**The honest limit, stated plainly:** a **single-signer account has no recovery**
+— if its only signer is lost, the account is unreachable by the user *and* by
+Haven. This is inherent to self-custody, not a Haven policy. Mitigation is
+structural: onboarding nudges a backup, the account blocks dropping below the
+safe floor, and copy never promises recovery Haven cannot deliver.
+
+## 7. Mainnet-gate criterion (recorded — and enforced)
+
+Before any account holds **mainnet** funds:
+
+> **No mainnet delegation-rail account may operate with fewer than two enrolled
+> signers**, unless the owner has explicitly acknowledged the single-signer
+> risk (a recorded, signed-off "I understand losing my only device loses this
+> account"). The enrollment nudge is not sufficient on its own for mainnet —
+> the ≥2 floor (or the explicit waiver) is a launch gate, tracked on the
+> mainnet decision issue (#908).
+
+**The mechanism (implemented, #908):** `lib/mainnet-gate.ts` enforces the floor
+at both authority moments — **provisioning** (`POST /accounts/hybrid`) and
+**grant activation** (`POST /agents/:id/delegations/:hash/activate`), the
+moment a delegation becomes live spend authority. Properties:
+
+- **Fail-closed chain classification:** a chain is value-bearing unless it is a
+  *known testnet* — an unregistered chain id inherits the mainnet floor rather
+  than slipping past it.
+- **Registry-independent ordering:** the routes run the floor *before* the
+  pinned-contracts availability check, so adding Base mainnet to
+  `delegation-contracts.ts` can never, on its own, open mainnet without the
+  floor.
+- **The waiver is recorded, not implied:** provisioning below the floor on a
+  value-bearing chain requires `single_signer_waiver: { acknowledged: true }`
+  in the request and stamps `user_safes.single_signer_waiver_at` (migration
+  046); activation reads that column back. Testnet accounts never carry one.
+- **Testnets are untouched:** single-signer dev/QA accounts remain exactly as
+  cheap as before — the floor is a mainnet launch criterion, not a general
+  restriction.
+- **Activation is atomic** (#1061): retiring the previously ACTIVE grant for a
+  `(token, recipient)` slot and activating the new one run in **one
+  transaction**. As two independent statements, a failure between them left the
+  slot with zero active grants — every payment 403s while the old grant is still
+  perfectly valid on-chain, i.e. a self-inflicted outage with no on-chain cause.
+  It is now replace-and-activate or neither. This is availability hardening, not
+  a custody change: neither statement can create authority the owner did not
+  sign.
+
+Two honest limits of the mechanism (review-noted): the signer count is
+**DB-sourced** — an owner can change the signer set directly on-chain without
+Haven's sync, so the floor protects the owner from themselves rather than
+proving on-chain state (the on-chain `CannotRemoveLastSigner` guard is the
+hard backstop). And a provisioning-time EOA owner is **not signature-verified**
+— the floor counts enrolled signers, it cannot prove each is usable (the zero
+address, which provably is NOT a signer, is rejected at every entry point).
+
+Remaining for the UI (when mainnet onboarding opens): a first-class backup
+step or an explicit waiver screen — the API refuses either way.
+
+## 8. x402 dual-scheme settlement — the EIP-3009 interop bridge (#946)
+
+The rail settles x402 two ways, selected per payment (`routes/x402.ts`):
+
+- **erc7710 direct settlement (default & destination, #830):** the settlement
+  redeems the budget delegation itself — enforcers run at every payment,
+  against every merchant; no funding leg, no hot balance, no sweep.
+- **EIP-3009 fallback (temporary interop bridge, #946 / RFC #791 §18):** for
+  facilitators that cannot redeem a delegation chain. The budget delegation is
+  redeemed with `to = the agent's own delegate EOA` (a sponsored UserOp the
+  agent signs — the same prepare/submit split as any redemption), then the EOA
+  signs a standard EIP-3009 header client-side and the facilitator settles
+  EOA→merchant.
+
+What the bridge deliberately gives up, for 3009 payments only — and the
+compensating controls:
+
+1. **A transient hot balance returns** on the delegate EOA between funding and
+   settlement. Bounded: the funding is the exact payment amount; the header's
+   validity window is capped (≤600 s, SDK-side); the delegate-balance monitor
+   covers delegation-rail agents; the rail-agnostic sweep route recovers
+   residuals to the **treasury Hybrid** (`agent.safe_address`), with the
+   1 USDC dust floor and sub-floor residuals visible in the ledger.
+2. **Budget meters at the funding hop, not at settlement.** Verify-without-
+   settle strands the amount on the EOA → sweep reconciles it; the budget
+   consumption is honest (funds genuinely left the treasury).
+3. **The merchant hop has no on-chain policy.** This is why 3009-mode
+   structurally requires an **open (unpinned) budget**: a recipient-pinned
+   delegation cannot fund the EOA (the pin locks `transfer(to,…)` to the
+   merchant), and the server only funds via delegations whose caveats permit
+   the EOA as recipient. **Pinned agents are erc7710-only** (owner decision
+   2026-07-15, recorded on #946) — a pin is never weakened for interop.
+
+Non-custody is unchanged: the agent signs both legs client-side (the funding
+UserOp's typed data and the 3009 header); Haven prepares and relays, holds no
+key, and sponsorship can pay gas but never move value. The scheme is recorded
+per intent (`machine_metadata.settlement_scheme`) so 3009-mode usage is
+auditable and its retirement measurable.
+
+Hardening shipped with #961: the per-agent hourly x402 cap now guards the
+delegation branch too (every authorize costs a sponsored bundler estimation,
+so the cap is sponsorship-cost protection on the #717 surface — placed after
+the idempotent-replay lookup so recovery retries are never rate-limited);
+one-shot authorize+execute is refused loudly (a signature over
+not-yet-prepared state can never be valid); and idempotent replays resume
+with the ORIGINAL reconstructed signing payload rather than re-running
+estimations — the stored intent, not a fresh prepare, is the source of truth
+for what the agent signs.
+
+### 8.1 The settlement child — verified signer, honest bearer semantics (#1061)
+
+Two properties of the erc7710 settlement leg, corrected in #1061:
+
+- **The settle signature is verified against the delegate key, not merely
+  shape-checked.** `POST /x402/:id/settle` recovers the signer from the child
+  delegation's EIP-712 typed data and refuses anything that is not the agent's
+  `delegate_address` — with a `400`, *before* the intent status flips, so the
+  intent stays signable and the client can re-sign the same payload. Previously
+  any hex (`0x0` included) passed the shape check and burned the intent, turning
+  a client-side signing bug into an unrecoverable payment. This is the
+  authentication/authorisation split enforced concretely: the bearer token
+  identifies the agent, the recovered delegate signature is what authorises.
+  Unlike `payments.ts`, the child's typed data is fully known server-side, so
+  the check is possible here.
+- **The child is a bearer instrument, and the doc says so.** It is issued to
+  `ANY_BENEFICIARY`; the redeemer *caveat* is the constraint that would narrow
+  it, and no live path populates it yet (`requirements.extra` is not parsed —
+  [#1058](https://github.com/d-hinders/Haven-AI/issues/1058)). The real
+  guarantee is therefore the caveat stack, not the recipient: exact amount,
+  payee-pinned, ≤600 s expiry. Worst case on a leaked child is "the merchant is
+  paid without delivering" for that one quoted amount — the leak-analysis table
+  in §3 is unchanged, since redeeming still cannot exceed those bounds.

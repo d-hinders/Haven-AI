@@ -1,5 +1,7 @@
 'use client'
 
+import { Check, X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { usePublicClient } from 'wagmi'
 import { type Address, parseUnits } from 'viem'
@@ -27,13 +29,14 @@ import {
 } from '@/lib/safe-tx'
 import type { SafeDetails } from '@/types/transactions'
 import type { Agent } from '@/hooks/useAgents'
-import { useActiveSigner } from '@/lib/signer'
+import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import { SigningStatus } from './SigningStatus'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
 import { useToast } from './ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { truncateAddress } from '@/components/haven'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -76,7 +79,12 @@ export default function EditAgentModal({
   mode = 'all',
 }: Props) {
   const showAgentFields = mode === 'all' || mode === 'agent'
-  const showBudgetFields = mode === 'all' || mode === 'budget'
+  // #1079: the budget half of this modal is the legacy AllowanceModule editor
+  // (signSafeTx) — it can never succeed on a delegation agent, whose budget is
+  // managed by DelegationBudgetCard. Name/description need no signature and
+  // stay editable on both rails.
+  const isDelegationAgent = agent.account_type === 'delegator_hybrid'
+  const showBudgetFields = (mode === 'all' || mode === 'budget') && !isDelegationAgent
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
   const chainTokens = getChainTokens(chainId)
@@ -114,10 +122,15 @@ export default function EditAgentModal({
 
   // Wagmi
   const publicClient = usePublicClient({ chainId })
-  const signer = useActiveSigner({
+  const activeSigner = useActiveSigner({
     safeAddress: safeAddress as Address,
     chainId,
   })
+  // #1079: this surface signs SAFE transactions; a delegator_passkey cannot.
+  // The narrowed view keeps every downstream call type-honest — on delegation
+  // accounts these controls are hidden, so null here renders the same
+  // no-signer state as before.
+  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
   const operationGate = useSafeOperationGate({
     safeAddress: safeAddress as Address,
     chainId,
@@ -240,7 +253,7 @@ export default function EditAgentModal({
         const rawAmount = parseUnits(parsedAmount.amount, selectedTokenConfig.decimals)
         const token = (selectedTokenConfig.address ?? '0x0000000000000000000000000000000000000000') as Address
 
-        // Build Safe tx
+        // Build Safe tx (plain AllowanceModule — session schedules retired, #834)
         const nonce = await getSafeNonce(publicClient, safeAddress as Address)
         const safeTx = buildSetAllowanceTx(
           agent.delegate_address as Address,
@@ -248,6 +261,7 @@ export default function EditAgentModal({
           rawAmount,
           resetTimeMin,
           nonce,
+          chainId,
         )
 
         // Sign
@@ -294,6 +308,7 @@ export default function EditAgentModal({
             allowance_amount: rawAmount.toString(),
             reset_period_min: resetTimeMin,
           })
+
       } else {
         setExecStatus('saving')
       }
@@ -358,6 +373,7 @@ export default function EditAgentModal({
         agent.delegate_address as Address,
         pendingRemoval.token,
         nonce,
+        chainId,
       )
 
       const signature = await signSafeTx(
@@ -457,10 +473,7 @@ export default function EditAgentModal({
             aria-label="Close"
             className="text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors p-1 -mr-1"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <Icon icon={X} className="h-4 w-4" />
           </button>
         </div>
 
@@ -524,20 +537,7 @@ export default function EditAgentModal({
                               aria-label={`Remove ${sym} budget`}
                               className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-danger)]/30 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              <svg
-                                aria-hidden="true"
-                                width="12"
-                                height="12"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <line x1="18" y1="6" x2="6" y2="18" />
-                                <line x1="6" y1="6" x2="18" y2="18" />
-                              </svg>
+                              <Icon icon={X} className="h-3 w-3" />
                             </button>
                           </div>
                         </div>
@@ -762,10 +762,7 @@ export default function EditAgentModal({
               ) : (
                 <>
                   <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-danger-soft)]">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--v2-danger)]">
-                      <line x1="18" y1="6" x2="6" y2="18" />
-                      <line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
+                    <Icon icon={X} className="h-5 w-5 text-[var(--v2-danger)]" />
                   </div>
                   <div>
                     <p className="text-sm font-medium text-[var(--v2-danger)]">Update failed</p>
@@ -789,9 +786,7 @@ export default function EditAgentModal({
             <div className="space-y-5">
               <div className="text-center py-4">
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--v2-success-soft)]">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--v2-success)]">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
+                  <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
                 </div>
                 <p className="text-sm font-medium text-[var(--v2-ink)]">
                   {execStatus === 'confirmed'
@@ -850,7 +845,7 @@ function tokenSymbolFromAddr(addr: string, cId: number): string {
   for (const [symbol, cfg] of Object.entries(tokens)) {
     if (cfg.address && cfg.address.toLowerCase() === lower) return symbol
   }
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
+  return truncateAddress(addr)
 }
 
 function tokenDecimalsFromAddr(addr: string, cId: number): number {

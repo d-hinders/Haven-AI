@@ -1,6 +1,6 @@
 import type { Address, PublicClient } from 'viem'
 import { api } from '@/lib/api'
-import type { HavenUserSigner } from '@/lib/signer'
+import type { SafeCapableSigner } from '@/lib/signer'
 import {
   executeSafeTx,
   getSafeNonce,
@@ -28,7 +28,8 @@ interface ApplyApproverChangeInput {
   chainId: number
   action: 'add' | 'remove'
   address: string
-  signer: HavenUserSigner
+  /** Owner changes are Safe self-calls — only a Safe-capable signer can sign them (#1079). */
+  signer: SafeCapableSigner
   publicClient: PublicClient
   /** Metadata persisted after an add. Ignored for remove. */
   label?: string

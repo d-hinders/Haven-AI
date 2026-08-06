@@ -1,5 +1,7 @@
 'use client'
 
+import { ArrowDown, ArrowUp, Bot, Check, Circle, EllipsisVertical, Info, TriangleAlert, X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
@@ -14,6 +16,12 @@ import {
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { Select } from '@/components/ui/Select'
+import { Table } from '@/components/ui/Table'
+import { SidePanel } from '@/components/ui/SidePanel'
+import { StepProgress } from '@/components/ui/StepProgress'
+import { CodeBlock } from '@/components/ui/CodeBlock'
+import ConfirmDialog from '@/components/ConfirmDialog'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -23,7 +31,9 @@ import { useToast } from '@/components/ui/Toast'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import {
   AgentBudgetCard,
+  Address,
   AgentRulesSummary,
+  Amount,
   ApprovalRequiredBanner,
   CredentialHandoffCard,
   DirectionMark,
@@ -76,17 +86,15 @@ function MovementExample({ from, to }: { from: string; to: string }) {
   return <TransactionMovement from={from} to={to} />
 }
 
-/** Generic placeholder icon for demos — 1.5 stroke, currentColor. */
+/** Generic placeholder icon for demos — the shared Icon convention. */
 function DotIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-      <circle cx="12" cy="12" r="6" />
-    </svg>
-  )
+  return <Icon icon={Circle} className="h-full w-full" />
 }
 
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [sampleAmount, setSampleAmount] = useState('')
   const { toast } = useToast()
 
@@ -131,6 +139,26 @@ export default function DesignSystemPage() {
               <span className="font-medium text-[var(--v2-ink)]">4. Mind the copy conventions.</span> See the
               Copy section near the bottom for the user-facing language rules (we say <em>account</em>, not
               <em> Safe</em>; sentence case for modal titles, etc.).
+            </li>
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">5. CI enforces this.</span> The design-lint
+              gate (<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">npm run design:lint -w packages/frontend</code>)
+              {' '}fails a PR across two rule families. <em>Token rules</em> catch a bypassed token: raw Tailwind
+              palette classes, hardcoded hex colours, or new{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">text-[10px]</code>/<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">text-[11px]</code>. {/* prose mention, not a use — design-lint-disable-line */}
+              {' '}<em>Structural rules</em> catch a re-hand-rolled component: a hand-rolled grey header band
+              (use <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">Card.Header</code>), a raw table
+              element (use the <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">Table</code> primitive),
+              an inline SVG element (use <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">Icon</code>{' '}
+              + a lucide glyph), or a hand-rolled address slice (use{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;Address&gt;</code>) — each exempts
+              its own primitive's home file. Marketing/landing surfaces (brand, marketing, the landing page,
+              protocols, investor-briefing, how-it-works) are intentionally bespoke and exempt; the
+              product app and this page stay fully gated. Existing debt lives in a shrink-only baseline
+              (<code className="rounded bg-[var(--v2-surface)] px-1 text-xs">design-lint-baseline.json</code>) —
+              counts may only go down. Route colours through{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">var(--v2-…)</code> tokens and reach
+              for the shared primitive instead.
             </li>
           </ol>
         </Card>
@@ -188,13 +216,11 @@ export default function DesignSystemPage() {
                   aria-hidden="true"
                   className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[10px] border ${token.swatch}`}
                 >
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
-                    <circle cx="12" cy="12" r="6" />
-                  </svg>
+                  <Icon icon={Circle} className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
                   <p className="font-mono text-xs font-medium text-[var(--v2-ink)]">{token.name}</p>
-                  <p className="font-mono text-[11px] text-[var(--v2-ink-3)]">{token.soft}</p>
+                  <p className="font-mono text-xs text-[var(--v2-ink-3)]">{token.soft}</p>
                   <p className="mt-1 text-xs leading-snug text-[var(--v2-ink-2)]">{token.use}</p>
                 </div>
               </div>
@@ -208,6 +234,134 @@ export default function DesignSystemPage() {
             the colour. Outgoing amount text stays neutral ink so the row reads calm — only the icon
             carries the signal.
           </p>
+          <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+            <span className="font-medium text-[var(--v2-ink-2)]">Contrast guarantee:</span> every ink and
+            semantic text token meets WCAG AA (≥4.5:1) on white, its own soft fill, and the tinted
+            surfaces. Guarded by <code className="rounded bg-[var(--v2-surface)] px-1">token-contrast.test.ts</code> —
+            change a token and the test tells you if it still clears the bar.
+          </p>
+          <div className="mt-4 border-t border-[var(--v2-border)] pt-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">
+              Chain identity
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              <code className="rounded bg-[var(--v2-surface)] px-1">--v2-chain-*</code> tells networks
+              apart (Base, Gnosis, testnet) in <code className="rounded bg-[var(--v2-surface)] px-1">NetworkPill</code>{' '}
+              and <code className="rounded bg-[var(--v2-surface)] px-1">NetworkSwitcher</code>. These are{' '}
+              <span className="font-medium text-[var(--v2-ink)]">identity</span> colours, deliberately outside the
+              semantic rules — never reuse a chain colour for success/warning meaning, and never route money
+              tone through them.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-4">
+              {[
+                { label: 'Base', dot: 'var(--v2-chain-base)' },
+                { label: 'Gnosis', dot: 'var(--v2-chain-gnosis)' },
+                { label: 'Testnet', dot: 'var(--v2-chain-testnet)' },
+              ].map((chain) => (
+                <span key={chain.label} className="inline-flex items-center gap-1.5 text-xs text-[var(--v2-ink-2)]">
+                  <span
+                    aria-hidden="true"
+                    className="inline-block h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: chain.dot }}
+                  />
+                  {chain.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="Typography"
+        description="The type ramp lives in globals.css as v2-text-* utility classes (size + leading + weight + tracking in one class). Rule: page and section headings go through the ramp; within components, body copy uses Tailwind's text-sm and metadata uses text-xs — those two map to the ramp's body and meta steps. Ad-hoc pixel sizes (text-[Npx]) are off-system; the design-lint gate blocks new ones."
+      >
+        <Card hover={false} className="space-y-4 p-5">
+          {[
+            { cls: 'v2-text-display', label: 'v2-text-display · 40/48 — hero numbers (dashboard balance)' },
+            { cls: 'v2-text-h1', label: 'v2-text-h1 · 28/34 — page titles (PageHeader)' },
+            { cls: 'v2-text-h2', label: 'v2-text-h2 · 20/28 — section titles' },
+            { cls: 'v2-text-h3', label: 'v2-text-h3 · 16/24 — card titles' },
+            { cls: 'v2-text-body', label: 'v2-text-body · 14/22 — body copy (= text-sm)' },
+            { cls: 'v2-text-meta', label: 'v2-text-meta · 12/18 — metadata, captions (= text-xs)' },
+          ].map((t) => (
+            <div key={t.cls} className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+              <span className={`${t.cls} text-[var(--v2-ink)]`}>Pay 50 USDC</span>
+              <span className="text-xs text-[var(--v2-ink-3)]">{t.label}</span>
+            </div>
+          ))}
+        </Card>
+      </Section>
+
+      <Section
+        title="Spacing & radius"
+        description="The implicit scale, made explicit. Radius: cards and inner tiles are 10px (rounded-[10px]); marketing heroes 24px; buttons, inputs and selects rounded-md; badges/pills rounded-full. Card padding: p-5 default, p-6 for page-level section cards (Card.Header uses px-5 py-4 / spacious px-6 py-5). Vertical rhythm: space-y-10 between page sections, gap-4/gap-5 inside grids, mt-2 title→body, mt-4/mt-5 body→action."
+      >
+        <Card hover={false} className="p-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-5 text-center">
+              <p className="text-sm font-medium text-[var(--v2-ink)]">rounded-[10px]</p>
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">cards, tiles, tables</p>
+            </div>
+            <div className="rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] p-5 text-center">
+              <p className="text-sm font-medium text-[var(--v2-ink)]">rounded-md</p>
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">buttons, inputs, selects</p>
+            </div>
+            <div className="rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] p-5 text-center">
+              <p className="text-sm font-medium text-[var(--v2-ink)]">rounded-full</p>
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">badges, pills, icon halos</p>
+            </div>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="Icons"
+        description="One icon family, one weight. Every UI icon is a lucide-react glyph rendered through the shared `Icon` wrapper (`@/components/ui/Icon`) — stroke 1.5, decorative by default (`aria-hidden`), sized via className. Never inline a raw SVG element; the only exemptions are brand marks in `components/brand` and marketing pages."
+      >
+        <Card hover={false} className="p-5">
+          <div className="flex flex-wrap items-center gap-5">
+            {[
+              { icon: Bot, name: 'Bot' },
+              { icon: ArrowDown, name: 'ArrowDown' },
+              { icon: ArrowUp, name: 'ArrowUp' },
+              { icon: Check, name: 'Check' },
+              { icon: X, name: 'X' },
+              { icon: Info, name: 'Info' },
+              { icon: TriangleAlert, name: 'TriangleAlert' },
+              { icon: EllipsisVertical, name: 'EllipsisVertical' },
+            ].map((entry) => (
+              <div key={entry.name} className="flex flex-col items-center gap-1.5">
+                <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)]">
+                  <Icon icon={entry.icon} className="h-4 w-4" />
+                </span>
+                <p className="font-mono text-xs text-[var(--v2-ink-3)]">{entry.name}</p>
+              </div>
+            ))}
+          </div>
+          <ul className="mt-4 space-y-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">Usage:</span>{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">{'<Icon icon={Check} className="h-4 w-4" />'}</code>{' '}
+              — size with className (or the numeric <code className="rounded bg-[var(--v2-surface)] px-1">size</code> prop
+              where a pixel value is passed through), colour with a text token on the icon or its parent.
+            </li>
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">Stroke:</span> 1.5 everywhere. Overriding{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">strokeWidth</code> requires a comment at the call
+              site explaining why (e.g. a large empty-state hero that reads too heavy at 1.5).
+            </li>
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">Accessibility:</span> icons are decorative by default.
+              Pass <code className="rounded bg-[var(--v2-surface)] px-1">label</code> only when the icon is the sole
+              carrier of meaning and the surrounding control has no <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>.
+            </li>
+            <li>
+              <span className="font-medium text-[var(--v2-ink)]">Adding a glyph:</span> pick the closest lucide icon —
+              do not draw a custom SVG. If a concept genuinely has no lucide glyph, raise it in the PR rather than
+              inlining markup.
+            </li>
+          </ul>
         </Card>
       </Section>
 
@@ -280,7 +434,7 @@ export default function DesignSystemPage() {
 
         <div className="grid gap-5 lg:grid-cols-3">
           <Card hover={false} className="p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Flat (default)</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Flat (default)</p>
             <p className="mt-2 text-sm font-semibold text-[var(--v2-ink)]">Standard card</p>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
               The default. One page can have many flat cards. Hover lift on interactive variants.
@@ -288,7 +442,7 @@ export default function DesignSystemPage() {
           </Card>
 
           <Card hover={false} elevation="anchor" className="p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-brand)]">Anchor</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-brand)]">Anchor</p>
             <p className="mt-2 text-sm font-semibold text-[var(--v2-ink)]">Secondary focal point</p>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
               Use for the second-most-important surface on a page (pending approvals, agent status). Cooler off-white background, brand-tinted hairline.
@@ -296,7 +450,7 @@ export default function DesignSystemPage() {
           </Card>
 
           <Card hover={false} elevation="raised" className="p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Raised</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Raised</p>
             <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
               $4,280.35
             </p>
@@ -377,6 +531,50 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Card.Header — the titled grey band"
+        description="Give a Card a titled header with Card.Header — never hand-roll the border-b + bg-surface band. Slots: `title` (heading level via `as`, default h3), optional `description`, optional right-aligned `actions`. Pass `children` instead for bespoke content (badges, balances). Padding: default (px-5 py-4), `spacious` (px-6 py-5) for page-level section cards, `none` when the caller owns padding. Parent Card needs `overflow-hidden` (or add `rounded-t-[10px]` via className)."
+      >
+        <Card hover={false} className="max-w-xl overflow-hidden">
+          <Card.Header
+            title="Connected agents"
+            description="Agents that can request payments from this account."
+            actions={<Button variant="ghost" size="sm">View all</Button>}
+          />
+          <Card.Section divided>
+            <Row title="Research assistant" subtitle="250 USDC per day" trailing={<StatusBadge tone="brand">Connected</StatusBadge>} />
+            <Row title="Travel planner" subtitle="0.10 ETH per day" trailing={<StatusBadge tone="warning">Paused</StatusBadge>} />
+          </Card.Section>
+        </Card>
+      </Section>
+
+      <Section
+        title="Amount & Address — the two core display objects"
+        description="Render money through <Amount> and on-chain addresses through <Address> — never hand-roll signs, tone classes, or slice(0, 6) truncation. Amount encodes the calm-money rule structurally: neutral ink by default, success only for incoming, danger only for failed; callers pass facts (direction, failed), never colours. Address applies the one truncation rule (0x1234…abcd), monospace, the full value in a tooltip, and optional copy / explorer-link affordances."
+      >
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">Amount</p>
+            <div className="mt-3 space-y-2 text-sm">
+              <p><Amount value="250.00" symbol="USDC" /> <span className="text-xs text-[var(--v2-ink-3)]">— signless figure (budgets, balances)</span></p>
+              <p><Amount value="12.00" symbol="USDC" direction="in" /> <span className="text-xs text-[var(--v2-ink-3)]">— incoming: the quiet success green</span></p>
+              <p><Amount value="12.00" symbol="USDC" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— outgoing stays neutral; direction colour lives in DirectionMark</span></p>
+              <p><Amount value="80.00" symbol="USDC" direction="out" failed /> <span className="text-xs text-[var(--v2-ink-3)]">— failed: the only red money gets</span></p>
+              <p><Amount value="320.00" symbol="USDC" direction="out" size="lg" /> <span className="text-xs text-[var(--v2-ink-3)]">— size=&quot;lg&quot; for detail-panel headlines</span></p>
+            </div>
+          </Card>
+          <Card hover={false} className="p-5">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">Address</p>
+            <div className="mt-3 space-y-2 text-sm text-[var(--v2-ink-2)]">
+              <p><Address value={sampleAddress} /> <span className="text-xs text-[var(--v2-ink-3)]">— hover for the full address</span></p>
+              <p><Address value={sampleAddress} copy /> <span className="text-xs text-[var(--v2-ink-3)]">— with check-pop copy</span></p>
+              <p><Address value={sampleAddress} href="https://basescan.org" /> <span className="text-xs text-[var(--v2-ink-3)]">— explorer link with ↗</span></p>
+              <p className="break-all text-xs"><Address value={sampleAddress} truncate={false} /> <span className="text-[var(--v2-ink-3)]">— full form for receive surfaces</span></p>
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
         title="Card.Section — nested content without grey-on-white"
         description="When you need to group content inside a card, use Card.Section instead of a grey inner wrapper. Renders a hairline top border that bleeds to the card's edges — the canonical way to subsection a card. Pass `divided` for a row list (auto row dividers, no horizontal padding so child rows own theirs)."
       >
@@ -386,7 +584,7 @@ export default function DesignSystemPage() {
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Base · 0x8f4F…6f4C</p>
           </div>
           <Card.Section className="mt-5 pt-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Holdings</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Holdings</p>
             <dl className="mt-2 grid grid-cols-2 gap-y-2 text-sm">
               <dt className="text-[var(--v2-ink-2)]">USDC</dt>
               <dd className="text-right v2-tabular text-[var(--v2-ink)]">4,280.35</dd>
@@ -395,7 +593,7 @@ export default function DesignSystemPage() {
             </dl>
           </Card.Section>
           <Card.Section className="mt-5 pt-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Approvers</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">Approvers</p>
             <p className="mt-2 text-sm text-[var(--v2-ink-2)]">2 of 3 approvers required</p>
           </Card.Section>
         </Card>
@@ -463,11 +661,7 @@ export default function DesignSystemPage() {
                 aria-label="Account options"
                 className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                  <circle cx="12" cy="5" r="1.25" />
-                  <circle cx="12" cy="12" r="1.25" />
-                  <circle cx="12" cy="19" r="1.25" />
-                </svg>
+                <Icon icon={EllipsisVertical} className="h-4 w-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => toast.info('Edit agent')}>Edit agent</DropdownMenuItem>
@@ -489,6 +683,77 @@ export default function DesignSystemPage() {
             </p>
           </div>
         </Card>
+      </Section>
+
+      <Section
+        title="Select"
+        description="The styled native <select>. Same height, radius, border and focus ring as Input so mixed form rows align. Passes through all native select attributes."
+      >
+        <Card hover={false} className="max-w-sm p-5">
+          <div className="space-y-3">
+            <Select defaultValue="week" aria-label="Budget period">
+              <option value="day">per day</option>
+              <option value="week">per week</option>
+              <option value="month">per month</option>
+            </Select>
+            <Select disabled defaultValue="usdc" aria-label="Token (disabled)">
+              <option value="usdc">USDC</option>
+            </Select>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="SidePanel"
+        description="Right-hand detail drawer — used for transaction details. Title + optional subtitle header, Escape/backdrop dismiss, focus trapped while open. Reach for it when a Row click needs more detail than a modal question."
+      >
+        <Card hover={false} className="p-5">
+          <Button variant="ghost" onClick={() => setPanelOpen(true)}>Open side panel</Button>
+        </Card>
+      </Section>
+
+      <Section
+        title="StepProgress"
+        description="Thin step indicator for multi-step flows (connect agent, onboarding). 0-indexed currentStep; pass totalSteps as currentStep to render everything completed."
+      >
+        <Card hover={false} className="max-w-sm space-y-4 p-5">
+          <StepProgress totalSteps={3} currentStep={0} />
+          <StepProgress totalSteps={3} currentStep={1} />
+          <StepProgress totalSteps={3} currentStep={3} />
+        </Card>
+      </Section>
+
+      <Section
+        title="ConfirmDialog"
+        description="Styled replacement for window.confirm. Defaults to tone danger (destructive actions: revoke, delete, disconnect); tone primary for consequential-but-safe confirmations. Supports confirmDisabled while the action runs and confirmButtonWrapper for guards like network switching."
+      >
+        <Card hover={false} className="p-5">
+          <Button variant="ghost" onClick={() => setConfirmOpen(true)}>Open confirm dialog</Button>
+        </Card>
+      </Section>
+
+      <Section
+        title="Toast"
+        description="Transient feedback via useToast() — success for completed user actions, error for failures the user must know about, info for neutral notices. One line, no actions inside the toast; anything requiring a decision belongs in a dialog. Toaster mounts once in the app shell."
+      >
+        <Card hover={false} className="p-5">
+          <div className="flex flex-wrap gap-3">
+            <Button variant="ghost" size="sm" onClick={() => toast.success('Budget set — it refills itself every period.')}>toast.success</Button>
+            <Button variant="ghost" size="sm" onClick={() => toast.error('Could not stop the budget. Try again.')}>toast.error</Button>
+            <Button variant="ghost" size="sm" onClick={() => toast.info('Agent reconnected.')}>toast.info</Button>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="CodeBlock"
+        description="Dark monospace block for terminal commands and credential snippets. Optional filename header row with a check-pop copy button; onCopy fires only when the clipboard write succeeded (used for handoff telemetry)."
+      >
+        <div className="max-w-xl">
+          <CodeBlock filename="Terminal" onCopy={() => toast.success('Command copied')}>
+            npx @haven_ai/connect@alpha
+          </CodeBlock>
+        </div>
       </Section>
 
       <Section
@@ -527,7 +792,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Empty states"
-        description="Pick a tone that matches the meaning (brand for default, warning for attention, success after a completed flow). The leading icon sits in a soft tinted circle with a faint halo — gives the surface a focal point without illustration overhead."
+        description="One component, three sizes — never hand-roll a dashed tile. `default` for page/section-level empties (icon halo, roomy). `compact` for in-card previews and side columns. `inline` for a one-line placeholder inside dense content (title only). Pick a tone that matches the meaning (brand for default, warning for attention, success after a completed flow). Dashed borders on non-empty content (draft forms, status callouts) are a different pattern and stay hand-rolled."
       >
         <div className="grid gap-5 lg:grid-cols-3">
           <EmptyState
@@ -550,6 +815,21 @@ export default function DesignSystemPage() {
             title="You're all caught up"
             body="No pending approvals. Agents will keep working within their budgets."
           />
+        </div>
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">size=&quot;compact&quot; — in-card previews</p>
+            <EmptyState
+              size="compact"
+              title="Activity preview unavailable"
+              body="Haven could not refresh recent payments right now."
+              action={<Button variant="ghost" size="sm">Try again</Button>}
+            />
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">size=&quot;inline&quot; — dense content</p>
+            <EmptyState size="inline" title="No budget set yet" />
+          </div>
         </div>
       </Section>
 
@@ -680,7 +960,7 @@ export default function DesignSystemPage() {
       >
         <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
           <Card hover={false} className="overflow-hidden border-[var(--v2-warning)]/25">
-            <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
+            <Card.Header>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusBadge tone="warning">Needs approval</StatusBadge>
@@ -688,7 +968,7 @@ export default function DesignSystemPage() {
                 </div>
                 <span className="text-xs text-[var(--v2-ink-3)]">Expires in 1 hour</span>
               </div>
-            </div>
+            </Card.Header>
             <div className="space-y-5 p-5">
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.9fr)]">
                 <div>
@@ -704,11 +984,11 @@ export default function DesignSystemPage() {
                   <TransactionMovement from="Operating wallet" to="api.vendor.com" />
                   <dl className="mt-4 grid gap-3 sm:grid-cols-2">
                     <div>
-                      <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Agent</dt>
+                      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Agent</dt>
                       <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Research assistant</dd>
                     </div>
                     <div>
-                      <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Network</dt>
+                      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
                       <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
                     </div>
                   </dl>
@@ -754,20 +1034,20 @@ export default function DesignSystemPage() {
             <TransactionMovement from="Operating wallet" to="Acme Services" />
             <dl className="mt-4 grid gap-3 sm:grid-cols-2">
               <div>
-                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
+                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Operating wallet</dd>
               </div>
               <div>
-                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Recipient</dt>
+                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Recipient</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Acme Services</dd>
-                <dd className="mt-0.5 font-mono text-[11px] text-[var(--v2-ink-3)]">0x7a58...91c2</dd>
+                <dd className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">0x7a58...91c2</dd>
               </div>
               <div>
-                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Network</dt>
+                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Network</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Base</dd>
               </div>
               <div>
-                <dt className="text-[11px] font-medium text-[var(--v2-ink-3)]">Approve with</dt>
+                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Approve with</dt>
                 <dd className="mt-1 text-sm font-medium text-[var(--v2-ink)]">Device approval</dd>
               </div>
             </dl>
@@ -787,17 +1067,15 @@ export default function DesignSystemPage() {
         description="Recipient surfaces show names first, keep wallet addresses subordinate, and preserve direct address entry for one-off payments."
       >
         <Card hover={false} className="max-w-xl overflow-hidden p-0">
-          <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Saved recipients</h3>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Use names for people and services you pay often. Confirm the network in Send.</p>
-              </div>
+          <Card.Header
+            title="Saved recipients"
+            description="Use names for people and services you pay often. Confirm the network in Send."
+            actions={
               <Button size="sm" className="flex-shrink-0 whitespace-nowrap">
                 Add contact
               </Button>
-            </div>
-          </div>
+            }
+          />
           {[
             ['Acme Services', '0x7a58...91c2'],
             ['Research API', '0x31bc...8d04'],
@@ -874,14 +1152,13 @@ export default function DesignSystemPage() {
           />
 
           <Card hover={false} className="overflow-hidden">
-            <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-4">
-              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Recent agent activity</h3>
-            </div>
+            <Card.Header title="Recent agent activity" />
             <TransactionActivityRow
               direction="out"
               title="x402 payment"
               description={<MovementExample from="Research assistant" to="API provider" />}
-              amount="-12.00 USDC"
+              value="12.00"
+              asset="USDC"
               status="Sent"
               statusTone="neutral"
             />
@@ -889,7 +1166,8 @@ export default function DesignSystemPage() {
               direction="out"
               title="Approval request"
               description={<MovementExample from="Research assistant" to="Cloud vendor" />}
-              amount="-320.00 USDC"
+              value="320.00"
+              asset="USDC"
               status="Needs approval"
               statusTone="warning"
             />
@@ -897,8 +1175,9 @@ export default function DesignSystemPage() {
               direction="out"
               title="Payment rejected"
               description={<MovementExample from="Research assistant" to="Unknown vendor" />}
-              amount="-80.00 USDC"
-              amountTone="danger"
+              value="80.00"
+              asset="USDC"
+              failed
               status="Failed"
               statusTone="danger"
             />
@@ -908,51 +1187,22 @@ export default function DesignSystemPage() {
 
       <Section
         title="Transaction history"
-        description="The full transaction route uses a semantic sortable table. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
+        description="Tables render through the Table primitive: Table.Head (collapses below md, optional sticky), Table.HeaderCell (srLabel for icon columns, hideBelowMd for the responsive-collapse pattern), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
       >
         <Card hover={false} className="overflow-hidden">
-          <table className="w-full border-separate border-spacing-0">
-            <thead className="hidden md:table-header-group">
+          <Table>
+            <Table.Head>
               <tr>
-                <th className="w-10 border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3" scope="col">
-                  <span className="sr-only">Direction</span>
-                </th>
-                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
-                  Activity
-                </th>
-                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
-                  Initiator
-                </th>
-                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col">
-                  From / To
-                </th>
-                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col" aria-sort="descending">
-                  <button
-                    type="button"
-                    aria-label="Sort by Date, currently descending"
-                    className="inline-flex items-center gap-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-                  >
-                    Date
-                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                </th>
-                <th className="border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3 text-right text-[11px] font-medium uppercase tracking-wide text-[var(--v2-ink-3)]" scope="col" aria-sort="none">
-                  <button
-                    type="button"
-                    aria-label="Sort by Amount, currently unsorted"
-                    className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-                  >
-                    Amount
-                  </button>
-                </th>
-                <th className="w-8 border-b border-[var(--v2-table-row-border)] bg-[var(--v2-table-header-bg)] px-4 py-3" scope="col">
-                  <span className="sr-only">External details</span>
-                </th>
+                <Table.HeaderCell srLabel="Direction" className="w-10" />
+                <Table.HeaderCell align="left">Activity</Table.HeaderCell>
+                <Table.HeaderCell align="left" hideBelowMd>Initiator</Table.HeaderCell>
+                <Table.HeaderCell align="left" hideBelowMd>From / To</Table.HeaderCell>
+                <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} hideBelowMd />
+                <Table.SortableHeaderCell label="Amount" direction={null} onSort={() => toast.info('Sorts the loaded set')} align="right" />
+                <Table.HeaderCell srLabel="External details" className="w-8" />
               </tr>
-            </thead>
-            <tbody className="[&>tr>td]:border-b [&>tr>td]:border-[var(--v2-border)] [&>tr:last-child>td]:border-b-0">
+            </Table.Head>
+            <Table.Body>
               {[
                 {
                   title: 'Received payment',
@@ -960,8 +1210,7 @@ export default function DesignSystemPage() {
                   to: 'Operating wallet',
                   initiator: 'You',
                   date: '12m ago',
-                  amount: '+500.00 USDC',
-                  amountClass: 'text-[var(--v2-success)]',
+                  value: '500.00',
                   direction: 'in' as const,
                   failed: false,
                 },
@@ -971,8 +1220,7 @@ export default function DesignSystemPage() {
                   to: 'API provider',
                   initiator: 'Research assistant',
                   date: '1h ago',
-                  amount: '-12.00 USDC',
-                  amountClass: 'text-[var(--v2-ink)]',
+                  value: '12.00',
                   direction: 'out' as const,
                   failed: false,
                 },
@@ -982,8 +1230,7 @@ export default function DesignSystemPage() {
                   to: 'unknown.vendor',
                   initiator: 'Research assistant',
                   date: '2h ago',
-                  amount: '-25.00 USDC',
-                  amountClass: 'text-[var(--v2-danger)]',
+                  value: '25.00',
                   direction: 'out' as const,
                   failed: true,
                 },
@@ -1011,7 +1258,9 @@ export default function DesignSystemPage() {
                     {row.date}
                   </td>
                   <td className="px-4 py-4 align-middle text-right">
-                    <p className={`text-sm font-semibold v2-tabular ${row.amountClass}`}>{row.amount}</p>
+                    <p>
+                      <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
+                    </p>
                     <p className="mt-1 text-xs text-[var(--v2-ink-3)] md:hidden">{row.date}</p>
                   </td>
                   <td className="px-4 py-4 align-middle text-right">
@@ -1019,8 +1268,8 @@ export default function DesignSystemPage() {
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+            </Table.Body>
+          </Table>
         </Card>
       </Section>
 
@@ -1080,18 +1329,7 @@ export default function DesignSystemPage() {
                 role="status"
                 className="mb-2 flex items-start gap-2 text-xs text-[var(--v2-ink-3)]"
               >
-                <svg
-                  aria-hidden="true"
-                  className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.75}
-                >
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 11v5" strokeLinecap="round" />
-                  <circle cx="12" cy="8" r="0.6" fill="currentColor" />
-                </svg>
+                <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
                 <span>Connect a wallet to update this agent budget.</span>
               </p>
               <div className="flex gap-3">
@@ -1119,8 +1357,8 @@ export default function DesignSystemPage() {
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Account, not Safe</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                 Users see <span className="font-medium">account</span>. The Safe contract abstraction stays
-                in code (<code className="text-[11px]">safeId</code>,{' '}
-                <code className="text-[11px]">UserSafe</code>, etc.). The word <em>Safe</em> should not
+                in code (<code className="text-xs">safeId</code>,{' '}
+                <code className="text-xs">UserSafe</code>, etc.). The word <em>Safe</em> should not
                 appear in any rendered string.
               </p>
             </div>
@@ -1150,7 +1388,7 @@ export default function DesignSystemPage() {
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Confirm destructive actions</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                 Anything that can&apos;t be reversed (revoke, remove account, remove token budget, delete
-                agent) opens a <code className="text-[11px]">ConfirmDialog</code> with a clear destructive
+                agent) opens a <code className="text-xs">ConfirmDialog</code> with a clear destructive
                 button label. Reversible actions (pause / resume) don&apos;t need confirmation.
               </p>
             </div>
@@ -1187,9 +1425,9 @@ export default function DesignSystemPage() {
           </ul>
           <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
             <span className="font-medium text-[var(--v2-ink-2)]">Don&apos;t inline 11px helper text</span> —
-            grep the codebase: if you see <code className="text-[11px]">text-[10px]</code> or{' '}
-            <code className="text-[11px]">text-[11px]</code> inside a modal, it&apos;s probably a missed
-            migration. Bump to <code className="text-[11px]">text-xs</code> or compose with the helpers.
+            grep the codebase: if you see <code className="text-xs">text-[10px]</code> or{' '}{/* literal examples shown to the reader — design-lint-disable-line */}
+            <code className="text-xs">text-[11px]</code>{/* design-lint-disable-line */} inside a modal, it&apos;s probably a missed
+            migration. Bump to <code className="text-xs">text-xs</code> or compose with the helpers.
           </p>
         </Card>
       </Section>
@@ -1249,6 +1487,29 @@ export default function DesignSystemPage() {
         Confirm the agent budget before connecting your agent. Requests above the remaining
         budget will wait for approval.
       </Modal>
+
+      <SidePanel
+        open={panelOpen}
+        onClose={() => setPanelOpen(false)}
+        title="x402 payment"
+        subtitle="Operating wallet · just now"
+      >
+        <p className="text-sm text-[var(--v2-ink-2)]">
+          Detail content goes here — the transactions route uses this panel for per-transaction
+          breakdowns (amount, movement, initiator, receipts).
+        </p>
+      </SidePanel>
+
+      {confirmOpen ? (
+        <ConfirmDialog
+          open
+          title="Stop this budget?"
+          body="The agent will no longer be able to pay from this budget. You can set a new one at any time."
+          confirmLabel="Stop budget"
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={() => setConfirmOpen(false)}
+        />
+      ) : null}
     </div>
   )
 }

@@ -69,6 +69,8 @@ export const sv: Messages = {
       backupDetail: 'Att lägga till reservgodkännare är inte tillgängligt ännu.',
       sessionsLabel: 'Aktiva sessioner',
       sessionsDetail: 'Granska inloggade enheter och återkalla sessioner.',
+      exitPathLabel: 'Din exit-väg',
+      exitPathDetail: 'Inspektera och återkalla dina agentbudgetar direkt på kedjan — utan Haven. Öppnar den fristående exit-sidan.',
     },
 
     data: {

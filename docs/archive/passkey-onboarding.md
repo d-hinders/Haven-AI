@@ -1,3 +1,10 @@
+---
+owner: "@d-hinders"
+status: archived
+covers: []  # narrative — no direct code mirror
+last-verified: "2026-06-28"
+---
+
 # Passkey-Native Safe Onboarding for Haven
 
 > **ARCHIVED — shipped.** This is the original design doc for passkey-native onboarding, which is now implemented (passkey enrollment, relayer-paid Safe deploy, and the signer abstraction are live in `packages/backend` and `packages/frontend`). Kept for design rationale; it is not a description of current code.

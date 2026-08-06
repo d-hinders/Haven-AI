@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getExplorerUrl } from '../lib/chains.js'
+import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import { machinePaymentLifecycle } from '../lib/machine-payment-lifecycle.js'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ interface PaymentRow {
   merchant_address: string | null
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
+  execution_rail: string | null
+  session_permission_id: string | null
+  delegation_hash: string | null
   created_at: string
   confirmed_at: string | null
 }
@@ -106,7 +110,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               us.id AS safe_id,
               COALESCE(us.safe_address, pi.safe_address) AS safe_address,
               us.name AS safe_name,
-              COALESCE(pi.chain_id, us.chain_id, 8453) AS chain_id,
+              COALESCE(pi.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) AS chain_id,
               pi.token_symbol,
               pi.token_address,
               pi.amount_raw,
@@ -121,6 +125,9 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.payment_rail,
               pi.payment_resource_url,
               pi.merchant_address,
+              pi.execution_rail,
+              pi.session_permission_id,
+              pi.delegation_hash,
               pi.created_at,
               pi.confirmed_at,
               mpre.event_type AS payment_reconciliation_event_type
@@ -147,7 +154,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               us.id AS safe_id,
               COALESCE(us.safe_address, ar.safe_address) AS safe_address,
               us.name AS safe_name,
-              COALESCE(ar.chain_id, us.chain_id, 8453) as chain_id,
+              COALESCE(ar.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
               ar.token_symbol,
               ar.token_address,
               ar.amount_human,
@@ -221,6 +228,13 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           safe_address: p.safe_address,
           safe_name: p.safe_name,
           explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
+          // #799: which on-chain mechanism moved the money, and (session rail)
+          // WHICH period-session the intent was pinned to — makes the #769
+          // lazy rollover observable to the owner without DB access.
+          execution_rail: p.execution_rail,
+          session_permission_id: p.session_permission_id,
+          // #829: which delegation authorized a delegation-rail payment.
+          delegation_hash: p.delegation_hash,
           confirmed_at: p.confirmed_at,
           created_at: p.created_at,
         }
@@ -379,7 +393,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               us.id AS safe_id,
               COALESCE(us.safe_address, pi.safe_address) AS safe_address,
               us.name AS safe_name,
-              COALESCE(pi.chain_id, us.chain_id, 8453) AS chain_id,
+              COALESCE(pi.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) AS chain_id,
               pi.token_symbol,
               pi.token_address,
               pi.amount_raw,
@@ -394,6 +408,9 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               pi.payment_rail,
               pi.payment_resource_url,
               pi.merchant_address,
+              pi.execution_rail,
+              pi.session_permission_id,
+              pi.delegation_hash,
               pi.created_at,
               pi.confirmed_at,
               mpre.event_type AS payment_reconciliation_event_type
@@ -421,7 +438,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
               us.id AS safe_id,
               COALESCE(us.safe_address, ar.safe_address) AS safe_address,
               us.name AS safe_name,
-              COALESCE(ar.chain_id, us.chain_id, 8453) as chain_id,
+              COALESCE(ar.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
               ar.token_symbol,
               ar.token_address,
               ar.amount_human,
@@ -497,6 +514,13 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           safe_address: p.safe_address,
           safe_name: p.safe_name,
           explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
+          // #799: which on-chain mechanism moved the money, and (session rail)
+          // WHICH period-session the intent was pinned to — makes the #769
+          // lazy rollover observable to the owner without DB access.
+          execution_rail: p.execution_rail,
+          session_permission_id: p.session_permission_id,
+          // #829: which delegation authorized a delegation-rail payment.
+          delegation_hash: p.delegation_hash,
           confirmed_at: p.confirmed_at,
           created_at: p.created_at,
         }

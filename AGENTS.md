@@ -1,3 +1,15 @@
+---
+owner: "@d-hinders"
+status: current
+covers:
+  - .github/workflows/publish.yml
+  - scripts/release-bump.mjs
+  - .agents/skills/**
+  - .claude/agents/**
+  - .claude/commands/**
+last-verified: "2026-07-12"
+---
+
 # Haven Codex Instructions
 
 ## Product Context
@@ -50,11 +62,12 @@ Apply these guardrails to generated artifacts too: SDK examples, credential file
 
 Before completing UI work:
 
-- Reuse shared primitives and Haven-domain components where possible.
+- Reuse shared primitives and Haven-domain components where possible. If the diff writes the same markup shape a second time, extract it into a `ui/`/`haven/` primitive and add a `/design-system` entry in the same PR (the coupling gate checks this).
 - Check mobile and desktop layouts.
 - Include empty, loading, error, and success states when the screen can enter them.
-- Review copy against `docs/product/copy-guidelines.md`.
+- Review copy against `docs/product/copy-guidelines.md` (the blocking copy-lint gate catches banned multi-word terms; review tone and clarity by hand).
 - Review the changed UX against `docs/product/design-review.md`.
+- Capture rendered-screen evidence (`npm run screenshot -w packages/frontend -- <routes>`) for any diff touching a rendered route or shared primitive, and run the `haven-design-reviewer` rendered pass alongside the code review.
 - Run relevant frontend tests or build checks when practical.
 - Run the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` for the surfaces the diff touches (numeric formatters, counter/summary stats, conditional copy, animations, inline gates, cross-surface values, paginated-list-derived progress).
 - If browser verification is skipped (preview environment unavailable, slow, flaky), add at least one **headless equivalent** in vitest:
@@ -84,8 +97,11 @@ Green CI is necessary but not sufficient for changes that touch money movement, 
 
 When a user asks to build a feature, improve a UX flow from feedback, or fix a bug from a report, use `docs/contributing/ai-agent-workflow.md`.
 
+Portable Haven workflows live under `.agents/skills/`. Client-specific command and agent definitions are adapters to that canonical layer; do not duplicate workflow policy in an adapter.
+
 Agentic delivery is the default decision path for non-trivial Haven work. This file is the user's standing instruction to use subagents, delegated workers, and parallel agent work whenever the captain decides that is the best workflow. The user does not need to explicitly ask to "use agents", "use workers", or "use parallel agents" on each request. Act as the captain, decide whether the agentic flow is useful from the task shape and risk, and proceed with it when it is the better workflow:
 
+- Use the roles in `.agents/skills/haven-agent-workflow/` for coordination, exploration, bounded implementation, and review.
 - Use `haven-workflow-coordinator` to choose the workflow, agent plan, file ownership boundaries, and expected checks when the work is non-trivial.
 - Use `haven-explorer` for read-only discovery before implementation unless the change is trivial.
 - Use `haven-ui-worker` and `haven-backend-worker` only for clean, bounded, disjoint implementation slices.

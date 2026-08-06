@@ -1,5 +1,7 @@
 'use client'
 
+import { Check, Clipboard, EllipsisVertical, X } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -15,6 +17,8 @@ import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useUserSafes } from '@/hooks/useUserSafes'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import SendModal from '@/components/SendModal'
+import DelegationSendModal from '@/components/DelegationSendModal'
+import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
@@ -58,13 +62,9 @@ function CopyButton({ text }: { text: string }) {
       aria-label="Copy address"
     >
       {copied ? (
-        <svg className="w-3.5 h-3.5 text-[var(--v2-success)] animate-check-pop" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-        </svg>
+        <Icon icon={Check} className="w-3.5 h-3.5 text-[var(--v2-success)] animate-check-pop" />
       ) : (
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
-        </svg>
+        <Icon icon={Clipboard} className="w-3.5 h-3.5" />
       )}
     </button>
   )
@@ -161,7 +161,10 @@ export default function AccountDetailClient() {
     loading: detailsLoading,
     error: detailsError,
     refetch: refetchDetails,
-  } = useSafeDetails(safeAddress, { chainId })
+    // #1107: a delegator_hybrid account has no Safe contract — fetching Safe
+    // details 500s and pollutes every console session on the default rail.
+    // The signer set (Backup & recovery card) is that rail's approval story.
+  } = useSafeDetails(safe?.account_type === 'delegator_hybrid' ? null : safeAddress, { chainId })
 
   const {
     totalUsd,
@@ -263,6 +266,9 @@ export default function AccountDetailClient() {
             <StatusBadge>{chain.name}</StatusBadge>
             {safeAddress && (
               <>
+                {/* Send exists on BOTH rails now (#1083): Safe accounts get
+                    the Safe transaction modal, delegation accounts the
+                    sponsored owner-send. */}
                 <Button onClick={() => setSendOpen(true)}>
                   Send
                 </Button>
@@ -282,18 +288,7 @@ export default function AccountDetailClient() {
                 aria-label="Account options"
                 className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
               >
-                <svg
-                  className="h-4 w-4"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  aria-hidden="true"
-                >
-                  <circle cx="12" cy="5" r="1.25" />
-                  <circle cx="12" cy="12" r="1.25" />
-                  <circle cx="12" cy="19" r="1.25" />
-                </svg>
+                <Icon icon={EllipsisVertical} className="h-4 w-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
@@ -320,7 +315,7 @@ export default function AccountDetailClient() {
       />
 
       <Card hover={false} elevation="raised" className="overflow-hidden">
-        <div className="border-b border-[var(--v2-border)] bg-[var(--v2-surface)] px-5 py-5 sm:px-6">
+        <Card.Header padding="none" className="px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-medium uppercase tracking-widest text-[var(--v2-ink-3)]">Total balance</p>
@@ -340,7 +335,7 @@ export default function AccountDetailClient() {
               Sum of all tokens held by this Haven wallet, converted to {currency}.
             </p>
           </div>
-        </div>
+        </Card.Header>
 
         <div className="p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -471,6 +466,16 @@ export default function AccountDetailClient() {
           </div>
         )}
       </Card>
+
+      {/* #1089: backup & recovery is an account capability, not an agent one —
+          it works from the moment the account exists, with no agent required. */}
+      {safe.account_type === 'delegator_hybrid' ? (
+        <AccountSignersCard
+          safeAddress={safe.safe_address}
+          chainId={chainId}
+          userEmail={user?.email ?? ''}
+        />
+      ) : null}
 
       {/* Account info */}
       <Card hover={false} className="p-5 sm:p-6">
@@ -630,7 +635,16 @@ export default function AccountDetailClient() {
         backing a wagmi wallet-client subscription) don't run in the
         background on every account page view.
       */}
-      {sendOpen && safeAddress && (
+      {sendOpen && safeAddress && safe.account_type === 'delegator_hybrid' && (
+        <DelegationSendModal
+          open
+          onClose={() => setSendOpen(false)}
+          accountAddress={safeAddress}
+          chainId={chainId}
+          onSent={handleSendSuccess}
+        />
+      )}
+      {sendOpen && safeAddress && safe.account_type !== 'delegator_hybrid' && (
         <SendModal
           open
           onClose={() => setSendOpen(false)}
@@ -719,9 +733,7 @@ function RenameModal({
             aria-label="Close"
             className="rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon icon={X} className="h-5 w-5" />
           </button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4 p-5">

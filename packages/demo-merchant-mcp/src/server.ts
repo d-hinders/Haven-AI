@@ -2,8 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { z } from 'zod'
 import { PRODUCTS, formatUsdc, type ProductId } from './products.js'
-import { generateInvoice, nextInvoiceNumber } from './invoice.js'
-import { buildPaymentRequired, type SettledPayment } from './x402.js'
+import { invoiceForPayment } from './invoice.js'
+import type { SettledPayment, X402PaymentProcessor } from './x402.js'
 import type { Address } from 'viem'
 
 const paymentStorage = new AsyncLocalStorage<SettledPayment | undefined>()
@@ -11,6 +11,11 @@ const paymentStorage = new AsyncLocalStorage<SettledPayment | undefined>()
 export interface MerchantConfig {
   merchantAddress: Address
   baseUrl: string
+  /** Requirements builder used for the in-band "payment required" tool text.
+   *  Required so every entrypoint passes the processor's builder and the tool
+   *  text advertises the same accepts entries (e.g. the experimental erc7710
+   *  option) as the HTTP 402 challenge. */
+  buildPaymentRequired: X402PaymentProcessor['buildPaymentRequired']
 }
 
 const completedPurchases = new WeakMap<SettledPayment, string>()
@@ -95,7 +100,7 @@ function completePurchase(config: MerchantConfig, productId: ProductId, descript
   const payment = paymentStorage.getStore()
 
   if (!payment || payment.productId !== productId) {
-    const requirements = buildPaymentRequired({
+    const requirements = config.buildPaymentRequired({
       merchantAddress: config.merchantAddress,
       amountUsdc: product.price_usdc,
       resource,
@@ -123,14 +128,9 @@ function completePurchase(config: MerchantConfig, productId: ProductId, descript
     return { content: [{ type: 'text' as const, text: cachedText }] }
   }
 
-  const invoiceNumber = nextInvoiceNumber()
-  const invoice = generateInvoice({
-    invoiceNumber,
-    productId,
-    buyerAddress: payment.from,
-    authorizationNonce: payment.nonce,
-    txHash: payment.txHash,
-  })
+  // Shared with the HTTP layer's x-receipt-json header (#956) — one invoice
+  // per settled payment, so header and text can never diverge.
+  const invoice = invoiceForPayment(payment, productId)
 
   const text =
     `✅ Köp bekräftat!\n\n` +

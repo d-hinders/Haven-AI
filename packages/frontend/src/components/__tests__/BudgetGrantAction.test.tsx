@@ -108,11 +108,17 @@ describe('BudgetGrantAction (#1073)', () => {
   it('is the ONLY grant implementation — both surfaces import it', () => {
     // The modal and the agent page must not drift apart on money authority.
     // If a surface stops importing this, it has grown its own copy.
+    // (#989 moved the modal's approval step into connect-agent/
+    // DelegationApprovalStep — the pin follows the code to its new home,
+    // same as the agents.test.ts account_type pin did in #988.)
     const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
-    for (const surface of ['../DelegationBudgetCard.tsx', '../ConnectAgent2Modal.tsx']) {
-      expect(read(surface), `${surface} must use the shared grant control`).toMatch(
-        /import BudgetGrantAction from '\.\/BudgetGrantAction'/,
-      )
-    }
+    expect(
+      read('../DelegationBudgetCard.tsx'),
+      'DelegationBudgetCard must use the shared grant control',
+    ).toMatch(/import BudgetGrantAction from '\.\/BudgetGrantAction'/)
+    expect(
+      read('../connect-agent/DelegationApprovalStep.tsx'),
+      'the connect-flow approval step must use the shared grant control',
+    ).toMatch(/import BudgetGrantAction from '\.\.\/BudgetGrantAction'/)
   })
 })

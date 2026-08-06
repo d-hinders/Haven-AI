@@ -73,20 +73,38 @@ for how the environments are wired, see
       (Railway redeploy-previous / Vercel instant rollback) and, if a migration is
       implicated, restore from the pre-deploy snapshot.
 
-## Production deploy drift (open, 2026-08-06)
+## Run the prod smoke on the right hostname
 
-Verify the frontend on `haven-ai-frontend.vercel.app` — **not** on
-`haven-ai-frontend-git-main-…vercel.app`. The latter is Vercel's branch alias for
-`main`, and it is currently misleading in two ways at once: it serves a
-different build from the production alias, and its `/api/*` proxies to the **dev**
-backend (`/api/chains` returns the dev backend's response), which means the newest
-`main` deployment was built with Preview-scope env vars. So a "prod smoke" run
-there would be testing dev.
+Vercel lists **three** hostnames under the Production environment. Two are
+production; one is a trap:
 
-Related and unresolved: `main` has not moved since **2026-06-26**, so production
-is well behind `dev`, and the production alias serves a build whose backend
-predates the `/chains` route. Before the next promotion, confirm in the Vercel
-project settings which branch is set as **Production Branch** and which
-deployment the production domain is assigned to — a promotion merge is only
-guaranteed to reach production if `main` pushes actually produce Production
-deployments.
+| Hostname | What it actually serves |
+|---|---|
+| `haven-ai-frontend.vercel.app` | Production deployment → **prod backend** ✅ |
+| `haven-ai-frontend-daniels-projects-f3327ba2.vercel.app` | Same production deployment → **prod backend** ✅ |
+| `haven-ai-frontend-git-main-…vercel.app` | **Not production** → dev backend ⚠️ |
+
+The third is the *branch alias* for `main`, and a branch alias always points at
+the newest deployment **of that branch, whatever its environment**. On
+2026-07-12 someone re-deployed `main`'s tip commit and the redeploy landed as a
+**Preview** deployment — so it was built with Preview-scope env vars (dev
+backend, `DEV` badge) and it took the alias. Verified 2026-08-06: its
+`/api/chains` returns the dev backend's response while both production
+hostnames return the prod backend's.
+
+Nothing is misconfigured — Production tracks `main`, the domain is connected to
+the Production *environment* rather than pinned to a deployment, and
+`NEXT_PUBLIC_API_URL` is scoped to both Production and Preview. It is one stray
+deployment holding a confusing name.
+
+- **Never "Promote to Production" that deployment.** It was built with Preview
+  env vars, so promoting it would point the production domain at the **dev
+  backend** and switch on the dev-only flags.
+- To clear it, delete the stray Preview deployment (Deployments → filter `main`
+  → the Jul 12 "Redeploy of…" row → ⋯ → Delete). The alias then falls back to
+  the production deployment.
+- Until then, smoke prod on `haven-ai-frontend.vercel.app` only.
+
+Separately: `main` has not moved since **2026-06-26**, so production is a long
+way behind `dev`. That is a promotion backlog, not a deploy bug — the pipeline
+below is wired correctly and will deploy whatever you merge.

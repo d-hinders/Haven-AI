@@ -72,11 +72,13 @@ deployed that way today.
   backend**: on it, dev-only features are missing and passkey onboarding dies
   with "Relayer is temporarily unfunded" (old code targets Gnosis, whose relayer
   is intentionally unfunded).
-  ⚠️ `haven-ai-frontend-git-main-…vercel.app` is **not production**. It is the
-  branch alias for `main`, and as of 2026-08-06 it serves a different build from
-  the production alias *and* proxies to the **dev** backend — see
-  [`promoting-dev-to-main.md`](promoting-dev-to-main.md) § *Production deploy
-  drift*. Use the production alias above when you mean production.
+  ⚠️ `haven-ai-frontend-git-main-…vercel.app` is **not production**, despite
+  Vercel listing it under the Production environment. It is the branch alias for
+  `main`, and a branch alias tracks the newest deployment of that branch in *any*
+  environment — a Jul 2026 redeploy landed as a Preview build, so this hostname
+  serves the dev backend. Details and cleanup:
+  [`promoting-dev-to-main.md`](promoting-dev-to-main.md) § *Run the prod smoke on
+  the right hostname*.
   ⚠️ `haven-dev.vercel.app` is a *different* app
   ("HAVEN Project" Vite SPA), not Haven's dashboard.
 - Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public).

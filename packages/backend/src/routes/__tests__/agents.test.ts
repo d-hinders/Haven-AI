@@ -509,15 +509,16 @@ describe('agent creation — passport opt-in never breaks creation', () => {
 })
 
 describe('agent payloads carry the rail (#1069/#1071 class)', () => {
-  it('every user_safes JOIN in agents.ts selects account_type — AgentPanel and EditAgentModal branch on it', async () => {
+  it('every user_safes JOIN in the agents repository selects account_type — AgentPanel and EditAgentModal branch on it', async () => {
     // Third instance of the same mine: the fix landed in GET /agents/:id, but
     // AgentPanel (dashboard/agents list) reads GET /agents, whose SELECT
     // omitted account_type — so delegation agents opened the legacy Safe
     // budget editor with a permanently dead "Update budget" button. Pin the
-    // field in EVERY user_safes join in this file, like auth.test.ts does
-    // for auth.ts.
+    // field in EVERY user_safes join in the agents SQL, like auth.test.ts
+    // does for auth.ts. (#988 moved the SQL verbatim from routes/agents.ts
+    // into infra/repositories/agents.ts; this pin follows it there.)
     const { readFileSync } = await import('node:fs')
-    const src = readFileSync(new URL('../agents.ts', import.meta.url), 'utf8')
+    const src = readFileSync(new URL('../../infra/repositories/agents.ts', import.meta.url), 'utf8')
     const selects = src.match(/SELECT[\s\S]*?JOIN user_safes[^\n]*/g) ?? []
     expect(selects.length).toBeGreaterThanOrEqual(4)
     for (const sel of selects) {

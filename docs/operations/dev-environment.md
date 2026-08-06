@@ -16,10 +16,11 @@ Haven runs a **shared dev backend stack** that mirrors production, so
 work-in-progress on the `dev` integration branch can be exercised end-to-end
 before it is promoted to `main`. The **backend, hosted MCP, demo-merchant, and
 Postgres** are one shared set of Railway services deploying from `dev`. The
-frontend has **no stable dev URL**: it is reached through **Vercel preview
-deployments**, and you test on the preview link of whichever PR you're working
-on. All of them point at the same shared dev backend, so they are the same
-environment and the same data — only the domain differs.
+frontend's **canonical dev URL is the branch-tracking Vercel preview** of the
+`dev` branch (a stable hostname that Vercel re-points at the newest `dev`
+deployment); each PR additionally gets its own per-PR preview link. All of them
+point at the same shared dev backend, so they are the same environment and the
+same data — only the domain differs, which is what makes passkeys per-domain.
 
 This doc is the authoritative reference for how the dev environment is wired and
 how to configure it. For the branch workflow that feeds it, see
@@ -44,15 +45,19 @@ deployed that way today.
 
 **URLs** (no custom domain — we test against the platform URLs):
 
-- Frontend (Vercel): **the preview link on the PR you are testing** (the PR's
-  Vercel check). There is no stable dev frontend URL, so the domain changes from
-  PR to PR — the `DEV` badge, not the hostname, is how you confirm you're on the
-  dev stack.
-  **Consequence, and it is the one that bites:** **passkeys are bound to the
-  exact domain they were created on**, so a passkey made on one preview is
-  unreachable on the next (the browser offers only the "use another device" QR).
-  Rather than making a new account per PR, enrol a wallet as a signer once and
-  sign with it on every preview:
+- Frontend (Vercel): `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
+  — the **branch-tracking preview of `dev`**: a stable hostname that Vercel
+  re-points at the newest `dev` deployment, so it is always current without ever
+  changing. Verified 2026-08-06: it serves the same build as the immutable
+  deployment of `dev` HEAD, and proxies to the dev backend. Per-PR preview links
+  exist alongside it (the PR's Vercel check) and are what you use to test *that
+  PR's build* — they are a different domain each time.
+  **The consequence that bites:** **passkeys are bound to the exact domain they
+  were created on**, so a passkey made on one PR preview is unreachable on the
+  next (the browser offers only the "use another device" QR, which is
+  domain-bound too and will not help). Keep passkey-holding accounts on the
+  branch-tracking URL above, and to test PR previews without a new account per
+  PR, enrol a wallet as a signer once and sign with it everywhere:
   [`dev-testing-with-a-wallet-signer.md`](dev-testing-with-a-wallet-signer.md).
   Domain-hopping mid-flow has burned real sessions — finish on one link before
   moving to the next.
@@ -231,9 +236,10 @@ renders nothing.
 
 - **Railway → dev backend service → Deployments** — build and runtime logs.
 - **Railway → dev Postgres → Data** — inspect tables (read-only with Viewer role).
-- **Vercel → dev project** — frontend build logs and the per-PR preview
-  deployments. Each PR's link tests that PR's build, and each is a different
-  domain, so passkeys don't carry between them (see above).
+- **Vercel → dev project** — frontend build logs, the branch-tracking `dev`
+  preview (the canonical dev URL above) and the per-PR preview deployments
+  (open a PR's own link only to test that PR's build — remember each is a
+  different domain, so passkeys don't carry between them).
   ⚠️ `haven-dev.vercel.app` is a different app, not ours.
   The backend is `https://havenbackend-dev-8b95.up.railway.app`.
 

@@ -13,11 +13,12 @@ last-verified: "2026-08-06"
 
 # Dev testing with a wallet signer
 
-**The problem this solves.** We test on **Vercel preview links**, and every PR
-gets its own. A passkey is bound to the exact domain it was created on, so a
-passkey made on one PR's preview is unreachable on the next — the browser only
-offers the "use another device" QR. Testing a handful of PRs a week that way
-means creating a handful of throwaway accounts a week.
+**The problem this solves.** We test PRs on **Vercel preview links**, and every
+PR gets its own domain. A passkey is bound to the exact domain it was created
+on, so a passkey made on one PR's preview is unreachable on the next — the
+browser only offers the "use another device" QR, which is domain-bound too and
+won't save you. Testing a handful of PRs a week that way means creating a
+handful of throwaway accounts a week.
 
 **The fix.** A delegation-rail account accepts **any** of its enrolled signers.
 Enrol a wallet (EOA) as a signer once, and from then on that same account works
@@ -36,12 +37,22 @@ Set this up once (~5 minutes) and you should not need a new dev account again.
 You need a **wallet you are happy to use for testing** — MetaMask (or any
 injected wallet), on Base Sepolia. It never holds real value; it only signs.
 
-**Which URL do I do this on?** Whichever preview link you have open. There is no
-stable dev frontend URL — every preview link is a different domain, and they all
-point at the **same** dev backend and database, so they are all the same account
-and the same data. The setup below is the one and only step that needs a
-passkey, and it needs it for about two minutes. After that you never return to
-that domain.
+**Which URL do I do this on?** Use the **stable dev URL** —
+`https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`, the
+branch-tracking preview of `dev` (see [`dev-environment.md`](dev-environment.md)).
+Vercel keeps that hostname pointed at the newest `dev` deployment, so it never
+changes, which means the passkey you create there keeps working. That is the
+only reason it matters here: it gives your account a real, reachable backup
+signer, not just a wallet.
+
+Any preview link would also work for the setup — this needs a passkey for about
+two minutes and never again — but the passkey would die with that preview
+domain, leaving your wallet as the account's only usable signer. Fine on a
+testnet account, avoidable in one click, so use the stable URL.
+
+All of these hosts — stable dev URL and every PR preview — point at the **same**
+dev backend and database, so it is the same account and the same data
+throughout. Only the domain differs, and only passkeys care about the domain.
 
 ⚠️ **Not** on `haven-ai-frontend.vercel.app` — that is the Vercel production
 alias pointing at the **production** backend. Check for the `DEV` badge in the
@@ -54,7 +65,7 @@ delegation onboarding is switched on.
 
 ## One-time setup
 
-Pick any current preview link and stay on it until step 3 is done.
+Do all three steps on the stable dev URL, in one sitting.
 
 **1. Create the account.**
 Sign up with email + password, then create your account with Face ID / Touch ID.
@@ -74,16 +85,15 @@ Backup & recovery should now list **two** ways to approve: "A connected wallet"
 (your address) and "Face ID / Touch ID". The one-way warning banner should be
 gone.
 
-Done. From here on the wallet is your signer and the preview domain is
-disposable.
+Done. From here on the wallet is your signer on every PR preview, and the
+passkey stays as a real backup on the stable dev URL.
 
-> **What happens to that first passkey?** It stays enrolled on-chain, but once
-> that preview link is gone it can no longer be used — it belongs to a domain
-> that no longer exists. In practice your wallet becomes the account's only
-> *usable* signer. That is fine on a testnet dev account, and it is the reason
-> this shortcut stays on dev: on mainnet the second signer has to be one you can
-> actually reach. Haven will also refuse to let you remove the dead passkey (it
-> won't drop an account below two signers), so just leave it there.
+> **If you did the setup on a PR preview instead**, that passkey stops working
+> when the preview goes — it belongs to a domain that no longer exists — leaving
+> the wallet as your only usable signer. On a testnet dev account that is fine,
+> but note Haven will refuse to remove the dead passkey (it won't drop an account
+> below two signers), so it just sits there. Redo the setup on the stable URL if
+> you want a backup you can actually reach.
 
 ---
 
@@ -113,6 +123,11 @@ On a preview domain you've never used before there is no local passkey, so:
 
 Connecting the wallet is the whole trick. If you ever land on that QR screen,
 that is what it's telling you — close it, connect, try again.
+
+You will also see a hint on the Backup & recovery card: *"This account's Face ID
+/ Touch ID may be on another device — your browser will guide you there when you
+approve."* On a preview that is expected and correct (your passkey **is**
+elsewhere), and you can ignore it — with the wallet connected, the wallet signs.
 
 ### Connect the *enrolled* wallet
 

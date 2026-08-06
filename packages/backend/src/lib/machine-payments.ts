@@ -1,6 +1,20 @@
 import { RelayerBudgetExceededError } from './relayer-spend-guard.js'
 import { ethers } from 'ethers'
-import pool from '../db.js'
+import {
+  confirmMachineIntent,
+  failMachineIntent,
+  findMachineIntentByKeyOrChallenge,
+  getIntentStatus,
+  insertMachineIntent,
+  recordMachineIntentSignature,
+  refreshMachineIntentNonce,
+} from '../infra/repositories/payment-intents.js'
+import {
+  findMachineApprovalByKeyOrChallenge,
+  insertMachineApproval,
+} from '../infra/repositories/approval-requests.js'
+import { getX402HourlyUsage } from '../infra/repositories/x402-authorizations.js'
+import { hasTokenAllowanceConfigured } from '../infra/repositories/agents.js'
 import { type AgentContext } from '../middleware/agentAuth.js'
 import { AgentPaymentNextAction, AgentPaymentPhase } from './agent-payment-taxonomy.js'
 import {
@@ -269,11 +283,7 @@ function machinePaymentResponse(
 }
 
 async function currentPaymentIntentStatus(id: string, agent: AgentContext): Promise<string> {
-  const current = await pool.query<{ status: string }>(
-    `SELECT status FROM payment_intents WHERE id = $1 AND agent_id = $2`,
-    [id, agent.id],
-  )
-  return current.rows[0]?.status ?? 'unknown'
+  return getIntentStatus(id, agent.id)
 }
 
 function signData(intent: PaymentIntentRow, hash = intent.sign_hash, nonce = intent.allowance_nonce) {
@@ -346,29 +356,12 @@ async function findExistingIntent(
 ): Promise<PaymentIntentRow | null> {
   if (!idempotencyKey && !challengeId) return null
 
-  const result = await pool.query<PaymentIntentRow>(
-    `SELECT *
-     FROM payment_intents
-     WHERE agent_id = $1
-       AND status NOT IN ('failed', 'expired')
-       AND COALESCE(payment_rail, source) = $4
-       AND (
-         ($2::TEXT IS NOT NULL AND (
-           machine_idempotency_key = $2
-           OR x402_idempotency_key = $2
-         ))
-         OR (
-           $3::TEXT IS NOT NULL
-           AND machine_challenge_id = $3
-           AND payment_rail = $4
-         )
-       )
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [agent.id, idempotencyKey ?? null, challengeId ?? null, rail],
+  return findMachineIntentByKeyOrChallenge(
+    agent.id,
+    idempotencyKey ?? null,
+    challengeId ?? null,
+    rail,
   )
-
-  return result.rows[0] ?? null
 }
 
 async function findExistingApproval(
@@ -379,28 +372,12 @@ async function findExistingApproval(
 ): Promise<ApprovalRequestRow | null> {
   if (!idempotencyKey && !challengeId) return null
 
-  const result = await pool.query<ApprovalRequestRow>(
-    `SELECT id, chain_id, status, token_symbol, token_address, amount_human,
-            amount_raw, expires_at, tx_hash, machine_challenge_id, payment_rail,
-            payment_resource_url, merchant_address, machine_idempotency_key,
-            machine_metadata
-     FROM approval_requests
-     WHERE agent_id = $1
-       AND status <> 'expired'
-       AND (
-         ($2::TEXT IS NOT NULL AND machine_idempotency_key = $2)
-         OR (
-           $3::TEXT IS NOT NULL
-           AND machine_challenge_id = $3
-           AND payment_rail = $4
-         )
-       )
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [agent.id, idempotencyKey ?? null, challengeId ?? null, rail],
+  return findMachineApprovalByKeyOrChallenge(
+    agent.id,
+    idempotencyKey ?? null,
+    challengeId ?? null,
+    rail,
   )
-
-  return result.rows[0] ?? null
 }
 
 async function returnExistingIntent(
@@ -440,20 +417,14 @@ async function returnExistingIntent(
         refreshedAllowance.nonce,
       )
 
-      const refreshedResult = await pool.query<{ id: string }>(
-        `UPDATE payment_intents
-         SET allowance_nonce = $1,
-             sign_hash = $2,
-             expires_at = NOW() + interval '10 minutes'
-         WHERE id = $3
-           AND agent_id = $4
-           AND COALESCE(payment_rail, source) = $5
-           AND status = 'pending_signature'
-           AND tx_hash IS NULL
-         RETURNING id`,
-        [existingNonce, existingHash, existing.id, agent.id, rail],
-      )
-      if (refreshedResult.rows.length === 0) {
+      const refreshed = await refreshMachineIntentNonce({
+        allowanceNonce: existingNonce,
+        signHash: existingHash,
+        intentId: existing.id,
+        agentId: agent.id,
+        rail,
+      })
+      if (!refreshed) {
         const status = await currentPaymentIntentStatus(existing.id, agent)
         return {
           statusCode: 409,
@@ -520,38 +491,7 @@ export interface CreateMachineApprovalInput {
 export async function createMachineApproval(
   input: CreateMachineApprovalInput,
 ): Promise<ApprovalRequestRow | null> {
-  const {
-    agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
-    reason, resourceUrl, merchantAddress, challengeId, idempotencyKey, metadata,
-  } = input
-
-  const result = await pool.query<ApprovalRequestRow>(
-    `INSERT INTO approval_requests (
-      agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-      to_address, amount_raw, amount_human, reason, source, x402_resource_url,
-      payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
-      machine_idempotency_key, machine_metadata, status, expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-      $13, $14, $15, $16, $17, $18, 'pending', NOW() + interval '24 hours')
-    ON CONFLICT (agent_id, machine_idempotency_key)
-      WHERE machine_idempotency_key IS NOT NULL
-        AND status NOT IN ('expired')
-    DO NOTHING
-    RETURNING id, chain_id, status, token_symbol, token_address, amount_human,
-              amount_raw, expires_at, tx_hash, machine_challenge_id, payment_rail,
-              payment_resource_url, merchant_address, machine_idempotency_key,
-              machine_metadata`,
-    [
-      agent.id, agent.user_id, agent.safe_address, agent.chain_id,
-      tokenSymbol, tokenAddress, payTo.toLowerCase(),
-      amountRaw.toString(), amountHuman, reason, rail,
-      rail === 'x402' ? resourceUrl : null,
-      rail, resourceUrl, merchantAddress?.toLowerCase() ?? null, challengeId ?? null,
-      idempotencyKey ?? null, metadata != null ? JSON.stringify(metadata) : null,
-    ],
-  )
-
-  return result.rows[0] ?? null
+  return insertMachineApproval(input)
 }
 
 export interface CreatePaymentIntentInput {
@@ -610,53 +550,7 @@ export interface CreatePaymentIntentInput {
 export async function createPaymentIntent(
   input: CreatePaymentIntentInput,
 ): Promise<PaymentIntentRow | null> {
-  const {
-    agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
-    allowanceNonce, signHash, resourceUrl, category, merchantAddress,
-    challengeId, idempotencyKey, metadata,
-    executionRail, sessionPermissionId, sessionUserOp,
-    delegationHash, budgetDelegationHash, preparedUserOp, conflictTarget,
-  } = input
-
-  // conflictTarget is a strict union mapped through an allowlist — never raw
-  // input — so interpolating it into the ON CONFLICT clause is injection-safe.
-  const conflictColumn =
-    conflictTarget === 'x402_idempotency_key' ? 'x402_idempotency_key' : 'machine_idempotency_key'
-
-  const result = await pool.query<PaymentIntentRow>(
-    `INSERT INTO payment_intents (
-      agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-      to_address, amount_raw, amount_human, delegate_address,
-      allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
-      x402_merchant_address, x402_idempotency_key,
-      payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
-      machine_idempotency_key, machine_metadata,
-      execution_rail, session_permission_id, session_user_op,
-      delegation_hash, budget_delegation_hash, prepared_user_op, expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-      'pending_signature', $13, $14, $15, $16, $17,
-      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NOW() + interval '10 minutes')
-    ON CONFLICT (agent_id, ${conflictColumn})
-      WHERE ${conflictColumn} IS NOT NULL
-        AND status NOT IN ('failed', 'expired')
-    DO NOTHING
-    RETURNING *`,
-    [
-      agent.id, agent.user_id, agent.safe_address, agent.chain_id,
-      tokenSymbol, tokenAddress, payTo.toLowerCase(),
-      amountRaw.toString(), amountHuman, agent.delegate_address,
-      allowanceNonce, signHash,
-      rail, rail === 'x402' ? resourceUrl : null, category ?? null,
-      rail === 'x402' ? merchantAddress?.toLowerCase() ?? null : null,
-      rail === 'x402' ? idempotencyKey ?? null : null,
-      rail, resourceUrl, merchantAddress?.toLowerCase() ?? null, challengeId ?? null,
-      idempotencyKey ?? null, metadata != null ? JSON.stringify(metadata) : null,
-      executionRail ?? null, sessionPermissionId ?? null, sessionUserOp ?? null,
-      delegationHash ?? null, budgetDelegationHash ?? null, preparedUserOp ?? null,
-    ],
-  )
-
-  return result.rows[0] ?? null
+  return insertMachineIntent(input)
 }
 
 export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInput) {
@@ -751,12 +645,8 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     return pendingApprovalResponse(existingApproval, null, rail)
   }
 
-  const dbAllowance = await pool.query<{ allowance_amount: string }>(
-    `SELECT allowance_amount FROM agent_allowances
-     WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
-    [agent.id, tokenAddress],
-  )
-  if (dbAllowance.rows.length === 0) {
+  const allowanceConfigured = await hasTokenAllowanceConfigured(agent.id, tokenAddress)
+  if (!allowanceConfigured) {
     return {
       statusCode: 403,
       body: { error: `Agent is not configured for ${tokenConfig.symbol} payments` },
@@ -764,19 +654,8 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
   }
 
   if (enforceX402RateLimit) {
-    const agentConfig = await pool.query(
-      `SELECT max_x402_per_hour FROM agents WHERE id = $1`,
-      [agent.id],
-    )
-    // 100 = default max x402 calls per hour (rate limit), NOT chain 100.
-    const maxPerHour = agentConfig.rows[0]?.max_x402_per_hour ?? 100
-
-    const recentCount = await pool.query(
-      `SELECT COUNT(*) as cnt FROM payment_intents
-       WHERE agent_id = $1 AND source = 'x402' AND created_at > NOW() - interval '1 hour'`,
-      [agent.id],
-    )
-    if (Number(recentCount.rows[0].cnt) >= maxPerHour) {
+    const { maxPerHour, recentCount } = await getX402HourlyUsage(agent.id)
+    if (recentCount >= maxPerHour) {
       return {
         statusCode: 429,
         body: {
@@ -975,18 +854,8 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     }
   }
 
-  const signatureResult = await pool.query<{ id: string }>(
-    `UPDATE payment_intents
-     SET signature = $1, signed_at = NOW()
-     WHERE id = $2
-       AND agent_id = $3
-       AND payment_rail = $4
-       AND status = 'pending_signature'
-       AND tx_hash IS NULL
-     RETURNING id`,
-    [signature, intent.id, agent.id, rail],
-  )
-  if (signatureResult.rows.length === 0) {
+  const signatureRecorded = await recordMachineIntentSignature(signature, intent.id, agent.id, rail)
+  if (!signatureRecorded) {
     const status = await currentPaymentIntentStatus(intent.id, agent)
     return {
       statusCode: 409,
@@ -1017,24 +886,16 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       amountHuman,
     )
 
-    const confirmedResult = await pool.query<{ id: string }>(
-      `UPDATE payment_intents
-       SET status = 'confirmed',
-           tx_hash = $1,
-           submitted_at = NOW(),
-           confirmed_at = NOW(),
-           usd_value = $3,
-           eur_value = $4
-       WHERE id = $2
-         AND agent_id = $5
-         AND payment_rail = $6
-         AND status = 'pending_signature'
-         AND tx_hash IS NULL
-       RETURNING id`,
-      [txHash, intent.id, fiatValues.usd, fiatValues.eur, agent.id, rail],
-    )
+    const confirmed = await confirmMachineIntent({
+      txHash,
+      intentId: intent.id,
+      usdValue: fiatValues.usd,
+      eurValue: fiatValues.eur,
+      agentId: agent.id,
+      rail,
+    })
 
-    if (confirmedResult.rows.length === 0) {
+    if (!confirmed) {
       const status = await currentPaymentIntentStatus(intent.id, agent)
       return {
         statusCode: 409,
@@ -1071,16 +932,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       }
     }
     const errorMsg = err instanceof Error ? err.message : String(err)
-    await pool.query(
-      `UPDATE payment_intents
-       SET status = 'failed', error_message = $1
-       WHERE id = $2
-         AND agent_id = $3
-         AND payment_rail = $4
-         AND status = 'pending_signature'
-         AND tx_hash IS NULL`,
-      [errorMsg, intent.id, agent.id, rail],
-    )
+    await failMachineIntent(errorMsg, intent.id, agent.id, rail)
     return {
       statusCode: 502,
       body: {

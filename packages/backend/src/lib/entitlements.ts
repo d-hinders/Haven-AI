@@ -1,4 +1,8 @@
-import pool from '../db.js'
+import {
+  grantEntitlementRow,
+  hasEntitlementRow,
+  revokeEntitlementRow,
+} from '../infra/repositories/account-entitlements.js'
 import { config } from '../config.js'
 
 /**
@@ -27,33 +31,17 @@ export const REPORTING_FEED = 'reporting_feed'
 
 /** True when the user holds the entitlement and it has not been revoked. */
 export async function hasEntitlement(userId: string, entitlement: string): Promise<boolean> {
-  const result = await pool.query(
-    `SELECT 1 FROM account_entitlements
-     WHERE user_id = $1 AND entitlement = $2 AND revoked_at IS NULL
-     LIMIT 1`,
-    [userId, entitlement],
-  )
-  return result.rows.length > 0
+  return hasEntitlementRow(userId, entitlement)
 }
 
 /** Grant an entitlement. Idempotent — re-granting clears any prior revocation. */
 export async function grantEntitlement(userId: string, entitlement: string): Promise<void> {
-  await pool.query(
-    `INSERT INTO account_entitlements (user_id, entitlement, granted_at, revoked_at)
-     VALUES ($1, $2, NOW(), NULL)
-     ON CONFLICT (user_id, entitlement)
-     DO UPDATE SET granted_at = NOW(), revoked_at = NULL`,
-    [userId, entitlement],
-  )
+  await grantEntitlementRow(userId, entitlement)
 }
 
 /** Revoke an entitlement. Idempotent — a no-op if not granted. */
 export async function revokeEntitlement(userId: string, entitlement: string): Promise<void> {
-  await pool.query(
-    `UPDATE account_entitlements SET revoked_at = NOW()
-     WHERE user_id = $1 AND entitlement = $2 AND revoked_at IS NULL`,
-    [userId, entitlement],
-  )
+  await revokeEntitlementRow(userId, entitlement)
 }
 
 /**

@@ -208,8 +208,8 @@ export async function confirmX402Intent(
   input: {
     txHash: string
     intentId: string
-    usdValue: string | null
-    eurValue: string | null
+    usdValue: number | string | null
+    eurValue: number | string | null
     agentId: string
   },
   db: Executor = pool,

@@ -1,4 +1,13 @@
-import pool from '../db.js'
+import {
+  attachEvidenceProof,
+  findApprovalForEvidenceScoped,
+  findIntentEvidenceSource,
+  findIntentForEvidenceScoped,
+  insertResidueEvent,
+  resolveReconciliationForPayment,
+  upsertEvidenceBase,
+} from '../infra/repositories/machine-payments.js'
+import { findAgentDelegateAddress } from '../infra/repositories/agents.js'
 import { getBookTimeSekValue } from './fiat-values.js'
 import { getTokenBalance } from './allowance-module.js'
 import { quoteFee, recordSettledFee } from './fee/fee-module.js'
@@ -110,7 +119,7 @@ interface EvidenceLogger {
   warn: (payload: Record<string, unknown>, message: string) => void
 }
 
-export function isProtocolPaymentRail(rail: string | null | undefined): boolean {
+export function isProtocolPaymentRail(rail: string | null | undefined): rail is string {
   return Boolean(rail && PROTOCOL_RAILS.has(rail))
 }
 
@@ -179,83 +188,44 @@ export async function recordMachinePaymentEvidenceBase(
   const resourceUrl = resourceUrlForPayment(intent)
   if (!resourceUrl) return
   const referenceColumn = referenceColumnForPayment(intent)
-  const conflictClause = referenceColumn === 'payment_intent_id'
-    ? 'ON CONFLICT (payment_intent_id)'
-    : 'ON CONFLICT (approval_request_id) WHERE approval_request_id IS NOT NULL'
   const paymentIntentId = referenceColumn === 'payment_intent_id' ? intent.id : null
   const approvalRequestId = referenceColumn === 'approval_request_id' ? intent.id : null
 
   // Book-time FX (migration 026): captured here, at settlement, and never
-  // overwritten (the COALESCE below). A pricing outage yields null, which is
-  // backfillable — it must not block settlement.
+  // overwritten (the COALESCE in the repository's upsert). A pricing outage
+  // yields null, which is backfillable — it must not block settlement.
   const sek = await getBookTimeSekValue(intent.token_symbol, intent.amount_human)
   const amountSek = sek ? sek.amountSek : null
   const fxRateSek = sek ? sek.fxRate : null
   const fxSource = sek ? sek.fxSource : null
   const fxAt = sek ? new Date().toISOString() : null
 
-  await pool.query(
-    `INSERT INTO machine_payment_evidence (
-      payment_intent_id, approval_request_id, agent_id, user_id, rail, proof_status, tx_hash,
-      chain_id, resource_url, merchant_address, payer_address, settlement_address,
-      token_symbol, token_address, amount_raw, amount_human, challenge_id,
-      idempotency_key, challenge_payload, confirmed_at,
-      amount_sek, fx_rate_sek, fx_source, fx_at
-    ) VALUES (
-      $1, $2, $3, $4, $5, 'payment_confirmed', LOWER($6::TEXT),
-      $7, $8, LOWER($9::TEXT), LOWER($10::TEXT), LOWER($11::TEXT),
-      $12, LOWER($13::TEXT), $14, $15, $16,
-      $17, $18, $19,
-      $20, $21, $22, $23
-    )
-    ${conflictClause}
-    DO UPDATE SET
-      rail = EXCLUDED.rail,
-      tx_hash = EXCLUDED.tx_hash,
-      chain_id = EXCLUDED.chain_id,
-      resource_url = EXCLUDED.resource_url,
-      merchant_address = EXCLUDED.merchant_address,
-      payer_address = EXCLUDED.payer_address,
-      settlement_address = EXCLUDED.settlement_address,
-      token_symbol = EXCLUDED.token_symbol,
-      token_address = EXCLUDED.token_address,
-      amount_raw = EXCLUDED.amount_raw,
-      amount_human = EXCLUDED.amount_human,
-      challenge_id = EXCLUDED.challenge_id,
-      idempotency_key = EXCLUDED.idempotency_key,
-      challenge_payload = COALESCE(machine_payment_evidence.challenge_payload, EXCLUDED.challenge_payload),
-      confirmed_at = EXCLUDED.confirmed_at,
-      amount_sek = COALESCE(machine_payment_evidence.amount_sek, EXCLUDED.amount_sek),
-      fx_rate_sek = COALESCE(machine_payment_evidence.fx_rate_sek, EXCLUDED.fx_rate_sek),
-      fx_source = COALESCE(machine_payment_evidence.fx_source, EXCLUDED.fx_source),
-      fx_at = COALESCE(machine_payment_evidence.fx_at, EXCLUDED.fx_at),
-      updated_at = NOW()`,
-    [
-      paymentIntentId,
-      approvalRequestId,
-      intent.agent_id,
-      intent.user_id,
-      rail,
-      intent.tx_hash,
-      intent.chain_id,
-      resourceUrl,
-      merchantAddressForPayment(intent),
-      intent.safe_address,
-      intent.to_address,
-      intent.token_symbol,
-      intent.token_address,
-      intent.amount_raw,
-      intent.amount_human,
-      intent.machine_challenge_id ?? null,
-      idempotencyKeyForPayment(intent),
-      normalizeJson(intent.machine_metadata),
-      intent.confirmed_at ?? null,
-      amountSek,
-      fxRateSek,
-      fxSource,
-      fxAt,
-    ],
-  )
+  await upsertEvidenceBase({
+    referenceColumn,
+    paymentIntentId,
+    approvalRequestId,
+    agentId: intent.agent_id,
+    userId: intent.user_id,
+    rail,
+    txHash: intent.tx_hash,
+    chainId: intent.chain_id,
+    resourceUrl,
+    merchantAddress: merchantAddressForPayment(intent),
+    payerAddress: intent.safe_address,
+    settlementAddress: intent.to_address,
+    tokenSymbol: intent.token_symbol,
+    tokenAddress: intent.token_address,
+    amountRaw: intent.amount_raw,
+    amountHuman: intent.amount_human,
+    challengeId: intent.machine_challenge_id ?? null,
+    idempotencyKey: idempotencyKeyForPayment(intent),
+    challengePayload: normalizeJson(intent.machine_metadata),
+    confirmedAt: intent.confirmed_at ?? null,
+    amountSek,
+    fxRateSek,
+    fxSource,
+    fxAt,
+  })
 
   // Record the (currently zero) platform fee for this payment so the fee ledger
   // and the bookkeeping export have a complete, reconcilable history (#386
@@ -286,22 +256,7 @@ export async function recordMachinePaymentEvidenceBaseById(
   paymentIntentId: string,
   agentId?: string,
 ): Promise<void> {
-  const result = await pool.query<MachinePaymentEvidenceSource>(
-    `SELECT 'payment_intent'::TEXT AS kind,
-            id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-            to_address, amount_raw, amount_human, tx_hash, status, source,
-            x402_resource_url, x402_merchant_address, x402_idempotency_key,
-            payment_rail, payment_resource_url, merchant_address,
-            machine_challenge_id, machine_idempotency_key, machine_metadata,
-            confirmed_at
-     FROM payment_intents
-     WHERE id = $1
-       AND ($2::UUID IS NULL OR agent_id = $2)
-     LIMIT 1`,
-    [paymentIntentId, agentId ?? null],
-  )
-
-  const intent = result.rows[0]
+  const intent = await findIntentEvidenceSource(paymentIntentId, agentId ?? null)
   if (intent) await recordMachinePaymentEvidenceBase(intent)
 }
 
@@ -332,38 +287,11 @@ async function findProtocolPaymentForEvidence(
   agentId: string,
   paymentId: string,
 ): Promise<ProtocolPaymentEvidenceRow | null> {
-  const paymentResult = await pool.query<PaymentIntentEvidenceRow>(
-    `SELECT 'payment_intent'::TEXT AS kind,
-            id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-            to_address, amount_raw, amount_human, tx_hash, status, source,
-            x402_resource_url, x402_merchant_address, x402_idempotency_key,
-            payment_rail, payment_resource_url, merchant_address,
-            machine_challenge_id, machine_idempotency_key, machine_metadata,
-            confirmed_at
-     FROM payment_intents
-     WHERE id = $1 AND agent_id = $2
-     LIMIT 1`,
-    [paymentId, agentId],
-  )
+  const payment = await findIntentForEvidenceScoped(paymentId, agentId)
+  if (payment) return payment as PaymentIntentEvidenceRow
 
-  const payment = paymentResult.rows[0]
-  if (payment) return payment
-
-  const approvalResult = await pool.query<ApprovalRequestEvidenceRow>(
-    `SELECT 'approval_request'::TEXT AS kind,
-            id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-            to_address, amount_raw, amount_human, tx_hash, status, source,
-            x402_resource_url, NULL::TEXT AS x402_merchant_address, NULL::TEXT AS x402_idempotency_key,
-            payment_rail, payment_resource_url, merchant_address,
-            machine_challenge_id, machine_idempotency_key, machine_metadata,
-            executed_at AS confirmed_at
-     FROM approval_requests
-     WHERE id = $1 AND agent_id = $2
-     LIMIT 1`,
-    [paymentId, agentId],
-  )
-
-  return approvalResult.rows[0] ?? null
+  const approval = await findApprovalForEvidenceScoped(paymentId, agentId)
+  return (approval as ApprovalRequestEvidenceRow | null) ?? null
 }
 
 export async function attachMachinePaymentEvidence(
@@ -408,52 +336,23 @@ export async function attachMachinePaymentEvidence(
 
   const proofStatus = proofStatusForAttach(input)
   const referenceColumn = referenceColumnForPayment(payment)
-  const result = await pool.query<MachinePaymentEvidenceRow>(
-    `UPDATE machine_payment_evidence
-     SET proof_status = CASE
-           WHEN $3 = 'protocol_receipt_attached' THEN $3
-           WHEN proof_status = 'protocol_receipt_attached' THEN proof_status
-           ELSE $3
-         END,
-         challenge_payload = COALESCE($4::JSONB, challenge_payload),
-         selected_payment = COALESCE($5::JSONB, selected_payment),
-         payment_proof_header_name = COALESCE($6, payment_proof_header_name),
-         payment_proof_header = COALESCE($7, payment_proof_header),
-         protocol_receipt_header_name = COALESCE($8, protocol_receipt_header_name),
-         protocol_receipt_header = COALESCE($9, protocol_receipt_header),
-         protocol_receipt_payload = COALESCE($10::JSONB, protocol_receipt_payload),
-         merchant_status = COALESCE($11, merchant_status),
-         updated_at = NOW()
-     WHERE ${referenceColumn} = $1
-       AND agent_id = $2
-     RETURNING *`,
-    [
-      payment.id,
-      input.agentId,
-      proofStatus,
-      normalizeJson(input.challengePayload),
-      normalizeJson(input.selectedPayment),
-      cleanHeaderName(input.paymentProofHeaderName),
-      cleanHeaderValue(input.paymentProofHeader),
-      cleanHeaderName(input.protocolReceiptHeaderName),
-      cleanHeaderValue(input.protocolReceiptHeader),
-      normalizeJson(input.protocolReceiptPayload),
-      input.merchantStatus ?? null,
-    ],
-  )
+  const evidence = await attachEvidenceProof<MachinePaymentEvidenceRow>({
+    referenceColumn,
+    paymentId: payment.id,
+    agentId: input.agentId,
+    proofStatus,
+    challengePayload: normalizeJson(input.challengePayload),
+    selectedPayment: normalizeJson(input.selectedPayment),
+    paymentProofHeaderName: cleanHeaderName(input.paymentProofHeaderName),
+    paymentProofHeader: cleanHeaderValue(input.paymentProofHeader),
+    protocolReceiptHeaderName: cleanHeaderName(input.protocolReceiptHeaderName),
+    protocolReceiptHeader: cleanHeaderValue(input.protocolReceiptHeader),
+    protocolReceiptPayload: normalizeJson(input.protocolReceiptPayload),
+    merchantStatus: input.merchantStatus ?? null,
+  })
 
-  const evidence = result.rows[0] ?? null
   if (evidence) {
-    await pool.query(
-      `UPDATE machine_payment_reconciliation_events
-       SET status = 'resolved',
-           updated_at = NOW()
-       WHERE ${referenceColumn} = $1
-         AND agent_id = $2
-         AND status = 'open'
-         AND event_type = 'merchant_retry_rejected_after_payment'`,
-      [payment.id, input.agentId],
-    )
+    await resolveReconciliationForPayment(referenceColumn, payment.id, input.agentId)
 
     // Post-settlement delegate reconciliation (#716, epic #713): a settle
     // proof just arrived, so for standard x402 (funding went to the agent's
@@ -490,38 +389,26 @@ export async function reconcileDelegateResidueAfterSettlement(
   payment: MachinePaymentEvidenceSource,
   agentId: string,
 ): Promise<void> {
-  const agentResult = await pool.query<{ delegate_address: string | null }>(
-    `SELECT delegate_address FROM agents WHERE id = $1`,
-    [agentId],
-  )
-  const delegate = agentResult.rows[0]?.delegate_address
+  const delegate = await findAgentDelegateAddress(agentId)
   if (!delegate || delegate.toLowerCase() !== payment.to_address.toLowerCase()) return
 
   const balance = await getTokenBalance(payment.chain_id, delegate, payment.token_address)
   if (balance < BigInt(payment.amount_raw)) return
 
-  await pool.query(
-    `INSERT INTO machine_payment_reconciliation_events (
-      agent_id, user_id, payment_intent_id, rail, event_type, tx_hash,
-      resource_url, merchant_address, reason, details
-    ) VALUES ($1, $2, $3, $4, 'delegate_residue_after_settlement', $5, $6, $7, $8, $9)
-    ON CONFLICT (payment_intent_id, event_type)
-      WHERE payment_intent_id IS NOT NULL
-    DO UPDATE SET details = EXCLUDED.details, updated_at = NOW()`,
-    [
-      agentId,
-      payment.user_id,
-      payment.id,
-      payment.payment_rail ?? payment.source ?? 'x402',
-      payment.tx_hash,
-      resourceUrlForPayment(payment),
-      payment.merchant_address ?? payment.x402_merchant_address ?? null,
+  await insertResidueEvent({
+    agentId,
+    userId: payment.user_id,
+    paymentIntentId: payment.id,
+    rail: payment.payment_rail ?? payment.source ?? 'x402',
+    txHash: payment.tx_hash,
+    resourceUrl: resourceUrlForPayment(payment),
+    merchantAddress: payment.merchant_address ?? payment.x402_merchant_address ?? null,
+    reason:
       'Delegate still holds at least the funded amount after the settle proof — funding may not have settled',
-      JSON.stringify({
-        observed_balance_atomic: balance.toString(),
-        payment_amount_raw: payment.amount_raw,
-        delegate_address: delegate,
-      }),
-    ],
-  )
+    details: JSON.stringify({
+      observed_balance_atomic: balance.toString(),
+      payment_amount_raw: payment.amount_raw,
+      delegate_address: delegate,
+    }),
+  })
 }

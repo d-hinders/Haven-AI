@@ -24,7 +24,7 @@
  */
 
 import pool from '../../db.js'
-import { type Executor } from '../transaction.js'
+import { type Executor, type QueryRow } from '../transaction.js'
 
 export type { Executor }
 
@@ -289,7 +289,7 @@ export interface AttachEvidenceParams {
   merchantStatus: number | null
 }
 
-export async function attachEvidenceProof<R extends Record<string, unknown>>(
+export async function attachEvidenceProof<R extends QueryRow>(
   input: AttachEvidenceParams,
   db: Executor = pool,
 ): Promise<R | null> {
@@ -323,7 +323,7 @@ export const LIST_EVIDENCE_RECEIPTS_SQL = `SELECT e.*, pi.machine_metadata->>'se
        ORDER BY e.created_at DESC
        LIMIT $2`
 
-export async function listEvidenceReceiptsForAgent<R extends Record<string, unknown>>(
+export async function listEvidenceReceiptsForAgent<R extends QueryRow>(
   agentId: string,
   limit: number,
   db: Executor = pool,

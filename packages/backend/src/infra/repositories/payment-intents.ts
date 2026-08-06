@@ -557,8 +557,8 @@ export async function confirmSubmittedIntent(
   input: {
     txHash: string
     intentId: string
-    usdValue: string | null
-    eurValue: string | null
+    usdValue: number | string | null
+    eurValue: number | string | null
     agentId: string
   },
   db: Executor = pool,
@@ -680,8 +680,8 @@ export async function confirmMachineIntent(
   input: {
     txHash: string
     intentId: string
-    usdValue: string | null
-    eurValue: string | null
+    usdValue: number | string | null
+    eurValue: number | string | null
     agentId: string
     rail: string
   },

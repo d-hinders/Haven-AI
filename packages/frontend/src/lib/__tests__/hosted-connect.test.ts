@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildAgentStarterPrompt,
   buildDeepLink,
@@ -33,13 +33,54 @@ function credential() {
 }
 
 describe('resolveHostedMcpUrl', () => {
+  // #1129: the production default may be served ONLY by the production build.
+  // Everything env-shaped is stubbed per test and unstubbed after, so no case
+  // leaks into another.
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  const PROD_API_URL = 'https://havenbackend-production-8a00.up.railway.app'
+  const PROD_DEFAULT = 'https://haven-ai-production-5953.up.railway.app/v1'
+
   it('honours an explicit override', () => {
     expect(resolveHostedMcpUrl('https://override.test/v2/')).toBe('https://override.test/v2')
   })
 
-  it('falls back to the production default when no override is given', () => {
-    // Don't poke process.env (mutating it leaks across tests); pass undefined.
-    expect(resolveHostedMcpUrl(undefined as unknown as string)).toMatch(/^https:\/\/.+/)
+  it('honours NEXT_PUBLIC_HAVEN_MCP_URL in any environment — explicit config always wins', () => {
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', 'dev')
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_MCP_URL', 'https://dev-mcp.example.test/v1/')
+    expect(resolveHostedMcpUrl()).toBe('https://dev-mcp.example.test/v1')
+  })
+
+  it('serves the production default only for the production build (env unset + prod API URL)', () => {
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_MCP_URL', '')
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
+    vi.stubEnv('NEXT_PUBLIC_API_URL', PROD_API_URL)
+    expect(resolveHostedMcpUrl()).toBe(PROD_DEFAULT)
+  })
+
+  it('returns null in a build flagged non-production via NEXT_PUBLIC_HAVEN_ENV — never the prod default', () => {
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_MCP_URL', '')
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', 'dev')
+    // Even when the API URL LOOKS like prod, the DEV badge flag wins: this is
+    // a preview build re-pointed at prod, not the production deploy.
+    vi.stubEnv('NEXT_PUBLIC_API_URL', PROD_API_URL)
+    expect(resolveHostedMcpUrl()).toBeNull()
+  })
+
+  it('returns null for a local build (env unset + localhost API URL)', () => {
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_MCP_URL', '')
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
+    vi.stubEnv('NEXT_PUBLIC_API_URL', 'http://localhost:3001')
+    expect(resolveHostedMcpUrl()).toBeNull()
+  })
+
+  it('returns null when nothing identifies the build as production (all vars unset)', () => {
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_MCP_URL', '')
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
+    vi.stubEnv('NEXT_PUBLIC_API_URL', '')
+    expect(resolveHostedMcpUrl()).toBeNull()
   })
 })
 

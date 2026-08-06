@@ -20,24 +20,12 @@
  *   properties, not style".
  */
 
-import type { QueryResult, QueryResultRow } from 'pg'
 import pool from '../../db.js'
 
-/**
- * Anything that can run a query: the app's `db.ts` default export, a raw
- * `pg.Pool`, or a `PoolClient` inside a transaction.
- *
- * Structural rather than `Pool | PoolClient` because `db.ts` exports a thin
- * wrapper, not a `pg.Pool`. Typing the capability instead of the concrete class
- * is also what lets a caller pass a transaction client — the point of taking an
- * explicit executor in the first place.
- */
-export interface Executor {
-  query<R extends QueryResultRow = QueryResultRow>(
-    sql: string,
-    values?: unknown[],
-  ): Promise<QueryResult<R>>
-}
+// Shared primitives promoted to ../db.ts by #985 — re-exported so existing
+// importers of this module's Executor keep working.
+export type { Executor } from '../db.js'
+import { withTransaction, type Executor } from '../db.js'
 
 export type PassportStatus = 'pending' | 'anchored' | 'failed'
 
@@ -128,25 +116,6 @@ export async function findAgentFacts(
  * per statement. A caller that already holds a transaction client passes it
  * straight through and `fn` runs inline on it.
  */
-async function withTransaction<T>(
-  db: Executor,
-  fn: (tx: Executor) => Promise<T>,
-): Promise<T> {
-  const connectable = db as Executor & { connect?: () => Promise<{ query: Executor['query']; release: () => void }> }
-  if (typeof connectable.connect !== 'function') return fn(db)
-  const client = await connectable.connect()
-  try {
-    await client.query('BEGIN')
-    const result = await fn(client)
-    await client.query('COMMIT')
-    return result
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {})
-    throw err
-  } finally {
-    client.release()
-  }
-}
 
 export type ClaimOutcome = 'claimed' | 'not_claimed' | 'eoa_already_bound'
 

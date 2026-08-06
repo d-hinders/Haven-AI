@@ -560,10 +560,17 @@ export interface HavenAllowanceSummary {
 
 /**
  * Affirmative spend-readiness for the authenticated agent, derived from the raw
- * agent status plus the on-chain remaining allowance:
- * - `ready`         — active and at least one token has remaining on-chain allowance.
- * - `needs_approval`— active but no remaining allowance to auto-spend; payments
- *                     will be queued for the wallet owner to approve in Haven.
+ * agent status plus the remaining spend authority the backend reports per rail
+ * (the on-chain AllowanceModule on the legacy rail; the active budget
+ * delegation on the delegation rail — #1135):
+ * - `ready`         — active and at least one token has remaining spend authority.
+ * - `needs_approval`— active but no remaining spend authority to auto-spend.
+ *                     The over-budget outcome differs by rail: on the legacy
+ *                     AllowanceModule rail the payment is queued for the wallet
+ *                     owner to approve in Haven; on the delegation rail there is
+ *                     NO approval queue — an over-budget redemption reverts
+ *                     on-chain, so the owner must grant or raise the budget in
+ *                     Haven before the agent can pay.
  * - `revoked`       — the agent's status is not `active`; nothing auto-executes.
  *
  * Note: a hard-paused/disabled credential is rejected by the API before this

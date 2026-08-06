@@ -26,3 +26,15 @@ export async function up(client: PoolClient): Promise<void> {
       ADD COLUMN IF NOT EXISTS prepared_user_op JSONB;
   `)
 }
+
+/**
+ * Best-effort structural reverse (#1139) — mirrors what up() created. The
+ * runner never calls down(); this exists for operator rollback tooling only.
+ */
+export async function down(client: PoolClient): Promise<void> {
+  await client.query(`
+    ALTER TABLE payment_intents
+      DROP COLUMN IF EXISTS prepared_user_op,
+      DROP COLUMN IF EXISTS delegation_hash
+  `)
+}

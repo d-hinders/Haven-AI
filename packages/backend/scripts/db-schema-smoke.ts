@@ -34,6 +34,31 @@ import {
   LIST_REVOCATIONS_DUE_SQL,
   LIST_STUCK_REVOCATIONS_SQL,
 } from '../src/infra/repositories/agent-passports.js'
+import {
+  ACTIVATE_PENDING_AGENT_SQL,
+  CANCEL_SETUP_SQL,
+  COPY_SETUP_ALLOWANCES_TO_AGENT_SQL,
+  FIND_AGENT_STATUS_SQL,
+  FIND_DEFAULT_USER_SAFE_SQL,
+  FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
+  FIND_SETUP_BY_AGENT_API_KEY_SQL,
+  FIND_SETUP_BY_ID_AND_TOKEN_HASH_SQL,
+  FIND_SETUP_BY_TOKEN_HASH_SQL,
+  FIND_SETUP_FOR_USER_SQL,
+  FIND_USER_SAFE_BY_ID_SQL,
+  INSERT_AGENT_FROM_SETUP_SQL,
+  INSERT_SETUP_ALLOWANCE_SQL,
+  INSERT_SETUP_SQL,
+  LIST_ACTIVE_DELEGATION_BUDGETS_SQL,
+  LIST_SETUP_ALLOWANCES_SQL,
+  LOCK_SETUP_BY_TOKEN_HASH_SQL,
+  LOCK_SETUP_FOR_USER_SQL,
+  MARK_SETUP_REGISTERED_SQL,
+  MERGE_INSTALL_STATUS_SQL,
+  REVOKE_PENDING_AGENT_SQL,
+  UPDATE_CONNECTOR_METADATA_SQL,
+  UPDATE_WALLET_APPROVAL_STATE_SQL,
+} from '../src/infra/repositories/agent-connection-setups.js'
 
 interface SmokeQuery {
   name: string
@@ -227,6 +252,103 @@ const QUERIES: SmokeQuery[] = [
              AND status <> 'anchored'
              AND (anchoring_started_at IS NULL
                   OR anchoring_started_at < NOW() - MAKE_INTERVAL(secs => $2))`,
+  },
+  // ── Connect Agent 2 setup flow (#985) — every repository query, IMPORTED ──
+  //
+  // Setup and credential issuance are authorization-adjacent: a schema drift
+  // here silently breaks agent onboarding or, worse, the approval state
+  // machine that decides when an agent may spend.
+  {
+    name: 'connect-setup: Haven wallet by id, owner-scoped',
+    sql: FIND_USER_SAFE_BY_ID_SQL,
+  },
+  {
+    name: 'connect-setup: default Haven wallet for the owner',
+    sql: FIND_DEFAULT_USER_SAFE_SQL,
+  },
+  {
+    name: 'connect-setup: setup row by token hash (/resolve auth)',
+    sql: FIND_SETUP_BY_TOKEN_HASH_SQL,
+  },
+  {
+    name: 'connect-setup: setup row by token hash FOR UPDATE (/register lock)',
+    sql: LOCK_SETUP_BY_TOKEN_HASH_SQL,
+  },
+  {
+    name: 'connect-setup: setup row for owner (status/approval reads)',
+    sql: FIND_SETUP_FOR_USER_SQL,
+  },
+  {
+    name: 'connect-setup: setup row for owner FOR UPDATE (approval/cancel lock)',
+    sql: LOCK_SETUP_FOR_USER_SQL,
+  },
+  {
+    name: 'connect-setup: setup row by id + token hash (install-status auth)',
+    sql: FIND_SETUP_BY_ID_AND_TOKEN_HASH_SQL,
+  },
+  {
+    name: 'connect-setup: setup row by agent API key (post-registration install-status)',
+    sql: FIND_SETUP_BY_AGENT_API_KEY_SQL,
+  },
+  {
+    name: 'connect-setup: setup insert (token stored only as hash)',
+    sql: INSERT_SETUP_SQL,
+  },
+  {
+    name: 'connect-setup: setup allowance insert',
+    sql: INSERT_SETUP_ALLOWANCE_SQL,
+  },
+  {
+    name: 'connect-setup: connector metadata update (/resolve)',
+    sql: UPDATE_CONNECTOR_METADATA_SQL,
+  },
+  {
+    name: 'connect-setup: install-status jsonb merge',
+    sql: MERGE_INSTALL_STATUS_SQL,
+  },
+  {
+    name: 'connect-setup: setup allowances list',
+    sql: LIST_SETUP_ALLOWANCES_SQL,
+  },
+  {
+    name: 'connect-setup: duplicate-delegate guard (non-revoked agent by address)',
+    sql: FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
+  },
+  {
+    name: 'connect-setup: agent insert as pending_approval (/register)',
+    sql: INSERT_AGENT_FROM_SETUP_SQL,
+  },
+  {
+    name: 'connect-setup: copy setup allowances onto the agent',
+    sql: COPY_SETUP_ALLOWANCES_TO_AGENT_SQL,
+  },
+  {
+    name: 'connect-setup: mark setup registered + consume token',
+    sql: MARK_SETUP_REGISTERED_SQL,
+  },
+  {
+    name: 'connect-setup: wallet-approval state persist',
+    sql: UPDATE_WALLET_APPROVAL_STATE_SQL,
+  },
+  {
+    name: 'connect-setup: idempotent agent activation (#1069 lifecycle)',
+    sql: ACTIVATE_PENDING_AGENT_SQL,
+  },
+  {
+    name: 'connect-setup: active delegation budgets for the #1073 authority check',
+    sql: LIST_ACTIVE_DELEGATION_BUDGETS_SQL,
+  },
+  {
+    name: 'connect-setup: agent status for the cancel guard (#1073)',
+    sql: FIND_AGENT_STATUS_SQL,
+  },
+  {
+    name: 'connect-setup: guarded cancel (preconditions re-stated in WHERE)',
+    sql: CANCEL_SETUP_SQL,
+  },
+  {
+    name: 'connect-setup: revoke never-approved agent on cancel',
+    sql: REVOKE_PENDING_AGENT_SQL,
   },
 ]
 

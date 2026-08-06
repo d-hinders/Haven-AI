@@ -73,9 +73,13 @@ vi.mock('@/context/OwnerDirectoryContext', () => ({
   useOwnerDirectory: () => mocks.useOwnerDirectory(),
 }))
 
-vi.mock('@/lib/signer', () => ({
-  useActiveSigner: (args: unknown) => mocks.useActiveSigner(args),
-}))
+vi.mock('@/lib/signer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/signer')>()
+  return {
+    ...actual,
+    useActiveSigner: (args: unknown) => mocks.useActiveSigner(args),
+  }
+})
 
 import WalletButton from '@/components/WalletButton'
 
@@ -305,5 +309,46 @@ describe('WalletButton', () => {
 
     expect(screen.getByRole('button', { name: 'Wrong network' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Passkey' })).not.toBeInTheDocument()
+  })
+
+
+  // #1126: the Hybrid DeleGator branch — the PR's core deliverable. The
+  // 'Signing with' block names the on-device credential WITHOUT an address
+  // (Hybrid passkeys are raw P256 coordinates; none exists).
+  it('Hybrid dropdown: honest account label + address-free Signing with block', async () => {
+    const KEY_A = '0x' + '11'.repeat(32)
+    const KEY_B = '0x' + '22'.repeat(32)
+    const ACCOUNT = '0x' + 'aa'.repeat(20)
+    // Mark the SECOND passkey as the on-device credential (Backup 1). The
+    // marker is keyed by the base64url CREDENTIAL id, not the raw key_id —
+    // use the real conversion so this test exercises the same path signing
+    // does.
+    const { credentialIdFromKeyId } = await import('@/lib/signer')
+    window.localStorage.setItem('haven_passkey_device_' + credentialIdFromKeyId(KEY_B), '1')
+    mocks.useActiveSigner.mockReturnValue({
+      type: 'delegator_passkey',
+      accountAddress: ACCOUNT,
+      chainId: 84532,
+      signers: {
+        account_address: ACCOUNT,
+        chain_id: 84532,
+        owner_address: null,
+        passkeys: [
+          { key_id: KEY_A, x: '0x1', y: '0x2' },
+          { key_id: KEY_B, x: '0x3', y: '0x4' },
+        ],
+      },
+    })
+
+    render(<WalletButton />)
+    fireEvent.click(screen.getByRole('button', { name: 'Passkey' }))
+    const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
+    expect(within(dialog).getByText('Haven account')).toBeInTheDocument()
+    expect(within(dialog).queryByText('Haven account (passkey)')).not.toBeInTheDocument()
+    expect(within(dialog).getByText('Signing with')).toBeInTheDocument()
+    expect(within(dialog).getByText('Backup 1')).toBeInTheDocument()
+    // The block identifies the credential by truncated key id, never an address:
+    expect(within(dialog).getByText('0x2222…2222')).toBeInTheDocument()
+    window.localStorage.removeItem('haven_passkey_device_' + credentialIdFromKeyId(KEY_B))
   })
 })

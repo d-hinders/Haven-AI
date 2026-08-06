@@ -205,7 +205,7 @@ function WalletPopover({
         )}
         {renderAddressSection(primary)}
         {signingWith ? (
-          <div className="px-3 py-2">
+          <div className="py-2">
             <p className="text-xs text-[var(--v2-ink-muted)]">Signing with</p>
             <p className="text-sm font-medium text-[var(--v2-ink)]">{signingWith.label}</p>
             <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
@@ -432,7 +432,7 @@ export default function WalletButton() {
             : -1
           const signingWith = onDeviceKey
             ? {
-                label: keyIndex <= 0 ? 'Face ID / Touch ID' : `Backup ${keyIndex}`,
+                label: keyIndex === 0 ? 'Face ID / Touch ID' : `Backup ${keyIndex}`,
                 keyId: onDeviceKey.key_id,
               }
             : undefined

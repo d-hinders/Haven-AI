@@ -140,6 +140,11 @@ Haven backend
 > Queued-approval completion is not a gap (#1121, investigated): the
 > dashboard executes an OWNER-signed Safe transaction — owner authority,
 > outside any agent rail — so the seam is rightly not consulted there.
+> Since #988 the agents/user-safes data access lives in
+> `infra/repositories/` with tenant scoping as REQUIRED function parameters —
+> the `WHERE user_id = $1` authorization that used to hide in inline route
+> SQL is now a signature the type checker enforces; the SQL itself moved
+> verbatim and is PREPARE-checked against the real schema in CI.
 
 > **Current state (2026-07-27, #976):** the erc7710 settle response carries a
 > `passport` reference — `{ attestation_uid, chain_id }`, plus an optional

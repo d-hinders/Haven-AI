@@ -46,7 +46,10 @@ module.exports = {
         'that takes its tenant-scoping argument as a required parameter (see #985).',
       from: {
         path: '^packages/backend/src/',
-        pathNot: '^packages/backend/src/(db/|infra/repositories/|db\\.ts$)',
+        // infra/db.ts is the shared repository primitives home promoted by
+        // #985 (Executor + withTransaction) — part of the data layer, so it
+        // may see pg's types (tsPreCompilationDeps counts type-only imports).
+        pathNot: '^packages/backend/src/(db/|infra/repositories/|infra/db\\.ts$|db\\.ts$)',
       },
       to: {
         path: '^(packages/backend/src/db\\.ts$|node_modules/pg/)',

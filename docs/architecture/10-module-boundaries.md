@@ -133,7 +133,8 @@ always a mistake in the new code, never inherited debt).
 2. **`modules/` may import `domain/` and `platform/`.** It may not import
    `http/`, and it may not import another module's internals.
 3. **Only `infra/` touches the database.** No `pg` import and no SQL string
-   outside `infra/repositories/`.
+   outside `infra/repositories/` — plus `infra/db.ts`, the shared repository
+   primitives (`Executor` + `withTransaction`) promoted there by #985.
 4. **Only `rails/` and `infra/` touch a chain SDK.** No `ethers`, `viem`,
    `permissionless`, or `@metamask/smart-accounts-kit` import anywhere else —
    in particular, never in `http/`.

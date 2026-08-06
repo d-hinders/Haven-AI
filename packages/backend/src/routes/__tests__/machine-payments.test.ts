@@ -276,6 +276,131 @@ describe('machine payment routes', () => {
     )
   })
 
+  describe('GET /allowances — legacy-rail characterization (#1135, pinned BEFORE the rail branch)', () => {
+    // money.md: the legacy AllowanceModule rail's response is pinned here —
+    // exact JSON shape, exact onchain.* fields — so the rail-aware change can
+    // prove it left this rail untouched.
+
+    function legacyOnchainRead() {
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({
+        amount: 10000n,
+        spent: 2500n,
+        resetTimeMin: 60,
+        lastResetMin: 100,
+        nonce: 7,
+      })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_750_000_000)
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({
+        remaining: 7500n,
+        effectiveSpent: 2500n,
+        isResetPending: false,
+      })
+    }
+
+    it('an explicit allowance_module rail returns the AllowanceModule snapshot byte-identically', async () => {
+      legacyOnchainRead()
+      mockQuery
+        .mockResolvedValueOnce({ rows: [{ ...AGENT, execution_rail: 'allowance_module' }] })
+        .mockResolvedValueOnce({
+          rows: [{
+            id: 'allowance-1',
+            token_address: USDC,
+            token_symbol: 'USDC',
+            allowance_amount: '10000',
+            reset_period_min: 60,
+          }],
+        })
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({
+        agent_id: AGENT.id,
+        safe_address: AGENT.safe_address,
+        delegate_address: AGENT.delegate_address,
+        chain_id: AGENT.chain_id,
+        allowances: [{
+          id: 'allowance-1',
+          token_address: USDC,
+          token_symbol: 'USDC',
+          configured_amount: '10000',
+          reset_period_min: 60,
+          onchain: {
+            amount: '10000',
+            spent: '2500',
+            remaining: '7500',
+            effective_spent: '2500',
+            reset_time_min: 60,
+            last_reset_min: 100,
+            nonce: 7,
+            is_reset_pending: false,
+          },
+        }],
+      })
+      expect(allowanceMocks.getTokenAllowance).toHaveBeenCalledWith(
+        AGENT.chain_id,
+        AGENT.safe_address,
+        AGENT.delegate_address,
+        USDC,
+      )
+    })
+
+    it('a legacy agent with no configured tokens returns an empty allowances array (200)', async () => {
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [] })
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({
+        agent_id: AGENT.id,
+        safe_address: AGENT.safe_address,
+        delegate_address: AGENT.delegate_address,
+        chain_id: AGENT.chain_id,
+        allowances: [],
+      })
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    })
+
+    it('an on-chain read failure returns 502 naming the token that failed', async () => {
+      allowanceMocks.getTokenAllowance.mockRejectedValueOnce(new Error('rpc down'))
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_750_000_000)
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({
+          rows: [{
+            id: 'allowance-1',
+            token_address: USDC,
+            token_symbol: 'USDC',
+            allowance_amount: '10000',
+            reset_period_min: 60,
+          }],
+        })
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+
+      expect(response.statusCode).toBe(502)
+      expect(response.json()).toEqual({
+        error: 'Failed to read on-chain allowance',
+        token_address: USDC,
+        details: 'rpc down',
+      })
+    })
+  })
+
   it('receipts join the intent so settlement_scheme is agent-visible (#1063 finding)', async () => {
     mockQuery.mockResolvedValueOnce(authRow()).mockResolvedValueOnce({ rows: [] })
     const response = await app.inject({

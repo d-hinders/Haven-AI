@@ -15,6 +15,12 @@ covers:
   - packages/backend/src/lib/fortnox.ts
   - packages/backend/src/lib/fortnox-connection.ts
   - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/infra/repositories/payment-intents.ts
+  - packages/backend/src/infra/repositories/approval-requests.ts
+  - packages/backend/src/infra/repositories/x402-authorizations.ts
+  - packages/backend/src/infra/repositories/machine-payments.ts
+  - packages/backend/src/infra/repositories/account-entitlements.ts
+  - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/lib/accounting-entry.ts
   - packages/backend/src/lib/catalog-discovery.ts
   - packages/backend/src/lib/merchant-catalog.ts

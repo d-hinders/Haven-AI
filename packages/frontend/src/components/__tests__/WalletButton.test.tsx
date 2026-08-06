@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { within, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -122,7 +122,7 @@ describe('WalletButton', () => {
     })
   })
 
-  it('shows Passkey ready when a local passkey signer is active', () => {
+  it('shows Passkey when a local passkey signer is active', () => {
     mocks.useActiveSigner.mockReturnValue({
       type: 'passkey',
       address: PASSKEY_ADDRESS,
@@ -132,7 +132,7 @@ describe('WalletButton', () => {
 
     render(<WalletButton />)
 
-    expect(screen.getByRole('button', { name: 'Passkey ready' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Passkey' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Connect wallet' })).not.toBeInTheDocument()
   })
 
@@ -167,10 +167,11 @@ describe('WalletButton', () => {
 
     render(<WalletButton />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Passkey ready' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Passkey' }))
 
-    expect(screen.getByRole('dialog', { name: 'Wallet menu' })).toBeInTheDocument()
-    expect(screen.getByText('Passkey')).toBeInTheDocument()
+    const dialog = screen.getByRole('dialog', { name: 'Wallet menu' })
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getByText('Passkey')).toBeInTheDocument()
     expect(screen.getByText('0x0802…0ce2')).toBeInTheDocument()
     expect(screen.getByText('Gnosis Chain')).toBeInTheDocument()
 
@@ -200,12 +201,12 @@ describe('WalletButton', () => {
 
     render(<WalletButton />)
 
-    expect(screen.getByRole('button', { name: 'Passkey ready' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Passkey' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Wrong network' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Passkey ready' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Passkey' }))
 
-    expect(screen.getByText('Passkey')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog', { name: 'Wallet menu' })).getByText('Passkey')).toBeInTheDocument()
     expect(screen.getByText('Connected wallet')).toBeInTheDocument()
     expect(screen.getByText('0x0802…0ce2')).toBeInTheDocument()
     expect(screen.getByText('0x5555…5555')).toBeInTheDocument()
@@ -303,6 +304,6 @@ describe('WalletButton', () => {
     render(<WalletButton />)
 
     expect(screen.getByRole('button', { name: 'Wrong network' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Passkey ready' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Passkey' })).not.toBeInTheDocument()
   })
 })

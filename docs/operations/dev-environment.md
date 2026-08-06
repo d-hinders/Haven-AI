@@ -17,8 +17,10 @@ work-in-progress on the `dev` integration branch can be exercised end-to-end
 before it is promoted to `main`. The **backend, hosted MCP, demo-merchant, and
 Postgres** are one shared set of Railway services deploying from `dev`. The
 frontend's **canonical dev URL is the branch-tracking Vercel preview** of the
-`dev` branch (stable across deploys); each PR additionally gets its own
-per-PR preview link.
+`dev` branch (a stable hostname that Vercel re-points at the newest `dev`
+deployment); each PR additionally gets its own per-PR preview link. All of them
+point at the same shared dev backend, so they are the same environment and the
+same data — only the domain differs, which is what makes passkeys per-domain.
 
 This doc is the authoritative reference for how the dev environment is wired and
 how to configure it. For the branch workflow that feeds it, see
@@ -28,7 +30,7 @@ how to configure it. For the branch workflow that feeds it, see
 
 | Service | Platform | Deploys from | Notes |
 |---|---|---|---|
-| Frontend | **Vercel** (dev project) | `dev` branch preview + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable). Per-PR previews exist alongside it. The Preview scope sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. |
+| Frontend | **Vercel** | `dev` branch alias + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, always the newest `dev` build). Per-PR previews exist alongside it. There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
 | Backend / API | **Railway** (dev project) | `dev` branch | Own isolated Postgres — never the prod DB. |
 | Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend. |
 | Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. EIP-3009 by default; the experimental ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
@@ -44,16 +46,39 @@ deployed that way today.
 **URLs** (no custom domain — we test against the platform URLs):
 
 - Frontend (Vercel): `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
-  — the **branch-tracking preview of `dev`** (stable across deploys; points at the
-  dev backend). Per-PR preview links exist alongside it (the PR's Vercel check).
+  — the **branch-tracking preview of `dev`**: a stable hostname that Vercel
+  re-points at the newest `dev` deployment, so it is always current without ever
+  changing. Verified 2026-08-06: it serves the same build as the immutable
+  deployment of `dev` HEAD, and proxies to the dev backend. Per-PR preview links
+  exist alongside it (the PR's Vercel check) and are what you use to test *that
+  PR's build* — they are a different domain each time.
+  **You will not find this URL under Vercel → Domains**, and that is expected:
+  that page lists only *assigned* domains (production + custom). Branch aliases
+  are generated automatically for any branch that has a deployment — open a
+  `dev` deployment under **Deployments** and they are listed on the deployment
+  itself. Vercel truncates the alias for long branch names, so copy it from
+  there rather than hand-building it. The alias is **public** — no login gate —
+  so treat the link as sharing the dev stack.
+  **The consequence that bites:** **passkeys are bound to the exact domain they
+  were created on**, so a passkey made on one PR preview is unreachable on the
+  next (the browser offers only the "use another device" QR, which is
+  domain-bound too and will not help). Keep passkey-holding accounts on the
+  branch-tracking URL above, and to test PR previews without a new account per
+  PR, enrol a wallet as a signer once and sign with it everywhere:
+  [`dev-testing-with-a-wallet-signer.md`](dev-testing-with-a-wallet-signer.md).
+  Domain-hopping mid-flow has burned real sessions — finish on one link before
+  moving to the next.
   ⚠️ `haven-ai-frontend.vercel.app` is the Vercel **production alias → PROD
   backend**: on it, dev-only features are missing and passkey onboarding dies
   with "Relayer is temporarily unfunded" (old code targets Gnosis, whose relayer
-  is intentionally unfunded). Both this and domain-hopping between previews have
-  burned real sessions: **passkeys are bound to the exact domain they were
-  created on** — switching preview domains makes enrolled passkeys unreachable
-  (the browser offers only the "use another device" QR). Do all passkey work on
-  the branch-tracking URL above.
+  is intentionally unfunded).
+  ⚠️ `haven-ai-frontend-git-main-…vercel.app` is **not production**, despite
+  Vercel listing it under the Production environment. It is the branch alias for
+  `main`, and a branch alias tracks the newest deployment of that branch in *any*
+  environment — a Jul 2026 redeploy landed as a Preview build, so this hostname
+  serves the dev backend. Details and cleanup:
+  [`promoting-dev-to-main.md`](promoting-dev-to-main.md) § *Run the prod smoke on
+  the right hostname*.
   ⚠️ `haven-dev.vercel.app` is a *different* app
   ("HAVEN Project" Vite SPA), not Haven's dashboard.
 - Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public).
@@ -227,8 +252,9 @@ renders nothing.
 - **Railway → dev Postgres → Data** — inspect tables (read-only with Viewer role).
 - **Vercel → dev project** — frontend build logs, the branch-tracking `dev`
   preview (the canonical dev URL above) and the per-PR preview deployments
-  (open a PR's own link only to test that PR's build — remember passkeys are
-  domain-bound). ⚠️ `haven-dev.vercel.app` is a different app, not ours.
+  (open a PR's own link only to test that PR's build — remember each is a
+  different domain, so passkeys don't carry between them).
+  ⚠️ `haven-dev.vercel.app` is a different app, not ours.
   The backend is `https://havenbackend-dev-8b95.up.railway.app`.
 
 If you need an env var changed or a secret rotated in the dev projects, ping the

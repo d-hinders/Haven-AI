@@ -81,9 +81,6 @@
     "chain-sdk-not-in-routes": 1,
     "pg-only-in-infra": 1
   },
-  "packages/backend/src/routes/agents.ts": {
-    "pg-only-in-infra": 1
-  },
   "packages/backend/src/routes/approvals.ts": {
     "pg-only-in-infra": 1
   },
@@ -141,9 +138,6 @@
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/transactions.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/routes/user-safes.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/user.ts": {

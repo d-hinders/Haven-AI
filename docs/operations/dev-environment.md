@@ -53,7 +53,9 @@ deployed that way today.
   burned real sessions: **passkeys are bound to the exact domain they were
   created on** — switching preview domains makes enrolled passkeys unreachable
   (the browser offers only the "use another device" QR). Do all passkey work on
-  the branch-tracking URL above.
+  the branch-tracking URL above — and to stop making a new account per PR, enrol
+  a wallet as a second signer once and sign with it on previews:
+  [`dev-testing-with-a-wallet-signer.md`](dev-testing-with-a-wallet-signer.md).
   ⚠️ `haven-dev.vercel.app` is a *different* app
   ("HAVEN Project" Vite SPA), not Haven's dashboard.
 - Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public).

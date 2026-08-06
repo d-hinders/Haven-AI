@@ -38,6 +38,30 @@ const isoDateTime = {
   format: 'date-time',
 } as const
 
+const agentAuthForbidden = {
+  description:
+    'Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is ' +
+    'valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused ' +
+    'API-initiated transactions. `detail` carries the operator action. Contrast 401, which means ' +
+    'the key itself is unknown or revoked.',
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        required: ['error'],
+        properties: {
+          // Not an enum: agentAuth also 403s configuration refusals
+          // ('Agent has no delegate address configured', 'No Safe deployed
+          // for this account') — an exhaustive-switch client must treat
+          // unknown codes as generic refusals (#1132 review).
+          error: { type: 'string' },
+          detail: { type: 'string' },
+        },
+      },
+    },
+  },
+}
+
 const errorResponse = {
   description: 'Error response',
   content: {
@@ -622,6 +646,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+          '403': agentAuthForbidden,
         },
       },
       post: {
@@ -680,6 +705,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+          '403': agentAuthForbidden,
           '404': errorResponse,
         },
       },
@@ -751,6 +777,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+          '403': agentAuthForbidden,
           '404': errorResponse,
         },
       },
@@ -774,6 +801,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+          '403': agentAuthForbidden,
           '404': errorResponse,
           '409': errorResponse,
           '410': errorResponse,
@@ -878,6 +906,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+          '403': agentAuthForbidden,
         },
       },
     },
@@ -897,6 +926,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+          '403': agentAuthForbidden,
           '502': errorResponse,
         },
       },
@@ -961,6 +991,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+          '403': agentAuthForbidden,
           '404': errorResponse,
         },
       },
@@ -1133,6 +1164,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+          '403': agentAuthForbidden,
         },
       },
     },
@@ -1170,6 +1202,7 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': errorResponse,
+          '403': agentAuthForbidden,
           '404': errorResponse,
           '409': errorResponse,
         },
@@ -1235,6 +1268,7 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': errorResponse,
+          '403': agentAuthForbidden,
           '404': errorResponse,
           '429': errorResponse,
         },
@@ -1267,6 +1301,7 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': errorResponse,
+          '403': agentAuthForbidden,
           '404': errorResponse,
           '409': errorResponse,
         },
@@ -1309,6 +1344,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+          '403': agentAuthForbidden,
           '422': errorResponse,
           '502': errorResponse,
         },
@@ -1530,6 +1566,7 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': errorResponse,
+          '403': agentAuthForbidden,
         },
       },
     },
@@ -1552,6 +1589,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+          '403': agentAuthForbidden,
           '404': errorResponse,
         },
       },

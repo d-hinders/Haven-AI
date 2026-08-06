@@ -3105,7 +3105,11 @@ export class HavenClient {
       if (!res.ok) {
         const record = data as Record<string, unknown>
         const errorText = typeof record.error === 'string' ? record.error : undefined
-        const rawDetails = record.details
+        // agentAuth's structured refusals (#1130: agent_pending_approval,
+        // agent_paused) carry their guidance as `detail` (singular) — without
+        // this fallback the operator sees a bare error code and none of the
+        // actionable text.
+        const rawDetails = record.details ?? record.detail
         const detailsText =
           typeof rawDetails === 'string'
             ? rawDetails

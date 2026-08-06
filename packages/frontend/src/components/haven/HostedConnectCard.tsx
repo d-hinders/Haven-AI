@@ -101,7 +101,11 @@ export function HostedConnectCard({
   tryItPrompt = DEFAULT_TRY_IT_PROMPT,
   lastSeenAt,
 }: HostedConnectCardProps) {
+  // Null in a non-production build with no NEXT_PUBLIC_HAVEN_MCP_URL (#1129):
+  // the card then renders an explicit not-configured state instead of a
+  // snippet that embeds the production URL and cannot work.
   const resolvedUrl = useMemo(() => resolveHostedMcpUrl(hostedUrl), [hostedUrl])
+  const notConfigured = resolvedUrl == null
 
   const isConnected = Boolean(lastSeenAt)
 
@@ -132,11 +136,17 @@ export function HostedConnectCard({
   )
 
   const snippet = useMemo(
-    () => (activeId ? buildHostedConnectSnippet(activeId, credential, resolvedUrl) : null),
+    () =>
+      activeId && resolvedUrl != null
+        ? buildHostedConnectSnippet(activeId, credential, resolvedUrl)
+        : null,
     [activeId, credential, resolvedUrl],
   )
   const setupPrompt = useMemo(
-    () => (activeId ? buildHostedSetupPrompt(activeId, credential, resolvedUrl) : null),
+    () =>
+      activeId && resolvedUrl != null
+        ? buildHostedSetupPrompt(activeId, credential, resolvedUrl)
+        : null,
     [activeId, credential, resolvedUrl],
   )
 
@@ -154,6 +164,7 @@ export function HostedConnectCard({
   }, [])
 
   const handleTestConnection = useCallback(async () => {
+    if (resolvedUrl == null) return
     setProbeState({ status: 'pending' })
     const result = await probeHostedConnection(credential.api_key, resolvedUrl)
     setProbeState(result)
@@ -205,7 +216,7 @@ export function HostedConnectCard({
   }, [setupPrompt, activeId, markCopiedSetupPrompt, onCopySigningKey, onCredentialSaved])
 
   const handleOpenDeepLink = useCallback(() => {
-    if (!activeId || !hasDeepLink(activeId)) return
+    if (!activeId || !hasDeepLink(activeId) || resolvedUrl == null) return
     const url = buildDeepLink(activeId, credential, resolvedUrl)
     window.open(url, '_self')
   }, [activeId, credential, resolvedUrl])
@@ -259,7 +270,29 @@ export function HostedConnectCard({
         </p>
       )}
 
-      {(!isConnected || showSetupSteps) && (
+      {/* Not-configured state (#1129): a non-production build with no
+          NEXT_PUBLIC_HAVEN_MCP_URL has no hosted MCP to point at — say so
+          plainly where the runtime picker and snippet would render, instead
+          of emitting config that silently targets the production server. */}
+      {notConfigured && (!isConnected || showSetupSteps) && (
+        <div
+          role="alert"
+          className="mt-3 rounded-[10px] border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-3 py-2.5"
+        >
+          <p className="text-[12px] font-semibold text-[var(--v2-warning)]">
+            Hosted connect is not configured for this environment
+          </p>
+          <p className="mt-1 text-[12px] leading-relaxed text-[var(--v2-ink-2)]">
+            This build has no hosted MCP endpoint, so a connect snippet cannot be generated. Set{' '}
+            <code className="font-mono text-xs">NEXT_PUBLIC_HAVEN_MCP_URL</code> to this
+            environment&rsquo;s hosted MCP endpoint, or connect the agent with the local connector
+            (<code className="font-mono text-xs">--local</code>) instead. The production endpoint
+            is only offered on the production deploy.
+          </p>
+        </div>
+      )}
+
+      {!notConfigured && (!isConnected || showSetupSteps) && (
         <>
           <p className="mt-1.5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
             Pick the app your agent runs in. The connection token goes to Haven; the signing key

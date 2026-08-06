@@ -100,10 +100,15 @@ deployment holding a confusing name.
 - **Never "Promote to Production" that deployment.** It was built with Preview
   env vars, so promoting it would point the production domain at the **dev
   backend** and switch on the dev-only flags.
-- To clear it, delete the stray Preview deployment (Deployments → filter `main`
-  → the Jul 12 "Redeploy of…" row → ⋯ → Delete). The alias then falls back to
-  the production deployment.
-- Until then, smoke prod on `haven-ai-frontend.vercel.app` only.
+- **Resolved 2026-08-06** by deleting the stray Preview deployment (Deployments →
+  filter `main` → the "Redeploy of…" row → ⋯ → Delete). The `-git-main-` hostname
+  now returns `DEPLOYMENT_NOT_FOUND` rather than falling back to the production
+  deployment, and Vercel's *Branch link for main* is `haven-ai-frontend.vercel.app`
+  — so the confusing hostname is simply gone. Verified: both production
+  hostnames still serve the prod backend.
+- If it ever reappears, the cause is the same — a Preview deployment on `main`
+  taking the branch alias — and so is the fix. Smoke prod on
+  `haven-ai-frontend.vercel.app` regardless.
 
 Separately: `main` has not moved since **2026-06-26**, so production is a long
 way behind `dev`. That is a promotion backlog, not a deploy bug — the pipeline

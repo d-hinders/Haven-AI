@@ -140,6 +140,11 @@ Haven backend
 > Queued-approval completion is not a gap (#1121, investigated): the
 > dashboard executes an OWNER-signed Safe transaction — owner authority,
 > outside any agent rail — so the seam is rightly not consulted there.
+> Since #1130 a valid key on a `pending_approval` agent gets a NAMED
+> `403 agent_pending_approval` with the required action, instead of the
+> false `401 Invalid or revoked API key` — the authentication gate stays a
+> positive allow-list (revoked and unknown statuses still 401), the refusal
+> just stopped lying about its cause.
 > Since #988 the agents/user-safes data access lives in
 > `infra/repositories/` with tenant scoping as REQUIRED function parameters —
 > the `WHERE user_id = $1` authorization that used to hide in inline route

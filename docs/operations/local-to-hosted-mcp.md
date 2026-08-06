@@ -111,8 +111,10 @@ For JSON-configured runtimes, remove the old stdio block:
 ### 3. Add Hosted MCP
 
 Use the hosted URL shown in the Haven app's **Connect your agent** flow. The
-current default can also be overridden in deployments with
-`NEXT_PUBLIC_HAVEN_MCP_URL`.
+production URL below is a built-in default only on the production deployment
+itself (#1129); every other environment sets its own endpoint via
+`NEXT_PUBLIC_HAVEN_MCP_URL` (frontend) / `HAVEN_HOSTED_MCP_URL` (backend), and
+shows a not-configured state instead of another environment's URL when unset.
 
 Claude Code:
 

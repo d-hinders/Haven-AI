@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 import { HostedConnectCard } from '@/components/haven/HostedConnectCard'
 import { buildAgentCredential } from '@/lib/agent-credential'
 import type { HandoffInput } from '@/lib/agent-handoff'
@@ -72,6 +72,15 @@ describe('HostedConnectCard', () => {
     windowOpen.mockClear()
     Object.assign(navigator, { clipboard: { writeText: clipboardWriteText } })
     vi.stubGlobal('open', windowOpen)
+    // #1129: resolveHostedMcpUrl() no longer falls back to the production URL
+    // in a non-production build (the test env is one). Pin an explicit hosted
+    // MCP URL so this suite exercises the configured card; the not-configured
+    // state has its own describe below.
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_MCP_URL', 'https://hosted-mcp.test.haven/v1')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
   })
 
   it('lands with no client picked and secret-bearing setup hidden', () => {
@@ -733,5 +742,49 @@ describe('HostedConnectCard', () => {
     } finally {
       globalThis.fetch = originalFetch
     }
+  })
+})
+
+/**
+ * Not-configured state (#1129): a non-production build with no
+ * NEXT_PUBLIC_HAVEN_MCP_URL has no hosted MCP endpoint to embed, so the card
+ * must say so explicitly instead of rendering snippets that silently point at
+ * the production server (whose backend would 401 the dev-issued key).
+ */
+describe('HostedConnectCard — hosted MCP not configured (#1129)', () => {
+  beforeEach(() => {
+    // Simulate a non-production build with no hosted MCP configured.
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_MCP_URL', '')
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', 'dev')
+    vi.stubEnv('NEXT_PUBLIC_API_URL', 'http://localhost:3001')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('renders an explicit not-configured message naming the variable, and no runtime picker', () => {
+    render(<HostedConnectCard credential={credential()} />)
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/Hosted connect is not configured/i)
+    expect(alert).toHaveTextContent(/NEXT_PUBLIC_HAVEN_MCP_URL/)
+    expect(alert).toHaveTextContent(/--local/)
+    // The picker and snippet flow are absent — there is nothing to connect to.
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    expect(screen.queryByText(/Pick the app your agent runs in/i)).not.toBeInTheDocument()
+  })
+
+  it('never embeds the production hosted MCP URL anywhere in the card', () => {
+    const { container } = render(<HostedConnectCard credential={credential()} />)
+    expect(container.innerHTML).not.toContain('haven-ai-production')
+  })
+
+  it('an explicit NEXT_PUBLIC_HAVEN_MCP_URL brings the full connect flow back', () => {
+    vi.stubEnv('NEXT_PUBLIC_HAVEN_MCP_URL', 'https://dev-mcp.example.test/v1')
+    render(<HostedConnectCard credential={credential()} />)
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('tab').length).toBeGreaterThan(0)
   })
 })

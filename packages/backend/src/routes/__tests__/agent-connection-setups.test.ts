@@ -105,6 +105,25 @@ const TX_HASH = `0x${'a'.repeat(64)}`
 const SAFE_TX_HASH = `0x${'b'.repeat(64)}`
 const ALLOWANCE_MODULE_ADDRESS = '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134'
 
+/** Suite-wide hosted MCP URL (#1129) — see the root beforeEach note. */
+const TEST_HOSTED_MCP_URL = 'https://hosted-mcp.test.haven/v1'
+/** The production backend host that (alone) still earns the built-in default. */
+const PROD_API_URL = 'https://havenbackend-production-8a00.up.railway.app'
+const PROD_DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
+
+// #1129: with HAVEN_HOSTED_MCP_URL / NEXT_PUBLIC_HAVEN_MCP_URL unset, a
+// non-production self-URL (inject resolves to localhost) is a hard
+// configuration error on /resolve and /register. The whole file therefore
+// pins an explicit hosted MCP URL so every describe stays representative of
+// a correctly configured deployment; the resolution matrix itself is covered
+// by the dedicated "hosted MCP URL resolution (#1129)" describe, which
+// overrides/unsets these per case.
+beforeEach(() => {
+  delete process.env.HAVEN_API_URL
+  delete process.env.NEXT_PUBLIC_HAVEN_MCP_URL
+  process.env.HAVEN_HOSTED_MCP_URL = TEST_HOSTED_MCP_URL
+})
+
 const CONNECTED_SETUP = {
   ...SETUP,
   agent_id: 'agent-1',
@@ -188,8 +207,8 @@ describe('agent connection setup routes', () => {
     mockGetTokensForDelegate.mockReset()
     mockRequestPassport.mockReset().mockResolvedValue(true)
     mockIssueBestEffort.mockReset()
-    delete process.env.HAVEN_API_URL
-    delete process.env.HAVEN_HOSTED_MCP_URL
+    // Env vars (HAVEN_API_URL, HAVEN_HOSTED_MCP_URL, …) are pinned by the
+    // root-level beforeEach above (#1129).
   })
 
   it('creates a pending setup with a returned-once token stored only as a hash', async () => {
@@ -2196,6 +2215,191 @@ describe('data access characterization (#985)', () => {
     const read = mockQuery.mock.calls.find(([sql]) => String(sql).includes('FROM agent_delegations'))
     expect(String(read?.[0])).toContain("status = 'active'")
     expect(read?.[1]).toEqual(['agent-1'])
+    await app.close()
+  })
+})
+
+/**
+ * Hosted MCP URL resolution matrix (#1129).
+ *
+ * A non-production backend must never hand out the PRODUCTION hosted MCP URL
+ * as a silent default: the hosted MCP relays to exactly one backend fixed at
+ * deploy time, so a dev/local-issued sk_agent_ key sent there is looked up in
+ * the prod database and 401s with a message blaming the key. The rule under
+ * test: explicit variable wins → prod self-URL earns the built-in default →
+ * everything else is a LOUD 500 configuration error naming the variable, and
+ * — on /register — one that fires BEFORE the transaction so the one-shot
+ * setup token is not consumed and no agent row is half-created.
+ */
+describe('hosted MCP URL resolution (#1129)', () => {
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientRelease.mockReset()
+    mockClientQuery.mockResolvedValue({ rows: [] })
+    mockConnect.mockResolvedValue({
+      query: (...args: unknown[]) => mockClientQuery(...args),
+      release: mockClientRelease,
+    })
+    mockRequestPassport.mockReset().mockResolvedValue(true)
+    mockIssueBestEffort.mockReset()
+  })
+
+  function mockResolveQueries() {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('UPDATE agent_connection_setups')) return { rows: [] }
+      if (String(sql).includes('agent_connection_setup_allowances')) return { rows: [ALLOWANCE] }
+      return { rows: [SETUP] }
+    })
+  }
+
+  function resolvePayload() {
+    return { setup_token: 'hv_setup_abc', connector_version: '0.1.0', runtime: 'claude-code' }
+  }
+
+  async function injectResolve(app: FastifyInstance) {
+    return app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/resolve',
+      payload: resolvePayload(),
+    })
+  }
+
+  /** Full happy-path register mocks + payload — with config present it 201s. */
+  async function registerSetup() {
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    const proof = await wallet.signMessage(SETUP.challenge_message)
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: [SETUP] }
+      if (String(sql).includes('SELECT id FROM agents')) return { rows: [] }
+      if (String(sql).includes('INSERT INTO agents')) return { rows: [{ id: 'agent-1' }] }
+      return { rows: [] }
+    })
+    return {
+      setup_token: 'hv_setup_abc',
+      challenge_id: SETUP.challenge_id,
+      delegate_address: wallet.address,
+      proof_signature: proof,
+      api_key_hash: API_KEY_HASH,
+      api_key_prefix: API_KEY_PREFIX,
+    }
+  }
+
+  it('an explicitly set HAVEN_HOSTED_MCP_URL always wins, on resolve and register (trailing slash stripped)', async () => {
+    process.env.HAVEN_HOSTED_MCP_URL = 'https://dev-mcp.example.test/v1/'
+
+    const app = await buildApp()
+    mockResolveQueries()
+    const resolveResponse = await injectResolve(app)
+    expect(resolveResponse.statusCode).toBe(200)
+    expect(resolveResponse.json().hosted_mcp_url).toBe('https://dev-mcp.example.test/v1')
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: await registerSetup(),
+    })
+    expect(registerResponse.statusCode).toBe(201)
+    expect(registerResponse.json().hosted_mcp_url).toBe('https://dev-mcp.example.test/v1')
+    await app.close()
+  })
+
+  it('NEXT_PUBLIC_HAVEN_MCP_URL is honoured as the explicit fallback variable', async () => {
+    delete process.env.HAVEN_HOSTED_MCP_URL
+    process.env.NEXT_PUBLIC_HAVEN_MCP_URL = 'https://mcp-from-public-var.test/v1'
+
+    const app = await buildApp()
+    mockResolveQueries()
+    const response = await injectResolve(app)
+    expect(response.statusCode).toBe(200)
+    expect(response.json().hosted_mcp_url).toBe('https://mcp-from-public-var.test/v1')
+    await app.close()
+  })
+
+  it('unset variables + production self-URL still serve the built-in default — prod needs no config change', async () => {
+    delete process.env.HAVEN_HOSTED_MCP_URL
+    process.env.HAVEN_API_URL = PROD_API_URL
+
+    const app = await buildApp()
+    mockResolveQueries()
+    const resolveResponse = await injectResolve(app)
+    expect(resolveResponse.statusCode).toBe(200)
+    expect(resolveResponse.json().hosted_mcp_url).toBe(PROD_DEFAULT_HOSTED_MCP_URL)
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: await registerSetup(),
+    })
+    expect(registerResponse.statusCode).toBe(201)
+    expect(registerResponse.json().hosted_mcp_url).toBe(PROD_DEFAULT_HOSTED_MCP_URL)
+    await app.close()
+  })
+
+  it('unset variables + dev self-URL fail register with a 500 naming the variable — and write NOTHING', async () => {
+    delete process.env.HAVEN_HOSTED_MCP_URL
+    process.env.HAVEN_API_URL = 'https://havenbackend-dev-8b95.up.railway.app'
+
+    const app = await buildApp()
+    // Identical mocks/payload to the 201 happy path — proving the refusal is
+    // the configuration guard, not some validation failure.
+    const payload = await registerSetup()
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload,
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().error).toContain('HAVEN_HOSTED_MCP_URL')
+    expect(response.json().error).toContain('--local')
+    expect(response.json().error).toContain('havenbackend-dev-8b95.up.railway.app')
+    // The guard fires BEFORE the transaction opens: the setup token was not
+    // locked or consumed, no agent row was inserted — not even BEGIN ran.
+    expect(mockConnect).not.toHaveBeenCalled()
+    expect(mockClientQuery).not.toHaveBeenCalled()
+    await app.close()
+  })
+
+  it('unset variables + dev self-URL fail resolve with the same 500, before the connector-metadata write', async () => {
+    delete process.env.HAVEN_HOSTED_MCP_URL
+    process.env.HAVEN_API_URL = 'https://havenbackend-dev-8b95.up.railway.app'
+
+    const app = await buildApp()
+    mockResolveQueries()
+    const response = await injectResolve(app)
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().error).toContain('HAVEN_HOSTED_MCP_URL')
+    // The payload carried connector_version/runtime, so a pass-through would
+    // have written connector metadata — the config error must precede it.
+    expect(
+      mockQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agent_connection_setups')),
+    ).toBe(false)
+    await app.close()
+  })
+
+  it('unset variables + localhost self-URL fail the same way — local dev is pointed at --local, not at prod', async () => {
+    delete process.env.HAVEN_HOSTED_MCP_URL
+    // No HAVEN_API_URL: the self-URL falls back to the request host, which is
+    // localhost under inject — exactly the local-dev backend case.
+
+    const app = await buildApp()
+    mockResolveQueries()
+    const resolveResponse = await injectResolve(app)
+    expect(resolveResponse.statusCode).toBe(500)
+    expect(resolveResponse.json().error).toContain('HAVEN_HOSTED_MCP_URL')
+    expect(resolveResponse.json().error).toContain('--local')
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: await registerSetup(),
+    })
+    expect(registerResponse.statusCode).toBe(500)
+    expect(registerResponse.json().error).toContain('HAVEN_HOSTED_MCP_URL')
+    expect(mockConnect).not.toHaveBeenCalled()
     await app.close()
   })
 })

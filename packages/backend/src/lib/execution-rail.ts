@@ -1,14 +1,25 @@
 /**
- * Execution-rail routing (epic #733, foundation #739 slice #745): decide, per
- * payment, whether the money moves on the legacy AllowanceModule rail or the
- * session-key rail (ERC-4337 Safe7579 + Smart Sessions, ADR #719 Stage 2).
+ * Execution-rail seam (epic #733 → retirement #834 → one-gate #993).
  *
- * The decision is FAIL-CLOSED to 'allowance_module': every existing account
- * routes exactly as before unless (a) the Safe row is explicitly marked
- * migrated, (b) the agent has an enabled session permissionId, and (c) the
- * chain is on the session-rail allowlist. Any missing or malformed piece
- * falls back to the legacy path — which keeps working on a migrated Safe too,
- * because the #721 on-chain migration is additive.
+ * TWO rails are live: the legacy AllowanceModule rail (import-only, existing
+ * Safes) and the delegation rail (the base for new accounts, epic #821). The
+ * session-key rail (ERC-4337 Safe7579 + Smart Sessions) is RETIRED outright
+ * (#834): its machinery is deleted, and any account or intent still marked
+ * `session_key` gets HTTP 410 — fail-closed, nothing written — on every
+ * agent-payment ENTRY point (/payments, /payments/:id/sign, MPP authorize +
+ * replay, /machine-payments/send, x402 authorize). Queued approvals are NOT
+ * a residual (investigated on #1121): approval execution is an OWNER-signed
+ * Safe transaction built by the dashboard — owner authority, not the
+ * retired rail's agent authority, so the seam is rightly not consulted
+ * there. The typed seam itself stays for
+ * reversibility (the #834 owner decision); what #993 removed is the four
+ * scattered copies of the retirement gate, not the seam.
+ *
+ * Retirement is decided HERE, once: `resolveExecutionRail` returns
+ * `retired_session` for any session-marked account (no chain allowlist, no
+ * permission-id shape check — those gated a LIVE rail; a retired rail's only
+ * answer is 410 regardless), and `sessionRailRetired()` is the single
+ * producer of the refusal body.
  *
  * An intent PINS its rail at authorize time (`payment_intents.execution_rail`)
  * so verification and execution use the rail whose hash the client actually
@@ -18,37 +29,50 @@
 import pool from '../db.js'
 import { getChain } from './chains.js'
 
-/**
- * Chains the session rail may execute on. Base Sepolia only until the Stage 2
- * production gates clear: #735 (registry attestation), #736 (non-custody CI +
- * CASP copy), #738 (bundler/paymaster vendor ownership). Do NOT add Base
- * mainnet before those; Gnosis additionally waits on its own v1.3.0 +
- * Safe7579 verification run (#733).
- */
-export const SESSION_RAIL_CHAIN_IDS: ReadonlySet<number> = new Set([84532])
-
-const PERMISSION_ID_RE = /^0x[0-9a-fA-F]{64}$/
-
 export interface ExecutionRailState {
   /** `user_safes.execution_rail` for the agent's Safe (null = no row / legacy). */
   safeExecutionRail: string | null
-  /** `agents.session_permission_id` (null = no enabled session). */
-  sessionPermissionId: string | null
   chainId: number
 }
 
 export type ExecutionRailDecision =
   | { rail: 'allowance_module' }
-  | { rail: 'session_key'; permissionId: `0x${string}` }
+  | { rail: 'retired_session' }
 
-/** The pure routing decision — see the fail-closed contract in the header. */
+/**
+ * The pure routing decision. A session-marked account is retired, full stop —
+ * the pre-#993 chain/permission checks made a marked-but-misconfigured
+ * account silently fall through to the legacy rail, which post-retirement
+ * just deferred the refusal to a confusing 403; the honest answer is the 410
+ * with re-onboarding instructions.
+ */
 export function resolveExecutionRail(state: ExecutionRailState): ExecutionRailDecision {
-  if (state.safeExecutionRail !== 'session_key') return { rail: 'allowance_module' }
-  if (!SESSION_RAIL_CHAIN_IDS.has(state.chainId)) return { rail: 'allowance_module' }
-  if (!state.sessionPermissionId || !PERMISSION_ID_RE.test(state.sessionPermissionId)) {
-    return { rail: 'allowance_module' }
+  if (state.safeExecutionRail === 'session_key') return { rail: 'retired_session' }
+  return { rail: 'allowance_module' }
+}
+
+/** An intent's pinned rail, resolved through the same retirement seam. */
+export function isRetiredRailIntent(executionRail: string | null | undefined): boolean {
+  return executionRail === 'session_key'
+}
+
+/**
+ * The ONE producer of the session-rail refusal (#993). Fail-closed contract:
+ * callers return this VERBATIM with nothing written — no intent row, no
+ * audit side effect, no status flip.
+ */
+export function sessionRailRetired(kind: 'account' | 'intent'): { statusCode: 410; body: { error: string } } {
+  return {
+    statusCode: 410,
+    body: {
+      error:
+        kind === 'account'
+          ? 'The session rail is retired — re-onboard this account on the delegation rail ' +
+            '(POST /accounts/hybrid, then grant a budget) to keep paying.'
+          : 'The session rail is retired — this intent can no longer execute. ' +
+            'Re-onboard the account on the delegation rail and authorize again.',
+    },
   }
-  return { rail: 'session_key', permissionId: state.sessionPermissionId as `0x${string}` }
 }
 
 /**
@@ -68,9 +92,8 @@ export async function loadExecutionRailState(agent: {
 }): Promise<ExecutionRailState> {
   const result = await pool.query<{
     execution_rail: string | null
-    session_permission_id: string | null
   }>(
-    `SELECT us.execution_rail, a.session_permission_id
+    `SELECT us.execution_rail
      FROM agents a
      LEFT JOIN user_safes us ON us.id = a.safe_id
      WHERE a.id = $1`,
@@ -79,7 +102,6 @@ export async function loadExecutionRailState(agent: {
   const row = result.rows[0]
   return {
     safeExecutionRail: row?.execution_rail ?? null,
-    sessionPermissionId: row?.session_permission_id ?? null,
     chainId: agent.chain_id,
   }
 }

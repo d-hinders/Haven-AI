@@ -1,22 +1,19 @@
 /**
- * #745 characterization tests for the execution-rail split in POST /:id/sign.
+ * Execution-rail contract tests (#745 origin, retirement #834, one-gate #993).
  *
- * - LEGACY intents (execution_rail null) must behave exactly as before the
- *   session rail existed: raw-ECDSA verification, executeAllowanceTransfer,
- *   and the session rail never touched.
- * - SESSION intents (execution_rail = 'session_key') verify EIP-191 and
- *   submit the stored UserOperation via the session rail; the AllowanceModule
- *   path is never touched.
+ * - LEGACY intents (execution_rail null) behave exactly as before the session
+ *   rail existed: raw-ECDSA verification + executeAllowanceTransfer.
+ * - SESSION accounts/intents are RETIRED: 410 with ZERO writes on every
+ *   surface — no intent row, no audit side effect, no status flip.
  *
- * Only the network-touching factory (getSessionRailFor) is mocked — signature
- * recovery and UserOp (de)serialization run REAL code, with a real EIP-191
- * signature, so a scheme regression fails these tests.
+ * Signature recovery and UserOp (de)serialization run REAL code, with a real
+ * EIP-191 signature, so a scheme regression fails these tests.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { Wallet, getBytes } from 'ethers'
 
-const { mockQuery, allowanceMocks, fiatMocks, sessionRailMocks, delegationMocks } = vi.hoisted(() => ({
+const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
@@ -32,9 +29,6 @@ const { mockQuery, allowanceMocks, fiatMocks, sessionRailMocks, delegationMocks 
     getFiatValuesForTokenAmount: vi.fn(),
     getBookTimeSekValue: vi.fn().mockResolvedValue(null),
   },
-  sessionRailMocks: {
-    getSessionRailFor: vi.fn(),
-  },
   delegationMocks: {
     prepareDelegationPayment: vi.fn(),
     submitDelegationPayment: vi.fn(),
@@ -46,11 +40,6 @@ vi.mock('../../db.js', () => ({
 }))
 vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
 vi.mock('../../lib/fiat-values.js', () => fiatMocks)
-// Replace ONLY the network factory; every pure function stays real.
-vi.mock('../../lib/execution-rail.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../lib/execution-rail.js')>()
-  return { ...actual, getSessionRailFor: sessionRailMocks.getSessionRailFor }
-})
 // Only the network seams of the delegation rail are mocked.
 vi.mock('../../lib/delegation-authorization.js', () => delegationMocks)
 
@@ -156,7 +145,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     mockQuery.mockReset()
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
     for (const mock of Object.values(fiatMocks)) mock.mockReset()
-    sessionRailMocks.getSessionRailFor.mockReset()
     for (const mock of Object.values(delegationMocks)) mock.mockReset()
   })
 
@@ -187,7 +175,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
       `0x${'ab'.repeat(65)}`,
     )
     expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
-    expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
   })
 
   it('POST /:id/sign REFUSES a session intent — the rail is retired (#834)', async () => {
@@ -206,9 +193,11 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toMatch(/session rail is retired/)
     // Nothing verified, claimed, or executed:
-    expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
     expect(mockQuery.mock.calls.some((c) => /SET signature/.test(String(c[0])))).toBe(false)
+    // #993 hardening of the same contract: ZERO writes of any kind — the 410
+    // must not leave an intent row, audit row, or status flip behind.
+    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE|DELETE/i.test(String(c[0])))).toBe(false)
   })
 
   it('POST /payments REFUSES a session-rail account — the rail is retired (#834)', async () => {
@@ -229,8 +218,9 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toMatch(/delegation rail/)
     // Fail-closed: no session machinery invoked, nothing written:
-    expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
+    // #993: ZERO writes of any kind on the 410 path.
+    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE|DELETE/i.test(String(c[0])))).toBe(false)
   })
 
   it('POST /payments on the delegation rail: prepares, pins the delegation, ships typed data — WITHOUT an allowance row (#829, #835)', async () => {
@@ -265,7 +255,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     // The account validates typed data, not the bare hash — ship it:
     expect(body.sign_data.typed_data.domain.name).toBe('HybridDeleGator')
     // Neither other rail is touched:
-    expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
     expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     // The allowance guard never ran — no agent_allowances lookup (#835 fix):
     expect(mockQuery.mock.calls.some((c) => /agent_allowances/.test(String(c[0])))).toBe(false)
@@ -332,7 +321,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     expect(response.json()).toMatchObject({ status: 'confirmed', tx_hash: TX_HASH })
     expect(delegationMocks.submitDelegationPayment).toHaveBeenCalledOnce()
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
-    expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
     // The legacy recover was NOT used — the chain validates this scheme:
     expect(allowanceMocks.recoverSigner).not.toHaveBeenCalled()
   })
@@ -396,7 +384,6 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
 
     expect(response.statusCode).toBe(201)
     expect(response.json().sign_data.signature_scheme).toBeUndefined()
-    expect(sessionRailMocks.getSessionRailFor).not.toHaveBeenCalled()
     expect(allowanceMocks.generateTransferHash).toHaveBeenCalledOnce()
   })
 

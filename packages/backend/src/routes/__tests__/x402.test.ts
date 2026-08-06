@@ -136,6 +136,28 @@ describe('x402 routes', () => {
     expect(response.json().error).toMatch(/delegation-rail account/)
   })
 
+  // #993 (review finding on #1120): the retired-rail 410 must hold on the
+  // x402 entry point too — a session-marked account previously slipped into
+  // the legacy AllowanceModule flow here.
+  it('REFUSES a session-marked account on x402 authorize — 410, zero writes', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [{ ...AGENT, execution_rail: 'session_key' }] })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+      },
+    })
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toMatch(/session rail is retired/)
+    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE|DELETE/i.test(String(c[0])))).toBe(false)
+  })
+
   // #1058: same scheme confusion, same loud failure — a legacy-rail client
   // believing a redeemer pin exists must not silently proceed unpinned.
   it('rejects facilitatorAddresses on the legacy rail — no settlement child exists there', async () => {

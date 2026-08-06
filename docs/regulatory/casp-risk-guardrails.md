@@ -132,6 +132,14 @@ Haven backend
 > (429 on over-cap, spend recorded per agent/user for attribution) — an
 > availability control on the shared gas sponsor, deliberately fail-open on
 > database errors because it gates gas, never funds.
+> Since #993 the retired session rail's fail-closed refusal (HTTP 410,
+> nothing written) is decided and produced in ONE place
+> (`lib/execution-rail.ts`), and enforced at every agent-payment entry point
+> (/payments, sign, MPP authorize + replay, /machine-payments/send, x402
+> authorize) regardless of the account's permission/chain configuration.
+> Queued-approval completion is not a gap (#1121, investigated): the
+> dashboard executes an OWNER-signed Safe transaction — owner authority,
+> outside any agent rail — so the seam is rightly not consulted there.
 
 > **Current state (2026-07-27, #976):** the erc7710 settle response carries a
 > `passport` reference — `{ attestation_uid, chain_id }`, plus an optional

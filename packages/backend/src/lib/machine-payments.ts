@@ -26,6 +26,8 @@ import {
   redactVendorSecrets,
   resolveExecutionRail,
   serializeUserOp,
+  sessionRailRetired,
+  isRetiredRailIntent,
 } from './execution-rail.js'
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
@@ -413,15 +415,8 @@ async function returnExistingIntent(
   if (existing.status === 'pending_signature') {
     // Session-rail intents are retired (#834) — a still-pending one can no
     // longer execute; the client must re-authorize on the delegation rail.
-    if (existing.execution_rail === 'session_key') {
-      return {
-        statusCode: 410,
-        body: {
-          error:
-            'The session rail is retired — this intent can no longer execute. ' +
-            'Re-onboard the account on the delegation rail and authorize again.',
-        },
-      }
+    if (isRetiredRailIntent(existing.execution_rail)) {
+      return sessionRailRetired('intent')
     }
     let existingHash = existing.sign_hash
     let existingNonce = existing.allowance_nonce
@@ -577,7 +572,7 @@ export interface CreatePaymentIntentInput {
   /** Plain object — serialised to JSON here; pass null to store SQL NULL. */
   metadata: unknown | null
   /** Pin the intent to a non-legacy rail (#745/#830). Omit for legacy. */
-  executionRail?: 'session_key' | 'delegation'
+  executionRail?: 'delegation'
   /** The Smart Sessions permissionId pinned at authorize time. */
   sessionPermissionId?: string
   /** Pre-serialized prepared UserOperation (serializeUserOp) for session intents. */
@@ -792,26 +787,14 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     }
   }
 
-  // ── Session-key rail (#745) ────────────────────────────────────────────────
-  // Fail-closed: only a Safe explicitly marked migrated, whose agent has an
-  // enabled session, on an allowlisted chain, leaves the legacy path. The
-  // legacy AllowanceModule flow below is untouched for everyone else.
+  // ── Retired-session gate (#993) — the marking alone decides; see the seam.
   const railDecision = resolveExecutionRail({
     ...(await loadExecutionRailState(agent)),
     chainId: agent.chain_id,
   })
-  if (railDecision.rail === 'session_key') {
-    // ── Session rail RETIRED (#834, epic #821) ──────────────────────────
-    // The typed seam stays for reversibility; the machinery behind it is
-    // deleted. Fail-closed: refuse loudly, write nothing.
-    return {
-      statusCode: 410,
-      body: {
-        error:
-          'The session rail is retired — re-onboard this account on the delegation rail ' +
-          '(POST /accounts/hybrid, then grant a budget) to keep paying.',
-      },
-    }
+  if (railDecision.rail === 'retired_session') {
+    // #993: retirement decided in the seam, refusal produced there too.
+    return sessionRailRetired('account')
   }
 
   let onChainAllowance

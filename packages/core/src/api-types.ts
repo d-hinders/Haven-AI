@@ -2494,19 +2494,6 @@ export interface operations {
                     };
                 };
             };
-            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
-                        detail?: string;
-                    };
-                };
-            };
             /** @description Error response */
             409: {
                 headers: {
@@ -2825,8 +2812,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -2968,8 +2954,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -3158,8 +3143,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -3223,8 +3207,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -3586,8 +3569,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -3634,8 +3616,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -3816,8 +3797,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -4052,8 +4032,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -4121,8 +4100,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -4235,6 +4213,18 @@ export interface operations {
                     };
                 };
             };
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        detail?: string;
+                    };
+                };
+            };
             /** @description Error response */
             404: {
                 headers: {
@@ -4326,8 +4316,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -4421,8 +4410,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -5043,8 +5031,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };
@@ -5093,8 +5080,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        error: "agent_pending_approval" | "agent_paused";
+                        error: string;
                         detail?: string;
                     };
                 };

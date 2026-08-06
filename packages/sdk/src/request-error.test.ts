@@ -39,4 +39,18 @@ describe('request() surfaces backend `details` in the error message (#684)', () 
     )
     await expect(haven().getAgent()).rejects.toThrow('Validation failed: {"field":"amount"}')
   })
+
+  // #1130: agentAuth's structured refusals carry `detail` (singular) — the
+  // operator guidance must reach the message, not just the attached body.
+  it("surfaces agentAuth's singular `detail` (agent_pending_approval, agent_paused)", async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      errorResponse(403, {
+        error: 'agent_pending_approval',
+        detail: 'This agent is waiting for its first budget approval.',
+      }),
+    )
+    await expect(haven().getAgent()).rejects.toThrow(
+      'agent_pending_approval: This agent is waiting for its first budget approval.',
+    )
+  })
 })

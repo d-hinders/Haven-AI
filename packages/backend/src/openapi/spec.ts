@@ -50,7 +50,11 @@ const agentAuthForbidden = {
         type: 'object',
         required: ['error'],
         properties: {
-          error: { type: 'string', enum: ['agent_pending_approval', 'agent_paused'] },
+          // Not an enum: agentAuth also 403s configuration refusals
+          // ('Agent has no delegate address configured', 'No Safe deployed
+          // for this account') — an exhaustive-switch client must treat
+          // unknown codes as generic refusals (#1132 review).
+          error: { type: 'string' },
           detail: { type: 'string' },
         },
       },
@@ -521,7 +525,6 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': errorResponse,
-          '403': agentAuthForbidden,
           '409': errorResponse,
         },
       },
@@ -1265,6 +1268,7 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': errorResponse,
+          '403': agentAuthForbidden,
           '404': errorResponse,
           '429': errorResponse,
         },

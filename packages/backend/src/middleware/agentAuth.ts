@@ -158,6 +158,20 @@ export async function agentAuthMiddleware(
 
   const row = result.rows[0]
 
+  // #1130: pending_approval is the NORMAL starting state for every connect-
+  // modal agent (the key is issued at /register; activation happens at the
+  // first budget grant) — a valid key must not read as "invalid or revoked".
+  // Named branch BEFORE the allow-list rejection, mirroring `paused` below;
+  // it never authenticates the request.
+  if (row.status === 'pending_approval') {
+    return reply.code(403).send({
+      error: 'agent_pending_approval',
+      detail:
+        'This agent is waiting for its first budget approval. Open Haven and complete the ' +
+        'budget grant for this agent — its API key starts working the moment the budget is active.',
+    })
+  }
+
   // Positive allow-list: only 'active' and 'paused' agents are recognised;
   // everything else (including 'revoked' and any future status strings) is
   // rejected. Using an explicit allow-list prevents unknown future statuses

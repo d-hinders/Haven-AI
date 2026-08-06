@@ -85,7 +85,13 @@ deployed that way today.
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
   not use it; it caused real confusion (#585/#595).
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).
-- Hosted MCP (Railway): `haven-ai-hosted-mcp-dev-<hash>.up.railway.app` — confirm the hash.
+- Hosted MCP (Railway): `https://haven-ai-hosted-mcp-dev-25c7.up.railway.app/v1` —
+  confirmed by probe 2026-08-06 (`GET /v1` → 405 POST-only MCP, `/healthz` → 200).
+  The service sleeps (Railway serverless): the first call after idle cold-starts.
+  Its `HAVEN_API_URL` must be `https://havenbackend-dev-8b95.up.railway.app` —
+  it shipped pointing at a NONEXISTENT host (`havenbackend-dev-8a00`, the dev
+  prefix with production's hash), which made every relayed call fail like a
+  credential problem (#1131).
 
 ## Branch → deploy mapping
 

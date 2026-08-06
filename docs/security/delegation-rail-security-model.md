@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/lib/hybrid-account-config.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-05"
+last-verified: "2026-08-06"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -211,6 +211,9 @@ single-signer on mainnet" has exactly one answer.
   deploy/sign paths rebuild the account config from) is synced only *after* the
   on-chain op confirms, and the submit step **pins the sync to the signed
   calldata** — the DB can never record a signer the owner didn't actually sign.
+  (#985 moved `Executor` out of `infra/repositories/hybrid-signers.ts` into the
+  shared `infra/transaction.ts`; that is a declaration site, not a behaviour —
+  the queries, their ordering and the post-confirmation sync are unchanged.)
 - **UUPS upgrade authority stays with the signers** (invariant 11); recovery
   changes signers, never the implementation.
 

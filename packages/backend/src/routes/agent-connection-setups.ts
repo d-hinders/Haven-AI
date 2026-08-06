@@ -106,7 +106,16 @@ interface WalletApprovalBody {
   confirmation_status?: 'confirmed' | 'receipt_timeout'
 }
 
+/**
+ * The PRODUCTION hosted MCP. Served as a default ONLY when this backend IS
+ * the production backend (#1129): a dev/local backend handing out this URL
+ * points agents at the wrong database, and every call 401s with a message
+ * blaming the key. Environments other than prod must set HAVEN_HOSTED_MCP_URL
+ * (or NEXT_PUBLIC_HAVEN_MCP_URL) explicitly or the setup fails LOUDLY with
+ * the variable named.
+ */
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
+const PRODUCTION_API_HOST = 'havenbackend-production-8a00.up.railway.app'
 export const CONNECTOR_PACKAGE = '@haven_ai/connect@alpha'
 
 /**
@@ -123,6 +132,15 @@ class SetupRefusal extends Error {
     super(message)
   }
 }
+
+/**
+ * Hosted MCP URL configuration refusal (#1129). A distinct class so route
+ * handlers can convert it into an explicit 500 carrying the actionable
+ * message — the app-level error handler masks generic 500 messages as
+ * "Internal server error", which would hide the variable name from the
+ * operator/developer who needs it.
+ */
+export class HostedMcpConfigError extends Error {}
 
 export default async function agentConnectionSetupRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: CreateSetupBody }>(
@@ -212,6 +230,11 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       return reply.code(410).send({ error: 'Setup token expired' })
     }
 
+    // #1129: resolve BEFORE the connector-metadata write so a configuration
+    // error answers cleanly without mutating the setup row.
+    const hostedMcpUrlValue = hostedMcpUrlOrReply(request, reply)
+    if (hostedMcpUrlValue == null) return reply
+
     if (request.body.connector_version || request.body.runtime) {
       await setups.updateConnectorMetadata(
         setup.id,
@@ -221,7 +244,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     }
 
     const allowances = await loadSetupAllowances(setup.id)
-    return buildConnectorSetupResponse(setup, allowances)
+    return buildConnectorSetupResponse(setup, allowances, hostedMcpUrlValue)
   })
 
   app.post<{ Body: RegisterSetupBody }>('/register', async (request, reply) => {
@@ -235,11 +258,18 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       return reply.code(401).send({ error: 'Invalid setup token' })
     }
 
+    // #1129: resolved BEFORE the transaction opens. A configuration error must
+    // refuse the whole registration up front — never after the setup token has
+    // been locked/consumed or the pending agent row inserted, so a misconfigured
+    // backend can neither burn the client's one-shot token nor leave a setup
+    // half-registered.
+    const hostedMcpUrlValue = hostedMcpUrlOrReply(request, reply)
+    if (hostedMcpUrlValue == null) return reply
+
     let agentId = ''
     let setupId = ''
     let apiKeyPrefix = ''
     let delegateAddress = ''
-    let hostedMcpUrlValue = ''
     let issuePassportForSetup = false
     let setupChainId = 0
     let setupUserId = ''
@@ -292,7 +322,6 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           restart_required: Boolean(request.body.install_capabilities?.restart_required),
         }
         setupId = setup.id
-        hostedMcpUrlValue = hostedMcpUrl()
         issuePassportForSetup = setup.issue_passport === true
         setupChainId = setup.safe_chain_id
         setupUserId = setup.user_id
@@ -954,7 +983,14 @@ async function authenticateInstallStatus(
 }
 
 
-function buildConnectorSetupResponse(setup: SetupRow, allowances: AllowanceRow[]) {
+// #1129: the hosted MCP URL is resolved by the ROUTE (via hostedMcpUrlOrReply)
+// and passed in, so a configuration error is answered before any state changes
+// rather than thrown from inside response building.
+function buildConnectorSetupResponse(
+  setup: SetupRow,
+  allowances: AllowanceRow[],
+  hostedMcpUrlValue: string,
+) {
   return {
     setup_id: setup.id,
     status: effectiveStatus(setup),
@@ -975,7 +1011,7 @@ function buildConnectorSetupResponse(setup: SetupRow, allowances: AllowanceRow[]
       allowance_amount: allowance.allowance_amount,
       reset_period_min: allowance.reset_period_min,
     })),
-    hosted_mcp_url: hostedMcpUrl(),
+    hosted_mcp_url: hostedMcpUrlValue,
     x402_binding_signer: x402BindingSignerAddress(),
     challenge: {
       id: setup.challenge_id,
@@ -1079,12 +1115,46 @@ function apiBaseUrl(request: FastifyRequest): string {
   return `${scheme}://${host}`.replace(/\/+$/, '')
 }
 
-function hostedMcpUrl(): string {
-  return (
-    process.env.HAVEN_HOSTED_MCP_URL ??
-    process.env.NEXT_PUBLIC_HAVEN_MCP_URL ??
-    DEFAULT_HOSTED_MCP_URL
-  ).replace(/\/+$/, '')
+/**
+ * #1129: the default is paired to the backend's own identity. An explicit
+ * variable always wins; the prod fallback is served only when the resolved
+ * self-URL IS the production host; everywhere else (dev, localhost — on
+ * purpose) this throws a configuration error naming the variable, which the
+ * routes surface as a 500 instead of silently emitting another environment's
+ * URL.
+ */
+export function hostedMcpUrl(request: FastifyRequest): string {
+  const explicit = process.env.HAVEN_HOSTED_MCP_URL ?? process.env.NEXT_PUBLIC_HAVEN_MCP_URL
+  if (explicit) return explicit.replace(/\/+$/, '')
+  const self = apiBaseUrl(request)
+  if (new URL(self).host === PRODUCTION_API_HOST) {
+    return DEFAULT_HOSTED_MCP_URL
+  }
+  throw new HostedMcpConfigError(
+    `This backend (${self}) is not production, so it has no hosted MCP URL to hand out — ` +
+      'set HAVEN_HOSTED_MCP_URL to this environment\'s hosted MCP (see .env.example), ' +
+      'or connect with --local.',
+  )
+}
+
+/**
+ * Resolve the hosted MCP URL or answer the request with an explicit 500
+ * configuration error (returns null after replying, so callers bail with
+ * `return reply`). Call this OUTSIDE any transaction: a configuration error
+ * must never consume a setup token, mutate a setup row, or leave a
+ * registration half-created.
+ */
+function hostedMcpUrlOrReply(request: FastifyRequest, reply: FastifyReply): string | null {
+  try {
+    return hostedMcpUrl(request)
+  } catch (err) {
+    if (err instanceof HostedMcpConfigError) {
+      request.log.error({ err }, 'hosted MCP URL not configured for this environment (#1129)')
+      void reply.code(500).send({ error: err.message })
+      return null
+    }
+    throw err
+  }
 }
 
 // Address of the dedicated x402 binding key the backend signs expected-context

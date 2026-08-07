@@ -3,41 +3,43 @@
 // docs/architecture/10-module-boundaries.md against packages/backend and the
 // shared kernel packages/core.
 //
-// BLOCKING, ratcheting baseline (#982, epic #980): existing debt is captured in
-// packages/backend/dep-lint-baseline.json (file → rule → count); counts may only
-// SHRINK. A NEW boundary violation — or growth of an existing count — fails the
-// build with the offending edge. Same treatment design-lint got in #855 and
-// copy-lint in #902, using the SHARED ratchet engine those two share.
+// ABSOLUTE since #999 (epic #980's closing issue): the ratcheting baseline is
+// retired — the linter simply passes or fails. The only escape hatch is an
+// inline waiver comment on (or directly above) the offending import:
+//
+//   // dep-lint-exempt: <concrete reason>
+//   import pool from '../db.js'
+//
+// The reason must be concrete ("bootstraps the pool before repositories
+// exist"), not "legacy" or "TODO" — reasons under 20 characters are rejected.
+// `no-circular` can never be waived: a cycle is a defect regardless of intent.
 //
 // The rules themselves live in .dependency-cruiser.cjs, which is authoritative
 // over the prose in the architecture doc.
 //
-//   node scripts/dep-lint.mjs            # check against the baseline
-//   node scripts/dep-lint.mjs --update   # rewrite the baseline (shrink, or a
-//                                        # reviewed, intentional add)
+//   node scripts/dep-lint.mjs
 
-import { readdir } from 'node:fs/promises'
-import { join, dirname, relative, sep } from 'node:path'
+import { readdir, readFile } from 'node:fs/promises'
+import { join, dirname, relative, sep, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { cruise } from 'dependency-cruiser'
-import { newViolations, hasShrunk, writeBaseline, readBaseline } from './lib/ratchet.mjs'
-
-// Re-exported so tests use the SHARED ratchet engine (scripts/lib/ratchet.mjs),
-// the same implementation design-lint and copy-lint use.
-export { newViolations, hasShrunk }
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const BASELINE_PATH = join(REPO_ROOT, 'packages', 'backend', 'dep-lint-baseline.json')
 // Roots the gate polices. `core` is here so `core-stays-pure` can actually fire
 // — a rule whose source tree is never scanned reports zero forever (#982's
-// chain-SDK lesson). The baseline file keeps its packages/backend home; it is
-// keyed by full repo-relative path, so entries from either root coexist.
+// chain-SDK lesson).
 const SCAN_ROOTS = [
   join(REPO_ROOT, 'packages', 'backend', 'src'),
   join(REPO_ROOT, 'packages', 'core', 'src'),
 ]
 const CONFIG_PATH = join(REPO_ROOT, '.dependency-cruiser.cjs')
+
+/** The one rule an inline waiver can never silence. */
+const UNWAIVABLE_RULES = new Set(['no-circular'])
+
+/** A waiver reason must say something; shorter than this reads as "TODO". */
+export const MIN_EXEMPT_REASON_LENGTH = 20
 
 /** The ruleset, loaded once. Also the source of the scan's exclude pattern. */
 export const ruleSet = createRequire(import.meta.url)(CONFIG_PATH)
@@ -64,25 +66,143 @@ async function walk(dir, out = []) {
 }
 
 /**
- * Pure core: fold dependency-cruiser's violation list into the ratchet shape.
- * Returns { counts: {file: {rule: n}}, details: [{file, rule, to, comment}] }.
- *
- * Keyed by the SOURCE file and rule name — the same edge reported twice (two
- * imports of `ethers` in one route) counts twice, so removing one of them
- * genuinely shrinks the baseline.
+ * Pure core: fold dependency-cruiser's violation list into per-edge details.
+ * Returns [{file, rule, to, comment}] — one entry per reported edge, so the
+ * same edge reported twice (two imports of `ethers` in one route) appears
+ * twice.
  */
 export function foldViolations(violations) {
-  const counts = {}
-  const details = []
-  for (const v of violations) {
-    const file = v.from
-    const rule = v.rule.name
-    counts[file] ??= {}
-    counts[file][rule] = (counts[file][rule] ?? 0) + 1
-    details.push({ file, rule, to: v.to, comment: v.rule.comment })
-  }
-  return { counts, details }
+  return violations.map((v) => ({
+    file: v.from,
+    rule: v.rule.name,
+    to: v.to,
+    comment: v.rule.comment,
+  }))
 }
+
+// ── Inline waivers ──────────────────────────────────────────────────────────
+
+/**
+ * Parse `// dep-lint-exempt: <reason>` waivers out of one source file. The
+ * marker binds to the import whose specifier appears on the SAME line or on
+ * one of the next few lines (so a multi-line `import { … } from '…'` under a
+ * comment-above still resolves). Returns [{specifier, reason}].
+ */
+export function parseExemptions(source) {
+  const lines = source.split('\n')
+  const found = []
+  const SPECIFIER_RE = /(?:from\s+|^\s*import\s+|require\(\s*)['"]([^'"]+)['"]/
+  for (let i = 0; i < lines.length; i++) {
+    const marker = lines[i].match(/dep-lint-exempt:\s*(.*\S)?/)
+    if (!marker) continue
+    const reason = (marker[1] ?? '').trim()
+    for (let j = i; j < Math.min(i + 10, lines.length); j++) {
+      const m = lines[j].match(SPECIFIER_RE)
+      if (m) {
+        found.push({ specifier: m[1], reason })
+        break
+      }
+    }
+  }
+  return found
+}
+
+/**
+ * Does `specifier`, written in `fromFile` (repo-relative posix path), resolve
+ * to the violation's `to` path? Relative specifiers resolve against the file
+ * (with the ESM `.js` → source `.ts` mapping and index resolution); bare
+ * specifiers match the resolved `node_modules/<pkg>/` prefix.
+ */
+export function specifierMatchesTarget(specifier, fromFile, target) {
+  if (specifier.startsWith('.')) {
+    const resolved = posix.normalize(posix.join(posix.dirname(fromFile), specifier))
+    const candidates = [
+      resolved,
+      resolved.replace(/\.js$/, '.ts'),
+      `${resolved}.ts`,
+      `${resolved}/index.ts`,
+    ]
+    return candidates.includes(target)
+  }
+  const pkg = specifier.startsWith('@')
+    ? specifier.split('/').slice(0, 2).join('/')
+    : specifier.split('/')[0]
+  return target.startsWith(`node_modules/${pkg}/`)
+}
+
+/**
+ * Split violations into waived and firing, reading each offending file's
+ * inline waivers at most once. A waiver with a reason shorter than
+ * `MIN_EXEMPT_REASON_LENGTH` does NOT waive — it fails with its own message,
+ * so "// dep-lint-exempt: TODO" can never ship. `no-circular` is unwaivable.
+ */
+export async function applyExemptions(details, readFileImpl = readFile) {
+  const cache = new Map()
+  const waived = []
+  const firing = []
+  const badReasons = []
+  for (const d of details) {
+    if (UNWAIVABLE_RULES.has(d.rule)) {
+      firing.push(d)
+      continue
+    }
+    if (!cache.has(d.file)) {
+      let source = ''
+      try {
+        source = await readFileImpl(join(REPO_ROOT, d.file), 'utf8')
+      } catch {
+        // Unreadable file → no waivers; the violation fires.
+      }
+      cache.set(d.file, parseExemptions(source))
+    }
+    const match = cache
+      .get(d.file)
+      .find((e) => specifierMatchesTarget(e.specifier, d.file, d.to))
+    if (!match) {
+      firing.push(d)
+    } else if (match.reason.length < MIN_EXEMPT_REASON_LENGTH) {
+      badReasons.push({ ...d, reason: match.reason })
+    } else {
+      waived.push({ ...d, reason: match.reason })
+    }
+  }
+  return { waived, firing, badReasons }
+}
+
+// ── The inline-SQL call-site gauge ──────────────────────────────────────────
+
+/**
+ * Count `.query(` / `.query<T>(` call sites in packages/backend/src OUTSIDE
+ * db/, db.ts and infra/repositories/ (production code only — the scan already
+ * excludes tests). This is the INTENSITY gauge #999 added when it retired the
+ * file-edge ratchet: the edge count sat flat at 66 files while call sites
+ * grew 256 → 344 (+34%), because a file that already imported the pool could
+ * grow inline SQL forever without moving any metric. Edges see presence;
+ * this sees growth. It is printed, not enforced — the number in CI logs is
+ * the trend line.
+ */
+export function countInlineSqlCallSites(files) {
+  let callSites = 0
+  let fileCount = 0
+  for (const { path, source } of files) {
+    if (!path.startsWith('packages/backend/src/')) continue
+    if (
+      path.startsWith('packages/backend/src/db/') ||
+      path === 'packages/backend/src/db.ts' ||
+      path.startsWith('packages/backend/src/infra/repositories/')
+    ) {
+      continue
+    }
+    const matches = source.match(/\.query[(<]/g)
+    if (matches && matches.length > 0) {
+      callSites += matches.length
+      fileCount += 1
+    }
+  }
+  return { callSites, fileCount }
+}
+
+// ── Scan ────────────────────────────────────────────────────────────────────
 
 /**
  * Run dependency-cruiser over the scanned source roots.
@@ -107,47 +227,53 @@ export async function scanAll() {
   const report = typeof output === 'string' ? JSON.parse(output) : output
   // `scannedFiles` is returned so callers can assert the scan actually reached
   // a given root — a rule whose tree is never walked reports zero forever.
-  return { ...foldViolations(report.summary.violations), fileCount: rel.length, scannedFiles: rel }
+  return { details: foldViolations(report.summary.violations), fileCount: rel.length, scannedFiles: rel }
 }
 
 async function main() {
-  const update = process.argv.includes('--update')
-  const { counts, details, fileCount } = await scanAll()
+  const { details, fileCount, scannedFiles } = await scanAll()
+  const { waived, firing, badReasons } = await applyExemptions(details)
 
-  if (update) {
-    writeBaseline(BASELINE_PATH, counts)
-    console.log(`dep-lint: baseline written (${details.length} existing violation(s) ratcheted).`)
-    return
+  // The gauge prints on every run — pass or fail — so CI logs always carry it.
+  const sources = await Promise.all(
+    scannedFiles.map(async (path) => ({ path, source: await readFile(join(REPO_ROOT, path), 'utf8') })),
+  )
+  const gauge = countInlineSqlCallSites(sources)
+  console.log(
+    `inline-SQL gauge: ${gauge.callSites} .query( call site(s) across ${gauge.fileCount} file(s) ` +
+      'outside infra/repositories/ (packages/backend/src, production code; trend only, not enforced).',
+  )
+
+  let failed = false
+  if (badReasons.length > 0) {
+    failed = true
+    console.log('\n✗ dep-lint-exempt comments with non-reasons (a waiver must say WHY, concretely):\n')
+    for (const b of badReasons) {
+      console.log(`  ${b.file} — ${b.rule}: "${b.reason}" is too short (< ${MIN_EXEMPT_REASON_LENGTH} chars)`)
+    }
   }
 
-  const baseline = readBaseline(BASELINE_PATH)
-  const failures = newViolations(counts, baseline)
-
-  if (failures.length > 0) {
-    console.log('✗ NEW dependency-boundary violations (beyond the ratcheting baseline):\n')
-    for (const f of failures) {
-      console.log(`  ${f.file} — ${f.key}: ${f.count} found, baseline allows ${f.allowed}`)
-      for (const d of details.filter((d) => d.file === f.file && d.rule === f.key)) {
-        console.log(`    → ${d.to}`)
-      }
-      const comment = details.find((d) => d.rule === f.key)?.comment
-      if (comment) console.log(`    ${comment}`)
+  if (firing.length > 0) {
+    failed = true
+    console.log('\n✗ Dependency-boundary violations:\n')
+    for (const f of firing) {
+      console.log(`  ${f.file} — ${f.rule}: → ${f.to}`)
+      if (f.comment) console.log(`    ${f.comment}`)
     }
     console.log(
-      '\nSee docs/architecture/10-module-boundaries.md. The baseline is SHRINK-ONLY: ' +
-        'fix the boundary rather than running `npm run lint:deps:update`, which is ' +
-        'only for a reviewed, intentional change.',
+      '\nSee docs/architecture/10-module-boundaries.md. Fix the boundary, or — for a ' +
+        'reviewed, deliberate exception — add `// dep-lint-exempt: <concrete reason>` on ' +
+        'the offending import (`no-circular` can never be waived).',
     )
-    process.exit(1)
   }
 
+  if (failed) process.exit(1)
+
   console.log(
-    `✓ No new dependency-boundary violations across ${fileCount} source files ` +
-      `(${details.length} baselined violation(s) remain).` +
-      (hasShrunk(counts, baseline)
-        ? ' Debt shrank — run `npm run lint:deps:update` to tighten the ratchet.'
-        : ''),
+    `✓ No dependency-boundary violations across ${fileCount} source files ` +
+      `(${waived.length} import edge(s) waived by dep-lint-exempt).`,
   )
+  for (const w of waived) console.log(`  waived: ${w.file} — ${w.rule}: ${w.reason}`)
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

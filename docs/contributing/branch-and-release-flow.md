@@ -72,7 +72,10 @@ the epic when its last sub-issue lands on `dev`.
      previous `prod-*` release). This is the durable "what's in prod, and when".
    - **`publish.yml`** publishes packages whose version isn't yet on npm — a
      version-gated step, so a promotion that didn't bump a version is a no-op
-     here (a separate concern — see [`../../scripts/README.md`](../../scripts/README.md)).
+     here. One package's failure doesn't abort the others (#1159): every
+     package is attempted and the run summary reports each outcome, so read
+     the per-package table — green-except-one is a real outcome (a separate
+     concern — see [`../../scripts/README.md`](../../scripts/README.md)).
 3. The pending-promotion digest updates to show `dev` and `main` back in sync.
 
 ## What's in prod vs. pending

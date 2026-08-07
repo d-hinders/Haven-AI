@@ -59,3 +59,18 @@ export async function up(client: PoolClient): Promise<void> {
     END $$;
   `)
 }
+
+/**
+ * Best-effort structural reverse (#1139) — mirrors what up() created. The
+ * runner never calls down(); this exists for operator rollback tooling only.
+ */
+export async function down(client: PoolClient): Promise<void> {
+  await client.query(`
+    ALTER TABLE payment_intents
+      DROP COLUMN IF EXISTS session_user_op,
+      DROP COLUMN IF EXISTS session_permission_id,
+      DROP COLUMN IF EXISTS execution_rail
+  `)
+  await client.query(`ALTER TABLE agents DROP COLUMN IF EXISTS session_permission_id`)
+  await client.query(`ALTER TABLE user_safes DROP COLUMN IF EXISTS execution_rail`)
+}

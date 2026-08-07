@@ -25,3 +25,15 @@ export async function up(client: PoolClient): Promise<void> {
       ADD COLUMN IF NOT EXISTS session_schedule_period_count INTEGER;
   `)
 }
+
+/**
+ * Best-effort structural reverse (#1139) — mirrors what up() created. The
+ * runner never calls down(); this exists for operator rollback tooling only.
+ */
+export async function down(client: PoolClient): Promise<void> {
+  await client.query(`
+    ALTER TABLE agents
+      DROP COLUMN IF EXISTS session_schedule_period_count,
+      DROP COLUMN IF EXISTS session_schedule_from_period
+  `)
+}

@@ -73,3 +73,22 @@ export async function up(client: PoolClient): Promise<void> {
       WHERE revocation_status = 'pending';
   `)
 }
+
+/**
+ * Best-effort structural reverse (#1139) — mirrors what up() created. The
+ * runner never calls down(); this exists for operator rollback tooling only.
+ */
+export async function down(client: PoolClient): Promise<void> {
+  await client.query(`ALTER TABLE agent_passports DROP CONSTRAINT IF EXISTS agent_passport_revocation_confirmed_has_tx`)
+  await client.query(`ALTER TABLE agent_passports DROP CONSTRAINT IF EXISTS agent_passport_revocation_status_valid`)
+  await client.query(`
+    ALTER TABLE agent_passports
+      DROP COLUMN IF EXISTS revocation_next_attempt_at,
+      DROP COLUMN IF EXISTS revocation_last_error,
+      DROP COLUMN IF EXISTS revocation_attempts,
+      DROP COLUMN IF EXISTS revocation_tx_hash,
+      DROP COLUMN IF EXISTS revocation_confirmed_at,
+      DROP COLUMN IF EXISTS revocation_requested_at,
+      DROP COLUMN IF EXISTS revocation_status
+  `)
+}

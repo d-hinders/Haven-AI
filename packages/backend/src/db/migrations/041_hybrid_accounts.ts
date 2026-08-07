@@ -45,3 +45,20 @@ export async function up(client: PoolClient): Promise<void> {
       CHECK (execution_rail IN ('allowance_module', 'session_key', 'delegation'));
   `)
 }
+
+/**
+ * Best-effort structural reverse (#1139) — mirrors what up() created. The
+ * runner never calls down(); this exists for operator rollback tooling only.
+ */
+export async function down(client: PoolClient): Promise<void> {
+  // Restore the pre-041 execution-rail CHECK (without 'delegation'), then
+  // drop what up() added.
+  await client.query(`ALTER TABLE user_safes DROP CONSTRAINT IF EXISTS user_safes_execution_rail_check`)
+  await client.query(`
+    ALTER TABLE user_safes
+      ADD CONSTRAINT user_safes_execution_rail_check
+      CHECK (execution_rail IN ('allowance_module', 'session_key'))
+  `)
+  await client.query(`ALTER TABLE user_safes DROP CONSTRAINT IF EXISTS user_safes_account_type_check`)
+  await client.query(`ALTER TABLE user_safes DROP COLUMN IF EXISTS account_type`)
+}

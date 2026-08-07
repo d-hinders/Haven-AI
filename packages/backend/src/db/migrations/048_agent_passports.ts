@@ -74,3 +74,11 @@ export async function up(client: PoolClient): Promise<void> {
       WHERE attestation_uid IS NOT NULL;
   `)
 }
+
+/**
+ * Best-effort structural reverse (#1139) — mirrors what up() created. The
+ * runner never calls down(); this exists for operator rollback tooling only.
+ */
+export async function down(client: PoolClient): Promise<void> {
+  await client.query(`DROP TABLE IF EXISTS agent_passports`)
+}

@@ -46,7 +46,8 @@ vi.mock('../../lib/portfolio.js', () => portfolioMocks)
 vi.mock('../../lib/fiat-values.js', () => ({
   getFiatValuesForTokenAmount: vi.fn(),
 }))
-vi.mock('../transactions.js', () => transactionMocks)
+// #992: aggregation/enrichment/caching moved to src/modules/transactions/.
+vi.mock('../../modules/transactions/index.js', () => transactionMocks)
 
 import dashboardRoutes from '../dashboard.js'
 

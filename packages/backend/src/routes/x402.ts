@@ -114,7 +114,7 @@ interface X402ApprovalRow {
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-function isPositiveDecimalAtomicAmount(value: string): boolean {
+export function isPositiveDecimalAtomicAmount(value: string): boolean {
   return DECIMAL_ATOMIC_AMOUNT_RE.test(value) && BigInt(value) > 0n
 }
 
@@ -131,7 +131,7 @@ function normaliseAddress(addr: string): string {
   return getChainClient('allowance_module').normaliseAddress(addr)
 }
 
-function chainIdFromX402Network(network: string): number | null {
+export function chainIdFromX402Network(network: string): number | null {
   if (network === 'base') return 8453
   if (network.startsWith('eip155:')) {
     const chainId = Number(network.slice('eip155:'.length))
@@ -171,7 +171,7 @@ function x402MetadataNetwork(metadata: unknown): string | null {
   return typeof network === 'string' ? network : null
 }
 
-function existingX402IntentMismatch(
+export function existingX402IntentMismatch(
   existing: Record<string, unknown>,
   requested: {
     resourceUrl: string

@@ -51,3 +51,26 @@ export async function up(client: PoolClient): Promise<void> {
     ON CONFLICT DO NOTHING;
   `)
 }
+
+/**
+ * Best-effort structural reverse (#1139) — mirrors what up() created. The
+ * runner never calls down(); this exists for operator rollback tooling only.
+ */
+export async function down(client: PoolClient): Promise<void> {
+  // Remove exactly the seeded rows, keyed by the same resource URLs the
+  // up() inserted (ON CONFLICT DO NOTHING means discovery-owned duplicates
+  // were never inserted by this migration and are left alone is NOT
+  // distinguishable — an operator rolling this back accepts removing these
+  // URLs regardless of who inserted them).
+  await client.query(`
+    DELETE FROM merchant_catalog
+    WHERE resource_url IN (
+      'https://pro-api.coingecko.com/api/v3/x402/onchain/search/pools',
+      'https://api.nansen.ai/api/v1/smart-money/netflow',
+      'https://api.anchor-x402.com/v1/price/token',
+      'https://api.linkedpanda.com/agent/v1/profiles/enrich',
+      'https://minifetch.com/api/v1/x402/extract/url-preview',
+      'https://api.anchor-x402.com/v1/decode/calldata'
+    )
+  `)
+}

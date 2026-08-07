@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/allowance-module.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/modules/mpp/**
-last-verified: "2026-08-07" # #997: covers updated (lib/machine-payment-evidence.ts moved into modules/mpp/**)
+last-verified: "2026-08-07" # #997: covers updated (modules/mpp/evidence.ts moved into modules/mpp/**)
 ---
 
 # Research — Smart-account-native x402 settlement (removing the funding leg)
@@ -21,7 +21,7 @@ last-verified: "2026-08-07" # #997: covers updated (lib/machine-payment-evidence
 >
 > **Outcome (2026-07):** the strategic track shipped. ERC-7710 direct
 > settlement is **live** on the delegation rail (#830 —
-> `packages/backend/src/lib/x402-delegation.ts`,
+> `packages/backend/src/modules/x402/x402-delegation.ts`,
 > `packages/backend/src/routes/x402.ts`), built on the MetaMask Hybrid
 > DeleGator (epic #821) rather than Safe-via-module. The Permit2 track was not
 > pursued. EIP-3009/delegate-EOA remains the default on the legacy
@@ -79,7 +79,7 @@ Standard merchant x402 on the legacy AllowanceModule rail (now import-only) is
 3. Backend validates allowance / token / amount / network / policy and **funds
    the delegate EOA from the Safe via the AllowanceModule** for the exact amount
    ([`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts),
-   [`packages/backend/src/lib/allowance-module.ts`](../../packages/backend/src/lib/allowance-module.ts)).
+   [`packages/backend/src/rails/allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts)).
 4. SDK retries with `X-PAYMENT`; merchant/facilitator settles delegate → merchant.
 
 Two implementation details that exist *only because of the funding leg* and are
@@ -90,7 +90,7 @@ the clearest evidence of its cost:
   `delegateBalance + remainingAllowance`, failing early with `insufficient_funds`
   when short ([`x402.ts`](../../packages/backend/src/routes/x402.ts)). This logic
   exists to reason about a wallet that *transiently holds liquid funds*.
-- **Gasless delegate sweep.** [`packages/backend/src/lib/sweep.ts`](../../packages/backend/src/lib/sweep.ts)
+- **Gasless delegate sweep.** [`packages/backend/src/rails/sweep.ts`](../../packages/backend/src/rails/sweep.ts)
   recovers stranded delegate USDC (merchant verified but didn't settle before
   expiry) via an EIP-3009 `transferWithAuthorization` back to the Safe. A target
   architecture with no funding leg deletes the *entire reason* this path exists.
@@ -194,7 +194,7 @@ Reasoned starting positions for the partner discussion (not final):
    `assetTransferMethod` support for the exact scheme; fall back to a **local
    facilitator** for the prototype so the spike isn't blocked on a vendor.
 8. **What evidence to return?** Same shape as today's machine-payment evidence
-   ([`packages/backend/src/lib/machine-payment-evidence.ts`](../../packages/backend/src/lib/machine-payment-evidence.ts)):
+   ([`packages/backend/src/modules/mpp/evidence.ts`](../../packages/backend/src/modules/mpp/evidence.ts)):
    smart account, merchant, token, amount, chain, x402 resource, tx hash — so the
    fee/bookkeeping ledger ([#386](https://github.com/d-hinders/Haven-AI/issues/386))
    is rail-agnostic.

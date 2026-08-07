@@ -25,7 +25,7 @@ Haven's custody-critical controls are **already on-chain**: the Safe
 AllowanceModule enforces per-token amount and reset period keyed by
 `(safe, delegate, token)`, and `executeAllowanceTransfer` is authorised by the
 **delegate's signature** — the relayer only pays gas
-([`allowance-module.ts`](../../packages/backend/src/lib/allowance-module.ts):232).
+([`allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts):232).
 The model is sound. The gap is **demonstrability**: the guardrails doc asks us to
 "maintain evidence that Haven does not control funds" (§ of the same name) and to
 keep the property "if Haven's backend disappeared, the Safe would still be
@@ -41,9 +41,9 @@ What the codebase shows today:
 - **No key storage.** No `private_key` / `seed` / `mnemonic` / `secret_key`
   column exists in any migration. ✅
 - **Two server signers, neither able to spend.** The relayer
-  ([`relayer.ts`](../../packages/backend/src/lib/relayer.ts):27) pays gas; it is
+  ([`relayer.ts`](../../packages/backend/src/infra/relayer.ts):27) pays gas; it is
   not a Safe owner or an allowance delegate. Since #974 there is a second:
-  [`lib/passport/receipt.ts`](../../packages/backend/src/lib/passport/receipt.ts)
+  [`modules/passport/receipt.ts`](../../packages/backend/src/modules/passport/receipt.ts)
   signs L0 passport verification receipts. It is a **message signer only** — no
   provider, no `sendTransaction`, and a dedicated key
   (`PASSPORT_RECEIPT_SIGNING_KEY`) that is never the relayer's, because its
@@ -71,7 +71,7 @@ blocks merge and points at the guardrail it would break.
 |---|---|---|---|
 | 1 | No key/seed storage | Scan all migrations + entity types for `private_key\|seed\|mnemonic\|secret_key` column names → must be empty | Red Line #1/#2; "no private key storage table" |
 | 2 | No plaintext key material at rest | Assert agent secrets are stored hashed; fail if a new column matches a secret-value pattern without `_hash` | Red Line #3 |
-| 3 | No server signer capable of spending | Static check: the env-derived `new Wallet(` sites in `src/` (excluding tests) are EXACTLY `lib/relayer.ts` and `lib/passport/receipt.ts` — an exhaustive allow-list, so a third is a deliberate decision. Assert the relayer address is never written as a Safe owner or allowance `delegate`, and that the receipt signer stays message-only (no provider, no `sendTransaction`, never the relayer key) | "no signer capable of spending"; Hard Invariants |
+| 3 | No server signer capable of spending | Static check: the env-derived `new Wallet(` sites in `src/` (excluding tests) are EXACTLY `infra/relayer.ts` and `modules/passport/receipt.ts` — an exhaustive allow-list, so a third is a deliberate decision. Assert the relayer address is never written as a Safe owner or allowance `delegate`, and that the receipt signer stays message-only (no provider, no `sendTransaction`, never the relayer key) | "no signer capable of spending"; Hard Invariants |
 | 4 | Authn ≠ authz on spend paths | Contract test: payment / relay endpoints reject a request that is authenticated (valid bearer) but carries no delegate/owner signature | Red Line #3; "Separate Authentication From Authorisation" |
 | 5 | On-chain is the final gate | Test that an over-allowance payment is queued for approval, never silently settled — i.e. the DB is not the only limit | Red Line #4 |
 | 6 | No discretionary mutation in relay | Test that the relay path does not alter recipient/amount/token/route after signature | "Treat Relaying As Non-Discretionary" |
@@ -174,5 +174,5 @@ link + honest labels.
 ## References
 
 - [`casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md) — the source of every invariant above.
-- [`allowance-module.ts`](../../packages/backend/src/lib/allowance-module.ts) — on-chain allowance read + relayer-gas-only transfer.
+- [`allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts) — on-chain allowance read + relayer-gas-only transfer.
 - [`02-identity-and-custody.md`](../architecture/02-identity-and-custody.md) — the custody model this makes provable.

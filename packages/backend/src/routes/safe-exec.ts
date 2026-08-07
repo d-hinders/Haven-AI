@@ -1,10 +1,10 @@
-import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
+import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../infra/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { getChain, isSupportedChain } from '../lib/chains.js'
-import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
-import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../lib/relayer.js'
+import { getChain, isSupportedChain } from '../domain/chains.js'
+import { predictSafePasskeySignerAddress } from '../modules/accounts/index.js'
+import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../infra/relayer.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   computeSafeTxHash,

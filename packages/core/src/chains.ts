@@ -6,7 +6,7 @@
  *
  * What deliberately does NOT live here:
  * - RPC URLs, API keys, provider/relayer construction — environment wiring,
- *   stays in the backend (`packages/backend/src/lib/chains.ts`).
+ *   stays in the backend (`packages/backend/src/domain/chains.ts`).
  * - viem chain objects, wagmi wiring — client construction, stays in the
  *   frontend (`packages/frontend/src/lib/chains.ts`).
  * - Each consumer's token RECORD keying and ordering — representation, not

@@ -13,7 +13,7 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../lib/portfolio.js', () => ({
+vi.mock('../../modules/accounts/index.js', () => ({
   fetchPortfolioForSafe: (...args: unknown[]) => mockFetchPortfolioForSafe(...args),
 }))
 

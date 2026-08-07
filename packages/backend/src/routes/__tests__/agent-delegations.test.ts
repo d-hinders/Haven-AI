@@ -26,16 +26,16 @@ vi.mock('../../middleware/auth.js', () => ({
     request.user = { sub: 'user-1' }
   },
 }))
-vi.mock('../../lib/hybrid-provisioning.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../lib/hybrid-provisioning.js')>()
+vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
   return {
     ...actual,
     computeHybridAccountAddress: (...a: unknown[]) => mockCompute(...a),
     ensureHybridDeployed: (...a: unknown[]) => mockEnsureDeployed(...a),
   }
 })
-vi.mock('../../lib/delegation-rail.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../lib/delegation-rail.js')>()
+vi.mock('../../rails/delegation-rail.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../rails/delegation-rail.js')>()
   return {
     ...actual,
     createTreasuryOps: (...a: unknown[]) => mockTreasury(...a),
@@ -44,7 +44,7 @@ vi.mock('../../lib/delegation-rail.js', async (importOriginal) => {
 })
 
 const agentDelegationRoutes = (await import('../agent-delegations.js')).default
-const { getDelegationContracts } = await import('../../lib/delegation-contracts.js')
+const { getDelegationContracts } = await import('../../rails/delegation-contracts.js')
 
 const AGENT_ID = '11111111-1111-1111-1111-111111111111'
 const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'

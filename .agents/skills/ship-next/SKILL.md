@@ -124,13 +124,14 @@ Classify a change as money-path when **either** the issue carries the `money-pat
 label **or** the diff touches any of:
 
 - `routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, or `routes/machine-payments.ts`;
-- `modules/mpp/`, `domain/payment-token.ts`, `lib/payment-coverage.ts`, or `lib/allowance-module.ts`;
-- `lib/execution-rail.ts` (the rail seam);
-- `lib/delegation-*.ts`, `lib/hybrid-provisioning.ts`, `lib/hybrid-account-config.ts`, or `routes/agent-delegations.ts`
+- `modules/mpp/`, `domain/payment-token.ts`, `domain/payment-coverage.ts`, or `rails/allowance-module.ts`;
+- `rails/execution-rail.ts` (the rail seam);
+- `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`, `rails/hybrid-account-config.ts`, or `routes/agent-delegations.ts`
   (the delegation rail);
-- `lib/sweep.ts`, `lib/relayer.ts`, or `lib/mainnet-gate.ts` (funds recovery, gas
+- `rails/sweep.ts`, `infra/relayer.ts`, or `modules/accounts/mainnet-gate.ts` (funds recovery, gas
   payment, and the mainnet authority floor — added by #1045; the review found them
-  missing while they literally move or gate money);
+  missing while they literally move or gate money; relocated out of the flat lib
+  directory by #998);
 - `routes/safe-exec.ts`, `routes/approvals.ts`, or `routes/hybrid-accounts.ts`
   (user-signed execution, the approval queue, account provisioning);
 - `packages/sdk/src/signer.ts` (signing schemes are spend authority);

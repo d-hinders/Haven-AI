@@ -15,7 +15,7 @@ covers:
   - packages/frontend/playwright.live.config.ts
   - packages/frontend/src/lib/api.ts
   - packages/sdk/src/sweep.ts
-  - packages/backend/src/lib/sweep.ts
+  - packages/backend/src/rails/sweep.ts
   - packages/backend/src/config.ts
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md

@@ -9,7 +9,7 @@
  */
 
 import { ethers } from 'ethers'
-import { scanDelegateBalances, dustAlertThresholdAtomic } from '../src/lib/delegate-balance-monitor.js'
+import { scanDelegateBalances, dustAlertThresholdAtomic } from '../src/infra/delegate-balance-monitor.js'
 
 const ICONS: Record<string, string> = {
   clear: '✅',

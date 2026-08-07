@@ -3,8 +3,8 @@
  * extracted verbatim from `routes/transactions.ts` (#992). Data access goes
  * through `infra/repositories/transaction-history.ts` (#985 convention).
  */
-import { getChain } from '../../lib/chains.js'
-import { machinePaymentLifecycle } from '../../lib/machine-payment-lifecycle.js'
+import { getChain } from '../../domain/chains.js'
+import { machinePaymentLifecycle } from '../../domain/machine-payment-lifecycle.js'
 import {
   findConfirmedX402ApprovalRequests,
   findConfirmedX402PaymentIntents,

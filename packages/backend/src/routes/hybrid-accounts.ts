@@ -16,19 +16,19 @@ import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
-import { DELEGATION_RAIL_CHAIN_IDS } from '../lib/delegation-contracts.js'
-import { isValueBearingChain, signerFloorError } from '../lib/mainnet-gate.js'
-import { computeHybridAccountAddress, type PasskeySigner } from '../lib/hybrid-provisioning.js'
+import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
+import { isValueBearingChain, signerFloorError } from '../modules/accounts/index.js'
+import { computeHybridAccountAddress, type PasskeySigner } from '../rails/hybrid-provisioning.js'
 import {
   prepareSignerChange,
   submitSignerChange,
   validateSignedSubmission,
   type SignerActionAccount,
   type SignerActionBody,
-} from '../lib/hybrid-signer-actions.js'
-import { prepareTransfer, submitTransfer, type TransferBody } from '../lib/hybrid-transfers.js'
+} from '../rails/hybrid-signer-actions.js'
+import { prepareTransfer, submitTransfer, type TransferBody } from '../rails/hybrid-transfers.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
-import { loadHybridOwnerConfig } from '../lib/hybrid-account-config.js'
+import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
 
 interface CreateHybridBody {
   chain_id?: number

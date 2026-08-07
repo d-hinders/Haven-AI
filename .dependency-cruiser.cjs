@@ -16,10 +16,12 @@
 //   npm run lint:deps           # check against the baseline
 //   npm run lint:deps:update    # rewrite the baseline (shrink, or a reviewed add)
 
-// Chain SDKs, confined to infra/chain/ behind the ChainClient port (#994) —
-// `rails/` doesn't exist yet (#980's later modularization), so today "confined"
-// means `infra/` (and, until #998 lands, the handful of `lib/*.ts` files the
-// port's implementations wrap rather than duplicate).
+// Chain SDKs, confined to infra/ and rails/ behind the ChainClient port
+// (#994) — `rails/` landed in #998, joining `infra/` as the two directories
+// allowed to import a chain SDK directly (rule 4). `chain-sdk-not-in-routes`
+// below only polices `routes/**` today; widening it to assert the positive
+// (infra/rails ARE the only importers, everywhere) is follow-up work, not
+// this issue's scope.
 // NOTE: dependency-cruiser reports npm dependencies by their RESOLVED path, so
 // this must match `node_modules/<pkg>` — a bare `^ethers` matches nothing and
 // silently passes. That false negative is covered by a unit test.
@@ -90,15 +92,44 @@ module.exports = {
       },
     },
     {
-      // Rule 6. `lib/reporting/` and `lib/fee/` don't have an index.ts yet, so
-      // every external import into them is still "deep" — the baseline records
-      // that debt, and the rule stops it growing. `modules/transactions/`
-      // (#992), `modules/x402/` (#996) and `modules/mpp/` (#997, the third
-      // #980 M4 module) DO have a public index.ts already — for them the rule
-      // holds at its intended end state: zero violations, and the baseline
-      // must never gain an entry for any of the three. Widens to the rest of
-      // modules/** as #980 creates them; zeroed for lib/(reporting|fee) by
-      // #998.
+      // Rule 1, applied to the backend's OWN domain/ (arrives with the
+      // directory, #998). domain/ is money/address types, the chain registry,
+      // policy predicates, the rail decision, and payment-state taxonomy —
+      // none of which need a framework, a database, or a chain SDK. Every
+      // file placed in domain/ by #998 was verified pure before landing here
+      // (one candidate — `execution-rail.ts`, "the rail decision" per the
+      // architecture doc's table — was kept OUT of domain/ specifically
+      // because it queries `db.ts` directly; see the #998 PR body). This rule
+      // therefore starts at ZERO and, like `core-stays-pure`, must never gain
+      // a baseline entry — a violation here means new code was placed in
+      // domain/ that does not belong there, not that domain/ needs grandfathering.
+      name: 'domain-stays-pure',
+      severity: 'error',
+      comment:
+        'packages/backend/src/domain/ must stay pure — no fastify, pg, ethers, viem, ' +
+        'permissionless, smart-accounts-kit, and no path under modules/, infra/, http/ or ' +
+        'rails/. It is the stable base every layer depends on; dependencies point INTO domain/, ' +
+        'never out of it.',
+      from: { path: '^packages/backend/src/domain/' },
+      to: {
+        path:
+          'node_modules/(fastify|pg|ethers|viem|permissionless|@metamask/smart-accounts-kit)/|' +
+          '^packages/backend/src/(modules|infra|http|rails)/',
+      },
+    },
+    {
+      // Rule 6. `modules/transactions/` (#992), `modules/x402/` (#996) and
+      // `modules/mpp/` (#997) already had a public index.ts; #998 gave every
+      // remaining modules/** directory one too (accounts/, agents/, payments/,
+      // catalog/, accounting/, reporting/, fee/, passport/) and fixed every
+      // external call site to import through it. The rule now covers ALL of
+      // modules/** at its intended end state — zero violations, and the
+      // baseline must never gain an entry for any of them. `platform/`,
+      // `domain/`, `infra/` and `rails/` are LAYERS, not domain-capability
+      // modules (see the architecture doc's "what belongs where" table), and
+      // deliberately do not get barrels — they hold multiple files each with
+      // many independent direct importers, so a barrel there would be
+      // ceremony, not a boundary.
       name: 'no-deep-cross-module-import',
       severity: 'error',
       comment:
@@ -106,12 +137,11 @@ module.exports = {
         'If the module has no index.ts yet, adding one is part of its #980 sub-issue.',
       from: {
         path: '^packages/backend/src/',
-        pathNot: '^packages/backend/src/(lib/(reporting|fee)|modules/(transactions|x402|mpp))/',
+        pathNot: '^packages/backend/src/modules/[^/]+/',
       },
       to: {
-        path: '^packages/backend/src/(lib/(reporting|fee)|modules/(transactions|x402|mpp))/',
-        pathNot:
-          '^packages/backend/src/(lib/(reporting|fee)|modules/(transactions|x402|mpp))/index\\.ts$',
+        path: '^packages/backend/src/modules/[^/]+/',
+        pathNot: '^packages/backend/src/modules/[^/]+/index\\.ts$',
       },
     },
   ],

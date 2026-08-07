@@ -13,8 +13,8 @@
  * existing logic").
  */
 import { createPublicClient, http, getAddress as viemGetAddress, erc20Abi, type Address as ViemAddress } from 'viem'
-import { getChain } from '../../lib/chains.js'
-import { chainForId } from '../../lib/delegation-contracts.js'
+import { getChain } from '../../domain/chains.js'
+import { chainForId } from '../../rails/delegation-contracts.js'
 import type { ChainClient } from '../../domain/chain-client.js'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'

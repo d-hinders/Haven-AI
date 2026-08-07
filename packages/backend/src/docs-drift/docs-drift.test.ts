@@ -3,7 +3,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { openapiSpec } from '../openapi/spec.js'
-import { getChain, SUPPORTED_CHAIN_IDS } from '../lib/chains.js'
+import { getChain, SUPPORTED_CHAIN_IDS } from '../domain/chains.js'
 
 /**
  * Documentation drift tests (Phase 2 of the docs-quality system, epic #642).
@@ -64,7 +64,7 @@ describe('CLAUDE.md chain claims match the chains registry', () => {
     for (const id of referenced) {
       expect(
         SUPPORTED_CHAIN_IDS,
-        `CLAUDE.md references chain ID ${id}, which is not in lib/chains.ts`,
+        `CLAUDE.md references chain ID ${id}, which is not in domain/chains.ts`,
       ).toContain(id)
     }
   })

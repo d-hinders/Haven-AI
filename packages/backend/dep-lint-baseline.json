@@ -1,54 +1,47 @@
 {
   "packages/backend/src/index.ts": {
-    "no-deep-cross-module-import": 2,
     "pg-only-in-infra": 1
   },
-  "packages/backend/src/lib/accounting-entry.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/agent-payment-status.ts": {
-    "no-deep-cross-module-import": 1
-  },
-  "packages/backend/src/lib/delegate-balance-monitor.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/delegation-authorization.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/execution-rail.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/fee/fee-module.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/fortnox-connection.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/hybrid-account-config.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/leader-lock.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/merchant-catalog.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/onboarding-funnel.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/reporting/feed-orchestrator.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/reporting/feed-sync.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/reporting/receipt-underlag.ts": {
+  "packages/backend/src/infra/delegate-balance-monitor.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/middleware/agentAuth.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/middleware/agentToolAudit.ts": {
+    "pg-only-in-infra": 1
+  },
+  "packages/backend/src/modules/accounting/accounting-entry.ts": {
+    "pg-only-in-infra": 1
+  },
+  "packages/backend/src/modules/catalog/merchant-catalog.ts": {
+    "pg-only-in-infra": 1
+  },
+  "packages/backend/src/modules/fee/fee-module.ts": {
+    "pg-only-in-infra": 1
+  },
+  "packages/backend/src/modules/reporting/feed-orchestrator.ts": {
+    "pg-only-in-infra": 1
+  },
+  "packages/backend/src/modules/reporting/feed-sync.ts": {
+    "pg-only-in-infra": 1
+  },
+  "packages/backend/src/modules/reporting/fortnox-connection.ts": {
+    "pg-only-in-infra": 1
+  },
+  "packages/backend/src/modules/reporting/receipt-underlag.ts": {
+    "pg-only-in-infra": 1
+  },
+  "packages/backend/src/platform/leader-lock.ts": {
+    "pg-only-in-infra": 1
+  },
+  "packages/backend/src/rails/delegation-authorization.ts": {
+    "pg-only-in-infra": 1
+  },
+  "packages/backend/src/rails/execution-rail.ts": {
+    "pg-only-in-infra": 1
+  },
+  "packages/backend/src/rails/hybrid-account-config.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/accounting.ts": {
@@ -87,14 +80,8 @@
   "packages/backend/src/routes/passkeys.ts": {
     "pg-only-in-infra": 1
   },
-  "packages/backend/src/routes/payments.ts": {
-    "no-deep-cross-module-import": 1
-  },
   "packages/backend/src/routes/portfolio.ts": {
     "pg-only-in-infra": 1
-  },
-  "packages/backend/src/routes/reporting.ts": {
-    "no-deep-cross-module-import": 2
   },
   "packages/backend/src/routes/safe-deploy.ts": {
     "pg-only-in-infra": 1

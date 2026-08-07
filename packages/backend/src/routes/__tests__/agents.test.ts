@@ -24,7 +24,7 @@ const { mockRequestPassport, mockIssueBestEffort } = vi.hoisted(() => ({
   mockRequestPassport: vi.fn(),
   mockIssueBestEffort: vi.fn(),
 }))
-vi.mock('../../lib/passport/index.js', () => ({
+vi.mock('../../modules/passport/index.js', () => ({
   requestPassport: (...a: unknown[]) => mockRequestPassport(...a),
   issuePassportBestEffort: (...a: unknown[]) => mockIssueBestEffort(...a),
   PASSPORT_CHAIN_IDS: new Set([84532]),

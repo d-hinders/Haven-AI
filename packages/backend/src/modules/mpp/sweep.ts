@@ -23,15 +23,15 @@ import {
   releaseSweepClaim,
   resolveStrandedEventsForAgent,
 } from '../../infra/repositories/machine-payments.js'
-import { RelayerBudgetExceededError } from '../../lib/relayer-spend-guard.js'
-import { getTokenBalance } from '../../lib/allowance-module.js'
-import { getExplorerUrl } from '../../lib/chains.js'
+import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
+import { getTokenBalance } from '../../rails/allowance-module.js'
+import { getExplorerUrl } from '../../domain/chains.js'
 import {
   buildSweepAuthorization,
   signSweepExpectedContext,
   recoverSweepSigner,
   relaySweepAuthorization,
-} from '../../lib/sweep.js'
+} from '../../rails/sweep.js'
 import {
   isSweepableChain,
   sweepUsdcAddress,

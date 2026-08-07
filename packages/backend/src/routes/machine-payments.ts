@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
-import { getAgentPaymentStatus } from '../lib/agent-payment-status.js'
+import { getAgentPaymentStatus } from '../modules/payments/index.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   authorizeMachinePayment,

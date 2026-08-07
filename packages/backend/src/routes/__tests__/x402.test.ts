@@ -27,9 +27,9 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
+vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 
-vi.mock('../../lib/fiat-values.js', () => fiatMocks)
+vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 
 // Evidence recording moved into the mpp module's public entry point (#997);
 // the x402 legacy-rail orchestration imports it from there now.

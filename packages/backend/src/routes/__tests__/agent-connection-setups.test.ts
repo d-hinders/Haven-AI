@@ -28,7 +28,7 @@ vi.mock('../../middleware/auth.js', () => ({
   },
 }))
 
-vi.mock('../../lib/allowance-module.js', () => ({
+vi.mock('../../rails/allowance-module.js', () => ({
   getTokenAllowance: (...args: unknown[]) => mockGetTokenAllowance(...args),
   getTokensForDelegate: (...args: unknown[]) => mockGetTokensForDelegate(...args),
 }))
@@ -40,7 +40,7 @@ const { mockRequestPassport, mockIssueBestEffort } = vi.hoisted(() => ({
   mockRequestPassport: vi.fn(),
   mockIssueBestEffort: vi.fn(),
 }))
-vi.mock('../../lib/passport/index.js', () => ({
+vi.mock('../../modules/passport/index.js', () => ({
   requestPassport: (...a: unknown[]) => mockRequestPassport(...a),
   issuePassportBestEffort: (...a: unknown[]) => mockIssueBestEffort(...a),
   isPassportConfigured: () => true,

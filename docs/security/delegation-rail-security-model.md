@@ -5,13 +5,13 @@ contract: true
 covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
-  - packages/backend/src/lib/hybrid-signer-actions.ts
-  - packages/backend/src/lib/hybrid-transfers.ts
+  - packages/backend/src/rails/hybrid-signer-actions.ts
+  - packages/backend/src/rails/hybrid-transfers.ts
   - packages/backend/src/infra/repositories/hybrid-signers.ts
-  - packages/backend/src/lib/hybrid-account-config.ts
+  - packages/backend/src/rails/hybrid-account-config.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-07"
+last-verified: "2026-08-07" # #998: covers + body re-read after the lib/ fold (hybrid-signer-actions.ts, hybrid-transfers.ts, hybrid-account-config.ts -> rails/, mainnet-gate.ts -> modules/accounts/, passport/attestation.ts -> modules/passport/) — pure path move, invariants unchanged
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -80,7 +80,7 @@ addresses with audit provenance (#825) and the #826 tripwires (framework repo
 activity, alternative 7710 implementations), not by CI.
 
 **Passport attestations (#970) — a new relayer use, still not value-bearing:**
-the L0 agent-passport anchor (`lib/passport/attestation.ts`) is the one place
+the L0 agent-passport anchor (`modules/passport/attestation.ts`) is the one place
 the relayer signs something other than gas on a user-authorised transaction —
 it submits EAS `attest`/`revoke` calls with Haven as issuer. That is governance
 metadata, not spend authority: the transaction targets the pinned EAS contract
@@ -239,7 +239,7 @@ resolved differently) but has no remaining frontend caller.
 The two surfaces differ only in how the account is resolved: agent lookup
 versus an owner-scoped `(address, chain)` lookup on `user_safes`. Authority
 rules, the ≥2-signer refusal, the calldata encoding and the signed-op matching
-are **one implementation** (`lib/hybrid-signer-actions.ts`), because two copies
+are **one implementation** (`rails/hybrid-signer-actions.ts`), because two copies
 of a spend-authority rule is how they drift apart. Invariant 13 is asserted
 against that shared core and against both routes reaching it. Client-side, signing selects the passkey whose credential is
 actually enrolled on the signing device rather than blindly `passkeys[0]`, so
@@ -274,7 +274,7 @@ Before any account holds **mainnet** funds:
 > the ≥2 floor (or the explicit waiver) is a launch gate, tracked on the
 > mainnet decision issue (#908).
 
-**The mechanism (implemented, #908):** `lib/mainnet-gate.ts` enforces the floor
+**The mechanism (implemented, #908):** `modules/accounts/mainnet-gate.ts` enforces the floor
 at both authority moments — **provisioning** (`POST /accounts/hybrid`) and
 **grant activation** (`POST /agents/:id/delegations/:hash/activate`), the
 moment a delegation becomes live spend authority. Properties:

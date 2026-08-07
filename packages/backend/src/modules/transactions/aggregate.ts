@@ -12,10 +12,10 @@ import {
   fetchInternalTransactions,
   fetchERC20Transfers,
   fetchSafeServiceTransfers,
-} from '../../lib/explorer-api.js'
-import { getChain } from '../../lib/chains.js'
-import { formatTokenValue } from '../../lib/tokens.js'
-import { createCache } from '../../lib/cache.js'
+} from '../../infra/explorer-api.js'
+import { getChain } from '../../domain/chains.js'
+import { formatTokenValue } from '../../domain/tokens.js'
+import { createCache } from '../../platform/cache.js'
 import { buildTransactionCacheKey } from './cache-key.js'
 import { compareTransactions, transactionDedupKey, parseIsoTimestamp } from './ordering.js'
 import type {

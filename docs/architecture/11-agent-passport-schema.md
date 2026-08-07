@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers:
-  - packages/backend/src/lib/passport/**
+  - packages/backend/src/modules/passport/**
   - packages/backend/src/infra/repositories/agent-passports.ts
   - packages/backend/src/routes/agent-passports.ts
   - packages/backend/src/routes/passport-verify.ts
@@ -97,7 +97,7 @@ The smart account is derived from it and exists only on the delegation rail.
 
 EAS has no nullable field type, so an agent with no smart account is attested
 with `smartAccount = 0x0`. Two rules follow, both enforced in
-`lib/passport/binding.ts` rather than left to callers:
+`modules/passport/binding.ts` rather than left to callers:
 
 - **A lookup by the zero address never matches.** Otherwise every EOA-only
   agent collides on one "address", and a merchant querying a junk or zero
@@ -588,14 +588,14 @@ required: an operator runs this by hand, once, on a machine with no reason to
 have a Postgres URL.
 
 That property is easy to lose by accident and was lost once: pointing the
-script at `lib/passport/index.js` pulls in issuance/revocation/verification,
+script at `modules/passport/index.js` pulls in issuance/revocation/verification,
 which reach `config.ts`, whose `requireEnv('DATABASE_URL')` runs at import
 time — so the probe died before its first line. It imports from `schema.js`
 directly for that reason, and a guard test now spawns it with `DATABASE_URL`
 removed to keep it that way.
 
 The script is **fail-closed on the pins**. The EAS addresses in
-`lib/passport/schema.ts` are the standard OP-Stack predeploys Base inherits,
+`modules/passport/schema.ts` are the standard OP-Stack predeploys Base inherits,
 but they were pinned *without* an on-chain check (no RPC egress in the authoring
 environment). Before sending anything the script proves both contracts have
 bytecode **and** that SchemaRegistry answers `getSchema(bytes32)` — code at an
@@ -624,7 +624,7 @@ off and both endpoints return 503 rather than serving an unsigned receipt.
 
 ## Related
 
-- [Module boundaries](10-module-boundaries.md) — `lib/passport/` is a module
+- [Module boundaries](10-module-boundaries.md) — `modules/passport/` is a module
   with a public `index.ts`; import through it, never a private file.
 - [Delegation-rail security model](../security/delegation-rail-security-model.md)
   — the custody perimeter the passport describes, and the zero-address posture.

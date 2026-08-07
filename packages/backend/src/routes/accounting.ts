@@ -2,9 +2,9 @@ import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { buildAccountingEntries } from '../lib/accounting-entry.js'
-import { sieExporter } from '../lib/sie-exporter.js'
-import { reconcileEntries } from '../lib/reconcile.js'
+import { buildAccountingEntries } from '../modules/accounting/index.js'
+import { sieExporter } from '../modules/accounting/index.js'
+import { reconcileEntries } from '../modules/accounting/index.js'
 
 interface ExportQuery {
   format?: string

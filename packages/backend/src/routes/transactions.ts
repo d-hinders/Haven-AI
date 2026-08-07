@@ -6,7 +6,7 @@ import {
   findSafeOwnership,
   listBasicSafesForUser,
 } from '../infra/repositories/transaction-history.js'
-import { getChain, isSupportedChain } from '../lib/chains.js'
+import { getChain, isSupportedChain } from '../domain/chains.js'
 import {
   aggregateSafeTransactions,
   buildSafeTransactionsPage,

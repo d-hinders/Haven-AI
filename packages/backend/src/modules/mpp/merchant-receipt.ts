@@ -25,7 +25,7 @@ import {
   getMerchantReceiptRow,
   insertMerchantReceiptOnce,
 } from '../../infra/repositories/machine-payments.js'
-import { lateAttachMerchantReceipt } from '../../lib/reporting/fortnox-connector.js'
+import { lateAttachMerchantReceipt } from '../reporting/index.js'
 import type { MppHandlerResult } from './types.js'
 
 /** Inline receipts are bookkeeping metadata, not blob storage. */

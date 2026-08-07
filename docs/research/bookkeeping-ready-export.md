@@ -2,13 +2,13 @@
 owner: "@d-hinders"
 status: research
 covers:
-  - packages/backend/src/lib/accounting-entry.ts
+  - packages/backend/src/modules/accounting/accounting-entry.ts
   - packages/backend/src/modules/mpp/**
-  - packages/backend/src/lib/ledger-exporter.ts
-  - packages/backend/src/lib/sie-exporter.ts
-  - packages/backend/src/lib/bas-accounts.ts
-  - packages/backend/src/lib/vat.ts
-  - packages/backend/src/lib/fortnox.ts
+  - packages/backend/src/modules/accounting/ledger-exporter.ts
+  - packages/backend/src/modules/accounting/sie-exporter.ts
+  - packages/backend/src/domain/bas-accounts.ts
+  - packages/backend/src/domain/vat.ts
+  - packages/backend/src/modules/reporting/fortnox.ts
   - packages/backend/src/routes/accounting.ts
   - packages/backend/src/routes/fortnox.ts
 last-verified: "2026-08-07" # #997: covers updated (lib/machine-payment-evidence.ts moved into modules/mpp/**)

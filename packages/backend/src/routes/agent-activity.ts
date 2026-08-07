@@ -1,9 +1,9 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { getExplorerUrl } from '../lib/chains.js'
+import { getExplorerUrl } from '../domain/chains.js'
 import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
-import { machinePaymentLifecycle } from '../lib/machine-payment-lifecycle.js'
+import { machinePaymentLifecycle } from '../domain/machine-payment-lifecycle.js'
 
 // ── Types ─────────────────────────────────────────────────────────
 

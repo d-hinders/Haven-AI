@@ -9,7 +9,7 @@ import {
   AgentPaymentNextAction,
   AgentPaymentPhase,
   AgentPaymentRail,
-} from '../lib/agent-payment-taxonomy.js'
+} from '../domain/agent-payment-taxonomy.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROUTES_DIR = join(__dirname, '..', 'routes')

@@ -29,7 +29,7 @@
  * (`block.timestamp / 60`) and only ever uses chain time.
  */
 
-import type { AllowanceInfo, EffectiveAllowance } from '../lib/allowance-module.js'
+import type { AllowanceInfo, EffectiveAllowance } from '../rails/allowance-module.js'
 
 /**
  * What the real contract would compute as the effective remaining allowance

@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify'
 import bcrypt from 'bcrypt'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
+import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 
 const SALT_ROUNDS = 10
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/

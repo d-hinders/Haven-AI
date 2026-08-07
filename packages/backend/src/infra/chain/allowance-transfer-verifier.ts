@@ -10,8 +10,8 @@
  * `getTransactionReceipt`) out of `routes/**`.
  */
 import { ethers } from 'ethers'
-import { getProvider } from '../../lib/allowance-module.js'
-import { getChain } from '../../lib/chains.js'
+import { getProvider } from '../../rails/allowance-module.js'
+import { getChain } from '../../domain/chains.js'
 
 const ALLOWANCE_MODULE_IFACE = new ethers.Interface([
   'function executeAllowanceTransfer(address safe, address token, address to, uint96 amount, address paymentToken, uint96 payment, address delegate, bytes signature)',

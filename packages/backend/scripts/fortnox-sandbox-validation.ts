@@ -31,10 +31,11 @@ import {
   exchangeCodeForTokens,
   refreshTokens,
   FORTNOX_API_BASE,
-} from '../src/lib/fortnox.js'
-import { FortnoxConnector, externalInvoiceNumber } from '../src/lib/reporting/fortnox-connector.js'
-import { underlagFromData } from '../src/lib/reporting/receipt-underlag.js'
-import type { ReportingTransaction } from '../src/lib/reporting/reporting-transaction.js'
+  FortnoxConnector,
+  externalInvoiceNumber,
+  underlagFromData,
+  type ReportingTransaction,
+} from '../src/modules/reporting/index.js'
 
 const TOKEN_PATH = path.join(homedir(), '.haven', 'fortnox-sandbox.json')
 

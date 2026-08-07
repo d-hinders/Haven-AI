@@ -8,14 +8,14 @@
  * unmodified (`routes/__tests__/machine-payments.test.ts`'s "GET /allowances
  * — rail-aware (#1135)" and "— legacy-rail characterization" suites).
  */
-import { resolveExecutionRail, sessionRailRetired } from '../../lib/execution-rail.js'
+import { resolveExecutionRail, sessionRailRetired } from '../../rails/execution-rail.js'
 import { listAllowanceConfigForAgent } from '../../infra/repositories/agents.js'
-import { deriveDelegationBudgets } from '../../lib/delegation-budget-view.js'
+import { deriveDelegationBudgets } from '../../rails/delegation-budget-view.js'
 import {
   getTokenAllowance,
   getLatestBlockTimeSec,
   computeEffectiveAllowance,
-} from '../../lib/allowance-module.js'
+} from '../../rails/allowance-module.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'
 

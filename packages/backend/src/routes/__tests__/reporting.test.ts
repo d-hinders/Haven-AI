@@ -24,19 +24,23 @@ const { configMock } = vi.hoisted(() => ({
 vi.mock('../../config.js', () => ({ config: configMock }))
 
 const entitlementMocks = vi.hoisted(() => ({ reportingFeedAvailable: vi.fn() }))
-vi.mock('../../lib/entitlements.js', () => entitlementMocks)
+vi.mock('../../modules/agents/index.js', () => entitlementMocks)
 
 const orchestratorMocks = vi.hoisted(() => ({
   getReportingStatus: vi.fn(),
   syncUser: vi.fn(),
 }))
-vi.mock('../../lib/reporting/feed-orchestrator.js', () => orchestratorMocks)
-
 const connectorMocks = vi.hoisted(() => ({ hasLiveConnector: vi.fn() }))
-vi.mock('../../lib/reporting/connector.js', () => connectorMocks)
-
 const fortnoxMocks = vi.hoisted(() => ({ getFortnoxConnection: vi.fn() }))
-vi.mock('../../lib/fortnox-connection.js', () => fortnoxMocks)
+// feed-orchestrator.ts, connector.ts and fortnox-connection.ts all fold into
+// one public entry point post-#998 (modules/reporting/index.ts) — a single
+// mock factory merging all three, not three vi.mock calls to the same
+// specifier (the last one silently wins otherwise).
+vi.mock('../../modules/reporting/index.js', () => ({
+  ...orchestratorMocks,
+  ...connectorMocks,
+  ...fortnoxMocks,
+}))
 
 import reportingRoutes from '../reporting.js'
 

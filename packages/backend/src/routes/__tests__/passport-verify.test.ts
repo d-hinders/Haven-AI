@@ -7,7 +7,7 @@ import {
   setReceiptSigningKey,
   verifyReceipt,
   type SignedPassportReceipt,
-} from '../../lib/passport/index.js'
+} from '../../modules/passport/index.js'
 
 /**
  * The merchant-facing verifier (#974). These tests exercise it end to end

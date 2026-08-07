@@ -14,8 +14,15 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../lib/safe-deployer.js', () => ({ relaySafeDeploy: vi.fn() }))
-vi.mock('../../lib/safe-details.js', () => ({
+// safe-deployer.ts, safe-details.ts and safe-owner-tx.ts all fold into one
+// public entry point post-#998 (modules/accounts/index.ts) — a single mock
+// factory, not two vi.mock calls to the same specifier (the second silently
+// wins otherwise). Real safe-owner-tx.ts exports (buildRemoveOwnerTx etc.)
+// pass through via importActual so this route's actual calldata-building
+// logic — the thing under test — still runs for real.
+vi.mock('../../modules/accounts/index.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  relaySafeDeploy: vi.fn(),
   getSafeDetails: (...args: unknown[]) => mockGetSafeDetails(...args),
 }))
 

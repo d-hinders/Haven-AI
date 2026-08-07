@@ -42,8 +42,8 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../lib/portfolio.js', () => portfolioMocks)
-vi.mock('../../lib/fiat-values.js', () => ({
+vi.mock('../../modules/accounts/index.js', () => portfolioMocks)
+vi.mock('../../infra/fiat-values.js', () => ({
   getFiatValuesForTokenAmount: vi.fn(),
 }))
 // #992: aggregation/enrichment/caching moved to src/modules/transactions/.

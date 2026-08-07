@@ -7,7 +7,7 @@ covers:
   - packages/frontend/src/components/onboarding/RecoveryNudge.tsx
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
-  - packages/backend/src/lib/hybrid-signer-actions.ts
+  - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx
 last-verified: "2026-08-07"
 ---

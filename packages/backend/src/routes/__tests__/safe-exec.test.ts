@@ -59,7 +59,7 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../lib/relayer.js', () => ({
+vi.mock('../../infra/relayer.js', () => ({
   getRelayer: (...args: unknown[]) => mockGetRelayer(...args),
   warnIfRelayerLow: (...args: unknown[]) => mockWarnIfRelayerLow(...args),
   // Pass-through: the per-chain send serialisation is covered by

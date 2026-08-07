@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
+import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 
 // ── Types ─────────────────────────────────────────────────────────
 

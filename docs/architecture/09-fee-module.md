@@ -2,8 +2,8 @@
 owner: "@d-hinders"
 status: current
 covers:
-  - packages/backend/src/lib/fee/**
-  - packages/backend/src/lib/agent-payment-status.ts
+  - packages/backend/src/modules/fee/**
+  - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/mpp/**
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/db/migrations/029_payment_fees.ts
@@ -22,7 +22,7 @@ shape before any non-zero pricing or settlement is enabled.
 
 ## Current behavior
 
-- `packages/backend/src/lib/fee/fee-module.ts` always quotes zero, including
+- `packages/backend/src/modules/fee/fee-module.ts` always quotes zero, including
   when `HAVEN_FEE_ENABLED` is set.
 - No fee executor, treasury transfer, pricing tier, or quota source runs.
 - Payment status/result responses expose the zero-fee result; the SDK maps that

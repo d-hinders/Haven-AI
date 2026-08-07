@@ -38,13 +38,13 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
 vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
-vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
-vi.mock('../../lib/fiat-values.js', () => fiatMocks)
+vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 // Only the network seams of the delegation rail are mocked.
-vi.mock('../../lib/delegation-authorization.js', () => delegationMocks)
+vi.mock('../../rails/delegation-authorization.js', () => delegationMocks)
 
 const paymentRoutes = (await import('../payments.js')).default
-const { serializeUserOp } = await import('../../lib/execution-rail.js')
+const { serializeUserOp } = await import('../../rails/execution-rail.js')
 
 // The session (delegate) key — a throwaway test key, never a real one.
 const sessionWallet = new Wallet('0x' + '22'.repeat(32))

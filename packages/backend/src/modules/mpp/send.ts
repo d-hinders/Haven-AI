@@ -7,7 +7,7 @@
  * lost insert), and the within-allowance / over-allowance coverage split.
  * `routes/machine-payments.ts` keeps only request-shape validation.
  */
-import { resolveExecutionRail, sessionRailRetired } from '../../lib/execution-rail.js'
+import { resolveExecutionRail, sessionRailRetired } from '../../rails/execution-rail.js'
 import {
   findSendIntentByIdempotencyKey,
   insertSendIntent,
@@ -18,16 +18,16 @@ import {
 } from '../../infra/repositories/approval-requests.js'
 import { hasTokenAllowanceConfigured } from '../../infra/repositories/agents.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
-import { getAgentPaymentStatus, agentPaymentStatusHttpCode } from '../../lib/agent-payment-status.js'
+import { getAgentPaymentStatus, agentPaymentStatusHttpCode } from '../payments/index.js'
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 import {
   getTokenAllowance,
   getLatestBlockTimeSec,
   computeEffectiveAllowance,
   generateTransferHash,
-} from '../../lib/allowance-module.js'
-import { getChain } from '../../lib/chains.js'
-import { AgentPaymentPhase, AgentPaymentNextAction } from '../../lib/agent-payment-taxonomy.js'
+} from '../../rails/allowance-module.js'
+import { getChain } from '../../domain/chains.js'
+import { AgentPaymentPhase, AgentPaymentNextAction } from '../../domain/agent-payment-taxonomy.js'
 import { ZERO_ADDRESS } from '../../domain/payment-token.js'
 import type { MppHandlerResult, SendAsset, SendBody } from './types.js'
 

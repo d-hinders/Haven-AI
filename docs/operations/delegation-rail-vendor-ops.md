@@ -2,9 +2,9 @@
 owner: "@d-hinders"
 status: current
 covers:
-  - packages/backend/src/lib/delegation-rail.ts
-  - packages/backend/src/lib/delegation-contracts.ts
-  - packages/backend/src/lib/hybrid-provisioning.ts
+  - packages/backend/src/rails/delegation-rail.ts
+  - packages/backend/src/rails/delegation-contracts.ts
+  - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
@@ -136,7 +136,7 @@ Probes:
 
 ## 4. Anti-lock-in: fork-and-pin policy + re-evaluation tripwires
 
-**Contracts:** pinned by address in `lib/delegation-contracts.ts` — since
+**Contracts:** pinned by address in `rails/delegation-contracts.ts` — since
 2026-07-27 for BOTH Base Sepolia and Base mainnet (#908; the mainnet pin run
 bytecode-compared every contract against the Sepolia set and required the two
 chain-scoped immutables in DelegationManager/HybridDeleGatorImpl explained

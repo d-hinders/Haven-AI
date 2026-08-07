@@ -48,9 +48,12 @@ vi.mock('../../lib/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/hybrid-provisioning.js')>()
   return { ...actual, computeHybridAccountAddress: mockCompute }
 })
-vi.mock('../../lib/machine-payments.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../lib/machine-payments.js')>()
-  return { ...actual, createPaymentIntent: mockCreateIntent }
+// The delegation-rail authorize orchestration writes the intent via the
+// repository directly now (#997 removed the `lib/machine-payments.js`
+// pass-through wrapper) — mock the repository export it actually calls.
+vi.mock('../../infra/repositories/payment-intents.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../infra/repositories/payment-intents.js')>()
+  return { ...actual, insertMachineIntent: mockCreateIntent }
 })
 
 const x402Routes = (await import('../x402.js')).default

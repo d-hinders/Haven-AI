@@ -124,7 +124,7 @@ Classify a change as money-path when **either** the issue carries the `money-pat
 label **or** the diff touches any of:
 
 - `routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, or `routes/machine-payments.ts`;
-- `lib/machine-payments.ts`, `lib/payment-coverage.ts`, or `lib/allowance-module.ts`;
+- `modules/mpp/`, `domain/payment-token.ts`, `lib/payment-coverage.ts`, or `lib/allowance-module.ts`;
 - `lib/execution-rail.ts` (the rail seam);
 - `lib/delegation-*.ts`, `lib/hybrid-provisioning.ts`, `lib/hybrid-account-config.ts`, or `routes/agent-delegations.ts`
   (the delegation rail);

@@ -8,8 +8,8 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/approvals.ts
   - packages/backend/src/routes/agent-delegations.ts
-  - packages/backend/src/lib/machine-payments.ts
-  - packages/backend/src/lib/merchant-receipt.ts
+  - packages/backend/src/modules/mpp/**
+  - packages/backend/src/domain/payment-token.ts
   - packages/backend/src/lib/delegation-rail.ts
   - packages/backend/src/lib/x402-delegation.ts
   - packages/backend/src/lib/delegation-policy.ts
@@ -18,7 +18,7 @@ covers:
   - packages/backend/src/lib/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-05"
+last-verified: "2026-08-07" # #997: covers updated (lib/machine-payments.ts + lib/merchant-receipt.ts moved into modules/mpp/**, domain/payment-token.ts)
 ---
 
 # Haven — Payment Execution Sequence

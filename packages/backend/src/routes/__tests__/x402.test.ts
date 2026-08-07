@@ -31,7 +31,9 @@ vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
 
 vi.mock('../../lib/fiat-values.js', () => fiatMocks)
 
-vi.mock('../../lib/machine-payment-evidence.js', () => evidenceMocks)
+// Evidence recording moved into the mpp module's public entry point (#997);
+// the x402 legacy-rail orchestration imports it from there now.
+vi.mock('../../modules/mpp/index.js', () => evidenceMocks)
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',

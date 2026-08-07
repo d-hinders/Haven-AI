@@ -4,7 +4,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }))
-vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
+vi.mock('../../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 
 const {
   captureMerchantReceipt,

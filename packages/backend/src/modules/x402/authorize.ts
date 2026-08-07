@@ -9,7 +9,7 @@
 import type { FastifyBaseLogger } from 'fastify'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { resolveExecutionRail, sessionRailRetired } from '../../lib/execution-rail.js'
-import { resolvePaymentToken } from '../../lib/machine-payments.js'
+import { resolvePaymentToken } from '../../domain/payment-token.js'
 import { formatTokenValue } from '../../lib/tokens.js'
 import { validateGenericSchemeRail } from './scheme-selection.js'
 import { runDelegationAuthorize } from './delegation-authorize.js'

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
-import { authorizeMachinePayment } from '../../lib/machine-payments.js'
+import { authorizeMachinePayment } from '../../modules/mpp/index.js'
 
 const { mockQuery, allowanceMocks, fiatMocks, reportingMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),

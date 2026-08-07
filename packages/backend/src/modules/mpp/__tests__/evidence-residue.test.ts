@@ -11,15 +11,15 @@ const { mockQuery, mockGetTokenBalance } = vi.hoisted(() => ({
   mockGetTokenBalance: vi.fn(),
 }))
 
-vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
-vi.mock('../allowance-module.js', () => ({
+vi.mock('../../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
+vi.mock('../../../lib/allowance-module.js', () => ({
   getTokenBalance: (...a: unknown[]) => mockGetTokenBalance(...a),
 }))
-vi.mock('../fiat-values.js', () => ({ getBookTimeSekValue: vi.fn() }))
-vi.mock('../fee/fee-module.js', () => ({ quoteFee: vi.fn(), recordSettledFee: vi.fn() }))
-vi.mock('../reporting/feed-orchestrator.js', () => ({ feedSettledPaymentBestEffort: vi.fn() }))
+vi.mock('../../../lib/fiat-values.js', () => ({ getBookTimeSekValue: vi.fn() }))
+vi.mock('../../../lib/fee/fee-module.js', () => ({ quoteFee: vi.fn(), recordSettledFee: vi.fn() }))
+vi.mock('../../../lib/reporting/feed-orchestrator.js', () => ({ feedSettledPaymentBestEffort: vi.fn() }))
 
-const { reconcileDelegateResidueAfterSettlement } = await import('../machine-payment-evidence.js')
+const { reconcileDelegateResidueAfterSettlement } = await import('../evidence.js')
 
 const AGENT_ID = '11111111-1111-1111-1111-111111111111'
 const DELEGATE = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'

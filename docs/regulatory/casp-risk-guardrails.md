@@ -9,6 +9,8 @@ covers:
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/modules/mpp/**
+  - packages/backend/src/domain/payment-token.ts
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/reporting.ts
   - packages/backend/src/routes/accounting.ts
@@ -25,7 +27,6 @@ covers:
   - packages/backend/src/lib/accounting-entry.ts
   - packages/backend/src/lib/catalog-discovery.ts
   - packages/backend/src/lib/merchant-catalog.ts
-  - packages/backend/src/lib/machine-payments.ts
   - packages/backend/src/lib/payment-coverage.ts
   - packages/backend/src/lib/relayer.ts
   - packages/backend/src/lib/reporting/**
@@ -48,7 +49,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-07"
+last-verified: "2026-08-07" # #997: covers updated (lib/machine-payments.ts moved into modules/mpp/**; the shared token-resolution primitive lives in domain/payment-token.ts) — no perimeter change, the same routes/repositories still enforce it
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails

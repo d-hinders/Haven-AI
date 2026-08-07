@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   recordMachinePaymentEvidenceBase,
   type MachinePaymentEvidenceSource,
-} from '../machine-payment-evidence.js'
+} from '../evidence.js'
 
 const {
   mockQuery,
@@ -16,17 +16,17 @@ const {
   mockFeedSettledPaymentBestEffort: vi.fn(),
 }))
 
-vi.mock('../../db.js', () => ({
+vi.mock('../../../db.js', () => ({
   default: {
     query: (...args: unknown[]) => mockQuery(...args),
   },
 }))
 
-vi.mock('../fiat-values.js', () => ({
+vi.mock('../../../lib/fiat-values.js', () => ({
   getBookTimeSekValue: (...args: unknown[]) => mockGetBookTimeSekValue(...args),
 }))
 
-vi.mock('../fee/fee-module.js', () => ({
+vi.mock('../../../lib/fee/fee-module.js', () => ({
   quoteFee: vi.fn((input) => ({
     paymentId: input.paymentId,
     rail: input.rail,
@@ -41,7 +41,7 @@ vi.mock('../fee/fee-module.js', () => ({
   recordSettledFee: (...args: unknown[]) => mockRecordSettledFee(...args),
 }))
 
-vi.mock('../reporting/feed-orchestrator.js', () => ({
+vi.mock('../../../lib/reporting/feed-orchestrator.js', () => ({
   feedSettledPaymentBestEffort: (...args: unknown[]) => mockFeedSettledPaymentBestEffort(...args),
 }))
 

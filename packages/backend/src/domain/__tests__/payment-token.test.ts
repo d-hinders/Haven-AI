@@ -1,10 +1,11 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 
-// resolvePaymentToken is pure over static chain config, but machine-payments.ts
-// imports the db pool at module load — stub it so this unit test needs no DB.
-vi.mock('../../db.js', () => ({ default: { query: vi.fn() } }))
-
-import { resolvePaymentToken } from '../machine-payments.js'
+// resolvePaymentToken moved to src/domain/ by #997 — genuinely pure over
+// static chain config (lib/chains.ts's registry), and shared verbatim by
+// modules/mpp/ and modules/x402/ rather than duplicated in either. No DB
+// mock needed: unlike the old lib/machine-payments.ts home, this file never
+// imports the db pool.
+import { resolvePaymentToken } from '../payment-token.js'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const GNOSIS = 100 // POC target chain

@@ -1,19 +1,38 @@
+/**
+ * Machine-payment evidence recording + attach orchestration (#997, epic #980
+ * M4). Extracted verbatim from `lib/machine-payment-evidence.ts`:
+ * `recordMachinePaymentEvidenceBase` (the settlement-time base row, #956),
+ * `attachMachinePaymentEvidence` (the agent-reported proof attach, first-
+ * write-wins on `proof_status` via the repository's sticky `CASE`), and
+ * `reconcileDelegateResidueAfterSettlement` (#716). `isProtocolPaymentRail`
+ * now lives in `rail-dispatch.ts` alongside the module's other protocol-rail
+ * checks — everything else here is unchanged.
+ *
+ * Also holds the HTTP-adjacent orchestration `routes/machine-payments.ts`
+ * used to do inline: `mapEvidence` (proof-header-safe serialization shared by
+ * `GET /receipts` and `POST /evidence`), the receipts-list read, and the
+ * marker-to-HTTP-status mapping for `attachEvidenceHandler` — the route keeps
+ * only request-shape validation and `reply.code(...).send(...)`.
+ */
 import {
   attachEvidenceProof,
   findApprovalForEvidenceScoped,
   findIntentEvidenceSource,
   findIntentForEvidenceScoped,
+  getIntentSettlementFields,
   insertResidueEvent,
+  listEvidenceReceiptsForAgent,
   resolveReconciliationForPayment,
   upsertEvidenceBase,
-} from '../infra/repositories/machine-payments.js'
-import { findAgentDelegateAddress } from '../infra/repositories/agents.js'
-import { getBookTimeSekValue } from './fiat-values.js'
-import { getTokenBalance } from './allowance-module.js'
-import { quoteFee, recordSettledFee } from './fee/fee-module.js'
-import { feedSettledPaymentBestEffort } from './reporting/feed-orchestrator.js'
+} from '../../infra/repositories/machine-payments.js'
+import { findAgentDelegateAddress } from '../../infra/repositories/agents.js'
+import { getBookTimeSekValue } from '../../lib/fiat-values.js'
+import { getTokenBalance } from '../../lib/allowance-module.js'
+import { quoteFee, recordSettledFee } from '../../lib/fee/fee-module.js'
+import { feedSettledPaymentBestEffort } from '../../lib/reporting/feed-orchestrator.js'
+import { isProtocolPaymentRail } from './rail-dispatch.js'
+import type { EvidenceBody, MppHandlerResult } from './types.js'
 
-const PROTOCOL_RAILS = new Set(['x402', 'mpp_demo', 'mpp_crypto', 'spt'])
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
 
 export type PaymentProofStatus =
@@ -101,6 +120,10 @@ export interface MachinePaymentEvidenceRow {
   fx_at: string | null
   created_at: string
   updated_at: string
+  /** Which settlement branch ran (eip3009 | erc7710), joined from the intent (#946/#1063). */
+  settlement_scheme?: string | null
+  /** The metering budget, uniform across schemes (#1059) — null on the legacy rail. */
+  budget_delegation_hash?: string | null
 }
 
 interface PaymentIntentEvidenceRow extends MachinePaymentEvidenceSource {
@@ -117,10 +140,6 @@ type ProtocolPaymentEvidenceRow = PaymentIntentEvidenceRow | ApprovalRequestEvid
 
 interface EvidenceLogger {
   warn: (payload: Record<string, unknown>, message: string) => void
-}
-
-export function isProtocolPaymentRail(rail: string | null | undefined): rail is string {
-  return Boolean(rail && PROTOCOL_RAILS.has(rail))
 }
 
 function railForPayment(intent: MachinePaymentEvidenceSource): string | null {
@@ -411,4 +430,124 @@ export async function reconcileDelegateResidueAfterSettlement(
       delegate_address: delegate,
     }),
   })
+}
+
+// ── HTTP-adjacent orchestration (moved from routes/machine-payments.ts) ─────
+
+/**
+ * Wire-shape a `machine_payment_evidence` row for an agent response. Strips
+ * the raw proof-header VALUES (`payment_proof_header`, `protocol_receipt_header`)
+ * — those are Haven-internal verification material, never echoed back.
+ */
+export function mapEvidence(row: MachinePaymentEvidenceRow) {
+  return {
+    id: row.id,
+    settlement_scheme: row.settlement_scheme ?? null,
+    budget_delegation_hash: row.budget_delegation_hash ?? null,
+    payment_id: row.payment_intent_id ?? row.approval_request_id,
+    payment_intent_id: row.payment_intent_id,
+    approval_request_id: row.approval_request_id,
+    rail: row.rail,
+    proof_status: row.proof_status,
+    tx_hash: row.tx_hash,
+    chain_id: row.chain_id,
+    resource_url: row.resource_url,
+    merchant_address: row.merchant_address,
+    payer_address: row.payer_address,
+    settlement_address: row.settlement_address,
+    token_symbol: row.token_symbol,
+    token_address: row.token_address,
+    amount_raw: row.amount_raw,
+    amount_human: row.amount_human,
+    challenge_id: row.challenge_id,
+    idempotency_key: row.idempotency_key,
+    challenge_payload: row.challenge_payload,
+    selected_payment: row.selected_payment,
+    payment_proof_header_name: row.payment_proof_header_name,
+    protocol_receipt_header_name: row.protocol_receipt_header_name,
+    protocol_receipt_payload: row.protocol_receipt_payload,
+    merchant_status: row.merchant_status,
+    confirmed_at: row.confirmed_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }
+}
+
+/** `GET /receipts` orchestration: recent evidence rows, agent-scoped. */
+export async function listReceipts(agentId: string, limit: number) {
+  const receipts = await listEvidenceReceiptsForAgent<MachinePaymentEvidenceRow>(agentId, limit)
+  return receipts.map(mapEvidence)
+}
+
+/**
+ * `POST /evidence` orchestration: attach + the marker-to-HTTP-status mapping.
+ * Assumes `validateEvidenceBody` already passed. Preserves the exact
+ * evidence-write-then-echo-enrichment ordering (#1118 review NB2): the
+ * intent's `settlement_scheme`/`budget_delegation_hash` are looked up AFTER
+ * the attach succeeds and are best-effort — a lookup failure never fails the
+ * 202 the attach already earned.
+ */
+export async function attachEvidenceHandler(
+  agentId: string,
+  body: EvidenceBody,
+): Promise<MppHandlerResult> {
+  try {
+    const evidence = await attachMachinePaymentEvidence({
+      agentId,
+      paymentId: body.paymentId as string,
+      rail: body.rail as string,
+      txHash: body.txHash as string,
+      resourceUrl: body.resourceUrl,
+      merchantStatus: body.merchantStatus,
+      challengePayload: body.challengePayload,
+      selectedPayment: body.selectedPayment,
+      paymentProofHeaderName: body.paymentProofHeaderName,
+      paymentProofHeader: body.paymentProofHeader,
+      protocolReceiptHeaderName: body.protocolReceiptHeaderName,
+      protocolReceiptHeader: body.protocolReceiptHeader,
+      protocolReceiptPayload: body.protocolReceiptPayload,
+    })
+
+    if (!evidence) {
+      return { statusCode: 404, body: { error: 'Payment not found' } }
+    }
+
+    // The INSERT…RETURNING row has no intent join — look the two intent
+    // fields up so this echo reports the same truth the receipts list does
+    // (previously both always echoed null here, #1118 review NB2).
+    let intentFields: { settlement_scheme?: string | null; budget_delegation_hash?: string | null } = {}
+    if (evidence.payment_intent_id) {
+      try {
+        intentFields = (await getIntentSettlementFields(evidence.payment_intent_id)) ?? {}
+      } catch {
+        // Echo enrichment only — never fail the 202 over it.
+      }
+    }
+    return { statusCode: 202, body: { evidence: mapEvidence({ ...evidence, ...intentFields }) } }
+  } catch (err) {
+    const marker = err instanceof Error ? err.message : String(err)
+    if (marker === 'payment_not_confirmed') {
+      return { statusCode: 409, body: { error: 'Evidence requires a confirmed payment' } }
+    }
+    if (marker === 'tx_hash_mismatch') {
+      return { statusCode: 409, body: { error: 'txHash does not match payment intent' } }
+    }
+    if (marker === 'rail_mismatch') {
+      return { statusCode: 409, body: { error: 'rail does not match payment intent' } }
+    }
+    if (marker === 'resource_mismatch') {
+      return { statusCode: 409, body: { error: 'resourceUrl does not match payment intent' } }
+    }
+    if (marker === 'unsupported_rail') {
+      return { statusCode: 400, body: { error: 'Unsupported evidence rail' } }
+    }
+    if (marker === 'tx_hash_invalid') {
+      return { statusCode: 400, body: { error: 'txHash must be a 0x-prefixed transaction hash' } }
+    }
+    if (marker === 'merchant_status_invalid') {
+      return { statusCode: 400, body: { error: 'merchantStatus must be an HTTP status code' } }
+    }
+
+    throw err
+  }
 }

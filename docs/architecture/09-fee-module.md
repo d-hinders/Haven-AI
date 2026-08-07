@@ -4,14 +4,14 @@ status: current
 covers:
   - packages/backend/src/lib/fee/**
   - packages/backend/src/lib/agent-payment-status.ts
-  - packages/backend/src/lib/machine-payment-evidence.ts
+  - packages/backend/src/modules/mpp/**
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/db/migrations/029_payment_fees.ts
   - packages/backend/src/config.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/types.ts
   - packages/sdk/src/payment-fee.test.ts
-last-verified: "2026-07-10"
+last-verified: "2026-08-07" # #997: covers updated (lib/machine-payment-evidence.ts moved into modules/mpp/**)
 ---
 
 # Haven — Platform fee scaffold and target design

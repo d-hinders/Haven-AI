@@ -31,7 +31,10 @@ import {
   recoverSigner,
   executeAllowanceTransfer,
 } from '../lib/allowance-module.js'
-import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
+// Evidence recording moved into the mpp module (#997); routes/payments.ts
+// needs it after a legacy-rail send confirms, so it imports the module's
+// public entry point (same pattern as routes/x402.ts -> modules/x402/).
+import { tryRecordMachinePaymentEvidenceBaseById } from '../modules/mpp/index.js'
 import {
   deserializeUserOp,
   loadExecutionRailState,

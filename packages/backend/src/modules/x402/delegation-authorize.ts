@@ -17,7 +17,8 @@ import {
   typedDataDigest,
 } from '../../lib/x402-delegation.js'
 import { serializeUserOp } from '../../lib/execution-rail.js'
-import { createPaymentIntent, type ResolvePaymentTokenResult } from '../../lib/machine-payments.js'
+import { insertMachineIntent as createPaymentIntent } from '../../infra/repositories/payment-intents.js'
+import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'

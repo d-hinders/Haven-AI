@@ -67,7 +67,11 @@ for how the environments are wired, see
 
 ## Merge, deploy, and verify prod
 
-- [ ] Merge the promotion PR.
+- [ ] Merge the promotion PR **with a merge commit** (`gh pr merge --merge`),
+      never squash. A squash-promotion puts a history-less copy of the batch on
+      `main`; the moment `dev` refactors any of those files, the next promotion
+      PR goes DIRTY with mass conflicts (this happened with #1152 → #1172, and
+      took a `-s ours` reconcile merge, #1173, to repair).
 - [ ] Watch the **prod deploys** finish (Railway backend / MCP, Vercel frontend)
       and confirm the **migrations applied cleanly** to the prod DB.
 - [ ] **Prod smoke:** load the prod app (no `DEV` badge), check login + balances,

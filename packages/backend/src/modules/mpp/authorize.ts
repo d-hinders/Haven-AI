@@ -15,7 +15,7 @@
  * wrapper — those were pure pass-throughs; x402's legacy rail calls the same
  * repository functions directly too, for the same reason).
  */
-import { RelayerBudgetExceededError } from '../../lib/relayer-spend-guard.js'
+import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
 import { ethers } from 'ethers'
 import {
   confirmMachineIntent,
@@ -35,14 +35,14 @@ import {
 import { getX402HourlyUsage } from '../../infra/repositories/x402-authorizations.js'
 import { hasTokenAllowanceConfigured } from '../../infra/repositories/agents.js'
 import { type AgentContext } from '../../middleware/agentAuth.js'
-import { AgentPaymentNextAction, AgentPaymentPhase } from '../../lib/agent-payment-taxonomy.js'
+import { AgentPaymentNextAction, AgentPaymentPhase } from '../../domain/agent-payment-taxonomy.js'
 import {
   agentPaymentStatusHttpCode,
   getAgentPaymentStatus,
-} from '../../lib/agent-payment-status.js'
-import { getExplorerUrl } from '../../lib/chains.js'
-import { getFiatValuesForTokenAmount } from '../../lib/fiat-values.js'
-import { formatTokenValue } from '../../lib/tokens.js'
+} from '../payments/index.js'
+import { getExplorerUrl } from '../../domain/chains.js'
+import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
+import { formatTokenValue } from '../../domain/tokens.js'
 import {
   getTokenAllowance,
   getLatestBlockTimeSec,
@@ -50,16 +50,16 @@ import {
   generateTransferHash,
   recoverSigner,
   executeAllowanceTransfer,
-} from '../../lib/allowance-module.js'
+} from '../../rails/allowance-module.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from './evidence.js'
-import { decideCoverage } from '../../lib/payment-coverage.js'
+import { decideCoverage } from '../../domain/payment-coverage.js'
 import { isAddress } from '@haven_ai/core'
 import {
   isRetiredRailIntent,
   loadExecutionRailState,
   resolveExecutionRail,
   sessionRailRetired,
-} from '../../lib/execution-rail.js'
+} from '../../rails/execution-rail.js'
 import { resolvePaymentToken, ZERO_ADDRESS } from '../../domain/payment-token.js'
 import {
   isMppRail,

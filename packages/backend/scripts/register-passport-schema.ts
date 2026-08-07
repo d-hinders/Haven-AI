@@ -7,7 +7,7 @@
  * binding, the fail-closed config) is code and is already merged; this script
  * turns it into a live schema and prints the UID to record.
  *
- * FAIL-CLOSED ON THE PINS. The EAS addresses in `lib/passport/schema.ts` are the
+ * FAIL-CLOSED ON THE PINS. The EAS addresses in `modules/passport/schema.ts` are the
  * standard OP-Stack predeploys Base inherits, but they were pinned WITHOUT an
  * on-chain check (no RPC egress where the file was written). This script proves
  * them before it will send anything:
@@ -49,14 +49,14 @@ import {
   PASSPORT_SCHEMA_REVOCABLE,
   PASSPORT_CHAIN_IDS,
   getEasDeployment,
-} from '../src/lib/passport/schema.js'
+} from '../src/modules/passport/schema.js'
 
 const SEND = process.argv.includes('--send')
 
 /**
  * RPC URL per chain, read straight from env.
  *
- * Deliberately NOT via `lib/chains.js`: that pulls in `config.ts`, which
+ * Deliberately NOT via `domain/chains.js`: that pulls in `config.ts`, which
  * `requireEnv`s DATABASE_URL at import time — so verifying contract pins would
  * have needed a running Postgres. An ops probe must stay runnable with nothing
  * but an RPC URL. Defaults match config.ts's.
@@ -160,7 +160,7 @@ async function main(): Promise<void> {
     if (failures > 0) {
       console.error(
         '\n✗ pin verification FAILED against a reachable RPC — the pinned addresses are wrong ' +
-          'for this chain.\n  Refusing to register. Fix lib/passport/schema.ts first.',
+          'for this chain.\n  Refusing to register. Fix modules/passport/schema.ts first.',
       )
       process.exit(1)
     }

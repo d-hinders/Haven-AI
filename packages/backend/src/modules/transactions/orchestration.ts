@@ -11,7 +11,7 @@ import {
   listBasicSafesForUser,
   type TransactionFilterAgentRow,
 } from '../../infra/repositories/transaction-history.js'
-import { getChain } from '../../lib/chains.js'
+import { getChain } from '../../domain/chains.js'
 import { fetchSafeTransactions } from './aggregate.js'
 import { compareEnrichedTransactions, enrichedTransactionIdentityKey } from './ordering.js'
 import { enrichTransactionsWithAgents } from './enrichment.js'

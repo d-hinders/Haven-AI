@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify'
-import { reportingFeedAvailable } from '../lib/entitlements.js'
+import { reportingFeedAvailable } from '../modules/agents/index.js'
 
 /**
  * Gate the reporting-feed routes (epic #491). Register AFTER the auth hook so

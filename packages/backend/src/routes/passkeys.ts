@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { isSupportedChain } from '../lib/chains.js'
-import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
+import { isSupportedChain } from '../domain/chains.js'
+import { predictSafePasskeySignerAddress } from '../modules/accounts/index.js'
 
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/

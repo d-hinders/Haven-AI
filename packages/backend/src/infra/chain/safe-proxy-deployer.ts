@@ -24,7 +24,7 @@ import {
   solidityPackedKeccak256,
   type Wallet,
 } from 'ethers'
-import { withRelayerSendLock } from '../../lib/relayer.js'
+import { withRelayerSendLock } from '../relayer.js'
 
 const SAFE_SETUP_ABI = [
   'function setup(address[] _owners, uint256 _threshold, address to, bytes data, address fallbackHandler, address paymentToken, uint256 payment, address paymentReceiver)',

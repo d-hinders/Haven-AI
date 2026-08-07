@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { FastifyInstance, FastifyRequest } from 'fastify'
 import pool from '../db.js'
-import { getExplorerUrl } from '../lib/chains.js'
+import { getExplorerUrl } from '../domain/chains.js'
 import { getChainClient } from '../infra/chain/index.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import { demoRateLimit } from '../middleware/rate-limit.js'

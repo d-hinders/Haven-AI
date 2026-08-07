@@ -24,8 +24,8 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
-vi.mock('../../lib/fiat-values.js', () => fiatMocks)
+vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -351,7 +351,7 @@ describe('payment routes', () => {
   // stuck unretryable forever, worse than any failure mode it replaced.
   it('releases the submitted claim on a relayer-budget 429 — the intent stays retryable', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    const { RelayerBudgetExceededError } = await import('../../lib/relayer-spend-guard.js')
+    const { RelayerBudgetExceededError } = await import('../../infra/relayer-spend-guard.js')
     allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(
       new RelayerBudgetExceededError('allowance_transfer', 60, 60),
     )

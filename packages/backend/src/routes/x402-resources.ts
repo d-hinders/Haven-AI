@@ -23,10 +23,10 @@
 import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { getChain } from '../lib/chains.js'
+import { getChain } from '../domain/chains.js'
 import { DEFAULT_CHAIN_ID, isAddress as isValidAddress } from '@haven_ai/core'
 import { verifyAllowanceTransferTx } from '../infra/chain/allowance-transfer-verifier.js'
-import { formatTokenValue } from '../lib/tokens.js'
+import { formatTokenValue } from '../domain/tokens.js'
 
 // ── Types ─────────────────────────────────────────────────────────
 

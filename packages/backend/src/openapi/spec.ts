@@ -2,7 +2,7 @@ import {
   AgentPaymentNextAction,
   AgentPaymentPhase,
   AgentPaymentRail,
-} from '../lib/agent-payment-taxonomy.js'
+} from '../domain/agent-payment-taxonomy.js'
 
 const address = {
   type: 'string',

@@ -12,7 +12,7 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import pool from '../db.js'
 import { agentAuthMiddleware } from '../middleware/agentAuth.js'
-import type { CatalogRow } from '../lib/merchant-catalog.js'
+import type { CatalogRow } from '../modules/catalog/index.js'
 
 const VALID_RAILS = new Set(['x402', 'mpp'])
 

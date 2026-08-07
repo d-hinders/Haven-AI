@@ -10,7 +10,7 @@
 import { createPublicClient, http, type Address, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { baseSepolia } from 'viem/chains'
-import { createTreasuryOps } from '../src/lib/delegation-rail.js'
+import { createTreasuryOps } from '../src/rails/delegation-rail.js'
 
 async function main(): Promise<void> {
   const ownerKey = process.env.PILOT_OWNER_PRIVATE_KEY as Hex

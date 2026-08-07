@@ -1,11 +1,11 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
-import { getChain, isSupportedChain } from '../lib/chains.js'
+import { getChain, isSupportedChain } from '../domain/chains.js'
 import { getChainClient } from '../infra/chain/index.js'
-import { formatTokenValue } from '../lib/tokens.js'
-import { createCache } from '../lib/cache.js'
-import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
+import { formatTokenValue } from '../domain/tokens.js'
+import { createCache } from '../platform/cache.js'
+import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
 // Balance reads are RPC-standard and rail-agnostic (a `balanceOf`/native-balance

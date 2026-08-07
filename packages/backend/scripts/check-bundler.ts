@@ -19,8 +19,8 @@
  * Run: npm run ops:check-bundler -w @haven/backend
  *      CHECK_BUNDLER_CHAIN_ID=8453 npm run ops:check-bundler -w @haven/backend
  */
-import { delegationRailBundlerUrl } from '../src/lib/delegation-rail.js'
-import { DELEGATION_RAIL_CHAIN_IDS } from '../src/lib/delegation-contracts.js'
+import { delegationRailBundlerUrl } from '../src/rails/delegation-rail.js'
+import { DELEGATION_RAIL_CHAIN_IDS } from '../src/rails/delegation-contracts.js'
 
 const ENTRY_POINT_07 = '0x0000000071727De22E5E9d8BAf0edAc6f37da032'
 

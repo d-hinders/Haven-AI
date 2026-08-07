@@ -35,7 +35,7 @@ const { mockEnqueueRevocation, mockRevokeBestEffort } = vi.hoisted(() => ({
   mockEnqueueRevocation: vi.fn(),
   mockRevokeBestEffort: vi.fn(),
 }))
-vi.mock('../../lib/passport/index.js', () => ({
+vi.mock('../../modules/passport/index.js', () => ({
   requestPassport: vi.fn(),
   issuePassportBestEffort: vi.fn(),
   enqueuePassportRevocation: (...a: unknown[]) => mockEnqueueRevocation(...a),
@@ -47,7 +47,7 @@ vi.mock('../../lib/passport/index.js', () => ({
 const { mockGetTokenBalance } = vi.hoisted(() => ({
   mockGetTokenBalance: vi.fn(),
 }))
-vi.mock('../../lib/allowance-module.js', () => ({
+vi.mock('../../rails/allowance-module.js', () => ({
   getTokenBalance: (...a: unknown[]) => mockGetTokenBalance(...a),
 }))
 

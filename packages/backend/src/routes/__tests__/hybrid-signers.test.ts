@@ -12,12 +12,12 @@ vi.mock('../../middleware/auth.js', () => ({
     request.user = { sub: 'user-1' }
   },
 }))
-vi.mock('../../lib/hybrid-account-config.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../lib/hybrid-account-config.js')>()
+vi.mock('../../rails/hybrid-account-config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../rails/hybrid-account-config.js')>()
   return { ...actual, loadHybridOwnerConfig: mockLoadOwner }
 })
-vi.mock('../../lib/delegation-rail.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../lib/delegation-rail.js')>()
+vi.mock('../../rails/delegation-rail.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../rails/delegation-rail.js')>()
   return {
     ...actual,
     delegationRailBundlerUrl: () => 'https://bundler.test/rpc',
@@ -203,7 +203,7 @@ describe('account-scoped signer management (#1081)', () => {
     mockPrepared()
     // callData must contain the addKey calldata the route re-derives.
     const { encodeFunctionData } = await import('viem')
-    const { HYBRID_SIGNER_ABI } = await import('../../lib/hybrid-signer-actions.js')
+    const { HYBRID_SIGNER_ABI } = await import('../../rails/hybrid-signer-actions.js')
     const callData = encodeFunctionData({
       abi: HYBRID_SIGNER_ABI,
       functionName: 'addKey',
@@ -346,7 +346,7 @@ describe('remove_owner — enrolling a wallet is not a one-way door (#1087)', ()
     ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] })
     mockPrepared()
     const { encodeFunctionData, zeroAddress } = await import('viem')
-    const { HYBRID_SIGNER_ABI } = await import('../../lib/hybrid-signer-actions.js')
+    const { HYBRID_SIGNER_ABI } = await import('../../rails/hybrid-signer-actions.js')
     const callData = encodeFunctionData({
       abi: HYBRID_SIGNER_ABI,
       functionName: 'transferOwnership',

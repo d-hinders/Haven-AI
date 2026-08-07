@@ -20,7 +20,7 @@ import {
   signDelegation,
   type Delegation,
 } from '@metamask/smart-accounts-kit'
-import { createDelegationRail } from '../src/lib/delegation-rail.js'
+import { createDelegationRail } from '../src/rails/delegation-rail.js'
 import { signUserOpTypedDataForDelegation } from '@haven_ai/sdk'
 
 const CHAIN = baseSepolia

@@ -31,7 +31,7 @@ vi.mock('../../db.js', () => ({
 }))
 
 // Avoid pulling chain/ethers deploy machinery into this route test.
-vi.mock('../../lib/safe-deployer.js', () => ({ relaySafeDeploy: vi.fn() }))
+vi.mock('../../modules/accounts/index.js', () => ({ relaySafeDeploy: vi.fn() }))
 
 import userSafesRoutes from '../user-safes.js'
 

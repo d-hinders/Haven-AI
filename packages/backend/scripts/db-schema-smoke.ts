@@ -24,7 +24,7 @@
  */
 
 import { getPool } from '../src/db.js'
-import { selectDelegation } from '../src/lib/delegation-authorization.js'
+import { selectDelegation } from '../src/rails/delegation-authorization.js'
 import { AGENT_BY_API_KEY_SQL } from '../src/middleware/agentAuth.js'
 import { runMigrations } from '../src/db/migrate.js'
 import {

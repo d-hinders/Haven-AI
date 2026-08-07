@@ -22,11 +22,11 @@ vi.mock('../../../db.js', () => ({
   },
 }))
 
-vi.mock('../../../lib/fiat-values.js', () => ({
+vi.mock('../../../infra/fiat-values.js', () => ({
   getBookTimeSekValue: (...args: unknown[]) => mockGetBookTimeSekValue(...args),
 }))
 
-vi.mock('../../../lib/fee/fee-module.js', () => ({
+vi.mock('../../fee/index.js', () => ({
   quoteFee: vi.fn((input) => ({
     paymentId: input.paymentId,
     rail: input.rail,
@@ -41,7 +41,7 @@ vi.mock('../../../lib/fee/fee-module.js', () => ({
   recordSettledFee: (...args: unknown[]) => mockRecordSettledFee(...args),
 }))
 
-vi.mock('../../../lib/reporting/feed-orchestrator.js', () => ({
+vi.mock('../../reporting/index.js', () => ({
   feedSettledPaymentBestEffort: (...args: unknown[]) => mockFeedSettledPaymentBestEffort(...args),
 }))
 

@@ -3,7 +3,7 @@
  * `routes/transactions.ts` (#992). Data access goes through
  * `infra/repositories/transaction-history.ts` (#985 convention).
  */
-import { machinePaymentLifecycle } from '../../lib/machine-payment-lifecycle.js'
+import { machinePaymentLifecycle } from '../../domain/machine-payment-lifecycle.js'
 import {
   findApprovalRequestAgentMatches,
   findDelegateSweepAgentMatches,

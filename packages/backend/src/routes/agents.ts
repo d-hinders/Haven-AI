@@ -5,11 +5,11 @@ import {
   normalizeAgentAllowance,
   normalizeAgentAllowances,
   normalizeAgentAllowanceTokenAddress,
-} from '../lib/agent-allowance-validation.js'
-import { getTokenBalance } from '../lib/allowance-module.js'
+} from '../modules/agents/index.js'
+import { getTokenBalance } from '../rails/allowance-module.js'
 import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
-import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
-import { getChain, isSupportedChain } from '../lib/chains.js'
+import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+import { getChain, isSupportedChain } from '../domain/chains.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   requestPassport,
@@ -18,9 +18,9 @@ import {
   revokePassportBestEffort,
   isPassportConfigured,
   PASSPORT_CHAIN_IDS,
-} from '../lib/passport/index.js'
-import { formatTokenValue } from '../lib/tokens.js'
-import { deriveDelegationAllowances } from '../lib/delegation-budget-view.js'
+} from '../modules/passport/index.js'
+import { formatTokenValue } from '../domain/tokens.js'
+import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import {
   agentExistsForUser,
   createAgentWithAllowances,

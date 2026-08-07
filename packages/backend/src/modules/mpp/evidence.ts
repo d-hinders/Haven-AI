@@ -26,10 +26,10 @@ import {
   upsertEvidenceBase,
 } from '../../infra/repositories/machine-payments.js'
 import { findAgentDelegateAddress } from '../../infra/repositories/agents.js'
-import { getBookTimeSekValue } from '../../lib/fiat-values.js'
-import { getTokenBalance } from '../../lib/allowance-module.js'
-import { quoteFee, recordSettledFee } from '../../lib/fee/fee-module.js'
-import { feedSettledPaymentBestEffort } from '../../lib/reporting/feed-orchestrator.js'
+import { getBookTimeSekValue } from '../../infra/fiat-values.js'
+import { getTokenBalance } from '../../rails/allowance-module.js'
+import { quoteFee, recordSettledFee } from '../fee/index.js'
+import { feedSettledPaymentBestEffort } from '../reporting/index.js'
 import { isProtocolPaymentRail } from './rail-dispatch.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
 

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { queryFunnel } from '../lib/onboarding-funnel.js'
+import { queryFunnel } from '../infra/repositories/onboarding-funnel.js'
 
 export default async function analyticsRoutes(app: FastifyInstance): Promise<void> {
   // GET /analytics/funnel?from=YYYY-MM-DD&to=YYYY-MM-DD

@@ -46,9 +46,9 @@ import {
   type Delegation,
   type MetaMaskSmartAccount,
 } from '@metamask/smart-accounts-kit'
-import { createDelegationRail } from '../src/lib/delegation-rail.js'
-import { ensureHybridDeployed } from '../src/lib/hybrid-provisioning.js'
-import { buildRevocation } from '../src/lib/delegation-policy.js'
+import { createDelegationRail } from '../src/rails/delegation-rail.js'
+import { ensureHybridDeployed } from '../src/rails/hybrid-provisioning.js'
+import { buildRevocation } from '../src/rails/delegation-policy.js'
 import { signUserOpTypedDataForDelegation } from '@haven_ai/sdk'
 
 const CHAIN = baseSepolia

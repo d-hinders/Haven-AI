@@ -10,7 +10,7 @@
  * substitution only changes WHERE this runs, never WHAT it does.
  */
 import { ethers } from 'ethers'
-import { getProvider } from '../../lib/allowance-module.js'
+import { getProvider } from '../../rails/allowance-module.js'
 import type { ChainClient } from '../../domain/chain-client.js'
 
 // Minimal ERC-20 ABI for balanceOf — same single-function ABI

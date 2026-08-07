@@ -18,8 +18,8 @@ const { mockQuery, allowanceMocks, sweepMocks } = vi.hoisted(() => ({
 vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
-vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
-vi.mock('../../lib/sweep.js', () => sweepMocks)
+vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+vi.mock('../../rails/sweep.js', () => sweepMocks)
 
 const DELEGATE = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
 const SAFE = '0x135a9215604711AC70d970e12Caa812c53537EF4'
@@ -315,7 +315,7 @@ describe('machine payment sweep routes', () => {
       mockQuery.mockResolvedValueOnce({ rows: [{ id: 'sweep-id' }] }) // claim (won)
       sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
-      const { RelayerBudgetExceededError } = await import('../../lib/relayer-spend-guard.js')
+      const { RelayerBudgetExceededError } = await import('../../infra/relayer-spend-guard.js')
       sweepMocks.relaySweepAuthorization.mockRejectedValueOnce(
         new RelayerBudgetExceededError('sweep', 30, 60),
       )

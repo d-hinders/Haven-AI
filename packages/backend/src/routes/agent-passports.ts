@@ -19,7 +19,7 @@ import {
   isPassportConfigured,
   passportStanding,
   PASSPORT_CHAIN_IDS,
-} from '../lib/passport/index.js'
+} from '../modules/passport/index.js'
 
 
 function serialize(row: Awaited<ReturnType<typeof getPassport>>) {

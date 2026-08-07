@@ -1,16 +1,16 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { isSupportedChain } from '../lib/chains.js'
+import { isSupportedChain } from '../domain/chains.js'
 import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
-import { relaySafeDeploy } from '../lib/safe-deployer.js'
-import { getSafeDetails } from '../lib/safe-details.js'
+import { relaySafeDeploy } from '../modules/accounts/index.js'
+import { getSafeDetails } from '../modules/accounts/index.js'
 import {
   buildAddOwnerTx,
   buildRemoveOwnerTx,
   LastOwnerError,
   OwnerExistsError,
   OwnerNotFoundError,
-} from '../lib/safe-owner-tx.js'
+} from '../modules/accounts/index.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
 import {
   countSafesForUser,

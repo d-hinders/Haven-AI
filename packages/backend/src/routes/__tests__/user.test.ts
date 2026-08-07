@@ -12,7 +12,7 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../lib/safe-details.js', () => ({
+vi.mock('../../modules/accounts/index.js', () => ({
   getSafeDetails: (...args: unknown[]) => mockGetSafeDetails(...args),
 }))
 

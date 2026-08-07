@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
-import { isSupportedChain } from '../lib/chains.js'
-import { fetchPortfolioForSafe } from '../lib/portfolio.js'
+import { isSupportedChain } from '../domain/chains.js'
+import { fetchPortfolioForSafe } from '../modules/accounts/index.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
 function parseChainId(value: unknown): number | null {

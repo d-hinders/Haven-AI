@@ -1,13 +1,17 @@
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import transactionRoutes, {
+import transactionRoutes from '../transactions.js'
+// #992: aggregation/enrichment/caching moved to src/modules/transactions/ —
+// these characterization tests (committed before the move) now import them
+// from there. Only this import changed; no test body or assertion did.
+import {
   type EnrichedTransaction,
   buildTransactionCacheKey,
   enrichTransactionsWithAgents,
   fetchSafeTransactions,
   mergeX402Transactions,
-} from '../transactions.js'
+} from '../../modules/transactions/index.js'
 import pool from '../../db.js'
 
 const SAFE_ADDRESS = '0x135a9215604711AC70d970e12Caa812c53537EF4'

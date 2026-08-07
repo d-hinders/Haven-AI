@@ -197,6 +197,18 @@ import {
   SET_SAFE_DEFAULT_SQL,
   UPSERT_APPROVER_METADATA_SQL,
 } from '../src/infra/repositories/user-safes.js'
+import {
+  FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL,
+  FIND_CONFIRMED_X402_APPROVAL_REQUESTS_SQL,
+  FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL,
+  FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL,
+  FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL,
+  FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL,
+  FIND_SAFE_OWNERSHIP_ANY_CHAIN_SQL,
+  FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL,
+  LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL,
+  LIST_BASIC_SAFES_FOR_USER_SQL,
+} from '../src/infra/repositories/transaction-history.js'
 
 interface SmokeQuery {
   name: string
@@ -534,6 +546,19 @@ const QUERIES: SmokeQuery[] = [
   { name: 'entitlements: has (unrevoked) check', sql: HAS_ENTITLEMENT_SQL },
   { name: 'entitlements: grant upsert', sql: GRANT_ENTITLEMENT_SQL },
   { name: 'entitlements: revoke', sql: REVOKE_ENTITLEMENT_SQL },
+  // ── Transaction-history read model (#992). All the joins here reach into
+  // money-path tables (payment_intents, approval_requests, delegate_sweeps,
+  // machine_payment_evidence) even though the route itself is read-only.
+  { name: 'tx-history: basic safes list driving aggregation', sql: LIST_BASIC_SAFES_FOR_USER_SQL },
+  { name: 'tx-history: agent picklist for /filters', sql: LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL },
+  { name: 'tx-history: Safe ownership, any chain', sql: FIND_SAFE_OWNERSHIP_ANY_CHAIN_SQL },
+  { name: 'tx-history: Safe ownership, pinned chain', sql: FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL },
+  { name: 'tx-history: payment_intents agent attribution', sql: FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL },
+  { name: 'tx-history: approval_requests agent attribution', sql: FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL },
+  { name: 'tx-history: delegate_sweeps agent attribution', sql: FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL },
+  { name: 'tx-history: confirmed x402 payment_intents funding', sql: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL },
+  { name: 'tx-history: confirmed x402 approval_requests funding', sql: FIND_CONFIRMED_X402_APPROVAL_REQUESTS_SQL },
+  { name: 'tx-history: machine-payment evidence detail', sql: FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL },
 ]
 
 async function main(): Promise<void> {

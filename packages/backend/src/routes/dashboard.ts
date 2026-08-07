@@ -11,7 +11,7 @@ import {
   enrichTransactionsWithAgents,
   fetchSafeTransactions,
   mergeX402Transactions,
-} from './transactions.js'
+} from '../modules/transactions/index.js'
 
 const AGENT_PREVIEW_LIMIT = 6
 const TRANSACTION_PREVIEW_LIMIT = 5

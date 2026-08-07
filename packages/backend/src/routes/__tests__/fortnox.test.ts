@@ -34,8 +34,6 @@ const fortnoxConnectionMocks = vi.hoisted(() => ({
   saveFortnoxConnection: vi.fn(),
   deleteFortnoxConnection: vi.fn(),
 }))
-vi.mock('../../lib/fortnox-connection.js', () => fortnoxConnectionMocks)
-
 const fortnoxMocks = vi.hoisted(() => ({
   buildFortnoxAuthorizeUrl: vi.fn(() => 'https://apps.fortnox.se/oauth-v1/auth?client_id=cid'),
   exchangeCodeForTokens: vi.fn(),
@@ -49,9 +47,15 @@ const fortnoxMocks = vi.hoisted(() => ({
     }
   },
 }))
-vi.mock('../../lib/fortnox.js', () => fortnoxMocks)
+// fortnox-connection.ts and fortnox.ts both fold into one public entry point
+// post-#998 (modules/reporting/index.ts) — a single mock factory, not two
+// vi.mock calls to the same specifier (the second silently wins otherwise).
+vi.mock('../../modules/reporting/index.js', () => ({
+  ...fortnoxConnectionMocks,
+  ...fortnoxMocks,
+}))
 
-vi.mock('../../lib/accounting-entry.js', () => ({
+vi.mock('../../modules/accounting/index.js', () => ({
   buildAccountingEntries: vi.fn(async () => []),
 }))
 

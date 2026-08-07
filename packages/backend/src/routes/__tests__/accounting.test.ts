@@ -22,13 +22,17 @@ const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }))
 vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
 
 const { buildAccountingEntries } = vi.hoisted(() => ({ buildAccountingEntries: vi.fn() }))
-vi.mock('../../lib/accounting-entry.js', () => ({ buildAccountingEntries }))
-
 const { sieExport } = vi.hoisted(() => ({ sieExport: vi.fn() }))
-vi.mock('../../lib/sie-exporter.js', () => ({ sieExporter: { export: sieExport } }))
-
 const { reconcileEntries } = vi.hoisted(() => ({ reconcileEntries: vi.fn() }))
-vi.mock('../../lib/reconcile.js', () => ({ reconcileEntries }))
+// accounting-entry.ts, sie-exporter.ts and reconcile.ts all fold into one
+// public entry point post-#998 (modules/accounting/index.ts) — a single mock
+// factory, not three vi.mock calls to the same specifier (the last one
+// silently wins otherwise).
+vi.mock('../../modules/accounting/index.js', () => ({
+  buildAccountingEntries,
+  sieExporter: { export: sieExport },
+  reconcileEntries,
+}))
 
 import accountingRoutes from '../accounting.js'
 

@@ -19,6 +19,10 @@ const { mockQuery, allowanceMocks, fiatMocks, reportingMocks } = vi.hoisted(() =
   },
   reportingMocks: {
     lateAttachMerchantReceipt: vi.fn().mockResolvedValue(undefined),
+    // modules/mpp/evidence.ts's fire-and-forget feed hook — also part of the
+    // modules/reporting/ barrel post-#998, so it needs a mock here too (an
+    // unmocked call threw and 500'd the settle/evidence routes).
+    feedSettledPaymentBestEffort: vi.fn(),
   },
 }))
 
@@ -28,20 +32,20 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
+vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 
-vi.mock('../../lib/fiat-values.js', () => fiatMocks)
+vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 
 // Fee recording at settlement must not consume a mocked DB call in these
 // sequence-based tests; neutralize it (the module is dark anyway).
-vi.mock('../../lib/fee/fee-module.js', () => ({
+vi.mock('../../modules/fee/index.js', () => ({
   quoteFee: () => ({ paymentId: '', rail: '', feeAtomic: 0n, feeToken: '', basisPoints: 0, isZero: true }),
   recordSettledFee: async () => {},
 }))
 
 // #956 late-attach: fire-and-forget, mocked so its own DB reads never
 // interleave with these sequence-based mockQuery queues.
-vi.mock('../../lib/reporting/fortnox-connector.js', () => reportingMocks)
+vi.mock('../../modules/reporting/index.js', () => reportingMocks)
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',

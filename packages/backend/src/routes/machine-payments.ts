@@ -39,6 +39,7 @@ import {
   type MachinePaymentRail,
 } from '../lib/machine-payments.js'
 import { getAgentPaymentStatus, agentPaymentStatusHttpCode } from '../lib/agent-payment-status.js'
+import { deriveDelegationBudgets } from '../lib/delegation-budget-view.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   attachMachinePaymentEvidence,
@@ -457,6 +458,59 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
 
   app.get('/allowances', async (request, reply) => {
     const agent = request.agent as AgentContext
+
+    // #1135: this endpoint was rail-blind — it read the on-chain
+    // AllowanceModule unconditionally, so a delegation-rail account (no Safe,
+    // no AllowanceModule) reported zeros forever and the SDK derived
+    // needs_approval for a fully funded agent. Resolve the rail FIRST.
+    const railDecision = resolveExecutionRail({
+      safeExecutionRail: agent.execution_rail ?? null,
+      chainId: agent.chain_id,
+    })
+    if (railDecision.rail === 'retired_session') {
+      // #993 fail-closed contract: a retired rail's state must not be
+      // readable here either — the 410 verbatim, nothing read.
+      const retired = sessionRailRetired('account')
+      return reply.code(retired.statusCode).send(retired.body)
+    }
+
+    if (agent.execution_rail === 'delegation') {
+      // Delegation rail: the authority IS the active agent_delegations set,
+      // derived through the #1090 shared view (agent_allowances is a frozen
+      // onboarding mirror on this rail — reading it would report the
+      // onboarding budget forever). remaining = the period budget: the
+      // period-refill caveat re-arms on-chain each period and is enforced at
+      // redemption, so an over-budget attempt reverts — nothing queues.
+      // spent / nonce / reset bookkeeping have no AllowanceModule analogue
+      // here; zeros keep the wire shape the SDK already parses. No active
+      // delegation → empty array, so derived readiness stays needs_approval.
+      const budgets = (await deriveDelegationBudgets([agent.id])).get(agent.id) ?? []
+      return {
+        agent_id: agent.id,
+        safe_address: agent.safe_address,
+        delegate_address: agent.delegate_address,
+        chain_id: agent.chain_id,
+        allowances: budgets.map((b) => ({
+          id: b.id,
+          token_address: b.token_address,
+          token_symbol: b.token_symbol,
+          configured_amount: b.allowance_amount,
+          reset_period_min: b.reset_period_min,
+          onchain: {
+            amount: b.budget_atomic,
+            spent: '0',
+            remaining: b.budget_atomic,
+            effective_spent: '0',
+            reset_time_min: b.reset_period_min,
+            last_reset_min: 0,
+            nonce: 0,
+            is_reset_pending: false,
+          },
+        })),
+      }
+    }
+
+    // Legacy AllowanceModule rail — unchanged (characterization-pinned).
     const rows: AgentAllowanceRow[] = await listAllowanceConfigForAgent(agent.id)
 
     const allowances = []

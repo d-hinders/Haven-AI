@@ -187,6 +187,21 @@ the exact bytes signed. `buildX402ExpectedMessage` puts the version in both the
 header line and the signed payload, so neither context can be replayed as the
 other.
 
+A version outside the table is a **third** refusal, and the one an operator is
+most likely to meet (#1143). The set a given signer understands is
+`SUPPORTED_X402_EXPECTED_VERSIONS` in `packages/signer/src/core.ts`; anything else
+fails closed before any content check, with an error naming the received version,
+the signer's ceiling, and the fix. This is not hypothetical housekeeping: the
+backend deploys continuously from `dev` while a signer reaches users only on a
+merge to `main`, so a signer one release behind a context bump is a structural
+state. The tool schema therefore accepts any positive integer for `auth.version`
+and leaves the decision to the signer — a literal there is validated by the MCP
+server *before* any handler runs, which is how the original v2 rollout produced a
+raw Zod string instead of a Haven diagnosis. Widening the schema widened the error
+path only; an unrecognised version was never signable and still is not. Symptom
+strings per signer age are tabulated in
+[`mcp-runtime-compatibility.md`](../operations/mcp-runtime-compatibility.md).
+
 Delegation-rail UserOp signing is **local-signer-only** — the hosted/edge
 keyless path never signs an account UserOp. That is a non-custody and CASP-scope
 boundary (owner decision, 2026-08-06), not a sequencing preference.

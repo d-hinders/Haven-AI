@@ -1,6 +1,9 @@
 export {
   createEdgeSigner,
   assertX402MatchesExpected,
+  assertSupportedBindingVersion,
+  SUPPORTED_SWEEP_BINDING_VERSIONS,
+  SUPPORTED_X402_EXPECTED_VERSIONS,
   type EdgeSigner,
   type X402ExpectedPayment,
   type X402FundingSignatureResult,

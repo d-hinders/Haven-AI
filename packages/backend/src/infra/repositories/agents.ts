@@ -138,6 +138,28 @@ export const LIST_ALLOWANCES_FOR_AGENT_SQL = `SELECT id, agent_id, token_address
 export const LIST_ALLOWANCES_FOR_AGENT_UNORDERED_SQL = `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
          FROM agent_allowances WHERE agent_id = $1`
 
+/**
+ * The money-path policy gate (#995): does this agent carry an AllowanceModule
+ * config row for the token? Session/legacy rails treat a missing row as "not
+ * configured" (403); the delegation rail never consults it. The projection
+ * (`allowance_amount`) is verbatim from the routes even though every caller
+ * only checks existence.
+ */
+export const FIND_TOKEN_ALLOWANCE_AMOUNT_SQL = `SELECT allowance_amount FROM agent_allowances
+         WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`
+
+/**
+ * The `/machine-payments/allowances` projection — narrower than
+ * `LIST_ALLOWANCES_FOR_AGENT_SQL` (no `agent_id` column). Pre-existing
+ * divergence, preserved verbatim rather than widened (#995).
+ */
+export const LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL = `SELECT id, token_address, token_symbol, allowance_amount, reset_period_min
+       FROM agent_allowances
+       WHERE agent_id = $1
+       ORDER BY created_at ASC`
+
+export const FIND_AGENT_DELEGATE_ADDRESS_SQL = `SELECT delegate_address FROM agents WHERE id = $1`
+
 export const FIND_USER_SAFE_ID_FOR_USER_SQL = 'SELECT id FROM user_safes WHERE id = $1 AND user_id = $2'
 
 export const FIND_DEFAULT_USER_SAFE_ID_SQL = 'SELECT id FROM user_safes WHERE user_id = $1 AND is_default = true LIMIT 1'
@@ -205,6 +227,47 @@ export async function listAllowancesForAgentUnordered(
     agentId,
   ])
   return result.rows
+}
+
+/** True when the agent has an AllowanceModule config row for this token (#995). */
+export async function hasTokenAllowanceConfigured(
+  agentId: string,
+  tokenAddress: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query<{ allowance_amount: string }>(FIND_TOKEN_ALLOWANCE_AMOUNT_SQL, [
+    agentId,
+    tokenAddress,
+  ])
+  return result.rows.length > 0
+}
+
+export interface AllowanceConfigRow {
+  id: string
+  token_address: string
+  token_symbol: string
+  allowance_amount: string
+  reset_period_min: number
+}
+
+export async function listAllowanceConfigForAgent(
+  agentId: string,
+  db: Executor = pool,
+): Promise<AllowanceConfigRow[]> {
+  const result = await db.query<AllowanceConfigRow>(LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL, [agentId])
+  return result.rows
+}
+
+/** The agent's delegate EOA, or null (#716 residue reconciliation read). */
+export async function findAgentDelegateAddress(
+  agentId: string,
+  db: Executor = pool,
+): Promise<string | null> {
+  const result = await db.query<{ delegate_address: string | null }>(
+    FIND_AGENT_DELEGATE_ADDRESS_SQL,
+    [agentId],
+  )
+  return result.rows[0]?.delegate_address ?? null
 }
 
 /** `userId` is REQUIRED — validates the Safe belongs to the caller. */

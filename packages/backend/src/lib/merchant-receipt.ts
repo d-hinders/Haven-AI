@@ -1,4 +1,8 @@
-import pool from '../db.js'
+import {
+  findEvidenceAnchorForAgent,
+  getMerchantReceiptRow,
+  insertMerchantReceiptOnce,
+} from '../infra/repositories/machine-payments.js'
 
 /**
  * Merchant-issued receipt capture + retrieval (#956, follow-up to #498).
@@ -82,38 +86,24 @@ export async function captureMerchantReceipt(
 
   // The evidence row is the anchor (#498's receiptRef) — agent-scoped via the
   // intent/approval join so an agent can only annotate its own payments.
-  const evidence = await pool.query<{ id: string; user_id: string }>(
-    `SELECT mpe.id, mpe.user_id
-     FROM machine_payment_evidence mpe
-     LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
-     LEFT JOIN approval_requests ar ON ar.id = mpe.approval_request_id
-     WHERE COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT) = $1
-       AND COALESCE(pi.agent_id, ar.agent_id) = $2`,
-    [paymentId, agentId],
-  )
-  const evidenceId = evidence.rows[0]?.id
-  const userId = evidence.rows[0]?.user_id
+  const evidence = await findEvidenceAnchorForAgent(paymentId, agentId)
+  const evidenceId = evidence?.id
+  const userId = evidence?.user_id
   if (!evidenceId || !userId) {
     return { ok: false, code: 404, error: 'No settled payment evidence found for this payment' }
   }
 
-  const inserted = await pool.query(
-    `INSERT INTO merchant_receipts (evidence_id, url, inline_json)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (evidence_id) DO NOTHING
-     RETURNING evidence_id`,
-    [evidenceId, url ?? null, inlineJson === undefined ? null : JSON.stringify(inlineJson)],
+  const stored = await insertMerchantReceiptOnce(
+    evidenceId,
+    url ?? null,
+    inlineJson === undefined ? null : JSON.stringify(inlineJson),
   )
-  return { ok: true, stored: inserted.rows.length > 0, userId }
+  return { ok: true, stored, userId }
 }
 
 /** The merchant receipt for an evidence row, or null. */
 export async function getMerchantReceipt(evidenceId: string): Promise<MerchantReceipt | null> {
-  const result = await pool.query<{ url: string | null; inline_json: unknown }>(
-    `SELECT url, inline_json FROM merchant_receipts WHERE evidence_id = $1`,
-    [evidenceId],
-  )
-  const row = result.rows[0]
+  const row = await getMerchantReceiptRow(evidenceId)
   if (!row) return null
   return { url: row.url, inlineJson: row.inline_json ?? null }
 }

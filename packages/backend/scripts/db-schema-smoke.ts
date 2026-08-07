@@ -84,6 +84,97 @@ import {
   UPSERT_AGENT_ALLOWANCE_SQL,
 } from '../src/infra/repositories/agents.js'
 import {
+  FIND_AGENT_DELEGATE_ADDRESS_SQL,
+  FIND_TOKEN_ALLOWANCE_AMOUNT_SQL,
+  LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL,
+} from '../src/infra/repositories/agents.js'
+import {
+  CLAIM_INTENT_FOR_SUBMISSION_SQL,
+  CONFIRM_MACHINE_INTENT_SQL,
+  CONFIRM_SUBMITTED_INTENT_SQL,
+  EXPIRE_OVERDUE_INTENT_BY_ID_SQL,
+  EXPIRE_OVERDUE_INTENT_RETURNING_STATUS_SQL,
+  EXPIRE_OVERDUE_INTENTS_FOR_AGENT_SQL,
+  EXPIRE_PENDING_INTENT_RETURNING_STATUS_SQL,
+  EXPIRE_PENDING_INTENT_SQL,
+  FAIL_MACHINE_INTENT_SQL,
+  FAIL_SUBMITTED_INTENT_SQL,
+  FIND_INTENT_FOR_AGENT_SQL,
+  FIND_INTENT_STATUS_ROW_SQL,
+  FIND_MACHINE_INTENT_BY_KEY_OR_CHALLENGE_SQL,
+  FIND_SEND_INTENT_BY_KEY_SQL,
+  FIND_SETTLED_PAYMENT_RECEIPT_SQL,
+  GET_INTENT_STATUS_SQL,
+  INSERT_DELEGATION_INTENT_SQL,
+  INSERT_LEGACY_INTENT_SQL,
+  INSERT_MACHINE_INTENT_MACHINE_KEY_SQL,
+  INSERT_MACHINE_INTENT_X402_KEY_SQL,
+  INSERT_SEND_INTENT_SQL,
+  LIST_INTENTS_FOR_AGENT_SQL,
+  RECORD_MACHINE_INTENT_SIGNATURE_SQL,
+  REFRESH_MACHINE_INTENT_NONCE_SQL,
+  RELEASE_SUBMITTED_CLAIM_SQL,
+} from '../src/infra/repositories/payment-intents.js'
+import {
+  EXPIRE_OVERDUE_APPROVAL_SQL,
+  FIND_APPROVAL_STATUS_ROW_SQL,
+  FIND_MACHINE_APPROVAL_BY_KEY_OR_CHALLENGE_SQL,
+  FIND_SEND_APPROVAL_BY_KEY_SQL,
+  FIND_X402_APPROVAL_BY_KEY_SQL,
+  INSERT_MACHINE_APPROVAL_SQL,
+  INSERT_PAYMENT_APPROVAL_SQL,
+  INSERT_SEND_APPROVAL_SQL,
+} from '../src/infra/repositories/approval-requests.js'
+import {
+  CONFIRM_X402_INTENT_SQL,
+  COUNT_RECENT_X402_INTENTS_SQL,
+  FAIL_X402_INTENT_SQL,
+  FIND_ACTIVE_X402_INTENT_BY_KEY_SQL,
+  FIND_SETTLE_INTENT_SQL,
+  FIND_X402_INTENT_BY_KEY_SQL,
+  GET_MAX_X402_PER_HOUR_SQL,
+  MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL,
+  RECORD_X402_SIGNATURE_SQL,
+  REFRESH_STALE_X402_INTENT_SQL,
+} from '../src/infra/repositories/x402-authorizations.js'
+import {
+  ATTACH_EVIDENCE_FOR_APPROVAL_SQL,
+  ATTACH_EVIDENCE_FOR_INTENT_SQL,
+  CLAIM_PREPARED_SWEEP_SQL,
+  EXPIRE_PREPARED_SWEEP_SQL,
+  FIND_APPROVAL_FOR_EVIDENCE_SQL,
+  FIND_EVIDENCE_ANCHOR_FOR_AGENT_SQL,
+  FIND_INTENT_EVIDENCE_SOURCE_SQL,
+  FIND_INTENT_FOR_EVIDENCE_SQL,
+  FIND_RECONCILIATION_APPROVAL_SQL,
+  FIND_RECONCILIATION_EVENT_FOR_APPROVAL_SQL,
+  FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL,
+  FIND_RECONCILIATION_INTENT_SQL,
+  FIND_SWEEP_BY_ID_SQL,
+  FIND_SWEEP_BY_NONCE_SQL,
+  GET_INTENT_SETTLEMENT_FIELDS_SQL,
+  GET_MERCHANT_RECEIPT_SQL,
+  INSERT_MERCHANT_RECEIPT_SQL,
+  INSERT_PREPARED_SWEEP_SQL,
+  INSERT_RESIDUE_EVENT_SQL,
+  LIST_EVIDENCE_RECEIPTS_SQL,
+  MARK_SWEEP_FAILED_SQL,
+  MARK_SWEEP_SUBMITTED_SQL,
+  RELEASE_SWEEP_CLAIM_SQL,
+  RESOLVE_RECONCILIATION_FOR_APPROVAL_SQL,
+  RESOLVE_RECONCILIATION_FOR_INTENT_SQL,
+  RESOLVE_STRANDED_EVENTS_FOR_AGENT_SQL,
+  UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL,
+  UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL,
+  UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL,
+  UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL,
+} from '../src/infra/repositories/machine-payments.js'
+import {
+  GRANT_ENTITLEMENT_SQL,
+  HAS_ENTITLEMENT_SQL,
+  REVOKE_ENTITLEMENT_SQL,
+} from '../src/infra/repositories/account-entitlements.js'
+import {
   CLEAR_DEFAULT_SAFES_FOR_USER_SQL,
   CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL,
   COUNT_SAFES_FOR_USER_SQL,
@@ -207,13 +298,9 @@ const QUERIES: SmokeQuery[] = [
           WHERE a.id = $1`,
   },
   {
+    // IMPORTED since #995 — the pasted copy predated the repository.
     name: 'x402: exact-amount idempotency reload',
-    sql: `SELECT * FROM payment_intents
-          WHERE agent_id = $1
-            AND (x402_idempotency_key = $2 OR machine_idempotency_key = $2)
-            AND COALESCE(payment_rail, source) = 'x402'
-            AND status <> 'failed'
-          ORDER BY created_at DESC`,
+    sql: FIND_X402_INTENT_BY_KEY_SQL,
   },
   {
     name: 'payments: session intent insert (execution_rail pinned)',
@@ -244,14 +331,9 @@ const QUERIES: SmokeQuery[] = [
           WHERE a.status = 'active' AND a.delegate_address IS NOT NULL`,
   },
   {
+    // IMPORTED since #995 — the pasted copy predated the repository.
     name: 'evidence: post-settle residue reconciliation insert',
-    sql: `INSERT INTO machine_payment_reconciliation_events (
-            agent_id, user_id, payment_intent_id, rail, event_type, tx_hash,
-            resource_url, merchant_address, reason, details
-          ) VALUES ($1, $2, $3, $4, 'delegate_residue_after_settlement', $5, $6, $7, $8, $9)
-          ON CONFLICT (payment_intent_id, event_type)
-            WHERE payment_intent_id IS NOT NULL
-          DO UPDATE SET details = EXCLUDED.details, updated_at = NOW()`,
+    sql: INSERT_RESIDUE_EVENT_SQL,
   },
   {
     name: 'hybrid accounts: provisioning insert with rail + type (#825)',
@@ -289,16 +371,9 @@ const QUERIES: SmokeQuery[] = [
             AND recipient_address IS NOT DISTINCT FROM LOWER($3)`,
   },
   {
+    // IMPORTED since #995 — the pasted copy predated the repository.
     name: 'payments: delegation intent insert (rail + delegation pinned, #829; budget hash #1059)',
-    sql: `INSERT INTO payment_intents (
-            agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-            to_address, amount_raw, amount_human, delegate_address,
-            allowance_nonce, sign_hash,
-            execution_rail, delegation_hash, budget_delegation_hash, prepared_user_op,
-            status, expires_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-            'pending_signature', NOW() + interval '10 minutes')
-          RETURNING *`,
+    sql: INSERT_DELEGATION_INTENT_SQL,
   },
   {
     name: 'relayer: gas-event insert (#717 attribution)',
@@ -374,6 +449,91 @@ const QUERIES: SmokeQuery[] = [
              AND (anchoring_started_at IS NULL
                   OR anchoring_started_at < NOW() - MAKE_INTERVAL(secs => $2))`,
   },
+  // ── Payment-path repositories (#995). ALL IMPORTED — the single biggest
+  // block of settlement data access, previously inline in nine files and
+  // therefore never PREPARE-checked in CI (the #757 failure class).
+  // payment_intents aggregate:
+  { name: 'intents: find for agent (tenant-scoped)', sql: FIND_INTENT_FOR_AGENT_SQL },
+  { name: 'intents: status read for 409 responder', sql: GET_INTENT_STATUS_SQL },
+  { name: 'intents: list for agent', sql: LIST_INTENTS_FOR_AGENT_SQL },
+  { name: 'intents: legacy AllowanceModule insert', sql: INSERT_LEGACY_INTENT_SQL },
+  { name: 'intents: /send insert (send_idempotency_key)', sql: INSERT_SEND_INTENT_SQL },
+  { name: 'intents: machine insert, machine-key arbiter', sql: INSERT_MACHINE_INTENT_MACHINE_KEY_SQL },
+  { name: 'intents: machine insert, x402-key arbiter', sql: INSERT_MACHINE_INTENT_X402_KEY_SQL },
+  { name: 'intents: /send idempotency replay lookup', sql: FIND_SEND_INTENT_BY_KEY_SQL },
+  { name: 'intents: machine key/challenge idempotency lookup', sql: FIND_MACHINE_INTENT_BY_KEY_OR_CHALLENGE_SQL },
+  { name: 'intents: expire pending (judged by caller)', sql: EXPIRE_PENDING_INTENT_SQL },
+  { name: 'intents: expire pending, returning status (GET read path)', sql: EXPIRE_PENDING_INTENT_RETURNING_STATUS_SQL },
+  { name: 'intents: expire overdue (claim-CAS loser branch)', sql: EXPIRE_OVERDUE_INTENT_RETURNING_STATUS_SQL },
+  { name: 'intents: lazy expire before status read', sql: EXPIRE_OVERDUE_INTENT_BY_ID_SQL },
+  { name: 'intents: lazy expire sweep before list', sql: EXPIRE_OVERDUE_INTENTS_FOR_AGENT_SQL },
+  { name: 'intents: claim for submission (the double-spend CAS)', sql: CLAIM_INTENT_FOR_SUBMISSION_SQL },
+  { name: 'intents: confirm submitted', sql: CONFIRM_SUBMITTED_INTENT_SQL },
+  { name: 'intents: release submitted claim (#717/#1119)', sql: RELEASE_SUBMITTED_CLAIM_SQL },
+  { name: 'intents: fail submitted', sql: FAIL_SUBMITTED_INTENT_SQL },
+  { name: 'intents: machine nonce/hash refresh', sql: REFRESH_MACHINE_INTENT_NONCE_SQL },
+  { name: 'intents: machine one-shot signature record', sql: RECORD_MACHINE_INTENT_SIGNATURE_SQL },
+  { name: 'intents: machine one-shot confirm', sql: CONFIRM_MACHINE_INTENT_SQL },
+  { name: 'intents: machine one-shot fail', sql: FAIL_MACHINE_INTENT_SQL },
+  { name: 'intents: status projection with funded-but-unsettled join', sql: FIND_INTENT_STATUS_ROW_SQL },
+  { name: 'intents: settled receipt row (evidence join)', sql: FIND_SETTLED_PAYMENT_RECEIPT_SQL },
+  // approval_requests aggregate:
+  { name: 'approvals: direct-payment over-allowance insert', sql: INSERT_PAYMENT_APPROVAL_SQL },
+  { name: 'approvals: /send over-allowance insert (send key)', sql: INSERT_SEND_APPROVAL_SQL },
+  { name: 'approvals: machine insert with ON CONFLICT arbiter', sql: INSERT_MACHINE_APPROVAL_SQL },
+  { name: 'approvals: /send idempotency replay lookup', sql: FIND_SEND_APPROVAL_BY_KEY_SQL },
+  { name: 'approvals: x402 idempotency lookup', sql: FIND_X402_APPROVAL_BY_KEY_SQL },
+  { name: 'approvals: machine key/challenge idempotency lookup', sql: FIND_MACHINE_APPROVAL_BY_KEY_OR_CHALLENGE_SQL },
+  { name: 'approvals: lazy expire before status read', sql: EXPIRE_OVERDUE_APPROVAL_SQL },
+  { name: 'approvals: status projection', sql: FIND_APPROVAL_STATUS_ROW_SQL },
+  // x402 authorization lifecycle:
+  { name: 'x402: hourly cap config read (#961)', sql: GET_MAX_X402_PER_HOUR_SQL },
+  { name: 'x402: hourly cap usage count (#961)', sql: COUNT_RECENT_X402_INTENTS_SQL },
+  { name: 'x402: post-conflict active-intent reload', sql: FIND_ACTIVE_X402_INTENT_BY_KEY_SQL },
+  { name: 'x402: stale-replay refresh (guarded, #961)', sql: REFRESH_STALE_X402_INTENT_SQL },
+  { name: 'x402: one-shot signature record', sql: RECORD_X402_SIGNATURE_SQL },
+  { name: 'x402: one-shot confirm', sql: CONFIRM_X402_INTENT_SQL },
+  { name: 'x402: one-shot fail', sql: FAIL_X402_INTENT_SQL },
+  { name: 'x402: settle intent load (#830)', sql: FIND_SETTLE_INTENT_SQL },
+  { name: 'x402: settle flip to submitted (#976 ordering)', sql: MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL },
+  // machine-payment evidence / reconciliation / sweeps / merchant receipts:
+  { name: 'evidence: base upsert anchored on intent', sql: UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL },
+  { name: 'evidence: base upsert anchored on approval', sql: UPSERT_EVIDENCE_BASE_FOR_APPROVAL_SQL },
+  { name: 'evidence: intent source read (optional agent scope)', sql: FIND_INTENT_EVIDENCE_SOURCE_SQL },
+  { name: 'evidence: intent source read (agent-scoped)', sql: FIND_INTENT_FOR_EVIDENCE_SQL },
+  { name: 'evidence: approval source read (agent-scoped)', sql: FIND_APPROVAL_FOR_EVIDENCE_SQL },
+  { name: 'evidence: proof attach on intent', sql: ATTACH_EVIDENCE_FOR_INTENT_SQL },
+  { name: 'evidence: proof attach on approval', sql: ATTACH_EVIDENCE_FOR_APPROVAL_SQL },
+  { name: 'evidence: receipts list with settlement-scheme join (#1063)', sql: LIST_EVIDENCE_RECEIPTS_SQL },
+  { name: 'evidence: intent settlement-fields echo (#1118)', sql: GET_INTENT_SETTLEMENT_FIELDS_SQL },
+  { name: 'reconciliation: intent lookup', sql: FIND_RECONCILIATION_INTENT_SQL },
+  { name: 'reconciliation: approval lookup', sql: FIND_RECONCILIATION_APPROVAL_SQL },
+  { name: 'reconciliation: event upsert keyed on intent', sql: UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL },
+  { name: 'reconciliation: event upsert keyed on approval', sql: UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL },
+  { name: 'reconciliation: event reload keyed on intent', sql: FIND_RECONCILIATION_EVENT_FOR_INTENT_SQL },
+  { name: 'reconciliation: event reload keyed on approval', sql: FIND_RECONCILIATION_EVENT_FOR_APPROVAL_SQL },
+  { name: 'reconciliation: resolve on settle proof (intent)', sql: RESOLVE_RECONCILIATION_FOR_INTENT_SQL },
+  { name: 'reconciliation: resolve on settle proof (approval)', sql: RESOLVE_RECONCILIATION_FOR_APPROVAL_SQL },
+  { name: 'reconciliation: resolve stranded flags after sweep', sql: RESOLVE_STRANDED_EVENTS_FOR_AGENT_SQL },
+  { name: 'sweeps: prepared insert', sql: INSERT_PREPARED_SWEEP_SQL },
+  { name: 'sweeps: find by nonce (tenant-scoped)', sql: FIND_SWEEP_BY_NONCE_SQL },
+  { name: 'sweeps: reload after lost claim', sql: FIND_SWEEP_BY_ID_SQL },
+  { name: 'sweeps: expire prepared', sql: EXPIRE_PREPARED_SWEEP_SQL },
+  { name: 'sweeps: claim CAS before relay', sql: CLAIM_PREPARED_SWEEP_SQL },
+  { name: 'sweeps: release claim on budget refusal (#717)', sql: RELEASE_SWEEP_CLAIM_SQL },
+  { name: 'sweeps: mark failed', sql: MARK_SWEEP_FAILED_SQL },
+  { name: 'sweeps: mark submitted', sql: MARK_SWEEP_SUBMITTED_SQL },
+  { name: 'merchant receipts: evidence anchor lookup (#956)', sql: FIND_EVIDENCE_ANCHOR_FOR_AGENT_SQL },
+  { name: 'merchant receipts: first-write-wins insert (#956)', sql: INSERT_MERCHANT_RECEIPT_SQL },
+  { name: 'merchant receipts: read by evidence id', sql: GET_MERCHANT_RECEIPT_SQL },
+  // agents-aggregate money-path reads:
+  { name: 'agents: token allowance policy gate', sql: FIND_TOKEN_ALLOWANCE_AMOUNT_SQL },
+  { name: 'agents: /allowances config projection', sql: LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL },
+  { name: 'agents: delegate address for residue check (#716)', sql: FIND_AGENT_DELEGATE_ADDRESS_SQL },
+  // account entitlements:
+  { name: 'entitlements: has (unrevoked) check', sql: HAS_ENTITLEMENT_SQL },
+  { name: 'entitlements: grant upsert', sql: GRANT_ENTITLEMENT_SQL },
+  { name: 'entitlements: revoke', sql: REVOKE_ENTITLEMENT_SQL },
 ]
 
 async function main(): Promise<void> {

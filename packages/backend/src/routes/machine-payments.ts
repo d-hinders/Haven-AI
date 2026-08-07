@@ -3,7 +3,35 @@ import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import { ethers } from 'ethers'
 import { config } from '../config.js'
-import pool from '../db.js'
+import {
+  findSendIntentByIdempotencyKey,
+  insertSendIntent,
+} from '../infra/repositories/payment-intents.js'
+import {
+  findSendApprovalByIdempotencyKey,
+  insertSendApproval,
+} from '../infra/repositories/approval-requests.js'
+import {
+  claimPreparedSweep,
+  expirePreparedSweep,
+  findReconciliationApproval,
+  findReconciliationEvent,
+  findSweepById,
+  findSweepByNonce,
+  findReconciliationIntent,
+  getIntentSettlementFields,
+  insertPreparedSweep,
+  listEvidenceReceiptsForAgent,
+  markSweepFailed,
+  markSweepSubmitted,
+  releaseSweepClaim,
+  resolveStrandedEventsForAgent,
+  upsertReconciliationEvent,
+} from '../infra/repositories/machine-payments.js'
+import {
+  hasTokenAllowanceConfigured,
+  listAllowanceConfigForAgent,
+} from '../infra/repositories/agents.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import {
@@ -358,27 +386,7 @@ async function findExistingSend(
   idempotencyKey: string,
   asset: SendAsset,
 ): Promise<SendReplay | null> {
-  const intent = await pool.query<{
-    id: string
-    status: string
-    expires_at: string
-    token_address: string
-    to_address: string
-    amount_raw: string
-    amount_human: string
-    allowance_nonce: number
-    sign_hash: string
-  }>(
-    `SELECT id, status, expires_at, token_address, to_address,
-            amount_raw, amount_human, allowance_nonce, sign_hash
-     FROM payment_intents
-     WHERE agent_id = $1 AND send_idempotency_key = $2
-       AND status NOT IN ('failed', 'expired')
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [agent.id, idempotencyKey],
-  )
-  const pi = intent.rows[0]
+  const pi = await findSendIntentByIdempotencyKey(agent.id, idempotencyKey)
   if (pi) {
     // Already submitted/confirmed — report the real state, not a stale sign request.
     if (pi.status !== 'pending_signature') {
@@ -405,22 +413,7 @@ async function findExistingSend(
     }
   }
 
-  const approval = await pool.query<{
-    id: string
-    status: string
-    expires_at: string
-    token_symbol: string
-    amount_human: string
-  }>(
-    `SELECT id, status, expires_at, token_symbol, amount_human
-     FROM approval_requests
-     WHERE agent_id = $1 AND send_idempotency_key = $2
-       AND status NOT IN ('rejected', 'expired')
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [agent.id, idempotencyKey],
-  )
-  const ar = approval.rows[0]
+  const ar = await findSendApprovalByIdempotencyKey(agent.id, idempotencyKey)
   if (ar) {
     // Owner has approved / executed it — report the real state, not "still waiting".
     if (ar.status !== 'pending') {
@@ -464,16 +457,10 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
 
   app.get('/allowances', async (request, reply) => {
     const agent = request.agent as AgentContext
-    const result = await pool.query<AgentAllowanceRow>(
-      `SELECT id, token_address, token_symbol, allowance_amount, reset_period_min
-       FROM agent_allowances
-       WHERE agent_id = $1
-       ORDER BY created_at ASC`,
-      [agent.id],
-    )
+    const rows: AgentAllowanceRow[] = await listAllowanceConfigForAgent(agent.id)
 
     const allowances = []
-    for (const row of result.rows) {
+    for (const row of rows) {
       try {
         const [onchain, chainTimeSec] = await Promise.all([
           getTokenAllowance(
@@ -534,19 +521,12 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     // (eip3009 bridge vs erc7710 direct) is unverifiable without it. Found
     // by the first real run of the delegation QA leg (#1063): the scenario
     // had nowhere to read the scheme from.
-    const result = await pool.query<MachinePaymentEvidenceRow & { settlement_scheme: string | null; budget_delegation_hash: string | null }>(
-      `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
-              pi.budget_delegation_hash
-       FROM machine_payment_evidence e
-       LEFT JOIN payment_intents pi ON pi.id = e.payment_intent_id
-       WHERE e.agent_id = $1
-       ORDER BY e.created_at DESC
-       LIMIT $2`,
-      [agent.id, limit],
-    )
+    const receipts = await listEvidenceReceiptsForAgent<
+      MachinePaymentEvidenceRow & { settlement_scheme: string | null; budget_delegation_hash: string | null }
+    >(agent.id, limit)
 
     return reply.send({
-      receipts: result.rows.map(mapEvidence),
+      receipts: receipts.map(mapEvidence),
     })
   })
 
@@ -630,12 +610,8 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     }
 
     // 4. Policy check: agent must have this token configured
-    const dbAllowance = await pool.query<{ allowance_amount: string }>(
-      `SELECT allowance_amount FROM agent_allowances
-       WHERE agent_id = $1 AND LOWER(token_address) = LOWER($2)`,
-      [agent.id, tokenAddress],
-    )
-    if (dbAllowance.rows.length === 0) {
+    const allowanceConfigured = await hasTokenAllowanceConfigured(agent.id, tokenAddress)
+    if (!allowanceConfigured) {
       return reply.code(403).send({
         error: `Agent is not configured for ${tokenConfig.symbol} transfers`,
       })
@@ -670,29 +646,21 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       const approvalReason =
         `Exceeds remaining allowance (${amount} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
 
-      let approvalResult
+      let approval
       try {
-        approvalResult = await pool.query<{ id: string; status: string; expires_at: string }>(
-          `INSERT INTO approval_requests (
-            agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-            to_address, amount_raw, amount_human, reason, send_idempotency_key, status, expires_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending',
-            NOW() + interval '24 hours')
-          RETURNING id, status, expires_at`,
-          [
-            agent.id,
-            agent.user_id,
-            agent.safe_address,
-            agent.chain_id,
-            tokenConfig.symbol,
-            tokenAddress,
-            recipient.toLowerCase(),
-            amountRaw.toString(),
-            amount,
-            approvalReason,
-            idempotencyKey ?? null,
-          ],
-        )
+        approval = await insertSendApproval({
+          agentId: agent.id,
+          userId: agent.user_id,
+          safeAddress: agent.safe_address,
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          tokenAddress,
+          toAddress: recipient.toLowerCase(),
+          amountRaw: amountRaw.toString(),
+          amountHuman: amount,
+          reason: approvalReason,
+          sendIdempotencyKey: idempotencyKey ?? null,
+        })
       } catch (err) {
         // Lost an idempotency-key race with a concurrent send — replay the winner.
         if (idempotencyKey && (err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
@@ -701,8 +669,6 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         }
         throw err
       }
-
-      const approval = approvalResult.rows[0]
       return reply.code(202).send({
         payment_id: approval.id,
         kind: 'approval_request',
@@ -738,32 +704,23 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     }
 
     // 7. Store the payment intent
-    let result
+    let intent: SendPaymentIntentRow
     try {
-      result = await pool.query<SendPaymentIntentRow>(
-        `INSERT INTO payment_intents (
-          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-          to_address, amount_raw, amount_human, delegate_address,
-          allowance_nonce, sign_hash, send_idempotency_key, status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending_signature',
-          NOW() + interval '10 minutes')
-        RETURNING id, status, expires_at`,
-        [
-          agent.id,
-          agent.user_id,
-          agent.safe_address,
-          agent.chain_id,
-          tokenConfig.symbol,
-          tokenAddress,
-          recipient.toLowerCase(),
-          amountRaw.toString(),
-          amount,
-          agent.delegate_address,
-          onChainAllowance.nonce,
-          signHash,
-          idempotencyKey ?? null,
-        ],
-      )
+      intent = await insertSendIntent({
+        agentId: agent.id,
+        userId: agent.user_id,
+        safeAddress: agent.safe_address,
+        chainId: agent.chain_id,
+        tokenSymbol: tokenConfig.symbol,
+        tokenAddress,
+        toAddress: recipient.toLowerCase(),
+        amountRaw: amountRaw.toString(),
+        amountHuman: amount,
+        delegateAddress: agent.delegate_address,
+        allowanceNonce: onChainAllowance.nonce,
+        signHash,
+        sendIdempotencyKey: idempotencyKey ?? null,
+      })
     } catch (err) {
       // Lost an idempotency-key race with a concurrent send — replay the winner.
       if (idempotencyKey && (err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
@@ -772,8 +729,6 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       }
       throw err
     }
-
-    const intent = result.rows[0]
 
     return reply.code(201).send({
       payment_id: intent.id,
@@ -921,12 +876,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       let intentFields: { settlement_scheme?: string | null; budget_delegation_hash?: string | null } = {}
       if (evidence.payment_intent_id) {
         try {
-          const intentRes = await pool.query<{ settlement_scheme: string | null; budget_delegation_hash: string | null }>(
-            `SELECT machine_metadata->>'settlement_scheme' AS settlement_scheme, budget_delegation_hash
-             FROM payment_intents WHERE id = $1`,
-            [evidence.payment_intent_id],
-          )
-          intentFields = intentRes.rows[0] ?? {}
+          intentFields = (await getIntentSettlementFields(evidence.payment_intent_id)) ?? {}
         } catch {
           // Echo enrichment only — never fail the 202 over it.
         }
@@ -1034,31 +984,12 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(400).send({ error: 'details must be an object' })
     }
 
-    const paymentResult = await pool.query<ReconciliationPaymentRow>(
-      `SELECT 'payment_intent'::TEXT AS kind,
-              id, user_id, tx_hash, status, payment_rail, source,
-              payment_resource_url, x402_resource_url,
-              merchant_address, x402_merchant_address,
-              machine_challenge_id, machine_idempotency_key, x402_idempotency_key
-       FROM payment_intents
-       WHERE id = $1 AND agent_id = $2
-       LIMIT 1`,
-      [paymentId, agent.id],
+    let payment: ReconciliationPaymentRow | null = await findReconciliationIntent(
+      paymentId,
+      agent.id,
     )
-    let payment = paymentResult.rows[0]
     if (!payment) {
-      const approvalResult = await pool.query<ReconciliationPaymentRow>(
-        `SELECT 'approval_request'::TEXT AS kind,
-                id, user_id, tx_hash, status, payment_rail, source,
-                payment_resource_url, x402_resource_url,
-                merchant_address, NULL::TEXT AS x402_merchant_address,
-                machine_challenge_id, machine_idempotency_key, NULL::TEXT AS x402_idempotency_key
-         FROM approval_requests
-         WHERE id = $1 AND agent_id = $2
-         LIMIT 1`,
-        [paymentId, agent.id],
-      )
-      payment = approvalResult.rows[0]
+      payment = await findReconciliationApproval(paymentId, agent.id)
     }
     if (!payment) {
       return reply.code(404).send({ error: 'Payment not found' })
@@ -1085,55 +1016,24 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     const approvalRequestId = payment.kind === 'approval_request' ? payment.id : null
     const conflictColumn = payment.kind === 'approval_request' ? 'approval_request_id' : 'payment_intent_id'
 
-    const result = await pool.query<ReconciliationEventRow>(
-      `INSERT INTO machine_payment_reconciliation_events (
-        agent_id, user_id, payment_intent_id, approval_request_id, rail, event_type, tx_hash,
-        resource_url, merchant_address, machine_challenge_id, machine_idempotency_key,
-        reason, details
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      ON CONFLICT (${conflictColumn}, event_type)
-        WHERE ${conflictColumn} IS NOT NULL
-      DO UPDATE SET
-        tx_hash = EXCLUDED.tx_hash,
-        resource_url = EXCLUDED.resource_url,
-        merchant_address = EXCLUDED.merchant_address,
-        machine_challenge_id = EXCLUDED.machine_challenge_id,
-        machine_idempotency_key = EXCLUDED.machine_idempotency_key,
-        reason = EXCLUDED.reason,
-        details = EXCLUDED.details,
-        status = 'open',
-        updated_at = NOW()
-      WHERE machine_payment_reconciliation_events.status <> 'resolved'
-      RETURNING id, status, created_at`,
-      [
-        agent.id,
-        payment.user_id,
-        paymentIntentId,
-        approvalRequestId,
-        rail,
-        eventType,
-        payment.tx_hash.toLowerCase(),
-        payment.payment_resource_url ?? payment.x402_resource_url,
-        payment.merchant_address ?? payment.x402_merchant_address,
-        payment.machine_challenge_id,
-        payment.machine_idempotency_key ?? payment.x402_idempotency_key,
-        reason ?? null,
-        details ? JSON.stringify(details) : null,
-      ],
-    )
-
-    let event = result.rows[0]
+    let event = await upsertReconciliationEvent({
+      conflictColumn,
+      agentId: agent.id,
+      userId: payment.user_id,
+      paymentIntentId,
+      approvalRequestId,
+      rail,
+      eventType,
+      txHash: payment.tx_hash.toLowerCase(),
+      resourceUrl: payment.payment_resource_url ?? payment.x402_resource_url,
+      merchantAddress: payment.merchant_address ?? payment.x402_merchant_address,
+      machineChallengeId: payment.machine_challenge_id,
+      machineIdempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
+      reason: reason ?? null,
+      details: details ? JSON.stringify(details) : null,
+    })
     if (!event) {
-      const existingResult = await pool.query<ReconciliationEventRow>(
-        `SELECT id, status, created_at
-         FROM machine_payment_reconciliation_events
-         WHERE ${conflictColumn} = $1
-           AND agent_id = $2
-           AND event_type = $3
-         LIMIT 1`,
-        [payment.id, agent.id, eventType],
-      )
-      event = existingResult.rows[0]
+      event = await findReconciliationEvent(conflictColumn, payment.id, agent.id, eventType)
     }
     if (!event) throw new Error('reconciliation_event_conflict_not_found')
 
@@ -1214,24 +1114,18 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       valueAtomic: balance,
     })
 
-    await pool.query(
-      `INSERT INTO delegate_sweeps (
-        agent_id, user_id, chain_id, token_address, from_address, to_address,
-        value_atomic, valid_after, valid_before, nonce, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'prepared')`,
-      [
-        agent.id,
-        agent.user_id,
-        authorization.chainId,
-        authorization.token.toLowerCase(),
-        authorization.from.toLowerCase(),
-        authorization.to.toLowerCase(),
-        authorization.value,
-        authorization.validAfter,
-        authorization.validBefore,
-        authorization.nonce.toLowerCase(),
-      ],
-    )
+    await insertPreparedSweep({
+      agentId: agent.id,
+      userId: agent.user_id,
+      chainId: authorization.chainId,
+      tokenAddress: authorization.token.toLowerCase(),
+      fromAddress: authorization.from.toLowerCase(),
+      toAddress: authorization.to.toLowerCase(),
+      valueAtomic: authorization.value,
+      validAfter: authorization.validAfter,
+      validBefore: authorization.validBefore,
+      nonce: authorization.nonce.toLowerCase(),
+    })
 
     const expectedAuth = await signSweepExpectedContext(authorization)
 
@@ -1267,15 +1161,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(400).send({ error: 'authorization.nonce must be a 0x-prefixed 32-byte hex string' })
     }
 
-    const rowResult = await pool.query<DelegateSweepRow>(
-      `SELECT id, chain_id, token_address, from_address, to_address, value_atomic,
-              valid_after, valid_before, nonce, status, tx_hash
-       FROM delegate_sweeps
-       WHERE nonce = $1 AND agent_id = $2
-       LIMIT 1`,
-      [nonce.toLowerCase(), agent.id],
-    )
-    const row = rowResult.rows[0]
+    const row: DelegateSweepRow | null = await findSweepByNonce(nonce.toLowerCase(), agent.id)
     if (!row) {
       return reply.code(404).send({ error: 'No prepared sweep found for this nonce. Call /sweep/prepare first.' })
     }
@@ -1298,10 +1184,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(409).send({ error: `Sweep is ${row.status}, expected prepared.`, status: row.status })
     }
     if (Number(row.valid_before) <= Math.floor(Date.now() / 1000)) {
-      await pool.query(
-        `UPDATE delegate_sweeps SET status = 'expired' WHERE id = $1 AND status = 'prepared'`,
-        [row.id],
-      )
+      await expirePreparedSweep(row.id)
       return reply.code(409).send({ error: 'Sweep authorization expired. Call /sweep/prepare again.' })
     }
 
@@ -1366,20 +1249,9 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     // reverts on the spent EIP-3009 nonce, and if its failure write lands first
     // it records a successful recovery as 'failed' and breaks replay. The loser
     // of this compare-and-swap re-reads and replays instead of relaying.
-    const claim = await pool.query<{ id: string }>(
-      `UPDATE delegate_sweeps SET status = 'submitting'
-       WHERE id = $1 AND status = 'prepared'
-       RETURNING id`,
-      [row.id],
-    )
-    if (claim.rows.length === 0) {
-      const currentResult = await pool.query<DelegateSweepRow>(
-        `SELECT id, chain_id, token_address, from_address, to_address, value_atomic,
-                valid_after, valid_before, nonce, status, tx_hash
-         FROM delegate_sweeps WHERE id = $1 LIMIT 1`,
-        [row.id],
-      )
-      const current = currentResult.rows[0]
+    const claimed = await claimPreparedSweep(row.id)
+    if (!claimed) {
+      const current = await findSweepById(row.id)
       if (current?.status === 'submitted' && current.tx_hash) {
         return reply.code(200).send(
           sweepResultBody({
@@ -1406,35 +1278,18 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
         // #717: refused before submission — release the claim back to
         // 'prepared' so the sweep can be retried after the window; 'failed'
         // would strand the funds path.
-        await pool.query(
-          `UPDATE delegate_sweeps SET status = 'prepared' WHERE id = $1 AND status = 'submitting'`,
-          [row.id],
-        )
+        await releaseSweepClaim(row.id)
         return reply.code(429).send({ error: err.message })
       }
       const errorMsg = err instanceof Error ? err.message : String(err)
-      await pool.query(
-        `UPDATE delegate_sweeps SET status = 'failed', error_message = $1 WHERE id = $2 AND status = 'submitting'`,
-        [errorMsg, row.id],
-      )
+      await markSweepFailed(errorMsg, row.id)
       return reply.code(502).send({ error: 'Sweep relay failed', details: errorMsg })
     }
 
-    await pool.query(
-      `UPDATE delegate_sweeps SET status = 'submitted', tx_hash = $1, submitted_at = NOW()
-       WHERE id = $2 AND status = 'submitting'`,
-      [txHash, row.id],
-    )
+    await markSweepSubmitted(txHash, row.id)
 
     // Recovering the stranded funds resolves the open stranded-funds reconciliation.
-    await pool.query(
-      `UPDATE machine_payment_reconciliation_events
-       SET status = 'resolved', updated_at = NOW()
-       WHERE agent_id = $1
-         AND status <> 'resolved'
-         AND event_type = 'merchant_retry_rejected_after_payment'`,
-      [agent.id],
-    )
+    await resolveStrandedEventsForAgent(agent.id)
 
     return reply.code(200).send(
       sweepResultBody({

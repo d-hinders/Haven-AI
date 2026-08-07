@@ -461,6 +461,11 @@ error instead of quietly routing a payment at the wrong chain's bundler.
 
 ## Guardrails
 
+- Data access for this flow lives in `packages/backend/src/infra/repositories/`
+  (`x402-authorizations.ts`, `payment-intents.ts`, `approval-requests.ts`, #995) —
+  routes hold the control flow only, and every statement (idempotency lookups,
+  the #961 stale-replay refresh, the settle flip) is PREPARE-checked against the
+  real schema in CI via `db-schema-smoke`.
 - Keep x402 budgets small and reset-bound.
 - Treat the delegate key as a hot payment key for x402.
 - Reconcile or sweep stranded delegate balances before scaling.

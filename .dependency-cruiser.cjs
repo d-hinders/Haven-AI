@@ -93,10 +93,11 @@ module.exports = {
       // Rule 6. `lib/reporting/` and `lib/fee/` don't have an index.ts yet, so
       // every external import into them is still "deep" — the baseline records
       // that debt, and the rule stops it growing. `modules/transactions/`
-      // (#992, the first #980 M4 module) DOES have a public index.ts already —
-      // for it the rule holds at its intended end state: zero violations, and
-      // the baseline must never gain an entry for it. Widens to the rest of
-      // modules/** as #980 creates them; zeroed for lib/(reporting|fee) by #998.
+      // (#992) and `modules/x402/` (#996, the second #980 M4 module) DO have a
+      // public index.ts already — for them the rule holds at its intended end
+      // state: zero violations, and the baseline must never gain an entry for
+      // either. Widens to the rest of modules/** as #980 creates them; zeroed
+      // for lib/(reporting|fee) by #998.
       name: 'no-deep-cross-module-import',
       severity: 'error',
       comment:
@@ -104,12 +105,12 @@ module.exports = {
         'If the module has no index.ts yet, adding one is part of its #980 sub-issue.',
       from: {
         path: '^packages/backend/src/',
-        pathNot: '^packages/backend/src/(lib/(reporting|fee)|modules/transactions)/',
+        pathNot: '^packages/backend/src/(lib/(reporting|fee)|modules/(transactions|x402))/',
       },
       to: {
-        path: '^packages/backend/src/(lib/(reporting|fee)|modules/transactions)/',
+        path: '^packages/backend/src/(lib/(reporting|fee)|modules/(transactions|x402))/',
         pathNot:
-          '^packages/backend/src/(lib/(reporting|fee)|modules/transactions)/index\\.ts$',
+          '^packages/backend/src/(lib/(reporting|fee)|modules/(transactions|x402))/index\\.ts$',
       },
     },
   ],

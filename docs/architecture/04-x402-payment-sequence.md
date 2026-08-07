@@ -4,6 +4,7 @@ status: current
 contract: true
 covers:
   - packages/backend/src/routes/x402.ts
+  - packages/backend/src/modules/x402/**
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/lib/agent-payment-status.ts
   - packages/backend/src/lib/payment-coverage.ts
@@ -50,7 +51,14 @@ Source of truth:
 
 - [`packages/sdk/src/x402.ts`](../../packages/sdk/src/x402.ts)
 - [`packages/sdk/src/client.ts`](../../packages/sdk/src/client.ts)
-- [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts)
+- [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts) — request
+  validation, auth wiring, rate-limit config, and response serialization only.
+  The authorize orchestration (scheme routing, funding-leg prep, erc7710 child
+  building, the #961 replay/resume logic) and settle assembly live in
+  [`packages/backend/src/modules/x402/`](../../packages/backend/src/modules/x402/index.ts)
+  (#996, epic #980 M4). `lib/x402-delegation.ts` stays in `lib/` — it is the
+  settlement *compiler* (typed-data / header assembly primitives), not route
+  orchestration.
 - [`packages/backend/src/lib/payment-coverage.ts`](../../packages/backend/src/lib/payment-coverage.ts)
 - [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
 - [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts)
@@ -376,7 +384,8 @@ merchants — so the rail now selects a settlement scheme **per payment**
 live-proven 2026-07-18; design of record: RFC
 [#791](https://github.com/d-hinders/Haven-AI/issues/791) §18 "B4-D").
 
-**How the scheme is chosen.** `routes/x402.ts` keys on the authorize request's
+**How the scheme is chosen.** The `modules/x402/` authorize orchestration
+(`scheme-selection.ts`, since #996) keys on the authorize request's
 `payTo` shape — which is exactly the standard-x402 SDK contract, so existing
 SDKs gained delegation-rail merchant reach with no client change:
 

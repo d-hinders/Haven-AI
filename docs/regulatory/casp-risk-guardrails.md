@@ -5,6 +5,7 @@ contract: true
 covers:
   - packages/backend/src/config.ts
   - packages/backend/src/routes/x402.ts
+  - packages/backend/src/modules/x402/**
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/machine-payments.ts

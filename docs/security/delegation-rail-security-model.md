@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/rails/hybrid-account-config.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-07" # #998: covers + body re-read after the lib/ fold (hybrid-signer-actions.ts, hybrid-transfers.ts, hybrid-account-config.ts -> rails/, mainnet-gate.ts -> modules/accounts/, passport/attestation.ts -> modules/passport/) — pure path move, invariants unchanged
+last-verified: "2026-08-07" # #999 re-verified: hybrid-account-config.ts now reads via infra/repositories (verbatim SQL, chain-scoped bind kept), agent-delegations/hybrid-accounts carry dep-lint-exempt waivers — no invariant change
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)

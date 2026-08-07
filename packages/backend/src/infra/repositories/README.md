@@ -4,8 +4,11 @@ The only place in `packages/backend/src` that may reach the database.
 
 Enforced, not aspirational: `pg-only-in-infra` in `.dependency-cruiser.cjs`
 fails the build when anything outside `db/`, `db.ts` and this directory imports
-`db.ts` or `pg`. Existing debt is ratcheted in `dep-lint-baseline.json` and may
-only shrink. Rule 3 of
+`db.ts` or `pg`. The rule is **absolute** — #999 drove the old ratcheting
+baseline to zero and retired it; the few deliberate exceptions carry an inline
+`// dep-lint-exempt: <concrete reason>` comment on the offending import, and
+each honored waiver is printed with its reason in every `npm run lint:deps`
+run. Rule 3 of
 [`docs/architecture/10-module-boundaries.md`](../../../../../docs/architecture/10-module-boundaries.md)
 is the prose; the cruiser config is authoritative.
 
@@ -92,8 +95,10 @@ stay free of any database import.
    that looks improvable gets reported in the pull request, not fixed in the
    same diff. Characterization tests land **before** the move.
 4. Register the new SQL constants in `scripts/db-schema-smoke.ts`.
-5. Shrink the `dep-lint-baseline.json` entry for whatever file you emptied. The
-   baseline is shrink-only — never regenerate it to silence a failure.
+5. If the file you emptied carried a `// dep-lint-exempt:` waiver on its
+   `db.ts` import, delete the waiver along with the import — `npm run
+   lint:deps` passes because the edge is gone, and the printed waiver list
+   shrinks by one.
 
 ## Status
 
@@ -102,5 +107,9 @@ agent-connection-setups), `#988` (agents, user-safes) and `#995` (payments,
 x402, machine-payments — `payment-intents.ts`, `approval-requests.ts`,
 `x402-authorizations.ts`, `machine-payments.ts`, `account-entitlements.ts`).
 The money path's data access now lives here and is PREPARE-checked by
-`db-schema-smoke`; remaining inline SQL elsewhere is ratcheted in
-`dep-lint-baseline.json` and may only shrink.
+`db-schema-smoke`. #999 (the epic's closing issue) then drove the boundary
+baseline to zero — extracting the small residue (auth lookup, rail resolution,
+delegate monitor, fees, Fortnox, reporting-feed ledger, passkeys, contacts,
+safe-ownership reads) into this directory and retiring the baseline outright.
+The remaining inline SQL elsewhere sits behind explicit, printed
+`dep-lint-exempt` waivers; the lint's call-site gauge tracks its volume.

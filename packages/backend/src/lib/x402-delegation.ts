@@ -24,7 +24,7 @@
  * `{ delegationManager, permissionContext, delegator }`.
  */
 
-import { pad, type Address, type Hex } from 'viem'
+import { hashTypedData, pad, type Address, type Hex } from 'viem'
 import { Interface } from 'ethers'
 import { createDelegation, type Delegation } from '@metamask/smart-accounts-kit'
 import { encodeDelegations, hashDelegation } from '@metamask/smart-accounts-kit/utils'
@@ -198,4 +198,33 @@ export function encodeXPaymentHeader(
 /** Sanity guard used by the route: the transfer the child permits, decoded. */
 export function settlementTransferCalldata(payTo: Address, amountAtomic: bigint): Hex {
   return ERC20_IFACE.encodeFunctionData('transfer', [payTo, amountAtomic]) as Hex
+}
+
+/**
+ * EIP-712 digest of the payload the account actually validates (#1138).
+ *
+ * On the delegation rail `payloadHash` is the bare ERC-4337 UserOp hash, which
+ * the account does NOT validate — so binding it alone tells the edge signer
+ * nothing about the typed data it is being asked to sign. Committing to this
+ * digest inside the Haven-signed expected context is what keeps the signer's
+ * verify-then-sign property intact on this rail.
+ *
+ * Lives here rather than in the route because the chain SDKs belong behind the
+ * lib boundary (`chain-sdk-not-in-routes`).
+ */
+export function typedDataDigest(typedData: unknown): string | undefined {
+  if (!typedData || typeof typedData !== 'object') return undefined
+  try {
+    return hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+  } catch (err) {
+    // Unhashable typed data is a backend defect, not a client error, and it is
+    // not survivable: the edge signer re-derives this same digest and would
+    // refuse the payload anyway. Fail here with a message that says so, rather
+    // than letting a raw viem type error surface as an opaque 500.
+    throw new Error(
+      'Failed to hash the delegation-rail signing payload for the x402 expected context. ' +
+        'sign_data.typed_data must be a complete EIP-712 payload (domain, types, primaryType, message). ' +
+        `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
 }

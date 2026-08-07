@@ -3,18 +3,18 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/routes/agents.ts
-  - packages/backend/src/lib/allowance-module.ts
-  - packages/backend/src/lib/relayer.ts
-  - packages/backend/src/lib/chains.ts
+  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/infra/relayer.ts
+  - packages/backend/src/domain/chains.ts
   - packages/core/src/chains.ts
   - packages/backend/src/routes/auth.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
-  - packages/backend/src/lib/x402-delegation.ts
+  - packages/backend/src/modules/x402/x402-delegation.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
-  - packages/backend/src/lib/delegation-rail.ts
-  - packages/backend/src/lib/delegation-policy.ts
+  - packages/backend/src/rails/delegation-rail.ts
+  - packages/backend/src/rails/delegation-policy.ts
   - packages/backend/src/routes/safe-exec.ts
   - packages/backend/src/routes/user-safes.ts
   - packages/backend/src/middleware/agentAuth.ts
@@ -151,7 +151,7 @@ flowchart LR
   The delegate signature is calldata verified by the AllowanceModule. The
   passkey Safe-execution path currently uses the shared relayer only after the
   Safe validates the user's complete signature package
-  ([allowance execution](../../packages/backend/src/lib/allowance-module.ts),
+  ([allowance execution](../../packages/backend/src/rails/allowance-module.ts),
   [passkey Safe execution](../../packages/backend/src/routes/safe-exec.ts)).
 - **Owner authority remains on-chain.** Linking an existing Haven wallet trusts
   the user-supplied Safe address at import time. Approver management later reads
@@ -188,7 +188,7 @@ flowchart LR
   **Base-only** (Base 8453, Base Sepolia 84532); Gnosis is not in scope. Details:
   [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md),
   [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md)
-  ([delegation rail](../../packages/backend/src/lib/delegation-rail.ts),
+  ([delegation rail](../../packages/backend/src/rails/delegation-rail.ts),
   [agent auth](../../packages/backend/src/middleware/agentAuth.ts)).
 - **Supported chains are Base (8453), Gnosis Chain (100), and Base Sepolia
   (84532).** Base is the primary production network; Base Sepolia is the dev/QA
@@ -196,4 +196,4 @@ flowchart LR
   the shared `@haven_ai/core` registry; the backend layers RPC endpoints and
   relayer configuration over it per chain
   ([core registry](../../packages/core/src/chains.ts),
-  [backend chain wiring](../../packages/backend/src/lib/chains.ts)).
+  [backend chain wiring](../../packages/backend/src/domain/chains.ts)).

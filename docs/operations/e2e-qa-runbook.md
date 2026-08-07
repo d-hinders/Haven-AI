@@ -17,8 +17,8 @@ covers:
   - packages/frontend/src/lib/__tests__/hosted-connect.test.ts
   - packages/frontend/src/components/settings/ManageApprovers.tsx
   - packages/frontend/src/components/settings/__tests__/ManageApprovers.test.tsx
-  - packages/backend/src/lib/safe-owner-tx.ts
-  - packages/backend/src/lib/__tests__/safe-owner-tx.test.ts
+  - packages/backend/src/modules/accounts/safe-owner-tx.ts
+  - packages/backend/src/modules/accounts/__tests__/safe-owner-tx.test.ts
   - packages/backend/src/routes/__tests__/user-safes-approvers.test.ts
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts

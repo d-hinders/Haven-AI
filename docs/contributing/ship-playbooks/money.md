@@ -15,9 +15,9 @@ Read [`docs/regulatory/casp-risk-guardrails.md`](../../regulatory/casp-risk-guar
 
 ## 2. Characterization-tests-first
 
-For any change to **existing** money-path behavior (`routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, `routes/machine-payments.ts`, `lib/{machine-payments,payment-coverage,allowance-module}.ts`, the rail seam `lib/execution-rail.ts`, the delegation rail `lib/delegation-*.ts` / `lib/hybrid-provisioning.ts` / `lib/hybrid-account-config.ts` / `routes/agent-delegations.ts`, `packages/sdk/src/signer.ts`, `middleware/agentAuth.ts`, `db/migrations/`), pin the current behavior with a characterization test **before** changing it, as required by the canonical skill's [Implement section](../../../.agents/skills/ship-next/SKILL.md#implement). The test encodes the invariant the change must preserve.
+For any change to **existing** money-path behavior (`routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, `routes/machine-payments.ts`, `modules/mpp/`, `domain/payment-coverage.ts`, `rails/allowance-module.ts`, the rail seam `rails/execution-rail.ts`, the delegation rail `rails/delegation-*.ts` / `rails/hybrid-provisioning.ts` / `rails/hybrid-account-config.ts` / `routes/agent-delegations.ts`, `packages/sdk/src/signer.ts`, `middleware/agentAuth.ts`, `db/migrations/`), pin the current behavior with a characterization test **before** changing it, as required by the canonical skill's [Implement section](../../../.agents/skills/ship-next/SKILL.md#implement). The test encodes the invariant the change must preserve.
 
-For other files in `casp-risk-guardrails.md`'s `covers:` list (e.g. `lib/relayer.ts`, `lib/safe-deployer.ts`, the passkeys / safe-deploy / user-safes routes), the §1 required reading still applies — §2 scopes only the characterization-test requirement.
+For other files in `casp-risk-guardrails.md`'s `covers:` list (e.g. `infra/relayer.ts`, `modules/accounts/safe-deployer.ts`, the passkeys / safe-deploy / user-safes routes), the §1 required reading still applies — §2 scopes only the characterization-test requirement.
 
 ## 3. Non-negotiables (CASP)
 

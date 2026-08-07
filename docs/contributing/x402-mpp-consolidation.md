@@ -6,8 +6,8 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/mpp/**
   - packages/backend/src/domain/payment-token.ts
-  - packages/backend/src/lib/payment-coverage.ts
-  - packages/backend/src/lib/__tests__/payment-coverage.test.ts
+  - packages/backend/src/domain/payment-coverage.ts
+  - packages/backend/src/domain/__tests__/payment-coverage.test.ts
   - packages/backend/src/domain/__tests__/payment-token.test.ts
   - packages/backend/src/routes/__tests__/x402-consolidation.characterization.test.ts
   - packages/backend/src/routes/__tests__/x402.test.ts

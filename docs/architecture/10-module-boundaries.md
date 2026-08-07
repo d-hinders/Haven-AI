@@ -8,12 +8,12 @@ covers:
   - packages/backend/dep-lint-baseline.json
   - packages/backend/src/index.ts
   - packages/backend/src/db.ts
-  - packages/backend/src/lib/execution-rail.ts
-  - packages/backend/src/lib/reporting/**
-  - packages/backend/src/lib/fee/**
+  - packages/backend/src/rails/execution-rail.ts
+  - packages/backend/src/modules/reporting/**
+  - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-08-07"
+last-verified: "2026-08-07" # #998: lib/ folded into platform/domain/infra/rails/modules — enforcement table, Today table, and covers: updated to match
 ---
 
 # Module Boundaries
@@ -84,9 +84,10 @@ packages/backend/src/
   http/       thin fastify routes: validate -> call module -> serialize
 ```
 
-This is not invented from scratch. `lib/reporting/` and `lib/fee/` already have
-this shape — a directory, an entry point, colocated tests — and they are
-visibly the most maintainable code in the backend. The target generalises them.
+This is not invented from scratch. `modules/reporting/` and `modules/fee/`
+(folded from `lib/reporting/` and `lib/fee/` by #998) already have this shape
+— a directory, an entry point, colocated tests — and they are visibly the
+most maintainable code in the backend. The target generalises them.
 
 ### What belongs where
 
@@ -109,12 +110,12 @@ Only the subset checkable against today's tree is enabled — a rule about
 
 | Rule | Enforced today | Arrives with |
 |---|---|---|
-| 1. `domain/` is pure | ◐ `core-stays-pure` covers the shared kernel (#983); the backend's own `domain/` still to come | the `domain/` directory (#998) |
-| 2. `modules/` may not import `http/` | ✗ | the `modules/` directories (#992 / #996 / #997) |
+| 1. `domain/` is pure | ✅ `core-stays-pure` covers the shared kernel (#983); `domain-stays-pure` covers the backend's own `domain/` (#998), zero baseline on both | landed |
+| 2. `modules/` may not import `http/` | ✗ | the `http/` directory (routes/ → http/ is not part of #998's scope — a separate future rename) |
 | 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra` | #985 / #988 / #995 landed (money path fully extracted); residual inline SQL is baseline-ratcheted |
-| 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself with the later modularization |
-| 5. `http/` imports module entry points only | ✗ | the `http/` directory (#998) |
-| 6. Cross-module imports go through `index.ts` | ✅ scoped to `lib/{reporting,fee}/` + `modules/{transactions,x402}/` (#992, #996) | widens as more modules land; zeroed for `lib/{reporting,fee}` by #998 |
+| 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself landed with #998; the rule's positive form (asserting infra/rails ARE the only importers, everywhere) is still follow-up work |
+| 5. `http/` imports module entry points only | ✗ | the `http/` directory (see rule 2 — not part of #998) |
+| 6. Cross-module imports go through `index.ts` | ✅ every `modules/**` directory (accounts, agents, payments, catalog, accounting, reporting, fee, passport, x402, mpp, transactions) — zero baseline | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`) |
 | 7. The graph is acyclic | ✅ `no-circular` | already at zero — held absolutely |
 
 `@haven_ai/core` also carries the GENERATED API wire types (#984):
@@ -123,10 +124,17 @@ Only the subset checkable against today's tree is enabled — a rule about
 (`npm run check:api-types`). Generated code is still bound by
 `core-stays-pure` — it imports nothing, by construction.
 
-Two rules carry **no baseline at all** and never may: `no-circular` (the tree is
-cycle-free and a new cycle must be broken, not grandfathered) and
+Three rules carry **no baseline at all** and never may: `no-circular` (the tree
+is cycle-free and a new cycle must be broken, not grandfathered),
 `core-stays-pure` (the shared kernel starts clean, so an impure import there is
-always a mistake in the new code, never inherited debt).
+always a mistake in the new code, never inherited debt), and `domain-stays-pure`
+(#998 — every file placed in the backend's own `domain/` was verified pure
+before landing there; one candidate, `execution-rail.ts`, was kept OUT of
+`domain/` specifically because it queries `db.ts` directly, and lives in
+`rails/` instead). `no-deep-cross-module-import` likewise carries no baseline
+today (#998 emptied it), though unlike the three above it is not a "never may"
+rule — a future module could, in principle, need a reviewed, temporary
+exception.
 
 1. **`domain/` is pure.** It may not import `fastify`, `pg`, `ethers`, `viem`,
    `permissionless`, `@metamask/smart-accounts-kit`, or any path under
@@ -199,12 +207,12 @@ Current state as of 2026-08-07, recorded so progress is measurable:
 
 | Signal | Today | Target |
 |---|---|---|
-| `lib/` layout | 51 non-test files sitting flat in `lib/`; `reporting/`, `fee/` and `passport/` are the only module directories | Every file inside a module |
+| `lib/` layout | Gone (#998) — every former file now lives in `platform/`, `domain/`, `infra/`, `rails/`, or a `modules/**` directory, each `modules/**` directory with a public `index.ts` | Every file inside a module — **met** |
 | Largest route | `routes/machine-payments.ts`, 1357 lines (`routes/x402.ts` split to 164 lines by #996) | Under ~250 lines |
 | Inline SQL call sites | 344 `.query` calls across 48 non-test files outside `db/` and `infra/repositories/` | Zero outside `infra/repositories/` |
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) | Zero |
 | Rail branching outside the seam | 10 non-test sites — 4 genuine dispatch, 4 retired-rail residue (#993), 2 passport fact derivation | Zero outside `rails/` |
-| Boundary enforcement | `npm run lint:deps`, blocking, 65 violations baselined (#982) | Baseline deleted, rules unconditional (#999) |
+| Boundary enforcement | `npm run lint:deps`, blocking, 33 violations baselined (down from 65 — #998 emptied `no-deep-cross-module-import` and moved `onboarding-funnel.ts`'s query into `infra/repositories/`), all remaining entries `pg-only-in-infra` | Baseline deleted, rules unconditional (#999) |
 | Dependency cycles | **0** — asserted absolutely, never baselined | 0 |
 
 > **The baseline is a file-edge count, and that is a real limit.**
@@ -220,17 +228,18 @@ Current state as of 2026-08-07, recorded so progress is measurable:
 Reproduce these from `packages/backend/src`:
 
 ```bash
-find lib -maxdepth 1 -type f -name '*.ts' -not -name '*.test.ts' | wc -l
 find . -name '*.ts' -not -name '*.test.ts' -not -path '*/__tests__/*' \
   | xargs grep -o 'pool\.query' | wc -l
 find ./routes -name '*.ts' -not -name '*.test.ts' \
   | xargs grep -lE "from 'ethers'|from 'viem'|permissionless|smart-accounts-kit" | wc -l
 ```
 
-The flat `lib/` is the headline symptom: filename prefixes (`delegation-*`,
-`machine-payment-*`) are doing the work that directories and interfaces should
-do, which is why "what is the delegation rail?" can only be answered by knowing
-which of sixty filenames to open.
+The flat `lib/` (removed by #998) was the headline symptom: filename prefixes
+(`delegation-*`, `machine-payment-*`) did the work that directories and
+interfaces should do, which is why "what is the delegation rail?" could
+previously only be answered by knowing which of sixty filenames to open. The
+delegation rail is now the seven `rails/delegation-*.ts` and `rails/hybrid-*.ts`
+files, one directory, one thing to open.
 
 ## Non-goals
 

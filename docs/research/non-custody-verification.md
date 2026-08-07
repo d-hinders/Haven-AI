@@ -2,10 +2,10 @@
 owner: "@d-hinders"
 status: research
 covers:
-  - packages/backend/src/lib/allowance-module.ts
-  - packages/backend/src/lib/relayer.ts
-  - packages/backend/src/lib/execution-rail.ts
-  - packages/backend/src/lib/__tests__/non-custody.invariants.test.ts
+  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/infra/relayer.ts
+  - packages/backend/src/rails/execution-rail.ts
+  - packages/backend/src/__tests__/non-custody.invariants.test.ts
   - packages/frontend/src/lib/revoke-agent.ts
 last-verified: "2026-07-26"
 ---

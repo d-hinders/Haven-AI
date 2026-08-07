@@ -176,7 +176,7 @@ they mirror:
 | Mirror | Pinned to | Test |
 | --- | --- | --- |
 | `CLAUDE.md` API surface table | `openapiSpec.paths` (path + method) | `docs-drift.test.ts` |
-| `CLAUDE.md` chain claims (Base 8453 / Gnosis 100) | `lib/chains.ts` registry | `docs-drift.test.ts` |
+| `CLAUDE.md` chain claims (Base 8453 / Gnosis 100) | `domain/chains.ts` registry | `docs-drift.test.ts` |
 | `.env.example` documented keys | env vars read in the code (`process.env.X`, `requireEnv`/`optionalEnv`) | `env-example-drift.test.ts` |
 
 The `.env.example` mirror is two-directional: every var the **backend** reads

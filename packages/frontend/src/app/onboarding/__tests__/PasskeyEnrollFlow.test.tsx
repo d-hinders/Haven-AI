@@ -30,7 +30,8 @@ vi.mock('@/lib/api', async () => {
 
 import { ApiRequestError } from '@/lib/api'
 import { passkeyStorageKey } from '@/lib/signer'
-import { PasskeyCancelledError } from '@/lib/passkey'
+import { PasskeyCancelledError, PasskeyUnsupportedError } from '@/lib/passkey'
+import { PASSKEY_REQUIRED_MESSAGE } from '@/app/onboarding/copy'
 import PasskeyEnrollFlow from '@/app/onboarding/PasskeyEnrollFlow'
 
 const mockUser = {
@@ -91,7 +92,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith({
       safeAddress: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
@@ -135,7 +136,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
 
     await waitFor(() => expect(onError).toHaveBeenCalledWith('Face ID prompt was cancelled.'))
     expect(mockEnrollPasskey).not.toHaveBeenCalled()
@@ -168,7 +169,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
     expect(mockListPasskeys).toHaveBeenCalled()
@@ -201,7 +202,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
 
     await waitFor(() =>
       expect(onError).toHaveBeenCalledWith(
@@ -242,7 +243,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith({
       safeAddress: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
@@ -260,7 +261,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
 
     await waitFor(() => {
       const stored = localStorage.getItem(
@@ -269,5 +270,27 @@ describe('PasskeyEnrollFlow', () => {
       expect(stored).toContain('"schemaVersion":1')
       expect(stored).toContain('"credentialId":"credential-123"')
     })
+  })
+
+  it('offers no retry when the browser cannot create a passkey (#1162)', async () => {
+    const onError = vi.fn()
+    mockCreatePasskey.mockRejectedValue(new PasskeyUnsupportedError())
+
+    render(
+      <PasskeyEnrollFlow
+        user={mockUser}
+        selectedChainId={100}
+        onComplete={vi.fn()}
+        onError={onError}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+
+    await waitFor(() => expect(onError).toHaveBeenCalledWith(PASSKEY_REQUIRED_MESSAGE))
+    // An honest dead end: no "Try again" that could only fail the same way,
+    // and no wallet fallback anywhere on the screen.
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(document.body.textContent).not.toMatch(/connect a wallet/i)
   })
 })

@@ -1,6 +1,5 @@
 import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
-import { ethers } from 'ethers'
 import {
   claimIntentForSubmission,
   confirmSubmittedIntent,
@@ -23,7 +22,7 @@ import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { AgentPaymentNextAction, AgentPaymentPhase } from '../lib/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
-import { isAddress as isValidAddress } from '@haven_ai/core'
+import { formatTokenAmount, isAddress as isValidAddress, parseTokenAmount } from '@haven_ai/core'
 import {
   getTokenAllowance,
   getLatestBlockTimeSec,
@@ -70,7 +69,7 @@ function buildResponseFee(intent: PaymentIntentRow) {
   })
   const tokenConfig = resolveToken(intent.chain_id, intent.token_symbol)
   return {
-    amount: quote.feeAtomic === 0n ? '0' : ethers.formatUnits(quote.feeAtomic, tokenConfig?.decimals ?? 18),
+    amount: quote.feeAtomic === 0n ? '0' : formatTokenAmount(quote.feeAtomic, tokenConfig?.decimals ?? 18),
     token: quote.feeToken,
     basis_points: quote.basisPoints,
     applied: !quote.isZero,
@@ -179,7 +178,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // 3. Convert human amount to raw units
     let amountRaw: bigint
     try {
-      amountRaw = ethers.parseUnits(amount, tokenConfig.decimals)
+      amountRaw = parseTokenAmount(amount, tokenConfig.decimals)
     } catch {
       return reply.code(400).send({ error: `Invalid amount for ${tokenConfig.symbol}` })
     }
@@ -335,7 +334,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     })
     if (coverage.kind === 'queue') {
       const reason = (request.body as unknown as Record<string, unknown>).reason as string | undefined
-      const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
+      const remainingHuman = formatTokenAmount(effective.remaining, tokenConfig.decimals)
       const approvalReason =
         reason ??
         `Exceeds remaining allowance (${amount} ${tokenConfig.symbol} requested, ${remainingHuman} available)`

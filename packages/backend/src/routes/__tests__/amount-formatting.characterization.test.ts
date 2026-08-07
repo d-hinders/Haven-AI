@@ -26,7 +26,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { ethers } from 'ethers'
-import { CHAIN_REGISTRY } from '@haven_ai/core'
+import { CHAIN_REGISTRY, formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 
 // Every distinct decimals value present in the registry today. If a future
 // token introduces a new decimals count, this suite must grow with it —
@@ -142,6 +142,45 @@ describe('amount-formatting characterization (pre-#994 baseline: ethers directly
     for (const token of registryTokens) {
       const tooPrecise = `0.${'0'.repeat(token.decimals)}1`
       expect(() => ethers.parseUnits(tooPrecise, token.decimals)).toThrow()
+    }
+  })
+})
+
+/**
+ * POST-#994 substitution check. Runs the IDENTICAL pinned literals from
+ * FORMAT_ORACLE/PARSE_ORACLE above against `@haven_ai/core`'s pure
+ * `formatTokenAmount`/`parseTokenAmount` — the functions routes/x402.ts,
+ * payments.ts and machine-payments.ts call now instead of
+ * `ethers.formatUnits`/`parseUnits`. Same expected values, different
+ * subject: "characterization passes byte-identical" is provable by diffing
+ * this describe block against the one above, not by re-reading a PR body.
+ */
+describe('amount-formatting characterization (post-#994: @haven_ai/core, byte-identical to the ethers baseline above)', () => {
+  for (const token of registryTokens) {
+    describe(`${token.chainName} — ${token.symbol} (${token.decimals} decimals)`, () => {
+      for (const { label, atomic, expected } of FORMAT_ORACLE[token.decimals]) {
+        it(`formatTokenAmount: ${label}`, () => {
+          expect(formatTokenAmount(atomic, token.decimals)).toBe(expected)
+        })
+      }
+
+      for (const { label, human, expected } of PARSE_ORACLE[token.decimals]) {
+        it(`parseTokenAmount: ${label}`, () => {
+          expect(parseTokenAmount(human, token.decimals)).toBe(expected)
+        })
+      }
+
+      it('format/parse round-trips at the decimal boundary', () => {
+        const oneWhole = 10n ** BigInt(token.decimals)
+        expect(parseTokenAmount(formatTokenAmount(oneWhole, token.decimals), token.decimals)).toBe(oneWhole)
+      })
+    })
+  }
+
+  it('rejects a value with more fractional digits than the token supports', () => {
+    for (const token of registryTokens) {
+      const tooPrecise = `0.${'0'.repeat(token.decimals)}1`
+      expect(() => parseTokenAmount(tooPrecise, token.decimals)).toThrow()
     }
   })
 })

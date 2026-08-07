@@ -23,7 +23,7 @@ import {
   receiptIssuerAddress,
   RECEIPT_TTL_SECONDS,
   RECEIPT_VERSION,
-} from '../lib/passport/index.js'
+} from '../modules/passport/index.js'
 
 const UID_RE = /^0x[0-9a-fA-F]{64}$/
 

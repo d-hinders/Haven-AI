@@ -6,10 +6,10 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
   - packages/backend/src/routes/x402-resources.ts
-  - packages/backend/src/lib/agent-payment-status.ts
-  - packages/backend/src/lib/payment-coverage.ts
-  - packages/backend/src/lib/x402-delegation.ts
-  - packages/backend/src/lib/delegation-rail.ts
+  - packages/backend/src/modules/payments/agent-payment-status.ts
+  - packages/backend/src/domain/payment-coverage.ts
+  - packages/backend/src/modules/x402/x402-delegation.ts
+  - packages/backend/src/rails/delegation-rail.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402.ts
   - packages/mcp/src/tools.ts
@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-07"
+last-verified: "2026-08-07" # re-verified same day (#999): a dep-lint-exempt comment on routes/x402-resources.ts only — no behavior change; sequence and settle paths unchanged
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -56,10 +56,11 @@ Source of truth:
   The authorize orchestration (scheme routing, funding-leg prep, erc7710 child
   building, the #961 replay/resume logic) and settle assembly live in
   [`packages/backend/src/modules/x402/`](../../packages/backend/src/modules/x402/index.ts)
-  (#996, epic #980 M4). `lib/x402-delegation.ts` stays in `lib/` — it is the
-  settlement *compiler* (typed-data / header assembly primitives), not route
-  orchestration.
-- [`packages/backend/src/lib/payment-coverage.ts`](../../packages/backend/src/lib/payment-coverage.ts)
+  (#996, epic #980 M4). `x402-delegation.ts` lives inside that module (folded
+  in by #998 — its only production consumers were already inside it) — it is
+  the settlement *compiler* (typed-data / header assembly primitives), not
+  route orchestration.
+- [`packages/backend/src/domain/payment-coverage.ts`](../../packages/backend/src/domain/payment-coverage.ts)
 - [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
 - [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts)
 - [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
@@ -291,6 +292,16 @@ transport session; callers do not need to preserve the old session id.
 | Payment authority | Delegate signature + on-chain allowance | Same for funding leg; EIP-3009 signature for merchant leg |
 | Approval resume | Poll payment status | Poll status, then resume original x402 request |
 
+The legacy rail's `payment_intents`/`approval_requests` INSERTs are the SAME
+rail-agnostic `infra/repositories/` writers the mpp module uses for its own
+rails (`modules/mpp/`, #997) — `modules/x402/legacy-authorize.ts` and
+`modules/x402/delegation-authorize.ts` call them directly rather than through
+a `lib/machine-payments.ts` pass-through (removed by #997: it added no logic
+over the repository call and kept x402 coupled to a private mpp file once
+mpp's own orchestration moved into its module). Token resolution
+(`resolvePaymentToken`) is genuinely shared between the two modules and lives
+in `src/domain/payment-token.ts` for the same reason.
+
 ## Delegation rail x402 (new accounts)
 
 On the delegation rail (#830, epic #821) there is **no funding leg and no delegate
@@ -312,13 +323,13 @@ The flow is a two-call variant of `/x402/authorize`:
    finding 3). A malformed signature or one from the wrong key is a `400` with
    the intent left signable — the client re-signs the same `sign_data`; nothing
    is burned. (Recovery lives in
-   [`lib/delegation-policy.ts`](../../packages/backend/src/lib/delegation-policy.ts)
+   [`rails/delegation-policy.ts`](../../packages/backend/src/rails/delegation-policy.ts)
    as `recoverDelegationSigner`, not in the route: `routes/**` may not import
    viem under the chain-SDK boundary rule.)
 3. Haven assembles the merchant-facing `X-PAYMENT` header using MetaMask x402's
    `erc7710` payload
    (`{ delegationManager, permissionContext, delegator }`
-   — [`x402-delegation.ts`](../../packages/backend/src/lib/x402-delegation.ts)).
+   — [`x402-delegation.ts`](../../packages/backend/src/modules/x402/x402-delegation.ts)).
    The agent retries the merchant with that header, and the merchant settles the
    payment directly from the account through the DelegationManager.
 
@@ -345,7 +356,7 @@ security model: [`delegation-rail-security-model.md`](../security/delegation-rai
 ### What the settlement child delegation actually constrains
 
 The child built by
-[`x402-delegation.ts`](../../packages/backend/src/lib/x402-delegation.ts) is
+[`x402-delegation.ts`](../../packages/backend/src/modules/x402/x402-delegation.ts) is
 issued to `ANY_BENEFICIARY` (`0x…0a11`) unconditionally. When the 402 names
 facilitator addresses, the **redeemer caveat** — not the `to` field — is what
 restricts who may redeem; pinning `to` to the first entry (the pre-#1061

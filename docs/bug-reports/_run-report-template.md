@@ -12,7 +12,7 @@ covers:
   - packages/connect/src/**
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/machine-payments.ts
-  - packages/backend/src/lib/sweep.ts
+  - packages/backend/src/rails/sweep.ts
   - packages/backend/src/config.ts
   - packages/sdk/src/sweep.ts
   - packages/qa-agent/**

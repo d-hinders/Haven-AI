@@ -1,0 +1,84 @@
+/**
+ * CoinGecko price fetching with in-memory cache.
+ *
+ * Chain-aware: collects all unique CoinGecko IDs across chains
+ * and fetches prices in a single API call.
+ */
+import { getChain, SUPPORTED_CHAIN_IDS, type TokenConfig } from '../domain/chains.js'
+import { config } from '../config.js'
+import { createCache } from '../platform/cache.js'
+
+type PriceMap = Record<string, { usd: number; eur: number; sek: number }>
+
+const priceCache = createCache<PriceMap>(60_000)
+const CACHE_KEY = 'all'
+
+/** Build a map of coingeckoId → { usd, eur } for all tokens across all chains */
+export async function fetchTokenPrices(): Promise<PriceMap> {
+  return priceCache.getOrFetch(CACHE_KEY, async () => {
+    // Collect all unique CoinGecko IDs and map them back to symbols
+    const idToSymbols = new Map<string, string[]>()
+    for (const chainId of SUPPORTED_CHAIN_IDS) {
+      const chain = getChain(chainId)
+      for (const token of Object.values(chain.tokens)) {
+        const existing = idToSymbols.get(token.coingeckoId) ?? []
+        if (!existing.includes(token.symbol)) {
+          existing.push(token.symbol)
+        }
+        idToSymbols.set(token.coingeckoId, existing)
+      }
+    }
+
+    const ids = Array.from(idToSymbols.keys()).join(',')
+    const apiKey = config.coingeckoApiKey
+
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd,eur,sek`
+
+    const headers: Record<string, string> = { Accept: 'application/json' }
+    if (apiKey) {
+      headers['x-cg-demo-api-key'] = apiKey
+    }
+
+    const res = await fetch(url, { headers })
+
+    if (!res.ok) {
+      throw new Error(`CoinGecko API error: ${res.status}`)
+    }
+
+    const data = (await res.json()) as Record<string, { usd?: number; eur?: number; sek?: number }>
+
+    const prices: PriceMap = {}
+    let usable = 0
+    for (const [geckoId, symbols] of idToSymbols.entries()) {
+      const p = data[geckoId]
+      for (const symbol of symbols) {
+        prices[symbol] = {
+          usd: p?.usd ?? 0,
+          eur: p?.eur ?? 0,
+          sek: p?.sek ?? 0,
+        }
+        if (prices[symbol].usd > 0 || prices[symbol].eur > 0 || prices[symbol].sek > 0) {
+          usable += 1
+        }
+      }
+    }
+
+    // A 200 response that carries no usable price (empty/degraded upstream, e.g.
+    // a soft rate-limit) must not be cached — that would pin every token to 0 for
+    // the full TTL. Throw so getOrFetch skips the cache and callers fall back
+    // safely (book-time SEK → null/backfillable, fiat display → caught → null).
+    if (usable === 0) {
+      throw new Error('CoinGecko returned no usable prices')
+    }
+
+    return prices
+  })
+}
+
+/** Get the price for a specific token by symbol */
+export async function getTokenPrice(
+  symbol: string,
+): Promise<{ usd: number; eur: number; sek: number }> {
+  const prices = await fetchTokenPrices()
+  return prices[symbol] ?? { usd: 0, eur: 0, sek: 0 }
+}

@@ -4,16 +4,16 @@ status: current
 covers:
   - packages/*/package.json
   - packages/core/src/index.ts
-  - packages/backend/src/lib/chains.ts
-  - packages/backend/src/lib/merchant-catalog.ts
-  - packages/backend/src/lib/catalog-discovery.ts
-  - packages/backend/src/lib/reporting/**
+  - packages/backend/src/domain/chains.ts
+  - packages/backend/src/modules/catalog/merchant-catalog.ts
+  - packages/backend/src/modules/catalog/catalog-discovery.ts
+  - packages/backend/src/modules/reporting/**
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
-  - packages/backend/src/lib/delegation-rail.ts
+  - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/routes/demo-mpp.ts
   - packages/backend/src/routes/reporting.ts
   - packages/backend/src/routes/catalog.ts
@@ -92,7 +92,7 @@ with no funding leg and no approval queue. Deep dive:
 
 | Package | One-liner |
 |---|---|
-| `@haven/backend` | Fastify API: auth, Haven wallets/Safes, agents, allowances, approvals, payments, x402/MPP, receipts, catalog, reporting (incl. the live Fortnox feed adapter, `lib/reporting/`), and [OpenAPI](05-agent-api-openapi.md). |
+| `@haven/backend` | Fastify API: auth, Haven wallets/Safes, agents, allowances, approvals, payments, x402/MPP, receipts, catalog, reporting (incl. the live Fortnox feed adapter, `modules/reporting/`), and [OpenAPI](05-agent-api-openapi.md). |
 | `@haven/frontend` | Next.js dashboard: onboarding, wallets, agent rules, approvals, activity, custody/recovery, catalog, and guarded reporting. |
 | `@haven_ai/sdk` | TypeScript agent client plus shared signing, x402, sweep, and payment-state primitives used by direct integrations and the MCP/signer packages. |
 | `@haven_ai/connect` | Connector CLI: generates the delegate key and API key locally, registers the public signing address/proof and API-key hash, stores local credentials, writes runtime config, and returns the user to Haven to approve the agent's authority (wallet approval on the legacy rail; budget-delegation signature on the delegation rail). |

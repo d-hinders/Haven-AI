@@ -84,7 +84,7 @@ async function main(): Promise<void> {
 
   // ── half 2: delegate lingering scan (prod shell only) ─────────────────────
   if (process.env.DATABASE_URL) {
-    const { scanDelegateBalances } = await import('../src/lib/delegate-balance-monitor.js')
+    const { scanDelegateBalances } = await import('../src/infra/delegate-balance-monitor.js')
     const report = await scanDelegateBalances()
     const lingering = report.lingering
     if (lingering.length > 0) {

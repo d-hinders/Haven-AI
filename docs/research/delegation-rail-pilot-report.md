@@ -4,8 +4,8 @@ status: research
 covers:
   - packages/backend/scripts/delegation-dod-matrix.ts
   - packages/backend/src/routes/payments.ts
-  - packages/backend/src/lib/delegation-rail.ts
-  - packages/backend/src/lib/delegation-authorization.ts
+  - packages/backend/src/rails/delegation-rail.ts
+  - packages/backend/src/rails/delegation-authorization.ts
 last-verified: "2026-08-05"
 ---
 

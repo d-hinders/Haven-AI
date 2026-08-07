@@ -57,14 +57,21 @@ for how the environments are wired, see
       secrets / relayer key / RPCs (these live on the platforms, not in code —
       just confirm nothing dev-specific was hardcoded).
 - [ ] **npm:** if the batch includes a version bump, `publish.yml` publishes on
-      merge — confirm the version and the intended dist-tag (`alpha` vs `latest`).
+      merge — confirm the version and the intended dist-tag (`alpha` vs `latest`),
+      then read the run's **per-package summary table**: a package can fail while
+      the others publish (#1159), so green-except-one is a real outcome, not a
+      binary.
 - [ ] Required checks are green, `dev-gate` passes, and a code-owner approval is
       present if the batch touches an owned path (migrations / release tooling /
       CODEOWNERS).
 
 ## Merge, deploy, and verify prod
 
-- [ ] Merge the promotion PR.
+- [ ] Merge the promotion PR **with a merge commit** (`gh pr merge --merge`),
+      never squash. A squash-promotion puts a history-less copy of the batch on
+      `main`; the moment `dev` refactors any of those files, the next promotion
+      PR goes DIRTY with mass conflicts (this happened with #1152 → #1172, and
+      took a `-s ours` reconcile merge, #1173, to repair).
 - [ ] Watch the **prod deploys** finish (Railway backend / MCP, Vercel frontend)
       and confirm the **migrations applied cleanly** to the prod DB.
 - [ ] **Prod smoke:** load the prod app (no `DEV` badge), check login + balances,

@@ -9,15 +9,16 @@
 import { signX402ExpectedContext } from '../../infra/chain/x402-binding-signer.js'
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
-import { redactVendorSecrets } from '../../lib/execution-rail.js'
-import { selectDelegation, prepareDelegationPayment } from '../../lib/delegation-authorization.js'
-import { computeHybridAccountAddress } from '../../lib/hybrid-provisioning.js'
+import { redactVendorSecrets } from '../../rails/execution-rail.js'
+import { selectDelegation, prepareDelegationPayment } from '../../rails/delegation-authorization.js'
+import { computeHybridAccountAddress } from '../../rails/hybrid-provisioning.js'
 import {
   buildSettlementDelegation,
   typedDataDigest,
-} from '../../lib/x402-delegation.js'
-import { serializeUserOp } from '../../lib/execution-rail.js'
-import { createPaymentIntent, type ResolvePaymentTokenResult } from '../../lib/machine-payments.js'
+} from './x402-delegation.js'
+import { serializeUserOp } from '../../rails/execution-rail.js'
+import { insertMachineIntent as createPaymentIntent } from '../../infra/repositories/payment-intents.js'
+import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'

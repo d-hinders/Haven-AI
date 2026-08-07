@@ -16,8 +16,8 @@ vi.mock('../../middleware/auth.js', () => ({
     request.user = { sub: 'user-1' }
   },
 }))
-vi.mock('../../lib/hybrid-provisioning.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../lib/hybrid-provisioning.js')>()
+vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
   return { ...actual, computeHybridAccountAddress: (...a: unknown[]) => mockCompute(...a) }
 })
 

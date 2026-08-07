@@ -1,10 +1,10 @@
-import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
+import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../infra/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
-import pool from '../db.js'
+import { findPasskeyForSafe } from '../infra/repositories/user-passkeys.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { getChain, isSupportedChain } from '../lib/chains.js'
-import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
-import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../lib/relayer.js'
+import { getChain, isSupportedChain } from '../domain/chains.js'
+import { predictSafePasskeySignerAddress } from '../modules/accounts/index.js'
+import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../infra/relayer.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   computeSafeTxHash,
@@ -42,11 +42,6 @@ interface ExecSafeBody {
   signatures: string
 }
 
-interface StoredPasskeySafeRow {
-  public_key_x: Buffer
-  public_key_y: Buffer
-  signer_address: string
-}
 
 function parseHexCoordinate(value: Buffer): `0x${string}` {
   return `0x${value.toString('hex')}` as `0x${string}`
@@ -108,20 +103,12 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
       return reply.code(400).send({ error: 'Numeric fields must be decimal strings' })
     }
 
-    const result = await pool.query<StoredPasskeySafeRow>(
-      `SELECT public_key_x, public_key_y, signer_address
-       FROM user_passkeys
-       WHERE user_id = $1
-         AND LOWER(safe_address) = LOWER($2)
-         AND chain_id = $3`,
-      [sub, body.safe_address, body.chain_id],
-    )
+    // Ownership check (repository query, #999).
+    const passkey = await findPasskeyForSafe(sub, body.safe_address, body.chain_id)
 
-    if (result.rows.length === 0) {
+    if (passkey === null) {
       return reply.code(403).send({ error: 'Safe is not associated with the authenticated user' })
     }
-
-    const passkey = result.rows[0]
     const chain = getChain(body.chain_id)
     const x = parseHexCoordinate(passkey.public_key_x)
     const y = parseHexCoordinate(passkey.public_key_y)

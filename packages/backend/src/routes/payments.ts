@@ -1,4 +1,4 @@
-import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
+import { RelayerBudgetExceededError } from '../infra/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import {
   claimIntentForSubmission,
@@ -19,9 +19,9 @@ import { insertPaymentApproval } from '../infra/repositories/approval-requests.j
 import { hasTokenAllowanceConfigured } from '../infra/repositories/agents.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
-import { AgentPaymentNextAction, AgentPaymentPhase } from '../lib/agent-payment-taxonomy.js'
-import { getChain, getExplorerUrl } from '../lib/chains.js'
-import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
+import { AgentPaymentNextAction, AgentPaymentPhase } from '../domain/agent-payment-taxonomy.js'
+import { getChain, getExplorerUrl } from '../domain/chains.js'
+import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import { formatTokenAmount, isAddress as isValidAddress, parseTokenAmount } from '@haven_ai/core'
 import {
   getTokenAllowance,
@@ -30,8 +30,11 @@ import {
   generateTransferHash,
   recoverSigner,
   executeAllowanceTransfer,
-} from '../lib/allowance-module.js'
-import { tryRecordMachinePaymentEvidenceBaseById } from '../lib/machine-payment-evidence.js'
+} from '../rails/allowance-module.js'
+// Evidence recording moved into the mpp module (#997); routes/payments.ts
+// needs it after a legacy-rail send confirms, so it imports the module's
+// public entry point (same pattern as routes/x402.ts -> modules/x402/).
+import { tryRecordMachinePaymentEvidenceBaseById } from '../modules/mpp/index.js'
 import {
   deserializeUserOp,
   loadExecutionRailState,
@@ -40,16 +43,16 @@ import {
   serializeUserOp,
   sessionRailRetired,
   isRetiredRailIntent,
-} from '../lib/execution-rail.js'
+} from '../rails/execution-rail.js'
 import {
   prepareDelegationPayment,
   submitDelegationPayment,
-} from '../lib/delegation-authorization.js'
-import { getAgentPaymentResumeState } from '../lib/agent-payment-status.js'
-import { getPaymentReceipt, verifyPaymentReceipt } from '../lib/receipt.js'
-import { quoteFee } from '../lib/fee/fee-module.js'
-import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
-import { decideCoverage } from '../lib/payment-coverage.js'
+} from '../rails/delegation-authorization.js'
+import { getAgentPaymentResumeState } from '../modules/payments/index.js'
+import { getPaymentReceipt, verifyPaymentReceipt } from '../modules/payments/index.js'
+import { quoteFee } from '../modules/fee/index.js'
+import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+import { decideCoverage } from '../domain/payment-coverage.js'
 
 /**
  * Surface the platform fee on a payment result so it's never silently collected

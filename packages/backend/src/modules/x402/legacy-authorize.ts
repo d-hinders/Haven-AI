@@ -7,7 +7,7 @@
  * are unchanged from the pre-#996 route.
  */
 import type { FastifyBaseLogger } from 'fastify'
-import { RelayerBudgetExceededError } from '../../lib/relayer-spend-guard.js'
+import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
 import {
   findActiveX402IntentByIdempotencyKey,
   findX402IntentByIdempotencyKey,
@@ -20,10 +20,10 @@ import { findX402ApprovalByIdempotencyKey } from '../../infra/repositories/appro
 import { hasTokenAllowanceConfigured } from '../../infra/repositories/agents.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { signX402ExpectedContext } from '../../infra/chain/x402-binding-signer.js'
-import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../../lib/agent-payment-taxonomy.js'
-import { getExplorerUrl } from '../../lib/chains.js'
-import { getFiatValuesForTokenAmount } from '../../lib/fiat-values.js'
-import { formatTokenValue } from '../../lib/tokens.js'
+import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../../domain/agent-payment-taxonomy.js'
+import { getExplorerUrl } from '../../domain/chains.js'
+import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
+import { formatTokenValue } from '../../domain/tokens.js'
 import { formatTokenAmount } from '@haven_ai/core'
 import {
   getTokenAllowance,
@@ -33,20 +33,22 @@ import {
   generateTransferHash,
   recoverSigner,
   executeAllowanceTransfer,
-} from '../../lib/allowance-module.js'
-import { waitForFreshAllowanceNonce } from '../../lib/allowance-nonce-coordinator.js'
-import { tryRecordMachinePaymentEvidenceBaseById } from '../../lib/machine-payment-evidence.js'
-import {
-  createMachineApproval,
-  createPaymentIntent,
-  type ResolvePaymentTokenResult,
-} from '../../lib/machine-payments.js'
-import { decideCoverage } from '../../lib/payment-coverage.js'
-import { emitFunnelEvent } from '../../lib/onboarding-funnel.js'
+} from '../../rails/allowance-module.js'
+import { waitForFreshAllowanceNonce } from '../../rails/allowance-nonce-coordinator.js'
+// Evidence recording is mpp-module orchestration (#997) that x402 also needs
+// after a successful legacy-rail settlement — a genuine cross-module need,
+// so it comes through the module's public entry point (rule 6, not a deep
+// import into `modules/mpp/`'s private `evidence.ts`).
+import { tryRecordMachinePaymentEvidenceBaseById } from '../mpp/index.js'
+import { insertMachineApproval as createMachineApproval } from '../../infra/repositories/approval-requests.js'
+import { insertMachineIntent as createPaymentIntent } from '../../infra/repositories/payment-intents.js'
+import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
+import { decideCoverage } from '../../domain/payment-coverage.js'
+import { emitFunnelEvent } from '../../infra/repositories/onboarding-funnel.js'
 import {
   agentPaymentStatusHttpCode,
   getAgentPaymentStatus,
-} from '../../lib/agent-payment-status.js'
+} from '../payments/index.js'
 import {
   agentHourlyX402CapExceeded,
   currentPaymentIntentStatus,
@@ -388,7 +390,8 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
       description: description ?? null,
     }
 
-    // Shared approval-row writer (see lib/machine-payments.createMachineApproval)
+    // Shared approval-row writer (infra/repositories/approval-requests.js's
+    // insertMachineApproval, called directly by modules/mpp/ too — #997)
     // so the column set, ON CONFLICT target, and 'pending'/24h semantics stay
     // identical to the MPP path. For x402, source/payment_rail are 'x402' and
     // there is no challenge — dedupe is on the idempotency key.

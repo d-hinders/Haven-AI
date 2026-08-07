@@ -25,27 +25,28 @@
  * dashboard (#833) renders exactly what is and isn't live.
  */
 
-import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
+import { RelayerBudgetExceededError } from '../infra/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import type { Hex, Address } from '../domain/chain-client.js'
+// dep-lint-exempt: 9 grant-lifecycle statements plus the activation transaction on a dedicated client (pool.connect); the guarded version/waiver checks must travel with their writes, making this a >100-line move deferred under #999
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
-import { getChain } from '../lib/chains.js'
-import { DELEGATION_RAIL_CHAIN_IDS } from '../lib/delegation-contracts.js'
-import { computeHybridAccountAddress, ensureHybridDeployed } from '../lib/hybrid-provisioning.js'
-import { loadHybridOwnerConfig } from '../lib/hybrid-account-config.js'
-import type { HybridOwnerConfig } from '../lib/hybrid-provisioning.js'
-import { signerFloorError } from '../lib/mainnet-gate.js'
+import { getChain } from '../domain/chains.js'
+import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
+import { computeHybridAccountAddress, ensureHybridDeployed } from '../rails/hybrid-provisioning.js'
+import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
+import type { HybridOwnerConfig } from '../rails/hybrid-provisioning.js'
+import { signerFloorError } from '../modules/accounts/index.js'
 import {
   buildBudgetDelegation,
   buildRevocation,
   delegationIdentity,
   delegationSigningPayload,
   type HavenBudgetPolicy,
-} from '../lib/delegation-policy.js'
-import { createTreasuryOps, delegationRailBundlerUrl } from '../lib/delegation-rail.js'
-import { redactVendorSecrets } from '../lib/execution-rail.js'
+} from '../rails/delegation-policy.js'
+import { createTreasuryOps, delegationRailBundlerUrl } from '../rails/delegation-rail.js'
+import { redactVendorSecrets } from '../rails/execution-rail.js'
 // Signer management is shared with the account-scoped routes (#1081) — one
 // copy of the authority rules, reached two ways.
 import {
@@ -54,7 +55,7 @@ import {
   submitSignerChange,
   validateSignedSubmission,
   type SignerActionBody,
-} from '../lib/hybrid-signer-actions.js'
+} from '../rails/hybrid-signer-actions.js'
 
 /** Vendor errors echo the bundler URL (which embeds the API key) — #764. */
 function safeDetails(err: unknown): string {

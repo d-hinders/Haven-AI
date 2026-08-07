@@ -18,8 +18,8 @@ const { mockQuery, allowanceMocks, sweepMocks } = vi.hoisted(() => ({
 vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
-vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
-vi.mock('../../lib/sweep.js', () => sweepMocks)
+vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+vi.mock('../../rails/sweep.js', () => sweepMocks)
 
 const DELEGATE = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
 const SAFE = '0x135a9215604711AC70d970e12Caa812c53537EF4'
@@ -301,6 +301,141 @@ describe('machine payment sweep routes', () => {
       })
 
       expect(res.statusCode).toBe(400)
+    })
+
+    // ── CAS lifecycle: relay outcomes (#997 characterization — the #717 ──────
+    // budget-release path and the generic-failure path had ZERO coverage
+    // before this pass; see routes/machine-payments.ts's
+    // `RelayerBudgetExceededError` branch, preserved verbatim in
+    // modules/mpp/sweep.ts).
+
+    it('#717: a relayer-budget refusal RELEASES the claim back to prepared (429), not markSweepFailed', async () => {
+      mockQuery.mockResolvedValueOnce(authRow()) // auth
+      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] }) // SELECT prepared
+      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'sweep-id' }] }) // claim (won)
+      sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
+      allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
+      const { RelayerBudgetExceededError } = await import('../../infra/relayer-spend-guard.js')
+      sweepMocks.relaySweepAuthorization.mockRejectedValueOnce(
+        new RelayerBudgetExceededError('sweep', 30, 60),
+      )
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/sweep/submit',
+        headers,
+        payload: { authorization: { nonce: NONCE }, signature: SIG },
+      })
+
+      expect(res.statusCode).toBe(429)
+      expect(res.json().error).toMatch(/budget/i)
+
+      // The claim MUST release back to 'prepared', never 'failed' — a
+      // 'failed' sweep here would strand the funds path (#717).
+      const releaseCall = mockQuery.mock.calls.find(([sql]) =>
+        typeof sql === 'string' && sql.includes("SET status = 'prepared'"),
+      )
+      expect(releaseCall).toBeDefined()
+      expect(releaseCall![0]).toContain("WHERE id = $1 AND status = 'submitting'")
+      expect(releaseCall![1]).toEqual([preparedRow().id])
+
+      const failCall = mockQuery.mock.calls.find(([sql]) =>
+        typeof sql === 'string' && sql.includes("SET status = 'failed'"),
+      )
+      expect(failCall).toBeUndefined()
+    })
+
+    it('a non-budget relay failure marks the sweep failed (502), releasing nothing', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] })
+      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'sweep-id' }] }) // claim (won)
+      sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
+      allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
+      sweepMocks.relaySweepAuthorization.mockRejectedValueOnce(new Error('relayer RPC timed out'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/sweep/submit',
+        headers,
+        payload: { authorization: { nonce: NONCE }, signature: SIG },
+      })
+
+      expect(res.statusCode).toBe(502)
+      expect(res.json()).toMatchObject({ error: 'Sweep relay failed', details: 'relayer RPC timed out' })
+
+      const failCall = mockQuery.mock.calls.find(([sql]) =>
+        typeof sql === 'string' && sql.includes("SET status = 'failed'"),
+      )
+      expect(failCall).toBeDefined()
+      expect(failCall![0]).toContain("WHERE id = $2 AND status = 'submitting'")
+      expect(failCall![1]).toEqual(['relayer RPC timed out', preparedRow().id])
+
+      const releaseCall = mockQuery.mock.calls.find(([sql]) =>
+        typeof sql === 'string' && sql.includes("SET status = 'prepared'"),
+      )
+      expect(releaseCall).toBeUndefined()
+    })
+
+    it('expires a prepared sweep past validBefore (409), never reaching claim or relay', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+      mockQuery.mockResolvedValueOnce({
+        rows: [preparedRow({ valid_before: String(Math.floor(Date.now() / 1000) - 60) })],
+      })
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/sweep/submit',
+        headers,
+        payload: { authorization: { nonce: NONCE }, signature: SIG },
+      })
+
+      expect(res.statusCode).toBe(409)
+      expect(res.json().error).toMatch(/expired/i)
+
+      const expireCall = mockQuery.mock.calls.find(([sql]) =>
+        typeof sql === 'string' && sql.includes("SET status = 'expired'"),
+      )
+      expect(expireCall).toBeDefined()
+      expect(expireCall![0]).toContain("WHERE id = $1 AND status = 'prepared'")
+      expect(sweepMocks.recoverSweepSigner).not.toHaveBeenCalled()
+      expect(sweepMocks.relaySweepAuthorization).not.toHaveBeenCalled()
+      expect(allowanceMocks.getTokenBalance).not.toHaveBeenCalled()
+    })
+
+    it('a successful relay resolves any open stranded-funds reconciliation for the agent', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] })
+      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'sweep-id' }] }) // claim (won)
+      sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
+      allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
+      sweepMocks.relaySweepAuthorization.mockResolvedValueOnce({ txHash: TX })
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/sweep/submit',
+        headers,
+        payload: { authorization: { nonce: NONCE }, signature: SIG },
+      })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json().tx_hash).toBe(TX)
+
+      const submittedCall = mockQuery.mock.calls.find(([sql]) =>
+        typeof sql === 'string' && sql.includes("SET status = 'submitted'"),
+      )
+      expect(submittedCall).toBeDefined()
+      const resolveCall = mockQuery.mock.calls.find(([sql]) =>
+        typeof sql === 'string' && sql.includes('machine_payment_reconciliation_events') &&
+          sql.includes("status = 'resolved'"),
+      )
+      expect(resolveCall).toBeDefined()
+      expect(resolveCall![1]).toEqual([AGENT.id])
+      // Ordering: markSweepSubmitted before the reconciliation resolve — a
+      // sweep that fails to record 'submitted' must not silently resolve
+      // reconciliation for a transfer that never landed.
+      const submittedIndex = mockQuery.mock.calls.indexOf(submittedCall!)
+      const resolveIndex = mockQuery.mock.calls.indexOf(resolveCall!)
+      expect(submittedIndex).toBeLessThan(resolveIndex)
     })
   })
 })

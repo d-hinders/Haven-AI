@@ -55,8 +55,8 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
-vi.mock('../../lib/chains.js', () => chainMocks)
+vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+vi.mock('../../domain/chains.js', () => chainMocks)
 
 import x402ResourceRoutes from '../x402-resources.js'
 

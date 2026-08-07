@@ -26,7 +26,7 @@ import {
   signDelegation,
   type Delegation,
 } from '@metamask/smart-accounts-kit'
-import { createDelegationRail } from '../src/lib/delegation-rail.js'
+import { createDelegationRail } from '../src/rails/delegation-rail.js'
 
 const CHAIN = baseSepolia
 const USDC: Address = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'

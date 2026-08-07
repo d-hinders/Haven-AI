@@ -17,8 +17,8 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { computeEffectiveAllowance } from '../lib/allowance-module.js'
-import type { AllowanceInfo } from '../lib/allowance-module.js'
+import { computeEffectiveAllowance } from '../rails/allowance-module.js'
+import type { AllowanceInfo } from '../rails/allowance-module.js'
 import { referenceEffectiveAllowance } from './reference-allowance-module.js'
 import { generateAllowanceCases } from './generators.js'
 

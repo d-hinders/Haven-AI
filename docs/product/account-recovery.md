@@ -7,9 +7,9 @@ covers:
   - packages/frontend/src/components/onboarding/RecoveryNudge.tsx
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
-  - packages/backend/src/lib/hybrid-signer-actions.ts
+  - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx
-last-verified: "2026-08-05"
+last-verified: "2026-08-07"
 ---
 
 # Account recovery (delegation-rail accounts)
@@ -50,9 +50,11 @@ agent a budget. If you truly want to run with a single device, you must
 explicitly acknowledge that losing it loses the account — Haven records that
 choice. (On testnets this rule does not apply.)
 
-**Haven nudges you to add a backup right after signup.** It is dismissible, and
-you can add one at any time from **Backup & recovery** on your account page —
-before you've connected any agent.
+**Haven nudges you to add a backup right after signup — on the dashboard you
+land on, not during signup itself.** Signup is one screen and one Face ID prompt
+(#1162); the prompt to add a backup comes after it, alongside the dashboard's
+setup checklist. It is dismissible, and you can add one at any time from
+**Backup & recovery** on your account page — before you've connected any agent.
 
 ## Add a backup (do this early)
 

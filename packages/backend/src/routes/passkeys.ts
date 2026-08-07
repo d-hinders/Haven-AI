@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify'
-import pool from '../db.js'
+import { insertUserPasskey, listUserPasskeys } from '../infra/repositories/user-passkeys.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { isSupportedChain } from '../lib/chains.js'
-import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
+import { isSupportedChain } from '../domain/chains.js'
+import { predictSafePasskeySignerAddress } from '../modules/accounts/index.js'
 
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/
@@ -15,14 +15,6 @@ interface RegisterPasskeyBody {
   raw_attestation_object?: string
 }
 
-interface UserPasskeyRow {
-  id: string
-  credential_id: string
-  signer_address: string
-  chain_id: number
-  safe_address: string | null
-  created_at: string
-}
 
 function isBase64Url(value: string): boolean {
   return value.length > 0 && value.length <= 1024 && BASE64URL_RE.test(value)
@@ -88,23 +80,18 @@ export default async function passkeyRoutes(app: FastifyInstance): Promise<void>
     try {
       // POC only: we persist the raw attestation for future verification, but do not
       // cryptographically verify it yet. A bad enrollment only harms the enrolling user.
-      const result = await pool.query<UserPasskeyRow>(
-        `INSERT INTO user_passkeys (
-           user_id, credential_id, public_key_x, public_key_y, signer_address, chain_id, raw_attestation
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, credential_id, signer_address, chain_id`,
-        [
-          sub,
-          credential_id,
-          Buffer.from(public_key_x.slice(2), 'hex'),
-          Buffer.from(public_key_y.slice(2), 'hex'),
-          signerAddress,
-          chain_id,
-          raw_attestation_object ? decodeBase64Url(raw_attestation_object) : null,
-        ],
-      )
+      // SQL lives in infra/repositories/user-passkeys.ts (#999).
+      const row = await insertUserPasskey({
+        userId: sub,
+        credentialId: credential_id,
+        publicKeyX: Buffer.from(public_key_x.slice(2), 'hex'),
+        publicKeyY: Buffer.from(public_key_y.slice(2), 'hex'),
+        signerAddress,
+        chainId: chain_id,
+        rawAttestation: raw_attestation_object ? decodeBase64Url(raw_attestation_object) : null,
+      })
 
-      return reply.code(201).send(result.rows[0])
+      return reply.code(201).send(row)
     } catch (error) {
       const constraint = uniqueViolationConstraint(error)
       if (constraint === 'user_passkeys_user_id_chain_id_key') {
@@ -120,15 +107,7 @@ export default async function passkeyRoutes(app: FastifyInstance): Promise<void>
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    const result = await pool.query<UserPasskeyRow>(
-      `SELECT id, credential_id, signer_address, chain_id, safe_address, created_at
-       FROM user_passkeys
-       WHERE user_id = $1
-       ORDER BY created_at ASC`,
-      [sub],
-    )
-
-    return { passkeys: result.rows }
+    return { passkeys: await listUserPasskeys(sub) }
   })
 }
 

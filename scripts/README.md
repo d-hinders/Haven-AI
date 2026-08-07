@@ -132,16 +132,27 @@ one-time-password prompt that blocks token-based publishing in CI.
 Trusted Publishing additionally emits a signed **sigstore provenance**
 statement. npm validates it against `package.json` and rejects the upload with
 `E422` unless each package declares a `repository.url` (with the monorepo
-`directory`) matching `https://github.com/d-hinders/Haven-AI`. All four
+`directory`) matching `https://github.com/d-hinders/Haven-AI`. All five
 published packages carry a `repository` block for this reason.
 
 > **Adding a new published package?** Two one-time setup steps before its first
 > release, or that release fails:
 > 1. Configure a trusted publisher for it on npm (package → Settings → Trusted
 >    Publisher → GitHub Actions: org `d-hinders`, repo `Haven-AI`, workflow
->    `publish.yml`) — otherwise the publish fails to authenticate.
+>    `publish.yml`) — otherwise the publish fails with a misleading `E404` on
+>    `PUT` ("not found or you do not have permission"), npm's shape for *this
+>    credential is not authorised for this package*.
 > 2. Add a `repository` block to its `package.json` (`type`/`url`/`directory`)
 >    — otherwise provenance verification fails with `E422`.
+>
+> This is not hypothetical: `@haven_ai/cli` was added with **both** steps
+> missed, which cost the 2026-08-07 release its cli publish (#1159). The gap
+> stayed invisible for six weeks because nothing bumped versions in between —
+> a workflow that skips already-published versions never re-exercises a
+> package's first-publish path. Since #1159 one package's failure no longer
+> aborts the others: every package is attempted, the run summary reports each
+> outcome (published / skipped / failed), and the job fails at the end naming
+> the failures.
 
 #### Manual fallback
 

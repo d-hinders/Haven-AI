@@ -2,17 +2,17 @@
 owner: "@d-hinders"
 status: current
 covers:
-  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/rails/allowance-module.ts
   - packages/backend/src/loop-harness/**
   - packages/frontend/src/lib/allowance-math.ts
   - packages/frontend/src/lib/loop-harness/**
-  - packages/backend/src/lib/payment-coverage.ts
-  - packages/backend/src/lib/machine-payments.ts
+  - packages/backend/src/domain/payment-coverage.ts
+  - packages/backend/src/modules/mpp/**
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/package.json
   - packages/frontend/package.json
   - .github/workflows/ci.yml
-last-verified: "2026-08-05"
+last-verified: "2026-08-07" # #997: covers updated (lib/machine-payments.ts moved into modules/mpp/**)
 ---
 
 # Loop Harness Index
@@ -31,7 +31,7 @@ Each row is a permanent harness that runs in CI as a regression/drift guard.
 
 ### LP-1 · Backend allowance routing math
 
-- **Target:** `computeEffectiveAllowance` in `packages/backend/src/lib/allowance-module.ts` — drives auto-execute-vs-queue routing.
+- **Target:** `computeEffectiveAllowance` in `packages/backend/src/rails/allowance-module.ts` — drives auto-execute-vs-queue routing.
 - **Oracle:** reference model of the Safe AllowanceModule reset semantics (`packages/backend/src/loop-harness/reference-allowance-module.ts`). Not yet machine-certified against the live contract (clock-source divergences are still confirmed bugs regardless).
 - **Harness:** `packages/backend/src/loop-harness/`
 - **Run:** `npm --prefix packages/backend run test:loop`
@@ -55,7 +55,7 @@ work.
 
 | Candidate | Where | Oracle to define | Notes |
 | --- | --- | --- | --- |
-| x402 coverage branching | `packages/backend/src/lib/payment-coverage.ts` (`decideCoverage`) | invariant set over `delegateBalance + remaining` vs requested amount | bespoke Haven logic, no on-chain backstop on the merchant leg |
+| x402 coverage branching | `packages/backend/src/domain/payment-coverage.ts` (`decideCoverage`) | invariant set over `delegateBalance + remaining` vs requested amount | bespoke Haven logic, no on-chain backstop on the merchant leg |
 | x402 tx verification decoder | `packages/backend/src/routes/x402-resources.ts` (`_verifyTx`) | AllowanceModule calldata spec (decode `executeAllowanceTransfer`) | parsing/validation surface |
 | Approval-flow state machine | `packages/backend/src/lib/machine-payments.ts` | invariant: no `executed` record without a tx hash; over-limit never auto-executes | property/invariant shape, not differential |
 

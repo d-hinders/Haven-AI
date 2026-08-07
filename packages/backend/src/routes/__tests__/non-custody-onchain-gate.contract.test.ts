@@ -32,8 +32,8 @@ const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
 }))
 
 vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
-vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
-vi.mock('../../lib/fiat-values.js', () => fiatMocks)
+vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',

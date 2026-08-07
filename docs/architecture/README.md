@@ -7,11 +7,11 @@ covers:
   - docs/archive/connect-agent-2-*.md
   - docs/research/**
   - packages/core/src/chains.ts
-  - packages/backend/src/lib/chains.ts
+  - packages/backend/src/domain/chains.ts
   - packages/frontend/src/lib/chains.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
-  - packages/backend/src/lib/fee/fee-module.ts
+  - packages/backend/src/modules/fee/fee-module.ts
 last-verified: "2026-08-07"
 ---
 

@@ -69,7 +69,7 @@ prod API URL.
 
 The canary treasury MUST have **≥2 enrolled signers** before it holds real
 money — the mainnet gate enforces this at provisioning and at grant
-activation (`lib/mainnet-gate.ts`), so a single-signer canary only exists if
+activation (`modules/accounts/mainnet-gate.ts`), so a single-signer canary only exists if
 someone recorded the explicit waiver (`single_signer_waiver`).
 
 **Record in the launch notes which path the canary took:** two signers

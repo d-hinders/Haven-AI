@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FastifyInstance } from 'fastify'
 import { buildApp } from '../../__tests__/helpers.js'
-import { predictSafePasskeySignerAddress } from '../../lib/passkey-signer.js'
+import { predictSafePasskeySignerAddress } from '../../modules/accounts/index.js'
 
 const { mockQuery } = vi.hoisted(() => ({
   mockQuery: vi.fn(),

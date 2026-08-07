@@ -218,7 +218,7 @@ variable change on the Railway demo-merchant service.
 2. **The pinned DelegationManager must match the buyer side — use Haven's own
    pinned value.** For Base Sepolia that is
    `0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3`
-   (`packages/backend/src/lib/delegation-contracts.ts`, extracted from
+   (`packages/backend/src/rails/delegation-contracts.ts`, extracted from
    `@metamask/smart-accounts-kit` **1.6.0**). Haven's delegation-rail agents —
    the accounts this feature exists to let pay this merchant — always sign
    against that address.

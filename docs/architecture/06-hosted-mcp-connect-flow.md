@@ -10,8 +10,8 @@ covers:
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
-  - packages/backend/src/lib/payment-coverage.ts
-  - packages/backend/src/lib/sweep.ts
+  - packages/backend/src/domain/payment-coverage.ts
+  - packages/backend/src/rails/sweep.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402.ts
 last-verified: "2026-08-05"

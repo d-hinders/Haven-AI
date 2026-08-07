@@ -106,7 +106,7 @@ describe("gap 2 — a money-path hotfix cannot be verified, so it BLOCKS", () =>
     const r = evaluate({
       ...hotfix,
       latestGreenRun: run(1),
-      changedMoneyPathFiles: ['packages/backend/src/lib/allowance-module.ts'],
+      changedMoneyPathFiles: ['packages/backend/src/rails/allowance-module.ts'],
     })
     assert.equal(r.ok, false)
     assert.equal(r.code, 'hotfix_money_path')
@@ -194,11 +194,11 @@ describe('glob matching', () => {
   })
 
   test('* stays within one segment', () => {
-    const g = 'packages/backend/src/lib/delegation-*.ts'
-    assert.equal(matchesGlob('packages/backend/src/lib/delegation-redeem.ts', g), true)
-    assert.equal(matchesGlob('packages/backend/src/lib/delegation.ts', g), false)
+    const g = 'packages/backend/src/rails/delegation-*.ts'
+    assert.equal(matchesGlob('packages/backend/src/rails/delegation-redeem.ts', g), true)
+    assert.equal(matchesGlob('packages/backend/src/rails/delegation.ts', g), false)
     // The bug a naive `.*` would introduce: crossing a directory boundary.
-    assert.equal(matchesGlob('packages/backend/src/lib/delegation-a/b.ts', g), false)
+    assert.equal(matchesGlob('packages/backend/src/rails/delegation-a/b.ts', g), false)
   })
 
   test('regex metacharacters in a path are literal, not patterns', () => {
@@ -213,14 +213,14 @@ describe('glob matching', () => {
         'packages/backend/src/routes/payments.ts',
         'packages/frontend/src/app/page.tsx',
         'packages/backend/src/db/migrations/051_a.sql',
-        'packages/backend/src/lib/delegation-redeem.ts',
+        'packages/backend/src/rails/delegation-redeem.ts',
       ],
       globs,
     )
     assert.deepEqual(hits, [
       'packages/backend/src/routes/payments.ts',
       'packages/backend/src/db/migrations/051_a.sql',
-      'packages/backend/src/lib/delegation-redeem.ts',
+      'packages/backend/src/rails/delegation-redeem.ts',
     ])
   })
 
@@ -229,9 +229,9 @@ describe('glob matching', () => {
     // never auto-labeled, so they never loaded money.md.
     const globs = loadMoneyPathGlobs()
     for (const f of [
-      'packages/backend/src/lib/delegation-redeem.ts',
-      'packages/backend/src/lib/execution-rail.ts',
-      'packages/backend/src/lib/hybrid-provisioning.ts',
+      'packages/backend/src/rails/delegation-redeem.ts',
+      'packages/backend/src/rails/execution-rail.ts',
+      'packages/backend/src/rails/hybrid-provisioning.ts',
       'packages/backend/src/routes/agent-delegations.ts',
       'packages/sdk/src/signer.ts',
     ]) {

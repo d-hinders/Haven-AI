@@ -2,7 +2,8 @@
  * Data access for the `payment_intents` aggregate (#995, epic #980 M3).
  *
  * Extracted verbatim from `routes/payments.ts`, `routes/machine-payments.ts`
- * (/send), `lib/machine-payments.ts`, `lib/agent-payment-status.ts` and
+ * (/send), `lib/machine-payments.ts` (moved to `modules/mpp/` by #997),
+ * `lib/agent-payment-status.ts` and
  * `lib/receipt.ts` — the money path's intent lifecycle: create (per rail),
  * claim, confirm, fail, expire, and the idempotency lookups that make a retry
  * resume instead of double-spend.
@@ -267,7 +268,10 @@ export async function insertSendIntent(
 }
 
 /**
- * The machine-rail intent insert (`lib/machine-payments.createPaymentIntent`).
+ * The machine-rail intent insert, called directly by both `modules/mpp/` and
+ * `modules/x402/` (#997 removed the `lib/machine-payments.createPaymentIntent`
+ * pass-through — it added no logic over this function, and kept x402 coupled
+ * to a private mpp file once mpp's orchestration moved into its module).
  * Parameterised by its ON CONFLICT arbiter so x402 and the MPP rails keep
  * their exact dedup semantics; the two concrete statements are the exported
  * constants below (what the smoke test PREPAREs). `conflictColumn` is a strict
@@ -600,7 +604,7 @@ export async function failSubmittedIntent(
   await db.query(FAIL_SUBMITTED_INTENT_SQL, [errorMessage, intentId, agentId])
 }
 
-// ── Machine-rail transitions (rail-scoped guards, lib/machine-payments.ts) ──
+// ── Machine-rail transitions (rail-scoped guards, modules/mpp/authorize.ts) ──
 
 export const REFRESH_MACHINE_INTENT_NONCE_SQL = `UPDATE payment_intents
          SET allowance_nonce = $1,

@@ -9,27 +9,28 @@ covers:
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/modules/mpp/**
+  - packages/backend/src/domain/payment-token.ts
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/reporting.ts
   - packages/backend/src/routes/accounting.ts
   - packages/backend/src/routes/fortnox.ts
-  - packages/backend/src/lib/fortnox.ts
-  - packages/backend/src/lib/fortnox-connection.ts
-  - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/modules/reporting/fortnox.ts
+  - packages/backend/src/modules/reporting/fortnox-connection.ts
+  - packages/backend/src/rails/allowance-module.ts
   - packages/backend/src/infra/repositories/payment-intents.ts
   - packages/backend/src/infra/repositories/approval-requests.ts
   - packages/backend/src/infra/repositories/x402-authorizations.ts
   - packages/backend/src/infra/repositories/machine-payments.ts
   - packages/backend/src/infra/repositories/account-entitlements.ts
   - packages/backend/src/infra/repositories/agents.ts
-  - packages/backend/src/lib/accounting-entry.ts
-  - packages/backend/src/lib/catalog-discovery.ts
-  - packages/backend/src/lib/merchant-catalog.ts
-  - packages/backend/src/lib/machine-payments.ts
-  - packages/backend/src/lib/payment-coverage.ts
-  - packages/backend/src/lib/relayer.ts
-  - packages/backend/src/lib/reporting/**
-  - packages/backend/src/lib/safe-deployer.ts
+  - packages/backend/src/modules/accounting/accounting-entry.ts
+  - packages/backend/src/modules/catalog/catalog-discovery.ts
+  - packages/backend/src/modules/catalog/merchant-catalog.ts
+  - packages/backend/src/domain/payment-coverage.ts
+  - packages/backend/src/infra/relayer.ts
+  - packages/backend/src/modules/reporting/**
+  - packages/backend/src/modules/accounts/safe-deployer.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/middleware/reportingFeed.ts
   - packages/backend/src/db/migrations/**
@@ -48,7 +49,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-07"
+last-verified: "2026-08-07" # #997: covers updated (lib/machine-payments.ts moved into modules/mpp/**; the shared token-resolution primitive lives in domain/payment-token.ts) — no perimeter change, the same routes/repositories still enforce it. #998: covers + body re-read after the lib/ fold (execution-rail.ts -> rails/, fortnox-connector.ts already under modules/reporting/, accounting-entry.ts/catalog-discovery.ts/merchant-catalog.ts/safe-deployer.ts relocated) — pure path move, the perimeter and the non-asserting Fortnox invariant are unchanged. #999 re-verified: fortnox-connection persistence moved verbatim behind infra/repositories, agents.ts gained the auth/last-seen queries, and the exempted routes carry inline dep-lint-exempt waivers — perimeter unchanged
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -150,7 +151,7 @@ Haven backend
 > database errors because it gates gas, never funds.
 > Since #993 the retired session rail's fail-closed refusal (HTTP 410,
 > nothing written) is decided and produced in ONE place
-> (`lib/execution-rail.ts`), and enforced at every agent-payment entry point
+> (`rails/execution-rail.ts`), and enforced at every agent-payment entry point
 > (/payments, sign, MPP authorize + replay, /machine-payments/send, x402
 > authorize) regardless of the account's permission/chain configuration.
 > Queued-approval completion is not a gap (#1121, investigated): the
@@ -390,7 +391,7 @@ Preferred pattern:
 **Current state (2026-07, epic #491):** the live Fortnox feed (#496/#498) follows
 the preferred pattern — each settled payment is pushed as an **unattested
 supplier invoice** carrying no account, no VAT, and no voucher rows
-(`assertNonAsserting()` in `lib/reporting/fortnox-connector.ts` makes the
+(`assertNonAsserting()` in `modules/reporting/fortnox-connector.ts` makes the
 non-asserting payload a runtime invariant), with the Haven-generated
 payment-evidence PDF attached as underlag. Nothing is booked until a human
 attests it in Fortnox. The earlier asserting voucher-push surface

@@ -17,8 +17,8 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/types.ts
-  - packages/backend/src/lib/agent-payment-taxonomy.ts
-  - packages/backend/src/lib/agent-payment-taxonomy.parity.test.ts
+  - packages/backend/src/domain/agent-payment-taxonomy.ts
+  - packages/backend/src/domain/__tests__/agent-payment-taxonomy.parity.test.ts
   - .github/workflows/ci.yml
   - scripts/generate-api-types.mjs
   - packages/core/src/api-types.ts

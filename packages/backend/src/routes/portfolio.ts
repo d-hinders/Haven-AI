@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import pool from '../db.js'
-import { isSupportedChain } from '../lib/chains.js'
-import { fetchPortfolioForSafe } from '../lib/portfolio.js'
+import { findSafeOwnership } from '../infra/repositories/transaction-history.js'
+import { isSupportedChain } from '../domain/chains.js'
+import { fetchPortfolioForSafe } from '../modules/accounts/index.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
 function parseChainId(value: unknown): number | null {
@@ -40,25 +40,17 @@ export default async function portfolioRoutes(
         return reply.code(400).send({ error: `Unsupported chain: ${requestedChainId}` })
       }
 
-      // Verify ownership and get chain_id
-      const ownershipSql = requestedChainId === null
-        ? 'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)'
-        : 'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3'
-      const ownershipParams = requestedChainId === null
-        ? [sub, safeAddress]
-        : [sub, safeAddress, requestedChainId]
-      const userResult = await pool.query<{ id: string; chain_id: number }>(
-        ownershipSql,
-        ownershipParams,
-      )
-      if (userResult.rows.length === 0) {
+      // Verify ownership and get chain_id (repository query, #999 — the same
+      // ownership check the transaction-history route runs).
+      const ownedSafes = await findSafeOwnership(sub, safeAddress, requestedChainId)
+      if (ownedSafes.length === 0) {
         return reply.code(403).send({ error: 'Not your Safe' })
       }
-      if (requestedChainId === null && userResult.rows.length > 1) {
+      if (requestedChainId === null && ownedSafes.length > 1) {
         return reply.code(400).send({ error: 'chain_id required' })
       }
 
-      const chainId = requestedChainId ?? userResult.rows[0].chain_id
+      const chainId = requestedChainId ?? ownedSafes[0].chain_id
       return fetchPortfolioForSafe(chainId, safeAddress)
     },
   )

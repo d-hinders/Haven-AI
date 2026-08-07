@@ -21,17 +21,17 @@ import {
   sanitizeConnectorContext,
   sanitizeInstallStatus,
   verifySetupProof,
-} from '../lib/agent-connection-setup.js'
-import { normalizeAgentAllowances } from '../lib/agent-allowance-validation.js'
-import { getTokenAllowance, getTokensForDelegate } from '../lib/allowance-module.js'
-import { getChain } from '../lib/chains.js'
-import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
+} from '../modules/agents/index.js'
+import { normalizeAgentAllowances } from '../modules/agents/index.js'
+import { getTokenAllowance, getTokensForDelegate } from '../rails/allowance-module.js'
+import { getChain } from '../domain/chains.js'
+import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import {
   requestPassport,
   issuePassportBestEffort,
   isPassportConfigured,
   PASSPORT_CHAIN_IDS,
-} from '../lib/passport/index.js'
+} from '../modules/passport/index.js'
 
 interface AllowanceInput {
   token_address: string

@@ -31,7 +31,7 @@ budget, a recipient pin, an expiry). It is redeemed through MetaMask's
 | Base Sepolia (84532) | `0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3` |
 
 These are the audited MetaMask deployments (Consensys Diligence, 2024/2025) and
-match Haven's `packages/backend/src/lib/delegation-contracts.ts`. If an address
+match Haven's `packages/backend/src/rails/delegation-contracts.ts`. If an address
 you are asked to interact with differs from this, stop.
 
 ## Manual path (explorer only — the guarantee)

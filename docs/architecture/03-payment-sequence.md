@@ -3,22 +3,22 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/routes/payments.ts
-  - packages/backend/src/lib/allowance-module.ts
-  - packages/backend/src/lib/payment-coverage.ts
+  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/domain/payment-coverage.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/approvals.ts
   - packages/backend/src/routes/agent-delegations.ts
-  - packages/backend/src/lib/machine-payments.ts
-  - packages/backend/src/lib/merchant-receipt.ts
-  - packages/backend/src/lib/delegation-rail.ts
-  - packages/backend/src/lib/x402-delegation.ts
-  - packages/backend/src/lib/delegation-policy.ts
-  - packages/backend/src/lib/delegation-authorization.ts
+  - packages/backend/src/modules/mpp/**
+  - packages/backend/src/domain/payment-token.ts
+  - packages/backend/src/rails/delegation-rail.ts
+  - packages/backend/src/modules/x402/x402-delegation.ts
+  - packages/backend/src/rails/delegation-policy.ts
+  - packages/backend/src/rails/delegation-authorization.ts
   - packages/backend/src/middleware/agentAuth.ts
-  - packages/backend/src/lib/chains.ts
+  - packages/backend/src/domain/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-05"
+last-verified: "2026-08-07" # #997: covers updated (lib/machine-payments.ts + lib/merchant-receipt.ts moved into modules/mpp/**, domain/payment-token.ts)
 ---
 
 # Haven — Payment Execution Sequence
@@ -29,7 +29,7 @@ required, no user approval) and **over allowance** (queued for user approval
 and user-authorized Safe execution).
 
 Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backend/src/routes/payments.ts) and
-[packages/backend/src/lib/allowance-module.ts](../../packages/backend/src/lib/allowance-module.ts).
+[packages/backend/src/rails/allowance-module.ts](../../packages/backend/src/rails/allowance-module.ts).
 
 > **This diagram is the legacy AllowanceModule rail** (import-only, existing
 > accounts). New accounts (`account_type='delegator_hybrid'`,
@@ -110,7 +110,7 @@ sequenceDiagram
   applies the module's reset semantics, so out-of-band AllowanceModule transfers
   under the same delegate/token allowance are already reflected and reset
   decisions use chain time
-  ([packages/backend/src/lib/allowance-module.ts](../../packages/backend/src/lib/allowance-module.ts)).
+  ([packages/backend/src/rails/allowance-module.ts](../../packages/backend/src/rails/allowance-module.ts)).
 - **The delegate signature is independently re-verified by the
   AllowanceModule.** Even if the backend skipped its own `ecrecover` check,
   the on-chain module would reject a bad signature.
@@ -163,7 +163,7 @@ lifecycle (build/activate/revoke) is managed out of band via
 ([agent delegations](../../packages/backend/src/routes/agent-delegations.ts)).
 Full security model and exit story:
 [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md)
-([delegation authorization](../../packages/backend/src/lib/delegation-authorization.ts)).
+([delegation authorization](../../packages/backend/src/rails/delegation-authorization.ts)).
 
 ## Related: x402 path
 
@@ -194,7 +194,7 @@ against that shape:
 - **erc7710 direct settlement** (`payTo` = the merchant): Haven builds a
   settlement CHILD delegation (exact amount, payee pin, expiry capped at 600s)
   re-delegated from the agent's budget delegation
-  ([packages/backend/src/lib/x402-delegation.ts](../../packages/backend/src/lib/x402-delegation.ts)).
+  ([packages/backend/src/modules/x402/x402-delegation.ts](../../packages/backend/src/modules/x402/x402-delegation.ts)).
   The agent signs its EIP-712 typed data (`signature_scheme:
   'eip712_delegation'`) and POSTs `/x402/:id/settle`, which returns the
   merchant `X-PAYMENT` header. The merchant redeems the `[child, budget]`

@@ -4,15 +4,16 @@ status: current
 covers:
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/routes/x402.ts
-  - packages/backend/src/lib/machine-payments.ts
-  - packages/backend/src/lib/payment-coverage.ts
-  - packages/backend/src/lib/__tests__/payment-coverage.test.ts
-  - packages/backend/src/lib/__tests__/resolve-payment-token.test.ts
+  - packages/backend/src/modules/mpp/**
+  - packages/backend/src/domain/payment-token.ts
+  - packages/backend/src/domain/payment-coverage.ts
+  - packages/backend/src/domain/__tests__/payment-coverage.test.ts
+  - packages/backend/src/domain/__tests__/payment-token.test.ts
   - packages/backend/src/routes/__tests__/x402-consolidation.characterization.test.ts
   - packages/backend/src/routes/__tests__/x402.test.ts
   - packages/backend/src/routes/__tests__/machine-payments.test.ts
   - docs/contributing/ai-agent-workflow.md
-last-verified: "2026-08-05"
+last-verified: "2026-08-07" # #997: covers updated (lib/machine-payments.ts moved into modules/mpp/**; resolve-payment-token test relocated to domain/__tests__/payment-token.test.ts)
 ---
 
 # x402 / Machine-Payment Consolidation (PT-1)
@@ -25,9 +26,14 @@ the resulting shared contract, not an active implementation plan.
 The x402 and generic/MPP money paths share four policy-first primitives:
 
 - `decideCoverage` selects execute, queue, or insufficient coverage.
-- `createMachineApproval` writes approval requests.
-- `createPaymentIntent` writes payment intents.
-- `resolvePaymentToken` resolves supported token configuration.
+- `insertMachineApproval` (`infra/repositories/approval-requests.ts`) writes
+  approval requests — called directly by both modules since #997 removed the
+  `lib/machine-payments.createMachineApproval` pass-through, which added no
+  logic over this repository call.
+- `insertMachineIntent` (`infra/repositories/payment-intents.ts`) writes
+  payment intents, same story (`createPaymentIntent` removed by #997).
+- `resolvePaymentToken` (`src/domain/payment-token.ts` since #997) resolves
+  supported token configuration.
 
 Thin rail-specific handlers retain x402 binding and one-shot execution, MPP
 challenge handling, response shapes, deep validation, and rail-specific
@@ -48,7 +54,7 @@ Delegate balance is coverage for an approval request, not permission to bypass
 the configured allowance.
 
 Both strategies apply to the legacy AllowanceModule rail only. Delegation-rail
-requests (#830) branch before coverage: they reuse `createPaymentIntent` (with
+requests (#830) branch before coverage: they reuse `insertMachineIntent` (with
 `execution_rail='delegation'` and a prepared settlement delegation) but skip
 `decideCoverage` entirely — budget, recipient, and expiry are enforced on-chain
 by the caveat enforcers, with no approval queue. Retired session-rail intents

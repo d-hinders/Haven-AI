@@ -1,8 +1,9 @@
 import { FastifyInstance } from 'fastify'
+// dep-lint-exempt: 10 statements across the users / user_safes / owner-alias aggregates; verbatim extraction is a >100-line move deferred under #999's fix-or-waive budget
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { getSafeDetails } from '../lib/safe-details.js'
-import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
+import { getSafeDetails } from '../modules/accounts/index.js'
+import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import { ETH_ADDRESS_RE, DEFAULT_CHAIN_ID } from '@haven_ai/core'
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/

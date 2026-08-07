@@ -1,9 +1,10 @@
 import { FastifyInstance } from 'fastify'
+// dep-lint-exempt: 9 dashboard aggregates (parallel Promise.all reads + the snapshot upsert), all user_id-scoped inline; verbatim extraction is a >100-line move deferred under #999's fix-or-waive budget
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
-import { fetchPortfolioForSafe } from '../lib/portfolio.js'
-import { deriveDelegationAllowances } from '../lib/delegation-budget-view.js'
+import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
+import { fetchPortfolioForSafe } from '../modules/accounts/index.js'
+import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import {
   compareTransactions,
   type EnrichedTransaction,

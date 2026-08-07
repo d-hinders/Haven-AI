@@ -1,14 +1,14 @@
 import { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { buildAccountingEntries } from '../lib/accounting-entry.js'
+import { buildAccountingEntries } from '../modules/accounting/index.js'
 import {
   buildFortnoxAuthorizeUrl,
   exchangeCodeForTokens,
   pushVoucher,
   toFortnoxVoucher,
   FortnoxError,
-} from '../lib/fortnox.js'
+} from '../modules/reporting/index.js'
 import {
   deleteFortnoxConnection,
   fortnoxConfigured,
@@ -16,7 +16,7 @@ import {
   getFortnoxConnection,
   getValidFortnoxAccessToken,
   saveFortnoxConnection,
-} from '../lib/fortnox-connection.js'
+} from '../modules/reporting/index.js'
 
 interface CallbackQuery {
   code?: string

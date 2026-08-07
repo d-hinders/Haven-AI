@@ -18,9 +18,9 @@ import {
   type Delegation,
 } from '@metamask/smart-accounts-kit'
 import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
-import { getDelegationContracts } from '../src/lib/delegation-contracts.js'
-import { buildRevocation } from '../src/lib/delegation-policy.js'
-import { createDelegationRail, createTreasuryOps } from '../src/lib/delegation-rail.js'
+import { getDelegationContracts } from '../src/rails/delegation-contracts.js'
+import { buildRevocation } from '../src/rails/delegation-policy.js'
+import { createDelegationRail, createTreasuryOps } from '../src/rails/delegation-rail.js'
 import { signUserOpTypedDataForDelegation } from '@haven_ai/sdk'
 
 const CHAIN = baseSepolia

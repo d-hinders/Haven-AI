@@ -11,11 +11,11 @@
  * Run: npm run ops:check-delegation -w @haven/backend
  */
 
-import { getChain } from '../src/lib/chains.js'
+import { getChain } from '../src/domain/chains.js'
 import {
   DELEGATION_RAIL_CHAIN_IDS,
   getDelegationContracts,
-} from '../src/lib/delegation-contracts.js'
+} from '../src/rails/delegation-contracts.js'
 
 async function hasCode(rpcUrl: string, address: string): Promise<boolean> {
   const response = await fetch(rpcUrl, {

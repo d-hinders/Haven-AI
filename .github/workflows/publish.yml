@@ -81,10 +81,18 @@ jobs:
           npm run build -w packages/cli
 
       - name: Publish packages whose version is not yet on npm
+        # One package's failure must not abort the rest (#1159): the loop
+        # attempts every package, records each outcome, writes a per-package
+        # table to the run summary, and only then exits non-zero naming the
+        # failed one(s). Before this, a failure early in the list silently
+        # skipped everything after it, and the run looked identical to a
+        # single-package failure.
         run: |
           set -euo pipefail
 
           published_any=false
+          failed=""
+          results=""
 
           for pkg in sdk signer mcp connect cli; do
             name=$(node -p "require('./packages/$pkg/package.json').name")
@@ -92,6 +100,7 @@ jobs:
 
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "✓ $name@$version already on npm — skipping"
+              results="$results| \`$name\` | $version | skipped — already on npm |"$'\n'
               continue
             fi
 
@@ -109,9 +118,29 @@ jobs:
             esac
 
             echo "→ Publishing $name@$version with --tag $tag"
-            npm publish -w "packages/$pkg" --tag "$tag" --access public
-            published_any=true
+            if npm publish -w "packages/$pkg" --tag "$tag" --access public; then
+              results="$results| \`$name\` | $version | published under \`$tag\` |"$'\n'
+              published_any=true
+            else
+              echo "✗ $name@$version failed to publish — continuing with the remaining packages"
+              results="$results| \`$name\` | $version | **FAILED** — npm publish exited non-zero (see log) |"$'\n'
+              failed="$failed $name"
+            fi
           done
+
+          {
+            echo "### npm publish results"
+            echo ""
+            echo "| package | version | outcome |"
+            echo "|---|---|---|"
+            printf '%s' "$results"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$failed" ]; then
+            echo "ERROR: failed to publish:$failed"
+            echo "Every other package was still attempted — anything not marked FAILED above is live or was already on npm."
+            exit 1
+          fi
 
           if [ "$published_any" = "false" ]; then
             echo "No package versions to publish — all up to date on npm."

@@ -20,7 +20,7 @@ const { mockRequest, mockIssue, mockGetPassport } = vi.hoisted(() => ({
   mockIssue: vi.fn(),
   mockGetPassport: vi.fn(),
 }))
-vi.mock('../../lib/passport/index.js', () => ({
+vi.mock('../../modules/passport/index.js', () => ({
   requestPassport: (...a: unknown[]) => mockRequest(...a),
   issuePassportBestEffort: (...a: unknown[]) => mockIssue(...a),
   getPassport: (...a: unknown[]) => mockGetPassport(...a),

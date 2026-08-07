@@ -7,7 +7,7 @@
  * `Math.random`, and every generated case carries the seed that produced it.
  */
 
-import type { AllowanceInfo } from '../lib/allowance-module.js'
+import type { AllowanceInfo } from '../rails/allowance-module.js'
 
 /** mulberry32 — tiny, fast, deterministic 32-bit PRNG. */
 export function mulberry32(seed: number): () => number {

@@ -1,442 +1,38 @@
-import { resolveExecutionRail, sessionRailRetired } from '../lib/execution-rail.js'
-import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
-import { config } from '../config.js'
-import {
-  findSendIntentByIdempotencyKey,
-  insertSendIntent,
-} from '../infra/repositories/payment-intents.js'
-import {
-  findSendApprovalByIdempotencyKey,
-  insertSendApproval,
-} from '../infra/repositories/approval-requests.js'
-import {
-  claimPreparedSweep,
-  expirePreparedSweep,
-  findReconciliationApproval,
-  findReconciliationEvent,
-  findSweepById,
-  findSweepByNonce,
-  findReconciliationIntent,
-  getIntentSettlementFields,
-  insertPreparedSweep,
-  listEvidenceReceiptsForAgent,
-  markSweepFailed,
-  markSweepSubmitted,
-  releaseSweepClaim,
-  resolveStrandedEventsForAgent,
-  upsertReconciliationEvent,
-} from '../infra/repositories/machine-payments.js'
-import {
-  hasTokenAllowanceConfigured,
-  listAllowanceConfigForAgent,
-} from '../infra/repositories/agents.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
+import { getAgentPaymentStatus } from '../modules/payments/index.js'
+import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   authorizeMachinePayment,
-  type MachinePaymentRail,
-} from '../lib/machine-payments.js'
-import { getAgentPaymentStatus, agentPaymentStatusHttpCode } from '../lib/agent-payment-status.js'
-import { deriveDelegationBudgets } from '../lib/delegation-budget-view.js'
-import { formatTokenAmount, isAddress as isValidAddress, parseTokenAmount } from '@haven_ai/core'
-import {
-  attachMachinePaymentEvidence,
-  type MachinePaymentEvidenceRow,
-} from '../lib/machine-payment-evidence.js'
-import {
-  getTokenAllowance,
-  getTokenBalance,
-  getLatestBlockTimeSec,
-  computeEffectiveAllowance,
-  generateTransferHash,
-} from '../lib/allowance-module.js'
-import { getChain, getExplorerUrl } from '../lib/chains.js'
-import {
-  isSweepableChain,
-  sweepUsdcAddress,
-  type SweepAuthorization,
-} from '@haven_ai/sdk'
-import {
-  buildSweepAuthorization,
-  signSweepExpectedContext,
-  recoverSweepSigner,
-  relaySweepAuthorization,
-} from '../lib/sweep.js'
-import { AgentPaymentPhase, AgentPaymentNextAction } from '../lib/agent-payment-taxonomy.js'
-import { captureMerchantReceipt } from '../lib/merchant-receipt.js'
-import { lateAttachMerchantReceipt } from '../lib/reporting/fortnox-connector.js'
+  handleGetAllowances,
+  handleReconciliationEvent,
+  handleSend,
+  attachEvidenceHandler,
+  handleMerchantReceiptCapture,
+  listReceipts,
+  prepareSweep,
+  submitSweep,
+  validateMppDemoChallenge,
+  RECONCILIATION_EVENT_TYPES,
+  SUPPORTED_ASSETS,
+  type AuthorizeBody,
+  type EvidenceBody,
+  type ReconciliationEventBody,
+  type SendAsset,
+  type SendBody,
+  type SweepSubmitBody,
+} from '../modules/mpp/index.js'
 
-interface MachinePaymentChallengeBody {
-  rail: MachinePaymentRail
-  version: string
-  challengeId: string
-  resource: string
-  description: string
-  network: {
-    chainId: number
-    name: 'base'
-  }
-  asset: {
-    symbol: 'USDC'
-    address: string
-    decimals: 6
-  }
-  amount: {
-    display: string
-    atomic: string
-  }
-  recipient: string
-  expiresAt: string
-  metadata?: Record<string, unknown>
-}
-
-interface AuthorizeBody {
-  challenge: MachinePaymentChallengeBody
-  idempotencyKey?: string
-  signature?: string
-}
-
-interface ReconciliationEventBody {
-  paymentId?: string
-  rail?: MachinePaymentRail
-  eventType?: string
-  txHash?: string
-  reason?: string
-  details?: Record<string, unknown>
-}
-
-interface EvidenceBody {
-  paymentId?: string
-  rail?: MachinePaymentRail
-  txHash?: string
-  resourceUrl?: string
-  merchantStatus?: number
-  challengePayload?: Record<string, unknown>
-  selectedPayment?: Record<string, unknown>
-  paymentProofHeaderName?: string
-  paymentProofHeader?: string
-  protocolReceiptHeaderName?: string
-  protocolReceiptHeader?: string
-  protocolReceiptPayload?: Record<string, unknown>
-}
-
-interface AgentAllowanceRow {
-  id: string
-  token_address: string
-  token_symbol: string
-  allowance_amount: string
-  reset_period_min: number
-}
-
-interface ReconciliationPaymentRow {
-  id: string
-  kind: 'payment_intent' | 'approval_request'
-  user_id: string
-  tx_hash: string | null
-  status: string
-  payment_rail: string | null
-  source: string | null
-  payment_resource_url: string | null
-  x402_resource_url: string | null
-  merchant_address: string | null
-  x402_merchant_address: string | null
-  machine_challenge_id: string | null
-  machine_idempotency_key: string | null
-  x402_idempotency_key: string | null
-}
-
-interface ReconciliationEventRow {
-  id: string
-  status: string
-  created_at: string
-}
-
-const RECONCILIATION_EVENT_TYPES = new Set([
-  'merchant_retry_rejected_after_payment',
-])
-
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-
-const SUPPORTED_ASSETS = ['ETH', 'USDC'] as const
-type SendAsset = (typeof SUPPORTED_ASSETS)[number]
-
-interface SendBody {
-  asset: SendAsset
-  recipient: string
-  amount: string
-  idempotency_key?: string
-}
-
-interface SendPaymentIntentRow {
-  id: string
-  status: string
-  expires_at: string
-}
+// Route handlers only: request validation, auth middleware wiring, rate-limit
+// config, and response serialization. Everything else — authorize
+// orchestration, the send flow, sweep prepare/submit orchestration,
+// evidence/receipt assembly, and the rail-aware allowances read — lives in
+// `src/modules/mpp/` (#997, epic #980 M4). See that module's `index.ts` for
+// the public surface and the boundary rationale.
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
-}
-
-function mapEvidence(
-  row: MachinePaymentEvidenceRow & {
-    settlement_scheme?: string | null
-    budget_delegation_hash?: string | null
-  },
-) {
-  return {
-    id: row.id,
-    /** Which settlement branch ran (eip3009 | erc7710), from the intent (#946). */
-    settlement_scheme: row.settlement_scheme ?? null,
-    /** The metering budget, uniform across schemes (#1059) — null on the
-     *  legacy rail and on intents predating the column. */
-    budget_delegation_hash: row.budget_delegation_hash ?? null,
-    payment_id: row.payment_intent_id ?? row.approval_request_id,
-    payment_intent_id: row.payment_intent_id,
-    approval_request_id: row.approval_request_id,
-    rail: row.rail,
-    proof_status: row.proof_status,
-    tx_hash: row.tx_hash,
-    chain_id: row.chain_id,
-    resource_url: row.resource_url,
-    merchant_address: row.merchant_address,
-    payer_address: row.payer_address,
-    settlement_address: row.settlement_address,
-    token_symbol: row.token_symbol,
-    token_address: row.token_address,
-    amount_raw: row.amount_raw,
-    amount_human: row.amount_human,
-    challenge_id: row.challenge_id,
-    idempotency_key: row.idempotency_key,
-    challenge_payload: row.challenge_payload,
-    selected_payment: row.selected_payment,
-    payment_proof_header_name: row.payment_proof_header_name,
-    protocol_receipt_header_name: row.protocol_receipt_header_name,
-    protocol_receipt_payload: row.protocol_receipt_payload,
-    merchant_status: row.merchant_status,
-    confirmed_at: row.confirmed_at,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-  }
-}
-
-function validateMppDemoChallenge(challenge: MachinePaymentChallengeBody): string | null {
-  if (!challenge || typeof challenge !== 'object') return 'challenge is required'
-  if (challenge.rail !== 'mpp_demo') return 'Only mpp_demo challenges are supported'
-  if (!challenge.challengeId || typeof challenge.challengeId !== 'string') return 'challengeId is required'
-  if (!challenge.resource || typeof challenge.resource !== 'string') return 'resource is required'
-  if (challenge.network?.chainId !== 8453 || challenge.network?.name !== 'base') {
-    return 'MPP demo payments must use Base'
-  }
-  if (
-    challenge.asset?.symbol !== 'USDC' ||
-    challenge.asset?.decimals !== 6 ||
-    challenge.asset?.address?.toLowerCase() !== '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
-  ) {
-    return 'MPP demo payments must use Base USDC'
-  }
-  if (challenge.amount?.atomic !== '10000' || challenge.amount?.display !== '0.01') {
-    return 'MPP demo payments are fixed at 0.01 USDC'
-  }
-  if (!challenge.expiresAt || typeof challenge.expiresAt !== 'string') {
-    return 'expiresAt must be a valid ISO timestamp'
-  }
-  const expiresAtMs = new Date(challenge.expiresAt).getTime()
-  if (!Number.isFinite(expiresAtMs)) {
-    return 'expiresAt must be a valid ISO timestamp'
-  }
-  if (expiresAtMs <= Date.now()) {
-    return 'MPP demo challenge has expired'
-  }
-  return null
-}
-
-function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
-  return Boolean(a && b && a.toLowerCase() === b.toLowerCase())
-}
-
-const USDC_DECIMALS = 6
-
-function sweepResultBody(fields: {
-  txHash: string
-  valueAtomic: string
-  from: string
-  to: string
-  chainId: number
-  idempotent?: boolean
-}) {
-  return {
-    tx_hash: fields.txHash,
-    asset: 'USDC',
-    amount: formatTokenAmount(BigInt(fields.valueAtomic), USDC_DECIMALS),
-    amount_atomic: fields.valueAtomic,
-    from_address: fields.from,
-    to_address: fields.to,
-    chain_id: fields.chainId,
-    explorer_url: getExplorerUrl(fields.chainId, 'tx', fields.txHash),
-    ...(fields.idempotent ? { idempotent_replay: true } : {}),
-  }
-}
-
-interface SweepSubmitBody {
-  authorization?: Partial<SweepAuthorization>
-  signature?: string
-}
-
-interface DelegateSweepRow {
-  id: string
-  chain_id: number
-  token_address: string
-  from_address: string
-  to_address: string
-  value_atomic: string
-  valid_after: string
-  valid_before: string
-  nonce: string
-  status: string
-  tx_hash: string | null
-}
-
-/**
- * Resolve a SendAsset enum value to the token config for a given chain.
- * 'ETH' resolves to the chain's native token; 'USDC' resolves by symbol match.
- */
-function resolveAsset(chainId: number, asset: SendAsset) {
-  const chain = getChain(chainId)
-  const tokens = chain.tokens
-  // Native ETH/xDAI = any token with address null
-  if (asset === 'ETH') {
-    return Object.values(tokens).find((t) => t.address === null) ?? null
-  }
-  // USDC = find by uppercase symbol prefix
-  for (const cfg of Object.values(tokens)) {
-    if (cfg.symbol.toUpperCase().startsWith('USDC')) return cfg
-  }
-  return null
-}
-
-const PG_UNIQUE_VIOLATION = '23505'
-
-const SEND_SIGN_INSTRUCTIONS =
-  'Sign the hash with your delegate private key using raw ECDSA (not eth_sign). ' +
-  'The signature must be 65 bytes: r (32) + s (32) + v (1), where v is 27 or 28.'
-
-/**
- * Build the AllowanceModule `sign_data` payload returned by /send.
- *
- * Shared by the create path and the idempotent-replay path so a retried request
- * can never receive a structurally different hash/components than its original
- * 201 — the retry path is exactly what idempotency exists to protect.
- */
-function buildSendSignData(
-  hash: string,
-  components: { safe: string; token: string; to: string; amount: string; nonce: number },
-) {
-  return {
-    hash,
-    components: {
-      safe: components.safe,
-      token: components.token,
-      to: components.to,
-      amount: components.amount,
-      payment_token: ZERO_ADDRESS,
-      payment: '0',
-      nonce: components.nonce,
-    },
-    instructions: SEND_SIGN_INSTRUCTIONS,
-  }
-}
-
-interface SendReplay {
-  code: number
-  body: Record<string, unknown>
-}
-
-/**
- * Build the canonical status response for an already-progressed payment, so a
- * replay of a settled/approved/submitted send reports its *real* state rather
- * than re-emitting the create-time "sign this" / "waiting for approval" framing.
- * Mirrors what GET status / haven_get_payment_status returns for the same id.
- */
-async function replayStatusOf(agent: AgentContext, paymentId: string): Promise<SendReplay> {
-  const status = await getAgentPaymentStatus(agent, paymentId)
-  if (status) {
-    return { code: agentPaymentStatusHttpCode(status), body: { ...status, idempotent_replay: true } }
-  }
-  return {
-    code: 409,
-    body: { payment_id: paymentId, error: 'Payment already exists but could not be loaded', idempotent_replay: true },
-  }
-}
-
-/**
- * Resolve an existing /send result for an idempotency key, if one exists.
- *
- * A send lands as either a signable payment intent (within allowance) or a
- * queued approval (over allowance), so both tables are checked. A replay returns
- * the original *signable* response only while the row is still actionable
- * (intent pending_signature / approval pending); once it has progressed it
- * returns the row's real status instead, so an agent that retries after the
- * payment already settled is not told to sign or wait again. Returns null when
- * the key has never been seen (or its prior row reached a terminal state
- * excluded by the unique index and is therefore reusable).
- */
-async function findExistingSend(
-  agent: AgentContext,
-  idempotencyKey: string,
-  asset: SendAsset,
-): Promise<SendReplay | null> {
-  const pi = await findSendIntentByIdempotencyKey(agent.id, idempotencyKey)
-  if (pi) {
-    // Already submitted/confirmed — report the real state, not a stale sign request.
-    if (pi.status !== 'pending_signature') {
-      return replayStatusOf(agent, pi.id)
-    }
-    return {
-      code: 201,
-      body: {
-        payment_id: pi.id,
-        status: pi.status,
-        expires_at: pi.expires_at,
-        asset,
-        amount: pi.amount_human,
-        recipient: pi.to_address,
-        idempotent_replay: true,
-        sign_data: buildSendSignData(pi.sign_hash, {
-          safe: agent.safe_address,
-          token: pi.token_address,
-          to: pi.to_address,
-          amount: pi.amount_raw,
-          nonce: pi.allowance_nonce,
-        }),
-      },
-    }
-  }
-
-  const ar = await findSendApprovalByIdempotencyKey(agent.id, idempotencyKey)
-  if (ar) {
-    // Owner has approved / executed it — report the real state, not "still waiting".
-    if (ar.status !== 'pending') {
-      return replayStatusOf(agent, ar.id)
-    }
-    return {
-      code: 202,
-      body: {
-        payment_id: ar.id,
-        kind: 'approval_request',
-        status: 'pending_approval',
-        phase: AgentPaymentPhase.UserApprovalRequired,
-        next_action: AgentPaymentNextAction.WaitForUserApproval,
-        message: `Transfer of ${ar.amount_human} ${ar.token_symbol} is queued for owner approval.`,
-        requested: ar.amount_human,
-        asset,
-        expires_at: ar.expires_at,
-        idempotent_replay: true,
-      },
-    }
-  }
-
-  return null
 }
 
 export default async function machinePaymentRoutes(app: FastifyInstance): Promise<void> {
@@ -457,108 +53,8 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
 
   app.get('/allowances', async (request, reply) => {
     const agent = request.agent as AgentContext
-
-    // #1135: this endpoint was rail-blind — it read the on-chain
-    // AllowanceModule unconditionally, so a delegation-rail account (no Safe,
-    // no AllowanceModule) reported zeros forever and the SDK derived
-    // needs_approval for a fully funded agent. Resolve the rail FIRST.
-    const railDecision = resolveExecutionRail({
-      safeExecutionRail: agent.execution_rail ?? null,
-      chainId: agent.chain_id,
-    })
-    if (railDecision.rail === 'retired_session') {
-      // #993 fail-closed contract: a retired rail's state must not be
-      // readable here either — the 410 verbatim, nothing read.
-      const retired = sessionRailRetired('account')
-      return reply.code(retired.statusCode).send(retired.body)
-    }
-
-    if (agent.execution_rail === 'delegation') {
-      // Delegation rail: the authority IS the active agent_delegations set,
-      // derived through the #1090 shared view (agent_allowances is a frozen
-      // onboarding mirror on this rail — reading it would report the
-      // onboarding budget forever). remaining = the period budget: the
-      // period-refill caveat re-arms on-chain each period and is enforced at
-      // redemption, so an over-budget attempt reverts — nothing queues.
-      // spent / nonce / reset bookkeeping have no AllowanceModule analogue
-      // here; zeros keep the wire shape the SDK already parses. No active
-      // delegation → empty array, so derived readiness stays needs_approval.
-      const budgets = (await deriveDelegationBudgets([agent.id])).get(agent.id) ?? []
-      return {
-        agent_id: agent.id,
-        safe_address: agent.safe_address,
-        delegate_address: agent.delegate_address,
-        chain_id: agent.chain_id,
-        allowances: budgets.map((b) => ({
-          id: b.id,
-          token_address: b.token_address,
-          token_symbol: b.token_symbol,
-          configured_amount: b.allowance_amount,
-          reset_period_min: b.reset_period_min,
-          onchain: {
-            amount: b.budget_atomic,
-            spent: '0',
-            remaining: b.budget_atomic,
-            effective_spent: '0',
-            reset_time_min: b.reset_period_min,
-            last_reset_min: 0,
-            nonce: 0,
-            is_reset_pending: false,
-          },
-        })),
-      }
-    }
-
-    // Legacy AllowanceModule rail — unchanged (characterization-pinned).
-    const rows: AgentAllowanceRow[] = await listAllowanceConfigForAgent(agent.id)
-
-    const allowances = []
-    for (const row of rows) {
-      try {
-        const [onchain, chainTimeSec] = await Promise.all([
-          getTokenAllowance(
-            agent.chain_id,
-            agent.safe_address,
-            agent.delegate_address,
-            row.token_address,
-          ),
-          getLatestBlockTimeSec(agent.chain_id),
-        ])
-        const effective = computeEffectiveAllowance(onchain, chainTimeSec)
-
-        allowances.push({
-          id: row.id,
-          token_address: row.token_address,
-          token_symbol: row.token_symbol,
-          configured_amount: row.allowance_amount,
-          reset_period_min: row.reset_period_min,
-          onchain: {
-            amount: onchain.amount.toString(),
-            spent: onchain.spent.toString(),
-            remaining: effective.remaining.toString(),
-            effective_spent: effective.effectiveSpent.toString(),
-            reset_time_min: onchain.resetTimeMin,
-            last_reset_min: onchain.lastResetMin,
-            nonce: onchain.nonce,
-            is_reset_pending: effective.isResetPending,
-          },
-        })
-      } catch (err) {
-        return reply.code(502).send({
-          error: 'Failed to read on-chain allowance',
-          token_address: row.token_address,
-          details: err instanceof Error ? err.message : String(err),
-        })
-      }
-    }
-
-    return {
-      agent_id: agent.id,
-      safe_address: agent.safe_address,
-      delegate_address: agent.delegate_address,
-      chain_id: agent.chain_id,
-      allowances,
-    }
+    const result = await handleGetAllowances(agent)
+    return reply.code(result.statusCode).send(result.body)
   })
 
   app.get<{ Querystring: { limit?: string } }>('/receipts', async (request, reply) => {
@@ -568,19 +64,8 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       ? Math.min(Math.max(parsedLimit, 1), 100)
       : 25
 
-    // settlement_scheme lives on the INTENT (#946 recorded it in
-    // machine_metadata for observability) — joined in here because the
-    // evidence row is what agents actually read, and "which branch ran"
-    // (eip3009 bridge vs erc7710 direct) is unverifiable without it. Found
-    // by the first real run of the delegation QA leg (#1063): the scenario
-    // had nowhere to read the scheme from.
-    const receipts = await listEvidenceReceiptsForAgent<
-      MachinePaymentEvidenceRow & { settlement_scheme: string | null; budget_delegation_hash: string | null }
-    >(agent.id, limit)
-
-    return reply.send({
-      receipts: receipts.map(mapEvidence),
-    })
+    const receipts = await listReceipts(agent.id, limit)
+    return reply.send({ receipts })
   })
 
   app.get<{ Params: { id: string } }>('/:id/status', async (request, reply) => {
@@ -599,17 +84,6 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   app.post<{ Body: SendBody }>('/send', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const { asset, recipient, amount } = request.body
-
-    // #993 (review finding on #1120): the retired-rail refusal must hold on
-    // EVERY money entry point — /send previously never consulted the seam.
-    const sendRail = resolveExecutionRail({
-      safeExecutionRail: agent.execution_rail ?? null,
-      chainId: agent.chain_id,
-    })
-    if (sendRail.rail === 'retired_session') {
-      const retired = sessionRailRetired('account')
-      return reply.code(retired.statusCode).send(retired.body)
-    }
 
     // 1. Validate inputs
     if (!asset || !SUPPORTED_ASSETS.includes(asset as SendAsset)) {
@@ -634,170 +108,8 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       idempotencyKey = key
     }
 
-    // 2. Resolve asset to token config
-    const tokenConfig = resolveAsset(agent.chain_id, asset)
-    if (!tokenConfig) {
-      return reply.code(400).send({ error: `Unsupported asset ${asset} on chain ${agent.chain_id}` })
-    }
-
-    const tokenAddress = tokenConfig.address ?? ZERO_ADDRESS
-
-    // 3. Convert human amount to raw units
-    let amountRaw: bigint
-    try {
-      amountRaw = parseTokenAmount(amount, tokenConfig.decimals)
-    } catch {
-      return reply.code(400).send({ error: `Invalid amount for ${tokenConfig.symbol}` })
-    }
-
-    if (amountRaw <= 0n) {
-      return reply.code(400).send({ error: 'amount must be greater than zero' })
-    }
-
-    // Idempotency replay: a retried send returns the original intent/approval
-    // rather than minting a second one. Checked before the on-chain read so a
-    // replay skips the RPC round trip entirely (see migration 020).
-    if (idempotencyKey) {
-      const replay = await findExistingSend(agent, idempotencyKey, asset)
-      if (replay) return reply.code(replay.code).send(replay.body)
-    }
-
-    // 4. Policy check: agent must have this token configured
-    const allowanceConfigured = await hasTokenAllowanceConfigured(agent.id, tokenAddress)
-    if (!allowanceConfigured) {
-      return reply.code(403).send({
-        error: `Agent is not configured for ${tokenConfig.symbol} transfers`,
-      })
-    }
-
-    // 5. On-chain allowance check. Read the allowance and chain time together:
-    // the reset decision must key off chain `block.timestamp`, not wall-clock.
-    let onChainAllowance
-    let chainTimeSec: number
-    try {
-      ;[onChainAllowance, chainTimeSec] = await Promise.all([
-        getTokenAllowance(
-          agent.chain_id,
-          agent.safe_address,
-          agent.delegate_address,
-          tokenAddress,
-        ),
-        getLatestBlockTimeSec(agent.chain_id),
-      ])
-    } catch (err) {
-      return reply.code(502).send({
-        error: 'Failed to read on-chain allowance',
-        details: err instanceof Error ? err.message : String(err),
-      })
-    }
-
-    const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
-
-    // 5a. Queue for approval when amount exceeds remaining on-chain allowance
-    if (amountRaw > effective.remaining) {
-      const remainingHuman = formatTokenAmount(effective.remaining, tokenConfig.decimals)
-      const approvalReason =
-        `Exceeds remaining allowance (${amount} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
-
-      let approval
-      try {
-        approval = await insertSendApproval({
-          agentId: agent.id,
-          userId: agent.user_id,
-          safeAddress: agent.safe_address,
-          chainId: agent.chain_id,
-          tokenSymbol: tokenConfig.symbol,
-          tokenAddress,
-          toAddress: recipient.toLowerCase(),
-          amountRaw: amountRaw.toString(),
-          amountHuman: amount,
-          reason: approvalReason,
-          sendIdempotencyKey: idempotencyKey ?? null,
-        })
-      } catch (err) {
-        // Lost an idempotency-key race with a concurrent send — replay the winner.
-        if (idempotencyKey && (err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
-          const replay = await findExistingSend(agent, idempotencyKey, asset)
-          if (replay) return reply.code(replay.code).send(replay.body)
-        }
-        throw err
-      }
-      return reply.code(202).send({
-        payment_id: approval.id,
-        kind: 'approval_request',
-        status: 'pending_approval',
-        phase: AgentPaymentPhase.UserApprovalRequired,
-        next_action: AgentPaymentNextAction.WaitForUserApproval,
-        message: `Transfer of ${amount} ${tokenConfig.symbol} exceeds the remaining on-chain allowance. Queued for owner approval.`,
-        remaining: remainingHuman,
-        requested: amount,
-        asset,
-        expires_at: approval.expires_at,
-      })
-    }
-
-    // 6. Generate the AllowanceModule transfer hash
-    let signHash: string
-    try {
-      signHash = await generateTransferHash(
-        agent.chain_id,
-        agent.safe_address,
-        tokenAddress,
-        recipient,
-        amountRaw,
-        ZERO_ADDRESS,
-        0n,
-        onChainAllowance.nonce,
-      )
-    } catch (err) {
-      return reply.code(502).send({
-        error: 'Failed to generate transfer hash',
-        details: err instanceof Error ? err.message : String(err),
-      })
-    }
-
-    // 7. Store the payment intent
-    let intent: SendPaymentIntentRow
-    try {
-      intent = await insertSendIntent({
-        agentId: agent.id,
-        userId: agent.user_id,
-        safeAddress: agent.safe_address,
-        chainId: agent.chain_id,
-        tokenSymbol: tokenConfig.symbol,
-        tokenAddress,
-        toAddress: recipient.toLowerCase(),
-        amountRaw: amountRaw.toString(),
-        amountHuman: amount,
-        delegateAddress: agent.delegate_address,
-        allowanceNonce: onChainAllowance.nonce,
-        signHash,
-        sendIdempotencyKey: idempotencyKey ?? null,
-      })
-    } catch (err) {
-      // Lost an idempotency-key race with a concurrent send — replay the winner.
-      if (idempotencyKey && (err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
-        const replay = await findExistingSend(agent, idempotencyKey, asset)
-        if (replay) return reply.code(replay.code).send(replay.body)
-      }
-      throw err
-    }
-
-    return reply.code(201).send({
-      payment_id: intent.id,
-      status: intent.status,
-      expires_at: intent.expires_at,
-      asset,
-      amount,
-      recipient: recipient.toLowerCase(),
-      sign_data: buildSendSignData(signHash, {
-        safe: agent.safe_address,
-        token: tokenAddress,
-        to: recipient.toLowerCase(),
-        amount: amountRaw.toString(),
-        nonce: onChainAllowance.nonce,
-      }),
-    })
+    const result = await handleSend(agent, asset as SendAsset, recipient, amount, idempotencyKey)
+    return reply.code(result.statusCode).send(result.body)
   })
 
   app.post<{ Body: AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, async (request, reply) => {
@@ -902,101 +214,19 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(400).send({ error: 'protocolReceiptPayload must be an object' })
     }
 
-    try {
-      const evidence = await attachMachinePaymentEvidence({
-        agentId: agent.id,
-        paymentId: body.paymentId,
-        rail: body.rail,
-        txHash: body.txHash,
-        resourceUrl: body.resourceUrl,
-        merchantStatus: body.merchantStatus,
-        challengePayload: body.challengePayload,
-        selectedPayment: body.selectedPayment,
-        paymentProofHeaderName: body.paymentProofHeaderName,
-        paymentProofHeader: body.paymentProofHeader,
-        protocolReceiptHeaderName: body.protocolReceiptHeaderName,
-        protocolReceiptHeader: body.protocolReceiptHeader,
-        protocolReceiptPayload: body.protocolReceiptPayload,
-      })
-
-      if (!evidence) {
-        return reply.code(404).send({ error: 'Payment not found' })
-      }
-
-      // The INSERT…RETURNING row has no intent join — look the two intent
-      // fields up so this echo reports the same truth the receipts list does
-      // (previously both always echoed null here, #1118 review NB2).
-      let intentFields: { settlement_scheme?: string | null; budget_delegation_hash?: string | null } = {}
-      if (evidence.payment_intent_id) {
-        try {
-          intentFields = (await getIntentSettlementFields(evidence.payment_intent_id)) ?? {}
-        } catch {
-          // Echo enrichment only — never fail the 202 over it.
-        }
-      }
-      return reply.code(202).send({ evidence: mapEvidence({ ...evidence, ...intentFields }) })
-    } catch (err) {
-      const marker = err instanceof Error ? err.message : String(err)
-      if (marker === 'payment_not_confirmed') {
-        return reply.code(409).send({ error: 'Evidence requires a confirmed payment' })
-      }
-      if (marker === 'tx_hash_mismatch') {
-        return reply.code(409).send({ error: 'txHash does not match payment intent' })
-      }
-      if (marker === 'rail_mismatch') {
-        return reply.code(409).send({ error: 'rail does not match payment intent' })
-      }
-      if (marker === 'resource_mismatch') {
-        return reply.code(409).send({ error: 'resourceUrl does not match payment intent' })
-      }
-      if (marker === 'unsupported_rail') {
-        return reply.code(400).send({ error: 'Unsupported evidence rail' })
-      }
-      if (marker === 'tx_hash_invalid') {
-        return reply.code(400).send({ error: 'txHash must be a 0x-prefixed transaction hash' })
-      }
-      if (marker === 'merchant_status_invalid') {
-        return reply.code(400).send({ error: 'merchantStatus must be an HTTP status code' })
-      }
-
-      throw err
-    }
+    const result = await attachEvidenceHandler(agent.id, body)
+    return reply.code(result.statusCode).send(result.body)
   })
 
   // ── POST /:id/merchant-receipt — capture the merchant's own receipt (#956) ──
-  //
-  // After a successful settlement retry the merchant may hand the agent its
-  // own receipt (invoice/VAT document). The agent reports it here; the
-  // reporting feed attaches it as a SECOND file next to the Haven-generated
-  // payment evidence (#498). Best-effort by design: absence is the normal
-  // case, and a failure here never affects the payment itself.
   app.post<{ Params: { id: string }; Body: { url?: string; json?: unknown } }>(
     '/:id/merchant-receipt',
     { config: moneyPathRateLimit },
     async (request, reply) => {
       const agent = request.agent as AgentContext
       const { url, json } = request.body ?? {}
-      const result = await captureMerchantReceipt({
-        paymentId: request.params.id,
-        agentId: agent.id,
-        url,
-        inlineJson: json,
-      })
-      if (!result.ok) return reply.code(result.code).send({ error: result.error })
-      if (result.stored) {
-        // #956 late attach: for x402 the feed has usually ALREADY pushed the
-        // invoice (it fires at funding confirmation; the merchant receipt
-        // arrives at the retry seconds later) — attach retroactively.
-        // Fire-and-forget: capture must never block or fail on feed state.
-        void lateAttachMerchantReceipt(result.userId, request.params.id, {
-          url: url ?? null,
-          inlineJson: json ?? null,
-        }).catch(() => {})
-      }
-      return reply.code(result.stored ? 201 : 200).send({
-        stored: result.stored,
-        ...(result.stored ? {} : { message: 'A merchant receipt is already recorded for this payment (first write wins).' }),
-      })
+      const result = await handleMerchantReceiptCapture(agent.id, request.params.id, url, json)
+      return reply.code(result.statusCode).send(result.body)
     },
   )
 
@@ -1037,170 +267,26 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(400).send({ error: 'details must be an object' })
     }
 
-    let payment: ReconciliationPaymentRow | null = await findReconciliationIntent(
-      paymentId,
+    const result = await handleReconciliationEvent(
       agent.id,
-    )
-    if (!payment) {
-      payment = await findReconciliationApproval(paymentId, agent.id)
-    }
-    if (!payment) {
-      return reply.code(404).send({ error: 'Payment not found' })
-    }
-
-    const expectedStatus = payment.kind === 'approval_request' ? 'executed' : 'confirmed'
-    if (payment.status !== expectedStatus || !payment.tx_hash) {
-      return reply.code(409).send({
-        error: 'Reconciliation events require a confirmed payment',
-        status: payment.status,
-      })
-    }
-
-    if (txHash && payment.tx_hash.toLowerCase() !== txHash.toLowerCase()) {
-      return reply.code(409).send({ error: 'txHash does not match payment intent' })
-    }
-
-    const paymentRail = payment.payment_rail ?? payment.source
-    if (paymentRail !== rail) {
-      return reply.code(409).send({ error: 'rail does not match payment intent' })
-    }
-
-    const paymentIntentId = payment.kind === 'payment_intent' ? payment.id : null
-    const approvalRequestId = payment.kind === 'approval_request' ? payment.id : null
-    const conflictColumn = payment.kind === 'approval_request' ? 'approval_request_id' : 'payment_intent_id'
-
-    let event = await upsertReconciliationEvent({
-      conflictColumn,
-      agentId: agent.id,
-      userId: payment.user_id,
-      paymentIntentId,
-      approvalRequestId,
+      paymentId,
       rail,
       eventType,
-      txHash: payment.tx_hash.toLowerCase(),
-      resourceUrl: payment.payment_resource_url ?? payment.x402_resource_url,
-      merchantAddress: payment.merchant_address ?? payment.x402_merchant_address,
-      machineChallengeId: payment.machine_challenge_id,
-      machineIdempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
-      reason: reason ?? null,
-      details: details ? JSON.stringify(details) : null,
-    })
-    if (!event) {
-      event = await findReconciliationEvent(conflictColumn, payment.id, agent.id, eventType)
-    }
-    if (!event) throw new Error('reconciliation_event_conflict_not_found')
-
-    return reply.code(202).send({
-      event_id: event.id,
-      status: event.status,
-      payment_id: payment.id,
-      rail,
-      event_type: eventType,
-      created_at: event.created_at,
-    })
+      txHash,
+      reason,
+      details,
+    )
+    return reply.code(result.statusCode).send(result.body)
   })
 
   // ── POST /sweep/prepare — build a gasless USDC sweep authorization ──────────
-  //
-  // Reads the delegate's stranded USDC and returns an EIP-3009
-  // TransferWithAuthorization (delegate → the agent's own Safe) plus Haven's
-  // binding signature. The edge signer signs it; /sweep/submit relays it. The
-  // delegate never needs ETH and the hosted server never holds the key.
   app.post('/sweep/prepare', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
-
-    if (!isSweepableChain(agent.chain_id)) {
-      return reply.code(422).send({
-        error: `Sweep is not supported on chain ${agent.chain_id}.`,
-      })
-    }
-    if (!agent.delegate_address || !agent.safe_address) {
-      return reply.code(422).send({ error: 'Agent is missing a delegate or Safe address.' })
-    }
-
-    const token = sweepUsdcAddress(agent.chain_id)
-
-    let balance: bigint
-    try {
-      balance = await getTokenBalance(agent.chain_id, agent.delegate_address, token)
-    } catch (err) {
-      return reply.code(502).send({
-        error: 'Failed to read delegate USDC balance',
-        details: err instanceof Error ? err.message : String(err),
-      })
-    }
-
-    if (balance <= 0n) {
-      return reply.code(200).send({
-        nothing_stranded: true,
-        asset: 'USDC',
-        chain_id: agent.chain_id,
-        message: 'No stranded USDC on the delegate wallet — nothing to recover.',
-      })
-    }
-
-    // Sweep dust floor (#700, corrected): only recover a stranded balance worth the
-    // gas — at least SWEEP_MIN_USDC. Smaller "dust" is left on the delegate, since
-    // the relayer gas to sweep it would exceed the value returned. No authorization
-    // is stored, so /sweep/submit can't relay a below-floor sweep either. Balances
-    // above the floor (including large ones) are recovered normally.
-    const minAtomic = parseTokenAmount(config.sweepMinUsdc, USDC_DECIMALS)
-    if (balance < minAtomic) {
-      return reply.code(200).send({
-        below_min: true,
-        asset: 'USDC',
-        amount: formatTokenAmount(balance, USDC_DECIMALS),
-        amount_atomic: balance.toString(),
-        min_usdc: config.sweepMinUsdc,
-        chain_id: agent.chain_id,
-        message:
-          `Stranded ${formatTokenAmount(balance, USDC_DECIMALS)} USDC is below the sweep ` +
-          `floor of ${config.sweepMinUsdc} USDC — left on the delegate (recovering dust ` +
-          `would cost more gas than it returns).`,
-      })
-    }
-
-    const authorization = buildSweepAuthorization({
-      delegateAddress: agent.delegate_address,
-      safeAddress: agent.safe_address,
-      chainId: agent.chain_id,
-      valueAtomic: balance,
-    })
-
-    await insertPreparedSweep({
-      agentId: agent.id,
-      userId: agent.user_id,
-      chainId: authorization.chainId,
-      tokenAddress: authorization.token.toLowerCase(),
-      fromAddress: authorization.from.toLowerCase(),
-      toAddress: authorization.to.toLowerCase(),
-      valueAtomic: authorization.value,
-      validAfter: authorization.validAfter,
-      validBefore: authorization.validBefore,
-      nonce: authorization.nonce.toLowerCase(),
-    })
-
-    const expectedAuth = await signSweepExpectedContext(authorization)
-
-    return reply.code(201).send({
-      authorization,
-      expected_auth: expectedAuth,
-      asset: 'USDC',
-      amount: formatTokenAmount(balance, USDC_DECIMALS),
-      amount_atomic: balance.toString(),
-      chain_id: agent.chain_id,
-      sign_instructions:
-        'Sign `authorization` with the local signer tool haven_sign_sweep_delegate ' +
-        '(pass authorization and expected_auth), then POST the returned signature to ' +
-        '/machine-payments/sweep/submit with the same authorization.',
-    })
+    const result = await prepareSweep(agent)
+    return reply.code(result.statusCode).send(result.body)
   })
 
   // ── POST /sweep/submit — relay a signed sweep authorization ─────────────────
-  //
-  // Trusts nothing from the client payload: the authorization is re-derived from
-  // the prepared row, the delegate signature is verified off-chain, and the
-  // balance is re-read before the relayer spends gas.
   app.post<{ Body: SweepSubmitBody }>('/sweep/submit', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const body = request.body ?? {}
@@ -1214,144 +300,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(400).send({ error: 'authorization.nonce must be a 0x-prefixed 32-byte hex string' })
     }
 
-    const row: DelegateSweepRow | null = await findSweepByNonce(nonce.toLowerCase(), agent.id)
-    if (!row) {
-      return reply.code(404).send({ error: 'No prepared sweep found for this nonce. Call /sweep/prepare first.' })
-    }
-
-    // Idempotent replay: a retried submit of an already-relayed sweep returns the
-    // original tx rather than relaying (and reverting) a second time.
-    if (row.status === 'submitted' && row.tx_hash) {
-      return reply.code(200).send(
-        sweepResultBody({
-          txHash: row.tx_hash,
-          valueAtomic: row.value_atomic,
-          from: row.from_address,
-          to: row.to_address,
-          chainId: row.chain_id,
-          idempotent: true,
-        }),
-      )
-    }
-    if (row.status !== 'prepared') {
-      return reply.code(409).send({ error: `Sweep is ${row.status}, expected prepared.`, status: row.status })
-    }
-    if (Number(row.valid_before) <= Math.floor(Date.now() / 1000)) {
-      await expirePreparedSweep(row.id)
-      return reply.code(409).send({ error: 'Sweep authorization expired. Call /sweep/prepare again.' })
-    }
-
-    // Re-derive the authorization from server state — never from the client.
-    const expected: SweepAuthorization = {
-      from: row.from_address,
-      to: row.to_address,
-      value: row.value_atomic,
-      validAfter: String(row.valid_after),
-      validBefore: String(row.valid_before),
-      nonce: row.nonce,
-      token: row.token_address,
-      chainId: row.chain_id,
-    }
-
-    if (!sameAddress(expected.from, agent.delegate_address)) {
-      return reply.code(409).send({ error: 'Prepared sweep `from` no longer matches the agent delegate.' })
-    }
-    if (!sameAddress(expected.to, agent.safe_address)) {
-      return reply.code(409).send({ error: 'Prepared sweep `to` no longer matches the agent Safe.' })
-    }
-
-    let recovered: string
-    try {
-      recovered = recoverSweepSigner(expected, signature)
-    } catch (err) {
-      return reply.code(400).send({
-        error: 'Invalid signature format',
-        details: err instanceof Error ? err.message : String(err),
-      })
-    }
-    if (!sameAddress(recovered, agent.delegate_address)) {
-      return reply.code(403).send({
-        error: 'Signature does not recover the registered delegate address',
-        expected: agent.delegate_address,
-        recovered,
-      })
-    }
-
-    // Re-read balance: an exact-value transferWithAuthorization reverts if the
-    // delegate no longer holds at least `value` (e.g. a concurrent payment).
-    let balance: bigint
-    try {
-      balance = await getTokenBalance(expected.chainId, expected.from, expected.token)
-    } catch (err) {
-      return reply.code(502).send({
-        error: 'Failed to re-read delegate USDC balance',
-        details: err instanceof Error ? err.message : String(err),
-      })
-    }
-    if (balance < BigInt(expected.value)) {
-      return reply.code(409).send({
-        error: 'Delegate balance changed since prepare; re-run /sweep/prepare.',
-        error_code: 'balance_changed',
-        expected_atomic: expected.value,
-        current_atomic: balance.toString(),
-      })
-    }
-
-    // Atomically claim the prepared sweep before relaying. Two concurrent submits
-    // can otherwise both read 'prepared' and both broadcast — the second tx
-    // reverts on the spent EIP-3009 nonce, and if its failure write lands first
-    // it records a successful recovery as 'failed' and breaks replay. The loser
-    // of this compare-and-swap re-reads and replays instead of relaying.
-    const claimed = await claimPreparedSweep(row.id)
-    if (!claimed) {
-      const current = await findSweepById(row.id)
-      if (current?.status === 'submitted' && current.tx_hash) {
-        return reply.code(200).send(
-          sweepResultBody({
-            txHash: current.tx_hash,
-            valueAtomic: current.value_atomic,
-            from: current.from_address,
-            to: current.to_address,
-            chainId: current.chain_id,
-            idempotent: true,
-          }),
-        )
-      }
-      return reply.code(409).send({
-        error: 'Sweep is already being submitted.',
-        status: current?.status ?? 'unknown',
-      })
-    }
-
-    let txHash: string
-    try {
-      ;({ txHash } = await relaySweepAuthorization(expected, signature, { agentId: agent.id, userId: agent.user_id }))
-    } catch (err) {
-      if (err instanceof RelayerBudgetExceededError) {
-        // #717: refused before submission — release the claim back to
-        // 'prepared' so the sweep can be retried after the window; 'failed'
-        // would strand the funds path.
-        await releaseSweepClaim(row.id)
-        return reply.code(429).send({ error: err.message })
-      }
-      const errorMsg = err instanceof Error ? err.message : String(err)
-      await markSweepFailed(errorMsg, row.id)
-      return reply.code(502).send({ error: 'Sweep relay failed', details: errorMsg })
-    }
-
-    await markSweepSubmitted(txHash, row.id)
-
-    // Recovering the stranded funds resolves the open stranded-funds reconciliation.
-    await resolveStrandedEventsForAgent(agent.id)
-
-    return reply.code(200).send(
-      sweepResultBody({
-        txHash,
-        valueAtomic: expected.value,
-        from: expected.from,
-        to: expected.to,
-        chainId: expected.chainId,
-      }),
-    )
+    const result = await submitSweep(agent, nonce, signature)
+    return reply.code(result.statusCode).send(result.body)
   })
 }

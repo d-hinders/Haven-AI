@@ -1,31 +1,17 @@
 import { FastifyRequest, FastifyReply, FastifyInstance } from 'fastify'
 import { createHash } from 'crypto'
-import pool from '../db.js'
-import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
+import {
+  AGENT_BY_API_KEY_SQL,
+  LAST_SEEN_THROTTLE_SECONDS,
+  findAgentAuthRowByApiKeyHash,
+  touchAgentLastSeenRow,
+  type Executor,
+} from '../infra/repositories/agents.js'
 
-/**
- * The agent-authentication lookup.
- *
- * Exported so `scripts/db-schema-smoke.ts` can PREPARE the REAL query rather
- * than a pasted copy — that script's own header warns a copy "drifts from
- * production the first time someone edits the real one, which is the failure
- * this script exists to catch, reproduced inside the check itself."
- *
- * `chain_id` falls back to the shared default when an agent has no linked
- * `user_safes` row. This value is not cosmetic: it becomes `agent.chain_id`,
- * which the machine-payment path uses for asset resolution, sweep-chain checks
- * and inserts (#990).
- */
-export const AGENT_BY_API_KEY_SQL = `
-  SELECT a.id, a.user_id, a.name, a.delegate_address,
-         a.status,
-         COALESCE(us.safe_address, u.safe_address) as safe_address,
-         COALESCE(us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
-         us.execution_rail, us.account_type
-  FROM agents a
-  JOIN users u ON a.user_id = u.id
-  LEFT JOIN user_safes us ON a.safe_id = us.id
-  WHERE a.api_key_hash = $1`
+// Re-exported for existing consumers (db-schema-smoke, tests): the query and
+// its throttle constant moved into the agents repository (#999) so this
+// middleware no longer reaches the pool directly.
+export { AGENT_BY_API_KEY_SQL, LAST_SEEN_THROTTLE_SECONDS }
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -55,33 +41,19 @@ export interface QueryableLike {
 }
 
 /**
- * How recently an agent must have been seen before we skip the write. The
- * dashboard's "last seen N ago" indicator doesn't need sub-throttle precision,
- * and this keeps a busy agent from writing on every single request.
- */
-export const LAST_SEEN_THROTTLE_SECONDS = 10
-
-/**
  * Record that an agent just talked to Haven. Best-effort and throttled: the
  * write only happens if the agent hasn't been seen in the last
- * `LAST_SEEN_THROTTLE_SECONDS`, and any failure is swallowed — liveness
- * tracking must never break or slow an authenticated request.
+ * `LAST_SEEN_THROTTLE_SECONDS` (enforced in the repository's SQL), and any
+ * failure is swallowed — liveness tracking must never break or slow an
+ * authenticated request.
  *
- * Exported for testing; called fire-and-forget from the middleware.
+ * Exported for testing; called fire-and-forget from the middleware. The SQL
+ * lives in `infra/repositories/agents.ts` (#999); omitting `db` uses the pool.
  */
-export async function touchAgentLastSeen(
-  agentId: string,
-  db: QueryableLike = pool as unknown as QueryableLike,
-): Promise<void> {
+export async function touchAgentLastSeen(agentId: string, db?: QueryableLike): Promise<void> {
   try {
-    await db.query(
-      `UPDATE agents
-         SET last_seen_at = NOW()
-       WHERE id = $1
-         AND (last_seen_at IS NULL
-              OR last_seen_at < NOW() - INTERVAL '${LAST_SEEN_THROTTLE_SECONDS} seconds')`,
-      [agentId],
-    )
+    if (db === undefined) await touchAgentLastSeenRow(agentId)
+    else await touchAgentLastSeenRow(agentId, db as unknown as Executor)
   } catch {
     // Best-effort: the response has its own path; never surface this.
   }
@@ -93,10 +65,7 @@ export async function touchAgentLastSeen(
  * handler's own queries, and it only fires when `agentAuthMiddleware` set
  * `request.agent`. Mirrors the agent-tool-audit hook's lifecycle.
  */
-export function registerAgentLastSeenHook(
-  app: FastifyInstance,
-  db: QueryableLike = pool as unknown as QueryableLike,
-): void {
+export function registerAgentLastSeenHook(app: FastifyInstance, db?: QueryableLike): void {
   app.addHook('onResponse', async (request) => {
     const agent = request.agent
     if (!agent) return
@@ -140,23 +109,13 @@ export async function agentAuthMiddleware(
   }
 
   // Look up agent + its linked Safe address (multi-Safe via user_safes)
-  const result = await pool.query<{
-    id: string
-    user_id: string
-    name: string
-    delegate_address: string | null
-    safe_address: string | null
-    chain_id: number
-    status: string
-    execution_rail: string | null
-    account_type: string | null
-  }>(AGENT_BY_API_KEY_SQL, [createHash('sha256').update(apiKey).digest('hex')])
+  const row = await findAgentAuthRowByApiKeyHash(
+    createHash('sha256').update(apiKey).digest('hex'),
+  )
 
-  if (result.rows.length === 0) {
+  if (row === null) {
     return reply.code(401).send({ error: 'Invalid or revoked API key' })
   }
-
-  const row = result.rows[0]
 
   // #1130: pending_approval is the NORMAL starting state for every connect-
   // modal agent (the key is issued at /register; activation happens at the

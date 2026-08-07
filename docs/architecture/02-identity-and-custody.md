@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/routes/safe-deploy.ts
-  - packages/backend/src/lib/safe-deployer.ts
+  - packages/backend/src/modules/accounts/safe-deployer.ts
   - packages/backend/src/routes/passkeys.ts
   - packages/backend/src/routes/user-safes.ts
   - packages/backend/src/routes/agents.ts
@@ -12,17 +12,17 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
-  - packages/backend/src/lib/delegation-rail.ts
-  - packages/backend/src/lib/delegation-policy.ts
+  - packages/backend/src/rails/delegation-rail.ts
+  - packages/backend/src/rails/delegation-policy.ts
   - packages/backend/src/routes/safe-exec.ts
   - packages/backend/src/routes/agent-connection-setups.ts
-  - packages/backend/src/lib/allowance-module.ts
-  - packages/backend/src/lib/agent-connection-setup.ts
-  - packages/backend/src/lib/chains.ts
-  - packages/backend/src/lib/passkey-signer.ts
-  - packages/backend/src/lib/relayer.ts
-  - packages/backend/src/lib/sweep.ts
-  - packages/backend/src/lib/safe-details.ts
+  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/modules/agents/agent-connection-setup.ts
+  - packages/backend/src/domain/chains.ts
+  - packages/backend/src/modules/accounts/passkey-signer.ts
+  - packages/backend/src/infra/relayer.ts
+  - packages/backend/src/rails/sweep.ts
+  - packages/backend/src/modules/accounts/safe-details.ts
   - packages/backend/src/config.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/db/migrations/006_user_passkeys.ts
@@ -240,5 +240,5 @@ Full invariant-by-invariant mapping (including the CI checks that enforce each
 one) and the independent exit/revocation story:
 [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md)
 and [`docs/exit/README.md`](../exit/README.md)
-([delegation rail](../../packages/backend/src/lib/delegation-rail.ts),
-[delegation policy](../../packages/backend/src/lib/delegation-policy.ts)).
+([delegation rail](../../packages/backend/src/rails/delegation-rail.ts),
+[delegation policy](../../packages/backend/src/rails/delegation-policy.ts)).

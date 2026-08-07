@@ -6,7 +6,7 @@ covers:
   - packages/frontend/src/hooks/useDelegationBudget.ts
   - packages/frontend/src/hooks/useAccountSigners.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
-  - packages/backend/src/lib/hybrid-signer-actions.ts
+  - packages/backend/src/rails/hybrid-signer-actions.ts
 last-verified: "2026-08-06"
 ---
 

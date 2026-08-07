@@ -7,7 +7,7 @@ import { getChainClient } from '../../infra/chain/index.js'
 import { getIntentStatus } from '../../infra/repositories/payment-intents.js'
 import { getX402HourlyUsage } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
-import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../../lib/agent-payment-taxonomy.js'
+import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../../domain/agent-payment-taxonomy.js'
 import type { X402ApprovalRow } from './types.js'
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'

@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
-import { authorizeMachinePayment } from '../../lib/machine-payments.js'
+import { authorizeMachinePayment } from '../../modules/mpp/index.js'
 
-const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
+const { mockQuery, allowanceMocks, fiatMocks, reportingMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenAllowance: vi.fn(),
@@ -17,6 +17,13 @@ const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
     getFiatValuesForTokenAmount: vi.fn(),
     getBookTimeSekValue: vi.fn().mockResolvedValue(null),
   },
+  reportingMocks: {
+    lateAttachMerchantReceipt: vi.fn().mockResolvedValue(undefined),
+    // modules/mpp/evidence.ts's fire-and-forget feed hook — also part of the
+    // modules/reporting/ barrel post-#998, so it needs a mock here too (an
+    // unmocked call threw and 500'd the settle/evidence routes).
+    feedSettledPaymentBestEffort: vi.fn(),
+  },
 }))
 
 vi.mock('../../db.js', () => ({
@@ -25,16 +32,20 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../lib/allowance-module.js', () => allowanceMocks)
+vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 
-vi.mock('../../lib/fiat-values.js', () => fiatMocks)
+vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 
 // Fee recording at settlement must not consume a mocked DB call in these
 // sequence-based tests; neutralize it (the module is dark anyway).
-vi.mock('../../lib/fee/fee-module.js', () => ({
+vi.mock('../../modules/fee/index.js', () => ({
   quoteFee: () => ({ paymentId: '', rail: '', feeAtomic: 0n, feeToken: '', basisPoints: 0, isZero: true }),
   recordSettledFee: async () => {},
 }))
+
+// #956 late-attach: fire-and-forget, mocked so its own DB reads never
+// interleave with these sequence-based mockQuery queues.
+vi.mock('../../modules/reporting/index.js', () => reportingMocks)
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -95,6 +106,10 @@ describe('machine payment routes', () => {
     mockQuery.mockReset()
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
     for (const mock of Object.values(fiatMocks)) mock.mockReset()
+    // mockClear (not mockReset): lateAttachMerchantReceipt is awaited via
+    // `.catch()` in the fire-and-forget call site — it must keep resolving
+    // to a promise across tests, just with a clean call history.
+    reportingMocks.lateAttachMerchantReceipt.mockClear()
   })
 
   function pendingIntent(overrides: Record<string, unknown> = {}) {
@@ -1142,6 +1157,47 @@ describe('machine payment routes', () => {
     expect(mockQuery).toHaveBeenCalledTimes(invalidExpiresAtValues.length)
   })
 
+  // ── validateMppDemoChallenge — authorization boundary (#997) ───────────────
+  // The #997 issue calls this out explicitly: "it must not become more
+  // permissive; test the rejection paths, not just the happy path." Before
+  // this pass, only the expiry branches (above) were pinned — every OTHER
+  // exact-match guard (rail, chain, asset, price) had zero coverage. Each
+  // case here asserts the EXACT error string `validateMppDemoChallenge`
+  // returns, so a loosened guard (e.g. `challenge.rail !== 'mpp_demo'`
+  // becoming `!challenge.rail`) changes the message and fails loudly rather
+  // than silently degrading to a looser check with the same happy path.
+  describe('validateMppDemoChallenge rejection paths (#997)', () => {
+    it.each([
+      ['wrong rail', { rail: 'x402' }, 'Only mpp_demo challenges are supported'],
+      ['missing challengeId', { challengeId: undefined }, 'challengeId is required'],
+      ['missing resource', { resource: undefined }, 'resource is required'],
+      ['wrong chain id', { network: { chainId: 100, name: 'base' } }, 'MPP demo payments must use Base'],
+      ['wrong network name', { network: { chainId: 8453, name: 'gnosis' } }, 'MPP demo payments must use Base'],
+      ['wrong asset symbol', { asset: { symbol: 'USDT', address: USDC, decimals: 6 } }, 'MPP demo payments must use Base USDC'],
+      ['wrong asset decimals', { asset: { symbol: 'USDC', address: USDC, decimals: 18 } }, 'MPP demo payments must use Base USDC'],
+      ['wrong asset address', { asset: { symbol: 'USDC', address: RECIPIENT, decimals: 6 } }, 'MPP demo payments must use Base USDC'],
+      ['wrong amount atomic (underpaying)', { amount: { display: '0.01', atomic: '1' } }, 'MPP demo payments are fixed at 0.01 USDC'],
+      ['wrong amount display', { amount: { display: '1.00', atomic: '10000' } }, 'MPP demo payments are fixed at 0.01 USDC'],
+    ])('%s → 400 with the exact message, zero authorization work', async (_label, overrides, expectedError) => {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: {
+          challenge: { ...challenge, ...overrides },
+          idempotencyKey: 'mpp_demo:test',
+        },
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toBe(expectedError)
+      expect(mockQuery).toHaveBeenCalledTimes(1) // only the auth lookup
+      expectNoAuthorizationWork()
+    })
+  })
+
   it('rejects malformed MPP payTo before allowance, hash, or execution work', async () => {
     mockQuery.mockResolvedValueOnce(authRow())
 
@@ -1760,6 +1816,193 @@ describe('machine payment routes', () => {
     expect(response.statusCode).toBe(404)
     expect(response.json().error).toBe('Payment not found')
     expect(mockQuery).toHaveBeenCalledTimes(3)
+  })
+
+  // ── attachMachinePaymentEvidence rejection paths (#997) ─────────────────────
+  // Before this pass only tx_hash_mismatch, payment_not_confirmed and the
+  // "not found" 404 were pinned. unsupported_rail, tx_hash_invalid,
+  // rail_mismatch and resource_mismatch had zero coverage — each is an
+  // attach-time authorization check (this evidence report belongs to THIS
+  // exact settled payment) that a refactor could silently loosen.
+
+  it('rejects an unsupported evidence rail before any payment lookup (400)', async () => {
+    mockQuery.mockResolvedValueOnce(authRow())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/evidence',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'stripe_deposit', // a real MachinePaymentRail, but NOT evidence-eligible
+        txHash: TX_HASH,
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('Unsupported evidence rail')
+    expect(mockQuery).toHaveBeenCalledTimes(1) // only the auth lookup
+  })
+
+  it('rejects a malformed txHash before any payment lookup (400)', async () => {
+    mockQuery.mockResolvedValueOnce(authRow())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/evidence',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        txHash: '0xnothex',
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('txHash must be a 0x-prefixed transaction hash')
+    expect(mockQuery).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an out-of-range merchantStatus before any payment lookup (400)', async () => {
+    mockQuery.mockResolvedValueOnce(authRow())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/evidence',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        txHash: TX_HASH,
+        merchantStatus: 999,
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('merchantStatus must be an HTTP status code')
+    expect(mockQuery).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects evidence whose rail does not match the payment intent\'s actual rail (409)', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [confirmedPayment({ payment_rail: 'mpp_demo', source: 'mpp_demo' })] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/evidence',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'x402', // a real evidence-eligible rail, just the WRONG one for this payment
+        txHash: TX_HASH,
+      },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toBe('rail does not match payment intent')
+  })
+
+  it('rejects evidence whose resourceUrl does not match the payment intent (409)', async () => {
+    mockQuery
+      .mockResolvedValueOnce(authRow())
+      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/evidence',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        paymentId: PAYMENT_ID,
+        rail: 'mpp_demo',
+        txHash: TX_HASH,
+        resourceUrl: 'https://a-different-merchant.example/resource',
+      },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toBe('resourceUrl does not match payment intent')
+  })
+
+  // ── POST /:id/merchant-receipt (#956) — zero HTTP-layer coverage before ────
+  // #997. `captureMerchantReceipt` itself was unit-tested
+  // (lib/__tests__/merchant-receipt.test.ts, now modules/mpp/__tests__/), but
+  // the ROUTE'S OWN wiring — status-code mapping and the #956 late-attach
+  // fire-and-forget call — had none.
+  describe('POST /machine-payments/:id/merchant-receipt (#956)', () => {
+    it('rejects a request with neither url nor json (400), no evidence lookup', async () => {
+      mockQuery.mockResolvedValueOnce(authRow())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/machine-payments/${PAYMENT_ID}/merchant-receipt`,
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: {},
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(mockQuery).toHaveBeenCalledTimes(1)
+      expect(reportingMocks.lateAttachMerchantReceipt).not.toHaveBeenCalled()
+    })
+
+    it('404s when no settled evidence exists for the payment', async () => {
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [] }) // findEvidenceAnchorForAgent miss
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/machine-payments/${PAYMENT_ID}/merchant-receipt`,
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { json: { fakturanummer: 'FAK-1' } },
+      })
+
+      expect(response.statusCode).toBe(404)
+      expect(reportingMocks.lateAttachMerchantReceipt).not.toHaveBeenCalled()
+    })
+
+    it('stores a first-reported receipt (201) and fires the #956 late-attach', async () => {
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [{ id: 'evidence-1', user_id: AGENT.user_id }] })
+        .mockResolvedValueOnce({ rows: [{ evidence_id: 'evidence-1' }] }) // insert won
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/machine-payments/${PAYMENT_ID}/merchant-receipt`,
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { json: { fakturanummer: 'FAK-1' } },
+      })
+
+      expect(response.statusCode).toBe(201)
+      expect(response.json()).toEqual({ stored: true })
+      await vi.waitFor(() => {
+        expect(reportingMocks.lateAttachMerchantReceipt).toHaveBeenCalledWith(
+          AGENT.user_id,
+          PAYMENT_ID,
+          { url: null, inlineJson: { fakturanummer: 'FAK-1' } },
+        )
+      })
+    })
+
+    it('first write wins: a duplicate report (200) does NOT re-fire the late-attach', async () => {
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        .mockResolvedValueOnce({ rows: [{ id: 'evidence-1', user_id: AGENT.user_id }] })
+        .mockResolvedValueOnce({ rows: [] }) // ON CONFLICT DO NOTHING — already recorded
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/machine-payments/${PAYMENT_ID}/merchant-receipt`,
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { json: { fakturanummer: 'FAK-2' } },
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toMatchObject({ stored: false })
+      expect(response.json().message).toMatch(/first write wins/)
+      expect(reportingMocks.lateAttachMerchantReceipt).not.toHaveBeenCalled()
+    })
   })
 
   it('does not record reconciliation events for unconfirmed payments', async () => {

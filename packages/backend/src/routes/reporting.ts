@@ -2,10 +2,10 @@ import { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { requireReportingFeed } from '../middleware/reportingFeed.js'
-import { reportingFeedAvailable } from '../lib/entitlements.js'
-import { getReportingStatus, syncUser } from '../lib/reporting/feed-orchestrator.js'
-import { hasLiveConnector } from '../lib/reporting/connector.js'
-import { getFortnoxConnection } from '../lib/fortnox-connection.js'
+import { reportingFeedAvailable } from '../modules/agents/index.js'
+import { getReportingStatus, syncUser } from '../modules/reporting/index.js'
+import { hasLiveConnector } from '../modules/reporting/index.js'
+import { getFortnoxConnection } from '../modules/reporting/index.js'
 
 /**
  * Reporting feed surface for the dashboard (epic #491, P2 #500).

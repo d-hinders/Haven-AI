@@ -1,11 +1,11 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import pool from '../db.js'
-import { getChain, isSupportedChain } from '../lib/chains.js'
+import { findSafeOwnership } from '../infra/repositories/transaction-history.js'
+import { getChain, isSupportedChain } from '../domain/chains.js'
 import { getChainClient } from '../infra/chain/index.js'
-import { formatTokenValue } from '../lib/tokens.js'
-import { createCache } from '../lib/cache.js'
-import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
+import { formatTokenValue } from '../domain/tokens.js'
+import { createCache } from '../platform/cache.js'
+import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
 // Balance reads are RPC-standard and rail-agnostic (a `balanceOf`/native-balance
@@ -60,25 +60,17 @@ export default async function balanceRoutes(
         return reply.code(400).send({ error: `Unsupported chain: ${requestedChainId}` })
       }
 
-      // Verify ownership and get chain_id
-      const ownershipSql = requestedChainId === null
-        ? 'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)'
-        : 'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3'
-      const ownershipParams = requestedChainId === null
-        ? [sub, safeAddress]
-        : [sub, safeAddress, requestedChainId]
-      const userResult = await pool.query<{ id: string; chain_id: number }>(
-        ownershipSql,
-        ownershipParams,
-      )
-      if (userResult.rows.length === 0) {
+      // Verify ownership and get chain_id (repository query, #999 — the same
+      // ownership check the transaction-history route runs).
+      const ownedSafes = await findSafeOwnership(sub, safeAddress, requestedChainId)
+      if (ownedSafes.length === 0) {
         return reply.code(403).send({ error: 'Not your Safe' })
       }
-      if (requestedChainId === null && userResult.rows.length > 1) {
+      if (requestedChainId === null && ownedSafes.length > 1) {
         return reply.code(400).send({ error: 'chain_id required' })
       }
 
-      const chainId = requestedChainId ?? userResult.rows[0].chain_id
+      const chainId = requestedChainId ?? ownedSafes[0].chain_id
       const chain = getChain(chainId)
 
       const cacheKey = `bal:${chainId}:${safeAddress.toLowerCase()}`

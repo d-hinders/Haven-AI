@@ -51,6 +51,13 @@ Keep this table in sync with that file.
 > checks below still matter — they are what CI enforces on the release PR
 > before merge.
 
+- Each published package needs its **own npm trusted publisher** (repo
+  `d-hinders/Haven-AI`, workflow `publish.yml`) and a `repository` block in its
+  `package.json` — configured once, per package, before its first release.
+  `@haven_ai/cli` shipped without either and its first workflow publish failed
+  with `E404` (#1159); the publish loop now attempts every package and reports
+  per-package outcomes, but the npm-side configuration is an operator step no
+  code change can do.
 - Update `packages/connect/src/runtime-manifest.ts` whenever `connect`, `mcp`,
   `sdk`, or `signer` compatibility changes.
 - Keep `packages/connect/package.json` and `packages/mcp/package.json` pinned

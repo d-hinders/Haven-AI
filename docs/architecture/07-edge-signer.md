@@ -19,7 +19,7 @@ covers:
   - packages/sdk/src/signer.ts
   - packages/sdk/src/sweep.ts
   - packages/sdk/src/x402.ts
-  - packages/backend/src/lib/sweep.ts
+  - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts

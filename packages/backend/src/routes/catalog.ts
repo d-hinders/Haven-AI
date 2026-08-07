@@ -10,9 +10,10 @@
  * self-service submission in this slice.
  */
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+// dep-lint-exempt: the public listing assembles its WHERE at runtime from optional category/rail filters (no fixed statement to PREPARE); read-only discovery surface, extraction deferred with the catalog module's under #999
 import pool from '../db.js'
 import { agentAuthMiddleware } from '../middleware/agentAuth.js'
-import type { CatalogRow } from '../lib/merchant-catalog.js'
+import type { CatalogRow } from '../modules/catalog/index.js'
 
 const VALID_RAILS = new Set(['x402', 'mpp'])
 

@@ -427,6 +427,11 @@ const ignoredBrowserErrorPatterns = [
   /Failed to fetch on-chain allowances/i,
   /ContractFunctionExecutionError/i,
   /isModuleEnabled/i,
+  // Vercel's live-feedback toolbar (vercel.live) is injected only on Preview
+  // deployments and trips a REPORT-ONLY CSP notice when it frames itself.
+  // Preview-only tooling noise, never present in prod. Match both together so
+  // a real (enforced) CSP violation from our own app still fails the smoke.
+  /report-only content security policy.*vercel\.live|vercel\.live.*report-only content security policy/is,
 ]
 
 export function collectBrowserErrors(page: Page) {

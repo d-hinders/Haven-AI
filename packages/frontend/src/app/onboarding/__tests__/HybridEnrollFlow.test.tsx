@@ -20,7 +20,8 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
-import { PasskeyCancelledError, base64UrlEncode } from '@/lib/passkey'
+import { PasskeyCancelledError, PasskeyUnsupportedError, base64UrlEncode } from '@/lib/passkey'
+import { PASSKEY_REQUIRED_MESSAGE } from '@/app/onboarding/copy'
 import HybridEnrollFlow from '@/app/onboarding/HybridEnrollFlow'
 
 const mockUser = {
@@ -96,6 +97,18 @@ describe('HybridEnrollFlow (#886)', () => {
     expect(onComplete).not.toHaveBeenCalled()
     // Back to idle — the button is clickable again:
     expect(screen.getByRole('button', { name: /Face ID/ })).toBeTruthy()
+  })
+
+  it('offers no action when the browser cannot create a passkey (#1162)', async () => {
+    mockCreatePasskey.mockRejectedValue(new PasskeyUnsupportedError())
+    const { onError } = renderFlow()
+
+    fireEvent.click(screen.getByRole('button', { name: /Face ID/ }))
+
+    await waitFor(() => expect(onError).toHaveBeenCalledWith(PASSKEY_REQUIRED_MESSAGE))
+    // An honest dead end — the host screen shows the message, and there is no
+    // button here that could only fail the same way.
+    expect(screen.queryByRole('button', { name: /Face ID/ })).toBeNull()
   })
 
   it('never shows crypto jargon', () => {

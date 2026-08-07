@@ -18,7 +18,7 @@ vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery
 // for REAL: a fixed-key delegate account whose address the agent mock carries.
 // Dummy hex now (correctly) 400s — see the wrong-signer regression test.
 import { privateKeyToAccount } from 'viem/accounts'
-import { delegationSigningPayload } from '../../lib/delegation-policy.js'
+import { delegationSigningPayload } from '../../rails/delegation-policy.js'
 const DELEGATE_SIGNER = privateKeyToAccount(('0x' + '11'.repeat(32)) as `0x${string}`)
 async function signChild(child: unknown): Promise<`0x${string}`> {
   const payload = delegationSigningPayload(child as never, 84532)
@@ -40,21 +40,24 @@ vi.mock('../../middleware/agentAuth.js', () => ({
     }
   },
 }))
-vi.mock('../../lib/delegation-authorization.js', () => ({
+vi.mock('../../rails/delegation-authorization.js', () => ({
   selectDelegation: mockSelect,
   prepareDelegationPayment: mockPrepareFunding,
 }))
-vi.mock('../../lib/hybrid-provisioning.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../lib/hybrid-provisioning.js')>()
+vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
   return { ...actual, computeHybridAccountAddress: mockCompute }
 })
-vi.mock('../../lib/machine-payments.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../lib/machine-payments.js')>()
-  return { ...actual, createPaymentIntent: mockCreateIntent }
+// The delegation-rail authorize orchestration writes the intent via the
+// repository directly now (#997 removed the `lib/machine-payments.js`
+// pass-through wrapper) — mock the repository export it actually calls.
+vi.mock('../../infra/repositories/payment-intents.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../infra/repositories/payment-intents.js')>()
+  return { ...actual, insertMachineIntent: mockCreateIntent }
 })
 
 const x402Routes = (await import('../x402.js')).default
-const { buildBudgetDelegation } = await import('../../lib/delegation-policy.js')
+const { buildBudgetDelegation } = await import('../../rails/delegation-policy.js')
 
 const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const MERCHANT = '0x' + 'cc'.repeat(20)

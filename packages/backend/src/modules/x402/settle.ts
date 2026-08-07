@@ -9,13 +9,13 @@
 import type { FastifyBaseLogger } from 'fastify'
 import { findSettleIntent } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
-import { redactVendorSecrets, deserializeUserOp } from '../../lib/execution-rail.js'
-import { recoverDelegationSigner } from '../../lib/delegation-policy.js'
+import { redactVendorSecrets, deserializeUserOp } from '../../rails/execution-rail.js'
+import { recoverDelegationSigner } from '../../rails/delegation-policy.js'
 import {
   assembleSettlementPayload,
   encodeXPaymentHeader,
-} from '../../lib/x402-delegation.js'
-import { passportReferenceFor } from '../../lib/passport/x402-delivery.js'
+} from './x402-delegation.js'
+import { passportReferenceFor } from '../passport/index.js'
 import { markIntentSubmittedForSettlement } from '../../infra/repositories/x402-authorizations.js'
 import type { X402HandlerResult } from './types.js'
 

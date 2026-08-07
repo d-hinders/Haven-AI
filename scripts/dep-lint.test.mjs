@@ -1,14 +1,21 @@
-// Unit tests for the dependency-boundary lint (#982, epic #980).
+// Unit tests for the dependency-boundary lint (#982 → absolute since #999).
 // Run with: node --test scripts/dep-lint.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { rmSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { foldViolations, newViolations, hasShrunk, scanAll, EXCLUDED } from './dep-lint.mjs'
-import { writeBaseline, readBaseline } from './lib/ratchet.mjs'
+import {
+  foldViolations,
+  parseExemptions,
+  specifierMatchesTarget,
+  applyExemptions,
+  countInlineSqlCallSites,
+  scanAll,
+  EXCLUDED,
+  MIN_EXEMPT_REASON_LENGTH,
+} from './dep-lint.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const ruleSet = createRequire(import.meta.url)(join(REPO_ROOT, '.dependency-cruiser.cjs'))
@@ -16,96 +23,162 @@ const ruleSet = createRequire(import.meta.url)(join(REPO_ROOT, '.dependency-crui
 /** A dependency-cruiser violation, shaped as the real reporter emits it. */
 const violation = (from, rule, to) => ({ from, to, rule: { name: rule, comment: `${rule} comment` } })
 
-// ── The ratchet contract ────────────────────────────────────────────
+const GOOD_REASON = 'bootstraps the pool before repositories exist'
 
-test('folds violations into per-file, per-rule counts', () => {
-  const { counts, details } = foldViolations([
+// ── Pass/fail core ──────────────────────────────────────────────────
+
+test('folds violations into per-edge details', () => {
+  const details = foldViolations([
     violation('packages/backend/src/routes/x402.ts', 'chain-sdk-not-in-routes', 'node_modules/ethers/x.js'),
     violation('packages/backend/src/routes/x402.ts', 'chain-sdk-not-in-routes', 'node_modules/viem/y.js'),
     violation('packages/backend/src/routes/payments.ts', 'pg-only-in-infra', 'packages/backend/src/db.ts'),
   ])
-  assert.equal(counts['packages/backend/src/routes/x402.ts']['chain-sdk-not-in-routes'], 2)
-  assert.equal(counts['packages/backend/src/routes/payments.ts']['pg-only-in-infra'], 1)
   assert.equal(details.length, 3)
+  assert.deepEqual(details[2], {
+    file: 'packages/backend/src/routes/payments.ts',
+    rule: 'pg-only-in-infra',
+    to: 'packages/backend/src/db.ts',
+    comment: 'pg-only-in-infra comment',
+  })
 })
 
-test('a NEW violation fails against the baseline', () => {
-  const baseline = { 'packages/backend/src/routes/x402.ts': { 'chain-sdk-not-in-routes': 1 } }
-  // Same file, a rule it was not baselined for.
-  const { counts } = foldViolations([
-    violation('packages/backend/src/routes/x402.ts', 'chain-sdk-not-in-routes', 'node_modules/ethers/x.js'),
-    violation('packages/backend/src/routes/x402.ts', 'pg-only-in-infra', 'packages/backend/src/db.ts'),
+test('an unwaived violation fires', async () => {
+  const details = foldViolations([
+    violation('packages/backend/src/routes/payments.ts', 'pg-only-in-infra', 'packages/backend/src/db.ts'),
   ])
-  const failures = newViolations(counts, baseline)
-  assert.equal(failures.length, 1)
-  assert.equal(failures[0].key, 'pg-only-in-infra')
-  assert.equal(failures[0].allowed, 0)
+  const { firing, waived } = await applyExemptions(details, async () => "import pool from '../db.js'\n")
+  assert.equal(firing.length, 1)
+  assert.equal(waived.length, 0)
 })
 
-test('GROWTH of an existing baselined count fails', () => {
-  const baseline = { 'packages/backend/src/routes/x402.ts': { 'chain-sdk-not-in-routes': 1 } }
-  const { counts } = foldViolations([
-    violation('packages/backend/src/routes/x402.ts', 'chain-sdk-not-in-routes', 'node_modules/ethers/x.js'),
-    violation('packages/backend/src/routes/x402.ts', 'chain-sdk-not-in-routes', 'node_modules/viem/y.js'),
+// ── Inline waivers ──────────────────────────────────────────────────
+
+test('parseExemptions binds a comment-above to the next import specifier', () => {
+  const found = parseExemptions(
+    [
+      `// dep-lint-exempt: ${GOOD_REASON}`,
+      "import pool from '../db.js'",
+    ].join('\n'),
+  )
+  assert.equal(found.length, 1)
+  assert.equal(found[0].specifier, '../db.js')
+  assert.equal(found[0].reason, GOOD_REASON)
+})
+
+test('parseExemptions binds an inline comment to its own import line', () => {
+  const found = parseExemptions(`import pool from '../db.js' // dep-lint-exempt: ${GOOD_REASON}\n`)
+  assert.equal(found.length, 1)
+  assert.equal(found[0].specifier, '../db.js')
+})
+
+test('parseExemptions reaches across a multi-line import', () => {
+  const found = parseExemptions(
+    [
+      `// dep-lint-exempt: ${GOOD_REASON}`,
+      'import {',
+      '  a,',
+      '  b,',
+      "} from '../db.js'",
+    ].join('\n'),
+  )
+  assert.equal(found.length, 1)
+  assert.equal(found[0].specifier, '../db.js')
+})
+
+test('specifierMatchesTarget resolves ESM .js specifiers to .ts sources', () => {
+  assert.ok(
+    specifierMatchesTarget('../db.js', 'packages/backend/src/routes/auth.ts', 'packages/backend/src/db.ts'),
+  )
+  assert.ok(
+    specifierMatchesTarget('./db.js', 'packages/backend/src/index.ts', 'packages/backend/src/db.ts'),
+  )
+  // A different target must not match — the waiver is per-edge, not per-file.
+  assert.equal(
+    specifierMatchesTarget('../db.js', 'packages/backend/src/routes/auth.ts', 'packages/backend/src/config.ts'),
+    false,
+  )
+})
+
+test('specifierMatchesTarget matches bare and scoped packages by resolved prefix', () => {
+  assert.ok(specifierMatchesTarget('pg', 'packages/backend/src/db.ts', 'node_modules/pg/lib/index.js'))
+  assert.ok(
+    specifierMatchesTarget(
+      '@metamask/smart-accounts-kit',
+      'packages/backend/src/rails/delegation-rail.ts',
+      'node_modules/@metamask/smart-accounts-kit/dist/index.js',
+    ),
+  )
+  assert.equal(
+    specifierMatchesTarget('pg', 'packages/backend/src/db.ts', 'node_modules/pg-pool/index.js'),
+    false,
+    'pg must not waive pg-pool — the prefix match is per-package, not per-substring',
+  )
+})
+
+test('a waived edge passes and carries its reason', async () => {
+  const details = foldViolations([
+    violation('packages/backend/src/routes/auth.ts', 'pg-only-in-infra', 'packages/backend/src/db.ts'),
   ])
-  const failures = newViolations(counts, baseline)
-  assert.equal(failures.length, 1)
-  assert.equal(failures[0].count, 2)
-  assert.equal(failures[0].allowed, 1)
+  const { firing, waived } = await applyExemptions(
+    details,
+    async () => `// dep-lint-exempt: ${GOOD_REASON}\nimport pool from '../db.js'\n`,
+  )
+  assert.equal(firing.length, 0)
+  assert.equal(waived.length, 1)
+  assert.equal(waived[0].reason, GOOD_REASON)
 })
 
-test('the baseline is per-file — the same rule in a NEW file is not grandfathered', () => {
-  const baseline = { 'packages/backend/src/routes/x402.ts': { 'chain-sdk-not-in-routes': 1 } }
-  const { counts } = foldViolations([
-    violation('packages/backend/src/routes/balances.ts', 'chain-sdk-not-in-routes', 'node_modules/ethers/x.js'),
+test('a too-short reason does NOT waive — it fails with its own message', async () => {
+  const details = foldViolations([
+    violation('packages/backend/src/routes/auth.ts', 'pg-only-in-infra', 'packages/backend/src/db.ts'),
   ])
-  assert.equal(newViolations(counts, baseline).length, 1)
+  const { firing, waived, badReasons } = await applyExemptions(
+    details,
+    async () => "// dep-lint-exempt: TODO\nimport pool from '../db.js'\n",
+  )
+  assert.ok('TODO'.length < MIN_EXEMPT_REASON_LENGTH, 'the guard constant must catch a bare TODO')
+  assert.equal(waived.length, 0)
+  assert.equal(firing.length, 0)
+  assert.equal(badReasons.length, 1)
 })
 
-test('a REMOVED violation passes and is reported as shrinkable', () => {
-  const baseline = {
-    'packages/backend/src/routes/x402.ts': { 'chain-sdk-not-in-routes': 2 },
-    'packages/backend/src/routes/balances.ts': { 'chain-sdk-not-in-routes': 1 },
-  }
-  const { counts } = foldViolations([
-    violation('packages/backend/src/routes/x402.ts', 'chain-sdk-not-in-routes', 'node_modules/ethers/x.js'),
+test('no-circular can never be waived', async () => {
+  const details = foldViolations([
+    violation('packages/backend/src/a.ts', 'no-circular', 'packages/backend/src/b.ts'),
   ])
-  assert.equal(newViolations(counts, baseline).length, 0, 'shrinking must not fail')
-  assert.equal(hasShrunk(counts, baseline), true)
+  const { firing, waived } = await applyExemptions(
+    details,
+    async () => `// dep-lint-exempt: ${GOOD_REASON}\nimport { b } from './b.js'\n`,
+  )
+  assert.equal(waived.length, 0)
+  assert.equal(firing.length, 1)
 })
 
-test('an unchanged tree is a no-op — no failures and nothing to tighten', () => {
-  const baseline = { 'packages/backend/src/routes/x402.ts': { 'chain-sdk-not-in-routes': 1 } }
-  const { counts } = foldViolations([
-    violation('packages/backend/src/routes/x402.ts', 'chain-sdk-not-in-routes', 'node_modules/ethers/x.js'),
+// ── The inline-SQL call-site gauge (#999) ───────────────────────────
+
+test('the gauge counts .query( and .query<T>( call sites, not just files', () => {
+  const { callSites, fileCount } = countInlineSqlCallSites([
+    {
+      path: 'packages/backend/src/routes/user.ts',
+      source: 'await pool.query(`SELECT 1`)\nawait pool.query<Row>(`SELECT 2`)\n',
+    },
+    { path: 'packages/backend/src/routes/auth.ts', source: 'await db.query(sql)\n' },
+    { path: 'packages/backend/src/domain/tokens.ts', source: 'const clean = true\n' },
   ])
-  assert.equal(newViolations(counts, baseline).length, 0)
-  assert.equal(hasShrunk(counts, baseline), false)
+  // Intensity, not presence: 3 call sites across 2 files — the ratchet this
+  // gauge replaced would have reported "2" forever while the 3 grew.
+  assert.equal(callSites, 3)
+  assert.equal(fileCount, 2)
 })
 
-test('--update writes a deterministic, sorted baseline', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'dep-lint-'))
-  try {
-    const path = join(dir, 'baseline.json')
-    const { counts } = foldViolations([
-      violation('z.ts', 'pg-only-in-infra', 'db.ts'),
-      violation('a.ts', 'pg-only-in-infra', 'db.ts'),
-      violation('a.ts', 'chain-sdk-not-in-routes', 'node_modules/ethers/x.js'),
-    ])
-    const json = writeBaseline(path, counts)
-    assert.ok(existsSync(path))
-    // Files sorted, and keys within a file sorted — so diffs stay reviewable.
-    assert.deepEqual(Object.keys(JSON.parse(json)), ['a.ts', 'z.ts'])
-    assert.deepEqual(Object.keys(JSON.parse(json)['a.ts']), [
-      'chain-sdk-not-in-routes',
-      'pg-only-in-infra',
-    ])
-    // Round-trips, and re-writing identical counts is byte-stable.
-    assert.deepEqual(readBaseline(path), JSON.parse(json))
-    assert.equal(writeBaseline(path, counts), json)
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
+test('the gauge excludes db/, db.ts, infra/repositories/ and non-backend files', () => {
+  const { callSites } = countInlineSqlCallSites([
+    { path: 'packages/backend/src/db.ts', source: 'pool.query(x)' },
+    { path: 'packages/backend/src/db/migrate.ts', source: 'pool.query(x)' },
+    { path: 'packages/backend/src/infra/repositories/agents.ts', source: 'db.query(x)' },
+    { path: 'packages/core/src/chains.ts', source: 'thing.query(x)' },
+  ])
+  assert.equal(callSites, 0)
 })
 
 // ── Rule-config guards ──────────────────────────────────────────────
@@ -129,7 +202,7 @@ test('the chain-SDK matcher matches RESOLVED npm paths, not bare module names', 
   }
   // Must not fire on an unrelated package that merely contains a name.
   assert.equal(re.test('node_modules/ethers-abi-shim-unrelated-pkg/index.js'), false)
-  assert.equal(re.test('packages/backend/src/lib/chains.ts'), false)
+  assert.equal(re.test('packages/backend/src/domain/chains.ts'), false)
 })
 
 test('the scan exclude is DERIVED from the config, so the two cannot drift', () => {
@@ -139,7 +212,7 @@ test('the scan exclude is DERIVED from the config, so the two cannot drift', () 
   assert.equal(EXCLUDED.source, new RegExp(ruleSet.options.exclude.path).source)
   for (const excluded of [
     'packages/backend/src/routes/__tests__/x402.test.ts',
-    'packages/backend/src/lib/relayer.test.ts',
+    'packages/backend/src/infra/relayer.test.ts',
     'packages/backend/src/loop-harness/allowance-differential.test.ts',
     'packages/backend/src/docs-drift/env-example-drift.test.ts',
   ]) {
@@ -147,7 +220,7 @@ test('the scan exclude is DERIVED from the config, so the two cannot drift', () 
   }
   for (const included of [
     'packages/backend/src/routes/x402.ts',
-    'packages/backend/src/lib/execution-rail.ts',
+    'packages/backend/src/rails/execution-rail.ts',
   ]) {
     assert.equal(EXCLUDED.test(included), false, `should be scanned: ${included}`)
   }
@@ -170,12 +243,12 @@ test('the core-stays-pure matcher covers every banned dependency', () => {
     assert.ok(re.test(resolved), `core must not be allowed to import ${resolved}`)
   }
   assert.equal(new RegExp(rule.from.path).test('packages/core/src/address.ts'), true)
-  assert.equal(new RegExp(rule.from.path).test('packages/backend/src/lib/relayer.ts'), false)
+  assert.equal(new RegExp(rule.from.path).test('packages/backend/src/infra/relayer.ts'), false)
 })
 
-test('every forbidden rule has a name and an actionable comment', () => {
+test('every forbidden rule has a name, an actionable comment, and error severity', () => {
   for (const rule of ruleSet.forbidden) {
-    assert.ok(rule.name, 'rule needs a name — it is the baseline key')
+    assert.ok(rule.name, 'rule needs a name — it is what a waiver is scoped to')
     assert.ok(rule.comment && rule.comment.length > 20, `${rule.name} needs an actionable comment`)
     assert.equal(rule.severity, 'error')
   }
@@ -184,23 +257,19 @@ test('every forbidden rule has a name and an actionable comment', () => {
 // ── Live integration ────────────────────────────────────────────────
 
 test('the live scan detects real violations and reports zero cycles', async () => {
-  // #994 emptied EVERY real chain-sdk-not-in-routes violation (that was the
-  // issue's whole point), so there is no longer a real "known-bad" route file
-  // to assert against — planting one permanently would defeat the
-  // zero-tolerance baseline #994 just landed. Use a temporary fixture instead,
+  // #994 emptied EVERY real chain-sdk-not-in-routes violation, so there is no
+  // real "known-bad" route file to assert against. Use a temporary fixture,
   // written into and removed from the real scanned tree around one `cruise()`
   // call, so this still proves the FULL pipeline (file walk -> cruise() ->
-  // rule match -> path resolution) fires, not just the regex
-  // ('the chain-SDK matcher matches RESOLVED npm paths' above already covers
-  // the regex in isolation).
+  // rule match -> path resolution) fires, not just the regex.
   const fixturePath = join(
     REPO_ROOT, 'packages', 'backend', 'src', 'routes', '__dep_lint_live_scan_fixture__.ts',
   )
   writeFileSync(fixturePath, "import { ethers } from 'ethers'\nexport const _fixture = ethers\n")
 
-  let counts, details, fileCount
+  let details, fileCount
   try {
-    ;({ counts, details, fileCount } = await scanAll())
+    ;({ details, fileCount } = await scanAll())
   } finally {
     rmSync(fixturePath, { force: true })
   }
@@ -209,7 +278,11 @@ test('the live scan detects real violations and reports zero cycles', async () =
 
   // The rule that silently passed must actually fire on a known-bad file.
   assert.ok(
-    counts['packages/backend/src/routes/__dep_lint_live_scan_fixture__.ts']?.['chain-sdk-not-in-routes'] > 0,
+    details.some(
+      (d) =>
+        d.file === 'packages/backend/src/routes/__dep_lint_live_scan_fixture__.ts' &&
+        d.rule === 'chain-sdk-not-in-routes',
+    ),
     'a routes/ file importing ethers must trip the chain-SDK rule',
   )
 
@@ -218,16 +291,16 @@ test('the live scan detects real violations and reports zero cycles', async () =
   // assertion would pass vacuously.
   assert.ok(
     details.every((d) => d.rule !== 'core-stays-pure'),
-    'core-stays-pure must have zero violations — it may never be baselined',
+    'core-stays-pure must have zero violations — it can never be waived into existence',
   )
 
-  // Rule 7 is the one to defend hardest; the tree is currently cycle-free and
-  // must stay that way. This is an absolute assertion, NOT a baselined one.
-  // (The fixture above imports only `ethers`, so it cannot introduce a cycle.)
+  // Rule 7 is the one to defend hardest; the tree is cycle-free and must stay
+  // that way. Absolute AND unwaivable. (The fixture imports only `ethers`, so
+  // it cannot introduce a cycle.)
   assert.equal(
     details.filter((d) => d.rule === 'no-circular').length,
     0,
-    'a dependency cycle was introduced — break it rather than baselining it',
+    'a dependency cycle was introduced — break it; no-circular cannot be waived',
   )
 })
 
@@ -240,12 +313,17 @@ test('the scan actually reaches packages/core (else core-stays-pure is vacuous)'
   assert.ok(scannedFiles.some((f) => f.startsWith('packages/backend/src/')))
 })
 
-test('the committed baseline covers the live scan (checked-in state is green)', async () => {
-  const { counts } = await scanAll()
-  const baseline = readBaseline(join(REPO_ROOT, 'packages', 'backend', 'dep-lint-baseline.json'))
+test('the checked-in tree is green: every violation is waived, every waiver has a real reason', async () => {
+  const { details } = await scanAll()
+  const { firing, badReasons } = await applyExemptions(details)
   assert.deepEqual(
-    newViolations(counts, baseline),
+    firing.map((f) => `${f.file} → ${f.to} (${f.rule})`),
     [],
-    'committed baseline is stale — run `npm run lint:deps:update`',
+    'unwaived dependency-boundary violation — fix the boundary or add a reviewed dep-lint-exempt',
+  )
+  assert.deepEqual(
+    badReasons.map((b) => `${b.file}: "${b.reason}"`),
+    [],
+    'a dep-lint-exempt comment carries a non-reason',
   )
 })

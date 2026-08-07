@@ -1,7 +1,8 @@
 /**
  * Data access for the x402 authorization flow over `payment_intents`
  * (#995, epic #980 M3). Extracted verbatim from `routes/x402.ts` and the
- * x402 rate-limit reads in `lib/machine-payments.ts`.
+ * x402 rate-limit reads formerly in `lib/machine-payments.ts` (moved to
+ * `modules/mpp/authorize.ts` by #997).
  *
  * The aggregate here is the x402 AUTHORIZATION LIFECYCLE, not a table of its
  * own: idempotent replay lookup, stale-intent refresh, one-shot execute

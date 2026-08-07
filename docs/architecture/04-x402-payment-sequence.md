@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-07"
+last-verified: "2026-08-07" # re-verified same day (#997): legacy-authorize.ts / delegation-authorize.ts import edits only, no behavior change
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -290,6 +290,16 @@ transport session; callers do not need to preserve the old session id.
 | Header sent to merchant | None | `X-PAYMENT` |
 | Payment authority | Delegate signature + on-chain allowance | Same for funding leg; EIP-3009 signature for merchant leg |
 | Approval resume | Poll payment status | Poll status, then resume original x402 request |
+
+The legacy rail's `payment_intents`/`approval_requests` INSERTs are the SAME
+rail-agnostic `infra/repositories/` writers the mpp module uses for its own
+rails (`modules/mpp/`, #997) — `modules/x402/legacy-authorize.ts` and
+`modules/x402/delegation-authorize.ts` call them directly rather than through
+a `lib/machine-payments.ts` pass-through (removed by #997: it added no logic
+over the repository call and kept x402 coupled to a private mpp file once
+mpp's own orchestration moved into its module). Token resolution
+(`resolvePaymentToken`) is genuinely shared between the two modules and lives
+in `src/domain/payment-token.ts` for the same reason.
 
 ## Delegation rail x402 (new accounts)
 

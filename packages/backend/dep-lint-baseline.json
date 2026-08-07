@@ -30,9 +30,6 @@
   "packages/backend/src/lib/leader-lock.ts": {
     "pg-only-in-infra": 1
   },
-  "packages/backend/src/lib/machine-payment-evidence.ts": {
-    "no-deep-cross-module-import": 2
-  },
   "packages/backend/src/lib/merchant-catalog.ts": {
     "pg-only-in-infra": 1
   },
@@ -86,9 +83,6 @@
   },
   "packages/backend/src/routes/hybrid-accounts.ts": {
     "pg-only-in-infra": 1
-  },
-  "packages/backend/src/routes/machine-payments.ts": {
-    "no-deep-cross-module-import": 1
   },
   "packages/backend/src/routes/passkeys.ts": {
     "pg-only-in-infra": 1

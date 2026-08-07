@@ -6,8 +6,8 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/lib/allowance-module.ts
   - packages/backend/src/lib/sweep.ts
-  - packages/backend/src/lib/machine-payment-evidence.ts
-last-verified: "2026-08-05"
+  - packages/backend/src/modules/mpp/**
+last-verified: "2026-08-07" # #997: covers updated (lib/machine-payment-evidence.ts moved into modules/mpp/**)
 ---
 
 # Research — Smart-account-native x402 settlement (removing the funding leg)

@@ -1,4 +1,21 @@
-import { RelayerBudgetExceededError } from './relayer-spend-guard.js'
+/**
+ * `authorizeMachinePayment` orchestration (#997, epic #980 M4). Extracted
+ * verbatim from `lib/machine-payments.ts`: idempotent replay of
+ * pending/confirmed intents and approvals, the #993 retired-session gate, the
+ * allowance-only coverage decision, the approval-queue path, and one-shot
+ * authorize+execute. Behavior and ordering are unchanged from the pre-#997
+ * lib file — this is the single entry point `routes/machine-payments.ts`'s
+ * `POST /authorize` calls after `challenge.ts` accepts the challenge.
+ *
+ * Token resolution (`resolvePaymentToken`) lives in `src/domain/payment-token.ts`
+ * because `modules/x402/` needs it too — folding it in here instead would
+ * force x402 to deep-import a private mpp file. The rail-agnostic
+ * `payment_intents`/`approval_requests` writers are `infra/repositories/`
+ * functions called directly (no `createPaymentIntent`/`createMachineApproval`
+ * wrapper — those were pure pass-throughs; x402's legacy rail calls the same
+ * repository functions directly too, for the same reason).
+ */
+import { RelayerBudgetExceededError } from '../../lib/relayer-spend-guard.js'
 import { ethers } from 'ethers'
 import {
   confirmMachineIntent,
@@ -8,22 +25,24 @@ import {
   insertMachineIntent,
   recordMachineIntentSignature,
   refreshMachineIntentNonce,
-} from '../infra/repositories/payment-intents.js'
+  type PaymentIntentRow,
+} from '../../infra/repositories/payment-intents.js'
 import {
   findMachineApprovalByKeyOrChallenge,
   insertMachineApproval,
-} from '../infra/repositories/approval-requests.js'
-import { getX402HourlyUsage } from '../infra/repositories/x402-authorizations.js'
-import { hasTokenAllowanceConfigured } from '../infra/repositories/agents.js'
-import { type AgentContext } from '../middleware/agentAuth.js'
-import { AgentPaymentNextAction, AgentPaymentPhase } from './agent-payment-taxonomy.js'
+  type MachineApprovalRow as ApprovalRequestRow,
+} from '../../infra/repositories/approval-requests.js'
+import { getX402HourlyUsage } from '../../infra/repositories/x402-authorizations.js'
+import { hasTokenAllowanceConfigured } from '../../infra/repositories/agents.js'
+import { type AgentContext } from '../../middleware/agentAuth.js'
+import { AgentPaymentNextAction, AgentPaymentPhase } from '../../lib/agent-payment-taxonomy.js'
 import {
   agentPaymentStatusHttpCode,
   getAgentPaymentStatus,
-} from './agent-payment-status.js'
-import { getChain, getExplorerUrl } from './chains.js'
-import { getFiatValuesForTokenAmount } from './fiat-values.js'
-import { formatTokenValue } from './tokens.js'
+} from '../../lib/agent-payment-status.js'
+import { getExplorerUrl } from '../../lib/chains.js'
+import { getFiatValuesForTokenAmount } from '../../lib/fiat-values.js'
+import { formatTokenValue } from '../../lib/tokens.js'
 import {
   getTokenAllowance,
   getLatestBlockTimeSec,
@@ -31,27 +50,30 @@ import {
   generateTransferHash,
   recoverSigner,
   executeAllowanceTransfer,
-} from './allowance-module.js'
-import { tryRecordMachinePaymentEvidenceBaseById } from './machine-payment-evidence.js'
-import { decideCoverage } from './payment-coverage.js'
+} from '../../lib/allowance-module.js'
+import { tryRecordMachinePaymentEvidenceBaseById } from './evidence.js'
+import { decideCoverage } from '../../lib/payment-coverage.js'
 import { isAddress } from '@haven_ai/core'
 import {
-  loadExecutionRailState,
-  redactVendorSecrets,
-  resolveExecutionRail,
-  serializeUserOp,
-  sessionRailRetired,
   isRetiredRailIntent,
-} from './execution-rail.js'
+  loadExecutionRailState,
+  resolveExecutionRail,
+  sessionRailRetired,
+} from '../../lib/execution-rail.js'
+import { resolvePaymentToken, ZERO_ADDRESS } from '../../domain/payment-token.js'
+import {
+  isMppRail,
+  machineRailFields,
+  approvalReasonFor,
+  metadataObject,
+  nullableString,
+  type MachineRailContext,
+} from './rail-dispatch.js'
+import type { MachinePaymentRail } from './types.js'
 
-export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-
-export type MachinePaymentRail =
-  | 'x402'
-  | 'mpp_demo'
-  | 'mpp_crypto'
-  | 'stripe_deposit'
-  | 'spt'
+export function normaliseAddress(addr: string): string {
+  return ethers.getAddress(addr.toLowerCase())
+}
 
 export interface AuthorizeMachinePaymentInput {
   agent: AgentContext
@@ -71,104 +93,6 @@ export interface AuthorizeMachinePaymentInput {
   enforceX402RateLimit?: boolean
 }
 
-export interface PaymentIntentRow {
-  id: string
-  agent_id: string
-  user_id: string
-  safe_address: string
-  chain_id: number
-  token_symbol: string
-  token_address: string
-  to_address: string
-  amount_raw: string
-  amount_human: string
-  delegate_address: string
-  allowance_nonce: number
-  sign_hash: string
-  signature: string | null
-  tx_hash: string | null
-  status: string
-  error_message: string | null
-  source: string | null
-  x402_resource_url: string | null
-  x402_category: string | null
-  x402_merchant_address: string | null
-  x402_idempotency_key: string | null
-  payment_rail: string | null
-  payment_resource_url: string | null
-  merchant_address: string | null
-  machine_challenge_id: string | null
-  machine_idempotency_key: string | null
-  machine_metadata: unknown
-  expires_at: string
-  /** Execution rail pinned at authorize time; null = legacy AllowanceModule (#745). */
-  execution_rail?: string | null
-  /** Smart Sessions permissionId pinned at authorize time. */
-  session_permission_id?: string | null
-  /** Serialized prepared UserOperation for session-rail intents (see execution-rail.ts). */
-  session_user_op?: unknown
-}
-
-interface ApprovalRequestRow {
-  id: string
-  chain_id: number
-  status: string
-  token_symbol: string
-  token_address: string | null
-  amount_human: string
-  amount_raw: string | null
-  expires_at: string
-  tx_hash: string | null
-  machine_challenge_id: string | null
-  payment_rail: string | null
-  payment_resource_url: string | null
-  merchant_address: string | null
-  machine_idempotency_key: string | null
-  machine_metadata: unknown
-}
-
-export { isAddress as isValidAddress } from '@haven_ai/core'
-
-export function normaliseAddress(addr: string): string {
-  return ethers.getAddress(addr.toLowerCase())
-}
-
-export function resolveTokenByAddress(chainId: number, address: string) {
-  const lower = address.toLowerCase()
-  const chain = getChain(chainId)
-  if (lower === ZERO_ADDRESS) {
-    return Object.values(chain.tokens).find((t) => t.address === null) ?? null
-  }
-  return chain.tokenByAddress[lower] ?? null
-}
-
-export type ResolvePaymentTokenResult =
-  | { ok: true; tokenConfig: NonNullable<ReturnType<typeof resolveTokenByAddress>>; tokenAddress: string }
-  | { ok: false; error: string; supported: Array<{ symbol: string; address: string }> }
-
-/**
- * Resolve a payment token from its contract address, returning the token config
- * and the AllowanceModule token address (ZERO_ADDRESS for the native asset), or
- * a structured 400-shaped error listing the chain's supported tokens. The
- * single token-resolution path for both the x402 route and the MPP core (each
- * previously had its own identical copy of this block).
- */
-export function resolvePaymentToken(chainId: number, asset: string): ResolvePaymentTokenResult {
-  const tokenConfig = resolveTokenByAddress(chainId, asset)
-  if (!tokenConfig) {
-    const chain = getChain(chainId)
-    return {
-      ok: false,
-      error: `Unsupported token asset: ${asset}`,
-      supported: Object.values(chain.tokens).map((t) => ({
-        symbol: t.symbol,
-        address: t.address ?? ZERO_ADDRESS,
-      })),
-    }
-  }
-  return { ok: true, tokenConfig, tokenAddress: tokenConfig.address ?? ZERO_ADDRESS }
-}
-
 function paymentResourceUrl(intent: PaymentIntentRow): string | null {
   return intent.payment_resource_url ?? intent.x402_resource_url
 }
@@ -177,72 +101,9 @@ function merchantAddress(intent: PaymentIntentRow): string | null {
   return intent.merchant_address ?? intent.x402_merchant_address
 }
 
-interface MachineMetadata {
-  network?: unknown
-  description?: unknown
-}
-
-interface MachineRailContext {
-  resourceUrl: string | null
-  merchantAddress: string | null
-  amountAtomic: string | null
-  asset: string | null
-  network: string | null
-  description: string | null
-  idempotencyKey: string | null
-  challengeId: string | null
-}
-
-function isMppRail(rail: string | null | undefined): boolean {
-  return rail === 'mpp' || Boolean(rail?.startsWith('mpp_'))
-}
-
-function metadataObject(value: unknown): MachineMetadata {
-  if (!value) return {}
-  if (typeof value === 'object' && !Array.isArray(value)) return value as MachineMetadata
-  if (typeof value !== 'string') return {}
-
-  try {
-    const parsed = JSON.parse(value)
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as MachineMetadata
-    }
-  } catch {
-    return {}
-  }
-
-  return {}
-}
-
-function nullableString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null
-}
-
-function machineRailFields(rail: string | null | undefined, context: MachineRailContext) {
-  const base = {
-    amount_atomic: context.amountAtomic,
-    asset: context.asset,
-    network: context.network,
-    description: context.description,
-    idempotency_key: context.idempotencyKey,
-  }
-
-  if (!isMppRail(rail)) return base
-
-  return {
-    ...base,
-    mpp: {
-      ...base,
-      resource_url: context.resourceUrl,
-      merchant_address: context.merchantAddress,
-      challenge_id: context.challengeId,
-    },
-  }
-}
-
-function machinePaymentResponse(
+export function machinePaymentResponse(
   intent: PaymentIntentRow,
-  agent: AgentContext,
+  agent: Pick<AgentContext, 'chain_id'>,
   txHash?: string,
 ) {
   const resolvedTxHash = txHash ?? intent.tx_hash
@@ -314,7 +175,7 @@ function pendingApprovalResponse(
   context?: MachineRailContext,
 ) {
   const metadata = metadataObject(approval.machine_metadata)
-  const railContext = context ?? {
+  const railContext: MachineRailContext = context ?? {
     resourceUrl: approval.payment_resource_url,
     merchantAddress: approval.merchant_address,
     amountAtomic: approval.amount_raw,
@@ -455,102 +316,6 @@ async function returnExistingIntent(
       error: 'Machine payment already submitted',
     },
   }
-}
-
-export interface CreateMachineApprovalInput {
-  agent: Pick<AgentContext, 'id' | 'user_id' | 'safe_address' | 'chain_id'>
-  rail: MachinePaymentRail
-  payTo: string
-  tokenSymbol: string
-  tokenAddress: string
-  amountRaw: bigint
-  amountHuman: string
-  reason: string
-  resourceUrl: string
-  merchantAddress: string | null
-  challengeId: string | null
-  idempotencyKey: string | null
-  /** Plain object — serialised to JSON here; pass null to store SQL NULL. */
-  metadata: unknown | null
-}
-
-/**
- * Insert a pending `approval_requests` row for an over-allowance machine
- * payment. This is the single, rail-agnostic writer for the approval row —
- * both `authorizeMachinePayment` (MPP rails) and the x402 route call it so the
- * column set, `ON CONFLICT` target, and `'pending'` / 24h-expiry semantics
- * cannot drift between paths.
- *
- * Returns the inserted row, or `null` when the `ON CONFLICT … DO NOTHING`
- * clause suppresses the insert (an idempotent replay). Callers own the reload
- * of the pre-existing row and the HTTP response shaping, which differ per path.
- *
- * `source` and `payment_rail` are both set from `rail`; for x402, `challengeId`
- * is `null` (x402 dedupes on `idempotencyKey`, not a challenge).
- */
-export async function createMachineApproval(
-  input: CreateMachineApprovalInput,
-): Promise<ApprovalRequestRow | null> {
-  return insertMachineApproval(input)
-}
-
-export interface CreatePaymentIntentInput {
-  agent: Pick<AgentContext, 'id' | 'user_id' | 'safe_address' | 'chain_id' | 'delegate_address'>
-  rail: MachinePaymentRail
-  payTo: string
-  tokenSymbol: string
-  tokenAddress: string
-  amountRaw: bigint
-  amountHuman: string
-  allowanceNonce: number
-  signHash: string
-  resourceUrl: string
-  category: string | null
-  merchantAddress: string | null
-  challengeId: string | null
-  idempotencyKey: string | null
-  /** Plain object — serialised to JSON here; pass null to store SQL NULL. */
-  metadata: unknown | null
-  /** Pin the intent to a non-legacy rail (#745/#830). Omit for legacy. */
-  executionRail?: 'delegation'
-  /** The Smart Sessions permissionId pinned at authorize time. */
-  sessionPermissionId?: string
-  /** Pre-serialized prepared UserOperation (serializeUserOp) for session intents. */
-  sessionUserOp?: string
-  /** The delegation authorizing a delegation-rail intent (#829/#830). */
-  delegationHash?: string
-  /**
-   * The METERING budget behind the intent (#1059) — uniform across schemes,
-   * unlike `delegationHash` (the signed instrument: child on erc7710, budget
-   * elsewhere). Coincides with `delegationHash` except on erc7710.
-   */
-  budgetDelegationHash?: string
-  /** Pre-serialized prepared redemption/settlement state for delegation intents. */
-  preparedUserOp?: string
-  /**
-   * Which partial-unique index enforces idempotent dedup for this rail. x402
-   * dedupes on `x402_idempotency_key`; MPP rails on `machine_idempotency_key`.
-   * Both columns are written (x402 fills both), so the choice only selects the
-   * conflict arbiter — it does not change the stored row.
-   */
-  conflictTarget: 'machine_idempotency_key' | 'x402_idempotency_key'
-}
-
-/**
- * Insert a `pending_signature` payment_intents row. The single, rail-agnostic
- * writer for the intent row (mirrors createMachineApproval for approvals) so the
- * column set, status, and 10-minute expiry cannot drift between the x402 route
- * and the MPP core.
- *
- * Returns the inserted row, or `null` when ON CONFLICT … DO NOTHING suppresses
- * the insert (idempotent replay). Callers own the reload of the pre-existing
- * row and response shaping. The conflict arbiter is parameterised so each rail
- * keeps its exact dedup semantics.
- */
-export async function createPaymentIntent(
-  input: CreatePaymentIntentInput,
-): Promise<PaymentIntentRow | null> {
-  return insertMachineIntent(input)
 }
 
 export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInput) {
@@ -701,20 +466,23 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
   const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
   // Allowance-only coverage: MPP rails route purely on the remaining on-chain
   // allowance (the delegate balance is not consulted). x402's balance-aware
-  // variant lives in the route. See lib/payment-coverage.decideCoverage.
+  // variant lives in the x402 module. See lib/payment-coverage.decideCoverage.
   const coverage = decideCoverage('allowance-only', {
     amount: amountRaw,
     remaining: effective.remaining,
   })
   if (coverage.kind === 'queue') {
     const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
-    const merchantPart = merchantPayTo ? ` to merchant ${merchantPayTo}` : ''
-    const approvalReason =
-      rail === 'x402'
-        ? `x402 payment for ${resourceUrl}${merchantPart}${category ? ` (${category})` : ''} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
-        : `Machine payment demo for ${resourceUrl}${merchantPart} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
+    const approvalReason = approvalReasonFor(rail, {
+      resourceUrl,
+      merchantPayTo,
+      category,
+      amountHuman,
+      tokenSymbol: tokenConfig.symbol,
+      remainingHuman,
+    })
 
-    let approval = await createMachineApproval({
+    let approval = await insertMachineApproval({
       agent,
       rail,
       payTo,
@@ -791,7 +559,7 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     }
   }
 
-  let intent = await createPaymentIntent({
+  let intent = await insertMachineIntent({
     agent,
     rail,
     payTo,

@@ -4,8 +4,8 @@
  * An approval request is the human circuit breaker: a payment that exceeds the
  * remaining on-chain allowance queues here for the owner instead of executing.
  * Extracted verbatim from `routes/payments.ts`, `routes/machine-payments.ts`
- * (/send), `routes/x402.ts`, `lib/machine-payments.ts` and
- * `lib/agent-payment-status.ts`.
+ * (/send), `routes/x402.ts`, `lib/machine-payments.ts` (moved to
+ * `modules/mpp/` by #997) and `lib/agent-payment-status.ts`.
  *
  * Convention — see `README.md` in this directory. Executor last, defaulting to
  * the pool; `agentId` tenant scope is a required parameter; SQL lives in

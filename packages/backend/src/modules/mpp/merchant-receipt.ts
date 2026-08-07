@@ -1,11 +1,7 @@
-import {
-  findEvidenceAnchorForAgent,
-  getMerchantReceiptRow,
-  insertMerchantReceiptOnce,
-} from '../infra/repositories/machine-payments.js'
-
 /**
- * Merchant-issued receipt capture + retrieval (#956, follow-up to #498).
+ * Merchant-issued receipt capture + retrieval (#956, moved into the mpp
+ * module by #997, follow-up to #498). Extracted verbatim from
+ * `lib/merchant-receipt.ts`.
  *
  * The reporting feed's always-present attachment is the HAVEN-generated
  * payment evidence document (#498). When the merchant ALSO hands the agent a
@@ -24,6 +20,13 @@ import {
  * duplicates are dropped rather than letting a later, different document
  * silently replace what may already be attached in the accounting tool).
  */
+import {
+  findEvidenceAnchorForAgent,
+  getMerchantReceiptRow,
+  insertMerchantReceiptOnce,
+} from '../../infra/repositories/machine-payments.js'
+import { lateAttachMerchantReceipt } from '../../lib/reporting/fortnox-connector.js'
+import type { MppHandlerResult } from './types.js'
 
 /** Inline receipts are bookkeeping metadata, not blob storage. */
 export const MERCHANT_RECEIPT_INLINE_MAX_BYTES = 64 * 1024
@@ -106,4 +109,40 @@ export async function getMerchantReceipt(evidenceId: string): Promise<MerchantRe
   const row = await getMerchantReceiptRow(evidenceId)
   if (!row) return null
   return { url: row.url, inlineJson: row.inline_json ?? null }
+}
+
+// ── HTTP-adjacent orchestration (moved from routes/machine-payments.ts) ─────
+
+/**
+ * `POST /:id/merchant-receipt` orchestration (#956). After a successful
+ * settlement retry the merchant may hand the agent its own receipt
+ * (invoice/VAT document). Best-effort by design: absence is the normal case,
+ * and a late-attach failure here never affects the payment itself — the
+ * feed's own retry/backfill owns that path, this is fire-and-forget.
+ */
+export async function handleMerchantReceiptCapture(
+  agentId: string,
+  paymentId: string,
+  url: string | undefined,
+  json: unknown,
+): Promise<MppHandlerResult> {
+  const result = await captureMerchantReceipt({ paymentId, agentId, url, inlineJson: json })
+  if (!result.ok) return { statusCode: result.code, body: { error: result.error } }
+  if (result.stored) {
+    // #956 late attach: for x402 the feed has usually ALREADY pushed the
+    // invoice (it fires at funding confirmation; the merchant receipt
+    // arrives at the retry seconds later) — attach retroactively.
+    // Fire-and-forget: capture must never block or fail on feed state.
+    void lateAttachMerchantReceipt(result.userId, paymentId, {
+      url: url ?? null,
+      inlineJson: json ?? null,
+    }).catch(() => {})
+  }
+  return {
+    statusCode: result.stored ? 201 : 200,
+    body: {
+      stored: result.stored,
+      ...(result.stored ? {} : { message: 'A merchant receipt is already recorded for this payment (first write wins).' }),
+    },
+  }
 }

@@ -35,12 +35,14 @@ import {
   executeAllowanceTransfer,
 } from '../../lib/allowance-module.js'
 import { waitForFreshAllowanceNonce } from '../../lib/allowance-nonce-coordinator.js'
-import { tryRecordMachinePaymentEvidenceBaseById } from '../../lib/machine-payment-evidence.js'
-import {
-  createMachineApproval,
-  createPaymentIntent,
-  type ResolvePaymentTokenResult,
-} from '../../lib/machine-payments.js'
+// Evidence recording is mpp-module orchestration (#997) that x402 also needs
+// after a successful legacy-rail settlement — a genuine cross-module need,
+// so it comes through the module's public entry point (rule 6, not a deep
+// import into `modules/mpp/`'s private `evidence.ts`).
+import { tryRecordMachinePaymentEvidenceBaseById } from '../mpp/index.js'
+import { insertMachineApproval as createMachineApproval } from '../../infra/repositories/approval-requests.js'
+import { insertMachineIntent as createPaymentIntent } from '../../infra/repositories/payment-intents.js'
+import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { decideCoverage } from '../../lib/payment-coverage.js'
 import { emitFunnelEvent } from '../../lib/onboarding-funnel.js'
 import {
@@ -388,7 +390,8 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
       description: description ?? null,
     }
 
-    // Shared approval-row writer (see lib/machine-payments.createMachineApproval)
+    // Shared approval-row writer (infra/repositories/approval-requests.js's
+    // insertMachineApproval, called directly by modules/mpp/ too — #997)
     // so the column set, ON CONFLICT target, and 'pending'/24h semantics stay
     // identical to the MPP path. For x402, source/payment_rail are 'x402' and
     // there is no challenge — dedupe is on the idempotency key.

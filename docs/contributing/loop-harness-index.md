@@ -7,12 +7,12 @@ covers:
   - packages/frontend/src/lib/allowance-math.ts
   - packages/frontend/src/lib/loop-harness/**
   - packages/backend/src/lib/payment-coverage.ts
-  - packages/backend/src/lib/machine-payments.ts
+  - packages/backend/src/modules/mpp/**
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/package.json
   - packages/frontend/package.json
   - .github/workflows/ci.yml
-last-verified: "2026-08-05"
+last-verified: "2026-08-07" # #997: covers updated (lib/machine-payments.ts moved into modules/mpp/**)
 ---
 
 # Loop Harness Index

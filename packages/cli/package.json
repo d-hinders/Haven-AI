@@ -25,6 +25,11 @@
     "non-custodial"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/d-hinders/Haven-AI.git",
+    "directory": "packages/cli"
+  },
   "publishConfig": {
     "access": "public"
   },

@@ -38,6 +38,7 @@
   ],
   "globs": [
     "packages/backend/src/db/migrations/**",
+    "packages/backend/src/infra/chain/**",
     "packages/backend/src/infra/repositories/**",
     "packages/backend/src/lib/allowance-module.ts",
     "packages/backend/src/lib/allowance-nonce-coordinator.ts",
@@ -54,6 +55,8 @@
     "packages/backend/src/lib/sweep.ts",
     "packages/backend/src/lib/x402-delegation.ts",
     "packages/backend/src/middleware/agentAuth.ts",
+    "packages/backend/src/modules/machine-payments/**",
+    "packages/backend/src/modules/x402/**",
     "packages/backend/src/routes/agent-delegations.ts",
     "packages/backend/src/routes/approvals.ts",
     "packages/backend/src/routes/hybrid-accounts.ts",

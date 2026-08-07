@@ -1,5 +1,6 @@
 import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../infra/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
+// dep-lint-exempt: the deploy path runs one multi-statement transaction on a dedicated client (pool.connect) whose guards travel together (user upsert, safe insert, default promotion); a >100-line move deferred under #999
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getChain, isSupportedChain, isDeployableChain } from '../domain/chains.js'

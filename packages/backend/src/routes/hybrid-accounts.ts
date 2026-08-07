@@ -13,6 +13,7 @@
  */
 
 import { FastifyInstance } from 'fastify'
+// dep-lint-exempt: 5 provisioning statements (duplicate check, first-account gate, insert with rail+type, passkey persist, ownership read) whose guards travel with the insert; a >100-line move deferred under #999
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'

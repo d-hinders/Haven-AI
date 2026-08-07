@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { FastifyInstance, FastifyRequest } from 'fastify'
+// dep-lint-exempt: 4 statements backing the demo-merchant receipt flow (dev/demo surface, not the production money path); verbatim extraction deferred under #999's fix-or-waive budget
 import pool from '../db.js'
 import { getExplorerUrl } from '../domain/chains.js'
 import { getChainClient } from '../infra/chain/index.js'

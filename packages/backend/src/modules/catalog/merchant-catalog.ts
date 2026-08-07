@@ -11,6 +11,7 @@
  *
  * The probe is read-only — it never pays, signs, or follows the challenge.
  */
+// dep-lint-exempt: pool appears only as the default of the injectable QueryableLike executor (index.ts and tests inject their own); the probe-driven refresh/ingest updates it feeds await a catalog repository (beyond #999's ~100-line budget)
 import pool from '../../db.js'
 
 export interface CatalogRow {

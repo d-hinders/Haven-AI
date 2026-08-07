@@ -21,6 +21,7 @@
  */
 
 import { FastifyInstance } from 'fastify'
+// dep-lint-exempt: 11 statements on the x402 demo-resources + receipts aggregate; verbatim extraction is a >100-line move deferred under #999's fix-or-waive budget
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getChain } from '../domain/chains.js'

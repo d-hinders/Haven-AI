@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify'
+// dep-lint-exempt: 3 BAS-mapping statements (settings read + upserts) awaiting a bookkeeping-settings repository — verbatim move deferred under #999's ~100-line fix-or-waive budget
 import pool from '../db.js'
 import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'

@@ -15,6 +15,7 @@
  * connections, leaking the lock).
  */
 
+// dep-lint-exempt: pg advisory locks are session-scoped, so the lock must acquire and hold ONE dedicated connection (pool.connect) for its whole lease — connection lifecycle management, not repository SQL
 import pool from '../db.js'
 
 /**

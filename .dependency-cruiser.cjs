@@ -16,7 +16,10 @@
 //   npm run lint:deps           # check against the baseline
 //   npm run lint:deps:update    # rewrite the baseline (shrink, or a reviewed add)
 
-// Chain SDKs, confined to rails/ and infra/ once those exist (#994).
+// Chain SDKs, confined to infra/chain/ behind the ChainClient port (#994) —
+// `rails/` doesn't exist yet (#980's later modularization), so today "confined"
+// means `infra/` (and, until #998 lands, the handful of `lib/*.ts` files the
+// port's implementations wrap rather than duplicate).
 // NOTE: dependency-cruiser reports npm dependencies by their RESOLVED path, so
 // this must match `node_modules/<pkg>` — a bare `^ethers` matches nothing and
 // silently passes. That false negative is covered by a unit test.
@@ -55,12 +58,15 @@ module.exports = {
     {
       // Rule 4 — not tidiness. ethers and viem format payment amounts
       // differently at the edges; confining them makes substitution testable
-      // in one place. Driven to zero by #994.
+      // in one place. Driven to zero by #994 — zero-tolerance: this rule
+      // carries NO baseline entries for routes/** and must never gain one
+      // (the same convention as `no-circular`/`core-stays-pure`).
       name: 'chain-sdk-not-in-routes',
       severity: 'error',
       comment:
         'Route handlers must not import a chain SDK. Go through the ChainClient port ' +
-        '(#994); pure helpers like formatUnits belong in @haven_ai/core.',
+        '(domain/chain-client.ts + infra/chain/, #994); pure helpers like ' +
+        'formatTokenAmount/isAddress belong in @haven_ai/core.',
       from: { path: '^packages/backend/src/routes/' },
       to: { path: CHAIN_SDKS },
     },

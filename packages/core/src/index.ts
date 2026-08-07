@@ -17,6 +17,10 @@
 
 export { ETH_ADDRESS_RE, isAddress } from './address.js'
 
+// Pure atomic<->decimal token amount conversion (#994) — the shared
+// definition ethers.formatUnits/parseUnits usage in routes substitutes to.
+export { formatTokenAmount, parseTokenAmount } from './amount.js'
+
 // Wire shapes generated from the backend's OpenAPI spec (#984) — the single
 // source for API response types. `ApiSchema<'TransactionsResponse'>` is the
 // ergonomic entry point; `ApiPaths`/`ApiOperations` cover route-keyed lookups.

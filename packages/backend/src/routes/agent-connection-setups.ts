@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import crypto from 'crypto'
-import { ethers } from 'ethers'
+import { resolveX402BindingSignerAddress } from '../infra/chain/x402-binding-signer.js'
 import * as setups from '../infra/repositories/agent-connection-setups.js'
 import type {
   AllowanceRow,
@@ -1012,7 +1012,7 @@ function buildConnectorSetupResponse(
       reset_period_min: allowance.reset_period_min,
     })),
     hosted_mcp_url: hostedMcpUrlValue,
-    x402_binding_signer: x402BindingSignerAddress(),
+    x402_binding_signer: resolveX402BindingSignerAddress(),
     challenge: {
       id: setup.challenge_id,
       message: setup.challenge_message,
@@ -1173,27 +1173,9 @@ function hostedMcpUrlOrReply(request: FastifyRequest, reply: FastifyReply): stri
 // the signer has no trusted verifier and refuses to sign x402 payments. Returns
 // null when x402 binding is not configured on this deployment (the field is
 // then omitted from the setup response). HAVEN_X402_BINDING_SIGNER overrides the
-// derived address for deployments that hold only the public address here. Read
-// fresh per call — /resolve is a low-frequency connect-time endpoint.
-function x402BindingSignerAddress(): string | null {
-  const explicit = process.env.HAVEN_X402_BINDING_SIGNER?.trim()
-  if (explicit) {
-    try {
-      return ethers.getAddress(explicit)
-    } catch {
-      console.warn('HAVEN_X402_BINDING_SIGNER is not a valid address; ignoring.')
-    }
-  }
-
-  const privateKey = process.env.X402_BINDING_PRIVATE_KEY?.trim()
-  if (!privateKey) return null
-  try {
-    return new ethers.Wallet(privateKey).address
-  } catch {
-    console.warn('X402_BINDING_PRIVATE_KEY is set but invalid; cannot derive the x402 binding signer.')
-    return null
-  }
-}
+// derived address for deployments that hold only the public address here.
+// `resolveX402BindingSignerAddress` (infra/chain — #994) reads env fresh per
+// call, matching /resolve's low-frequency connect-time usage.
 
 function extractAgentApiKey(request: FastifyRequest): string | null {
   const authHeader = request.headers.authorization

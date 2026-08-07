@@ -27,8 +27,7 @@
 
 import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
-import { encodeFunctionData } from 'viem'
-import type { Hex, Address } from 'viem'
+import type { Hex, Address } from '../domain/chain-client.js'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'

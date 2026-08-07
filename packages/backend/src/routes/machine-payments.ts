@@ -1,7 +1,6 @@
 import { resolveExecutionRail, sessionRailRetired } from '../lib/execution-rail.js'
 import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
-import { ethers } from 'ethers'
 import { config } from '../config.js'
 import {
   findSendIntentByIdempotencyKey,
@@ -40,7 +39,7 @@ import {
 } from '../lib/machine-payments.js'
 import { getAgentPaymentStatus, agentPaymentStatusHttpCode } from '../lib/agent-payment-status.js'
 import { deriveDelegationBudgets } from '../lib/delegation-budget-view.js'
-import { isAddress as isValidAddress } from '@haven_ai/core'
+import { formatTokenAmount, isAddress as isValidAddress, parseTokenAmount } from '@haven_ai/core'
 import {
   attachMachinePaymentEvidence,
   type MachinePaymentEvidenceRow,
@@ -269,7 +268,7 @@ function sweepResultBody(fields: {
   return {
     tx_hash: fields.txHash,
     asset: 'USDC',
-    amount: ethers.formatUnits(BigInt(fields.valueAtomic), USDC_DECIMALS),
+    amount: formatTokenAmount(BigInt(fields.valueAtomic), USDC_DECIMALS),
     amount_atomic: fields.valueAtomic,
     from_address: fields.from,
     to_address: fields.to,
@@ -646,7 +645,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     // 3. Convert human amount to raw units
     let amountRaw: bigint
     try {
-      amountRaw = ethers.parseUnits(amount, tokenConfig.decimals)
+      amountRaw = parseTokenAmount(amount, tokenConfig.decimals)
     } catch {
       return reply.code(400).send({ error: `Invalid amount for ${tokenConfig.symbol}` })
     }
@@ -696,7 +695,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
 
     // 5a. Queue for approval when amount exceeds remaining on-chain allowance
     if (amountRaw > effective.remaining) {
-      const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
+      const remainingHuman = formatTokenAmount(effective.remaining, tokenConfig.decimals)
       const approvalReason =
         `Exceeds remaining allowance (${amount} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
 
@@ -1145,17 +1144,17 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     // the relayer gas to sweep it would exceed the value returned. No authorization
     // is stored, so /sweep/submit can't relay a below-floor sweep either. Balances
     // above the floor (including large ones) are recovered normally.
-    const minAtomic = ethers.parseUnits(config.sweepMinUsdc, USDC_DECIMALS)
+    const minAtomic = parseTokenAmount(config.sweepMinUsdc, USDC_DECIMALS)
     if (balance < minAtomic) {
       return reply.code(200).send({
         below_min: true,
         asset: 'USDC',
-        amount: ethers.formatUnits(balance, USDC_DECIMALS),
+        amount: formatTokenAmount(balance, USDC_DECIMALS),
         amount_atomic: balance.toString(),
         min_usdc: config.sweepMinUsdc,
         chain_id: agent.chain_id,
         message:
-          `Stranded ${ethers.formatUnits(balance, USDC_DECIMALS)} USDC is below the sweep ` +
+          `Stranded ${formatTokenAmount(balance, USDC_DECIMALS)} USDC is below the sweep ` +
           `floor of ${config.sweepMinUsdc} USDC — left on the delegate (recovering dust ` +
           `would cost more gas than it returns).`,
       })
@@ -1187,7 +1186,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       authorization,
       expected_auth: expectedAuth,
       asset: 'USDC',
-      amount: ethers.formatUnits(balance, USDC_DECIMALS),
+      amount: formatTokenAmount(balance, USDC_DECIMALS),
       amount_atomic: balance.toString(),
       chain_id: agent.chain_id,
       sign_instructions:

@@ -1,37 +1,19 @@
 import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
-import {
-  Contract,
-  Interface,
-  ZeroAddress,
-  getAddress,
-  getCreate2Address,
-  keccak256,
-  solidityPacked,
-  solidityPackedKeccak256,
-} from 'ethers'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getChain, isSupportedChain, isDeployableChain } from '../lib/chains.js'
 import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
 import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../lib/relayer.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
-
-const SAFE_SETUP_ABI = [
-  'function setup(address[] _owners, uint256 _threshold, address to, bytes data, address fallbackHandler, address paymentToken, uint256 payment, address paymentReceiver)',
-] as const
-
-const PROXY_FACTORY_ABI = [
-  'function createProxyWithNonce(address _singleton, bytes initializer, uint256 saltNonce) returns (address proxy)',
-  'function proxyCreationCode() view returns (bytes)',
-  'event ProxyCreation(address proxy, address singleton)',
-] as const
-const PASSKEY_SIGNER_FACTORY_ABI = [
-  'function createSigner(uint256 x, uint256 y, uint176 verifiers) returns (address signer)',
-] as const
-
-const SAFE_SETUP_IFACE = new Interface(SAFE_SETUP_ABI)
-const PROXY_FACTORY_IFACE = new Interface(PROXY_FACTORY_ABI)
+import {
+  encodeSafeSetupCalldata,
+  ensurePasskeySignerDeployed,
+  extractSafeAddressFromReceipt,
+  getProxyFactoryContract,
+  getRelayerProviderCode,
+  predictSafeProxyAddress,
+} from '../infra/chain/safe-proxy-deployer.js'
 
 interface DeploySafeBody {
   chain_id: number
@@ -46,21 +28,6 @@ interface StoredPasskeyRow {
   safe_address: string | null
 }
 
-interface SafeProxyFactoryContract {
-  createProxyWithNonce(singleton: string, initializer: string, saltNonce: bigint): Promise<{
-    hash: string
-    wait(): Promise<{ logs: Array<{ address?: string; topics?: string[]; data?: string }> } | null>
-  }>
-  proxyCreationCode(): Promise<string>
-}
-
-interface PasskeySignerFactoryContract {
-  createSigner(x: bigint, y: bigint, verifiers: bigint): Promise<{
-    hash: string
-    wait(): Promise<unknown>
-  }>
-}
-
 function parseHexCoordinate(value: Buffer): `0x${string}` {
   return `0x${value.toString('hex')}` as `0x${string}`
 }
@@ -68,87 +35,6 @@ function parseHexCoordinate(value: Buffer): `0x${string}` {
 function isInsufficientFundsError(error: unknown): boolean {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
   return message.includes('insufficient funds')
-}
-
-function extractSafeAddressFromReceipt(
-  factoryAddress: string,
-  receipt: { logs: Array<{ address?: string; topics?: string[]; data?: string }> },
-): string {
-  for (const log of receipt.logs) {
-    if (log.address?.toLowerCase() !== factoryAddress.toLowerCase()) {
-      continue
-    }
-
-    try {
-      const parsed = PROXY_FACTORY_IFACE.parseLog({
-        topics: log.topics ?? [],
-        data: log.data ?? '0x',
-      })
-      if (parsed?.name === 'ProxyCreation') {
-        return getAddress(parsed.args[0])
-      }
-    } catch {
-      // Ignore unrelated logs from the same tx.
-    }
-  }
-
-  throw new Error('Safe deployment transaction succeeded but ProxyCreation event not found')
-}
-
-function predictSafeProxyAddress(args: {
-  factoryAddress: string
-  singletonAddress: string
-  initializer: string
-  saltNonce: bigint
-  proxyCreationCode: string
-}): string {
-  const deploymentData = solidityPacked(
-    ['bytes', 'uint256'],
-    [args.proxyCreationCode, BigInt(args.singletonAddress)],
-  )
-  const salt = solidityPackedKeccak256(
-    ['bytes32', 'uint256'],
-    [keccak256(args.initializer), args.saltNonce],
-  )
-
-  return getCreate2Address(
-    args.factoryAddress,
-    salt,
-    keccak256(deploymentData),
-  )
-}
-
-async function ensurePasskeySignerDeployed(args: {
-  chainId: number
-  relayer: ReturnType<typeof getRelayer>
-  factoryAddress: string
-  signerAddress: string
-  x: `0x${string}`
-  y: `0x${string}`
-  verifierAddress: string
-}): Promise<void> {
-  const provider = args.relayer.provider
-  const code = provider ? await provider.getCode(args.signerAddress) : '0x'
-  if (code !== '0x') {
-    return
-  }
-
-  const signerFactory = new Contract(
-    args.factoryAddress,
-    PASSKEY_SIGNER_FACTORY_ABI,
-    args.relayer,
-  ) as unknown as PasskeySignerFactoryContract
-
-  // Broadcast under the per-chain send lock so the signer deploy can't race
-  // another relayer submission for the same EOA nonce (#692/#718).
-  const tx = await withRelayerSendLock(args.chainId, () =>
-    signerFactory.createSigner(
-      BigInt(args.x),
-      BigInt(args.y),
-      BigInt(args.verifierAddress),
-    ),
-  )
-  await tx.wait()
 }
 
 export default async function safeDeployRoutes(app: FastifyInstance): Promise<void> {
@@ -221,16 +107,10 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         return reply.code(500).send({ error: 'Internal server error' })
       }
 
-      const deploymentInitializer = SAFE_SETUP_IFACE.encodeFunctionData('setup', [
-        [expectedSignerAddress],
-        1n,
-        ZeroAddress,
-        '0x',
-        chain.contracts.fallbackHandler,
-        ZeroAddress,
-        0n,
-        ZeroAddress,
-      ])
+      const deploymentInitializer = encodeSafeSetupCalldata({
+        owner: expectedSignerAddress,
+        fallbackHandler: chain.contracts.fallbackHandler,
+      })
 
       // #717: one deploy budget per user covers the whole route (signer
       // deploy + proxy deploy ride the same cap) — checked before the
@@ -247,11 +127,7 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         y: parseHexCoordinate(passkey.public_key_y),
         verifierAddress: chain.passkey.verifier,
       })
-      const factory = new Contract(
-        chain.contracts.safeProxyFactory,
-        PROXY_FACTORY_ABI,
-        relayer,
-      ) as unknown as SafeProxyFactoryContract
+      const factory = getProxyFactoryContract(chain.contracts.safeProxyFactory, relayer)
 
       const proxyCreationCode = await factory.proxyCreationCode()
       const predictedSafeAddress = predictSafeProxyAddress({
@@ -262,8 +138,7 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
         proxyCreationCode,
       })
 
-      const provider = relayer.provider
-      const existingCode = provider ? await provider.getCode(predictedSafeAddress) : '0x'
+      const existingCode = await getRelayerProviderCode(relayer, predictedSafeAddress)
       if (existingCode !== '0x') {
         await client.query('ROLLBACK')
         transactionOpen = false

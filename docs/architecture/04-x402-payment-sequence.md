@@ -421,6 +421,9 @@ receipt's gas numbers for cost attribution. Availability guard, not a funds
 gate: it fails open on database errors because funds stay caveat-gated
 on-chain either way.
 
+Since #994 the x402 route reaches the chain only through the `ChainClient`
+port and `infra/chain/` modules (binding-signer consolidated there) — the
+route file itself imports no chain SDK.
 Since #1130 agent authentication ahead of every x402 call distinguishes a
 pending agent (`403 agent_pending_approval`, actionable) from a bad key
 (`401`) — the compound misdiagnosis from #1129's URL confusion is now

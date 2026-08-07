@@ -1,16 +1,19 @@
 import { FastifyInstance } from 'fastify'
-import { ethers } from 'ethers'
 import { authMiddleware } from '../middleware/auth.js'
 import pool from '../db.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
-import { getProvider } from '../lib/allowance-module.js'
+import { getChainClient } from '../infra/chain/index.js'
 import { formatTokenValue } from '../lib/tokens.js'
 import { createCache } from '../lib/cache.js'
 import { emitFunnelEvent } from '../lib/onboarding-funnel.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
-// Minimal ERC-20 ABI for balanceOf
-const ERC20_ABI = ['function balanceOf(address account) view returns (uint256)']
+// Balance reads are RPC-standard and rail-agnostic (a `balanceOf`/native-balance
+// read is identical regardless of which execution rail the Safe uses), and this
+// route has no agent/rail context to resolve one from — it reads a Safe address
+// directly. Kept on the existing ethers-backed implementation (#994) so this
+// route's behavior is unchanged; there's no per-rail branch to make here.
+const BALANCE_READ_RAIL = 'allowance_module'
 
 const balanceCache = createCache<{ balances: BalanceItem[] }>(30_000)
 
@@ -80,7 +83,7 @@ export default async function balanceRoutes(
 
       const cacheKey = `bal:${chainId}:${safeAddress.toLowerCase()}`
       const result = await balanceCache.getOrFetch(cacheKey, async () => {
-        const provider = getProvider(chainId)
+        const chainClient = getChainClient(BALANCE_READ_RAIL)
         const tokens = Object.values(chain.tokens)
         const nativeToken = tokens.find((t) => t.address === null)!
         const erc20Tokens = tokens.filter((t) => t.address !== null)
@@ -88,11 +91,8 @@ export default async function balanceRoutes(
         const balances: BalanceItem[] = []
 
         const results = await Promise.allSettled([
-          provider.getBalance(safeAddress),
-          ...erc20Tokens.map((token) => {
-            const contract = new ethers.Contract(token.address!, ERC20_ABI, provider)
-            return contract.balanceOf(safeAddress) as Promise<bigint>
-          }),
+          chainClient.getNativeBalance(chainId, safeAddress),
+          ...erc20Tokens.map((token) => chainClient.getTokenBalance(chainId, token.address!, safeAddress)),
         ])
 
         const nativeResult = results[0]

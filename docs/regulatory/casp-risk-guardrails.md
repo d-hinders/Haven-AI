@@ -134,6 +134,11 @@ Haven backend
 > Since #1059 every delegation-rail intent also records `budget_delegation_hash`
 > — the metering budget, uniform across schemes — so attribution in the
 > accounting feed never depends on parsing prepared execution state.
+> Since #994 no route handler imports a chain SDK: chain reads go through
+> the `ChainClient` port and pure amount formatting through `@haven_ai/core`
+> (characterized byte-identical to the prior implementation) — enforced at
+> zero-tolerance by the dependency ratchet, so the HTTP layer cannot regrow
+> direct chain access.
 > Since #1139 every migration in the mainnet-money table set carries a
 > structural `down()` (proven by an up-then-down-all run against a real
 > schema) — rollback is operator tooling, never runner behavior, and the

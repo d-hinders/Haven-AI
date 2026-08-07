@@ -1,7 +1,7 @@
 import { RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { ethers } from 'ethers'
-import { buildX402ExpectedMessage, type X402ExpectedContext } from '@haven_ai/sdk'
+import { getChainClient } from '../infra/chain/index.js'
+import { signX402ExpectedContext } from '../infra/chain/x402-binding-signer.js'
 import {
   expirePendingIntent,
   getIntentStatus,
@@ -25,7 +25,7 @@ import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../
 import { getExplorerUrl } from '../lib/chains.js'
 import { getFiatValuesForTokenAmount } from '../lib/fiat-values.js'
 import { formatTokenValue } from '../lib/tokens.js'
-import { isAddress as isValidAddress } from '@haven_ai/core'
+import { formatTokenAmount, isAddress as isValidAddress } from '@haven_ai/core'
 import {
   getTokenAllowance,
   getTokenBalance,
@@ -122,15 +122,13 @@ function isPositiveDecimalAtomicAmount(value: string): boolean {
  * Normalise an Ethereum address to its canonical EIP-55 checksum form.
  *
  * x402 payment-required headers are emitted by third-party services that may
- * ship malformed (non-checksummed or mis-cased) addresses. ethers v6 throws
- * `bad address checksum` when ABI-encoding such values, which surfaced here
- * as a confusing "Failed to generate transfer hash" error.
- *
- * Lower-casing first lets `getAddress()` skip checksum validation and just
- * recompute it, so any 40-hex address (any casing) is accepted.
+ * ship malformed (non-checksummed or mis-cased) addresses. Skipping to the
+ * lower-cased form first lets the checksum re-derive instead of validate, so
+ * any 40-hex address (any casing) is accepted — see the `ChainClient` port
+ * (#994) for why this goes through `normaliseAddress` and not a raw SDK call.
  */
 function normaliseAddress(addr: string): string {
-  return ethers.getAddress(addr.toLowerCase())
+  return getChainClient('allowance_module').normaliseAddress(addr)
 }
 
 function chainIdFromX402Network(network: string): number | null {
@@ -140,28 +138,6 @@ function chainIdFromX402Network(network: string): number | null {
     return Number.isInteger(chainId) ? chainId : null
   }
   return null
-}
-
-async function signX402ExpectedContext(context: X402ExpectedContext) {
-  const privateKey = process.env.X402_BINDING_PRIVATE_KEY
-  if (!privateKey) {
-    throw new Error(
-      'X402_BINDING_PRIVATE_KEY must be set to authenticate x402 expected context. ' +
-        'Do not fall back to RELAYER_PRIVATE_KEY — the binding signer must be a dedicated key ' +
-        'so that the edge signer can verify it against HAVEN_X402_BINDING_SIGNER.',
-    )
-  }
-  const wallet = new ethers.Wallet(privateKey)
-  const message = buildX402ExpectedMessage(context)
-  return {
-    // Derived from the context, never chosen here: a v2 context carries a
-    // typed-data commitment and a v1 one does not. Announcing a version the
-    // message does not match is precisely the downgrade the signer rejects.
-    version: (context.typedDataHash ? 2 : 1) as 1 | 2,
-    message,
-    signature: await wallet.signMessage(message),
-    signer: wallet.address,
-  }
 }
 
 /**
@@ -1108,10 +1084,10 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     if (decision.kind === 'insufficient') {
       const shortfallRaw = decision.shortfall
       const totalCoverage = decision.totalCoverage
-      const balanceHuman = ethers.formatUnits(delegateBalance, tokenConfig.decimals)
-      const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
-      const coverageHuman = ethers.formatUnits(totalCoverage, tokenConfig.decimals)
-      const shortfallHuman = ethers.formatUnits(shortfallRaw, tokenConfig.decimals)
+      const balanceHuman = formatTokenAmount(delegateBalance, tokenConfig.decimals)
+      const remainingHuman = formatTokenAmount(effective.remaining, tokenConfig.decimals)
+      const coverageHuman = formatTokenAmount(totalCoverage, tokenConfig.decimals)
+      const shortfallHuman = formatTokenAmount(shortfallRaw, tokenConfig.decimals)
       return reply.code(422).send({
         error:
           `Insufficient funds to pay ${amountHuman} ${tokenConfig.symbol}: ` +
@@ -1146,7 +1122,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     }
 
     if (decision.kind === 'queue') {
-      const remainingHuman = ethers.formatUnits(effective.remaining, tokenConfig.decimals)
+      const remainingHuman = formatTokenAmount(effective.remaining, tokenConfig.decimals)
       const merchantPart = merchantPayTo ? ` to merchant ${merchantPayTo}` : ''
       const approvalReason = `x402 payment for ${url}${merchantPart}${category ? ` (${category})` : ''} — exceeds remaining allowance (${amountHuman} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
       const metadata = {

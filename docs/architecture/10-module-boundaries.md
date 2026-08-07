@@ -13,7 +13,7 @@ covers:
   - packages/backend/src/lib/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-08-05"
+last-verified: "2026-08-06"
 ---
 
 # Module Boundaries
@@ -111,7 +111,7 @@ Only the subset checkable against today's tree is enabled — a rule about
 |---|---|---|
 | 1. `domain/` is pure | ◐ `core-stays-pure` covers the shared kernel (#983); the backend's own `domain/` still to come | the `domain/` directory (#998) |
 | 2. `modules/` may not import `http/` | ✗ | the `modules/` directories (#992 / #996 / #997) |
-| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra` | #985 landed the convention + first route; #988 / #995 remain |
+| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra` | #985 / #988 / #995 landed (money path fully extracted); residual inline SQL is baseline-ratcheted |
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes` | zeroed by #994 |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (#998) |
 | 6. Cross-module imports go through `index.ts` | ✅ scoped to `lib/{reporting,fee}/` | widens as modules land; zeroed by #998 |

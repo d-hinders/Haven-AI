@@ -6,7 +6,16 @@ import {
   type AgentPaymentPhase as AgentPaymentPhaseValue,
 } from './agent-payment-taxonomy.js'
 import { ethers } from 'ethers'
-import pool from '../db.js'
+import {
+  expireOverdueIntentById,
+  findIntentStatusRow,
+  type PaymentIntentStatusRow,
+} from '../infra/repositories/payment-intents.js'
+import {
+  expireOverdueApproval,
+  findApprovalStatusRow,
+  type ApprovalStatusRow,
+} from '../infra/repositories/approval-requests.js'
 import { type AgentContext } from '../middleware/agentAuth.js'
 import { quoteFee } from './fee/fee-module.js'
 
@@ -182,50 +191,6 @@ export interface AgentMppResumeState {
   chainId: number
   merchantAddress: string
   expiresAt: string
-}
-
-interface PaymentIntentStatusRow {
-  id: string
-  chain_id: number
-  token_symbol: string
-  token_address: string | null
-  amount_human: string
-  amount_raw: string | null
-  status: string
-  tx_hash: string | null
-  expires_at: string
-  source: string | null
-  payment_rail: string | null
-  payment_resource_url: string | null
-  x402_resource_url: string | null
-  merchant_address: string | null
-  x402_merchant_address: string | null
-  x402_idempotency_key: string | null
-  machine_challenge_id: string | null
-  machine_idempotency_key: string | null
-  machine_metadata: unknown
-  /** True when an open merchant_retry_rejected_after_payment reconciliation event exists. */
-  funded_but_unsettled: boolean
-}
-
-interface ApprovalStatusRow {
-  id: string
-  chain_id: number
-  token_symbol: string
-  token_address: string | null
-  amount_human: string
-  amount_raw: string | null
-  status: string
-  tx_hash: string | null
-  expires_at: string
-  source: string | null
-  payment_rail: string | null
-  payment_resource_url: string | null
-  x402_resource_url: string | null
-  merchant_address: string | null
-  machine_challenge_id: string | null
-  machine_idempotency_key: string | null
-  machine_metadata: unknown
 }
 
 interface MachinePaymentMetadata {
@@ -676,31 +641,9 @@ export async function getAgentPaymentStatus(
   agent: AgentContext,
   paymentId: string,
 ): Promise<AgentPaymentStatus | null> {
-  await pool.query(
-    `UPDATE payment_intents
-     SET status = 'expired'
-     WHERE id = $1 AND agent_id = $2 AND status = 'pending_signature' AND expires_at < NOW()`,
-    [paymentId, agent.id],
-  )
+  await expireOverdueIntentById(paymentId, agent.id)
 
-  const paymentResult = await pool.query<PaymentIntentStatusRow>(
-    `SELECT pi.id, pi.chain_id, pi.token_symbol, pi.token_address, pi.amount_human, pi.amount_raw,
-            pi.status, pi.tx_hash, pi.expires_at,
-            pi.source, pi.payment_rail, pi.payment_resource_url, pi.x402_resource_url,
-            pi.merchant_address, pi.x402_merchant_address, pi.x402_idempotency_key,
-            pi.machine_challenge_id, pi.machine_idempotency_key, pi.machine_metadata,
-            (mpre.id IS NOT NULL) AS funded_but_unsettled
-     FROM payment_intents pi
-     LEFT JOIN machine_payment_reconciliation_events mpre
-       ON mpre.payment_intent_id = pi.id
-      AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-      AND mpre.status = 'open'
-     WHERE pi.id = $1 AND pi.agent_id = $2
-     LIMIT 1`,
-    [paymentId, agent.id],
-  )
-
-  const payment = paymentResult.rows[0]
+  const payment: PaymentIntentStatusRow | null = await findIntentStatusRow(paymentId, agent.id)
   if (payment) {
     const state = payment.funded_but_unsettled && payment.status === 'confirmed'
       ? {
@@ -741,25 +684,9 @@ export async function getAgentPaymentStatus(
     }
   }
 
-  await pool.query(
-    `UPDATE approval_requests
-     SET status = 'expired'
-     WHERE id = $1 AND agent_id = $2 AND status IN ('pending', 'approved') AND expires_at < NOW()`,
-    [paymentId, agent.id],
-  )
+  await expireOverdueApproval(paymentId, agent.id)
 
-  const approvalResult = await pool.query<ApprovalStatusRow>(
-    `SELECT id, chain_id, token_symbol, token_address, amount_human, amount_raw,
-            status, tx_hash, expires_at,
-            source, payment_rail, payment_resource_url, x402_resource_url,
-            merchant_address, machine_challenge_id, machine_idempotency_key, machine_metadata
-     FROM approval_requests
-     WHERE id = $1 AND agent_id = $2
-     LIMIT 1`,
-    [paymentId, agent.id],
-  )
-
-  const approval = approvalResult.rows[0]
+  const approval: ApprovalStatusRow | null = await findApprovalStatusRow(paymentId, agent.id)
   if (!approval) return null
 
   const state = approvalState(approval.status)

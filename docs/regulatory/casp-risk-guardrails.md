@@ -15,6 +15,12 @@ covers:
   - packages/backend/src/lib/fortnox.ts
   - packages/backend/src/lib/fortnox-connection.ts
   - packages/backend/src/lib/allowance-module.ts
+  - packages/backend/src/infra/repositories/payment-intents.ts
+  - packages/backend/src/infra/repositories/approval-requests.ts
+  - packages/backend/src/infra/repositories/x402-authorizations.ts
+  - packages/backend/src/infra/repositories/machine-payments.ts
+  - packages/backend/src/infra/repositories/account-entitlements.ts
+  - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/lib/accounting-entry.ts
   - packages/backend/src/lib/catalog-discovery.ts
   - packages/backend/src/lib/merchant-catalog.ts
@@ -214,6 +220,8 @@ Preserve these facts as non-negotiable implementation invariants:
 - Users can access their Safe through other Safe-compatible UIs.
 - Users can revoke or modify agent authority independently of Haven.
 - Haven cannot block users from transacting with their Safe outside Haven.
+
+**Delegation-rail x402 signing is local-signer-only (owner decision, 2026-08-06, #1138).** The hosted/edge keyless path never signs an account UserOp: on this rail the agent's signature is produced by the local signer holding the delegate key, exactly as invariant "signed by an agent private key held by the agent or user, not by Haven" requires. Haven's role is limited to *declaring* what is to be signed — an expected context it signs with a dedicated binding key — which the signer verifies before signing and can refuse. Because the account validates EIP-712 typed data rather than the bare ERC-4337 hash, that declaration commits to the typed data's digest (expected context v2); the signer re-derives the digest from the payload it actually signs and refuses any mismatch, so Haven cannot substitute a different operation behind a correctly-signed declaration. This is a boundary, not a staging decision: teaching the hosted signer to sign account UserOps would put Haven in the signing path and is out of scope by construction.
 
 **Delegation rail (epic #821, dark-launched 2026-07):** a second account type (MetaMask Hybrid DeleGator) is being introduced with the same custody posture — every invariant above maps one-to-one per [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) (§2, implemented as CI checks in #831). Two Safe-specific formulations generalise rather than weaken: "Safe-compatible UIs" becomes the independent exit path (#832, now DEMONSTRABLE — live-verified enumerate + owner-signed revoke with no Haven involvement; see [`docs/exit/README.md`](../exit/README.md)), and "Safe transactions approved by the user" becomes owner-signed delegations. The payment path (#829) moves funds ONLY via the agent's owner-signed delegation, redeemed through audited enforcers that carry the budget, recipient and expiry on-chain; Haven relays sponsored operations and signs nothing (invariants 5-d/7-d/11/12 in CI).
 
@@ -623,6 +631,12 @@ Haven's "Add funds" feature embeds a link to a licensed third-party on-ramp prov
 - If Haven ever pre-funds purchases (e.g., instant availability before on-chain settlement), this becomes a credit or payment service — do not implement without a separate regulatory review.
 
 ## Payment-Related Merge Checklist
+
+> Since #995, all payment/x402/machine-payment SQL lives in
+> `packages/backend/src/infra/repositories/` (routes and libs hold control flow
+> only), and every settlement statement is PREPARE-checked against the real
+> schema in CI via `db-schema-smoke` — a schema/query drift on the money path
+> now fails the build instead of 500ing in production.
 
 Before merging any payment-related, agent-authority, Safe, SDK, x402/MPP, or relayer change, verify:
 

@@ -1,4 +1,4 @@
-import pool from '../db.js'
+import { findSettledPaymentReceiptRow } from '../infra/repositories/payment-intents.js'
 import {
   RECEIPT_VERSION,
   verifyPaymentReceipt,
@@ -63,17 +63,6 @@ export async function getPaymentReceipt(
   paymentId: string,
   agentId: string,
 ): Promise<PaymentReceipt | null> {
-  const result = await pool.query<PaymentReceiptRow>(
-    `SELECT pi.id, pi.safe_address, pi.chain_id, pi.token_symbol, pi.token_address,
-            pi.to_address, pi.amount_human, pi.delegate_address, pi.sign_hash,
-            pi.signature, pi.tx_hash, pi.confirmed_at,
-            mpe.resource_url AS resource_url,
-            mpe.amount_sek AS amount_sek
-     FROM payment_intents pi
-     LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
-     WHERE pi.id = $1 AND pi.agent_id = $2 AND pi.status = 'confirmed'`,
-    [paymentId, agentId],
-  )
-  const row = result.rows[0]
+  const row = await findSettledPaymentReceiptRow(paymentId, agentId)
   return row ? buildPaymentReceipt(row) : null
 }

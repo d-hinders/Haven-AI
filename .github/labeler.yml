@@ -52,6 +52,7 @@
           - ".github/workflows/publish.yml"
           - ".github/workflows/qa-dev.yml"
           - "packages/backend/src/db/migrations/**"
+          - "packages/backend/src/infra/repositories/**"
           - "packages/backend/src/lib/allowance-module.ts"
           - "packages/backend/src/lib/allowance-nonce-coordinator.ts"
           - "packages/backend/src/lib/delegation-*.ts"

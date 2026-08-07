@@ -16,7 +16,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-05"
+last-verified: "2026-08-06"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -160,6 +160,36 @@ reconstructs the canonical payment/resource/merchant/amount/asset/network/expiry
 context, verifies Haven's expected-context signature against its configured
 trusted signer. Before building the merchant header, it rejects expired context
 and verifies that the live challenge still matches the recorded funded context.
+
+### Expected context v1 / v2 — which payload may be signed (#1138)
+
+The hosted flow above works on the **delegation rail** too, with one difference
+that the signer, not the caller, enforces. On that rail the account validates
+the UserOp's **EIP-712 typed data**, while `payload_hash` is the bare ERC-4337
+hash — a different value. Binding only the hash would leave the edge signer
+endorsing bytes it cannot check, which is the opposite of the property the
+binding exists to provide.
+
+So the expected context is versioned, and the version is *derived* from its
+contents rather than announced:
+
+| Version | Carries | Signer may sign |
+|---|---|---|
+| v1 | no `typedDataHash` | the bare hash (raw ECDSA) — legacy rail |
+| v2 | `typedDataHash` | `sign_data.typed_data` (EIP-712) — delegation rail |
+
+The signer refuses the mismatch **in both directions**: raw-signing the hash of
+a v2 intent (the account would reject that signature on-chain, after the intent
+is claimed), and signing typed data under a v1 context (no commitment to what
+is being signed). It then re-derives the digest from the typed data in hand and
+requires it to equal the committed one, so the Haven-signed declaration covers
+the exact bytes signed. `buildX402ExpectedMessage` puts the version in both the
+header line and the signed payload, so neither context can be replayed as the
+other.
+
+Delegation-rail UserOp signing is **local-signer-only** — the hosted/edge
+keyless path never signs an account UserOp. That is a non-custody and CASP-scope
+boundary (owner decision, 2026-08-06), not a sequencing preference.
 
 ## Hosted Paid-MCP-Tool Flow
 
@@ -431,6 +461,11 @@ error instead of quietly routing a payment at the wrong chain's bundler.
 
 ## Guardrails
 
+- Data access for this flow lives in `packages/backend/src/infra/repositories/`
+  (`x402-authorizations.ts`, `payment-intents.ts`, `approval-requests.ts`, #995) —
+  routes hold the control flow only, and every statement (idempotency lookups,
+  the #961 stale-replay refresh, the settle flip) is PREPARE-checked against the
+  real schema in CI via `db-schema-smoke`.
 - Keep x402 budgets small and reset-bound.
 - Treat the delegate key as a hot payment key for x402.
 - Reconcile or sweep stranded delegate balances before scaling.

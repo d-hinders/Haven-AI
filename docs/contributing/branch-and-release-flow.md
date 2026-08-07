@@ -7,7 +7,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-08-05"
+last-verified: "2026-08-07"
 ---
 
 # Branch & release flow
@@ -80,8 +80,15 @@ the epic when its last sub-issue lands on `dev`.
 - **In prod (history):** the [**`prod-*` GitHub Releases**](https://github.com/d-hinders/Haven-AI/releases)
   — one per promotion, each with its PR list.
 - **Awaiting promotion:** the **📦 "Pending promotion: dev → main"** issue, kept
-  current by `promotion-digest.yml` (weekly + on-demand via *Run workflow*). The
-  `main..dev` compare is the same view on demand.
+  current by `promotion-digest.yml` — refreshed **on every promotion** (push to
+  `main`, so it flips to ✅ as soon as prod catches up), weekly for drift piling
+  up on `dev`, and on-demand via *Run workflow*. The `main..dev` compare is the
+  same view on demand.
+
+  It is **one long-lived issue, deliberately**: the workflow upserts by the
+  `promotion` label, so closing it just makes the next run open a duplicate under
+  a new number. It's **pinned** rather than recreated — a bot-maintained tracker
+  wants a stable identity, and pinning is what keeps it visible. Leave it open.
 
 ## Workflows in this flow
 
@@ -89,7 +96,7 @@ the epic when its last sub-issue lands on `dev`.
 |---|---|---|
 | `dev-gate.yml` | PR into `main` | `gate`: blocks anything but `dev`/`hotfix/*`. `qa-freshness`: blocks unless a green money-flow QA run covers the promoted money-path code; a money-path `hotfix/*` blocks outright ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)). Bypass: `qa-override`. |
 | `release.yml` | push to `main` | cuts the `prod-*` Release |
-| `promotion-digest.yml` | weekly + manual | upserts the pending-promotion issue |
+| `promotion-digest.yml` | push to `main` + weekly + manual | upserts the pending-promotion issue |
 | `publish.yml` | push to `main` | publishes packages whose version isn't yet on npm |
 
 ## One-time setup

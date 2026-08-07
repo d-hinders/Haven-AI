@@ -316,8 +316,20 @@ export interface X402ExpectedContext {
 }
 
 export interface X402ExpectedAuth {
-  /** 1 = hash-only (legacy rail). 2 = carries `typedDataHash` (delegation rail, #1138). */
-  version: 1 | 2
+  /**
+   * 1 = hash-only (legacy rail). 2 = carries `typedDataHash` (delegation rail,
+   * #1138).
+   *
+   * Deliberately `number`, not a literal union (#1143). This is an **inbound**
+   * value: a signer parses a context Haven produced, and a signer older than the
+   * backend will legitimately receive a version it does not know. A closed union
+   * makes that state unrepresentable, which pushed the rejection down to the
+   * schema boundary and produced a raw validation error naming neither the cause
+   * nor the fix. The supported set lives in the signer
+   * (`SUPPORTED_X402_EXPECTED_VERSIONS`), which fails closed on anything outside
+   * it with an actionable message.
+   */
+  version: number
   message: string
   signature: string
   signer: string

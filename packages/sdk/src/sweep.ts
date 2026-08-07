@@ -118,7 +118,13 @@ export interface SweepAuthorization {
  * hosted server pointing `to` at an attacker) before it signs.
  */
 export interface SweepExpectedAuth {
-  version: 1
+  /**
+   * Currently always 1. Typed as `number` for the same reason as
+   * `X402ExpectedAuth.version` (#1143): it is inbound, so a stale signer must be
+   * able to *receive* an unknown version in order to report it. The signer's
+   * `SUPPORTED_SWEEP_BINDING_VERSIONS` is the authority on what it will sign.
+   */
+  version: number
   message: string
   signature: string
   signer: string

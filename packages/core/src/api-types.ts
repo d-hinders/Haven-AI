@@ -442,7 +442,10 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** Fetch live allowance state for the authenticated agent. */
+        /**
+         * Fetch live spend-authority state for the authenticated agent.
+         * @description Rail-aware (#1135): on the legacy rail this reads the on-chain AllowanceModule per configured token; on the delegation rail the same response shape carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). A retired session-rail account gets 410. Reporting only — enforcement stays on-chain on every rail.
+         */
         get: operations["getMachinePaymentAllowances"];
         put?: never;
         post?: never;
@@ -3585,7 +3588,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Configured and on-chain allowance state. */
+            /** @description Configured and remaining spend authority for the account's rail. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3618,6 +3621,21 @@ export interface operations {
                     "application/json": {
                         error: string;
                         detail?: string;
+                    };
+                };
+            };
+            /** @description The account is on the retired session rail — no state is read (#993 fail-closed contract). */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };

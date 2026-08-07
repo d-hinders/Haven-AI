@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto'
 import { FastifyInstance, FastifyRequest } from 'fastify'
-import { ethers } from 'ethers'
 import pool from '../db.js'
 import { getExplorerUrl } from '../lib/chains.js'
+import { getChainClient } from '../infra/chain/index.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import { demoRateLimit } from '../middleware/rate-limit.js'
 
@@ -52,7 +52,7 @@ function parseB64Json<T>(value: string): T | null {
 
 function demoRecipient(): string | null {
   const configured = process.env.MPP_DEMO_RECIPIENT_ADDRESS
-  if (configured && isValidAddress(configured)) return ethers.getAddress(configured.toLowerCase())
+  if (configured && isValidAddress(configured)) return getChainClient('allowance_module').normaliseAddress(configured)
   return null
 }
 

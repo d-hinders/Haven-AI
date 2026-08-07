@@ -42,3 +42,11 @@ export async function up(client: PoolClient): Promise<void> {
     DROP INDEX IF EXISTS agent_passports_revocation_pending_idx;
   `)
 }
+
+/**
+ * Best-effort structural reverse (#1139) — mirrors what up() created. The
+ * runner never calls down(); this exists for operator rollback tooling only.
+ */
+export async function down(client: PoolClient): Promise<void> {
+  await client.query(`DROP INDEX IF EXISTS agent_passports_revocation_due_idx`)
+}

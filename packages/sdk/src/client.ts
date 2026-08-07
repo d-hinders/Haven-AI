@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { exact } from 'x402/schemes'
+import { hashTypedData } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { signHash, signUserOpTypedDataForDelegation, addressFromKey, verifySignature } from './signer.js'
 import { verifyPaymentReceipt, type PaymentReceipt, type ReceiptVerification } from './receipt.js'
@@ -342,6 +343,30 @@ function selectJsonRpcResult(
   return messages.find((m) => 'result' in m || 'error' in m) ?? messages[messages.length - 1]
 }
 
+/**
+ * Digest of a delegation-rail signing payload, or `undefined` when there is
+ * none (#1138).
+ *
+ * Guarded because a payload that cannot be hashed is not a recoverable
+ * condition to paper over: the edge signer derives this same digest before
+ * signing, so an unhashable payload can never be signed by anyone. Surfacing it
+ * as a named Haven error beats letting a raw viem type error escape from the
+ * middle of intent construction.
+ */
+function x402TypedDataDigest(typedData: unknown): string | undefined {
+  if (!typedData || typeof typedData !== 'object') return undefined
+  try {
+    return hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+  } catch (err) {
+    throw new HavenSigningError(
+      'The x402 funding intent carried a sign_data.typed_data that is not a valid EIP-712 ' +
+        'payload (needs domain, types, primaryType, message), so its digest cannot be derived ' +
+        'and no signer could accept it. ' +
+        `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+}
+
 export class HavenClient {
   private readonly apiKey: string
   private readonly delegateKey: string | undefined
@@ -528,15 +553,19 @@ export class HavenClient {
     if (!raw.sign_data?.hash) {
       throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
     }
-    // #946: a delegation-rail funding intent signs the ACCOUNT's EIP-712 typed
-    // data — the keyless/hosted flow's edge signer only raw-ECDSA-signs a
-    // payload hash, which the account would reject at the bundler AFTER the
-    // intent is claimed. Fail loudly here instead of confusingly there.
-    if (raw.sign_data.signature_scheme !== undefined) {
+    // #946/#1138: a delegation-rail funding intent signs the ACCOUNT's EIP-712
+    // typed data, not the bare hash. This path is keyless by construction, so
+    // it does not sign either one — it passes the payload through to whoever
+    // holds the key (the local signer the connector installs). What it MUST
+    // refuse is a scheme it cannot describe faithfully: handing a caller a
+    // `hash` for a typed-data intent invites a raw ECDSA signature the account
+    // rejects at the bundler, after the intent is claimed.
+    if (raw.sign_data.signature_scheme !== undefined && !raw.sign_data.typed_data) {
       throw new HavenSigningError(
-        `This account's x402 funding intent requires signature scheme '${raw.sign_data.signature_scheme}', ` +
-          'which the hosted/keyless signer flow does not support yet. Use the local SDK flow ' +
-          '(HavenClient with delegateKey) for delegation-rail x402 payments.',
+        `This account's x402 funding intent declares signature scheme ` +
+          `'${raw.sign_data.signature_scheme}' but carried no typed_data to sign. ` +
+          'Refusing to fall back to the bare hash — the account would reject that signature ' +
+          'on-chain. This is a backend contract violation; report it rather than working around it.',
       )
     }
     if (!raw.x402_expected_auth) {
@@ -556,6 +585,14 @@ export class HavenClient {
       asset: option.asset,
       network: option.network,
       expectedAuth: raw.x402_expected_auth,
+      // #1138: the digest the delegation-rail expected context commits to.
+      // Re-derived locally, exactly like every other context field the edge
+      // signer is handed (amount, merchantTo, …) — none of them are trusted
+      // because they arrived, they are trusted because the reconstructed
+      // message has to match Haven's signature over it. A typed_data altered in
+      // transit therefore fails message equality and is refused, and the signer
+      // re-derives this digest a second time from the payload it actually signs.
+      expectedTypedDataHash: x402TypedDataDigest(raw.sign_data.typed_data),
       fundingTo,
     }
   }

@@ -320,9 +320,26 @@ export function x402AuthorizationAmount(option: X402PaymentOption): string {
   return amount
 }
 
+/**
+ * Canonical Haven-authenticated x402 expected context, recomputed byte-for-byte
+ * by the edge signer before it signs anything.
+ *
+ * **Two versions, and the version is derived — never passed in (#1138).**
+ * `typedDataHash` present ⇒ v2, absent ⇒ v1. A v1 message is byte-identical to
+ * what shipped before, so existing signers keep verifying legacy-rail bindings
+ * unchanged.
+ *
+ * The version lives in both the header line and the payload so neither can be
+ * reinterpreted as the other: a v2 context cannot be replayed as a v1 one that
+ * drops the typed-data commitment, and a v1 context cannot be presented as v2.
+ * That downgrade is exactly the attack the digest exists to stop — see
+ * `assertExpectedBinding` in `@haven_ai/signer`, which refuses to raw-sign a
+ * hash under a v2 binding and refuses to sign typed data without one.
+ */
 export function buildX402ExpectedMessage(context: X402ExpectedContext): string {
+  const version = context.typedDataHash ? 2 : 1
   const payload: Record<string, unknown> = {
-    version: 1,
+    version,
     kind: 'haven.x402.expected',
     paymentId: context.paymentId,
     payloadHash: context.payloadHash.toLowerCase(),
@@ -335,7 +352,10 @@ export function buildX402ExpectedMessage(context: X402ExpectedContext): string {
   if (context.expiresAt) {
     payload.expiresAt = context.expiresAt
   }
-  return `Haven x402 expected context v1\n${stableStringify(payload)}`
+  if (context.typedDataHash) {
+    payload.typedDataHash = context.typedDataHash.toLowerCase()
+  }
+  return `Haven x402 expected context v${version}\n${stableStringify(payload)}`
 }
 
 export function toStandardPaymentRequirements(

@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-08-05"
+last-verified: "2026-08-07"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -190,6 +190,14 @@ shape; only the returned `sign_data` scheme differs (`eip712_userop` typed data
 the account validates verbatim, vs an AllowanceModule transfer hash). Delegation
 lifecycle lives under `/agents/{id}/delegations/*` (build/activate/revoke) and
 account provisioning under `POST /accounts/hybrid`.
+
+The agent-facing spend-authority read is rail-aware (#1135):
+`GET /machine-payments/allowances` returns the on-chain AllowanceModule
+snapshot on the legacy rail, the ACTIVE budget delegations (same #1090
+derivation the dashboard uses; remaining = the period budget) on the
+delegation rail in the same response shape, and the #993 fail-closed 410 for
+retired `session_key` accounts. The SDK derives its `readiness` signal from
+this endpoint, so both rails report honest spendability.
 
 Not all delegation-rail routes are in the OpenAPI spec yet: the x402 settlement
 route `POST /x402/{id}/settle` (#830) currently sits on the drift check's

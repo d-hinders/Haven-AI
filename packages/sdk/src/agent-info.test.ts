@@ -101,6 +101,49 @@ describe('agent info helpers', () => {
     expect(summary.allowances[0]).toMatchObject({ remainingAtomic: '0', remainingDisplay: '0.0 USDC' })
   })
 
+  it('getAgentSummary derives ready from a delegation-rail derived budget (#1135)', async () => {
+    // The delegation rail's /allowances view reports the active delegation's
+    // period budget as remaining (amount = remaining = budget, spent = 0,
+    // no AllowanceModule nonce). Readiness must derive ready from it with no
+    // rail-specific SDK logic.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+      if (u.endsWith('/machine-payments/allowances')) {
+        return delegationAllowancesResponse([{ tokenAddress: USDC_BASE, tokenSymbol: 'USDC', budgetAtomic: '10000000' }])
+      }
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const summary = await haven.getAgentSummary()
+
+    expect(summary.readiness).toBe('ready')
+    expect(summary.allowances[0]).toMatchObject({
+      tokenSymbol: 'USDC',
+      remainingAtomic: '10000000',
+      remainingDisplay: '10.0 USDC',
+    })
+  })
+
+  it('getAgentSummary reports needs_approval when a delegation agent has NO active budget (#1135)', async () => {
+    // No active delegation → the endpoint returns an empty allowances array.
+    // Readiness must stay honest: nothing spendable means needs_approval,
+    // not an unconditionally optimistic ready.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+      if (u.endsWith('/machine-payments/allowances')) return delegationAllowancesResponse([])
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const summary = await haven.getAgentSummary()
+
+    expect(summary.readiness).toBe('needs_approval')
+    expect(summary.allowances).toEqual([])
+  })
+
   it('getAgentSummary reports revoked when the credential is not active, regardless of allowance', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       const u = String(url)
@@ -257,6 +300,39 @@ function agentResponse(status: string): Response {
 // lookup (Base USDC = 6 decimals, Gnosis EURe = 18 decimals).
 const USDC_BASE = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
 const EURE_GNOSIS = '0xcb444e90d8198415266c6a2724b7900fb12fc56e'
+
+/**
+ * The delegation rail's /machine-payments/allowances shape (#1135): remaining
+ * is the ACTIVE delegation's period budget (amount = remaining, spent = 0);
+ * the AllowanceModule-only fields are zeroed placeholders on this rail.
+ */
+function delegationAllowancesResponse(
+  budgets: Array<{ tokenAddress: string; tokenSymbol: string; budgetAtomic: string }>,
+): Response {
+  return new Response(JSON.stringify({
+    agent_id: 'agent-1',
+    safe_address: '0xSafe',
+    delegate_address: '0xDelegate',
+    chain_id: 8453,
+    allowances: budgets.map((b, i) => ({
+      id: `delegation-${i + 1}`,
+      token_address: b.tokenAddress,
+      token_symbol: b.tokenSymbol,
+      configured_amount: '10.00',
+      reset_period_min: 1440,
+      onchain: {
+        amount: b.budgetAtomic,
+        spent: '0',
+        remaining: b.budgetAtomic,
+        effective_spent: '0',
+        reset_time_min: 1440,
+        last_reset_min: 0,
+        nonce: 0,
+        is_reset_pending: false,
+      },
+    })),
+  }))
+}
 
 function allowancesResponse(
   overrides: { remaining?: string; tokenAddress?: string; tokenSymbol?: string } = {},

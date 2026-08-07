@@ -66,8 +66,26 @@ export interface SignData {
   /** The hash to sign (keccak256, 0x-prefixed) */
   hash: string
 
-  /** 'eip712_userop' = delegation rail; absent = legacy AllowanceModule (raw ECDSA). The session rail's 'eip191_userop' is retired (#834). */
-  signature_scheme?: 'eip712_userop'
+  /**
+   * Delegation rail: 'eip712_userop' (funding redemption) or
+   * 'eip712_delegation' (erc7710 settlement child). Absent = legacy
+   * AllowanceModule (raw ECDSA over `hash`). The session rail's
+   * 'eip191_userop' is retired (#834).
+   *
+   * When present, `hash` is NOT what gets signed — `typed_data` is (#1138).
+   */
+  signature_scheme?: 'eip712_userop' | 'eip712_delegation'
+
+  /**
+   * EIP-712 payload the account validates, signed VERBATIM (#829). Present
+   * whenever `signature_scheme` is — never reconstruct it from `components`.
+   */
+  typed_data?: {
+    domain: Record<string, unknown>
+    types: Record<string, unknown>
+    primaryType: string
+    message: Record<string, unknown>
+  }
 
   /** Breakdown of values that were hashed — useful for debugging */
   components: {
@@ -264,6 +282,12 @@ export interface X402Intent {
   network: string
   /** Haven-authenticated binding over the x402 expected context. */
   expectedAuth: X402ExpectedAuth
+  /**
+   * EIP-712 digest of `signData.typed_data`, present on the delegation rail
+   * (#1138). The edge signer needs it to reconstruct the v2 expected-context
+   * message that Haven signed.
+   */
+  expectedTypedDataHash?: string
   /** Delegate EOA the funding transfer tops up (the x402 payer). */
   fundingTo: string
 }
@@ -278,10 +302,34 @@ export interface X402ExpectedContext {
   network: string
   /** Optional ISO expiry for the funding/quote window. When present, it is bound into the Haven-authenticated context. */
   expiresAt?: string
+  /**
+   * EIP-712 digest of the typed data the account actually validates
+   * (delegation rail, #1138). Present ⇒ the context is **version 2** and the
+   * signer must sign that typed data, never `payloadHash`.
+   *
+   * On the delegation rail `payloadHash` is the bare ERC-4337 UserOp hash,
+   * which is NOT what the account validates — binding it alone would leave the
+   * edge signer unable to verify the payload it is being asked to sign. Binding
+   * this digest makes Haven's declaration cover the real payload.
+   */
+  typedDataHash?: string
 }
 
 export interface X402ExpectedAuth {
-  version: 1
+  /**
+   * 1 = hash-only (legacy rail). 2 = carries `typedDataHash` (delegation rail,
+   * #1138).
+   *
+   * Deliberately `number`, not a literal union (#1143). This is an **inbound**
+   * value: a signer parses a context Haven produced, and a signer older than the
+   * backend will legitimately receive a version it does not know. A closed union
+   * makes that state unrepresentable, which pushed the rejection down to the
+   * schema boundary and produced a raw validation error naming neither the cause
+   * nor the fix. The supported set lives in the signer
+   * (`SUPPORTED_X402_EXPECTED_VERSIONS`), which fails closed on anything outside
+   * it with an actionable message.
+   */
+  version: number
   message: string
   signature: string
   signer: string
@@ -524,10 +572,17 @@ export interface HavenAllowanceSummary {
 
 /**
  * Affirmative spend-readiness for the authenticated agent, derived from the raw
- * agent status plus the on-chain remaining allowance:
- * - `ready`         — active and at least one token has remaining on-chain allowance.
- * - `needs_approval`— active but no remaining allowance to auto-spend; payments
- *                     will be queued for the wallet owner to approve in Haven.
+ * agent status plus the remaining spend authority the backend reports per rail
+ * (the on-chain AllowanceModule on the legacy rail; the active budget
+ * delegation on the delegation rail — #1135):
+ * - `ready`         — active and at least one token has remaining spend authority.
+ * - `needs_approval`— active but no remaining spend authority to auto-spend.
+ *                     The over-budget outcome differs by rail: on the legacy
+ *                     AllowanceModule rail the payment is queued for the wallet
+ *                     owner to approve in Haven; on the delegation rail there is
+ *                     NO approval queue — an over-budget redemption reverts
+ *                     on-chain, so the owner must grant or raise the budget in
+ *                     Haven before the agent can pay.
  * - `revoked`       — the agent's status is not `active`; nothing auto-executes.
  *
  * Note: a hard-paused/disabled credential is rejected by the API before this
@@ -935,21 +990,7 @@ export interface RawMachinePaymentAuthorizeResponse {
   challenge_id?: string
   explorer_url?: string
   expires_at?: string
-  sign_data?: {
-    hash: string
-    /** 'eip712_userop' = delegation rail; absent = legacy AllowanceModule (raw ECDSA). The session rail's 'eip191_userop' is retired (#834). */
-    signature_scheme?: 'eip712_userop'
-    components: {
-      safe: string
-      token: string
-      to: string
-      amount: string
-      payment_token: string
-      payment: string
-      nonce: number
-    }
-    instructions: string
-  }
+  sign_data?: SignData
   error?: string
 }
 
@@ -986,21 +1027,7 @@ export interface RawX402AuthorizeResponse {
   mpp?: RawMppStateContext
   challenge_id?: string
   expires_at?: string
-  sign_data?: {
-    hash: string
-    /** 'eip712_userop' = delegation rail; absent = legacy AllowanceModule (raw ECDSA). The session rail's 'eip191_userop' is retired (#834). */
-    signature_scheme?: 'eip712_userop'
-    components: {
-      safe: string
-      token: string
-      to: string
-      amount: string
-      payment_token: string
-      payment: string
-      nonce: number
-    }
-    instructions: string
-  }
+  sign_data?: SignData
   error?: string
 }
 

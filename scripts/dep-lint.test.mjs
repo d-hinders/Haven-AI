@@ -2,7 +2,7 @@
 // Run with: node --test scripts/dep-lint.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { createRequire } from 'node:module'
@@ -184,13 +184,33 @@ test('every forbidden rule has a name and an actionable comment', () => {
 // ── Live integration ────────────────────────────────────────────────
 
 test('the live scan detects real violations and reports zero cycles', async () => {
-  const { counts, details, fileCount } = await scanAll()
+  // #994 emptied EVERY real chain-sdk-not-in-routes violation (that was the
+  // issue's whole point), so there is no longer a real "known-bad" route file
+  // to assert against — planting one permanently would defeat the
+  // zero-tolerance baseline #994 just landed. Use a temporary fixture instead,
+  // written into and removed from the real scanned tree around one `cruise()`
+  // call, so this still proves the FULL pipeline (file walk -> cruise() ->
+  // rule match -> path resolution) fires, not just the regex
+  // ('the chain-SDK matcher matches RESOLVED npm paths' above already covers
+  // the regex in isolation).
+  const fixturePath = join(
+    REPO_ROOT, 'packages', 'backend', 'src', 'routes', '__dep_lint_live_scan_fixture__.ts',
+  )
+  writeFileSync(fixturePath, "import { ethers } from 'ethers'\nexport const _fixture = ethers\n")
+
+  let counts, details, fileCount
+  try {
+    ;({ counts, details, fileCount } = await scanAll())
+  } finally {
+    rmSync(fixturePath, { force: true })
+  }
+
   assert.ok(fileCount > 100, `expected to scan the backend tree, saw ${fileCount} files`)
 
   // The rule that silently passed must actually fire on a known-bad file.
   assert.ok(
-    counts['packages/backend/src/routes/x402.ts']?.['chain-sdk-not-in-routes'] > 0,
-    'routes/x402.ts imports ethers — the chain-SDK rule must fire on it',
+    counts['packages/backend/src/routes/__dep_lint_live_scan_fixture__.ts']?.['chain-sdk-not-in-routes'] > 0,
+    'a routes/ file importing ethers must trip the chain-SDK rule',
   )
 
   // The shared kernel is clean. Paired with the scan-coverage test below, which
@@ -203,6 +223,7 @@ test('the live scan detects real violations and reports zero cycles', async () =
 
   // Rule 7 is the one to defend hardest; the tree is currently cycle-free and
   // must stay that way. This is an absolute assertion, NOT a baselined one.
+  // (The fixture above imports only `ethers`, so it cannot introduce a cycle.)
   assert.equal(
     details.filter((d) => d.rule === 'no-circular').length,
     0,

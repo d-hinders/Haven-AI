@@ -95,8 +95,12 @@ stay free of any database import.
 5. Shrink the `dep-lint-baseline.json` entry for whatever file you emptied. The
    baseline is shrink-only — never regenerate it to silence a failure.
 
-## Not yet done
+## Status
 
-`#988` (agents, user-safes) and `#995` (payments, x402, machine-payments) are
-the remaining tracks of epic #980's M3. Until they land, most backend SQL is
-still inline and outside the smoke test's reach.
+Epic #980 M3's three tracks have landed: `#985` (the convention +
+agent-connection-setups), `#988` (agents, user-safes) and `#995` (payments,
+x402, machine-payments — `payment-intents.ts`, `approval-requests.ts`,
+`x402-authorizations.ts`, `machine-payments.ts`, `account-entitlements.ts`).
+The money path's data access now lives here and is PREPARE-checked by
+`db-schema-smoke`; remaining inline SQL elsewhere is ratcheted in
+`dep-lint-baseline.json` and may only shrink.

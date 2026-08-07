@@ -106,3 +106,18 @@ export async function up(client: PoolClient): Promise<void> {
       );
   `)
 }
+
+/**
+ * Best-effort structural reverse (#1139) — mirrors what up() created. The
+ * runner never calls down(); this exists for operator rollback tooling only.
+ */
+export async function down(client: PoolClient): Promise<void> {
+  await client.query(`DROP INDEX IF EXISTS agent_passports_attestation_uid_idx`)
+  await client.query(`DROP INDEX IF EXISTS agent_passports_smart_account_idx`)
+  await client.query(`DROP INDEX IF EXISTS agent_passports_agent_eoa_idx`)
+  await client.query(`
+    ALTER TABLE agent_passports
+      DROP COLUMN IF EXISTS smart_account,
+      DROP COLUMN IF EXISTS agent_eoa
+  `)
+}

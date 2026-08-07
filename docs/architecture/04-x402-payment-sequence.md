@@ -4,6 +4,7 @@ status: current
 contract: true
 covers:
   - packages/backend/src/routes/x402.ts
+  - packages/backend/src/modules/x402/**
   - packages/backend/src/routes/x402-resources.ts
   - packages/backend/src/lib/agent-payment-status.ts
   - packages/backend/src/lib/payment-coverage.ts
@@ -16,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-05"
+last-verified: "2026-08-07"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -50,7 +51,14 @@ Source of truth:
 
 - [`packages/sdk/src/x402.ts`](../../packages/sdk/src/x402.ts)
 - [`packages/sdk/src/client.ts`](../../packages/sdk/src/client.ts)
-- [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts)
+- [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts) — request
+  validation, auth wiring, rate-limit config, and response serialization only.
+  The authorize orchestration (scheme routing, funding-leg prep, erc7710 child
+  building, the #961 replay/resume logic) and settle assembly live in
+  [`packages/backend/src/modules/x402/`](../../packages/backend/src/modules/x402/index.ts)
+  (#996, epic #980 M4). `lib/x402-delegation.ts` stays in `lib/` — it is the
+  settlement *compiler* (typed-data / header assembly primitives), not route
+  orchestration.
 - [`packages/backend/src/lib/payment-coverage.ts`](../../packages/backend/src/lib/payment-coverage.ts)
 - [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
 - [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts)
@@ -160,6 +168,51 @@ reconstructs the canonical payment/resource/merchant/amount/asset/network/expiry
 context, verifies Haven's expected-context signature against its configured
 trusted signer. Before building the merchant header, it rejects expired context
 and verifies that the live challenge still matches the recorded funded context.
+
+### Expected context v1 / v2 — which payload may be signed (#1138)
+
+The hosted flow above works on the **delegation rail** too, with one difference
+that the signer, not the caller, enforces. On that rail the account validates
+the UserOp's **EIP-712 typed data**, while `payload_hash` is the bare ERC-4337
+hash — a different value. Binding only the hash would leave the edge signer
+endorsing bytes it cannot check, which is the opposite of the property the
+binding exists to provide.
+
+So the expected context is versioned, and the version is *derived* from its
+contents rather than announced:
+
+| Version | Carries | Signer may sign |
+|---|---|---|
+| v1 | no `typedDataHash` | the bare hash (raw ECDSA) — legacy rail |
+| v2 | `typedDataHash` | `sign_data.typed_data` (EIP-712) — delegation rail |
+
+The signer refuses the mismatch **in both directions**: raw-signing the hash of
+a v2 intent (the account would reject that signature on-chain, after the intent
+is claimed), and signing typed data under a v1 context (no commitment to what
+is being signed). It then re-derives the digest from the typed data in hand and
+requires it to equal the committed one, so the Haven-signed declaration covers
+the exact bytes signed. `buildX402ExpectedMessage` puts the version in both the
+header line and the signed payload, so neither context can be replayed as the
+other.
+
+A version outside the table is a **third** refusal, and the one an operator is
+most likely to meet (#1143). The set a given signer understands is
+`SUPPORTED_X402_EXPECTED_VERSIONS` in `packages/signer/src/core.ts`; anything else
+fails closed before any content check, with an error naming the received version,
+the signer's ceiling, and the fix. This is not hypothetical housekeeping: the
+backend deploys continuously from `dev` while a signer reaches users only on a
+merge to `main`, so a signer one release behind a context bump is a structural
+state. The tool schema therefore accepts any positive integer for `auth.version`
+and leaves the decision to the signer — a literal there is validated by the MCP
+server *before* any handler runs, which is how the original v2 rollout produced a
+raw Zod string instead of a Haven diagnosis. Widening the schema widened the error
+path only; an unrecognised version was never signable and still is not. Symptom
+strings per signer age are tabulated in
+[`mcp-runtime-compatibility.md`](../operations/mcp-runtime-compatibility.md).
+
+Delegation-rail UserOp signing is **local-signer-only** — the hosted/edge
+keyless path never signs an account UserOp. That is a non-custody and CASP-scope
+boundary (owner decision, 2026-08-06), not a sequencing preference.
 
 ## Hosted Paid-MCP-Tool Flow
 
@@ -331,7 +384,8 @@ merchants — so the rail now selects a settlement scheme **per payment**
 live-proven 2026-07-18; design of record: RFC
 [#791](https://github.com/d-hinders/Haven-AI/issues/791) §18 "B4-D").
 
-**How the scheme is chosen.** `routes/x402.ts` keys on the authorize request's
+**How the scheme is chosen.** The `modules/x402/` authorize orchestration
+(`scheme-selection.ts`, since #996) keys on the authorize request's
 `payTo` shape — which is exactly the standard-x402 SDK contract, so existing
 SDKs gained delegation-rail merchant reach with no client change:
 
@@ -376,6 +430,9 @@ receipt's gas numbers for cost attribution. Availability guard, not a funds
 gate: it fails open on database errors because funds stay caveat-gated
 on-chain either way.
 
+Since #994 the x402 route reaches the chain only through the `ChainClient`
+port and `infra/chain/` modules (binding-signer consolidated there) — the
+route file itself imports no chain SDK.
 Since #1130 agent authentication ahead of every x402 call distinguishes a
 pending agent (`403 agent_pending_approval`, actionable) from a bad key
 (`401`) — the compound misdiagnosis from #1129's URL confusion is now
@@ -431,6 +488,11 @@ error instead of quietly routing a payment at the wrong chain's bundler.
 
 ## Guardrails
 
+- Data access for this flow lives in `packages/backend/src/infra/repositories/`
+  (`x402-authorizations.ts`, `payment-intents.ts`, `approval-requests.ts`, #995) —
+  routes hold the control flow only, and every statement (idempotency lookups,
+  the #961 stale-replay refresh, the settle flip) is PREPARE-checked against the
+  real schema in CI via `db-schema-smoke`.
 - Keep x402 budgets small and reset-bound.
 - Treat the delegate key as a hot payment key for x402.
 - Reconcile or sweep stranded delegate balances before scaling.

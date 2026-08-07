@@ -125,7 +125,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Use this as the one-shot orientation/bootstrap at the start of a session, or whenever you need to confirm identity together with whether the agent can spend right now. For a detailed per-token breakdown (configured vs spent vs reset window) use haven_get_allowances.',
     behavior:
-      'Reads identity plus the on-chain AllowanceModule snapshot in one shot. readiness is "ready" when at least one token has remaining on-chain allowance, "needs_approval" when the agent is active but has no remaining allowance to auto-spend (payments will be queued for the wallet owner to approve in Haven), and "revoked" when the credential is not active. allowances[] carries remainingAtomic and remainingDisplay per token. Identity fields (id, name, status, safeAddress, delegateAddress, chainId) are unchanged from before.',
+      'Reads identity plus the live spend-authority snapshot in one shot — the on-chain AllowanceModule on the legacy rail, the active budget delegation on the delegation rail. readiness is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. What an over-budget payment does differs by rail: on the legacy AllowanceModule rail it is queued for the wallet owner to approve in Haven; on the delegation rail there is no approval queue — an over-budget redemption reverts on-chain, so ask the owner to grant or raise the budget in Haven rather than waiting for an approval. allowances[] carries remainingAtomic and remainingDisplay per token. Identity fields (id, name, status, safeAddress, delegateAddress, chainId) are unchanged from before.',
     nextActionGuidance: '',
   },
   getAllowances: {
@@ -134,7 +134,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Use this when the user asks about allowance, budget, spend limit, remaining amount, remaining allowance, remaining budget, daily limit, reset period, what can I spend, or what the agent can still spend.',
     behavior:
-      'Reads the Safe AllowanceModule snapshot per token (allowance, spent, remaining, reset window). Configured amounts from Haven are returned alongside the on-chain truth.',
+      'Returns the per-token spend authority for the account\'s rail: the Safe AllowanceModule snapshot (allowance, spent, remaining, reset window) on the legacy rail, or the active budget delegation (remaining = the period budget; over-budget redemptions revert on-chain, nothing queues) on the delegation rail. Configured amounts from Haven are returned alongside.',
     nextActionGuidance: '',
   },
   listReceipts: {

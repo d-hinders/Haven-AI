@@ -1,25 +1,19 @@
 import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../lib/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
-import { Contract, TypedDataEncoder } from 'ethers'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getChain, isSupportedChain } from '../lib/chains.js'
 import { predictSafePasskeySignerAddress } from '../lib/passkey-signer.js'
 import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../lib/relayer.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
+import {
+  computeSafeTxHash,
+  ensurePasskeySignerDeployed,
+  getSafeExecContract,
+} from '../infra/chain/safe-exec-contract.js'
 
 const HEX_RE = /^0x([0-9a-fA-F]{2})*$/
 const DECIMAL_RE = /^\d+$/
-
-const SAFE_EXEC_ABI = [
-  'function execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures) payable returns (bool success)',
-  'function nonce() view returns (uint256)',
-  'function encodeTransactionData(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,uint256 _nonce) view returns (bytes)',
-  'function checkSignatures(bytes32 dataHash,bytes data,bytes signatures) view',
-] as const
-const PASSKEY_SIGNER_FACTORY_ABI = [
-  'function createSigner(uint256 x, uint256 y, uint176 verifiers) returns (address signer)',
-] as const
 
 // The provider estimate has been reliable once the signer contract exists, but
 // passkey-backed Safe admin flows still need a little headroom beyond the raw
@@ -31,20 +25,6 @@ const RELAY_EXEC_GAS_BUFFER = 150_000n
 const RELAY_EXEC_GAS_LIMIT_FALLBACK = 5_000_000n
 // Upper bound to avoid accidentally submitting an unbounded relayer tx.
 const RELAY_EXEC_GAS_LIMIT_MAX = 8_000_000n
-const SAFE_TX_TYPES = {
-  SafeTx: [
-    { name: 'to', type: 'address' },
-    { name: 'value', type: 'uint256' },
-    { name: 'data', type: 'bytes' },
-    { name: 'operation', type: 'uint8' },
-    { name: 'safeTxGas', type: 'uint256' },
-    { name: 'baseGas', type: 'uint256' },
-    { name: 'gasPrice', type: 'uint256' },
-    { name: 'gasToken', type: 'address' },
-    { name: 'refundReceiver', type: 'address' },
-    { name: 'nonce', type: 'uint256' },
-  ],
-}
 
 interface ExecSafeBody {
   chain_id: number
@@ -68,72 +48,6 @@ interface StoredPasskeySafeRow {
   signer_address: string
 }
 
-interface SafeContract {
-  nonce(): Promise<bigint>
-  encodeTransactionData(
-    to: string,
-    value: bigint,
-    data: string,
-    operation: number,
-    safeTxGas: bigint,
-    baseGas: bigint,
-    gasPrice: bigint,
-    gasToken: string,
-    refundReceiver: string,
-    nonce: bigint,
-  ): Promise<string>
-  checkSignatures(dataHash: string, data: string, signatures: string): Promise<void>
-  execTransaction: {
-    (
-      to: string,
-      value: bigint,
-      data: string,
-      operation: number,
-      safeTxGas: bigint,
-      baseGas: bigint,
-      gasPrice: bigint,
-      gasToken: string,
-      refundReceiver: string,
-      signatures: string,
-      overrides?: { gasLimit?: bigint },
-    ): Promise<{
-      hash: string
-      wait(): Promise<unknown>
-    }>
-    staticCall(
-      to: string,
-      value: bigint,
-      data: string,
-      operation: number,
-      safeTxGas: bigint,
-      baseGas: bigint,
-      gasPrice: bigint,
-      gasToken: string,
-      refundReceiver: string,
-      signatures: string,
-    ): Promise<boolean>
-    estimateGas(
-      to: string,
-      value: bigint,
-      data: string,
-      operation: number,
-      safeTxGas: bigint,
-      baseGas: bigint,
-      gasPrice: bigint,
-      gasToken: string,
-      refundReceiver: string,
-      signatures: string,
-    ): Promise<bigint>
-  }
-}
-
-interface PasskeySignerFactoryContract {
-  createSigner(x: bigint, y: bigint, verifiers: bigint): Promise<{
-    hash: string
-    wait(): Promise<unknown>
-  }>
-}
-
 function parseHexCoordinate(value: Buffer): `0x${string}` {
   return `0x${value.toString('hex')}` as `0x${string}`
 }
@@ -147,28 +61,6 @@ function isValidDecimal(value: string): boolean {
   return DECIMAL_RE.test(value)
 }
 
-function computeSafeTxHash(body: ExecSafeBody): string {
-  return TypedDataEncoder.hash(
-    {
-      chainId: body.chain_id,
-      verifyingContract: body.safe_address,
-    },
-    SAFE_TX_TYPES,
-    {
-      to: body.to,
-      value: BigInt(body.value),
-      data: body.data,
-      operation: body.operation,
-      safeTxGas: BigInt(body.safe_tx_gas),
-      baseGas: BigInt(body.base_gas),
-      gasPrice: BigInt(body.gas_price),
-      gasToken: body.gas_token,
-      refundReceiver: body.refund_receiver,
-      nonce: BigInt(body.nonce),
-    },
-  )
-}
-
 function getRelayExecGasLimit(estimatedGas: bigint | null): bigint {
   if (estimatedGas === null) {
     return RELAY_EXEC_GAS_LIMIT_FALLBACK
@@ -176,39 +68,6 @@ function getRelayExecGasLimit(estimatedGas: bigint | null): bigint {
 
   const buffered = estimatedGas + RELAY_EXEC_GAS_BUFFER
   return buffered > RELAY_EXEC_GAS_LIMIT_MAX ? RELAY_EXEC_GAS_LIMIT_MAX : buffered
-}
-
-async function ensurePasskeySignerDeployed(args: {
-  chainId: number
-  relayer: ReturnType<typeof getRelayer>
-  factoryAddress: string
-  signerAddress: string
-  x: `0x${string}`
-  y: `0x${string}`
-  verifierAddress: string
-}): Promise<void> {
-  const provider = args.relayer.provider
-  const code = provider ? await provider.getCode(args.signerAddress) : '0x'
-  if (code !== '0x') {
-    return
-  }
-
-  const signerFactory = new Contract(
-    args.factoryAddress,
-    PASSKEY_SIGNER_FACTORY_ABI,
-    args.relayer,
-  ) as unknown as PasskeySignerFactoryContract
-
-  // Broadcast under the per-chain send lock so the signer deploy can't race
-  // another relayer submission for the same EOA nonce (#692/#718).
-  const tx = await withRelayerSendLock(args.chainId, () =>
-    signerFactory.createSigner(
-      BigInt(args.x),
-      BigInt(args.y),
-      BigInt(args.verifierAddress),
-    ),
-  )
-  await tx.wait()
 }
 
 export default async function safeExecRoutes(app: FastifyInstance): Promise<void> {
@@ -291,11 +150,7 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
         y,
         verifierAddress: chain.passkey.verifier,
       })
-      const safe = new Contract(
-        body.safe_address,
-        SAFE_EXEC_ABI,
-        relayer,
-      ) as unknown as SafeContract
+      const safe = getSafeExecContract(body.safe_address, relayer)
 
       const execArgs = [
         body.to,

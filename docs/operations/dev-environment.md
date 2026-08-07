@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-08-05"
+last-verified: "2026-08-06"
 ---
 
 # Dev environment
@@ -32,7 +32,7 @@ how to configure it. For the branch workflow that feeds it, see
 |---|---|---|---|
 | Frontend | **Vercel** | `dev` branch alias + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, always the newest `dev` build). Per-PR previews exist alongside it. There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
 | Backend / API | **Railway** (dev project) | `dev` branch | Own isolated Postgres — never the prod DB. |
-| Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend. |
+| Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend via its own `HAVEN_API_URL`. ⚠️ Was found wired to `main` with a dead upstream on 2026-08-06 — [verify before trusting it](#verifying-a-dev-service-actually-works). |
 | Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. EIP-3009 by default; the experimental ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
 | Postgres | **Railway** managed | — | A separate managed instance, isolated from prod. |
 
@@ -92,6 +92,40 @@ deployed that way today.
   it shipped pointing at a NONEXISTENT host (`havenbackend-dev-8a00`, the dev
   prefix with production's hash), which made every relayed call fail like a
   credential problem (#1131).
+  ⚠️ That was one of **three** faults found on this one service in a single
+  session — see [Verifying a dev service actually works](#verifying-a-dev-service-actually-works).
+
+### Verifying a dev service actually works
+
+"Deploys from `dev`" in the table above describes the intent, not a guarantee. On
+2026-08-06 the dev hosted MCP was found with **two independent faults that had
+persisted for weeks**, each invisible to every gate in the repo (#1131):
+
+- its `HAVEN_API_URL` pointed at `havenbackend-dev-8a00.up.railway.app` — the `dev`
+  prefix with **production's** hash — a host that does not exist, so Railway's edge
+  answered `{"status":"error","code":404,"message":"Application not found"}` and every
+  relayed call failed upstream;
+- its Railway **Source** was connected to the **`main`** branch, not `dev`. So a service
+  in the dev environment was serving *production* code — and because `main` had not
+  moved since 2026-06-26 (317 commits behind `dev`; see the pending-promotion issue),
+  auto-deploy had nothing to fire on and the build silently aged. Its commit predated
+  SDK Base-Sepolia x402 support (`6d4d647`, 2026-06-28), so x402 payments failed with
+  `No compatible payment option found in x402 requirements` — an error that reads like
+  a merchant incompatibility, not a stale deploy.
+
+None of this is visible from the repo: a branch setting and a hostname typo live only in
+Railway, and a stale deployment still reports healthy. Before trusting a dev service,
+check all three:
+
+1. **It answers.** `curl -s https://<host>/healthz` → `{"status":"ok"}`.
+2. **Its upstream resolves.** Read the service's `HAVEN_API_URL` in Railway and curl
+   `<that host>/health`. `Application not found` means the hostname is wrong, not that
+   the backend is down.
+3. **Its build is current, from the right branch.** Railway → Settings → Source: a dev
+   service must be connected to **`dev`**. Then compare the deployment's commit against
+   `origin/dev` (`git log --oneline <deployed-sha>..origin/dev | wc -l`). A redeploy of
+   an old commit looks identical to a fresh deploy in the Railway UI, and a service
+   pinned to a branch that never moves never redeploys at all.
 
 ## Branch → deploy mapping
 

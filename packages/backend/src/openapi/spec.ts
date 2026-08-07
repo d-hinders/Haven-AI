@@ -914,11 +914,13 @@ export const openapiSpec = {
       get: {
         tags: ['Machine payments'],
         operationId: 'getMachinePaymentAllowances',
-        summary: 'Fetch live allowance state for the authenticated agent.',
+        summary: 'Fetch live spend-authority state for the authenticated agent.',
+        description:
+          'Rail-aware (#1135): on the legacy rail this reads the on-chain AllowanceModule per configured token; on the delegation rail the same response shape carries the ACTIVE budget delegations (remaining = the period budget; AllowanceModule-only fields are zeroed placeholders). A retired session-rail account gets 410. Reporting only — enforcement stays on-chain on every rail.',
         security: [{ AgentApiKey: [] }],
         responses: {
           '200': {
-            description: 'Configured and on-chain allowance state.',
+            description: 'Configured and remaining spend authority for the account\'s rail.',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/AllowanceSummary' },
@@ -927,6 +929,10 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '403': agentAuthForbidden,
+          '410': {
+            ...errorResponse,
+            description: 'The account is on the retired session rail — no state is read (#993 fail-closed contract).',
+          },
           '502': errorResponse,
         },
       },

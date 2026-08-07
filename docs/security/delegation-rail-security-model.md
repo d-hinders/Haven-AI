@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/lib/hybrid-account-config.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-06"
+last-verified: "2026-08-07"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)

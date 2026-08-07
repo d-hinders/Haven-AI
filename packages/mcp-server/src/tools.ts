@@ -224,7 +224,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, merchant_url, tool_name, arguments, mcp_transport }. ' +
     'The funding/quote window expires at expires_at; if it expires, re-run haven_pay_mcp_tool with the same idempotency_key before signing again. ' +
     'Finish with two follow-up calls (fast path, recommended): ' +
-    '(1) mcp__haven-signer__haven_sign_x402 on the local signer with payload_hash, x402_expected (the nested x402.expected context, including expires_at), and payment_required → { signature, payment_header }; ' +
+    '(1) mcp__haven-signer__haven_sign_x402 on the local signer with payload_hash, x402_expected (the nested x402.expected context, including expires_at), and payment_required → { signature, payment_header }. '+ 'When this result carries signature_scheme and typed_data (delegation-rail accounts), pass typed_data through VERBATIM as well — that is what the account validates, and the signer will refuse to sign the bare payload_hash without it; ' +
     '(2) mcp__haven__haven_settle_mcp_tool with payment_id, signature, payment_header, merchant_url, tool_name, arguments, and mcp_transport to fund the delegate and settle with the merchant in one call, returning the tool result. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
@@ -951,6 +951,16 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
     idempotency_key: intent.idempotencyKey,
     payload_hash: intent.signData.hash,
     expires_at: intent.expiresAt,
+    // #1138: on the delegation rail the account validates typed data, not
+    // payload_hash. Pass both through verbatim — the local signer picks the
+    // path from the Haven-signed expected context below and refuses the wrong
+    // one, so this surface never has to be the thing that gets it right.
+    ...(intent.signData.signature_scheme
+      ? {
+          signature_scheme: intent.signData.signature_scheme,
+          typed_data: intent.signData.typed_data,
+        }
+      : {}),
     // The edge signer needs these to build + sign the EIP-3009 merchant header
     // locally after the funding transfer is relayed via haven_submit.
     x402: {
@@ -967,6 +977,12 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
         asset: intent.asset,
         network: intent.network,
         expires_at: intent.expiresAt,
+        // #1138: without this the signer reconstructs a v1 message, which will
+        // not match Haven's v2 signature — the delegation-rail intent then
+        // fails closed rather than being signed under a weaker commitment.
+        ...(intent.expectedTypedDataHash
+          ? { typed_data_hash: intent.expectedTypedDataHash }
+          : {}),
         auth: intent.expectedAuth,
       },
     },

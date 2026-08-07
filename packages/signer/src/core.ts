@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { hashMessage, recoverTypedDataAddress } from 'viem'
+import { hashMessage, hashTypedData, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { exact } from 'x402/schemes'
 import {
@@ -40,6 +40,18 @@ export interface EdgeSigner {
   signPaymentHash(hash: string): string
   /** Sign an x402 funding hash and remember the funded merchant-header context. */
   signX402FundingHash(hash: string, expected: X402ExpectedPayment): X402FundingSignatureResult
+  /**
+   * Sign a delegation-rail x402 funding intent's EIP-712 typed data (#1138) and
+   * remember the funded merchant-header context, exactly as the hash path does.
+   *
+   * The account validates this typed data, NOT the bare ERC-4337 hash, so the
+   * expected context must be v2 and commit to its digest — see
+   * `assertExpectedBinding`.
+   */
+  signX402FundingTypedData(
+    typedData: X402FundingTypedData,
+    expected: X402ExpectedPayment,
+  ): Promise<X402FundingSignatureResult>
   /** Build + sign the EIP-3009 X-PAYMENT header for the merchant leg of x402. */
   buildX402PaymentHeader(
     paymentRequired: X402PaymentRequired,
@@ -68,11 +80,25 @@ export interface SweepSignatureResult {
   signature: string
 }
 
+/** EIP-712 payload the delegation-rail account validates (#1138). */
+export interface X402FundingTypedData {
+  domain: Record<string, unknown>
+  types: Record<string, unknown>
+  primaryType: string
+  message: Record<string, unknown>
+}
+
 export interface X402ExpectedPayment {
   /** Haven payment id for the funding transfer. */
   paymentId: string
   /** Funding hash this expected context authenticates. */
   payloadHash: string
+  /**
+   * EIP-712 digest of the typed data the account validates (#1138). Present ⇒
+   * the binding is v2 and the delegation-rail typed-data path is the ONLY
+   * signing path allowed for this intent.
+   */
+  typedDataHash?: string
   /** Resource URL that was funded by hosted haven_x402_authorize. */
   resourceUrl: string
   /** Merchant recipient that was funded by hosted haven_x402_authorize. */
@@ -141,8 +167,36 @@ export function createEdgeSigner(
     },
 
     signX402FundingHash(hash: string, expected: X402ExpectedPayment): X402FundingSignatureResult {
-      assertExpectedBinding(hash, expected, options.x402BindingSigner)
+      assertExpectedBinding(hash, expected, options.x402BindingSigner, 'hash')
       const signature = signAndVerify(hash)
+      const x402Binding = randomUUID()
+      x402Bindings.set(x402Binding, { ...expected })
+      return { signature, x402Binding }
+    },
+
+    async signX402FundingTypedData(
+      typedData: X402FundingTypedData,
+      expected: X402ExpectedPayment,
+    ): Promise<X402FundingSignatureResult> {
+      assertExpectedBinding(expected.payloadHash, expected, options.x402BindingSigner, 'typed-data')
+      // Recompute the digest from the typed data actually in hand and require it
+      // to equal Haven's commitment. Everything upstream is untrusted input; this
+      // equality is what makes the binding cover the bytes being signed rather
+      // than a hash that merely travels alongside them.
+      const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+      if (digest.toLowerCase() !== expected.typedDataHash?.toLowerCase()) {
+        throw new HavenSigningError(
+          'x402 typed data does not match the digest Haven committed to in the expected context. ' +
+            'Refusing to sign — the payload was altered in transit or Haven declared a different one.',
+        )
+      }
+      const account = privateKeyToAccount(delegateKey as `0x${string}`)
+      // Signed VERBATIM (#829): the exact structure Haven sent, never one
+      // reconstructed from components — a re-derived payload is a different
+      // payload, and the account validates the original.
+      const signature = await account.signTypedData(
+        typedData as Parameters<typeof account.signTypedData>[0],
+      )
       const x402Binding = randomUUID()
       x402Bindings.set(x402Binding, { ...expected })
       return { signature, x402Binding }
@@ -276,8 +330,16 @@ function assertSweepBinding(
       'Sweep binding verifier is not configured. Set HAVEN_X402_BINDING_SIGNER before signing sweep authorizations.',
     )
   }
+  // Before any content comparison: an unrecognised version means we cannot
+  // reason about this binding at all, so a mismatch below would be a symptom
+  // reported as a cause (#1143).
+  assertSupportedBindingVersion(
+    expectedAuth.version,
+    SUPPORTED_SWEEP_BINDING_VERSIONS,
+    'sweep authorization binding',
+  )
   const message = buildSweepAuthorizationMessage(authorization)
-  if (expectedAuth.version !== 1 || expectedAuth.message !== message) {
+  if (expectedAuth.message !== message) {
     throw new HavenSigningError('Sweep authorization binding does not match the authorization being signed.')
   }
   if (!sameAddress(expectedAuth.signer, trustedSigner)) {
@@ -318,10 +380,87 @@ function assertExpectedShape(expected: X402ExpectedPayment): void {
   }
 }
 
+/**
+ * Expected-context binding versions THIS signer understands (#1143).
+ *
+ * The backend deploys continuously from `dev`; a signer reaches users only on a
+ * merge to `main` (the publish workflow). So a signer that is one release behind
+ * a context bump is a structural state, not an accident, and it needs to report
+ * itself as one. These sets are the signer's authority on what it will sign —
+ * the tool schemas deliberately accept any positive integer so an unknown
+ * version arrives *here* instead of dying at the schema boundary with a raw
+ * validation string.
+ *
+ * **Adding a version here is not sufficient to support it.** The mode rules in
+ * `assertExpectedBinding` derive the expected version from the context's
+ * *contents* (`typedDataHash` present ⇒ 2), not from `auth.version`, so a v3
+ * that carries anything new needs that derivation extended in the same change.
+ * Widening this array alone would admit a v3 context to the v1/v2 rule set:
+ * the array announces what this signer can evaluate, it does not define it.
+ */
+export const SUPPORTED_X402_EXPECTED_VERSIONS: readonly number[] = [1, 2]
+export const SUPPORTED_SWEEP_BINDING_VERSIONS: readonly number[] = [1]
+
+/**
+ * Fail closed on a binding version this signer does not understand, with an
+ * error that names the received version, the ceiling this signer supports, and
+ * the fix.
+ *
+ * This is strictly about the *message*: an unrecognised version was never
+ * signable and still is not. The version travels inside the Haven-signed binding
+ * message, so the error also tells the caller not to "fix" it by rewriting the
+ * field — an agent that does would invalidate the signature and misrepresent
+ * what Haven authorised.
+ *
+ * Exported so a test can pin the historical case (a v2 context against a signer
+ * whose set was `{1}`) that this signer can no longer produce on its own. The
+ * signing path always passes the module constants above.
+ */
+export function assertSupportedBindingVersion(
+  received: number,
+  supported: readonly number[],
+  context: 'x402 expected context' | 'sweep authorization binding',
+): void {
+  if (supported.includes(received)) return
+  const highest = Math.max(...supported)
+  const ceiling =
+    received > highest
+      ? `This signer is out of date: it supports ${context} versions up to ${highest}, ` +
+        `and Haven sent version ${received}. Update @haven_ai/signer — rerun the Haven ` +
+        'connector (`npx @haven_ai/connect@alpha`), which reinstalls the pinned MCP runtime.'
+      : `Unsupported ${context} version ${received}: this signer supports ` +
+        `${supported.join(', ')}.`
+  throw new HavenSigningError(
+    `${ceiling} Nothing was signed. Do not rewrite the version field to a supported ` +
+      'value: it is part of the Haven-signed binding message, so changing it invalidates ' +
+      'the signature and would misrepresent what Haven authorised.',
+  )
+}
+
+/**
+ * Verify Haven's expected-context binding before signing anything.
+ *
+ * `mode` is what closes the #1138 downgrade in BOTH directions, and neither
+ * half is optional:
+ *
+ * - `'hash'` (legacy rail, raw ECDSA) refuses a **v2** context. A v2 binding
+ *   means the account validates typed data; raw-signing its 4337 hash would
+ *   produce a signature the account rejects on-chain, after the intent is
+ *   claimed.
+ * - `'typed-data'` (delegation rail) refuses a **v1** context. Without the
+ *   `typedDataHash` commitment, Haven's declaration covers only a hash that is
+ *   NOT what gets signed — the signer would be endorsing a payload it cannot
+ *   check, which is the whole property this binding exists to provide.
+ *
+ * The version is derived from the context inside `buildX402ExpectedMessage`, so
+ * a tampered `auth.version` cannot select a different rule than the signed
+ * message encodes: the recomputed message simply stops matching.
+ */
 function assertExpectedBinding(
   payloadHash: string,
   expected: X402ExpectedPayment,
   trustedSigner: string | undefined,
+  mode: 'hash' | 'typed-data' = 'hash',
 ): void {
   assertExpectedShape(expected)
   if (!trustedSigner) {
@@ -329,8 +468,32 @@ function assertExpectedBinding(
       'x402 expected-context verifier is not configured. Set HAVEN_X402_BINDING_SIGNER before signing x402 funding hashes.',
     )
   }
+  // Skew check first (#1143). Every content check below — the hash comparison,
+  // the mode rules, the recomputed message — assumes we understand the context's
+  // shape. Under an unknown version they are symptoms, and reporting one as the
+  // cause is what sent a live debugging session after the wrong string. A missing
+  // `auth` is left to the message check below, which already fails closed on it.
+  if (expected.auth) {
+    assertSupportedBindingVersion(
+      expected.auth.version,
+      SUPPORTED_X402_EXPECTED_VERSIONS,
+      'x402 expected context',
+    )
+  }
   if (expected.payloadHash.toLowerCase() !== payloadHash.toLowerCase()) {
     throw new HavenSigningError('x402 expected context does not match the funding hash being signed.')
+  }
+  if (mode === 'hash' && expected.typedDataHash) {
+    throw new HavenSigningError(
+      'This x402 funding intent commits to EIP-712 typed data, so its bare hash must not be ' +
+        'raw-signed — the account would reject that signature on-chain. Sign sign_data.typed_data instead.',
+    )
+  }
+  if (mode === 'typed-data' && !expected.typedDataHash) {
+    throw new HavenSigningError(
+      'Refusing to sign typed data under an expected context that does not commit to it. ' +
+        'Haven must return a v2 x402 expected context (with typedDataHash) for a delegation-rail intent.',
+    )
   }
   const message = buildX402ExpectedMessage({
     paymentId: expected.paymentId,
@@ -341,8 +504,10 @@ function assertExpectedBinding(
     asset: expected.asset,
     network: expected.network,
     expiresAt: expected.expiresAt,
+    typedDataHash: expected.typedDataHash,
   })
-  if (expected.auth?.version !== 1 || expected.auth.message !== message) {
+  const expectedVersion = expected.typedDataHash ? 2 : 1
+  if (expected.auth?.version !== expectedVersion || expected.auth.message !== message) {
     throw new HavenSigningError('x402 expected context authentication message is invalid.')
   }
   if (!sameAddress(expected.auth.signer, trustedSigner)) {

@@ -16,7 +16,10 @@
 //   npm run lint:deps           # check against the baseline
 //   npm run lint:deps:update    # rewrite the baseline (shrink, or a reviewed add)
 
-// Chain SDKs, confined to rails/ and infra/ once those exist (#994).
+// Chain SDKs, confined to infra/chain/ behind the ChainClient port (#994) —
+// `rails/` doesn't exist yet (#980's later modularization), so today "confined"
+// means `infra/` (and, until #998 lands, the handful of `lib/*.ts` files the
+// port's implementations wrap rather than duplicate).
 // NOTE: dependency-cruiser reports npm dependencies by their RESOLVED path, so
 // this must match `node_modules/<pkg>` — a bare `^ethers` matches nothing and
 // silently passes. That false negative is covered by a unit test.
@@ -55,12 +58,15 @@ module.exports = {
     {
       // Rule 4 — not tidiness. ethers and viem format payment amounts
       // differently at the edges; confining them makes substitution testable
-      // in one place. Driven to zero by #994.
+      // in one place. Driven to zero by #994 — zero-tolerance: this rule
+      // carries NO baseline entries for routes/** and must never gain one
+      // (the same convention as `no-circular`/`core-stays-pure`).
       name: 'chain-sdk-not-in-routes',
       severity: 'error',
       comment:
         'Route handlers must not import a chain SDK. Go through the ChainClient port ' +
-        '(#994); pure helpers like formatUnits belong in @haven_ai/core.',
+        '(domain/chain-client.ts + infra/chain/, #994); pure helpers like ' +
+        'formatTokenAmount/isAddress belong in @haven_ai/core.',
       from: { path: '^packages/backend/src/routes/' },
       to: { path: CHAIN_SDKS },
     },
@@ -84,10 +90,14 @@ module.exports = {
       },
     },
     {
-      // Rule 6, scoped to the two directories that are already modules.
-      // Neither has an index.ts yet, so today EVERY external import is "deep" —
-      // the baseline records that, and the rule stops the count growing.
-      // Widens to modules/** as #980 creates them; zeroed by #998.
+      // Rule 6. `lib/reporting/` and `lib/fee/` don't have an index.ts yet, so
+      // every external import into them is still "deep" — the baseline records
+      // that debt, and the rule stops it growing. `modules/transactions/`
+      // (#992) and `modules/x402/` (#996, the second #980 M4 module) DO have a
+      // public index.ts already — for them the rule holds at its intended end
+      // state: zero violations, and the baseline must never gain an entry for
+      // either. Widens to the rest of modules/** as #980 creates them; zeroed
+      // for lib/(reporting|fee) by #998.
       name: 'no-deep-cross-module-import',
       severity: 'error',
       comment:
@@ -95,11 +105,12 @@ module.exports = {
         'If the module has no index.ts yet, adding one is part of its #980 sub-issue.',
       from: {
         path: '^packages/backend/src/',
-        pathNot: '^packages/backend/src/lib/(reporting|fee)/',
+        pathNot: '^packages/backend/src/(lib/(reporting|fee)|modules/(transactions|x402))/',
       },
       to: {
-        path: '^packages/backend/src/lib/(reporting|fee)/',
-        pathNot: '^packages/backend/src/lib/(reporting|fee)/index\\.ts$',
+        path: '^packages/backend/src/(lib/(reporting|fee)|modules/(transactions|x402))/',
+        pathNot:
+          '^packages/backend/src/(lib/(reporting|fee)|modules/(transactions|x402))/index\\.ts$',
       },
     },
   ],

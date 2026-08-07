@@ -7,16 +7,12 @@
     "pg-only-in-infra": 1
   },
   "packages/backend/src/lib/agent-payment-status.ts": {
-    "no-deep-cross-module-import": 1,
-    "pg-only-in-infra": 1
+    "no-deep-cross-module-import": 1
   },
   "packages/backend/src/lib/delegate-balance-monitor.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/lib/delegation-authorization.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/entitlements.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/lib/execution-rail.ts": {
@@ -35,22 +31,12 @@
     "pg-only-in-infra": 1
   },
   "packages/backend/src/lib/machine-payment-evidence.ts": {
-    "no-deep-cross-module-import": 2,
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/machine-payments.ts": {
-    "pg-only-in-infra": 1
+    "no-deep-cross-module-import": 2
   },
   "packages/backend/src/lib/merchant-catalog.ts": {
     "pg-only-in-infra": 1
   },
-  "packages/backend/src/lib/merchant-receipt.ts": {
-    "pg-only-in-infra": 1
-  },
   "packages/backend/src/lib/onboarding-funnel.ts": {
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/lib/receipt.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/lib/reporting/feed-orchestrator.ts": {
@@ -74,11 +60,7 @@
   "packages/backend/src/routes/agent-activity.ts": {
     "pg-only-in-infra": 1
   },
-  "packages/backend/src/routes/agent-connection-setups.ts": {
-    "chain-sdk-not-in-routes": 1
-  },
   "packages/backend/src/routes/agent-delegations.ts": {
-    "chain-sdk-not-in-routes": 1,
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/approvals.ts": {
@@ -88,7 +70,6 @@
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/balances.ts": {
-    "chain-sdk-not-in-routes": 1,
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/catalog.ts": {
@@ -101,24 +82,19 @@
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/demo-mpp.ts": {
-    "chain-sdk-not-in-routes": 1,
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/hybrid-accounts.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/machine-payments.ts": {
-    "chain-sdk-not-in-routes": 1,
-    "no-deep-cross-module-import": 1,
-    "pg-only-in-infra": 1
+    "no-deep-cross-module-import": 1
   },
   "packages/backend/src/routes/passkeys.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/payments.ts": {
-    "chain-sdk-not-in-routes": 1,
-    "no-deep-cross-module-import": 1,
-    "pg-only-in-infra": 1
+    "no-deep-cross-module-import": 1
   },
   "packages/backend/src/routes/portfolio.ts": {
     "pg-only-in-infra": 1
@@ -127,28 +103,18 @@
     "no-deep-cross-module-import": 2
   },
   "packages/backend/src/routes/safe-deploy.ts": {
-    "chain-sdk-not-in-routes": 1,
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/safe-details.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/safe-exec.ts": {
-    "chain-sdk-not-in-routes": 1,
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/routes/transactions.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/user.ts": {
     "pg-only-in-infra": 1
   },
   "packages/backend/src/routes/x402-resources.ts": {
-    "chain-sdk-not-in-routes": 1,
-    "pg-only-in-infra": 1
-  },
-  "packages/backend/src/routes/x402.ts": {
-    "chain-sdk-not-in-routes": 1,
     "pg-only-in-infra": 1
   }
 }

@@ -7,7 +7,7 @@ covers:
   - packages/connect/**
   - packages/signer/**
   - .github/workflows/publish.yml
-last-verified: "2026-08-06"
+last-verified: "2026-08-07"
 ---
 
 # MCP Runtime Compatibility
@@ -67,7 +67,7 @@ Keep this table in sync with that file.
 - Confirm setup output, logs, generated config, wrapper scripts, and sidecars do
   not include API keys or delegate private keys.
 
-## Signer / hosted-MCP version skew (#1138)
+## Signer / hosted-MCP version skew (#1138, #1143)
 
 `haven_sign` and `haven_sign_x402` take an optional `typed_data`, and the
 x402 expected context has a second version that carries `typedDataHash`. Both
@@ -78,13 +78,42 @@ current, and the failure mode differs by which half is stale:
 
 | Stale half | Symptom |
 |---|---|
-| Signer older than the backend | `x402 expected context authentication message is invalid` — it reconstructs a v1 message against a v2 signature |
+| Signer older than the backend, **`@haven_ai/signer` ≥ the #1143 release** | `This signer is out of date: it supports x402 expected context versions up to <N>, and Haven sent version <M>. Update @haven_ai/signer …` |
+| Signer older than the backend, **signer predating #1138** | `MCP error -32602: Input validation error: Invalid arguments for tool haven_sign_x402: Invalid literal value, expected 1 at x402_expected.auth.version` |
+| Signer with #1138 but predating #1143 (forward-looking — see below) | `… Invalid input at x402_expected.auth.version` — Zod says nothing at all about a failing literal *union* |
 | Backend older than the signer | `Refusing to sign typed data under an expected context that does not commit to it` |
 
-Both fail closed, which is the point: neither produces a signature. Treat either
-message on the delegation rail as a version-skew report, not a credential
-problem — and note the second is also what a *legacy-rail* intent looks like if
+All of these fail closed, which is the point: none produces a signature. Treat any
+of them on the delegation rail as a version-skew report, not a credential
+problem — and note the last is also what a *legacy-rail* intent looks like if
 a caller passes `typed_data` that the context never committed to.
+
+**Why three stale-signer rows (#1143).** The second is what the field actually
+returned on 2026-08-06, and #1141's original version of this table got it wrong:
+it listed `x402 expected context authentication message is invalid`, which is what
+the *binding* check produces. That check is never reached — the tool schema pinned
+`auth.version` to a literal, so the MCP server rejected the call before any Haven
+code ran, and anyone grepping the documented string during an incident found
+nothing. #1143 opened the schema and moved the decision into the signer
+(`SUPPORTED_X402_EXPECTED_VERSIONS` in `packages/signer/src/core.ts`), which is
+the first row. The other two rows stay because they are not historical: every
+signer published before that release still behaves this way, and they remain
+installed until users update. Both Zod strings were reproduced against `zod/v3`
+rather than inferred — note that a failing literal *union* degrades to a bare
+`Invalid input`, so the pre-#1143 signer that knows v2 is even less diagnosable
+than the older one that reported `expected 1`.
+
+Row three cannot fire on today's traffic and is listed for the next context bump:
+a signer carrying #1138 accepts both v1 and v2, so it only breaks once a v3
+context ships while that signer is still installed. Row two is the one seen in
+the field on 2026-08-06.
+
+If you see either Zod row, **do not** "fix" it by editing `auth.version` to a
+supported value. The version is inside the Haven-signed binding message, so
+rewriting it invalidates the signature and misrepresents what Haven authorised —
+the update is the fix. The same applies to `expected_auth.version` on the sweep
+binding, which shares the mechanism (`SUPPORTED_SWEEP_BINDING_VERSIONS`) and will
+hit this the first time that binding is versioned.
 
 ## Troubleshooting
 

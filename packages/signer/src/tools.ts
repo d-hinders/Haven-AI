@@ -42,8 +42,23 @@ const sweepAuthorizationSchema = z.object({
   chainId: z.number().int().positive(),
 })
 
+/**
+ * Binding version at the tool boundary (#1143).
+ *
+ * Open on purpose. A literal (or literal union) here is validated by the MCP
+ * server *before* any handler runs, so a signer one release behind the backend
+ * rejected the payment with `Invalid literal value, expected 1 at
+ * x402_expected.auth.version` — a message that names neither the cause (your
+ * signer is stale) nor the fix (update it), and which no Haven code wrote.
+ * Accept any positive integer here and let the signer decide semantically:
+ * `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS` in
+ * `core.ts` still fail closed on anything they do not know, so this widens the
+ * *error path*, never what can be signed.
+ */
+const bindingVersionSchema = z.number().int().positive()
+
 const sweepExpectedAuthSchema = z.object({
-  version: z.literal(1),
+  version: bindingVersionSchema,
   message: z.string().min(1),
   signature: z
     .string()
@@ -74,7 +89,8 @@ const x402ExpectedSchema = z.object({
     .regex(/^0x[0-9a-fA-F]+$/, 'typed_data_hash must be a 0x-prefixed hex string')
     .optional(),
   auth: z.object({
-    version: z.union([z.literal(1), z.literal(2)]),
+    // Open at the boundary, enforced in the signer — see bindingVersionSchema.
+    version: bindingVersionSchema,
     message: z.string().min(1),
     signature: z
       .string()

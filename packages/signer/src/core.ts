@@ -330,8 +330,16 @@ function assertSweepBinding(
       'Sweep binding verifier is not configured. Set HAVEN_X402_BINDING_SIGNER before signing sweep authorizations.',
     )
   }
+  // Before any content comparison: an unrecognised version means we cannot
+  // reason about this binding at all, so a mismatch below would be a symptom
+  // reported as a cause (#1143).
+  assertSupportedBindingVersion(
+    expectedAuth.version,
+    SUPPORTED_SWEEP_BINDING_VERSIONS,
+    'sweep authorization binding',
+  )
   const message = buildSweepAuthorizationMessage(authorization)
-  if (expectedAuth.version !== 1 || expectedAuth.message !== message) {
+  if (expectedAuth.message !== message) {
     throw new HavenSigningError('Sweep authorization binding does not match the authorization being signed.')
   }
   if (!sameAddress(expectedAuth.signer, trustedSigner)) {
@@ -373,6 +381,63 @@ function assertExpectedShape(expected: X402ExpectedPayment): void {
 }
 
 /**
+ * Expected-context binding versions THIS signer understands (#1143).
+ *
+ * The backend deploys continuously from `dev`; a signer reaches users only on a
+ * merge to `main` (the publish workflow). So a signer that is one release behind
+ * a context bump is a structural state, not an accident, and it needs to report
+ * itself as one. These sets are the signer's authority on what it will sign —
+ * the tool schemas deliberately accept any positive integer so an unknown
+ * version arrives *here* instead of dying at the schema boundary with a raw
+ * validation string.
+ *
+ * **Adding a version here is not sufficient to support it.** The mode rules in
+ * `assertExpectedBinding` derive the expected version from the context's
+ * *contents* (`typedDataHash` present ⇒ 2), not from `auth.version`, so a v3
+ * that carries anything new needs that derivation extended in the same change.
+ * Widening this array alone would admit a v3 context to the v1/v2 rule set:
+ * the array announces what this signer can evaluate, it does not define it.
+ */
+export const SUPPORTED_X402_EXPECTED_VERSIONS: readonly number[] = [1, 2]
+export const SUPPORTED_SWEEP_BINDING_VERSIONS: readonly number[] = [1]
+
+/**
+ * Fail closed on a binding version this signer does not understand, with an
+ * error that names the received version, the ceiling this signer supports, and
+ * the fix.
+ *
+ * This is strictly about the *message*: an unrecognised version was never
+ * signable and still is not. The version travels inside the Haven-signed binding
+ * message, so the error also tells the caller not to "fix" it by rewriting the
+ * field — an agent that does would invalidate the signature and misrepresent
+ * what Haven authorised.
+ *
+ * Exported so a test can pin the historical case (a v2 context against a signer
+ * whose set was `{1}`) that this signer can no longer produce on its own. The
+ * signing path always passes the module constants above.
+ */
+export function assertSupportedBindingVersion(
+  received: number,
+  supported: readonly number[],
+  context: 'x402 expected context' | 'sweep authorization binding',
+): void {
+  if (supported.includes(received)) return
+  const highest = Math.max(...supported)
+  const ceiling =
+    received > highest
+      ? `This signer is out of date: it supports ${context} versions up to ${highest}, ` +
+        `and Haven sent version ${received}. Update @haven_ai/signer — rerun the Haven ` +
+        'connector (`npx @haven_ai/connect@alpha`), which reinstalls the pinned MCP runtime.'
+      : `Unsupported ${context} version ${received}: this signer supports ` +
+        `${supported.join(', ')}.`
+  throw new HavenSigningError(
+    `${ceiling} Nothing was signed. Do not rewrite the version field to a supported ` +
+      'value: it is part of the Haven-signed binding message, so changing it invalidates ' +
+      'the signature and would misrepresent what Haven authorised.',
+  )
+}
+
+/**
  * Verify Haven's expected-context binding before signing anything.
  *
  * `mode` is what closes the #1138 downgrade in BOTH directions, and neither
@@ -401,6 +466,18 @@ function assertExpectedBinding(
   if (!trustedSigner) {
     throw new HavenSigningError(
       'x402 expected-context verifier is not configured. Set HAVEN_X402_BINDING_SIGNER before signing x402 funding hashes.',
+    )
+  }
+  // Skew check first (#1143). Every content check below — the hash comparison,
+  // the mode rules, the recomputed message — assumes we understand the context's
+  // shape. Under an unknown version they are symptoms, and reporting one as the
+  // cause is what sent a live debugging session after the wrong string. A missing
+  // `auth` is left to the message check below, which already fails closed on it.
+  if (expected.auth) {
+    assertSupportedBindingVersion(
+      expected.auth.version,
+      SUPPORTED_X402_EXPECTED_VERSIONS,
+      'x402 expected context',
     )
   }
   if (expected.payloadHash.toLowerCase() !== payloadHash.toLowerCase()) {

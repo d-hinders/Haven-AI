@@ -3,7 +3,7 @@ import {
   chainIdFromX402Network,
   existingX402IntentMismatch,
   isPositiveDecimalAtomicAmount,
-} from '../../../routes/x402.js'
+} from '../helpers.js'
 
 /**
  * `existingX402IntentMismatch` is the #961 idempotency-key-reuse guard: it

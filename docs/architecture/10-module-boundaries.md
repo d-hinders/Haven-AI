@@ -13,7 +13,7 @@ covers:
   - packages/backend/src/lib/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-08-06"
+last-verified: "2026-08-07"
 ---
 
 # Module Boundaries
@@ -114,7 +114,7 @@ Only the subset checkable against today's tree is enabled — a rule about
 | 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra` | #985 / #988 / #995 landed (money path fully extracted); residual inline SQL is baseline-ratcheted |
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself with the later modularization |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (#998) |
-| 6. Cross-module imports go through `index.ts` | ✅ scoped to `lib/{reporting,fee}/` + `modules/transactions/` (#992) | widens as more modules land; zeroed for `lib/{reporting,fee}` by #998 |
+| 6. Cross-module imports go through `index.ts` | ✅ scoped to `lib/{reporting,fee}/` + `modules/{transactions,x402}/` (#992, #996) | widens as more modules land; zeroed for `lib/{reporting,fee}` by #998 |
 | 7. The graph is acyclic | ✅ `no-circular` | already at zero — held absolutely |
 
 `@haven_ai/core` also carries the GENERATED API wire types (#984):
@@ -195,12 +195,12 @@ to satisfy a bad rule is worse than having no rule.
 
 ## Today
 
-Current state as of 2026-08-05, recorded so progress is measurable:
+Current state as of 2026-08-07, recorded so progress is measurable:
 
 | Signal | Today | Target |
 |---|---|---|
 | `lib/` layout | 51 non-test files sitting flat in `lib/`; `reporting/`, `fee/` and `passport/` are the only module directories | Every file inside a module |
-| Largest route | `routes/x402.ts`, 1583 lines | Under ~250 lines |
+| Largest route | `routes/machine-payments.ts`, 1357 lines (`routes/x402.ts` split to 164 lines by #996) | Under ~250 lines |
 | Inline SQL call sites | 344 `.query` calls across 48 non-test files outside `db/` and `infra/repositories/` | Zero outside `infra/repositories/` |
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) | Zero |
 | Rail branching outside the seam | 10 non-test sites — 4 genuine dispatch, 4 retired-rail residue (#993), 2 passport fact derivation | Zero outside `rails/` |

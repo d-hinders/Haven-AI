@@ -34,16 +34,12 @@
     "release-bump.mjs and publish.yml moved to controlGlobs: the harness cannot",
     "exercise them, so keeping them in `globs` made 'a green run covered this'",
     "hollow -- they still get the label and the human reading, without a QA",
-    "re-run that proves nothing about them.",
-    "",
-    "2026-08-07 (#997): lib/machine-payments.ts and lib/machine-payment-evidence.ts",
-    "moved into modules/mpp/**; the shared token-resolution primitive both mpp and",
-    "x402 need moved to domain/payment-token.ts. Replaced the two lib globs with",
-    "modules/mpp/** and domain/payment-token.ts -- same runtime surface, new home."
+    "re-run that proves nothing about them."
   ],
   "globs": [
     "packages/backend/src/db/migrations/**",
     "packages/backend/src/domain/payment-token.ts",
+    "packages/backend/src/infra/chain/**",
     "packages/backend/src/infra/repositories/**",
     "packages/backend/src/lib/allowance-module.ts",
     "packages/backend/src/lib/allowance-nonce-coordinator.ts",
@@ -58,7 +54,9 @@
     "packages/backend/src/lib/sweep.ts",
     "packages/backend/src/lib/x402-delegation.ts",
     "packages/backend/src/middleware/agentAuth.ts",
+    "packages/backend/src/modules/machine-payments/**",
     "packages/backend/src/modules/mpp/**",
+    "packages/backend/src/modules/x402/**",
     "packages/backend/src/routes/agent-delegations.ts",
     "packages/backend/src/routes/approvals.ts",
     "packages/backend/src/routes/hybrid-accounts.ts",

@@ -20,7 +20,7 @@
  * when #998 draws the full boundary — it may want this fed from a pre-loaded
  * registry value instead of importing `lib/chains.ts` directly.
  */
-import { getChain } from '../lib/chains.js'
+import { getChain } from './chains.js'
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 

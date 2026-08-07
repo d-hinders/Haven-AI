@@ -16,7 +16,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-06"
+last-verified: "2026-08-07"
 ---
 
 # Haven - x402 Payment Execution Sequence

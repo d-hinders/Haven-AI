@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { hashTypedData, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import {
   AgentPaymentFailureCode,
@@ -49,7 +50,9 @@ async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) 
   return {
     ...context,
     auth: {
-      version: 1 as const,
+      // Derived exactly as the backend derives it (#1138) — a helper that
+      // hardcoded v1 would mask the version check instead of exercising it.
+      version: ((context as { typedDataHash?: string }).typedDataHash ? 2 : 1) as 1 | 2,
       message,
       signature: await account.signMessage({ message }),
       signer: account.address,
@@ -293,5 +296,108 @@ describe('buildX402PaymentHeader', () => {
     const auth = payload.authorization as Record<string, unknown>
     expect(auth).toBeDefined()
     expect((auth.from as string).toLowerCase()).toBe(delegateAddress.toLowerCase())
+  })
+})
+
+/**
+ * #1138 — delegation-rail typed-data signing.
+ *
+ * The property under test is narrow and load-bearing: the *Haven-signed
+ * context* decides which payload may be signed, so neither a caller nor a
+ * tampered response can pick the weaker path. On this rail `payloadHash` is the
+ * bare ERC-4337 hash, which the account does NOT validate — raw-signing it
+ * would be a signature the chain rejects, and signing typed data with no
+ * commitment to it would be the edge signer endorsing bytes it cannot check.
+ */
+describe('signX402FundingTypedData (#1138)', () => {
+  // A minimally realistic account UserOp payload — shape matters (viem hashes
+  // it), the values do not.
+  const TYPED_DATA = {
+    domain: {
+      chainId: 84532,
+      name: 'HybridDeleGator',
+      version: '1',
+      verifyingContract: '0x98ffBf30459a98FD80fAce18f519967769641F76' as const,
+    },
+    types: {
+      PackedUserOperation: [
+        { name: 'sender', type: 'address' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'callData', type: 'bytes' },
+      ],
+    },
+    primaryType: 'PackedUserOperation',
+    message: {
+      sender: '0x98ffBf30459a98FD80fAce18f519967769641F76',
+      nonce: '1',
+      callData: '0xdeadbeef',
+    },
+  }
+
+  const digest = () => hashTypedData(TYPED_DATA as Parameters<typeof hashTypedData>[0])
+
+  async function expectedV2(overrides: Record<string, unknown> = {}) {
+    return expectedX402({ typedDataHash: digest(), ...overrides } as never)
+  }
+
+  it('signs the typed data verbatim, recoverable to the delegate key', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const result = await signer.signX402FundingTypedData(TYPED_DATA as never, await expectedV2())
+    expect(result.signature).toMatch(/^0x[0-9a-f]+$/i)
+    expect(result.x402Binding).toBeTruthy()
+    const recovered = await recoverTypedDataAddress({
+      ...(TYPED_DATA as unknown as Parameters<typeof recoverTypedDataAddress>[0]),
+      signature: result.signature as `0x${string}`,
+    })
+    // Verbatim (#829): recovery only succeeds against the exact structure sent.
+    expect(recovered.toLowerCase()).toBe(addressFromKey(TEST_KEY).toLowerCase())
+  })
+
+  it('refuses typed data whose digest is not the one Haven committed to', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const expected = await expectedV2()
+    // The exact attack the commitment exists to stop: a benign, correctly-bound
+    // context arrives alongside typed data that moves something else.
+    const swapped = {
+      ...TYPED_DATA,
+      message: { ...TYPED_DATA.message, callData: '0xc0ffee' },
+    }
+    await expect(signer.signX402FundingTypedData(swapped as never, expected)).rejects.toThrow(
+      /does not match the digest Haven committed to/,
+    )
+  })
+
+  it('refuses to sign typed data under a v1 context that never committed to it', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const v1 = await expectedX402() // no typedDataHash → v1
+    await expect(signer.signX402FundingTypedData(TYPED_DATA as never, v1)).rejects.toThrow(
+      /does not commit to it/,
+    )
+  })
+
+  it('refuses to RAW-sign the bare hash of a v2 (delegation-rail) intent', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const expected = await expectedV2()
+    // The other direction of the downgrade: the account would reject this
+    // signature on-chain, after the intent is already claimed.
+    expect(() => signer.signX402FundingHash(FUNDING_HASH, expected)).toThrow(
+      /must not be\s+raw-signed/,
+    )
+  })
+
+  it('refuses a v2 context whose announced auth.version was tampered to 1', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const expected = await expectedV2()
+    const tampered = { ...expected, auth: { ...expected.auth, version: 1 as const } }
+    await expect(signer.signX402FundingTypedData(TYPED_DATA as never, tampered)).rejects.toThrow(
+      /authentication message is invalid/,
+    )
+  })
+
+  it('still refuses when the binding signer is not the trusted Haven key', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: addressFromKey(TEST_KEY) })
+    await expect(
+      signer.signX402FundingTypedData(TYPED_DATA as never, await expectedV2()),
+    ).rejects.toThrow(HavenSigningError)
   })
 })

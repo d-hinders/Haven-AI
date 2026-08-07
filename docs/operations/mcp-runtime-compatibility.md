@@ -7,7 +7,7 @@ covers:
   - packages/connect/**
   - packages/signer/**
   - .github/workflows/publish.yml
-last-verified: "2026-07-23"
+last-verified: "2026-08-06"
 ---
 
 # MCP Runtime Compatibility
@@ -66,6 +66,25 @@ Keep this table in sync with that file.
   handshake before setup reports local MCP as ready.
 - Confirm setup output, logs, generated config, wrapper scripts, and sidecars do
   not include API keys or delegate private keys.
+
+## Signer / hosted-MCP version skew (#1138)
+
+`haven_sign` and `haven_sign_x402` take an optional `typed_data`, and the
+x402 expected context has a second version that carries `typedDataHash`. Both
+additions are backward compatible in the only direction that can actually occur
+— a **v1** (legacy-rail) context is byte-identical to what shipped before, so an
+older signer keeps verifying it — but the delegation rail needs both halves
+current, and the failure mode differs by which half is stale:
+
+| Stale half | Symptom |
+|---|---|
+| Signer older than the backend | `x402 expected context authentication message is invalid` — it reconstructs a v1 message against a v2 signature |
+| Backend older than the signer | `Refusing to sign typed data under an expected context that does not commit to it` |
+
+Both fail closed, which is the point: neither produces a signature. Treat either
+message on the delegation rail as a version-skew report, not a credential
+problem — and note the second is also what a *legacy-rail* intent looks like if
+a caller passes `typed_data` that the context never committed to.
 
 ## Troubleshooting
 

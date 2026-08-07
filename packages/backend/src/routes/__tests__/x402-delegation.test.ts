@@ -237,7 +237,26 @@ describe('x402 delegation-rail settlement (#830)', () => {
     prepared: {
       userOperation: { sender: DELEGATE_ACCT, nonce: '1' },
       userOpHash: `0x${'56'.repeat(32)}`,
-      signingTypedData: { domain: { name: 'HybridDeleGator' }, primaryType: 'PackedUserOperation' },
+      // A COMPLETE EIP-712 payload, not a stub: since #1138 the route hashes
+      // this to build the v2 expected-context commitment, and the edge signer
+      // re-derives the same digest before signing. A payload that cannot be
+      // hashed is one no signer could ever accept.
+      signingTypedData: {
+        domain: {
+          chainId: 84532,
+          name: 'HybridDeleGator',
+          version: '1',
+          verifyingContract: DELEGATE_ACCT,
+        },
+        types: {
+          PackedUserOperation: [
+            { name: 'sender', type: 'address' },
+            { name: 'nonce', type: 'uint256' },
+          ],
+        },
+        primaryType: 'PackedUserOperation',
+        message: { sender: DELEGATE_ACCT, nonce: '1' },
+      },
       delegateAccountAddress: DELEGATE_ACCT,
     },
   }

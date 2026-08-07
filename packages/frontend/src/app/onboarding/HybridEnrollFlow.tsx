@@ -11,9 +11,12 @@
  *
  * The user never sees an address ceremony, a wallet, or a seed phrase — the
  * copy stays in outcome language (copy-guidelines).
+ *
+ * The heading and intro live on the single onboarding screen that hosts this
+ * flow (#1162); this component owns the action and its progress only.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toHex } from 'viem'
 import { api, ApiRequestError } from '@/lib/api'
 import {
@@ -25,6 +28,7 @@ import {
 import { rememberPasskeyCredentialOnDevice } from '@/lib/signer'
 import type { User } from '@/context/AuthContext'
 import { Button } from '@/components/ui/Button'
+import { PASSKEY_REQUIRED_MESSAGE } from './copy'
 
 type Stage = 'idle' | 'creating_passkey' | 'creating_account' | 'done'
 
@@ -33,6 +37,8 @@ interface HybridEnrollFlowProps {
   selectedChainId: number
   onComplete: (args: { accountAddress: `0x${string}` }) => void
   onError: (message: string) => void
+  /** Reports whether creation is in flight, so the host screen can settle. */
+  onCreatingChange?: (creating: boolean) => void
 }
 
 function displayName(user: User): string {
@@ -50,8 +56,17 @@ export default function HybridEnrollFlow({
   selectedChainId,
   onComplete,
   onError,
+  onCreatingChange,
 }: HybridEnrollFlowProps) {
   const [stage, setStage] = useState<Stage>('idle')
+  // A browser without WebAuthn fails identically on every attempt, and
+  // onboarding has no wallet fallback to offer — so it gets the message and no
+  // action, rather than a button that can only fail again.
+  const [blocked, setBlocked] = useState(false)
+
+  useEffect(() => {
+    onCreatingChange?.(stage !== 'idle')
+  }, [onCreatingChange, stage])
 
   async function start(): Promise<void> {
     setStage('creating_passkey')
@@ -86,7 +101,8 @@ export default function HybridEnrollFlow({
       if (err instanceof PasskeyCancelledError) {
         message = 'Face ID prompt was cancelled.'
       } else if (err instanceof PasskeyUnsupportedError) {
-        message = 'This browser does not support passkeys. Connect a wallet instead.'
+        message = PASSKEY_REQUIRED_MESSAGE
+        setBlocked(true)
       } else if (err instanceof ApiRequestError) {
         message = err.message
       }
@@ -95,30 +111,25 @@ export default function HybridEnrollFlow({
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="mb-2 text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">
-          Create your account
-        </h1>
-        <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          Your face or fingerprint approves everything — budgets, agents, changes.
-          No wallet, no seed phrase, nothing to install.
-        </p>
-      </div>
+  if (blocked) return null
 
-      {stage === 'idle' ? (
-        <Button onClick={() => void start()} className="w-full">
-          Create account with Face ID / Touch ID
-        </Button>
-      ) : (
-        <div className="flex items-center gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
-          <div className="h-2 w-2 animate-pulse rounded-full bg-[var(--v2-brand)]" />
-          <span className="text-sm text-[var(--v2-ink-2)]">
-            {stage === 'creating_passkey' ? 'Waiting for Face ID…' : 'Setting up your account…'}
-          </span>
-        </div>
-      )}
+  if (stage === 'idle') {
+    return (
+      <Button onClick={() => void start()} size="lg" className="w-full">
+        Create account with Face ID / Touch ID
+      </Button>
+    )
+  }
+
+  return (
+    <div
+      role="status"
+      className="flex items-center gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3"
+    >
+      <div className="h-2 w-2 animate-pulse rounded-full bg-[var(--v2-brand)]" />
+      <span className="text-sm text-[var(--v2-ink-2)]">
+        {stage === 'creating_passkey' ? 'Waiting for Face ID…' : 'Setting up your account…'}
+      </span>
     </div>
   )
 }

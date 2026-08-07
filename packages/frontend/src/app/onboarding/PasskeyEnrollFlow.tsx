@@ -1,6 +1,14 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+/**
+ * Passkey → Safe onboarding (the non-delegation path).
+ *
+ * The heading and intro live on the single onboarding screen that hosts this
+ * flow (#1162); this component owns the action, its progress list, and the
+ * retry affordance only.
+ */
+
+import { useEffect, useMemo, useState } from 'react'
 import type { Address, Hash } from 'viem'
 import type { User } from '@/context/AuthContext'
 import { api, ApiRequestError, type ListPasskeysResponse } from '@/lib/api'
@@ -11,6 +19,8 @@ import {
   rememberPasskeyCredentialOnDevice,
   setStoredPasskeySigner,
 } from '@/lib/signer'
+import { Button } from '@/components/ui/Button'
+import { PASSKEY_REQUIRED_MESSAGE } from './copy'
 
 const EMPTY_TX_HASH = `0x${'0'.repeat(64)}` as Hash
 
@@ -28,6 +38,8 @@ interface PasskeyEnrollFlowProps {
   selectedChainId: number
   onComplete: (args: { safeAddress: Address; txHash: Hash }) => void
   onError: (message: string) => void
+  /** Reports whether creation is in flight, so the host screen can settle. */
+  onCreatingChange?: (creating: boolean) => void
 }
 
 function getRandomUserId(): Uint8Array {
@@ -87,9 +99,19 @@ export default function PasskeyEnrollFlow({
   selectedChainId,
   onComplete,
   onError,
+  onCreatingChange,
 }: PasskeyEnrollFlowProps) {
   const [stage, setStage] = useState<Stage>('idle')
-  const [error, setError] = useState<string | null>(null)
+  // A browser without WebAuthn will fail identically on every attempt, and
+  // onboarding has no wallet fallback to offer — so it gets the message and no
+  // retry, rather than a button that can only fail again.
+  const [blocked, setBlocked] = useState(false)
+
+  // 'error' is a settled state — the host screen re-enables the network picker
+  // so a retry can pick a different chain.
+  useEffect(() => {
+    onCreatingChange?.(stage !== 'idle' && stage !== 'error')
+  }, [onCreatingChange, stage])
 
   const stageItems = useMemo(
     () =>
@@ -108,7 +130,7 @@ export default function PasskeyEnrollFlow({
 
   async function start(): Promise<void> {
     setStage('creating_passkey')
-    setError(null)
+    onError('') // clear any previous failure the host screen is still showing
 
     try {
       const createdPasskey = await createPasskey({
@@ -205,7 +227,8 @@ export default function PasskeyEnrollFlow({
       if (err instanceof PasskeyCancelledError) {
         message = 'Face ID prompt was cancelled.'
       } else if (err instanceof PasskeyUnsupportedError) {
-        message = 'This browser does not support passkeys. Connect a wallet instead.'
+        message = PASSKEY_REQUIRED_MESSAGE
+        setBlocked(true)
       } else if (err instanceof ApiRequestError) {
         message = err.message
       } else if (err instanceof Error && err.message) {
@@ -213,7 +236,6 @@ export default function PasskeyEnrollFlow({
       }
 
       setStage('error')
-      setError(message)
       onError(message)
     }
   }
@@ -221,27 +243,19 @@ export default function PasskeyEnrollFlow({
   return (
     <div className="space-y-5">
       {stage === 'idle' && (
-        <div className="space-y-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Use Face ID or Touch ID</h1>
-            <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
-              Create a secure passkey to approve actions in your Haven account.
-            </p>
-          </div>
-
-          <button
-            onClick={() => {
-              void start()
-            }}
-            className="w-full py-2.5 rounded-md bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-all duration-200 shadow-[var(--v2-shadow-button)]"
-          >
-            Continue with Face ID / Touch ID
-          </button>
-        </div>
+        <Button
+          onClick={() => {
+            void start()
+          }}
+          size="lg"
+          className="w-full"
+        >
+          Create account with Face ID / Touch ID
+        </Button>
       )}
 
-      {stage !== 'idle' && (
-        <div className="relative space-y-3">
+      {stage !== 'idle' && stage !== 'error' && (
+        <div role="status" className="relative space-y-3">
           {/* Mesh-drift backdrop during the wait — calms the moment the
               user is staring at a spinner without information. */}
           <div
@@ -252,16 +266,6 @@ export default function PasskeyEnrollFlow({
                 'radial-gradient(ellipse 60% 50% at 30% 30%, rgba(99,102,241,0.16) 0%, transparent 70%), radial-gradient(ellipse 55% 45% at 75% 70%, rgba(14,165,233,0.13) 0%, transparent 65%)',
             }}
           />
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
-              Setting up your Haven account
-            </h1>
-            <p className="text-sm text-[var(--v2-ink-2)] leading-relaxed">
-              We&apos;re creating your passkey and bringing your account online. Stay on this tab — it
-              takes a few seconds.
-            </p>
-          </div>
-
           {stageItems.map((item, index) => {
             const order: Stage[] = ['creating_passkey', 'enrolling', 'deploying', 'registering']
             const currentIndex = order.indexOf(stage)
@@ -300,9 +304,9 @@ export default function PasskeyEnrollFlow({
                   <div className={`text-xs font-medium ${isActive ? 'text-[var(--v2-brand)]' : isDone ? 'text-[var(--v2-success)]' : 'text-[var(--v2-ink-3)]'}`}>
                     {item.label}
                   </div>
-                  {(isActive || stage === 'error') && (
+                  {isActive && (
                     <div className="text-xs text-[var(--v2-ink-3)] mt-0.5 leading-relaxed">
-                      {stage === 'error' ? error : item.hint}
+                      {item.hint}
                     </div>
                   )}
                 </div>
@@ -315,20 +319,19 @@ export default function PasskeyEnrollFlow({
         </div>
       )}
 
-      {stage === 'error' && (
-        <div className="space-y-4">
-          <div className="rounded-md border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
-            {error}
-          </div>
-          <button
-            onClick={() => {
-              void start()
-            }}
-            className="w-full py-2.5 rounded-md border border-[var(--v2-border-strong)] bg-white text-[var(--v2-ink)] text-sm font-medium hover:bg-[var(--v2-surface)] transition-colors"
-          >
-            Try again
-          </button>
-        </div>
+      {/* The message itself is rendered once, by the host screen, from
+          `onError` — this owns the retry only, so the two can't double up. */}
+      {stage === 'error' && !blocked && (
+        <Button
+          onClick={() => {
+            void start()
+          }}
+          variant="ghost"
+          size="lg"
+          className="w-full"
+        >
+          Try again
+        </Button>
       )}
     </div>
   )

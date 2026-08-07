@@ -28,6 +28,7 @@ import { agentStatusPresentation } from '@/lib/payment-status'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import { RecoveryNudge } from '@/components/onboarding/RecoveryNudge'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgent2Modal from '@/components/ConnectAgent2Modal'
 import SendModal from '@/components/SendModal'
@@ -1006,12 +1007,23 @@ export default function DashboardClient() {
           />
         ) : null
 
+        // Interim home for the backup-signer prompt (#1162). Onboarding used
+        // to render it on its "You're in" screen, which #1162 removed; #1153
+        // supersedes this placement with a funded-state trigger. Dismissible,
+        // exactly as before, and kept to delegation-rail accounts — the
+        // condition it rendered under before — because "Backup & recovery" is
+        // where it sends you and that only exists on those accounts.
+        const recoveryNudge = safes.some((safe) => safe.account_type === 'delegator_hybrid') ? (
+          <RecoveryNudge />
+        ) : null
+
         if (isFocusedView) {
           return (
             <div className="space-y-6">
               {heroPanel}
               {hasAttention ? attentionPanel : null}
               {guide}
+              {recoveryNudge}
             </div>
           )
         }
@@ -1027,6 +1039,7 @@ export default function DashboardClient() {
               {attentionPanel}
             </div>
             {guide}
+            {recoveryNudge}
             {metricsGrid}
             {activityGrid}
           </div>

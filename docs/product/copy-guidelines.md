@@ -17,7 +17,7 @@ covers:
   - packages/frontend/src/lib/hosted-connect.ts
   - packages/frontend/src/lib/passkey.ts
   - packages/frontend/src/lib/signer.ts
-last-verified: "2026-08-05"
+last-verified: "2026-08-07"
 ---
 
 # Haven UX Copy Guidelines
@@ -216,76 +216,78 @@ action where relevant.
 
 ## Copy examples
 
-### Onboarding: choosing sign-in method
+### Onboarding: the create screen
+
+Onboarding is **one screen and passkey-only** (#1162). There is no sign-in method
+to choose, so there is no copy for choosing one — a wallet is something the user
+adds to an existing account later (Accounts → Add account, or Backup & recovery),
+described in that surface's copy rather than here.
 
 Preferred:
 
 ```text
-Choose your network and approval method
+Welcome, Ada
 
-Select where to create your account, then choose how you want to approve actions.
+Create your Haven account
 
-Network
-Base
-
-Use a passkey
-Fastest option. Creates a secure passkey.
-
-Connect a wallet instead
-Use an existing crypto wallet.
-```
-
-Alternative:
-
-```text
-Set up your Haven account
-
-Choose a network, then pick how you want to access your account.
+Your face or fingerprint approves everything — budgets, agents, changes.
+No wallet, no seed phrase, nothing to install.
 
 Network
 Base
 
-Use a passkey
-Fastest option. Creates a secure passkey.
-
-Connect a wallet instead
-Use an existing crypto wallet.
+Create account with Face ID / Touch ID
 ```
 
-### Onboarding: passkey creation screen
-
-Preferred:
+While it runs, the intro becomes the reassurance:
 
 ```text
-Use a passkey
-
-Create a secure passkey to approve actions in your Haven account.
-
-Continue with a passkey
+Setting up your account. Stay on this tab — it takes a few seconds.
 ```
 
 Avoid:
 
 ```text
+Choose your network and approval method
+Pick how you'll approve payments.
+Connect a wallet instead — use an existing crypto wallet.
 Create a passkey for this browser, enroll it with Haven, and deploy a Safe that uses that passkey-backed signer as its owner.
 ```
 
+### Onboarding: passkeys are unavailable
+
+Because onboarding is passkey-only, there is no fallback to offer. Say a passkey
+is required and name a concrete way forward — never advise an action with no
+destination.
+
+Preferred:
+
+```text
+This browser can't create a passkey, and Haven needs one. Open Haven in Safari,
+Chrome, or Edge on a device with Face ID, Touch ID, Windows Hello, or a device PIN.
+```
+
+Avoid:
+
+```text
+This browser does not support passkeys. Connect a wallet instead.
+```
+
 ### Onboarding: successful setup
+
+Success happens **in place** on the create screen and hands off to the dashboard
+on its own after a beat — the dashboard's own onboarding checklist is what
+orients the user, so this moment stays short. No address or transaction ceremony
+here: that detail lives on the account page, where the user can actually act on it.
 
 Preferred:
 
 ```text
 You're in
 
-Your Haven account is live on Base. Add funds, set agent budgets, and you're ready to pay.
+Your Haven account is live on Base. Taking you to your dashboard…
 
-Account address
-0x...
-
-Setup transaction
-0x...
-
-Go to Dashboard
+Go to dashboard
 ```
 
 Avoid:
@@ -376,7 +378,7 @@ Use this mapping when replacing technical language with product-facing language.
 | API key | Agent identity / API key; never payment authority |
 | Delegate private key / session key | Private signing key (advanced setup and recovery copy) |
 | Complete credential bundle | Haven setup / Haven credential |
-| Transaction hash during onboarding | Setup transaction |
+| Transaction hash in first-run / account setup copy | Setup transaction |
 | Transaction hash in advanced or transaction detail | Transaction ID / explorer link |
 | Safe address in primary account UI | Account address / Haven wallet address |
 | Agent delegate address | Agent wallet address (advanced and recovery copy) |

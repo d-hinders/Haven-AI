@@ -257,6 +257,16 @@ function parseIsoTimestamp(iso: string): number {
   return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000)
 }
 
+/**
+ * Exported so characterization tests can pin the exact cache key format
+ * (#992) — a silently changed key is a production cache-miss storm, not a
+ * test failure. Extracted verbatim from the inline template literal that
+ * built `cacheKey` in `fetchSafeTransactions`; no behavior change.
+ */
+export function buildTransactionCacheKey(chainId: number, safeAddress: string): string {
+  return `tx:${chainId}:${safeAddress.toLowerCase()}`
+}
+
 function transactionDedupKey(tx: Transaction): string {
   return [
     tx.hash,
@@ -277,7 +287,7 @@ export async function fetchSafeTransactions({
 }: FetchSafeTransactionsParams): Promise<FetchSafeTransactionsResult> {
   const chain = getChain(chainId)
   const nativeToken = Object.values(chain.tokens).find((token) => token.address === null)!
-  const cacheKey = `tx:${chainId}:${safeAddress.toLowerCase()}`
+  const cacheKey = buildTransactionCacheKey(chainId, safeAddress)
 
   if (fresh) {
     txCache.delete(cacheKey)

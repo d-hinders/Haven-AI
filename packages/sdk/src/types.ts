@@ -66,8 +66,26 @@ export interface SignData {
   /** The hash to sign (keccak256, 0x-prefixed) */
   hash: string
 
-  /** 'eip712_userop' = delegation rail; absent = legacy AllowanceModule (raw ECDSA). The session rail's 'eip191_userop' is retired (#834). */
-  signature_scheme?: 'eip712_userop'
+  /**
+   * Delegation rail: 'eip712_userop' (funding redemption) or
+   * 'eip712_delegation' (erc7710 settlement child). Absent = legacy
+   * AllowanceModule (raw ECDSA over `hash`). The session rail's
+   * 'eip191_userop' is retired (#834).
+   *
+   * When present, `hash` is NOT what gets signed — `typed_data` is (#1138).
+   */
+  signature_scheme?: 'eip712_userop' | 'eip712_delegation'
+
+  /**
+   * EIP-712 payload the account validates, signed VERBATIM (#829). Present
+   * whenever `signature_scheme` is — never reconstruct it from `components`.
+   */
+  typed_data?: {
+    domain: Record<string, unknown>
+    types: Record<string, unknown>
+    primaryType: string
+    message: Record<string, unknown>
+  }
 
   /** Breakdown of values that were hashed — useful for debugging */
   components: {
@@ -264,6 +282,12 @@ export interface X402Intent {
   network: string
   /** Haven-authenticated binding over the x402 expected context. */
   expectedAuth: X402ExpectedAuth
+  /**
+   * EIP-712 digest of `signData.typed_data`, present on the delegation rail
+   * (#1138). The edge signer needs it to reconstruct the v2 expected-context
+   * message that Haven signed.
+   */
+  expectedTypedDataHash?: string
   /** Delegate EOA the funding transfer tops up (the x402 payer). */
   fundingTo: string
 }
@@ -278,10 +302,22 @@ export interface X402ExpectedContext {
   network: string
   /** Optional ISO expiry for the funding/quote window. When present, it is bound into the Haven-authenticated context. */
   expiresAt?: string
+  /**
+   * EIP-712 digest of the typed data the account actually validates
+   * (delegation rail, #1138). Present ⇒ the context is **version 2** and the
+   * signer must sign that typed data, never `payloadHash`.
+   *
+   * On the delegation rail `payloadHash` is the bare ERC-4337 UserOp hash,
+   * which is NOT what the account validates — binding it alone would leave the
+   * edge signer unable to verify the payload it is being asked to sign. Binding
+   * this digest makes Haven's declaration cover the real payload.
+   */
+  typedDataHash?: string
 }
 
 export interface X402ExpectedAuth {
-  version: 1
+  /** 1 = hash-only (legacy rail). 2 = carries `typedDataHash` (delegation rail, #1138). */
+  version: 1 | 2
   message: string
   signature: string
   signer: string
@@ -935,21 +971,7 @@ export interface RawMachinePaymentAuthorizeResponse {
   challenge_id?: string
   explorer_url?: string
   expires_at?: string
-  sign_data?: {
-    hash: string
-    /** 'eip712_userop' = delegation rail; absent = legacy AllowanceModule (raw ECDSA). The session rail's 'eip191_userop' is retired (#834). */
-    signature_scheme?: 'eip712_userop'
-    components: {
-      safe: string
-      token: string
-      to: string
-      amount: string
-      payment_token: string
-      payment: string
-      nonce: number
-    }
-    instructions: string
-  }
+  sign_data?: SignData
   error?: string
 }
 
@@ -986,21 +1008,7 @@ export interface RawX402AuthorizeResponse {
   mpp?: RawMppStateContext
   challenge_id?: string
   expires_at?: string
-  sign_data?: {
-    hash: string
-    /** 'eip712_userop' = delegation rail; absent = legacy AllowanceModule (raw ECDSA). The session rail's 'eip191_userop' is retired (#834). */
-    signature_scheme?: 'eip712_userop'
-    components: {
-      safe: string
-      token: string
-      to: string
-      amount: string
-      payment_token: string
-      payment: string
-      nonce: number
-    }
-    instructions: string
-  }
+  sign_data?: SignData
   error?: string
 }
 

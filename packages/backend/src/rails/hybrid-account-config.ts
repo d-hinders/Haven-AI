@@ -7,7 +7,8 @@
  * deploy (#860) and revoke paths rebuild it from here so a pure-passkey
  * account — which has no owner_address — can still be deployed and operated.
  */
-import pool from '../db.js'
+import { findHybridOwnerSafeRow } from '../infra/repositories/user-safes.js'
+import { listAccountPasskeys } from '../infra/repositories/hybrid-signers.js'
 import type { Address } from 'viem'
 import type { HybridOwnerConfig } from './hybrid-provisioning.js'
 
@@ -27,32 +28,14 @@ export async function loadHybridOwnerConfig(
   safeAddress: string,
   chainId: number,
 ): Promise<{ config: HybridOwnerConfig; userSafeId: string; singleSignerWaiverAt: string | null } | null> {
-  // chain_id is part of the row identity: the same owner config derives the
-  // same address on EVERY chain, so a user can hold rows for one address on
-  // both testnet and mainnet. Without the bind, rows[0] of an unordered
-  // result could return the OTHER chain's signer set — found by the #908
-  // money-path review (a testnet row's backup passkey must never satisfy the
-  // mainnet signer floor).
-  const safeRow = await pool.query<{
-    id: string
-    owner_address: string | null
-    single_signer_waiver_at: string | null
-  }>(
-    `SELECT id, owner_address, single_signer_waiver_at FROM user_safes
-     WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3`,
-    [userId, safeAddress, chainId],
-  )
-  const safe = safeRow.rows[0]
+  // The queries live in the repositories (#999): the account row bind is
+  // chain-scoped — see FIND_HYBRID_OWNER_SAFE_ROW_SQL's note on the #908
+  // testnet/mainnet signer-set hazard.
+  const safe = await findHybridOwnerSafeRow(userId, safeAddress, chainId)
   if (!safe) return null
 
-  const passkeyRows = await pool.query<{ key_id: string; public_key_x: string; public_key_y: string }>(
-    `SELECT key_id, public_key_x, public_key_y
-     FROM hybrid_account_passkeys
-     WHERE user_safe_id = $1
-     ORDER BY created_at ASC`,
-    [safe.id],
-  )
-  const passkeys: StoredPasskey[] = passkeyRows.rows.map((r) => ({
+  const passkeyRows = await listAccountPasskeys(safe.id)
+  const passkeys: StoredPasskey[] = passkeyRows.map((r) => ({
     keyId: r.key_id,
     x: BigInt(r.public_key_x),
     y: BigInt(r.public_key_y),

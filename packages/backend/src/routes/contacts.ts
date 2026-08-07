@@ -1,16 +1,12 @@
 import { FastifyInstance } from 'fastify'
-import pool from '../db.js'
+import {
+  deleteContactForUser,
+  insertContact,
+  listContactsForUser,
+  renameContactForUser,
+} from '../infra/repositories/contacts.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
-
-interface Contact {
-  id: string
-  user_id: string
-  name: string
-  address: string
-  created_at: string
-  updated_at: string
-}
 
 interface CreateContactBody {
   name: string
@@ -27,12 +23,7 @@ export default async function contactRoutes(app: FastifyInstance): Promise<void>
   // GET /contacts
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
-    const result = await pool.query<Contact>(
-      `SELECT id, name, address, created_at, updated_at
-       FROM contacts WHERE user_id = $1 ORDER BY name ASC`,
-      [sub],
-    )
-    return { contacts: result.rows }
+    return { contacts: await listContactsForUser(sub) }
   })
 
   // POST /contacts
@@ -48,13 +39,8 @@ export default async function contactRoutes(app: FastifyInstance): Promise<void>
     }
 
     try {
-      const result = await pool.query<Contact>(
-        `INSERT INTO contacts (user_id, name, address)
-         VALUES ($1, $2, $3)
-         RETURNING id, name, address, created_at, updated_at`,
-        [sub, name.trim(), address],
-      )
-      return reply.code(201).send(result.rows[0])
+      const row = await insertContact(sub, name.trim(), address)
+      return reply.code(201).send(row)
     } catch (err: unknown) {
       if (isUniqueViolation(err)) {
         return reply.code(409).send({ error: 'A contact with this address already exists' })
@@ -73,18 +59,13 @@ export default async function contactRoutes(app: FastifyInstance): Promise<void>
       return reply.code(400).send({ error: 'Name is required' })
     }
 
-    const result = await pool.query<Contact>(
-      `UPDATE contacts SET name = $3, updated_at = NOW()
-       WHERE id = $1 AND user_id = $2
-       RETURNING id, name, address, created_at, updated_at`,
-      [id, sub, name.trim()],
-    )
+    const row = await renameContactForUser(id, sub, name.trim())
 
-    if (result.rows.length === 0) {
+    if (row === null) {
       return reply.code(404).send({ error: 'Contact not found' })
     }
 
-    return result.rows[0]
+    return row
   })
 
   // DELETE /contacts/:id
@@ -92,12 +73,9 @@ export default async function contactRoutes(app: FastifyInstance): Promise<void>
     const { sub } = request.user as { sub: string }
     const { id } = request.params
 
-    const result = await pool.query(
-      'DELETE FROM contacts WHERE id = $1 AND user_id = $2 RETURNING id',
-      [id, sub],
-    )
+    const deleted = await deleteContactForUser(id, sub)
 
-    if (result.rows.length === 0) {
+    if (!deleted) {
       return reply.code(404).send({ error: 'Contact not found' })
     }
 

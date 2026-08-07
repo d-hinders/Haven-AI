@@ -329,3 +329,104 @@ export async function deleteApproverMetadata(
 ): Promise<void> {
   await db.query(DELETE_APPROVER_METADATA_SQL, [safeId, address])
 }
+
+// ── Hybrid owner-config source row (moved from rails/hybrid-account-config.ts, #999)
+
+/**
+ * chain_id is part of the row identity: the same owner config derives the
+ * same address on EVERY chain, so a user can hold rows for one address on
+ * both testnet and mainnet. Without the bind, rows[0] of an unordered result
+ * could return the OTHER chain's signer set — found by the #908 money-path
+ * review (a testnet row's backup passkey must never satisfy the mainnet
+ * signer floor).
+ */
+export const FIND_HYBRID_OWNER_SAFE_ROW_SQL = `SELECT id, owner_address, single_signer_waiver_at FROM user_safes
+     WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3`
+
+export interface HybridOwnerSafeRow {
+  id: string
+  owner_address: string | null
+  single_signer_waiver_at: string | null
+}
+
+/** `userId` is REQUIRED — owner-scoped account lookup. */
+export async function findHybridOwnerSafeRow(
+  userId: string,
+  safeAddress: string,
+  chainId: number,
+  db: Executor = pool,
+): Promise<HybridOwnerSafeRow | null> {
+  const result = await db.query<HybridOwnerSafeRow>(FIND_HYBRID_OWNER_SAFE_ROW_SQL, [
+    userId,
+    safeAddress,
+    chainId,
+  ])
+  return result.rows[0] ?? null
+}
+
+// ── Safe-details ownership check (moved from routes/safe-details.ts, #999) ──
+
+export const FIND_OWNED_SAFE_WITH_TYPE_ANY_CHAIN_SQL =
+  'SELECT id, chain_id, account_type FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)'
+
+export const FIND_OWNED_SAFE_WITH_TYPE_FOR_CHAIN_SQL =
+  'SELECT id, chain_id, account_type FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3'
+
+export interface OwnedSafeWithTypeRow {
+  id: string
+  chain_id: number
+  account_type: string | null
+}
+
+/**
+ * `userId` is REQUIRED — the ownership check `/safe/:safeAddress/details`
+ * runs before probing the chain. `chainId === null` returns every chain the
+ * address is owned on; the route decides whether that is ambiguous.
+ */
+export async function findOwnedSafesWithType(
+  userId: string,
+  safeAddress: string,
+  chainId: number | null,
+  db: Executor = pool,
+): Promise<OwnedSafeWithTypeRow[]> {
+  const result =
+    chainId === null
+      ? await db.query<OwnedSafeWithTypeRow>(FIND_OWNED_SAFE_WITH_TYPE_ANY_CHAIN_SQL, [
+          userId,
+          safeAddress,
+        ])
+      : await db.query<OwnedSafeWithTypeRow>(FIND_OWNED_SAFE_WITH_TYPE_FOR_CHAIN_SQL, [
+          userId,
+          safeAddress,
+          chainId,
+        ])
+  return result.rows
+}
+
+// ── Execution-rail resolution (moved from rails/execution-rail.ts, #999) ────
+
+/**
+ * The account's rail for an agent. Lives in THIS aggregate because the only
+ * column it returns is `user_safes.execution_rail`; the agent id is just the
+ * lookup key. LEFT JOIN so a missing Safe row yields null → legacy
+ * (fail-closed), never an error. The join goes through `agents.safe_id` —
+ * the agent's bound Safe row — the same resolution the auth middleware uses.
+ * NOTE: `agents` has NO `safe_address` column; an address-based join here
+ * 500s on the real schema, which mocked route tests cannot catch — found
+ * live on the first DoD run (#745).
+ */
+export const FIND_EXECUTION_RAIL_FOR_AGENT_SQL = `SELECT us.execution_rail
+     FROM agents a
+     LEFT JOIN user_safes us ON us.id = a.safe_id
+     WHERE a.id = $1`
+
+export async function findExecutionRailForAgent(
+  agentId: string,
+  db: Executor = pool,
+): Promise<string | null> {
+  const result = await db.query<{ execution_rail: string | null }>(
+    FIND_EXECUTION_RAIL_FOR_AGENT_SQL,
+    [agentId],
+  )
+  return result.rows[0]?.execution_rail ?? null
+}

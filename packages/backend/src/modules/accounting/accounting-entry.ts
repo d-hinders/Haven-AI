@@ -1,3 +1,4 @@
+// dep-lint-exempt: both statements assemble their WHERE/LIMIT at runtime around the shared ENTRY_SOURCE_SQL join fragment, so there is no fixed statement for db-schema-smoke to PREPARE; extraction needs the fragment redesigned first (beyond #999's ~100-line budget)
 import pool from '../../db.js'
 import { vatTreatmentForCountry } from '../../domain/vat.js'
 

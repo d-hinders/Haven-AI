@@ -23,6 +23,7 @@
  */
 
 import pool from '../../db.js'
+import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import { withTransaction, type Executor } from '../transaction.js'
 
 export type { Executor }
@@ -566,3 +567,79 @@ export async function deleteAgentAllowance(
   const result = await db.query<{ id: string }>(DELETE_AGENT_ALLOWANCE_SQL, [agentId, tokenAddress])
   return result.rows.length > 0
 }
+
+// ── Agent authentication (moved from middleware/agentAuth.ts, #999) ─────────
+
+/**
+ * The agent-authentication lookup — every authenticated agent request runs
+ * this. Exported so `scripts/db-schema-smoke.ts` can PREPARE the REAL query
+ * rather than a pasted copy.
+ *
+ * `chain_id` falls back to the shared default when an agent has no linked
+ * `user_safes` row. This value is not cosmetic: it becomes `agent.chain_id`,
+ * which the machine-payment path uses for asset resolution, sweep-chain checks
+ * and inserts (#990).
+ */
+export const AGENT_BY_API_KEY_SQL = `
+  SELECT a.id, a.user_id, a.name, a.delegate_address,
+         a.status,
+         COALESCE(us.safe_address, u.safe_address) as safe_address,
+         COALESCE(us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
+         us.execution_rail, us.account_type
+  FROM agents a
+  JOIN users u ON a.user_id = u.id
+  LEFT JOIN user_safes us ON a.safe_id = us.id
+  WHERE a.api_key_hash = $1`
+
+export interface AgentAuthRow {
+  id: string
+  user_id: string
+  name: string
+  delegate_address: string | null
+  safe_address: string | null
+  chain_id: number
+  status: string
+  execution_rail: string | null
+  account_type: string | null
+}
+
+/**
+ * Keyed by the API-key HASH — the caller hashes, this function never sees the
+ * secret. The hash IS the tenant scope: it selects exactly one agent row.
+ */
+export async function findAgentAuthRowByApiKeyHash(
+  apiKeyHash: string,
+  db: Executor = pool,
+): Promise<AgentAuthRow | null> {
+  const result = await db.query<AgentAuthRow>(AGENT_BY_API_KEY_SQL, [apiKeyHash])
+  return result.rows[0] ?? null
+}
+
+/**
+ * How recently an agent must have been seen before the liveness write is
+ * skipped (moved with `TOUCH_AGENT_LAST_SEEN_SQL`; re-exported by
+ * `middleware/agentAuth.ts`).
+ */
+export const LAST_SEEN_THROTTLE_SECONDS = 10
+
+export const TOUCH_AGENT_LAST_SEEN_SQL = `UPDATE agents
+         SET last_seen_at = NOW()
+       WHERE id = $1
+         AND (last_seen_at IS NULL
+              OR last_seen_at < NOW() - INTERVAL '${LAST_SEEN_THROTTLE_SECONDS} seconds')`
+
+/**
+ * Record agent liveness, throttled in SQL. Not tenant-scoped beyond the agent
+ * id: the caller (agent auth middleware) has already authenticated the agent
+ * whose id it passes.
+ */
+export async function touchAgentLastSeenRow(agentId: string, db: Executor = pool): Promise<void> {
+  await db.query(TOUCH_AGENT_LAST_SEEN_SQL, [agentId])
+}
+
+// NOTE: the execution-rail resolution and delegate-monitor reads deliberately
+// live elsewhere (`user-safes.ts`, `delegate-monitoring.ts`): a guard test
+// pins every `user_safes` JOIN in THIS file to select `account_type`, because
+// every query here feeds an agent API payload the dashboard branches on
+// (#1069/#1071). Those two reads return no payload, so they don't belong
+// under that pin.

@@ -1,4 +1,9 @@
-import pool from '../../db.js'
+import {
+  deleteFortnoxConnectionRow,
+  getFortnoxConnectionRow,
+  upsertFortnoxConnection,
+  type FortnoxConnectionRow,
+} from '../../infra/repositories/fortnox-connections.js'
 import { config } from '../../config.js'
 import {
   type FortnoxCredentials,
@@ -7,18 +12,12 @@ import {
 } from './fortnox.js'
 
 /**
- * Persistence + token lifecycle for a user's Fortnox connection (P2 #465).
+ * Token lifecycle for a user's Fortnox connection (P2 #465). Persistence
+ * moved verbatim into `infra/repositories/fortnox-connections.ts` (#999).
  * Tokens are secrets held server-side only.
  */
 
-export interface FortnoxConnectionRow {
-  user_id: string
-  access_token: string
-  refresh_token: string
-  token_type: string
-  scope: string | null
-  expires_at: string
-}
+export type { FortnoxConnectionRow }
 
 /** Whether the Fortnox feature is configured at all. */
 export function fortnoxConfigured(): boolean {
@@ -34,32 +33,21 @@ export function fortnoxCredentials(): FortnoxCredentials {
 }
 
 export async function saveFortnoxConnection(userId: string, tokens: FortnoxTokens): Promise<void> {
-  await pool.query(
-    `INSERT INTO fortnox_connections
-       (user_id, access_token, refresh_token, token_type, scope, expires_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW())
-     ON CONFLICT (user_id) DO UPDATE SET
-       access_token = EXCLUDED.access_token,
-       refresh_token = EXCLUDED.refresh_token,
-       token_type = EXCLUDED.token_type,
-       scope = EXCLUDED.scope,
-       expires_at = EXCLUDED.expires_at,
-       updated_at = NOW()`,
-    [userId, tokens.accessToken, tokens.refreshToken, tokens.tokenType, tokens.scope, tokens.expiresAt],
-  )
+  await upsertFortnoxConnection(userId, {
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    tokenType: tokens.tokenType,
+    scope: tokens.scope,
+    expiresAt: tokens.expiresAt,
+  })
 }
 
 export async function getFortnoxConnection(userId: string): Promise<FortnoxConnectionRow | null> {
-  const result = await pool.query<FortnoxConnectionRow>(
-    `SELECT user_id, access_token, refresh_token, token_type, scope, expires_at
-     FROM fortnox_connections WHERE user_id = $1`,
-    [userId],
-  )
-  return result.rows[0] ?? null
+  return getFortnoxConnectionRow(userId)
 }
 
 export async function deleteFortnoxConnection(userId: string): Promise<void> {
-  await pool.query('DELETE FROM fortnox_connections WHERE user_id = $1', [userId])
+  await deleteFortnoxConnectionRow(userId)
 }
 
 /**

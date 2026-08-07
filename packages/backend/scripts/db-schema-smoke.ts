@@ -25,8 +25,39 @@
 
 import { getPool } from '../src/db.js'
 import { selectDelegation } from '../src/rails/delegation-authorization.js'
-import { AGENT_BY_API_KEY_SQL } from '../src/middleware/agentAuth.js'
 import { runMigrations } from '../src/db/migrate.js'
+import { SELECT_DELEGATION_FOR_PAYMENT_SQL } from '../src/infra/repositories/delegation-budgets.js'
+import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
+import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
+import {
+  GET_RECORDED_FEE_SQL,
+  INSERT_PAYMENT_FEE_SQL,
+} from '../src/infra/repositories/payment-fees.js'
+import {
+  DELETE_FORTNOX_CONNECTION_SQL,
+  GET_FORTNOX_CONNECTION_SQL,
+  UPSERT_FORTNOX_CONNECTION_SQL,
+} from '../src/infra/repositories/fortnox-connections.js'
+import {
+  CLAIM_SYNC_INSERT_SQL,
+  CLAIM_SYNC_RECLAIM_FAILED_SQL,
+  GET_SYNC_STATE_SQL,
+  LIST_SYNCS_FOR_USER_SQL,
+  LIST_UNPUSHED_PAYMENT_IDS_SQL,
+  MARK_SYNC_FAILED_SQL,
+  MARK_SYNC_PUSHED_SQL,
+} from '../src/infra/repositories/reporting-feed-syncs.js'
+import {
+  FIND_PASSKEY_FOR_SAFE_SQL,
+  INSERT_USER_PASSKEY_SQL,
+  LIST_USER_PASSKEYS_SQL,
+} from '../src/infra/repositories/user-passkeys.js'
+import {
+  DELETE_CONTACT_FOR_USER_SQL,
+  INSERT_CONTACT_SQL,
+  LIST_CONTACTS_FOR_USER_SQL,
+  RENAME_CONTACT_FOR_USER_SQL,
+} from '../src/infra/repositories/contacts.js'
 import {
   CLAIM_REVOCATION_SQL,
   FIND_BY_AGENT_ADDRESS_SQL,
@@ -87,7 +118,13 @@ import {
   FIND_AGENT_DELEGATE_ADDRESS_SQL,
   FIND_TOKEN_ALLOWANCE_AMOUNT_SQL,
   LIST_ALLOWANCE_CONFIG_FOR_AGENT_SQL,
+  AGENT_BY_API_KEY_SQL,
+  TOUCH_AGENT_LAST_SEEN_SQL,
 } from '../src/infra/repositories/agents.js'
+import {
+  LIST_AGENTS_WITH_FRESH_PENDING_INTENTS_SQL,
+  LIST_MONITORED_DELEGATES_SQL,
+} from '../src/infra/repositories/delegate-monitoring.js'
 import {
   CLAIM_INTENT_FOR_SUBMISSION_SQL,
   CONFIRM_MACHINE_INTENT_SQL,
@@ -168,6 +205,7 @@ import {
   UPSERT_EVIDENCE_BASE_FOR_INTENT_SQL,
   UPSERT_RECONCILIATION_EVENT_FOR_APPROVAL_SQL,
   UPSERT_RECONCILIATION_EVENT_FOR_INTENT_SQL,
+  LOAD_RECEIPT_UNDERLAG_SOURCE_SQL,
 } from '../src/infra/repositories/machine-payments.js'
 import {
   GRANT_ENTITLEMENT_SQL,
@@ -196,6 +234,10 @@ import {
   SET_LEGACY_USER_SAFE_ADDRESS_SQL,
   SET_SAFE_DEFAULT_SQL,
   UPSERT_APPROVER_METADATA_SQL,
+  FIND_HYBRID_OWNER_SAFE_ROW_SQL,
+  FIND_OWNED_SAFE_WITH_TYPE_ANY_CHAIN_SQL,
+  FIND_OWNED_SAFE_WITH_TYPE_FOR_CHAIN_SQL,
+  FIND_EXECUTION_RAIL_FOR_AGENT_SQL,
 } from '../src/infra/repositories/user-safes.js'
 import {
   FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL,
@@ -303,11 +345,19 @@ const QUERIES: SmokeQuery[] = [
     sql: AGENT_BY_API_KEY_SQL,
   },
   {
+    // IMPORTED since #999 — the pasted copy had drifted (it still selected
+    // `a.session_permission_id`, which the real query dropped), which is
+    // exactly the failure mode importing prevents.
     name: 'execution-rail: loadExecutionRailState (the #757 regression)',
-    sql: `SELECT us.execution_rail, a.session_permission_id
-          FROM agents a
-          LEFT JOIN user_safes us ON us.id = a.safe_id
-          WHERE a.id = $1`,
+    sql: FIND_EXECUTION_RAIL_FOR_AGENT_SQL,
+  },
+  {
+    name: 'auth: agent last-seen throttle write (#999, imported)',
+    sql: TOUCH_AGENT_LAST_SEEN_SQL,
+  },
+  {
+    name: 'audit: agent tool-invocation insert (#999, imported)',
+    sql: INSERT_AGENT_TOOL_INVOCATION_SQL,
   },
   {
     // IMPORTED since #995 — the pasted copy predated the repository.
@@ -335,12 +385,13 @@ const QUERIES: SmokeQuery[] = [
           RETURNING id`,
   },
   {
+    // IMPORTED since #999 — was a pasted copy.
     name: 'delegate monitor: active delegates joined to their Safe chain',
-    sql: `SELECT a.id AS agent_id, a.name AS agent_name,
-                 a.delegate_address, us.chain_id
-          FROM agents a
-          JOIN user_safes us ON us.id = a.safe_id
-          WHERE a.status = 'active' AND a.delegate_address IS NOT NULL`,
+    sql: LIST_MONITORED_DELEGATES_SQL,
+  },
+  {
+    name: 'delegate monitor: fresh pending intents per agent (#999, imported)',
+    sql: LIST_AGENTS_WITH_FRESH_PENDING_INTENTS_SQL,
   },
   {
     // IMPORTED since #995 — the pasted copy predated the repository.
@@ -360,11 +411,13 @@ const QUERIES: SmokeQuery[] = [
           ON CONFLICT (user_safe_id, key_id) DO NOTHING`,
   },
   {
-    name: 'hybrid accounts: owner config round-trip — account row + passkey set (#885)',
-    sql: `SELECT key_id, public_key_x, public_key_y
-          FROM hybrid_account_passkeys
-          WHERE user_safe_id = $1
-          ORDER BY created_at ASC`,
+    // IMPORTED since #999 — was a pasted copy.
+    name: 'hybrid accounts: owner config round-trip — passkey set (#885)',
+    sql: LIST_ACCOUNT_PASSKEYS_SQL,
+  },
+  {
+    name: 'hybrid accounts: owner config round-trip — account row (#885/#908, imported)',
+    sql: FIND_HYBRID_OWNER_SAFE_ROW_SQL,
   },
   {
     name: 'delegations: grant insert with lifecycle status (#828)',
@@ -401,15 +454,35 @@ const QUERIES: SmokeQuery[] = [
             AND created_at > NOW() - ($3 || ' minutes')::interval`,
   },
   {
+    // IMPORTED since #999 — was a pasted copy.
     name: 'delegations: authorization selection (pinned wins over open, #829)',
-    sql: `SELECT delegation_hash, delegation_json, recipient_address
-          FROM agent_delegations
-          WHERE agent_id = $1
-            AND token_address = LOWER($2)
-            AND status = 'active'
-            AND (recipient_address = LOWER($3) OR recipient_address IS NULL)
-          ORDER BY (recipient_address IS NULL), created_at DESC`,
+    sql: SELECT_DELEGATION_FOR_PAYMENT_SQL,
   },
+  // Repository extractions landed by #999 (baseline-to-zero): fee ledger,
+  // Fortnox connection, reporting-feed dedup ledger, user passkeys, safe
+  // ownership-with-type, receipt underlag. All IMPORTED.
+  { name: 'fees: idempotent settled-fee insert (#386)', sql: INSERT_PAYMENT_FEE_SQL },
+  { name: 'fees: recorded-fee read (#386)', sql: GET_RECORDED_FEE_SQL },
+  { name: 'fortnox: connection upsert (#465)', sql: UPSERT_FORTNOX_CONNECTION_SQL },
+  { name: 'fortnox: connection read (#465)', sql: GET_FORTNOX_CONNECTION_SQL },
+  { name: 'fortnox: connection delete (#465)', sql: DELETE_FORTNOX_CONNECTION_SQL },
+  { name: 'reporting feed: claim insert (first writer wins, #497)', sql: CLAIM_SYNC_INSERT_SQL },
+  { name: 'reporting feed: re-claim failed row (#497)', sql: CLAIM_SYNC_RECLAIM_FAILED_SQL },
+  { name: 'reporting feed: mark pushed (note #498)', sql: MARK_SYNC_PUSHED_SQL },
+  { name: 'reporting feed: mark failed (#497)', sql: MARK_SYNC_FAILED_SQL },
+  { name: 'reporting feed: sync state read (#497)', sql: GET_SYNC_STATE_SQL },
+  { name: 'reporting feed: per-user listing (#500)', sql: LIST_SYNCS_FOR_USER_SQL },
+  { name: 'reporting feed: unpushed payment ids (#499)', sql: LIST_UNPUSHED_PAYMENT_IDS_SQL },
+  { name: 'passkeys: enrollment insert', sql: INSERT_USER_PASSKEY_SQL },
+  { name: 'passkeys: per-user listing', sql: LIST_USER_PASSKEYS_SQL },
+  { name: 'passkeys: safe-exec ownership read', sql: FIND_PASSKEY_FOR_SAFE_SQL },
+  { name: 'safes: details ownership check (any chain)', sql: FIND_OWNED_SAFE_WITH_TYPE_ANY_CHAIN_SQL },
+  { name: 'safes: details ownership check (for chain)', sql: FIND_OWNED_SAFE_WITH_TYPE_FOR_CHAIN_SQL },
+  { name: 'reporting: receipt underlag source join (#498)', sql: LOAD_RECEIPT_UNDERLAG_SOURCE_SQL },
+  { name: 'contacts: per-user listing', sql: LIST_CONTACTS_FOR_USER_SQL },
+  { name: 'contacts: insert (23505 → 409 in the route)', sql: INSERT_CONTACT_SQL },
+  { name: 'contacts: rename (tenant-scoped)', sql: RENAME_CONTACT_FOR_USER_SQL },
+  { name: 'contacts: delete (tenant-scoped)', sql: DELETE_CONTACT_FOR_USER_SQL },
   {
     // Not a money query, but it is a SAFETY query: if these stop matching the
     // schema, revoked agents keep a live attestation on-chain and nothing fails

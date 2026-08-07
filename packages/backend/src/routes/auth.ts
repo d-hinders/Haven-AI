@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import bcrypt from 'bcrypt'
+// dep-lint-exempt: 6 signup/login statements on the users aggregate (email lookup, insert, legacy safe hydration); verbatim extraction is a >100-line move deferred under #999's fix-or-waive budget
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'

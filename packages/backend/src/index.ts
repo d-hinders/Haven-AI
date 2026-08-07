@@ -61,6 +61,7 @@ import { refreshCatalog, type QueryableLike } from './modules/catalog/index.js'
 import { ingestDiscoveredCatalog } from './modules/catalog/index.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
 import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
+// dep-lint-exempt: composition root — owns the pool for the /health liveness probe (SELECT 1) and hands it to the leader-gated catalog jobs at boot; it wires infrastructure rather than running tenant SQL
 import pool from './db.js'
 
 const app = Fastify({

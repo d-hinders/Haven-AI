@@ -28,6 +28,7 @@
 import { RelayerBudgetExceededError } from '../infra/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import type { Hex, Address } from '../domain/chain-client.js'
+// dep-lint-exempt: 9 grant-lifecycle statements plus the activation transaction on a dedicated client (pool.connect); the guarded version/waiver checks must travel with their writes, making this a >100-line move deferred under #999
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'

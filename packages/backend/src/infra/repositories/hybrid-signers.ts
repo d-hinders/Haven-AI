@@ -68,3 +68,28 @@ export async function clearAccountOwnerAddress(
     [userSafeId],
   )
 }
+
+// ── Owner-config passkey set (moved from rails/hybrid-account-config.ts, #999)
+
+export const LIST_ACCOUNT_PASSKEYS_SQL = `SELECT key_id, public_key_x, public_key_y
+     FROM hybrid_account_passkeys
+     WHERE user_safe_id = $1
+     ORDER BY created_at ASC`
+
+export interface AccountPasskeyRow {
+  key_id: string
+  public_key_x: string
+  public_key_y: string
+}
+
+/**
+ * `userSafeId` IS the tenant scope here (see the header). Ordered by
+ * enrollment time so the derived owner config is deterministic.
+ */
+export async function listAccountPasskeys(
+  userSafeId: string,
+  executor: Executor = pool,
+): Promise<AccountPasskeyRow[]> {
+  const result = await executor.query<AccountPasskeyRow>(LIST_ACCOUNT_PASSKEYS_SQL, [userSafeId])
+  return result.rows
+}

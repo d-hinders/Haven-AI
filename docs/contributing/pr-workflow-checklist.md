@@ -7,7 +7,7 @@ covers:
   - package.json
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
-last-verified: "2026-08-05"
+last-verified: "2026-08-07"
 ---
 
 # PR Workflow Checklist
@@ -133,7 +133,7 @@ Notes:
 - `npm run quality` means typecheck, unit tests, and builds across workspaces.
 - Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with one exception: editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Editing `.github/workflows/*.yml` triggers full workflow checks.
 - Frontend ESLint (`next lint`) is still not a required gate because it currently prompts for ESLint setup; add it only after a dedicated non-interactive lint migration. The blocking frontend gates that DO exist are design-lint (part of *Frontend checks*), the *Banned product-copy terms* copy lint (#902), and the *Design visual regression* job (#897) — both shrink-only-baseline lints fail on NEW violations only.
-- The backend has an equivalent shrink-only-baseline gate: **dependency-boundary lint** (#982), a blocking step inside *Backend checks* enforcing `docs/architecture/10-module-boundaries.md` with the baseline at `packages/backend/dep-lint-baseline.json`. Like the frontend baselines it fails on NEW violations only — fix the boundary rather than running `npm run lint:deps:update`. `no-circular` is the exception: it is asserted absolutely and a cycle may never be baselined.
+- The backend gate is stricter than the frontend baselines: **dependency-boundary lint** (#982, absolute since #999), a blocking step inside *Backend checks* enforcing `docs/architecture/10-module-boundaries.md` with **no baseline at all** — it fails on ANY violation. Fix the boundary; a reviewed, deliberate exception uses an inline `// dep-lint-exempt: <concrete reason>` comment on the offending import. `no-circular` can never be waived.
 - Auto-merge is gated by the required checks in the **"Haven automerge rules"** ruleset (per-surface checks plus *Design visual regression* and *Banned product-copy terms*) — see `docs/contributing/autonomous-pr-loop.md` §One-time setup. A "blocking" job not in that list is advisory in practice.
 - Every PR also gets two sticky comments: doc↔code coupling (docs whose `covers:` match changed code the PR didn't touch — update the flagged doc in the same PR) and design-system coupling. The doc↔code comment is advisory **except** for docs marked `contract: true`, which the separate *Contract-doc coupling* check blocks on (#646). Reproduce it locally with `npm run docs:coupling` — the bare `node scripts/docs/coupling-gate.mjs` always exits 0 and will not tell you what CI says.
 - Playwright desktop smoke is useful but currently known to be unreliable in some local environments; call out skipped or failed browser checks in the PR description.

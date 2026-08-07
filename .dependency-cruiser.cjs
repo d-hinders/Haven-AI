@@ -1,20 +1,17 @@
-// Dependency-boundary rules for packages/backend (#982, epic #980).
+// Dependency-boundary rules for packages/backend (#982, epic #980; absolute
+// since #999).
 //
 // These rules are the machine-checkable form of the seven rules in
 // docs/architecture/10-module-boundaries.md. That doc is the prose; THIS FILE
 // IS AUTHORITATIVE — if the two disagree, the doc is the bug.
 //
-// Only the subset checkable against TODAY's tree is enabled. The structural
-// rules (domain purity, module entry points, http/ thinness) arrive with the
-// directories they police, as epic #980 creates them. Each rule below names
-// the sub-issue that will drive its baseline to zero.
+// Every rule is ERROR severity and UNCONDITIONAL: the ratcheting baseline
+// (#982's dep-lint-baseline.json) was driven to zero and retired by #999.
+// The lint simply passes or fails; the only escape hatch is an inline
+// `// dep-lint-exempt: <concrete reason>` comment on the offending import
+// (see scripts/dep-lint.mjs — `no-circular` can never be waived).
 //
-// Existing debt is ratcheted in packages/backend/dep-lint-baseline.json and may
-// only SHRINK — see scripts/dep-lint.mjs and the shared engine in
-// scripts/lib/ratchet.mjs.
-//
-//   npm run lint:deps           # check against the baseline
-//   npm run lint:deps:update    # rewrite the baseline (shrink, or a reviewed add)
+//   npm run lint:deps
 
 // Chain SDKs, confined to infra/ and rails/ behind the ChainClient port
 // (#994) — `rails/` landed in #998, joining `infra/` as the two directories
@@ -43,7 +40,9 @@ module.exports = {
     {
       // Rule 3 — tenant isolation. Much of Haven's authorization lives in the
       // `WHERE user_id = $1` clause; it belongs behind repositories where the
-      // scoping argument is required and explicit. Driven to zero by #985/#988/#995.
+      // scoping argument is required and explicit. Driven to zero by
+      // #985/#988/#995/#999; remaining deliberate exceptions carry inline
+      // dep-lint-exempt waivers with their reasons.
       name: 'pg-only-in-infra',
       severity: 'error',
       comment:
@@ -60,8 +59,7 @@ module.exports = {
     {
       // Rule 4 — not tidiness. ethers and viem format payment amounts
       // differently at the edges; confining them makes substitution testable
-      // in one place. Driven to zero by #994 — zero-tolerance: this rule
-      // carries NO baseline entries for routes/** and must never gain one
+      // in one place. Driven to zero by #994 — zero-tolerance for routes/**
       // (the same convention as `no-circular`/`core-stays-pure`).
       name: 'chain-sdk-not-in-routes',
       severity: 'error',
@@ -78,8 +76,8 @@ module.exports = {
       // browser bundle, so a framework or chain-SDK dependency here would be
       // wrong in both directions at once.
       //
-      // This rule starts at ZERO violations and must NEVER gain a baseline
-      // entry. If it fires, the new code belongs in the consumer, not in core.
+      // This rule holds at ZERO violations and must never gain a waiver.
+      // If it fires, the new code belongs in the consumer, not in core.
       name: 'core-stays-pure',
       severity: 'error',
       comment:
@@ -100,9 +98,9 @@ module.exports = {
       // (one candidate — `execution-rail.ts`, "the rail decision" per the
       // architecture doc's table — was kept OUT of domain/ specifically
       // because it queries `db.ts` directly; see the #998 PR body). This rule
-      // therefore starts at ZERO and, like `core-stays-pure`, must never gain
-      // a baseline entry — a violation here means new code was placed in
-      // domain/ that does not belong there, not that domain/ needs grandfathering.
+      // therefore holds at ZERO and, like `core-stays-pure`, must never gain
+      // a waiver — a violation here means new code was placed in domain/
+      // that does not belong there, not that domain/ needs grandfathering.
       name: 'domain-stays-pure',
       severity: 'error',
       comment:
@@ -123,8 +121,8 @@ module.exports = {
       // remaining modules/** directory one too (accounts/, agents/, payments/,
       // catalog/, accounting/, reporting/, fee/, passport/) and fixed every
       // external call site to import through it. The rule now covers ALL of
-      // modules/** at its intended end state — zero violations, and the
-      // baseline must never gain an entry for any of them. `platform/`,
+      // modules/** at its intended end state — zero violations, and it must
+      // never gain a waiver for any of them. `platform/`,
       // `domain/`, `infra/` and `rails/` are LAYERS, not domain-capability
       // modules (see the architecture doc's "what belongs where" table), and
       // deliberately do not get barrels — they hold multiple files each with
@@ -150,8 +148,8 @@ module.exports = {
     doNotFollow: { path: 'node_modules' },
     // Tests legitimately reach past production boundaries (integration tests
     // touch the pool directly, route tests stub chain SDKs). The rules describe
-    // PRODUCTION structure, so scanning tests would fill the baseline with
-    // entries nobody should ever "fix".
+    // PRODUCTION structure, so scanning tests would report violations
+    // nobody should ever "fix".
     exclude: {
       path: '(/__tests__/|\\.test\\.ts$|\\.parity\\.test\\.ts$|/loop-harness/|/docs-drift/)',
     },

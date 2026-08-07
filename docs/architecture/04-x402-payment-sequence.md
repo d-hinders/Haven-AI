@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-07" # re-verified same day (#997): legacy-authorize.ts / delegation-authorize.ts import edits only, no behavior change
+last-verified: "2026-08-07" # re-verified same day (#999): a dep-lint-exempt comment on routes/x402-resources.ts only — no behavior change; sequence and settle paths unchanged
 ---
 
 # Haven - x402 Payment Execution Sequence

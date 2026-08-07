@@ -5,7 +5,6 @@ covers:
   - .dependency-cruiser.cjs
   - scripts/dep-lint.mjs
   - packages/core/src/**
-  - packages/backend/dep-lint-baseline.json
   - packages/backend/src/index.ts
   - packages/backend/src/db.ts
   - packages/backend/src/rails/execution-rail.ts
@@ -13,16 +12,18 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-08-07" # #998: lib/ folded into platform/domain/infra/rails/modules — enforcement table, Today table, and covers: updated to match
+last-verified: "2026-08-07" # #999: baseline retired, rules absolute with inline waivers; Today table records achieved state
 ---
 
 # Module Boundaries
 
-> **This doc describes a target, not today's tree.** It is the reference the
-> modularization epic [#980](https://github.com/d-hinders/Haven-AI/issues/980)
-> is measured against. The "Today" section describes current state; everything
-> else is where we are going. When #980 closes, "Today" gets deleted and this
-> becomes a plain description of the backend.
+> **This doc describes the enforced state of the backend.** It was written as
+> the target of the modularization epic
+> [#980](https://github.com/d-hinders/Haven-AI/issues/980); with
+> [#999](https://github.com/d-hinders/Haven-AI/issues/999) the epic closed and
+> every enabled rule became absolute. The "Today" section records the achieved
+> end state (with the deliberate, inline-waived exceptions); rules 2 and 5
+> still await the `http/` directory and remain future work.
 
 Structure is cosmetic; the dependency graph is the architecture. A folder
 reshuffle that leaves the graph unchanged buys nothing. This doc therefore
@@ -32,8 +33,9 @@ decays within weeks.
 
 ## Why domain capability, not technical layer
 
-`routes/` + `lib/` + `db/` is a *technical* taxonomy: it groups files by what
-they are, not by why they change. The test is mechanical — take a realistic
+`routes/` + `lib/` + `db/` (the pre-#998 layout) is a *technical* taxonomy: it
+groups files by what they are, not by why they change. The test is mechanical —
+take a realistic
 feature ("add a spending cap to x402 authorization") and count the directories
 it touches. If the answer is "all of them, every time", the boundaries are not
 boundaries; they are filing cabinets.
@@ -50,11 +52,12 @@ how cheaply the thing behind it can be deleted. The worked example is in our
 own history: the session-rail retirement
 ([#834](https://github.com/d-hinders/Haven-AI/issues/834)). A well-bounded rail
 would have been an `rm -rf` of one directory plus one line removed from a
-registry. Instead the retirement is currently expressed at three separate
-points — a decision branch in `resolveExecutionRail`, and independent
-`=== 'session_key'` guards in `routes/payments.ts` and `lib/machine-payments.ts`
-— which is precisely the symptom of a seam that exists as a type but not as a
-boundary.
+registry. Instead the retirement was, for a while, expressed at several
+separate points — a decision branch in `resolveExecutionRail` plus independent
+`=== 'session_key'` guards scattered across the payment entry points — which
+is precisely the symptom of a seam that exists as a type but not as a boundary.
+[#993](https://github.com/d-hinders/Haven-AI/issues/993) collapsed those into
+the one gate in `rails/execution-rail.ts`.
 
 ### Stable dependencies
 
@@ -106,17 +109,18 @@ These are the normative rules. `.dependency-cruiser.cjs` encodes them; if the
 two ever disagree, **the lint config is authoritative and this doc is the bug.**
 
 Only the subset checkable against today's tree is enabled — a rule about
-`domain/` cannot fire before `domain/` exists. Enforcement status:
+`domain/` cannot fire before `domain/` exists. Every enabled rule is **error
+severity and unconditional** (#999). Enforcement status:
 
 | Rule | Enforced today | Arrives with |
 |---|---|---|
-| 1. `domain/` is pure | ✅ `core-stays-pure` covers the shared kernel (#983); `domain-stays-pure` covers the backend's own `domain/` (#998), zero baseline on both | landed |
+| 1. `domain/` is pure | ✅ `core-stays-pure` covers the shared kernel (#983); `domain-stays-pure` covers the backend's own `domain/` (#998), zero violations on both | landed |
 | 2. `modules/` may not import `http/` | ✗ | the `http/` directory (routes/ → http/ is not part of #998's scope — a separate future rename) |
-| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra` | #985 / #988 / #995 landed (money path fully extracted); residual inline SQL is baseline-ratcheted |
+| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra`, absolute | #985 / #988 / #995 extracted the money path; #999 drove the residue to zero — 16 deliberate exceptions carry inline `dep-lint-exempt` waivers with their reasons |
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself landed with #998; the rule's positive form (asserting infra/rails ARE the only importers, everywhere) is still follow-up work |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (see rule 2 — not part of #998) |
-| 6. Cross-module imports go through `index.ts` | ✅ every `modules/**` directory (accounts, agents, payments, catalog, accounting, reporting, fee, passport, x402, mpp, transactions) — zero baseline | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`) |
-| 7. The graph is acyclic | ✅ `no-circular` | already at zero — held absolutely |
+| 6. Cross-module imports go through `index.ts` | ✅ every `modules/**` directory (accounts, agents, payments, catalog, accounting, reporting, fee, passport, x402, mpp, transactions) — zero violations | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`) |
+| 7. The graph is acyclic | ✅ `no-circular` | at zero — held absolutely, and the one rule an inline waiver can never silence |
 
 `@haven_ai/core` also carries the GENERATED API wire types (#984):
 `src/api-types.ts` is emitted from the backend's OpenAPI spec by
@@ -124,17 +128,18 @@ Only the subset checkable against today's tree is enabled — a rule about
 (`npm run check:api-types`). Generated code is still bound by
 `core-stays-pure` — it imports nothing, by construction.
 
-Three rules carry **no baseline at all** and never may: `no-circular` (the tree
-is cycle-free and a new cycle must be broken, not grandfathered),
-`core-stays-pure` (the shared kernel starts clean, so an impure import there is
-always a mistake in the new code, never inherited debt), and `domain-stays-pure`
-(#998 — every file placed in the backend's own `domain/` was verified pure
-before landing there; one candidate, `execution-rail.ts`, was kept OUT of
-`domain/` specifically because it queries `db.ts` directly, and lives in
-`rails/` instead). `no-deep-cross-module-import` likewise carries no baseline
-today (#998 emptied it), though unlike the three above it is not a "never may"
-rule — a future module could, in principle, need a reviewed, temporary
-exception.
+Three rules carry **no waivers at all** and never may: `no-circular` (the tree
+is cycle-free and a new cycle must be broken, not grandfathered — the linter
+refuses to honor a waiver on it), `core-stays-pure` (the shared kernel starts
+clean, so an impure import there is always a mistake in the new code, never
+inherited debt), and `domain-stays-pure` (#998 — every file placed in the
+backend's own `domain/` was verified pure before landing there; one candidate,
+`execution-rail.ts`, was kept OUT of `domain/` specifically because it reached
+the database directly, and lives in `rails/` instead — its query itself moved
+behind `infra/repositories/` in #999). `no-deep-cross-module-import` likewise
+carries no waivers today (#998 emptied it), though unlike `no-circular` it is
+not mechanically unwaivable — a future module could, in principle, need a
+reviewed, temporary exception.
 
 1. **`domain/` is pure.** It may not import `fastify`, `pg`, `ethers`, `viem`,
    `permissionless`, `@metamask/smart-accounts-kit`, or any path under
@@ -169,33 +174,51 @@ relaxed with an argument; a cycle is a defect regardless of intent.
   those amounts are payments. Confining them behind a port means substitutions
   are testable in one place instead of ten route files.
 
-## Enforcement: shrink-only ratchet
+## Enforcement: absolute, with inline waivers
 
 Conventions decay. Boundaries survive only when CI fails on violation.
 
-Haven already runs this exact pattern twice — design-lint
-([#855](https://github.com/d-hinders/Haven-AI/issues/855)) and copy-lint
-([#902](https://github.com/d-hinders/Haven-AI/issues/902)) — and #855's baseline
-was subsequently driven to zero by
-[#913](https://github.com/d-hinders/Haven-AI/issues/913). The dependency graph
-gets the same treatment:
+`npm run lint:deps` (scripts/dep-lint.mjs) is blocking and **absolute**: it
+simply passes or fails — new code complies from its first commit. The ratchet
+that got here is history, recorded because the sequencing was the point:
 
-1. **Install the linter with a baseline of today's violations** (#982 — done).
-   Nothing moves; new violations simply become impossible. The opening baseline
-   is **66 violations across 48 files**: 47 `pg-only-in-infra`, 10
-   `chain-sdk-not-in-routes`, 9 `no-deep-cross-module-import` — and **zero**
-   cycles, so `no-circular` is asserted absolutely rather than baselined.
-   `core-stays-pure` (#983) joined later and likewise carries **no** baseline
-   entry: the shared kernel starts clean and must stay clean.
-2. **Shrink the baseline** as each epic issue removes a class of violation. The
-   script refuses to grow the baseline without an explicit `--update`.
-3. **Delete the baseline** when it reaches zero
-   ([#999](https://github.com/d-hinders/Haven-AI/issues/999)), promoting every
-   rule to unconditional.
+1. **#982 installed the linter with a shrink-only baseline** of the then-current
+   debt — 66 violations across 48 files (47 `pg-only-in-infra`, 10
+   `chain-sdk-not-in-routes`, 9 `no-deep-cross-module-import`), zero cycles.
+   Nothing moved; new violations simply became impossible — the same pattern
+   design-lint ([#855](https://github.com/d-hinders/Haven-AI/issues/855), zeroed
+   by [#913](https://github.com/d-hinders/Haven-AI/issues/913)) and copy-lint
+   ([#902](https://github.com/d-hinders/Haven-AI/issues/902)) run.
+2. **The epic's sub-issues shrank it to zero** (#985/#988/#992/#994/#995/#996/
+   #997/#998, then [#999](https://github.com/d-hinders/Haven-AI/issues/999) for
+   the residue).
+3. **#999 deleted the baseline and its machinery**, promoting every rule to
+   unconditional.
 
 Doing this in the other order — move first, enforce later — reliably produces
 tidy folders and an unchanged graph, because nothing prevents the moves from
 re-establishing the same edges under new names.
+
+The one escape hatch is an inline waiver on the offending import:
+
+```ts
+// dep-lint-exempt: pg advisory locks are session-scoped, so the lock must
+// hold ONE dedicated connection for its whole lease
+import pool from '../db.js'
+```
+
+A waiver must say **why, concretely** — the linter rejects reasons under 20
+characters, and `no-circular` can never be waived. Every honored waiver is
+printed in the lint output with its reason, so the exception list is visible in
+each CI run rather than buried in a JSON file.
+
+The lint also prints the **inline-SQL call-site gauge**: the count of
+`.query(` call sites in `packages/backend/src` outside `db/`, `db.ts` and
+`infra/repositories/` (production code only). The retired baseline was a
+file-edge count and went blind exactly there — it held flat at 66 files while
+call sites grew 256 → 344 (+34%), because a file that already imported the
+pool could grow inline SQL forever without moving any metric. The gauge sees
+intensity, not just presence. It is a printed trend line, not a gate.
 
 If a rule turns out to be **wrong** rather than merely unmet — the tree is right
 and the rule is too strict — change the rule and say why. Bending working code
@@ -203,36 +226,29 @@ to satisfy a bad rule is worse than having no rule.
 
 ## Today
 
-Current state as of 2026-08-07, recorded so progress is measurable:
+Achieved state as of 2026-08-07 (#999, the epic's closing issue):
 
-| Signal | Today | Target |
-|---|---|---|
-| `lib/` layout | Gone (#998) — every former file now lives in `platform/`, `domain/`, `infra/`, `rails/`, or a `modules/**` directory, each `modules/**` directory with a public `index.ts` | Every file inside a module — **met** |
-| Largest route | `routes/machine-payments.ts`, 1357 lines (`routes/x402.ts` split to 164 lines by #996) | Under ~250 lines |
-| Inline SQL call sites | 344 `.query` calls across 48 non-test files outside `db/` and `infra/repositories/` | Zero outside `infra/repositories/` |
-| Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) | Zero |
-| Rail branching outside the seam | 10 non-test sites — 4 genuine dispatch, 4 retired-rail residue (#993), 2 passport fact derivation | Zero outside `rails/` |
-| Boundary enforcement | `npm run lint:deps`, blocking, 33 violations baselined (down from 65 — #998 emptied `no-deep-cross-module-import` and moved `onboarding-funnel.ts`'s query into `infra/repositories/`), all remaining entries `pg-only-in-infra` | Baseline deleted, rules unconditional (#999) |
-| Dependency cycles | **0** — asserted absolutely, never baselined | 0 |
+| Signal | Achieved |
+|---|---|
+| `lib/` layout | Gone (#998) — every former file lives in `platform/`, `domain/`, `infra/`, `rails/`, or a `modules/**` directory, each `modules/**` directory with a public `index.ts` |
+| Largest route | `routes/agent-connection-setups.ts`, 1246 lines (`routes/x402.ts` split by #996, `routes/machine-payments.ts` split into `modules/mpp/` by #997); further route slimming is post-epic work |
+| Inline SQL call sites | 108 `.query(` call sites across 18 production files outside `db/`, `db.ts` and `infra/repositories/` — printed by the lint's gauge on every run |
+| Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) |
+| Rail branching outside the seam | The retirement gate is decided ONCE, in `rails/execution-rail.ts` (#993); outside migrations, no non-test file but the seam itself mentions `session_key` |
+| Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 16 deliberate `pg-only-in-infra` exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason |
+| Dependency cycles | **0** — `no-circular` is absolute and unwaivable |
 
-> **The baseline is a file-edge count, and that is a real limit.**
-> `pg-only-in-infra` fires once per file that imports `db.ts`, whatever that
-> file's query volume — `routes/agent-connection-setups.ts` was 1 violation and
-> 56 `.query` call sites (24 statements plus 32 BEGIN/COMMIT/ROLLBACK; the
-> distinction matters when comparing counts, and #985 removed all of them). So the baseline held flat at 66 from 2026-07-26 while inline SQL
-> grew from 256 call sites to 344 in the same set of files. Read the ratchet as
-> "no new offending *files*", never as "the debt is not growing"
-> ([#999](https://github.com/d-hinders/Haven-AI/issues/999) tracks fixing the
-> measure itself).
+The gauge exists because the retired baseline was a file-edge count, and that
+was a real limit: `pg-only-in-infra` fired once per file that imported `db.ts`,
+whatever that file's query volume — `routes/agent-connection-setups.ts` was 1
+violation and 56 `.query` call sites (24 statements plus 32
+BEGIN/COMMIT/ROLLBACK) before #985 removed all of them. The baseline held flat
+at 66 from 2026-07-26 while inline SQL grew from 256 call sites to 344 in the
+same set of files. #999 fixed the measure before retiring it: the call-site
+count is now printed in every `npm run lint:deps` run, so the trend is visible
+in CI logs even though it is not (yet) a gate.
 
-Reproduce these from `packages/backend/src`:
-
-```bash
-find . -name '*.ts' -not -name '*.test.ts' -not -path '*/__tests__/*' \
-  | xargs grep -o 'pool\.query' | wc -l
-find ./routes -name '*.ts' -not -name '*.test.ts' \
-  | xargs grep -lE "from 'ethers'|from 'viem'|permissionless|smart-accounts-kit" | wc -l
-```
+Reproduce: `npm run lint:deps` prints both the waiver list and the gauge.
 
 The flat `lib/` (removed by #998) was the headline symptom: filename prefixes
 (`delegation-*`, `machine-payment-*`) did the work that directories and

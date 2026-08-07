@@ -1,4 +1,8 @@
-import pool from '../../db.js'
+import {
+  getRecordedFeeRow,
+  insertPaymentFee,
+  type RecordedFeeRow,
+} from '../../infra/repositories/payment-fees.js'
 import { config } from '../../config.js'
 
 /**
@@ -80,37 +84,22 @@ export async function recordSettledFee(
   quote: FeeQuote,
   opts: { feeSek?: string | null; txRef?: string | null } = {},
 ): Promise<void> {
-  await pool.query(
-    `INSERT INTO payment_fees
-       (payment_id, rail, fee_amount_atomic, fee_token, fee_sek, tx_ref, status, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 'recorded', NOW())
-     ON CONFLICT (payment_id) DO NOTHING`,
-    [
-      quote.paymentId,
-      quote.rail,
-      quote.feeAtomic.toString(),
-      quote.feeToken,
-      opts.feeSek ?? null,
-      opts.txRef ?? null,
-    ],
-  )
+  // SQL lives in infra/repositories/payment-fees.ts (#999) — idempotent per
+  // paymentId there (ON CONFLICT DO NOTHING).
+  await insertPaymentFee({
+    paymentId: quote.paymentId,
+    rail: quote.rail,
+    feeAmountAtomic: quote.feeAtomic.toString(),
+    feeToken: quote.feeToken,
+    feeSek: opts.feeSek ?? null,
+    txRef: opts.txRef ?? null,
+  })
 }
 
-export interface RecordedFee {
-  payment_id: string
-  fee_amount_atomic: string
-  fee_token: string | null
-  fee_sek: string | null
-  status: string
-}
+export type RecordedFee = RecordedFeeRow
 
 export async function getRecordedFee(paymentId: string): Promise<RecordedFee | null> {
-  const result = await pool.query<RecordedFee>(
-    `SELECT payment_id, fee_amount_atomic, fee_token, fee_sek, status
-     FROM payment_fees WHERE payment_id = $1`,
-    [paymentId],
-  )
-  return result.rows[0] ?? null
+  return getRecordedFeeRow(paymentId)
 }
 
 /** The #386 module surface (quote + recordSettled), for callers/shells. */

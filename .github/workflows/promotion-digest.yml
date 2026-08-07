@@ -7,8 +7,11 @@ name: Pending promotion digest
 # See docs/contributing/autonomous-pr-loop.md.
 
 on:
+  push:
+    branches: [main]       # a promotion just landed — the digest is now stale in
+                           # the worst direction (claims commits pending that shipped)
   schedule:
-    - cron: '13 8 * * 1'   # Mondays 08:13 UTC
+    - cron: '13 8 * * 1'   # Mondays 08:13 UTC — catches drift accumulating on dev
   workflow_dispatch:
 
 permissions:

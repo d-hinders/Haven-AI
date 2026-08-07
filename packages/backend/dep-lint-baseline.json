@@ -111,9 +111,6 @@
   "packages/backend/src/routes/safe-exec.ts": {
     "pg-only-in-infra": 1
   },
-  "packages/backend/src/routes/transactions.ts": {
-    "pg-only-in-infra": 1
-  },
   "packages/backend/src/routes/user.ts": {
     "pg-only-in-infra": 1
   },

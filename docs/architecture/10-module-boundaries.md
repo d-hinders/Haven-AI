@@ -114,7 +114,7 @@ Only the subset checkable against today's tree is enabled — a rule about
 | 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra` | #985 / #988 / #995 landed (money path fully extracted); residual inline SQL is baseline-ratcheted |
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself with the later modularization |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (#998) |
-| 6. Cross-module imports go through `index.ts` | ✅ scoped to `lib/{reporting,fee}/` | widens as modules land; zeroed by #998 |
+| 6. Cross-module imports go through `index.ts` | ✅ scoped to `lib/{reporting,fee}/` + `modules/transactions/` (#992) | widens as more modules land; zeroed for `lib/{reporting,fee}` by #998 |
 | 7. The graph is acyclic | ✅ `no-circular` | already at zero — held absolutely |
 
 `@haven_ai/core` also carries the GENERATED API wire types (#984):

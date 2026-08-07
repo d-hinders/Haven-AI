@@ -53,10 +53,10 @@ Pieces:
 > **dev-merge** — closed = implemented and on dev. What's actually in **prod** is
 > tracked separately (issue state is not overloaded with promotion state): each
 > `dev → main` promotion cuts a **prod GitHub Release** (`.github/workflows/release.yml`)
-> with auto-generated notes, and a weekly **pending-promotion digest**
-> (`.github/workflows/promotion-digest.yml`) keeps a "📦 Pending promotion" issue
-> listing what's on `dev` but not yet in prod. The `main..dev` compare is the
-> same view on demand. Full details: [`branch-and-release-flow.md`](branch-and-release-flow.md).
+> with auto-generated notes, and the **pending-promotion digest**
+> (`.github/workflows/promotion-digest.yml`) keeps a single pinned "📦 Pending
+> promotion" issue listing what's on `dev` but not yet in prod — refreshed on
+> every promotion and weekly. The `main..dev` compare is the same view on demand. Full details: [`branch-and-release-flow.md`](branch-and-release-flow.md).
 
 ## Quickstart
 

@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import pool from '../db.js'
+import { findOwnedSafesWithType } from '../infra/repositories/user-safes.js'
 import { isSupportedChain } from '../domain/chains.js'
 import { getSafeDetails } from '../modules/accounts/index.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
@@ -40,29 +40,21 @@ export default async function safeDetailRoutes(
         return reply.code(400).send({ error: `Unsupported chain: ${requestedChainId}` })
       }
 
-      const userResult =
-        requestedChainId === null
-          ? await pool.query<{ id: string; chain_id: number; account_type: string | null }>(
-              'SELECT id, chain_id, account_type FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)',
-              [sub, safeAddress],
-            )
-          : await pool.query<{ id: string; chain_id: number; account_type: string | null }>(
-              'SELECT id, chain_id, account_type FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3',
-              [sub, safeAddress, requestedChainId],
-            )
-      if (userResult.rows.length === 0) {
+      // Ownership check (repository query, #999).
+      const ownedSafes = await findOwnedSafesWithType(sub, safeAddress, requestedChainId)
+      if (ownedSafes.length === 0) {
         return reply.code(403).send({ error: 'Not your Safe' })
       }
       // #1107: a delegator_hybrid account has no Safe contract — probing it
       // with the Safe ABI throws, which surfaced as a 500 that hid real 500s.
       // A wrong-account-type request is a clean, explicable 409.
-      if (userResult.rows[0].account_type === 'delegator_hybrid') {
+      if (ownedSafes[0].account_type === 'delegator_hybrid') {
         return reply.code(409).send({
           error: 'This account is not a Safe — its approval methods are its signer set (see /accounts/hybrid/:address/signers)',
         })
       }
 
-      const chainId = requestedChainId ?? userResult.rows[0].chain_id
+      const chainId = requestedChainId ?? ownedSafes[0].chain_id
       return getSafeDetails(safeAddress, chainId)
     },
   )

@@ -26,7 +26,7 @@
  * signed, even if account state changes in between.
  */
 
-import pool from '../db.js'
+import { findExecutionRailForAgent } from '../infra/repositories/user-safes.js'
 import { getChain } from '../domain/chains.js'
 
 export interface ExecutionRailState {
@@ -76,32 +76,18 @@ export function sessionRailRetired(kind: 'account' | 'intent'): { statusCode: 41
 }
 
 /**
- * Load the rail state for an agent. LEFT JOIN so a missing Safe row yields
- * nulls → legacy (fail-closed), never an error.
- *
- * The join goes through `agents.safe_id` — the agent's bound Safe row — the
- * same resolution agentAuthMiddleware uses. NOTE: `agents` has NO
- * `safe_address` column (the AgentContext field is middleware-hydrated via
- * this very join); an address-based join here 500s with "column does not
- * exist" on the real schema, which mocked route tests cannot catch — found
- * live on the first DoD run (#745).
+ * Load the rail state for an agent. The query lives in
+ * `infra/repositories/user-safes.ts` (`FIND_EXECUTION_RAIL_FOR_AGENT_SQL`, #999):
+ * LEFT JOIN through `agents.safe_id` so a missing Safe row yields null →
+ * legacy (fail-closed), never an error — see the repository's note on the
+ * #745/#757 join regression.
  */
 export async function loadExecutionRailState(agent: {
   id: string
   chain_id: number
 }): Promise<ExecutionRailState> {
-  const result = await pool.query<{
-    execution_rail: string | null
-  }>(
-    `SELECT us.execution_rail
-     FROM agents a
-     LEFT JOIN user_safes us ON us.id = a.safe_id
-     WHERE a.id = $1`,
-    [agent.id],
-  )
-  const row = result.rows[0]
   return {
-    safeExecutionRail: row?.execution_rail ?? null,
+    safeExecutionRail: await findExecutionRailForAgent(agent.id),
     chainId: agent.chain_id,
   }
 }

@@ -19,7 +19,10 @@
  * session matrix on every payment.
  */
 
-import pool from '../db.js'
+import {
+  selectDelegationForPayment,
+  type DelegationForPaymentRow,
+} from '../infra/repositories/delegation-budgets.js'
 import type { Address, Hex } from 'viem'
 import { getChain } from '../domain/chains.js'
 import { computeHybridAccountAddress } from './hybrid-provisioning.js'
@@ -34,32 +37,18 @@ export interface DelegationAuthorization {
   prepared: PreparedRedemption
 }
 
-interface DelegationRow {
-  delegation_hash: string
-  delegation_json: string
-  recipient_address: string | null
-}
-
 /**
  * The delegation that authorizes this payment, or null when the agent has no
- * applicable active grant (caller fails closed with a clean 403).
+ * applicable active grant (caller fails closed with a clean 403). The SQL
+ * lives in `infra/repositories/delegation-budgets.ts`
+ * (`SELECT_DELEGATION_FOR_PAYMENT_SQL`, #999).
  */
 export async function selectDelegation(
   agentId: string,
   tokenAddress: string,
   toAddress: string,
-): Promise<DelegationRow | null> {
-  const result = await pool.query<DelegationRow>(
-    `SELECT delegation_hash, delegation_json, recipient_address
-     FROM agent_delegations
-     WHERE agent_id = $1
-       AND token_address = LOWER($2)
-       AND status = 'active'
-       AND (recipient_address = LOWER($3) OR recipient_address IS NULL)
-     ORDER BY (recipient_address IS NULL), created_at DESC`,
-    [agentId, tokenAddress, toAddress],
-  )
-  return result.rows[0] ?? null
+): Promise<DelegationForPaymentRow | null> {
+  return selectDelegationForPayment(agentId, tokenAddress, toAddress)
 }
 
 /**

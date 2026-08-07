@@ -794,3 +794,38 @@ export async function getMerchantReceiptRow(
   const result = await db.query<MerchantReceiptRow>(GET_MERCHANT_RECEIPT_SQL, [evidenceId])
   return result.rows[0] ?? null
 }
+
+// ── Receipt underlag source (moved from modules/reporting/receipt-underlag.ts, #999)
+
+export const LOAD_RECEIPT_UNDERLAG_SOURCE_SQL = `SELECT mpe.tx_hash, mpe.chain_id, mpe.merchant_address,
+            pi.sign_hash, pi.signature, pi.delegate_address
+     FROM machine_payment_evidence mpe
+     LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
+     WHERE mpe.id = $1 AND mpe.user_id = $2`
+
+export interface UnderlagSourceRow {
+  tx_hash: string | null
+  chain_id: number | null
+  merchant_address: string | null
+  sign_hash: string | null
+  signature: string | null
+  delegate_address: string | null
+}
+
+/**
+ * `userId` is REQUIRED — the underlag join is tenant-scoped on the evidence
+ * row. Returns null only when the evidence row genuinely does not exist; a
+ * query FAILURE throws so the caller degrades with a "lookup failed" note
+ * rather than a false "no receipt exists" diagnosis.
+ */
+export async function loadReceiptUnderlagSource(
+  evidenceId: string,
+  userId: string,
+  db: Executor = pool,
+): Promise<UnderlagSourceRow | null> {
+  const result = await db.query<UnderlagSourceRow>(LOAD_RECEIPT_UNDERLAG_SOURCE_SQL, [
+    evidenceId,
+    userId,
+  ])
+  return result.rows[0] ?? null
+}

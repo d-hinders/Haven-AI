@@ -1,4 +1,4 @@
-import pool from '../../db.js'
+import { loadReceiptUnderlagSource } from '../../infra/repositories/machine-payments.js'
 import type { ReportingTransaction } from './reporting-transaction.js'
 
 /**
@@ -192,15 +192,6 @@ export async function fetchMerchantReceiptDocument(
   return { filename: `merchant-receipt.${ext}`, bytes, contentType }
 }
 
-interface UnderlagSourceRow {
-  tx_hash: string | null
-  chain_id: number | null
-  merchant_address: string | null
-  sign_hash: string | null
-  signature: string | null
-  delegate_address: string | null
-}
-
 /**
  * Load + render the underlag for a feed transaction. `receiptRef` is the
  * `machine_payment_evidence` row id (see `AccountingEntry.receiptRef`);
@@ -214,15 +205,8 @@ export async function loadReceiptUnderlag(
   userId: string,
   tx: ReportingTransaction,
 ): Promise<ReceiptUnderlag | null> {
-  const result = await pool.query<UnderlagSourceRow>(
-    `SELECT mpe.tx_hash, mpe.chain_id, mpe.merchant_address,
-            pi.sign_hash, pi.signature, pi.delegate_address
-     FROM machine_payment_evidence mpe
-     LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
-     WHERE mpe.id = $1 AND mpe.user_id = $2`,
-    [tx.receiptRef, userId],
-  )
-  const row = result.rows[0]
+  // SQL lives in infra/repositories/machine-payments.ts (#999).
+  const row = await loadReceiptUnderlagSource(tx.receiptRef, userId)
   if (!row) return null
   return underlagFromData({
     paymentId: tx.paymentId,

@@ -1,4 +1,4 @@
-import pool from '../../db.js'
+import { listUnpushedPaymentIds } from '../../infra/repositories/reporting-feed-syncs.js'
 import { reportingFeedAvailable } from '../agents/index.js'
 import { buildAccountingEntryForPayment } from '../accounting/index.js'
 import { toReportingTransaction } from './reporting-transaction.js'
@@ -74,30 +74,10 @@ export async function syncUser(userId: string, opts: { limit?: number } = {}): P
   const connector = await getActiveConnector(userId)
   if (!connector) return { fed: 0 }
 
+  // Selection SQL lives in infra/repositories/reporting-feed-syncs.ts (#999).
   const ids = await listUnpushedPaymentIds(userId, connector.provider, opts.limit ?? 200)
   for (const id of ids) await feedSettledPayment(userId, id)
   return { fed: ids.length }
-}
-
-/** Settled, FX-ready payment ids for the user with no `pushed` sync row yet. */
-async function listUnpushedPaymentIds(
-  userId: string,
-  provider: string,
-  limit: number,
-): Promise<string[]> {
-  const result = await pool.query<{ payment_id: string | null }>(
-    `SELECT COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT) AS payment_id
-     FROM machine_payment_evidence mpe
-     LEFT JOIN reporting_feed_syncs s
-       ON s.user_id = mpe.user_id AND s.provider = $2
-      AND s.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
-      AND s.status = 'pushed'
-     WHERE mpe.user_id = $1 AND mpe.amount_sek IS NOT NULL AND s.id IS NULL
-     ORDER BY COALESCE(mpe.confirmed_at, mpe.created_at) DESC
-     LIMIT $3`,
-    [userId, provider, limit],
-  )
-  return result.rows.map((r) => r.payment_id).filter((id): id is string => Boolean(id))
 }
 
 /** Per-user sync status for the Reporting UI (#500). */

@@ -23,7 +23,10 @@
  */
 
 import { ethers } from 'ethers'
-import pool from '../db.js'
+import {
+  listAgentIdsWithFreshPendingIntents,
+  listMonitoredDelegates,
+} from './repositories/delegate-monitoring.js'
 import { config } from '../config.js'
 import { getChain } from '../domain/chains.js'
 import { getTokenBalance } from '../rails/allowance-module.js'
@@ -76,36 +79,14 @@ export function classifyDelegateBalance(
   return 'lingering'
 }
 
-interface MonitoredDelegate {
-  agent_id: string
-  agent_name: string
-  delegate_address: string
-  chain_id: number
-}
-
-/** Active agents with a delegate, joined to their Safe's chain. */
-async function loadMonitoredDelegates(): Promise<MonitoredDelegate[]> {
-  const result = await pool.query<MonitoredDelegate>(
-    `SELECT a.id AS agent_id, a.name AS agent_name,
-            a.delegate_address, us.chain_id
-     FROM agents a
-     JOIN user_safes us ON us.id = a.safe_id
-     WHERE a.status = 'active' AND a.delegate_address IS NOT NULL`,
-  )
-  return result.rows
+/** Active agents with a delegate, joined to their Safe's chain (repository, #999). */
+async function loadMonitoredDelegates() {
+  return listMonitoredDelegates()
 }
 
 /** Agent ids with a payment intent fresh enough to explain a funded delegate. */
 async function loadAgentsWithFreshPendingPayments(agentIds: string[]): Promise<Set<string>> {
-  if (agentIds.length === 0) return new Set()
-  const result = await pool.query<{ agent_id: string }>(
-    `SELECT DISTINCT agent_id FROM payment_intents
-     WHERE agent_id = ANY($1)
-       AND status IN ('pending_signature', 'submitted')
-       AND created_at > NOW() - ($2 || ' minutes')::interval`,
-    [agentIds, String(IN_FLIGHT_WINDOW_MIN)],
-  )
-  return new Set(result.rows.map((r) => r.agent_id))
+  return listAgentIdsWithFreshPendingIntents(agentIds, String(IN_FLIGHT_WINDOW_MIN))
 }
 
 function usdcAddressFor(chainId: number): string | null {

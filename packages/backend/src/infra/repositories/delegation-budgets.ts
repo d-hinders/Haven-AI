@@ -29,3 +29,39 @@ export async function listActiveDelegations(
   )
   return result.rows
 }
+
+// ── Payment authorization selection (moved from rails/delegation-authorization.ts, #999)
+
+/**
+ * The delegation that authorizes a payment: the ACTIVE row for (agent, token)
+ * whose recipient matches, else the agent's ACTIVE open-budget row for that
+ * token. A pinned delegation always wins over the open one — the tighter
+ * grant is the one the owner meant for that recipient (#829).
+ */
+export const SELECT_DELEGATION_FOR_PAYMENT_SQL = `SELECT delegation_hash, delegation_json, recipient_address
+     FROM agent_delegations
+     WHERE agent_id = $1
+       AND token_address = LOWER($2)
+       AND status = 'active'
+       AND (recipient_address = LOWER($3) OR recipient_address IS NULL)
+     ORDER BY (recipient_address IS NULL), created_at DESC`
+
+export interface DelegationForPaymentRow {
+  delegation_hash: string
+  delegation_json: string
+  recipient_address: string | null
+}
+
+/** `agentId` is the scope: delegations belong to exactly one agent. */
+export async function selectDelegationForPayment(
+  agentId: string,
+  tokenAddress: string,
+  toAddress: string,
+): Promise<DelegationForPaymentRow | null> {
+  const result = await pool.query<DelegationForPaymentRow>(SELECT_DELEGATION_FOR_PAYMENT_SQL, [
+    agentId,
+    tokenAddress,
+    toAddress,
+  ])
+  return result.rows[0] ?? null
+}

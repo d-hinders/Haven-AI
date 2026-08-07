@@ -1,5 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import pool from '../db.js'
+import {
+  insertAgentToolInvocation,
+  type Executor,
+} from '../infra/repositories/agent-tool-invocations.js'
 
 /**
  * Minimal pool-like interface — matches the shape exported by `db.ts` and
@@ -70,7 +73,7 @@ export function readMcpToolHeader(request: FastifyRequest): void {
  */
 export function registerAgentToolAuditHooks(
   app: FastifyInstance,
-  poolOverride: QueryableLike = pool as unknown as QueryableLike,
+  poolOverride?: QueryableLike,
 ): void {
   app.addHook('onRequest', async (request) => {
     readMcpToolHeader(request)
@@ -110,21 +113,19 @@ export function registerAgentToolAuditHooks(
     const resultStatus = deriveResultStatus(status)
 
     try {
-      await poolOverride.query(
-        `INSERT INTO agent_tool_invocations
-           (agent_id, user_id, tool_name, payment_id, result_status, next_action, error_code, status_code)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          agent.id,
-          agent.user_id,
-          tool,
-          paymentId,
-          resultStatus,
-          nextAction ?? null,
-          errorCode ?? null,
-          status,
-        ],
-      )
+      // SQL lives in the repository (#999); omitting `poolOverride` uses the pool.
+      const input = {
+        agentId: agent.id,
+        userId: agent.user_id,
+        toolName: tool,
+        paymentId,
+        resultStatus,
+        nextAction: nextAction ?? null,
+        errorCode: errorCode ?? null,
+        statusCode: status,
+      }
+      if (poolOverride === undefined) await insertAgentToolInvocation(input)
+      else await insertAgentToolInvocation(input, poolOverride as unknown as Executor)
     } catch (err) {
       // Audit logging is best-effort: a failure here must not affect the
       // user-visible response, which has already been sent. Log to stderr

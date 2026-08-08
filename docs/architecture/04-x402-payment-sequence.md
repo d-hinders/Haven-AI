@@ -167,7 +167,18 @@ sequenceDiagram
 Before signing the funding hash, the edge signer checks payload-hash equality,
 reconstructs the canonical payment/resource/merchant/amount/asset/network/expiry
 context, verifies Haven's expected-context signature against its configured
-trusted signer. Before building the merchant header, it rejects expired context
+trusted signer.
+
+> **Every field in that context must be the value Haven SIGNED, not a locally
+> preferred one.** The hosted MCP relays the context; it is never a second
+> opinion about what it contains. `resource_url` is the worked example
+> ([#1189](https://github.com/d-hinders/Haven-AI/issues/1189)): the backend
+> signs `paymentRequired.resource.url`, and the hosted surface briefly preferred
+> the accepted option's own `resource` when a merchant set one. The
+> reconstruction then differed by one field and the signer refused — correctly,
+> but with `authentication message is invalid`, which reads as a credential
+> problem rather than a field mismatch. When a relayed field looks like it has
+> two plausible sources, the signed one wins by definition. Before building the merchant header, it rejects expired context
 and verifies that the live challenge still matches the recorded funded context.
 
 ### Expected context v1 / v2 — which payload may be signed (#1138)

@@ -18,8 +18,9 @@
  *   `agent_id`, and the route MUST establish that the agent belongs to the
  *   caller first (`agentExistsForUser`, or the feed's own `user_id`-scoped
  *   agent list). Adding a caller that skips that check turns these into a
- *   cross-tenant read of another user's payment history. The one exception is
- *   `countActionableApprovalsForUser`, which is scoped by `user_id` directly.
+ *   cross-tenant read of another user's payment history. Since #1179 there is
+ *   no exception in this file: the one `user_id`-scoped statement moved to
+ *   `approval-requests.ts`, where the aggregate that owns it lives.
  * - Safe identity is joined on the payment's STORED `safe_address` + chain,
  *   not through `agents.safe_id`. A payment keeps the account it was made
  *   from even after the agent is re-pointed or the Safe unlinked; joining

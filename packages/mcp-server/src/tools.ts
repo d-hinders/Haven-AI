@@ -971,7 +971,15 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
       expected: {
         payment_id: intent.paymentId,
         payload_hash: intent.signData.hash,
-        resource_url: intent.accepted.resource ?? intent.resourceUrl,
+        // MUST be exactly what Haven signed: the backend builds this context
+        // from `paymentRequired.resource.url` (the SDK's `intent.resourceUrl`),
+        // never the accepted option's own `resource`. Preferring the latter
+        // reconstructed a different message whenever a merchant set an
+        // option-level `resource` — the signer then refused with
+        // "authentication message is invalid", which reads as a credential
+        // problem rather than a field mismatch (#1189). The signature is the
+        // authority; this surface only relays it.
+        resource_url: intent.resourceUrl,
         merchant_to: intent.merchantTo,
         amount: intent.amountAtomic,
         asset: intent.asset,

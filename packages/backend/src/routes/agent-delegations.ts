@@ -37,7 +37,6 @@ import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../rails/hybrid-provisioning.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
 import type { HybridOwnerConfig } from '../rails/hybrid-provisioning.js'
-import { signerFloorError } from '../modules/accounts/index.js'
 import {
   buildBudgetDelegation,
   buildRevocation,
@@ -354,29 +353,12 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         })
       }
 
-      // ── #908 mainnet signer floor at the AUTHORITY moment ──
-      // Provisioning gates new rows, but activation is where a delegation
-      // becomes live spend authority — enforce the floor here too so accounts
-      // created by older code (or any other path) cannot operate under-floor
-      // on a value-bearing chain without a recorded waiver.
-      // The zero address is "no owner" in the Hybrid encoding — never a
-      // signer. Rows created by older code could carry it; count defensively.
-      const hasRealOwner =
-        !!owner.config.ownerAddress && !/^0x0{40}$/i.test(owner.config.ownerAddress)
-      const signerCount = (owner.config.passkeys?.length ?? 0) + (hasRealOwner ? 1 : 0)
-      const waiverRow = await pool.query<{ single_signer_waiver_at: string | null }>(
-        `SELECT single_signer_waiver_at FROM user_safes
-         WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3`,
-        [sub, agent.treasury_address, agent.chain_id],
-      )
-      const floorBlock = signerFloorError({
-        chainId: agent.chain_id,
-        signerCount,
-        waiverAcknowledged: waiverRow.rows[0]?.single_signer_waiver_at != null,
-      })
-      if (floorBlock) {
-        return reply.code(403).send({ error: floorBlock })
-      }
+      // #1153: activation no longer refuses below the signer floor. A budget
+      // may be granted to a single-signer account on a value-bearing chain —
+      // the backup-signer recommendation reaches the user after funding
+      // instead. The account is no more recoverable than it was; what changed
+      // is that Haven says so at a moment the user can act on, rather than
+      // refusing the grant. (#908's activation gate lived here.)
 
       try {
         const deployed = await ensureHybridDeployed(

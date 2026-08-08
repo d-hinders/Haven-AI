@@ -72,7 +72,7 @@ describe('AccountSignersCard (#888)', () => {
     await waitFor(() => expect(removePasskey).toHaveBeenCalledWith('0x' + '11'.repeat(32)))
   })
 
-  it('the wallet owner can be removed when a passkey remains (#1087)', async () => {
+  it('the wallet owner can be removed when a passkey remains, behind a consequence-naming confirmation (#1087, #1153)', async () => {
     const removeOwner = vi.fn().mockResolvedValue({ ok: true })
     mockUseSigners.mockReturnValue(
       base({
@@ -90,7 +90,66 @@ describe('AccountSignersCard (#888)', () => {
     expect(screen.getByText(/passkeys become the only ways to approve/)).toBeTruthy()
     const [ownerRemove] = screen.getAllByText('Remove') as HTMLButtonElement[]
     expect(ownerRemove.disabled).toBe(false)
+
+    // Removing this owner would drop the account to a single signer (one
+    // remaining passkey) — the backend now permits that unconditionally
+    // (#1153), so the frontend must name the consequence BEFORE calling it.
     fireEvent.click(ownerRemove)
+    expect(removeOwner).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(screen.getByText(/this account will have no recovery/i)).toBeTruthy()
+    expect(screen.getByText(/losing this device loses the funds|lose access to this account/i)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove anyway' }))
+    await waitFor(() => expect(removeOwner).toHaveBeenCalled())
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('cancelling the single-signer confirmation leaves the wallet in place', async () => {
+    const removeOwner = vi.fn().mockResolvedValue({ ok: true })
+    mockUseSigners.mockReturnValue(
+      base({
+        removeOwner,
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    const [ownerRemove] = screen.getAllByText('Remove') as HTMLButtonElement[]
+    fireEvent.click(ownerRemove)
+    expect(screen.getByRole('dialog')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(removeOwner).not.toHaveBeenCalled()
+  })
+
+  it('does not show the single-signer confirmation when a backup passkey would still remain', async () => {
+    const removeOwner = vi.fn().mockResolvedValue({ ok: true })
+    mockUseSigners.mockReturnValue(
+      base({
+        removeOwner,
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [
+            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' },
+            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4' },
+          ],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    const [ownerRemove] = screen.getAllByText('Remove') as HTMLButtonElement[]
+    fireEvent.click(ownerRemove)
+    // Removing the wallet here still leaves two passkeys — ordinary
+    // maintenance, no single-signer consequence to name.
+    expect(screen.queryByRole('dialog')).toBeNull()
     await waitFor(() => expect(removeOwner).toHaveBeenCalled())
   })
 

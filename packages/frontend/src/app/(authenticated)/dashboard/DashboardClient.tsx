@@ -29,6 +29,7 @@ import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifec
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import { RecoveryNudge } from '@/components/onboarding/RecoveryNudge'
+import { getStoredHybridSigners } from '@/lib/signer'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgent2Modal from '@/components/ConnectAgent2Modal'
 import SendModal from '@/components/SendModal'
@@ -655,6 +656,25 @@ export default function DashboardClient() {
   const fundingStateKnown = safes.length > 0 && !balancesLoading && !balancesError
   const dataReady = fundingStateKnown && !agentsLoading
   const hasFunds = fundingStateKnown && hasAnyBalance
+
+  // #1153: the backup recommendation needs BOTH halves — funded, AND actually
+  // missing a backup. Telling someone who already enrolled a second signer to
+  // enrol one teaches them to ignore the banner.
+  //
+  // Read from the set `AuthContext` already resolves for every delegation-rail
+  // safe on login. A plain synchronous read, so no extra request and no
+  // signing-provider context — a dashboard banner has no business requiring
+  // the wallet machinery `useAccountSigners` pulls in.
+  const delegationSafe = safes.find((safe) => safe.account_type === 'delegator_hybrid')
+  const recoverySigners = getStoredHybridSigners({
+    safeAddress: delegationSafe?.safe_address as Address | undefined,
+    chainId: delegationSafe?.chain_id,
+  })
+  // Unknown signer set → stay silent. Nagging on a failed read is worse than
+  // a late recommendation, and the next load will know.
+  const missingBackup = recoverySigners
+    ? recoverySigners.passkeys.length + (recoverySigners.owner_address ? 1 : 0) < 2
+    : false
   const hasAgents = dataReady && agents.length > 0
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
@@ -1007,15 +1027,20 @@ export default function DashboardClient() {
           />
         ) : null
 
-        // Interim home for the backup-signer prompt (#1162). Onboarding used
-        // to render it on its "You're in" screen, which #1162 removed; #1153
-        // supersedes this placement with a funded-state trigger. Dismissible,
-        // exactly as before, and kept to delegation-rail accounts — the
-        // condition it rendered under before — because "Backup & recovery" is
-        // where it sends you and that only exists on those accounts.
-        const recoveryNudge = safes.some((safe) => safe.account_type === 'delegator_hybrid') ? (
-          <RecoveryNudge />
-        ) : null
+        // Home for the backup-signer prompt (#1162, #1153). Onboarding used
+        // to render it on its "You're in" screen, which #1162 removed and
+        // relocated here; #1153 replaces the unconditional
+        // "any delegator_hybrid account" render with a funded-state trigger
+        // — the owner does not want this in front of the user before they
+        // have funds at risk. `hasFunds` is already fail-closed: it only
+        // goes true once `fundingStateKnown` is true (safes loaded, balance
+        // fetch not loading, no balance error), so a transient RPC failure
+        // reads as "not funded", never as "funded". Dismissible exactly as
+        // before, and kept to delegation-rail accounts because "Backup &
+        // recovery" is where it sends you and that only exists on those
+        // accounts.
+        const recoveryNudge =
+          hasFunds && delegationSafe && missingBackup ? <RecoveryNudge /> : null
 
         if (isFocusedView) {
           return (

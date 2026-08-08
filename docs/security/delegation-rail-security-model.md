@@ -191,11 +191,11 @@ point — it is the owner's own money.
 **The signer set is symmetric (#1087):** enrolling an EOA owner is not a
 one-way door — `remove_owner` encodes `transferOwnership(address(0))` through
 the same prepare/submit path and returns the account to passkey-only. Refused
-before any op is prepared when the wallet is the account's only signer; on a
-value-bearing chain a removal that would drop the account to a single signer
-is additionally gated by the **same recorded single-signer waiver provisioning
-honours** (#908 floor — decision recorded on #1087), so "may this account run
-single-signer on mainnet" has exactly one answer.
+before any op is prepared when the wallet is the account's **only** signer —
+that would leave nothing able to approve anything, and the account refuses it
+on-chain regardless. A removal that leaves exactly ONE signer is **permitted**
+since #1153, on any chain: the dashboard names the consequence and asks for
+confirmation, and the API does not refuse (see §7 for the decision).
 
 **Recovery invariants (non-custody preserved through recovery):**
 
@@ -204,9 +204,11 @@ single-signer on mainnet" has exactly one answer.
   (WebAuthn or EOA). Haven holds no key that can add, remove, or use a signer —
   invariant 13, CI-enforced.
 - **The account enforces ≥1 signer on-chain** (`CannotRemoveLastSigner`, proven
-  in the #884 spike). Haven mirrors a **≥2** floor in the API as a clean refusal
-  so a user is nudged to add a backup before they can strip redundancy — the UI
-  never lets you approach a no-recovery state silently.
+  in the #884 spike), and that is the only hard floor. Haven mirrored a **≥2**
+  refusal in the API until #1153 turned it into a recommendation; the UI still
+  never lets you approach a no-recovery state *silently*, but it now warns
+  rather than refuses. `remove_passkey` is the one place the ≥2 refusal
+  remains, on every chain — an asymmetry #1153 records rather than resolves.
 - **Storage tracks the chain, not the reverse.** The stored signer set (which the
   deploy/sign paths rebuild the account config from) is synced only *after* the
   on-chain op confirms, and the submit step **pins the sync to the signed
@@ -263,36 +265,62 @@ Haven. This is inherent to self-custody, not a Haven policy. Mitigation is
 structural: onboarding nudges a backup, the account blocks dropping below the
 safe floor, and copy never promises recovery Haven cannot deliver.
 
-## 7. Mainnet-gate criterion (recorded — and enforced)
+## 7. Two signers: a recommendation, not a gate (#1153)
 
-Before any account holds **mainnet** funds:
+**This section previously recorded a launch GATE.** It said no mainnet
+delegation-rail account could operate below two enrolled signers without a
+recorded waiver, and `modules/accounts/mainnet-gate.ts` enforced exactly that at
+provisioning, at grant activation, and at owner removal.
 
-> **No mainnet delegation-rail account may operate with fewer than two enrolled
-> signers**, unless the owner has explicitly acknowledged the single-signer
-> risk (a recorded, signed-off "I understand losing my only device loses this
-> account"). The enrollment nudge is not sufficient on its own for mainnet —
-> the ≥2 floor (or the explicit waiver) is a launch gate, tracked on the
-> mainnet decision issue (#908).
+**It no longer does. Owner decision, 2026-08-07, verbatim:**
 
-**The mechanism (implemented, #908):** `modules/accounts/mainnet-gate.ts` enforces the floor
-at both authority moments — **provisioning** (`POST /accounts/hybrid`) and
-**grant activation** (`POST /agents/:id/delegations/:hash/activate`), the
-moment a delegation becomes live spend authority. Properties:
+> "This is too hard, create a issue where this requirement is changed from
+> being a hard one, to a soft recommendation of adding a backup, but this
+> recommendation should only be displayed to the user after they have funded
+> the account. I do not want users to have this in their face directly at
+> onboarding."
 
-- **Fail-closed chain classification:** a chain is value-bearing unless it is a
-  *known testnet* — an unregistered chain id inherits the mainnet floor rather
-  than slipping past it.
-- **Registry-independent ordering:** the routes run the floor *before* the
-  pinned-contracts availability check, so adding Base mainnet to
-  `delegation-contracts.ts` can never, on its own, open mainnet without the
-  floor.
-- **The waiver is recorded, not implied:** provisioning below the floor on a
-  value-bearing chain requires `single_signer_waiver: { acknowledged: true }`
-  in the request and stamps `user_safes.single_signer_waiver_at` (migration
-  046); activation reads that column back. Testnet accounts never carry one.
-- **Testnets are untouched:** single-signer dev/QA accounts remain exactly as
-  cheap as before — the floor is a mainnet launch criterion, not a general
-  restriction.
+and, on owner removal:
+
+> "convert this from a block to a warning instead, the user should be able to
+> move to a one signer set up."
+
+**What this does and does not change.** It does not make single-signer accounts
+safer, and it does not lower the risk stated in §6: such an account has **no
+recovery**, and losing the device loses the funds with no path back through
+Haven or anyone else. That is now a risk the user may take. What changed is
+*when and how* they are told: after funding, when there is something to
+protect, instead of as a wall in the first minute — where it blocked the
+one-Face-ID, zero-transaction onboarding this rail exists to offer, at the
+moment the user has nothing at risk and no context for what a backup protects.
+
+**The mechanism now:**
+
+- **Provisioning and grant activation do not consider signer count.** A
+  single-signer account may be created on a value-bearing chain and may receive
+  a budget.
+- **`remove_owner` succeeds** in dropping a value-bearing account to one
+  signer. The dashboard requires an explicit confirmation naming the
+  consequence before it calls; an API-level acknowledgement flag was rejected
+  on #1153 because it would still be a block to any non-UI caller, which is the
+  thing being removed.
+- **The recommendation is delivered after funding**, and only when the account
+  is genuinely below two signers — recommending a backup to someone who has one
+  teaches them to ignore the banner.
+- **`needsBackupSignerRecommendation`** replaces `signerFloorError`. Same
+  condition, no refusal: it answers "would this account benefit from a backup",
+  and the fail-closed chain classification stays because over-recommending on
+  an unknown chain is harmless while staying quiet on a real one is not.
+- **The waiver column survives as history, not as an unblock.**
+  `user_safes.single_signer_waiver_at` (migration 046) is still written when an
+  acknowledgement is sent, and nothing requires it to proceed. It no longer
+  silences the recommendation either — it never made an account recoverable; it
+  only recorded that someone had been told once, and the risk is ongoing.
+
+**What did NOT relax:** the account still refuses to remove its *last* signer.
+That is a different rule — it mirrors an invariant the account enforces
+on-chain, and dropping to zero signers bricks the account rather than merely
+making it unrecoverable.
 - **Activation is atomic** (#1061): retiring the previously ACTIVE grant for a
   `(token, recipient)` slot and activating the new one run in **one
   transaction**. As two independent statements, a failure between them left the

@@ -18,7 +18,7 @@ import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
-import { isValueBearingChain, signerFloorError } from '../modules/accounts/index.js'
+import { isValueBearingChain } from '../modules/accounts/index.js'
 import { computeHybridAccountAddress, type PasskeySigner } from '../rails/hybrid-provisioning.js'
 import {
   prepareSignerChange,
@@ -85,15 +85,15 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       return reply.code(400).send({ error: 'duplicate passkey key_id' })
     }
 
-    // ── #908 mainnet signer floor — BEFORE the contract-availability check,
-    // so adding a mainnet entry to the pinned registry can never, on its own,
-    // open mainnet provisioning without this gate.
+    // #1153: provisioning no longer refuses a single-signer account on a
+    // value-bearing chain. The #908 floor became a recommendation shown AFTER
+    // funding — the owner's call, recorded on that issue — because a wall in
+    // the first minute blocked the one-Face-ID onboarding this rail exists to
+    // offer, at the moment the user has nothing at risk and no context for
+    // what a backup signer protects. An acknowledgement is still RECORDED
+    // below when one is sent; it just no longer unblocks anything.
     const signerCount = parsedPasskeys.length + (owner_address ? 1 : 0)
     const waiverAcknowledged = single_signer_waiver?.acknowledged === true
-    const floorBlock = signerFloorError({ chainId, signerCount, waiverAcknowledged })
-    if (floorBlock) {
-      return reply.code(403).send({ error: floorBlock })
-    }
 
     if (!DELEGATION_RAIL_CHAIN_IDS.has(chainId)) {
       return reply.code(400).send({

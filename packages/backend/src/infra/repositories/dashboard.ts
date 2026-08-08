@@ -121,10 +121,6 @@ export async function listDashboardAgents(
 
 // ── Counters ─────────────────────────────────────────────────────────────────
 
-export const COUNT_ACTIONABLE_APPROVALS_SQL = `SELECT COUNT(*) AS count
-         FROM approval_requests
-         WHERE user_id = $1 AND status IN ('pending', 'approved')`
-
 export const HAS_FIRST_AGENT_PAYMENT_SQL = `SELECT (
            EXISTS (
              SELECT 1
@@ -143,14 +139,6 @@ export const HAS_FIRST_AGENT_PAYMENT_SQL = `SELECT (
          ) AS has_first_agent_payment`
 
 /** `userId` is REQUIRED — tenant scope for the approval queue count. */
-export async function countActionableApprovals(
-  userId: string,
-  db: Executor = pool,
-): Promise<number> {
-  const result = await db.query<{ count: string }>(COUNT_ACTIONABLE_APPROVALS_SQL, [userId])
-  return Number(result.rows[0]?.count ?? '0')
-}
-
 /**
  * `userId` is REQUIRED — tenant scope for the onboarding milestone.
  *

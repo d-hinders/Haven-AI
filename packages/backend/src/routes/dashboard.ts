@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
+import { countActionableApprovalsForUser } from '../infra/repositories/approval-requests.js'
 import {
-  countActionableApprovals,
   findPortfolioSnapshots,
   hasFirstAgentPayment,
   insertPortfolioSnapshot,
@@ -81,7 +81,7 @@ export default async function dashboardRoutes(
     ] = await Promise.all([
       listDashboardSafes(sub),
       listDashboardAgents(sub),
-      countActionableApprovals(sub),
+      countActionableApprovalsForUser(sub),
       hasFirstAgentPayment(sub),
     ])
 

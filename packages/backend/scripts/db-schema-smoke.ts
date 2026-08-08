@@ -161,6 +161,7 @@ import {
   INSERT_MACHINE_APPROVAL_SQL,
   INSERT_PAYMENT_APPROVAL_SQL,
   INSERT_SEND_APPROVAL_SQL,
+  COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL,
 } from '../src/infra/repositories/approval-requests.js'
 import {
   CONFIRM_X402_INTENT_SQL,
@@ -271,7 +272,6 @@ import {
   UPSERT_OWNER_ALIAS_SQL,
 } from '../src/infra/repositories/owner-aliases.js'
 import {
-  COUNT_ACTIONABLE_APPROVALS_SQL,
   FIND_PORTFOLIO_SNAPSHOTS_SQL,
   HAS_FIRST_AGENT_PAYMENT_SQL,
   INSERT_PORTFOLIO_SNAPSHOT_SQL,
@@ -282,7 +282,6 @@ import {
   SUM_MONTHLY_PAYMENT_SPEND_SQL,
 } from '../src/infra/repositories/dashboard.js'
 import {
-  COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL,
   COUNT_PENDING_APPROVALS_FOR_AGENT_SQL,
   LIST_AGENT_APPROVALS_SQL,
   LIST_AGENT_PAYMENTS_SQL,
@@ -407,7 +406,6 @@ const QUERIES: SmokeQuery[] = [
   // routes/dashboard.ts.
   { name: 'dashboard: account list', sql: LIST_DASHBOARD_SAFES_SQL },
   { name: 'dashboard: agent preview (safe join)', sql: LIST_DASHBOARD_AGENTS_SQL },
-  { name: 'dashboard: actionable approvals count', sql: COUNT_ACTIONABLE_APPROVALS_SQL },
   { name: 'dashboard: first-agent-payment milestone', sql: HAS_FIRST_AGENT_PAYMENT_SQL },
   { name: 'dashboard: legacy allowance mirror for agents', sql: LIST_DASHBOARD_ALLOWANCES_SQL },
   { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
@@ -427,7 +425,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agent-activity: spend today', sql: SUM_AGENT_SPEND_TODAY_SQL },
   { name: 'agent-activity: spend this week', sql: SUM_AGENT_SPEND_WEEK_SQL },
   { name: 'agent-activity: pending approvals for agent', sql: COUNT_PENDING_APPROVALS_FOR_AGENT_SQL },
-  { name: 'agent-activity: actionable approvals for user', sql: COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL },
+  // One statement, two surfaces (#1179) — the dashboard and the activity feed.
+  { name: 'approvals: actionable count for user', sql: COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL },
   { name: 'agent-tool-invocations: read for agent', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL },
   { name: 'agent-tool-invocations: read for agent set', sql: LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL },
   { name: 'agents: name map for activity feed', sql: LIST_AGENT_NAMES_FOR_USER_SQL },

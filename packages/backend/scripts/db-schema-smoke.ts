@@ -30,6 +30,10 @@ import { SELECT_DELEGATION_FOR_PAYMENT_SQL } from '../src/infra/repositories/del
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
 import {
+  FIND_ALLOWANCE_NONCE_WATERMARK_SQL,
+  UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL,
+} from '../src/infra/repositories/allowance-nonce-watermarks.js'
+import {
   GET_RECORDED_FEE_SQL,
   INSERT_PAYMENT_FEE_SQL,
 } from '../src/infra/repositories/payment-fees.js'
@@ -398,6 +402,11 @@ const QUERIES: SmokeQuery[] = [
   { name: 'auth: login credentials read by email', sql: FIND_USER_CREDENTIALS_BY_EMAIL_SQL },
   { name: 'auth: /me profile read by id', sql: FIND_USER_PROFILE_BY_ID_SQL },
   { name: 'auth: session safes payload (carries account_type, #1069)', sql: LIST_SESSION_SAFES_FOR_USER_SQL },
+  // Cross-replica allowance-nonce watermark (#718). The GREATEST upsert is the
+  // monotonicity guarantee — a schema change that broke it would silently
+  // re-open the stale-nonce window.
+  { name: 'nonce: raise the allowance watermark (GREATEST upsert)', sql: UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL },
+  { name: 'nonce: read the allowance watermark', sql: FIND_ALLOWANCE_NONCE_WATERMARK_SQL },
   // Owner-alias aggregate (#1167). IMPORTED — verbatim from routes/user.ts.
   { name: 'owner-aliases: list for confirmed owners', sql: LIST_OWNER_ALIASES_SQL },
   { name: 'owner-aliases: upsert', sql: UPSERT_OWNER_ALIAS_SQL },

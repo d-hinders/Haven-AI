@@ -3,6 +3,7 @@ import {
   recordAllowanceNonce,
   waitForFreshAllowanceNonce,
   __resetAllowanceNonceCoordinator,
+  readSharedWatermark,
 } from '../allowance-nonce-coordinator.js'
 
 const C = 84532
@@ -222,5 +223,90 @@ describe('cross-replica watermark (#718)', () => {
         slowButFine,
       ),
     ).toBe(8)
+  })
+})
+
+// ── Prefetch (#1196) ─────────────────────────────────────────────────────────
+//
+// #718 read the shared watermark inline, which put a serial database round
+// trip on a path that previously did no I/O. The four sign-hash builders each
+// already await a `Promise.all` of chain reads, so the lookup rides along
+// there instead and costs nothing measurable.
+
+describe('a prefetched watermark (#1196)', () => {
+  beforeEach(() => __resetAllowanceNonceCoordinator())
+
+  it('is USED, and the store is never consulted', async () => {
+    const store = fakeStore({ '84532:0xsafe:0xdelegate:0xtoken': 3 })
+    const read = vi.fn().mockResolvedValueOnce(4).mockResolvedValue(7)
+
+    const nonce = await waitForFreshAllowanceNonce(
+      C, SAFE, DELEGATE, TOKEN, 4, read,
+      { intervalMs: 1, timeoutMs: 1000, sharedWatermark: 7 },
+      store,
+    )
+
+    expect(nonce).toBe(7) // the prefetched 7, not the store's 3
+    expect(store.find).not.toHaveBeenCalled()
+  })
+
+  it('distinguishes "read it, there was none" from "did not read it"', async () => {
+    // null must not fall back to an inline read — the caller already asked and
+    // got nothing, and re-asking would reintroduce the round trip.
+    const store = fakeStore({ '84532:0xsafe:0xdelegate:0xtoken': 9 })
+    const read = vi.fn().mockResolvedValue(4)
+
+    const nonce = await waitForFreshAllowanceNonce(
+      C, SAFE, DELEGATE, TOKEN, 4, read, { intervalMs: 1, sharedWatermark: null }, store,
+    )
+
+    expect(nonce).toBe(4)
+    expect(store.find).not.toHaveBeenCalled()
+  })
+
+  it('still reads inline when nothing was prefetched (undefined)', async () => {
+    const store = fakeStore({ '84532:0xsafe:0xdelegate:0xtoken': 6 })
+    const read = vi.fn().mockResolvedValueOnce(4).mockResolvedValue(6)
+
+    const nonce = await waitForFreshAllowanceNonce(
+      C, SAFE, DELEGATE, TOKEN, 4, read, { intervalMs: 1, timeoutMs: 1000 }, store,
+    )
+
+    expect(nonce).toBe(6)
+    expect(store.find).toHaveBeenCalled()
+  })
+
+  it('the local map still wins when it is higher than the prefetch', async () => {
+    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 9, NO_SHARED_TIER)
+    const read = vi.fn().mockResolvedValue(9)
+
+    expect(
+      await waitForFreshAllowanceNonce(
+        C, SAFE, DELEGATE, TOKEN, 4, read, { intervalMs: 1, sharedWatermark: 2 }, NO_SHARED_TIER,
+      ),
+    ).toBe(9)
+  })
+})
+
+describe('readSharedWatermark (#1196)', () => {
+  it('returns the stored value', async () => {
+    const store = fakeStore({ '84532:0xsafe:0xdelegate:0xtoken': 5 })
+    expect(await readSharedWatermark(C, SAFE, DELEGATE, TOKEN, {}, store)).toBe(5)
+  })
+
+  it('is fail-open on a rejecting store', async () => {
+    const broken = { raise: async () => {}, find: async () => { throw new Error('db down') } }
+    expect(await readSharedWatermark(C, SAFE, DELEGATE, TOKEN, {}, broken)).toBeNull()
+  })
+
+  it('is BOUNDED — a hanging store cannot stall the Promise.all it rides in', async () => {
+    // The whole point of prefetching is that it is concurrent with slower
+    // chain reads. An unbounded hang here would hold up the entire
+    // Promise.all, converting a free lookup into an outage.
+    const hanging = { raise: async () => {}, find: () => new Promise<number | null>(() => {}) }
+    const started = Date.now()
+
+    expect(await readSharedWatermark(C, SAFE, DELEGATE, TOKEN, { timeoutMs: 20 }, hanging)).toBeNull()
+    expect(Date.now() - started).toBeLessThan(1000)
   })
 })

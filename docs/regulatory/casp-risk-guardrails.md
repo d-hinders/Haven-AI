@@ -49,7 +49,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-08" # per-change history: see "Verification log" at the end of this document
+last-verified: "2026-08-09" # per-change history: see "Verification log" at the end of this document
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -773,3 +773,4 @@ one — the staleness audit ranks on it.
 - **#1155** — the signer publishes its supported expected-context version set at handshake and the hosted quote reports the version it will emit. Both are observability on the payment path, not authority over it — no key role added or widened, no relay discretion introduced, no new refusal (a quote whose version the signer may not know still succeeds), and the binding-verification path in signer/core.ts is untouched. Invariants re-read against the diff — perimeter unchanged.
 - **#1145** — the delegation rail's reported `remaining` now comes from the ERC20PeriodTransferEnforcer's own storage rather than always reporting the full period budget — a REPORTING correction with no new authority (the enforcer already gated every redemption and still does; an over-budget attempt reverted before this change and reverts after it). It makes Haven's guidance match what the chain will allow instead of overstating it, and a failed read falls back to the old number rather than to a zero that would stop a funded agent — no route, perimeter or control changed.
 - **#718** — the allowance-nonce coordinator gained a shared Postgres watermark so a multi-replica backend waits on the highest nonce ANY replica confirmed; it is an optimisation that avoids a revert-and-retry, fail-open in BOTH the repository and the coordinator, and the #693 preflight remains the control that actually prevents a double-spend — no authority, route or perimeter changed, and no path became able to move funds it could not move before.
+- **#1196** — the #692 nonce coordinator now runs on all FOUR legacy-rail sign-hash builders instead of one (`routes/payments.ts`, `modules/mpp/send.ts` and `modules/mpp/authorize.ts` joined `modules/x402/legacy-authorize.ts`), with the shared watermark prefetched alongside each site's existing chain reads. Purely an accuracy/latency change on which nonce a signature targets: no new authority, no new refusal, and the #693 preflight remains the control that prevents a double-spend on every path — it simply makes three paths revert-and-retry as rarely as the fourth already did. Perimeter unchanged.

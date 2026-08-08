@@ -31,6 +31,15 @@ const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   },
 }))
 
+// #1196 wired the allowance-nonce coordinator into this path, so it now reads
+// the shared watermark alongside its chain reads. These suites mock db.query
+// with POSITIONAL chains, which any new query shifts (the #775 failure mode).
+// Stub the watermark repository instead: it is fail-open and orthogonal to
+// what these tests assert, so silencing it changes nothing they measure.
+vi.mock('../../infra/repositories/allowance-nonce-watermarks.js', () => ({
+  findAllowanceNonceWatermark: async () => null,
+  raiseAllowanceNonceWatermark: async () => {},
+}))
 vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
 vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)

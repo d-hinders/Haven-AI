@@ -34,7 +34,10 @@ import {
   recoverSigner,
   executeAllowanceTransfer,
 } from '../../rails/allowance-module.js'
-import { waitForFreshAllowanceNonce } from '../../rails/allowance-nonce-coordinator.js'
+import {
+  readSharedWatermark,
+  waitForFreshAllowanceNonce,
+} from '../../rails/allowance-nonce-coordinator.js'
 // Evidence recording is mpp-module orchestration (#997) that x402 also needs
 // after a successful legacy-rail settlement — a genuine cross-module need,
 // so it comes through the module's public entry point (rule 6, not a deep
@@ -258,8 +261,12 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
   // 6. On-chain allowance check + auto-queue when over the remaining allowance
   let onChainAllowance
   let chainTimeSec: number
+  let sharedWatermark: number | null
   try {
-    ;[onChainAllowance, chainTimeSec] = await Promise.all([
+    // The watermark rides along with the on-chain reads (#1196) rather than
+    // going out serially afterwards: it is a single indexed lookup against
+    // reads that take orders of magnitude longer, so concurrently it is free.
+    ;[onChainAllowance, chainTimeSec, sharedWatermark] = await Promise.all([
       getTokenAllowance(
         agent.chain_id,
         agent.safe_address,
@@ -267,6 +274,12 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
         tokenAddress,
       ),
       getLatestBlockTimeSec(agent.chain_id),
+      readSharedWatermark(
+        agent.chain_id,
+        agent.safe_address,
+        agent.delegate_address,
+        tokenAddress,
+      ),
     ])
   } catch (err) {
     return {
@@ -294,6 +307,7 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
           tokenAddress,
         )
       ).nonce,
+    { sharedWatermark },
   )
 
   const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)

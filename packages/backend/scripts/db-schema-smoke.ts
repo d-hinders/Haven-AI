@@ -224,9 +224,11 @@ import {
   FIND_OWNED_SAFE_SQL,
   FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL,
   INSERT_USER_SAFE_SQL,
+  LINK_DEFAULT_USER_SAFE_SQL,
   LIST_APPROVER_METADATA_FOR_SAFE_SQL,
   LIST_KNOWN_APPROVERS_FOR_USER_SQL,
   LIST_SAFES_FOR_USER_SQL,
+  LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL,
   ORPHAN_AGENTS_FOR_SAFE_SQL,
   ORPHAN_SELF_SIGN_AGENTS_FOR_SAFE_SQL,
   PROMOTE_SAFE_TO_DEFAULT_SQL,
@@ -251,6 +253,45 @@ import {
   LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL,
   LIST_BASIC_SAFES_FOR_USER_SQL,
 } from '../src/infra/repositories/transaction-history.js'
+import {
+  FIND_CURRENCY_PREFERENCE_SQL,
+  UPDATE_CURRENCY_PREFERENCE_SQL,
+  UPDATE_USER_NAME_SQL,
+  UPDATE_USER_SAFE_ADDRESS_SQL,
+  UPDATE_USER_WALLET_ADDRESS_SQL,
+} from '../src/infra/repositories/users.js'
+import {
+  DELETE_OWNER_ALIAS_SQL,
+  LIST_OWNER_ALIASES_SQL,
+  UPSERT_OWNER_ALIAS_SQL,
+} from '../src/infra/repositories/owner-aliases.js'
+import {
+  COUNT_ACTIONABLE_APPROVALS_SQL,
+  FIND_PORTFOLIO_SNAPSHOTS_SQL,
+  HAS_FIRST_AGENT_PAYMENT_SQL,
+  INSERT_PORTFOLIO_SNAPSHOT_SQL,
+  LIST_DASHBOARD_AGENTS_SQL,
+  LIST_DASHBOARD_ALLOWANCES_SQL,
+  LIST_DASHBOARD_SAFES_SQL,
+  SUM_MONTHLY_APPROVAL_SPEND_SQL,
+  SUM_MONTHLY_PAYMENT_SPEND_SQL,
+} from '../src/infra/repositories/dashboard.js'
+import {
+  COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL,
+  COUNT_PENDING_APPROVALS_FOR_AGENT_SQL,
+  LIST_AGENT_APPROVALS_SQL,
+  LIST_AGENT_PAYMENTS_SQL,
+  LIST_FEED_APPROVALS_SQL,
+  LIST_FEED_PAYMENTS_SQL,
+  SUM_AGENT_SPEND_ALL_TIME_SQL,
+  SUM_AGENT_SPEND_TODAY_SQL,
+  SUM_AGENT_SPEND_WEEK_SQL,
+} from '../src/infra/repositories/agent-activity.js'
+import {
+  LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL,
+  LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL,
+} from '../src/infra/repositories/agent-tool-invocations.js'
+import { LIST_AGENT_NAMES_FOR_USER_SQL } from '../src/infra/repositories/agents.js'
 
 interface SmokeQuery {
   name: string
@@ -336,6 +377,47 @@ const QUERIES: SmokeQuery[] = [
   { name: 'user-safes: approver metadata for safe', sql: LIST_APPROVER_METADATA_FOR_SAFE_SQL },
   { name: 'user-safes: approver metadata upsert (expression conflict target)', sql: UPSERT_APPROVER_METADATA_SQL },
   { name: 'user-safes: approver metadata delete', sql: DELETE_APPROVER_METADATA_SQL },
+  { name: 'user-safes: owner-directory list (account_type)', sql: LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL },
+  { name: 'user-safes: idempotent link from PUT /user/safe', sql: LINK_DEFAULT_USER_SAFE_SQL },
+  // Users aggregate (#1167). IMPORTED from the repository — verbatim from
+  // routes/user.ts.
+  { name: 'users: update display name', sql: UPDATE_USER_NAME_SQL },
+  { name: 'users: update connected wallet address', sql: UPDATE_USER_WALLET_ADDRESS_SQL },
+  { name: 'users: update legacy safe_address mirror', sql: UPDATE_USER_SAFE_ADDRESS_SQL },
+  { name: 'users: read currency preference', sql: FIND_CURRENCY_PREFERENCE_SQL },
+  { name: 'users: update currency preference', sql: UPDATE_CURRENCY_PREFERENCE_SQL },
+  // Owner-alias aggregate (#1167). IMPORTED — verbatim from routes/user.ts.
+  { name: 'owner-aliases: list for confirmed owners', sql: LIST_OWNER_ALIASES_SQL },
+  { name: 'owner-aliases: upsert', sql: UPSERT_OWNER_ALIAS_SQL },
+  { name: 'owner-aliases: delete', sql: DELETE_OWNER_ALIAS_SQL },
+  // Dashboard overview aggregate (#1167). IMPORTED — verbatim from
+  // routes/dashboard.ts.
+  { name: 'dashboard: account list', sql: LIST_DASHBOARD_SAFES_SQL },
+  { name: 'dashboard: agent preview (safe join)', sql: LIST_DASHBOARD_AGENTS_SQL },
+  { name: 'dashboard: actionable approvals count', sql: COUNT_ACTIONABLE_APPROVALS_SQL },
+  { name: 'dashboard: first-agent-payment milestone', sql: HAS_FIRST_AGENT_PAYMENT_SQL },
+  { name: 'dashboard: legacy allowance mirror for agents', sql: LIST_DASHBOARD_ALLOWANCES_SQL },
+  { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
+  { name: 'dashboard: portfolio snapshot upsert', sql: INSERT_PORTFOLIO_SNAPSHOT_SQL },
+  { name: 'dashboard: month-to-date payment spend', sql: SUM_MONTHLY_PAYMENT_SPEND_SQL },
+  { name: 'dashboard: month-to-date approval spend', sql: SUM_MONTHLY_APPROVAL_SPEND_SQL },
+  // Agent-activity read model (#1167). IMPORTED — verbatim from
+  // routes/agent-activity.ts. The four-table payment/approval joins are the
+  // highest-value additions in this block: they reach machine_payment_evidence
+  // and machine_payment_reconciliation_events, which no other smoke query
+  // touches from this angle.
+  { name: 'agent-activity: single-agent payments (evidence joins)', sql: LIST_AGENT_PAYMENTS_SQL },
+  { name: 'agent-activity: single-agent approvals (evidence joins)', sql: LIST_AGENT_APPROVALS_SQL },
+  { name: 'agent-activity: feed payments (evidence joins)', sql: LIST_FEED_PAYMENTS_SQL },
+  { name: 'agent-activity: feed approvals (evidence joins)', sql: LIST_FEED_APPROVALS_SQL },
+  { name: 'agent-activity: spend all time', sql: SUM_AGENT_SPEND_ALL_TIME_SQL },
+  { name: 'agent-activity: spend today', sql: SUM_AGENT_SPEND_TODAY_SQL },
+  { name: 'agent-activity: spend this week', sql: SUM_AGENT_SPEND_WEEK_SQL },
+  { name: 'agent-activity: pending approvals for agent', sql: COUNT_PENDING_APPROVALS_FOR_AGENT_SQL },
+  { name: 'agent-activity: actionable approvals for user', sql: COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL },
+  { name: 'agent-tool-invocations: read for agent', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL },
+  { name: 'agent-tool-invocations: read for agent set', sql: LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL },
+  { name: 'agents: name map for activity feed', sql: LIST_AGENT_NAMES_FOR_USER_SQL },
   {
     // Every authenticated agent request runs this, and it is where
     // `agent.chain_id` comes from — the value machine-payments.ts then uses for

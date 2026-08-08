@@ -43,6 +43,16 @@ export interface OwnedSafeRow {
   chain_id: number
 }
 
+/** The owner-directory projection (#1167). */
+export interface SafeWithAccountTypeRow {
+  id: string
+  safe_address: string
+  chain_id: number
+  name: string
+  /** 'delegator_hybrid' on the delegation rail; null/legacy = Safe rail (#1069). */
+  account_type: string | null
+}
+
 export interface ApproverMetadataRow {
   address: string
   type: 'eoa' | 'passkey'
@@ -63,6 +73,19 @@ export const LIST_SAFES_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name,
        WHERE user_id = $1
        ORDER BY created_at ASC`
 
+/**
+ * The owner-directory projection (moved from `routes/user.ts`, #1167). Same
+ * scope and ordering as `LIST_SAFES_FOR_USER_SQL`, but it trades
+ * `is_default`/`created_at` for `account_type` — the rail marker the directory
+ * needs. Kept as its own statement rather than widening the other: both are
+ * PREPARE-checked, and a shared superset would make every caller pay for
+ * columns it does not read.
+ */
+export const LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name, account_type
+     FROM user_safes
+     WHERE user_id = $1
+     ORDER BY created_at ASC`
+
 export const FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL = `SELECT id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3`
 
 export const COUNT_SAFES_FOR_USER_SQL = `SELECT COUNT(*) as count FROM user_safes WHERE user_id = $1`
@@ -79,6 +102,18 @@ export async function listSafesForUser(
   db: Executor = pool,
 ): Promise<UserSafeRow[]> {
   const result = await db.query<UserSafeRow>(LIST_SAFES_FOR_USER_SQL, [userId])
+  return result.rows
+}
+
+/** `userId` is REQUIRED — tenant scope for the owner-directory Safe list. */
+export async function listSafesWithAccountTypeForUser(
+  userId: string,
+  db: Executor = pool,
+): Promise<SafeWithAccountTypeRow[]> {
+  const result = await db.query<SafeWithAccountTypeRow>(
+    LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL,
+    [userId],
+  )
   return result.rows
 }
 
@@ -143,6 +178,30 @@ export const INSERT_USER_SAFE_SQL = `INSERT INTO user_safes (user_id, safe_addre
        RETURNING id, safe_address, chain_id, name, is_default, created_at`
 
 export const SET_LEGACY_USER_SAFE_ADDRESS_SQL = `UPDATE users SET safe_address = $1, updated_at = NOW() WHERE id = $2`
+
+/**
+ * The `PUT /user/safe` companion write (moved from `routes/user.ts`, #1167).
+ *
+ * Distinct from `INSERT_USER_SAFE_SQL`, which the multi-Safe import path uses:
+ * this one hard-codes the name and the default flag and is IDEMPOTENT —
+ * `DO NOTHING` means re-linking an already-linked Safe is a no-op rather than
+ * an error, and in particular does NOT reset a name the user has since
+ * changed. It returns nothing, so a conflict is indistinguishable from an
+ * insert by design.
+ */
+export const LINK_DEFAULT_USER_SAFE_SQL = `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default)
+       VALUES ($1, $2, $3, 'My account', true)
+       ON CONFLICT (user_id, safe_address, chain_id) DO NOTHING`
+
+/** `userId` is REQUIRED — the Safe is linked into that user's namespace. */
+export async function linkDefaultUserSafe(
+  userId: string,
+  safeAddress: string,
+  chainId: number,
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(LINK_DEFAULT_USER_SAFE_SQL, [userId, safeAddress, chainId])
+}
 
 export async function insertUserSafe(
   input: {

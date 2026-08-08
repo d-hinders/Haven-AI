@@ -113,3 +113,21 @@ delegate monitor, fees, Fortnox, reporting-feed ledger, passkeys, contacts,
 safe-ownership reads) into this directory and retiring the baseline outright.
 The remaining inline SQL elsewhere sits behind explicit, printed
 `dep-lint-exempt` waivers; the lint's call-site gauge tracks its volume.
+
+#1167 then took the three largest of those waivers — `routes/user.ts` (10
+statements), `routes/dashboard.ts` (9) and `routes/agent-activity.ts` (14) —
+and emptied them, adding `users.ts`, `owner-aliases.ts`, `dashboard.ts` and
+`agent-activity.ts` and extending `user-safes.ts`, `agents.ts` and
+`agent-tool-invocations.ts`. The gauge fell 108 → 75 and the waiver list 16 →
+13. Two placement lessons worth carrying forward:
+
+- **A route-shaped projection gets its own file.** The dashboard's Safe and
+  agent lists are not the canonical shape of those aggregates, so they went to
+  `dashboard.ts` rather than widening `user-safes.ts` / `agents.ts` for every
+  other caller.
+- **But a query whose aggregate already has a home goes there.** The activity
+  surfaces' `agent_tool_invocations` reads joined the insert that already
+  owned that table, and one statement moved nowhere at all — `agents.ts`
+  already exported `agentExistsForUser` over byte-identical SQL, so the route
+  now calls it instead of the codebase carrying a third copy. Check for an
+  existing constant before writing a new one.

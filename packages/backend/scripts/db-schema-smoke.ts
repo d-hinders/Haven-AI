@@ -276,6 +276,22 @@ import {
   SUM_MONTHLY_APPROVAL_SPEND_SQL,
   SUM_MONTHLY_PAYMENT_SPEND_SQL,
 } from '../src/infra/repositories/dashboard.js'
+import {
+  COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL,
+  COUNT_PENDING_APPROVALS_FOR_AGENT_SQL,
+  LIST_AGENT_APPROVALS_SQL,
+  LIST_AGENT_PAYMENTS_SQL,
+  LIST_FEED_APPROVALS_SQL,
+  LIST_FEED_PAYMENTS_SQL,
+  SUM_AGENT_SPEND_ALL_TIME_SQL,
+  SUM_AGENT_SPEND_TODAY_SQL,
+  SUM_AGENT_SPEND_WEEK_SQL,
+} from '../src/infra/repositories/agent-activity.js'
+import {
+  LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL,
+  LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL,
+} from '../src/infra/repositories/agent-tool-invocations.js'
+import { LIST_AGENT_NAMES_FOR_USER_SQL } from '../src/infra/repositories/agents.js'
 
 interface SmokeQuery {
   name: string
@@ -385,6 +401,23 @@ const QUERIES: SmokeQuery[] = [
   { name: 'dashboard: portfolio snapshot upsert', sql: INSERT_PORTFOLIO_SNAPSHOT_SQL },
   { name: 'dashboard: month-to-date payment spend', sql: SUM_MONTHLY_PAYMENT_SPEND_SQL },
   { name: 'dashboard: month-to-date approval spend', sql: SUM_MONTHLY_APPROVAL_SPEND_SQL },
+  // Agent-activity read model (#1167). IMPORTED — verbatim from
+  // routes/agent-activity.ts. The four-table payment/approval joins are the
+  // highest-value additions in this block: they reach machine_payment_evidence
+  // and machine_payment_reconciliation_events, which no other smoke query
+  // touches from this angle.
+  { name: 'agent-activity: single-agent payments (evidence joins)', sql: LIST_AGENT_PAYMENTS_SQL },
+  { name: 'agent-activity: single-agent approvals (evidence joins)', sql: LIST_AGENT_APPROVALS_SQL },
+  { name: 'agent-activity: feed payments (evidence joins)', sql: LIST_FEED_PAYMENTS_SQL },
+  { name: 'agent-activity: feed approvals (evidence joins)', sql: LIST_FEED_APPROVALS_SQL },
+  { name: 'agent-activity: spend all time', sql: SUM_AGENT_SPEND_ALL_TIME_SQL },
+  { name: 'agent-activity: spend today', sql: SUM_AGENT_SPEND_TODAY_SQL },
+  { name: 'agent-activity: spend this week', sql: SUM_AGENT_SPEND_WEEK_SQL },
+  { name: 'agent-activity: pending approvals for agent', sql: COUNT_PENDING_APPROVALS_FOR_AGENT_SQL },
+  { name: 'agent-activity: actionable approvals for user', sql: COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL },
+  { name: 'agent-tool-invocations: read for agent', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL },
+  { name: 'agent-tool-invocations: read for agent set', sql: LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL },
+  { name: 'agents: name map for activity feed', sql: LIST_AGENT_NAMES_FOR_USER_SQL },
   {
     // Every authenticated agent request runs this, and it is where
     // `agent.chain_id` comes from — the value machine-payments.ts then uses for

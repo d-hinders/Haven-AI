@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { HavenClient } from '@haven_ai/sdk'
+import { HavenClient, isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk'
 import { loadCredentials, type HavenCredentialFile } from './credentials.js'
 import {
   createToolHandlers,
@@ -32,6 +32,8 @@ export interface HavenMcpServerOptions {
    * controlled embedding — production CLIs should not set this.
    */
   skipConsent?: boolean
+  /** Overridable so the Node-floor refusal is testable without spawning a Node. */
+  nodeVersion?: string
 }
 
 export interface ResolvedHavenClient {
@@ -45,6 +47,14 @@ export async function createHavenClient(options: HavenMcpServerOptions = {}): Pr
 }
 
 export async function resolveHavenClient(options: HavenMcpServerOptions = {}): Promise<ResolvedHavenClient> {
+  // The choke point (#1161 review): `runStdioServer`, `createHavenClient` and
+  // `createHavenMcpServer` all funnel through here, and the client built below
+  // is delegate-key-bound — `pay()`, `sign()` and the x402 paths activate the
+  // moment `delegateKey` is set. Guarding only the stdio entrypoint would leave
+  // the embedding constructors reaching a signing-capable client on an
+  // unsupported runtime, which is this issue's own bug one layer down.
+  assertSupportedNodeVersion(options.nodeVersion)
+
   const credentialSource = options.credentialsPath || options.identityPath || options.signerPath
     ? {
         credentialsPath: options.credentialsPath,
@@ -102,7 +112,27 @@ export function buildMcpServer(haven: HavenClient): McpServer {
   return server
 }
 
+/**
+ * Refuse to start on an unsupported Node (#1161).
+ *
+ * Same reasoning as the signer's identical guard: install-time enforcement
+ * cannot see a Node downgrade after setup, or a version manager handing the
+ * agent runtime a different Node than the shell that connected. The local MCP
+ * server drives payment construction against the signer, so it is held to the
+ * package's declared floor rather than whatever happens to boot.
+ */
+export function assertSupportedNodeVersion(nodeVersion: string = process.versions.node): void {
+  if (isSupportedNodeVersion(nodeVersion)) return
+  const err: NodeJS.ErrnoException = new Error(
+    unsupportedNodeVersionMessage({ subject: 'The Haven MCP server', nodeVersion }),
+  )
+  err.code = 'HAVEN_MCP_UNSUPPORTED_NODE'
+  throw err
+}
+
 export async function runStdioServer(options: HavenMcpServerOptions = {}): Promise<void> {
+  // Asserted inside resolveHavenClient — the choke point every key-bound path
+  // shares — so it still runs here, before credentials are read.
   const { client: haven, credentials } = await resolveHavenClient(options)
 
   if (!options.skipConsent) {

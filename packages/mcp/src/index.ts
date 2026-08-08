@@ -1,7 +1,9 @@
 export {
   createHavenClient,
   createHavenMcpServer,
+  resolveHavenClient,
   runStdioServer,
+  assertSupportedNodeVersion,
   MCP_NAME,
   MCP_VERSION,
   type HavenMcpServerOptions,

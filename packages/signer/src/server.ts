@@ -6,6 +6,7 @@ import {
   registeredSignerToolNames,
   type SignerConsentDecision,
 } from './consent.js'
+import { isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk'
 import { createEdgeSigner, type EdgeSigner } from './core.js'
 import { loadSignerCredentials, type SignerCredentials } from './credentials.js'
 import {
@@ -26,6 +27,8 @@ export interface SignerOptions {
   delegateKey?: string
   /** Append local signing audit entries here. Defaults to a credential sidecar or ~/.haven. */
   auditPath?: string
+  /** Overridable so the Node-floor refusal is testable without spawning a Node. */
+  nodeVersion?: string
   /**
    * When true, write the consent sidecar file (`<credentials>.signer-ack.json`)
    * with the current consent hash and proceed. Surfaced via the `--ack` CLI flag.
@@ -57,6 +60,19 @@ export interface ResolvedSignerRuntime {
 export async function resolveSignerRuntime(
   options: SignerOptions = {},
 ): Promise<ResolvedSignerRuntime> {
+  // The choke point, deliberately (#1161 review). Every public way to obtain a
+  // key-bound EdgeSigner from this package funnels through here —
+  // `runSignerStdioServer`, `resolveEdgeSigner`, and any embedder calling it
+  // directly (the `skipConsent` docs invite controlled embedding, so that is a
+  // supported surface, not just a test seam). Asserting only in the stdio
+  // entrypoint would have reproduced the exact bug this issue fixes: a guard
+  // that exists but sits on one path while another reaches the delegate key
+  // unchecked.
+  //
+  // First statement, before the `delegateKey` fast path and before credentials
+  // are read, so an unsupported runtime never touches a key by either route.
+  assertSupportedNodeVersion(options.nodeVersion)
+
   if (options.delegateKey) {
     return {
       signer: createEdgeSigner(options.delegateKey, {
@@ -112,7 +128,33 @@ export function buildSignerMcpServer(
   return server
 }
 
+/**
+ * Refuse to start on an unsupported Node (#1161).
+ *
+ * Asserted at STARTUP, not only at install, because the two can diverge: a user
+ * upgrades Node, connects successfully, then downgrades — or a version manager
+ * hands the agent runtime a different Node than the shell that ran setup. Only a
+ * startup check sees the version this process is actually running on.
+ *
+ * This is the signer, so refusing is the conservative answer rather than the
+ * aggressive one. It holds the delegate key and produces every payment
+ * signature; on an unsupported runtime the plausible failure is a wrong or
+ * absent signature, which is worse than not starting. The consent gate below
+ * takes the same posture for the same reason.
+ */
+export function assertSupportedNodeVersion(nodeVersion: string = process.versions.node): void {
+  if (isSupportedNodeVersion(nodeVersion)) return
+  const err: NodeJS.ErrnoException = new Error(
+    unsupportedNodeVersionMessage({ subject: 'The Haven signer', nodeVersion }),
+  )
+  err.code = 'HAVEN_SIGNER_UNSUPPORTED_NODE'
+  throw err
+}
+
 export async function runSignerStdioServer(options: SignerOptions = {}): Promise<void> {
+  // The Node floor is asserted inside resolveSignerRuntime — the choke point
+  // every key-bound path shares — so it is enforced here too, before
+  // credentials are read, without a second call site to keep in sync.
   const { signer, credentials } = await resolveSignerRuntime(options)
 
   if (!options.skipConsent) {

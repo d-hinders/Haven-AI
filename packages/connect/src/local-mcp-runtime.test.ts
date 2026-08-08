@@ -1,4 +1,5 @@
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -16,11 +17,25 @@ const PINNED_SDK_VERSION = MCP_RUNTIME_MANIFEST.sdkVersion
 
 const API_KEY = 'sk_agent_secret_for_local_runtime_test'
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
+const SUPPORTED_NODE = '24.0.0'
 
 describe('prepareLocalMcpRuntime', () => {
   it('requires the manifest minimum Node version before installing', () => {
-    expect(() => assertSupportedNodeVersion('20.0.0')).not.toThrow()
-    expect(() => assertSupportedNodeVersion('18.19.0')).toThrow(/requires Node\.js >=20\.0\.0/)
+    expect(() => assertSupportedNodeVersion('24.0.0')).not.toThrow()
+    expect(() => assertSupportedNodeVersion('24.5.1')).not.toThrow()
+    // 23.1.0 is the version from the #1161 report. It used to PASS this guard —
+    // the manifest floor read '20.0.0' while every package's `engines` said
+    // `>=24` — which is why the report's connect run reached the signer even
+    // though a guard nominally existed.
+    expect(() => assertSupportedNodeVersion('23.1.0')).toThrow(/requires Node\.js >=24\.0\.0/)
+    expect(() => assertSupportedNodeVersion('20.0.0')).toThrow(/requires Node\.js >=24\.0\.0/)
+  })
+
+  it("pins the manifest floor to the package's declared engines.node", () => {
+    // The drift guard. These are two spellings of one fact, and when they
+    // disagreed the enforced one silently lost to the advertised one.
+    const engines = createRequire(import.meta.url)('../package.json').engines as { node?: string }
+    expect(engines.node).toBe(`>=${MCP_RUNTIME_MANIFEST.minimumNodeVersion.split('.')[0]}`)
   })
 
   it('installs through a Haven-owned npm cache and writes a stable non-secret wrapper', async () => {
@@ -47,6 +62,8 @@ describe('prepareLocalMcpRuntime', () => {
       identityPath,
       signerPath,
       homeDir,
+      // Pinned: these assert install layout, not the developer's Node version.
+      nodeVersion: SUPPORTED_NODE,
     }, { runCommand })
 
     // Fast path: default npm cache (warmed by npx) with --prefer-offline, no
@@ -97,6 +114,8 @@ describe('prepareLocalMcpRuntime', () => {
       identityPath,
       signerPath,
       homeDir,
+      // Pinned: these assert install layout, not the developer's Node version.
+      nodeVersion: SUPPORTED_NODE,
     }, { runCommand })
 
     expect(runCommand).toHaveBeenCalled()
@@ -131,6 +150,8 @@ describe('prepareLocalMcpRuntime', () => {
       identityPath,
       signerPath,
       homeDir,
+      // Pinned: these assert install layout, not the developer's Node version.
+      nodeVersion: SUPPORTED_NODE,
     }, { runCommand })
 
     expect(runCommand).toHaveBeenCalledTimes(2)

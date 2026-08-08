@@ -47,6 +47,14 @@ export async function createHavenClient(options: HavenMcpServerOptions = {}): Pr
 }
 
 export async function resolveHavenClient(options: HavenMcpServerOptions = {}): Promise<ResolvedHavenClient> {
+  // The choke point (#1161 review): `runStdioServer`, `createHavenClient` and
+  // `createHavenMcpServer` all funnel through here, and the client built below
+  // is delegate-key-bound — `pay()`, `sign()` and the x402 paths activate the
+  // moment `delegateKey` is set. Guarding only the stdio entrypoint would leave
+  // the embedding constructors reaching a signing-capable client on an
+  // unsupported runtime, which is this issue's own bug one layer down.
+  assertSupportedNodeVersion(options.nodeVersion)
+
   const credentialSource = options.credentialsPath || options.identityPath || options.signerPath
     ? {
         credentialsPath: options.credentialsPath,
@@ -123,8 +131,8 @@ export function assertSupportedNodeVersion(nodeVersion: string = process.version
 }
 
 export async function runStdioServer(options: HavenMcpServerOptions = {}): Promise<void> {
-  assertSupportedNodeVersion(options.nodeVersion)
-
+  // Asserted inside resolveHavenClient — the choke point every key-bound path
+  // shares — so it still runs here, before credentials are read.
   const { client: haven, credentials } = await resolveHavenClient(options)
 
   if (!options.skipConsent) {

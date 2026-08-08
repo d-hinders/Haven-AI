@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient } from '@haven_ai/sdk'
 import { buildMcpServer, createHavenMcpServer } from './server.js'
 
+// Pinned so the #1161 Node floor cannot make these host-dependent: the
+// guard lives at the credential/client choke point, which these exercise.
+const SUPPORTED_NODE = '24.0.0'
+
 const baseUrl = 'https://haven.example'
 
 interface CapturedRequest {
@@ -105,7 +109,7 @@ describe('Haven MCP server dispatch', () => {
     await chmod(identityPath, 0o600)
     await chmod(signerPath, 0o600)
 
-    const server = await createHavenMcpServer({ identityPath, signerPath, skipConsent: true })
+    const server = await createHavenMcpServer({ identityPath, signerPath, skipConsent: true, nodeVersion: SUPPORTED_NODE })
 
     expect(readToolByName(server as any, 'haven_get_agent')).toBeDefined()
   })
@@ -123,7 +127,7 @@ describe('Haven MCP server dispatch', () => {
 
     try {
       process.env.HAVEN_CREDENTIALS = credentialsPath
-      const server = await createHavenMcpServer({ skipConsent: true })
+      const server = await createHavenMcpServer({ skipConsent: true, nodeVersion: SUPPORTED_NODE })
 
       expect(readToolByName(server as any, 'haven_get_agent')).toBeDefined()
     } finally {

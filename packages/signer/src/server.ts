@@ -60,6 +60,19 @@ export interface ResolvedSignerRuntime {
 export async function resolveSignerRuntime(
   options: SignerOptions = {},
 ): Promise<ResolvedSignerRuntime> {
+  // The choke point, deliberately (#1161 review). Every public way to obtain a
+  // key-bound EdgeSigner from this package funnels through here —
+  // `runSignerStdioServer`, `resolveEdgeSigner`, and any embedder calling it
+  // directly (the `skipConsent` docs invite controlled embedding, so that is a
+  // supported surface, not just a test seam). Asserting only in the stdio
+  // entrypoint would have reproduced the exact bug this issue fixes: a guard
+  // that exists but sits on one path while another reaches the delegate key
+  // unchecked.
+  //
+  // First statement, before the `delegateKey` fast path and before credentials
+  // are read, so an unsupported runtime never touches a key by either route.
+  assertSupportedNodeVersion(options.nodeVersion)
+
   if (options.delegateKey) {
     return {
       signer: createEdgeSigner(options.delegateKey, {
@@ -139,10 +152,9 @@ export function assertSupportedNodeVersion(nodeVersion: string = process.version
 }
 
 export async function runSignerStdioServer(options: SignerOptions = {}): Promise<void> {
-  // Before credentials are read — an unsupported runtime should not be the
-  // thing that first touches the delegate key on disk.
-  assertSupportedNodeVersion(options.nodeVersion)
-
+  // The Node floor is asserted inside resolveSignerRuntime — the choke point
+  // every key-bound path shares — so it is enforced here too, before
+  // credentials are read, without a second call site to keep in sync.
   const { signer, credentials } = await resolveSignerRuntime(options)
 
   if (!options.skipConsent) {

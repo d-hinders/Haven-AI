@@ -73,6 +73,18 @@ export {
   type ReceiptVerification,
 } from './receipt.js'
 
+// Deployment readiness (#1151): the half-configured state — issuance on,
+// verification off — anchors passports no merchant can verify. Reported on
+// /health and warned at boot so it can never again be found by hand.
+export {
+  passportReadiness,
+  logPassportReadiness,
+  type PassportChainState,
+  type PassportChainReadiness,
+  type PassportReadiness,
+  type PassportReadinessInputs,
+} from './readiness.js'
+
 // Revocation + live standing (#973). `passportStanding` is THE answer to
 // "is this agent authorized right now?" — DB-authoritative, chain-eventual.
 export {

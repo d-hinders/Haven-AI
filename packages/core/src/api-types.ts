@@ -837,6 +837,31 @@ export type components = {
                 latencyMs?: number;
                 error?: string;
             };
+            /** @description Cached per-chain relayer gas balance from the hourly scan. Never a live RPC read. */
+            relayer?: {
+                chainId: number;
+                /** @example 0x1111111111111111111111111111111111111111 */
+                address: string;
+                balanceWei: string;
+                low: boolean;
+                /** Format: date-time */
+                checkedAt: string;
+            }[];
+            /** @description L0 Agent Passport configuration state (#1151). Booleans plus the published issuer address only — never key material, never the schema UID. A chain in `issuance_only` anchors passports no merchant can verify. */
+            passport?: {
+                verification: {
+                    configured: boolean;
+                    issuer: string | null;
+                };
+                chains: {
+                    chainId: number;
+                    issuanceConfigured: boolean;
+                    verificationConfigured: boolean;
+                    /** @enum {string} */
+                    state: "ready" | "issuance_only" | "verification_only" | "unconfigured";
+                }[];
+                unverifiableChainIds: number[];
+            };
         };
         SuccessResponse: {
             success: boolean;

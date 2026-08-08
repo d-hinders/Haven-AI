@@ -1699,6 +1699,61 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
+          relayer: {
+            type: 'array',
+            description:
+              'Cached per-chain relayer gas balance from the hourly scan. Never a live RPC read.',
+            items: {
+              type: 'object',
+              required: ['chainId', 'address', 'balanceWei', 'low', 'checkedAt'],
+              properties: {
+                chainId: { type: 'integer' },
+                address,
+                balanceWei: { type: 'string' },
+                low: { type: 'boolean' },
+                checkedAt: isoDateTime,
+              },
+              additionalProperties: false,
+            },
+          },
+          passport: {
+            type: 'object',
+            description:
+              'L0 Agent Passport configuration state (#1151). Booleans plus the published ' +
+              'issuer address only — never key material, never the schema UID. A chain in ' +
+              '`issuance_only` anchors passports no merchant can verify.',
+            required: ['verification', 'chains', 'unverifiableChainIds'],
+            properties: {
+              verification: {
+                type: 'object',
+                required: ['configured', 'issuer'],
+                properties: {
+                  configured: { type: 'boolean' },
+                  issuer: { anyOf: [address, { type: 'null' }] },
+                },
+                additionalProperties: false,
+              },
+              chains: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['chainId', 'issuanceConfigured', 'verificationConfigured', 'state'],
+                  properties: {
+                    chainId: { type: 'integer' },
+                    issuanceConfigured: { type: 'boolean' },
+                    verificationConfigured: { type: 'boolean' },
+                    state: {
+                      type: 'string',
+                      enum: ['ready', 'issuance_only', 'verification_only', 'unconfigured'],
+                    },
+                  },
+                  additionalProperties: false,
+                },
+              },
+              unverifiableChainIds: { type: 'array', items: { type: 'integer' } },
+            },
+            additionalProperties: false,
+          },
         },
         additionalProperties: false,
       },

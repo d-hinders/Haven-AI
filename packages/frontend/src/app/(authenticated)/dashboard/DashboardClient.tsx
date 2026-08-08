@@ -1007,15 +1007,22 @@ export default function DashboardClient() {
           />
         ) : null
 
-        // Interim home for the backup-signer prompt (#1162). Onboarding used
-        // to render it on its "You're in" screen, which #1162 removed; #1153
-        // supersedes this placement with a funded-state trigger. Dismissible,
-        // exactly as before, and kept to delegation-rail accounts — the
-        // condition it rendered under before — because "Backup & recovery" is
-        // where it sends you and that only exists on those accounts.
-        const recoveryNudge = safes.some((safe) => safe.account_type === 'delegator_hybrid') ? (
-          <RecoveryNudge />
-        ) : null
+        // Home for the backup-signer prompt (#1162, #1153). Onboarding used
+        // to render it on its "You're in" screen, which #1162 removed and
+        // relocated here; #1153 replaces the unconditional
+        // "any delegator_hybrid account" render with a funded-state trigger
+        // — the owner does not want this in front of the user before they
+        // have funds at risk. `hasFunds` is already fail-closed: it only
+        // goes true once `fundingStateKnown` is true (safes loaded, balance
+        // fetch not loading, no balance error), so a transient RPC failure
+        // reads as "not funded", never as "funded". Dismissible exactly as
+        // before, and kept to delegation-rail accounts because "Backup &
+        // recovery" is where it sends you and that only exists on those
+        // accounts.
+        const recoveryNudge =
+          hasFunds && safes.some((safe) => safe.account_type === 'delegator_hybrid') ? (
+            <RecoveryNudge />
+          ) : null
 
         if (isFocusedView) {
           return (

@@ -191,4 +191,21 @@ describe('OnboardingClient (#1162)', () => {
     expect(mockReplace).not.toHaveBeenCalled()
     expect(screen.getByText(/You're in/)).toBeTruthy()
   })
+
+  // #1153: the backup-signer recommendation moved to a funded-state trigger
+  // on the dashboard (DashboardClient) and must never come back here — the
+  // owner explicitly does not want it "in their face directly at onboarding".
+  // #1162 already removed it; this is the regression guard so a future edit
+  // can't quietly reintroduce it on either onboarding phase.
+  it('never renders the backup-signer recovery nudge anywhere in onboarding (regression guard for #1153)', async () => {
+    render(<OnboardingClient />)
+    expect(screen.queryByText('Add a backup soon')).toBeNull()
+    expect(screen.queryByText(/a lost device never means a lost account/i)).toBeNull()
+
+    await completeCreation()
+
+    expect(screen.getByText(/You're in/)).toBeTruthy()
+    expect(screen.queryByText('Add a backup soon')).toBeNull()
+    expect(screen.queryByText(/a lost device never means a lost account/i)).toBeNull()
+  })
 })

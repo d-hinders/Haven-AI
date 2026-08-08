@@ -413,6 +413,82 @@ describe('DashboardClient', () => {
     expect(screen.queryByText('No transactions yet')).not.toBeInTheDocument()
   })
 
+  describe('backup-signer recovery nudge (#1153 funded-state trigger)', () => {
+    const DELEGATOR_SAFE = { ...SAFE, account_type: 'delegator_hybrid' }
+
+    it('shows the nudge for a funded delegation-rail account', () => {
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          safes: [DELEGATOR_SAFE],
+        },
+        activeSafe: DELEGATOR_SAFE,
+      })
+      // mockBaseState() already sets a non-zero aggregated balance.
+
+      render(<DashboardClient />)
+
+      expect(screen.getByText('Add a backup soon')).toBeInTheDocument()
+    })
+
+    it('does not show the nudge for an unfunded delegation-rail account', () => {
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          safes: [DELEGATOR_SAFE],
+        },
+        activeSafe: DELEGATOR_SAFE,
+      })
+      mockUseAggregatedBalances.mockReturnValue({
+        balances: [],
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    it('does not show the nudge when a transient balance-fetch failure makes funded state unknown', () => {
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          safes: [DELEGATOR_SAFE],
+        },
+        activeSafe: DELEGATOR_SAFE,
+      })
+      mockUseAggregatedBalances.mockReturnValue({
+        balances: [],
+        loading: false,
+        error: 'Failed to load balances',
+        refetch: vi.fn(),
+      })
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    it('does not show the nudge for a funded account that is not on the delegation rail', () => {
+      // mockBaseState() default SAFE has no account_type (legacy rail) and a
+      // non-zero balance.
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+  })
+
   describe('first-arrival welcome toast', () => {
     it('fires a welcome toast and clears the flag when arriving from onboarding', () => {
       window.sessionStorage.setItem('haven-just-onboarded', '1')

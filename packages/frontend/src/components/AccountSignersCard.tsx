@@ -49,11 +49,19 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
   const [walletAddr, setWalletAddr] = useState('')
   const [showWallet, setShowWallet] = useState(false)
   const [showRecoveryHelp, setShowRecoveryHelp] = useState(false)
+  const [showRemoveOwnerConfirm, setShowRemoveOwnerConfirm] = useState(false)
 
   const wayCount = useMemo(
     () => (signers ? signers.passkeys.length + (signers.owner_address ? 1 : 0) : 0),
     [signers],
   )
+
+  // #1153: the backend now permits remove_owner unconditionally, even when
+  // it drops the account to a single signer — so the human must see the
+  // actual consequence (no recovery, ever) before it happens, not after.
+  // Only the drop-to-one case gets the confirmation; removing a wallet that
+  // still leaves a backup passkey is ordinary maintenance.
+  const removingOwnerLeavesOneSigner = wayCount === 2
 
   const handle = useCallback(
     async (result: Promise<{ ok: boolean; reason?: string; message?: string }>, okMsg: string) => {
@@ -116,7 +124,11 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
                   size="sm"
                   variant="ghost"
                   disabled={busy || !ready || wayCount < 2}
-                  onClick={() => void handle(removeOwner(), 'Wallet removed.')}
+                  onClick={() =>
+                    removingOwnerLeavesOneSigner
+                      ? setShowRemoveOwnerConfirm(true)
+                      : void handle(removeOwner(), 'Wallet removed.')
+                  }
                 >
                   Remove
                 </Button>
@@ -237,6 +249,40 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
             >
               How recovery works
             </a>
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={showRemoveOwnerConfirm}
+        onClose={() => setShowRemoveOwnerConfirm(false)}
+        title="Remove this wallet?"
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <Button variant="tertiary" onClick={() => setShowRemoveOwnerConfirm(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              disabled={busy || !ready}
+              onClick={() => {
+                setShowRemoveOwnerConfirm(false)
+                void handle(removeOwner(), 'Wallet removed.')
+              }}
+            >
+              Remove anyway
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p>
+            This is the last backup on this account. Removing it leaves a single Face ID / Touch ID
+            as the only way to approve anything — this account will have no recovery.
+          </p>
+          <p>
+            If you lose that device, you lose access to this account and everything in it. Haven
+            can&apos;t get it back for you, and neither can anyone else.
           </p>
         </div>
       </Modal>

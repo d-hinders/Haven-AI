@@ -199,6 +199,23 @@ export const legacyToolSchemas: Record<HostedToolNameLegacy, z.ZodRawShape> = {
   haven_list_transactions: toolSchemas.haven_list_receipts,
 }
 
+/**
+ * The `capabilities.experimental` key the local signer advertises its supported
+ * expected-context versions under (#1155).
+ *
+ * Spelled out rather than imported: `@haven_ai/signer` is a devDependency here,
+ * and the hosted server is keyless — it must not take a runtime dependency on
+ * the signing package. One constant, referenced by every agent-facing surface
+ * that names it, so a rename on the signer side has a single place to land;
+ * `hosted-signer-integration.test.ts` imports both packages and pins this to
+ * the signer's exported `SIGNER_CAPABILITY_KEY`.
+ */
+const SIGNER_CAPABILITY_KEY = 'haven/signer-compatibility'
+
+/** Where the agent reads the signer's supported set, for use inside prose. */
+const SIGNER_CAPABILITY_SOURCE =
+  `capabilities.experimental["${SIGNER_CAPABILITY_KEY}"]`
+
 const PAY_DESCRIPTION = [
   'Construct a Safe AllowanceModule payment within the agent budget and return the unsigned hash to sign.',
   'For read-only allowance, budget, spend-limit, remaining-amount, or reset-period questions,',
@@ -221,8 +238,11 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
   ...sharedDescriptions.payMcpTool,
   behavior:
     'Builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. ' +
-    'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, merchant_url, tool_name, arguments, mcp_transport }. ' +
+    'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, signer_compatibility, merchant_url, tool_name, arguments, mcp_transport }. ' +
     'The funding/quote window expires at expires_at; if it expires, re-run haven_pay_mcp_tool with the same idempotency_key before signing again. ' +
+    'Before the signing step, check signer_compatibility.x402_expected_context_version against the versions the haven-signer MCP server advertises at initialize ' +
+    `(${SIGNER_CAPABILITY_SOURCE} and its instructions). If it is not in that set the local signer is out of date: STOP before signing and tell the user to update ` +
+    '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has been spent at that point. ' +
     'Finish with two follow-up calls (fast path, recommended): ' +
     '(1) mcp__haven-signer__haven_sign_x402 on the local signer with payload_hash, x402_expected (the nested x402.expected context, including expires_at), and payment_required → { signature, payment_header }. '+ 'When this result carries signature_scheme and typed_data (delegation-rail accounts), pass typed_data through VERBATIM as well — that is what the account validates, and the signer will refuse to sign the bare payload_hash without it; ' +
     '(2) mcp__haven__haven_settle_mcp_tool with payment_id, signature, payment_header, merchant_url, tool_name, arguments, and mcp_transport to fund the delegate and settle with the merchant in one call, returning the tool result. ' +
@@ -281,6 +301,12 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'Returns { payment_id, payload_hash, expires_at, x402 } where x402 carries the accepted option,',
   'resource_url, merchant_to, funding_to, and x402.expected signing context including expires_at.',
   'If expires_at passes before signing, re-quote with the same idempotency_key before signing again.',
+  'Also returns signer_compatibility.x402_expected_context_version — the expected-context version',
+  'this result emits. Before signing, check it against the versions the haven-signer MCP server',
+  `advertises at initialize (${SIGNER_CAPABILITY_SOURCE} and its`,
+  'instructions). If it is not in that set the local signer is out of date: STOP before signing and',
+  'tell the user to update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has',
+  'been spent yet — funds move only when haven_submit relays a signature.',
   'Sign payload_hash via mcp__haven-signer__haven_sign (passing x402.expected) on the local signer, then relay',
   'with mcp__haven__haven_submit to fund the delegate wallet. After submission confirms, call',
   'mcp__haven-signer__haven_x402_sign_header on the local signer to build the EIP-3009 X-PAYMENT header, then',
@@ -298,6 +324,17 @@ const RESUME_X402_DESCRIPTION = [
   'Returns { payment_id, payment_required, x402 } with the same signing context shape as',
   'haven_pay_x402_quote so the signer can call haven_x402_sign_header with the x402_binding',
   '(or re-derive it via haven_sign if the binding was lost across a signer restart).',
+  // #1155: resume leads straight back to signing, and the signer restart this
+  // description already anticipates is exactly when the INSTALLED signer can
+  // have changed since the original quote. There is no version to echo here —
+  // the resume state carries no expected context — so this prompts a re-check
+  // of the one the agent already holds rather than inventing a null to compare.
+  'This result carries no signer_compatibility of its own. Before signing, re-check the',
+  'x402_expected_context_version from the ORIGINAL quote against the versions the haven-signer',
+  `MCP server advertises at initialize (${SIGNER_CAPABILITY_SOURCE} and its instructions) —`,
+  'a signer restart or reinstall since that quote may have changed which versions it verifies.',
+  'On a mismatch, STOP before signing and tell the user to update @haven_ai/signer by rerunning',
+  '`npx @haven_ai/connect@alpha`.',
   'Next: call mcp__haven-signer__haven_x402_sign_header when you have the x402_binding, or mcp__haven-signer__haven_sign first to re-derive it.',
 ].join(' ')
 
@@ -951,6 +988,14 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
     idempotency_key: intent.idempotencyKey,
     payload_hash: intent.signData.hash,
     expires_at: intent.expiresAt,
+    // #1155: state the expected-context version this quote is about to emit, so
+    // the agent can compare it against the local signer's advertised set BEFORE
+    // signing — the #1143 guard only speaks after a quote already exists. Read
+    // from the binding Haven signed rather than re-derived here: the version is
+    // an attribute of that binding, and a second derivation could disagree with
+    // it. Advisory, not a gate: this surface adds no refusal, and a mismatch is
+    // still enforced (fail-closed) by the signer at signing time.
+    signer_compatibility: signerCompatibilityNotice(intent.expectedAuth.version),
     // #1138: on the delegation rail the account validates typed data, not
     // payload_hash. Pass both through verbatim — the local signer picks the
     // path from the Haven-signed expected context below and refuses the wrong
@@ -994,6 +1039,36 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
         auth: intent.expectedAuth,
       },
     },
+  }
+}
+
+/**
+ * The pre-payment half of #1155: what this quote will emit, plus the instruction
+ * to compare it against the local signer.
+ *
+ * Carried in-band on the quote result rather than left to the tool description
+ * alone. The description is read once when the tool list loads; this travels
+ * with the number it is about to be compared to, so an agent that never reads
+ * descriptions still has the warning in front of it at the moment it matters.
+ *
+ * The version is read from the binding Haven signed rather than re-derived, and
+ * is required on that binding — there is deliberately no "unknown" fallback,
+ * which would imply a state the type does not allow and give the agent a null
+ * to compare against.
+ */
+function signerCompatibilityNotice(emittedVersion: number) {
+  return {
+    x402_expected_context_version: emittedVersion,
+    signer_capability: SIGNER_CAPABILITY_KEY,
+    check:
+      'Before calling the local signer, compare x402_expected_context_version against ' +
+      'x402_expected_context_versions in the haven-signer MCP server\'s initialize result ' +
+      `(${SIGNER_CAPABILITY_SOURCE}, also stated in its instructions). ` +
+      'If this version is not in that set, the local signer is out of date: STOP before signing ' +
+      'and tell the user to update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`, ' +
+      'which reinstalls the pinned MCP runtime. Do not edit the version to a supported value — ' +
+      'it is part of the Haven-signed binding message, so changing it invalidates the signature. ' +
+      'Nothing has been spent at this point; no funds move until haven_submit relays a signature.',
   }
 }
 

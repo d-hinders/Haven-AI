@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { hashTypedData } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { buildX402ExpectedMessage, buildSweepAuthorizationMessage } from '@haven_ai/sdk'
 import {
   assertSupportedBindingVersion,
@@ -8,6 +10,13 @@ import {
   SUPPORTED_SWEEP_BINDING_VERSIONS,
   SUPPORTED_X402_EXPECTED_VERSIONS,
 } from './core.js'
+import {
+  signerCompatibility,
+  signerInstructions,
+  SIGNER_CAPABILITY_KEY,
+  type SignerCompatibility,
+} from './capabilities.js'
+import { buildSignerMcpServer } from './server.js'
 import { createToolHandlers } from './tools.js'
 
 /**
@@ -84,6 +93,21 @@ async function expectedWithVersion(
       signer: account.address,
     },
   }
+}
+
+/** Complete an `initialize` handshake against a real signer MCP server. */
+async function handshake() {
+  const server = buildSignerMcpServer(createEdgeSigner(TEST_KEY))
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  const client = new Client({ name: 'test-client', version: '0.0.0' })
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+  const advertised = (client.getServerCapabilities()?.experimental as
+    | Record<string, SignerCompatibility>
+    | undefined)?.[SIGNER_CAPABILITY_KEY]
+  const instructions = client.getInstructions()
+  await client.close()
+  await server.close()
+  return { advertised, instructions }
 }
 
 describe('assertSupportedBindingVersion (#1143)', () => {
@@ -264,7 +288,7 @@ describe('tool boundary surfaces the skew instead of a Zod string (#1143)', () =
     expect(result.message).toContain('@haven_ai/signer')
   })
 
-  it('still rejects a structurally invalid version at the schema boundary', async () => {
+  it('still rejects a structurally invalid version at the schema boundary (#1143)', async () => {
     // Widening the version is not the same as removing validation: a
     // non-numeric or nonsensical version is still an input error.
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
@@ -288,5 +312,132 @@ describe('tool boundary surfaces the skew instead of a Zod string (#1143)', () =
     expect(result.success).toBe(false)
     if (result.success) return
     expect(result.code).toBe('INVALID_INPUT')
+  })
+})
+
+/**
+ * #1155 — the same skew, detectable BEFORE a payment is attempted.
+ *
+ * #1143 left detection reactive: the agent found out by quoting, signing, and
+ * failing. The handshake now states what this signer can verify, so the check
+ * costs nothing and happens before any funds can move. It stays advisory —
+ * these tests assert information, never a new refusal.
+ */
+describe('signer advertises its supported versions at handshake (#1155)', () => {
+  it('advertises the enforced sets, machine-readably, in the initialize result', async () => {
+    const { advertised } = await handshake()
+
+    // Machine-readable, and DERIVED — not a second literal that can drift from
+    // what the signing path enforces. If these ever disagree the feature is a
+    // lie, which is the main way it could fail.
+    expect(advertised).toEqual({
+      x402_expected_context_versions: [...SUPPORTED_X402_EXPECTED_VERSIONS],
+      sweep_binding_versions: [...SUPPORTED_SWEEP_BINDING_VERSIONS],
+    })
+  })
+
+  it('survives the tools capability McpServer registers when the first tool is added', async () => {
+    // `mergeCapabilities` merges per top-level key, so a regression here would
+    // be silent: tools would still work and only the advertisement would vanish.
+    const { advertised } = await handshake()
+    expect(advertised).toBeDefined()
+  })
+
+  it('states the same versions in the instructions clients show the model', async () => {
+    const { instructions } = await handshake()
+    const compatibility = signerCompatibility()
+
+    // The instructions are free text, so they are where a hand-maintained copy
+    // would drift. Pin the rendered list to the enforced set in BOTH directions:
+    // every supported version appears, and nothing outside the set does.
+    const rendered = /x402 expected-context versions supported: ([0-9, ]+)/.exec(instructions ?? '')
+    expect(rendered).not.toBeNull()
+    expect(rendered![1].split(',').map((v) => Number(v.trim()))).toEqual(
+      compatibility.x402_expected_context_versions,
+    )
+    expect(instructions).toContain(
+      `sweep authorization binding versions supported: ${compatibility.sweep_binding_versions.join(', ')}`,
+    )
+  })
+
+  it('names the #1143 fix at handshake, so the agent can act without paying first', async () => {
+    const { instructions } = await handshake()
+    expect(instructions).toContain('@haven_ai/signer')
+    expect(instructions).toContain('npx @haven_ai/connect@alpha')
+    // Same standing instruction as the signing-time error: the version is inside
+    // the Haven-signed message, so rewriting it is never the fix.
+    expect(instructions).toMatch(/invalidates the signature/)
+  })
+
+  it('advertises nothing the signing path would reject as unknown', async () => {
+    // The drift guard with teeth: drive the REAL signing path with each version
+    // the handshake advertises and assert the skew guard is never what rejects
+    // it. (A v2 context fails later for an unrelated reason — it must commit to
+    // typed data — which is why this asserts the absence of the skew error
+    // rather than success.) Advertising {1,2,3} while enforcing {1,2} fails here.
+    const { advertised } = await handshake()
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const skewError = /out of date|Unsupported x402 expected context version/
+
+    for (const version of advertised!.x402_expected_context_versions) {
+      const expected = await expectedWithVersion(version)
+      let message = ''
+      try {
+        signer.signX402FundingHash(FUNDING_HASH, expected)
+      } catch (err) {
+        message = (err as Error).message
+      }
+      expect(message).not.toMatch(skewError)
+    }
+
+    // And the converse: one past the advertised ceiling still IS a skew.
+    const beyond = await expectedWithVersion(
+      Math.max(...advertised!.x402_expected_context_versions) + 1,
+    )
+    expect(() => signer.signX402FundingHash(FUNDING_HASH, beyond)).toThrow(skewError)
+  })
+
+  it('makes a hosted-emitted version comparable before any signing call', async () => {
+    // The skew scenario, agent-side: the hosted quote reports the version it
+    // will emit (`signer_compatibility.x402_expected_context_version`), and the
+    // agent holds the advertised set from this handshake. Both are available
+    // before haven_sign is called and before haven_submit moves anything.
+    const { advertised } = await handshake()
+    const emittedByANewerBackend = Math.max(...SUPPORTED_X402_EXPECTED_VERSIONS) + 1
+
+    expect(advertised!.x402_expected_context_versions).not.toContain(emittedByANewerBackend)
+    for (const version of SUPPORTED_X402_EXPECTED_VERSIONS) {
+      expect(advertised!.x402_expected_context_versions).toContain(version)
+    }
+  })
+
+  it('adds no refusal: a supported context still signs after the advertisement', async () => {
+    // The whole feature is warn-not-block. Nothing that succeeded before may
+    // fail now — the #1143 signing-time guard remains the only enforcement.
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const expected = await expectedWithVersion(1)
+    const result = signer.signX402FundingHash(FUNDING_HASH, expected)
+    expect(result.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+  })
+
+  it('does not leak the delegate key through the new handshake surface', async () => {
+    const { advertised, instructions } = await handshake()
+    const surface = JSON.stringify({ advertised, instructions })
+    expect(surface).not.toContain(TEST_KEY)
+    expect(surface).not.toContain(TEST_KEY.slice(2))
+  })
+})
+
+describe('signerInstructions is derived, not hand-maintained (#1155)', () => {
+  it('renders from the exported constants', () => {
+    // Cheap unit-level backstop for the handshake assertions above: the string
+    // builder itself never hard-codes a version.
+    const instructions = signerInstructions()
+    for (const version of SUPPORTED_X402_EXPECTED_VERSIONS) {
+      expect(instructions).toContain(String(version))
+    }
+    expect(instructions).not.toContain(
+      String(Math.max(...SUPPORTED_X402_EXPECTED_VERSIONS) + 1),
+    )
   })
 })

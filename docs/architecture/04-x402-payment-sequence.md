@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-07" # re-verified same day (#999): a dep-lint-exempt comment on routes/x402-resources.ts only — no behavior change; sequence and settle paths unchanged
+last-verified: "2026-08-07" # re-verified same day (#999): a dep-lint-exempt comment on routes/x402-resources.ts only — no behavior change; sequence and settle paths unchanged. #1155 re-verified: the hosted quote/prepare results gained signer_compatibility (the expected-context version they will emit) and the signer advertises the set it verifies at handshake — pre-payment skew detection, advisory only. No sequence step, rail branch, settle path or refusal changed
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -221,6 +221,19 @@ raw Zod string instead of a Haven diagnosis. Widening the schema widened the err
 path only; an unrecognised version was never signable and still is not. Symptom
 strings per signer age are tabulated in
 [`mcp-runtime-compatibility.md`](../operations/mcp-runtime-compatibility.md).
+
+That refusal is still *reactive* — the agent learns by quoting and then failing
+to sign. Since [#1155](https://github.com/d-hinders/Haven-AI/issues/1155) both
+halves of the comparison are also available **before** anything is signed:
+`haven_pay_x402_quote` and `haven_pay_mcp_tool` return
+`signer_compatibility.x402_expected_context_version` (the version that quote will
+emit), and the signer states the set it verifies at its own MCP `initialize`.
+The comparison is necessarily agent-mediated — the two servers cannot introspect
+each other, and only the client sees both handshakes — so this layer ships
+information and a prompt, never a gate. A mismatch is **advisory**: nothing that
+succeeded before fails now, and the signing-time refusal above remains the
+enforcement point. See
+[`mcp-runtime-compatibility.md`](../operations/mcp-runtime-compatibility.md#detecting-skew-before-a-payment-1155).
 
 Delegation-rail UserOp signing is **local-signer-only** — the hosted/edge
 keyless path never signs an account UserOp. That is a non-custody and CASP-scope

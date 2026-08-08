@@ -1,5 +1,5 @@
 /**
- * In-process allowance-nonce coordinator (#692).
+ * Allowance-nonce coordinator (#692, cross-replica since #718).
  *
  * Sequential allowance transfers for the same delegate share one on-chain nonce.
  * When a prior transfer's nonce increment hasn't propagated to the RPC the next
@@ -9,11 +9,64 @@
  * This tracks the nonce a confirmed transfer left on-chain, so the next build
  * **waits until that nonce is visible** before signing — turning the reactive
  * retry (#693 preflight + #695 retry) into a proactive wait that avoids the
- * revert in the first place. It is best-effort and **in-process** (one replica);
- * the preflight + retry remain the cross-replica / concurrency safety net.
+ * revert in the first place. The #693 preflight + #695 retry remain the safety
+ * net under all conditions; nothing here is load-bearing for correctness.
+ *
+ * ## Two tiers, since #718
+ *
+ * The tracker used to be a process-local `Map`, which is exactly right for one
+ * replica and silently narrower for two: replica B knows nothing about the
+ * transfer replica A just confirmed, so it reads a stale nonce and signs
+ * against a consumed one. Safe (the preflight catches it), but back to the
+ * revert-and-retry #692 existed to remove.
+ *
+ * So the map stays as tier 1 and a Postgres watermark joins it as tier 2:
+ *
+ * - **Local map** — free, synchronous, and survives a database outage. It is
+ *   what the common single-replica path still runs on.
+ * - **Shared watermark** — one indexed row per (chain, safe, delegate, token),
+ *   consulted alongside the map so any replica waits on the highest nonce ANY
+ *   replica has confirmed.
+ *
+ * The wait target is the max of the two. Every database interaction is
+ * **fail-open** (see the repository's header): a read that errors contributes
+ * nothing and a write that errors is dropped, which degrades this to exactly
+ * its pre-#718 behaviour rather than blocking a payment. Trading a rare retry
+ * for an outage would be the wrong direction on a money path.
  */
 
+import {
+  findAllowanceNonceWatermark,
+  raiseAllowanceNonceWatermark,
+} from '../infra/repositories/allowance-nonce-watermarks.js'
+
 const latestNonce = new Map<string, number>()
+
+/**
+ * The shared tier, injectable so tests can drive both halves without a
+ * database — the same shape as the `db: Executor = pool` convention used by
+ * the repositories.
+ */
+export interface NonceWatermarkStore {
+  raise: (
+    chainId: number,
+    safe: string,
+    delegate: string,
+    token: string,
+    nonce: number,
+  ) => Promise<void>
+  find: (
+    chainId: number,
+    safe: string,
+    delegate: string,
+    token: string,
+  ) => Promise<number | null>
+}
+
+const postgresStore: NonceWatermarkStore = {
+  raise: raiseAllowanceNonceWatermark,
+  find: findAllowanceNonceWatermark,
+}
 
 function keyOf(chainId: number, safe: string, delegate: string, token: string): string {
   return `${chainId}:${safe.toLowerCase()}:${delegate.toLowerCase()}:${token.toLowerCase()}`
@@ -29,10 +82,23 @@ export function recordAllowanceNonce(
   delegate: string,
   token: string,
   nonce: number,
+  store: NonceWatermarkStore = postgresStore,
 ): void {
   const key = keyOf(chainId, safe, delegate, token)
   const prev = latestNonce.get(key)
   if (prev === undefined || nonce > prev) latestNonce.set(key, nonce)
+
+  // Fire-and-forget, matching this function's existing contract: it is called
+  // right after a confirmed transfer, on a path that must not grow an await
+  // (and must not fail) for a bookkeeping write. The store swallows its own
+  // errors; the catch here covers a synchronous throw from a bad store.
+  try {
+    void store
+      .raise(chainId, safe.toLowerCase(), delegate.toLowerCase(), token.toLowerCase(), nonce)
+      .catch(() => {})
+  } catch {
+    /* fail-open — see the file header */
+  }
 }
 
 export interface FreshNonceOptions {
@@ -56,8 +122,25 @@ export async function waitForFreshAllowanceNonce(
   initial: number,
   read: () => Promise<number>,
   opts: FreshNonceOptions = {},
+  store: NonceWatermarkStore = postgresStore,
 ): Promise<number> {
-  const want = latestNonce.get(keyOf(chainId, safe, delegate, token))
+  const local = latestNonce.get(keyOf(chainId, safe, delegate, token))
+
+  // The shared tier is consulted even when the local map already knows a value:
+  // another replica may have confirmed a LATER transfer, and waiting for the
+  // lower of the two would sign against a nonce that replica already consumed.
+  // One indexed lookup on the money path, and it returns null rather than
+  // throwing if the database is unavailable.
+  // Guarded HERE as well as in the repository. The repository catches its own
+  // errors, but that makes fail-open a convention two files have to remember
+  // rather than a property of this path — and the one that matters is this
+  // one, because a throw here would fail a payment. Structural beats agreed.
+  const shared = await store
+    .find(chainId, safe.toLowerCase(), delegate.toLowerCase(), token.toLowerCase())
+    .catch(() => null)
+
+  const candidates = [local, shared].filter((n): n is number => typeof n === 'number')
+  const want = candidates.length > 0 ? Math.max(...candidates) : undefined
   if (want === undefined || initial >= want) return initial
 
   const timeoutMs = opts.timeoutMs ?? 15_000

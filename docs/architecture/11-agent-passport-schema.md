@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-08-05"
+last-verified: "2026-08-08"
 ---
 
 # L0 Agent Passport — EAS schema
@@ -622,10 +622,25 @@ signer only**: no provider, no transaction, and a non-custody invariant test
 enforces that rather than trusting the convention. Unset means verification is
 off and both endpoints return 503 rather than serving an unsigned receipt.
 
+The two variables are **independent**, so every combination is representable —
+including issuance on with verification off, which anchors real passports no
+merchant can verify. That state now reports itself: `GET /health` carries a
+`passport` block (per-chain `state`, plus `unverifiableChainIds`) and the backend
+logs one boot warning naming the chain. Booleans and the published issuer address
+only — never key material, never the schema UID.
+
+**The operator procedure lives in
+[Passport verification setup](../operations/passport-verification-setup.md)** —
+minting a dedicated signing key, setting it per environment, and the two-curl
+smoke check that proves a real anchored passport verifies. Treat that runbook as
+the reference rather than this section, which fixes the *design* and stops there.
+
 ## Related
 
 - [Module boundaries](10-module-boundaries.md) — `modules/passport/` is a module
   with a public `index.ts`; import through it, never a private file.
+- [Passport verification setup](../operations/passport-verification-setup.md) —
+  the operator runbook for turning the merchant-facing verifier on.
 - [Delegation-rail security model](../security/delegation-rail-security-model.md)
   — the custody perimeter the passport describes, and the zero-address posture.
 - [x402 payment sequence](04-x402-payment-sequence.md) — the two settlement

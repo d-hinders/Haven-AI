@@ -1,5 +1,5 @@
 {
-  "total": 69,
+  "total": 68,
   "files": {
     "packages/backend/src/index.ts": 1,
     "packages/backend/src/infra/transaction.ts": 3,
@@ -8,7 +8,7 @@
     "packages/backend/src/modules/catalog/merchant-catalog.ts": 3,
     "packages/backend/src/platform/leader-lock.ts": 2,
     "packages/backend/src/routes/accounting.ts": 3,
-    "packages/backend/src/routes/agent-delegations.ts": 14,
+    "packages/backend/src/routes/agent-delegations.ts": 13,
     "packages/backend/src/routes/approvals.ts": 9,
     "packages/backend/src/routes/catalog.ts": 2,
     "packages/backend/src/routes/demo-mpp.ts": 4,

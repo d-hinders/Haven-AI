@@ -425,17 +425,18 @@ describe('delegation lifecycle API (#828)', () => {
       }, TREASURY, { agentId: AGENT_ID, userId: 'user-1' })
     })
 
-    it('#908: blocks activation for a single-signer MAINNET account without a recorded waiver', async () => {
+    it('REVERSAL (#1153): a single-signer MAINNET account ACTIVATES, no waiver required', async () => {
+      // Asserted 403 until #1153. A budget may now be granted to an account
+      // with one signer on a value-bearing chain; the backup recommendation
+      // reaches the user after funding instead of refusing the grant here.
       mockDb({ agent: agentRow({ chain_id: 8453 }) }) // owner only = 1 signer
+      mockEnsureDeployed.mockResolvedValueOnce({ address: TREASURY, alreadyDeployed: true })
       const res = await app.inject({
         method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
         payload: { signature: '0x' + 'ab'.repeat(65) },
       })
-      expect(res.statusCode).toBe(403)
-      expect(res.json().error).toMatch(/at least 2 enrolled signers/)
-      // Fail-closed BEFORE any chain interaction and before activation:
-      expect(mockEnsureDeployed).not.toHaveBeenCalled()
-      expect(mockQuery.mock.calls.some((c) => /SET\s+status = 'active'/.test(String(c[0])))).toBe(false)
+      expect(res.statusCode).toBe(200)
+      expect(mockEnsureDeployed).toHaveBeenCalled()
     })
 
     it('#908: a recorded waiver lets a single-signer mainnet account activate', async () => {
@@ -461,20 +462,24 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.statusCode).toBe(200)
     })
 
-    it('#908: a zero-address owner does NOT count toward the floor (legacy-row defense)', async () => {
-      // 0x0 is the Hybrid "no owner" encoding — an older row carrying it must
-      // not satisfy the mainnet floor as a phantom second signer.
+    it('REVERSAL (#1153): a legacy zero-address-owner row activates too', async () => {
+      // 0x0 is the Hybrid "no owner" encoding, so this row has ONE real
+      // signer. It used to 403 — the assertion proved the zero address was
+      // not miscounted as a phantom second signer and so could not sneak past
+      // the floor. With no floor to sneak past, activation proceeds; the
+      // "0x0 is not a signer" rule now lives where it still decides something,
+      // in the recommendation predicate's unit tests.
       mockDb({
         agent: agentRow({ chain_id: 8453 }),
         owner: '0x' + '0'.repeat(40),
         passkeys: [{ key_id: 'cred-1', public_key_x: '0x11', public_key_y: '0x22' }],
       })
+      mockEnsureDeployed.mockResolvedValueOnce({ address: TREASURY, alreadyDeployed: true })
       const res = await app.inject({
         method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
         payload: { signature: '0x' + 'ab'.repeat(65) },
       })
-      expect(res.statusCode).toBe(403)
-      expect(mockEnsureDeployed).not.toHaveBeenCalled()
+      expect(res.statusCode).toBe(200)
     })
 
     it('#908 CHARACTERIZATION: testnet activation is untouched by the floor', async () => {

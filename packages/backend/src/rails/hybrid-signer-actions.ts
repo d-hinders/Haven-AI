@@ -27,7 +27,6 @@ import { getChain } from '../domain/chains.js'
 import type { HybridOwnerConfig } from './hybrid-provisioning.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
 import { redactVendorSecrets } from './execution-rail.js'
-import { signerFloorError } from '../modules/accounts/index.js'
 
 export const HYBRID_SIGNER_ABI = [
   { name: 'addKey', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: '_keyId', type: 'string' }, { name: '_x', type: 'uint256' }, { name: '_y', type: 'uint256' }], outputs: [] },
@@ -169,34 +168,25 @@ export function encodeSignerAction(
   return { error: 'action must be add_passkey, remove_passkey, add_owner or remove_owner' }
 }
 
-/**
- * The #908 mainnet floor applied to owner removal (decision recorded on
- * #1087): on a value-bearing chain, dropping to a single signer is permitted
- * only when the account carries the SAME recorded single-signer waiver that
- * provisioning honours — otherwise refused before any op is prepared.
- * Testnets are unaffected, so the passkey-only → add owner → remove owner
- * round-trip stays cheap on dev.
- */
-function removeOwnerFloorFailure(
-  account: SignerActionAccount,
-  body: SignerActionBody,
-): SignerChangeFailure | null {
-  if (body.action !== 'remove_owner') return null
-  const signersAfterRemoval = (account.config.passkeys ?? []).length
-  const floor = signerFloorError({
-    chainId: account.chainId,
-    signerCount: signersAfterRemoval,
-    waiverAcknowledged: Boolean(account.singleSignerWaiverAt),
-  })
-  if (!floor) return null
-  return {
-    status: 409,
-    error:
-      'Removing the wallet would leave this account with a single signer on a chain where real ' +
-      'funds move. Add a backup passkey first, or record the single-signer waiver the account ' +
-      'was provisioned without.',
-  }
-}
+// #1153 removed `removeOwnerFloorFailure` from this file. It refused a
+// `remove_owner` that would leave a value-bearing account with one signer
+// (#908, applied here by #1087) unless a waiver was recorded.
+//
+// **Owner decision (2026-08-07, recorded verbatim on #1153):** "convert this
+// from a block to a warning instead, the user should be able to move to a one
+// signer set up."
+//
+// So the API permits it, and the consequence is delivered where a human can
+// read it: the dashboard requires an explicit confirmation naming what is
+// lost ("this account will have no recovery") before it calls. The
+// alternative — an `acknowledge_single_signer` flag — was rejected on the
+// issue because it is still a block to any non-UI caller, which is the thing
+// being removed.
+//
+// What did NOT change: `encodeSignerAction` still refuses to remove the owner
+// when there are ZERO passkeys behind it. That is a different guard — it
+// mirrors an invariant the account itself enforces on-chain, and dropping to
+// no signers bricks the account rather than merely making it unrecoverable.
 
 export type SignerChangeFailure = { status: 409 | 400 | 502; error: string; details?: string }
 
@@ -237,9 +227,6 @@ export async function prepareSignerChange(
 ): Promise<{ ok: true; prepared: PreparedSignerChange } | { ok: false; failure: SignerChangeFailure }> {
   const encoded = encodeSignerAction(body, { config: account.config })
   if ('error' in encoded) return { ok: false, failure: { status: 409, error: encoded.error } }
-
-  const floorFailure = removeOwnerFloorFailure(account, body)
-  if (floorFailure) return { ok: false, failure: floorFailure }
 
   const resolved = resolveSignatureScheme(body.signature_scheme, account.config)
   if ('error' in resolved) return { ok: false, failure: { status: 409, error: resolved.error } }
@@ -309,9 +296,6 @@ export async function submitSignerChange(
   if ('error' in encoded) return { ok: false, failure: { status: 409, error: encoded.error } }
 
   // Public entry point — the floor must hold here too, not just at prepare.
-  const floorFailure = removeOwnerFloorFailure(account, body)
-  if (floorFailure) return { ok: false, failure: floorFailure }
-
   const callData = String((user_operation as { callData?: string }).callData ?? '')
   if (!callData.toLowerCase().includes(encoded.data.slice(2).toLowerCase())) {
     return {

@@ -416,7 +416,20 @@ describe('DashboardClient', () => {
   describe('backup-signer recovery nudge (#1153 funded-state trigger)', () => {
     const DELEGATOR_SAFE = { ...SAFE, account_type: 'delegator_hybrid' }
 
-    it('shows the nudge for a funded delegation-rail account', () => {
+    /** The signer set AuthContext resolves on login, as the dashboard reads it. */
+    const storeSigners = (passkeys: number, owner: string | null) => {
+      window.localStorage.setItem(
+        `haven_hybrid_signers_${DELEGATOR_SAFE.safe_address.toLowerCase()}_${DELEGATOR_SAFE.chain_id}`,
+        JSON.stringify({
+          account_address: DELEGATOR_SAFE.safe_address,
+          chain_id: DELEGATOR_SAFE.chain_id,
+          owner_address: owner,
+          passkeys: Array.from({ length: passkeys }, (_, i) => ({ key_id: `0x0${i}`, x: '0x1', y: '0x2' })),
+        }),
+      )
+    }
+
+    const asDelegationUser = () =>
       mockUseAuth.mockReturnValue({
         user: {
           id: 'user-1',
@@ -427,11 +440,45 @@ describe('DashboardClient', () => {
         },
         activeSafe: DELEGATOR_SAFE,
       })
+
+    it('shows the nudge for a funded, single-signer delegation-rail account', () => {
+      asDelegationUser()
+      storeSigners(1, null) // one passkey, no owner → no recovery
       // mockBaseState() already sets a non-zero aggregated balance.
 
       render(<DashboardClient />)
 
       expect(screen.getByText('Add a backup soon')).toBeInTheDocument()
+    })
+
+    it('stays silent when the account ALREADY has a backup', () => {
+      // Recommending a backup to someone who enrolled one teaches them to
+      // ignore the banner — and it is the state the nudge is asking for.
+      asDelegationUser()
+      storeSigners(2, null)
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    it('counts an EOA owner as the second signer', () => {
+      asDelegationUser()
+      storeSigners(1, '0x5555555555555555555555555555555555555555')
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    it('stays silent when the signer set is unknown — a failed read must not nag', () => {
+      asDelegationUser()
+      // Nothing stored: AuthContext skips per-safe failures silently, so an
+      // absent set means "we do not know", not "no backup".
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
     })
 
     it('does not show the nudge for an unfunded delegation-rail account', () => {

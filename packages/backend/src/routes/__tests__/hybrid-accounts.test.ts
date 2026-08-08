@@ -154,16 +154,29 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
     expect(insert?.[1]?.[6]).toBeNull() // single_signer_waiver_at param
   })
 
-  it('blocks a single-signer MAINNET account without a waiver — before the contract check', async () => {
+  it('REVERSAL (#1153): a single-signer MAINNET account now PROVISIONS — no waiver, no 403', async () => {
+    // This asserted 403 until #1153. The owner's call: the floor became a
+    // recommendation shown after funding, because a wall here blocked the
+    // one-Face-ID onboarding at the moment the user has nothing at risk.
+    // The account is no more recoverable than before — see the security model.
     mockDb({})
     const res = await app.inject({
       method: 'POST', url: '/accounts/hybrid',
       payload: { chain_id: 8453, passkeys: [PASSKEY] },
     })
-    // 403 floor error — NOT the 400 "not available on chain" error: the gate
-    // runs first, so adding mainnet contracts later cannot bypass it.
-    expect(res.statusCode).toBe(403)
-    expect(res.json().error).toMatch(/at least 2 enrolled signers/)
+    expect(res.statusCode).toBe(201)
+  })
+
+  it('a single-signer mainnet row records NO waiver when none was sent', async () => {
+    // The column stops being an unblock but stays as history, so it must not
+    // be written just because provisioning now succeeds.
+    mockDb({})
+    await app.inject({
+      method: 'POST', url: '/accounts/hybrid',
+      payload: { chain_id: 8453, passkeys: [PASSKEY] },
+    })
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO user_safes/.test(String(c[0])))
+    expect(insert?.[1]?.[6]).toBeNull()
   })
 
   it('two signers pass the mainnet floor and provision on Base mainnet (#908 pins landed)', async () => {
@@ -180,17 +193,18 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
     expect(res.statusCode).toBe(201)
   })
 
-  it('the signer floor runs BEFORE contract availability (order proof on an unpinned mainnet)', async () => {
+  it('REVERSAL (#1153): an unpinned mainnet now refuses on AVAILABILITY, not the signer floor', async () => {
+    // Chain 10 (OP mainnet): value-bearing and unpinned. This used to prove
+    // the floor ran FIRST — one signer got 403 rather than the 400 for
+    // "chain not available". With the floor gone, availability is the only
+    // thing left to refuse it, which is what makes the removal visible here.
     mockDb({})
-    // Chain 10 (OP mainnet): value-bearing → the floor applies; unpinned →
-    // contract availability would 400. One signer must be refused by the
-    // FLOOR, not by availability — that error names the signer requirement.
     const res = await app.inject({
       method: 'POST', url: '/accounts/hybrid',
       payload: { chain_id: 10, passkeys: [PASSKEY] },
     })
-    expect(res.statusCode).toBe(403) // the floor refuses with 403, availability with 400
-    expect(res.json().error).toMatch(/at least 2 signers|signer/i)
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/not available on chain/i)
   })
 
   it('passkey + EOA owner counts as two signers', async () => {
@@ -217,7 +231,10 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
     expect(res.statusCode).toBe(201)
   })
 
-  it('a non-true waiver value does NOT pass the floor', async () => {
+  it('a non-true waiver value provisions, and is NOT recorded as an acknowledgement', async () => {
+    // Nothing is gated on the waiver any more, so the interesting question
+    // moved: a truthy-but-not-true value must not be written to the audit
+    // column as though the user had acknowledged anything.
     mockDb({})
     const res = await app.inject({
       method: 'POST', url: '/accounts/hybrid',
@@ -227,7 +244,9 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
         single_signer_waiver: { acknowledged: 'yes' as unknown as boolean },
       },
     })
-    expect(res.statusCode).toBe(403)
+    expect(res.statusCode).toBe(201)
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO user_safes/.test(String(c[0])))
+    expect(insert?.[1]?.[6]).toBeNull()
   })
 
   it('rejects the zero address as owner (the "no owner" encoding must not count as a signer)', async () => {
@@ -250,12 +269,17 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
     expect(res.json().error).toMatch(/duplicate passkey/)
   })
 
-  it('unknown chains fail closed: gated like mainnet', async () => {
+  it('REVERSAL (#1153): an unknown chain is refused by availability, not by the floor', async () => {
+    // The fail-closed classification still exists and still calls an unknown
+    // chain value-bearing — it now decides whether to RECOMMEND a backup, not
+    // whether to refuse. Provisioning on a chain Haven has no pins for is
+    // still impossible, which is the 400 below.
     mockDb({})
     const res = await app.inject({
       method: 'POST', url: '/accounts/hybrid',
       payload: { chain_id: 424242, passkeys: [PASSKEY] },
     })
-    expect(res.statusCode).toBe(403)
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/not available on chain/i)
   })
 })

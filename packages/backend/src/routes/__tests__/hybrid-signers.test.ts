@@ -311,15 +311,20 @@ describe('remove_owner — enrolling a wallet is not a one-way door (#1087)', ()
     expect(mockTreasury).not.toHaveBeenCalled()
   })
 
-  it('refuses on a value-bearing chain when removal would drop below the #908 floor without a waiver', async () => {
+  it('REVERSAL (#1153): a mainnet drop to ONE signer is permitted, no waiver', async () => {
     ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] }) // 1 signer after removal
+    mockPrepared()
     const res = await app.inject({
       method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/prepare?chain_id=8453`,
       payload: { action: 'remove_owner' },
     })
-    expect(res.statusCode).toBe(409)
-    expect(res.json().error).toMatch(/single signer/)
-    expect(mockTreasury).not.toHaveBeenCalled()
+    // REVERSAL (#1153). This asserted 409. Owner decision, verbatim:
+    // "convert this from a block to a warning instead, the user should be
+    // able to move to a one signer set up." The API permits it; the dashboard
+    // requires an explicit confirmation naming what is lost before calling,
+    // because the information has to reach the human — an API flag would only
+    // have moved the block, not removed it.
+    expect(res.statusCode).toBe(200)
   })
 
   it('permits the mainnet drop when the account carries the recorded single-signer waiver', async () => {

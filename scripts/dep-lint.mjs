@@ -19,7 +19,7 @@
 //
 //   node scripts/dep-lint.mjs
 
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join, dirname, relative, sep, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
@@ -184,6 +184,7 @@ export async function applyExemptions(details, readFileImpl = readFile) {
 export function countInlineSqlCallSites(files) {
   let callSites = 0
   let fileCount = 0
+  const perFile = {}
   for (const { path, source } of files) {
     if (!path.startsWith('packages/backend/src/')) continue
     if (
@@ -197,9 +198,40 @@ export function countInlineSqlCallSites(files) {
     if (matches && matches.length > 0) {
       callSites += matches.length
       fileCount += 1
+      perFile[path] = matches.length
     }
   }
-  return { callSites, fileCount }
+  return { callSites, fileCount, perFile }
+}
+
+// ── The call-site ceiling (#1166) ───────────────────────────────────────────
+
+export const CEILING_PATH = 'packages/backend/dep-lint-callsite-ceiling.json'
+
+/**
+ * Shrink-only ceiling over the gauge (#1166). The retired file-edge ratchet
+ * was blind to intensity — 66 files flat while call sites grew 256 → 344 —
+ * so the replacement ratchets the CALL-SITE total instead. The committed JSON
+ * holds the total plus per-file counts so a failure can name what grew.
+ * Lowering the ceiling is a reviewed change (`--update-ceiling` writes it,
+ * and refuses to raise); raising it means hand-editing the JSON and defending
+ * that in the PR.
+ */
+export function checkCallSiteCeiling(gauge, ceiling) {
+  if (gauge.callSites <= ceiling.total) {
+    return {
+      ok: true,
+      canLower: gauge.callSites < ceiling.total,
+      grown: [],
+    }
+  }
+  const grown = []
+  for (const [path, count] of Object.entries(gauge.perFile)) {
+    const committed = ceiling.files[path] ?? 0
+    if (count > committed) grown.push({ path, committed, count })
+  }
+  grown.sort((a, b) => b.count - b.committed - (a.count - a.committed))
+  return { ok: false, canLower: false, grown }
 }
 
 // ── Scan ────────────────────────────────────────────────────────────────────
@@ -239,12 +271,54 @@ async function main() {
     scannedFiles.map(async (path) => ({ path, source: await readFile(join(REPO_ROOT, path), 'utf8') })),
   )
   const gauge = countInlineSqlCallSites(sources)
+  const ceiling = JSON.parse(await readFile(join(REPO_ROOT, CEILING_PATH), 'utf8'))
   console.log(
     `inline-SQL gauge: ${gauge.callSites} .query( call site(s) across ${gauge.fileCount} file(s) ` +
-      'outside infra/repositories/ (packages/backend/src, production code; trend only, not enforced).',
+      `outside infra/repositories/ (packages/backend/src, production code; ceiling ${ceiling.total}, shrink-only).`,
   )
 
+  const ceilingCheck = checkCallSiteCeiling(gauge, ceiling)
+
+  if (process.argv.includes('--update-ceiling')) {
+    if (gauge.callSites > ceiling.total) {
+      console.log(
+        `✗ --update-ceiling refuses to RAISE the ceiling (${ceiling.total} → ${gauge.callSites}). ` +
+          'Growth is a reviewed decision: hand-edit the JSON and defend it in the PR.',
+      )
+      process.exit(1)
+    }
+    await writeFile(
+      join(REPO_ROOT, CEILING_PATH),
+      JSON.stringify({ total: gauge.callSites, files: gauge.perFile }, null, 2) + '\n',
+    )
+    console.log(`✓ ceiling lowered ${ceiling.total} → ${gauge.callSites} (${CEILING_PATH} rewritten).`)
+    return
+  }
+
   let failed = false
+  if (!ceilingCheck.ok) {
+    failed = true
+    console.log(
+      `\n✗ inline-SQL call sites grew past the ceiling: ${gauge.callSites} > ${ceiling.total}. Files that grew:\n`,
+    )
+    for (const g of ceilingCheck.grown) {
+      console.log(`  ${g.path}: ${g.committed} → ${g.count}`)
+    }
+    if (ceilingCheck.grown.length === 0) {
+      console.log(
+        '  (no single file exceeds its committed count — the ceiling JSON is internally ' +
+          'inconsistent, likely a hand-edit that lowered `total` without the tree shrinking)',
+      )
+    }
+    console.log(
+      '\nMove the query behind infra/repositories/ (see its README) instead of growing inline SQL. ' +
+        'If growth is genuinely justified, hand-edit ' + CEILING_PATH + ' and defend it in the PR.',
+    )
+  } else if (ceilingCheck.canLower) {
+    console.log(
+      `  (count is below the ceiling ${ceiling.total} — lock in the progress: node scripts/dep-lint.mjs --update-ceiling)`,
+    )
+  }
   if (badReasons.length > 0) {
     failed = true
     console.log('\n✗ dep-lint-exempt comments with non-reasons (a waiver must say WHY, concretely):\n')

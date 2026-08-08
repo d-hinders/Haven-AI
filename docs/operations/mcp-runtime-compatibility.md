@@ -124,6 +124,18 @@ hit this the first time that binding is versioned.
 
 ## Troubleshooting
 
+- **A stale local `dist/` masquerading as version skew (#1188).** The symptoms
+  in the skew table above have a second, unrelated cause: a sibling package
+  whose `dist/` is older than its `src/`. `packages/signer`'s dist once sat four
+  weeks behind its source and produced
+  `signX402FundingTypedData is not a function` plus a pre-#1143 schema rejecting
+  `auth.version` — indistinguishable, from the error alone, from a genuinely
+  outdated installed signer. The npm scripts rebuild what they depend on
+  (`npm run test -w packages/mcp-server` builds sdk and signer first), so this
+  only bites when vitest is invoked directly. A `globalSetup` guard now refuses
+  to run those suites against a stale dist, and `npm run check:dist` reports it
+  on demand. If you see a skew-shaped error locally, check this before
+  reinstalling anything.
 - **Broken or root-owned `~/.npm`:** the MCP runtime install first tries the
   user's default npm cache with `--prefer-offline` (which `npx` just warmed, so
   the signer/sdk tarballs are reused instead of re-downloaded). If that fails —

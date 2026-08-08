@@ -6,6 +6,7 @@ covers:
   - packages/mcp/**
   - packages/connect/**
   - packages/signer/**
+  - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
 last-verified: "2026-08-08" # #1155: pre-payment skew detection documented (signer handshake advertisement + hosted quote-reported version); runtime manifest, Node-floor and release-checklist sections re-read and unchanged
 ---
@@ -16,11 +17,20 @@ last-verified: "2026-08-08" # #1155: pre-payment skew detection documented (sign
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
-> **One exception:** [Where the Node floor is enforced](#where-the-node-floor-is-enforced)
-> applies to **both** topologies. The floor is a property of the machine, not of
-> the chosen topology — scoping it to the local path is exactly the mistake
-> [#1161](https://github.com/d-hinders/Haven-AI/issues/1161) fixed, so it is
-> documented in one place rather than split across two.
+> **Two sections sit outside that scope**, each for its own reason:
+>
+> - [Where the Node floor is enforced](#where-the-node-floor-is-enforced) applies
+>   to **both** topologies. The floor is a property of the machine, not of the
+>   chosen topology — scoping it to the local path is exactly the mistake
+>   [#1161](https://github.com/d-hinders/Haven-AI/issues/1161) fixed, so it is
+>   documented in one place rather than split across two.
+> - [Signer / hosted-MCP version skew](#signer--hosted-mcp-version-skew-1138-1143)
+>   and its [pre-payment detection](#detecting-skew-before-a-payment-1155)
+>   subsection are the **opposite** case: they apply only to the hosted MCP +
+>   local signer topology, because skew needs two independently versioned
+>   components and the local runtime signs in-process with the SDK it shipped
+>   with. They live here because this is the runtime-compatibility doc, not
+>   because they describe the local path.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent

@@ -107,8 +107,16 @@ describe('buildHostedMcpServer', () => {
       expect(description).toContain('haven/signer-compatibility')
       // Same fix as #1143, so both surfaces tell the user the same thing.
       expect(description).toContain('npx @haven_ai/connect@alpha')
-      expect(description).toContain('stop before signing')
+      expect(description).toContain('STOP before signing')
     }
+
+    // Resume re-enters signing and carries no version of its own, so it prompts
+    // a re-check of the original quote's — the signer restart it already
+    // anticipates is exactly when the installed signer can have changed.
+    const resume = byName.get('haven_resume_x402_payment') ?? ''
+    expect(resume).toContain('haven/signer-compatibility')
+    expect(resume).toContain('npx @haven_ai/connect@alpha')
+    expect(resume).toContain('STOP before signing')
 
     await client.close()
     await server.close()

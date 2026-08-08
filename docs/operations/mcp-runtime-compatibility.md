@@ -15,6 +15,12 @@ last-verified: "2026-08-08"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **One exception:** [Where the Node floor is enforced](#where-the-node-floor-is-enforced)
+> applies to **both** topologies. The floor is a property of the machine, not of
+> the chosen topology — scoping it to the local path is exactly the mistake
+> [#1161](https://github.com/d-hinders/Haven-AI/issues/1161) fixed, so it is
+> documented in one place rather than split across two.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent
@@ -42,11 +48,18 @@ Keep this table in sync with that file.
 
 ## Where the Node floor is enforced
 
-`>=24.0.0` is declared in four places that must agree: each published package's
-`engines.node`, `.nvmrc`, `HAVEN_MINIMUM_NODE_VERSION` in `@haven_ai/sdk`, and
+`>=24.0.0` is declared in four places that must agree: the `engines.node` of the
+four packages this floor governs (`sdk`, `connect`, `signer`, `mcp`), `.nvmrc`,
+`HAVEN_MINIMUM_NODE_VERSION` in `@haven_ai/sdk`, and
 `MCP_RUNTIME_MANIFEST.minimumNodeVersion`. The manifest field is **derived** from
-the SDK constant, and a guard test in `sdk`, `connect`, `signer`, and `mcp` pins
-each package's `engines.node` to it. They cannot drift silently.
+the SDK constant, and a guard test in each of those four packages pins its own
+`engines.node` to it. They cannot drift silently.
+
+`@haven_ai/cli` is **out of scope and declares no `engines` floor today** — it is
+published but sits outside the connect/signer/MCP runtime this section governs.
+Neither do the unpublished workspace packages (`backend`, `frontend`, `core`,
+`mcp-server`, `demo-merchant-mcp`, `qa-agent`), which are pinned by `.nvmrc` in
+CI instead. Read "the floor" here as the agent-runtime floor, not a repo-wide one.
 
 They did drift once, which is why the constant exists. `engines` said `>=24`
 everywhere while the manifest enforced `20.0.0`, so the guard meant to hold the
@@ -163,7 +176,8 @@ hit this the first time that binding is versioned.
 - **Invalid Codex TOML:** the connector writes Codex config with a TOML string
   serializer and validates the generated Haven block before writing. The
   expected shape is `command = ".../bin/haven-mcp"` and `args = []`.
-- **Unsupported Node.js:** every Haven package requires Node.js `>=24.0.0`, and
+- **Unsupported Node.js:** the connector, signer, and MCP packages require
+  Node.js `>=24.0.0`, and
   since [#1161](https://github.com/d-hinders/Haven-AI/issues/1161) setup
   **refuses** below it rather than proceeding — see
   [Where the Node floor is enforced](#where-the-node-floor-is-enforced). The

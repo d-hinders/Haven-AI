@@ -265,6 +265,17 @@ import {
   LIST_OWNER_ALIASES_SQL,
   UPSERT_OWNER_ALIAS_SQL,
 } from '../src/infra/repositories/owner-aliases.js'
+import {
+  COUNT_ACTIONABLE_APPROVALS_SQL,
+  FIND_PORTFOLIO_SNAPSHOTS_SQL,
+  HAS_FIRST_AGENT_PAYMENT_SQL,
+  INSERT_PORTFOLIO_SNAPSHOT_SQL,
+  LIST_DASHBOARD_AGENTS_SQL,
+  LIST_DASHBOARD_ALLOWANCES_SQL,
+  LIST_DASHBOARD_SAFES_SQL,
+  SUM_MONTHLY_APPROVAL_SPEND_SQL,
+  SUM_MONTHLY_PAYMENT_SPEND_SQL,
+} from '../src/infra/repositories/dashboard.js'
 
 interface SmokeQuery {
   name: string
@@ -363,6 +374,17 @@ const QUERIES: SmokeQuery[] = [
   { name: 'owner-aliases: list for confirmed owners', sql: LIST_OWNER_ALIASES_SQL },
   { name: 'owner-aliases: upsert', sql: UPSERT_OWNER_ALIAS_SQL },
   { name: 'owner-aliases: delete', sql: DELETE_OWNER_ALIAS_SQL },
+  // Dashboard overview aggregate (#1167). IMPORTED — verbatim from
+  // routes/dashboard.ts.
+  { name: 'dashboard: account list', sql: LIST_DASHBOARD_SAFES_SQL },
+  { name: 'dashboard: agent preview (safe join)', sql: LIST_DASHBOARD_AGENTS_SQL },
+  { name: 'dashboard: actionable approvals count', sql: COUNT_ACTIONABLE_APPROVALS_SQL },
+  { name: 'dashboard: first-agent-payment milestone', sql: HAS_FIRST_AGENT_PAYMENT_SQL },
+  { name: 'dashboard: legacy allowance mirror for agents', sql: LIST_DASHBOARD_ALLOWANCES_SQL },
+  { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
+  { name: 'dashboard: portfolio snapshot upsert', sql: INSERT_PORTFOLIO_SNAPSHOT_SQL },
+  { name: 'dashboard: month-to-date payment spend', sql: SUM_MONTHLY_PAYMENT_SPEND_SQL },
+  { name: 'dashboard: month-to-date approval spend', sql: SUM_MONTHLY_APPROVAL_SPEND_SQL },
   {
     // Every authenticated agent request runs this, and it is where
     // `agent.chain_id` comes from — the value machine-payments.ts then uses for

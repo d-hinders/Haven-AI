@@ -7,7 +7,7 @@ covers:
   - packages/connect/**
   - packages/signer/**
   - .github/workflows/publish.yml
-last-verified: "2026-08-08"
+last-verified: "2026-08-08" # #1155: pre-payment skew detection documented (signer handshake advertisement + hosted quote-reported version); runtime manifest, Node-floor and release-checklist sections re-read and unchanged
 ---
 
 # MCP Runtime Compatibility
@@ -164,6 +164,60 @@ rewriting it invalidates the signature and misrepresents what Haven authorised �
 the update is the fix. The same applies to `expected_auth.version` on the sweep
 binding, which shares the mechanism (`SUPPORTED_SWEEP_BINDING_VERSIONS`) and will
 hit this the first time that binding is versioned.
+
+### Detecting skew before a payment (#1155)
+
+Every row above is a *post-quote* symptom: the agent found out by trying to pay.
+The same skew is now detectable at connection time, from two surfaces that cost
+nothing to read.
+
+| Surface | What it states | Where |
+|---|---|---|
+| Signer `initialize` result | The version sets this signer will verify — `capabilities.experimental["haven/signer-compatibility"]` (machine-readable) and the same numbers in `instructions` (what clients show the model) | `packages/signer/src/capabilities.ts`, wired in `buildSignerMcpServer` |
+| Hosted quote/prepare result | `signer_compatibility.x402_expected_context_version` — the version that quote will emit — plus the comparison instruction in-band | `packages/mcp-server/src/tools.ts` (`haven_pay_x402_quote`, `haven_pay_mcp_tool`) |
+
+**The check is agent-mediated, and cannot be otherwise.** The signer and the
+hosted MCP are two separate servers connected to the same agent client. The
+hosted server cannot introspect the signer, and the signer never calls the Haven
+API — it only signs. Only the agent sees both handshakes, so what ships is the
+information plus the prompt to compare it. The hosted tool descriptions carry
+that prompt; the signer's `instructions` carry the other half.
+
+**A mismatch warns, it does not block** (owner decision, 2026-08-07). No refusal
+was added to the payment path: a quote whose emitted version the signer may not
+know still succeeds and simply reports the number. Refusing on the strength of
+reported client metadata would let a false positive block a working payment,
+which is strictly worse than the reactive state — and the signing-time guard
+above already fails closed, so nothing is unguarded. Both surfaces name the same
+fix (update `@haven_ai/signer`; rerun `npx @haven_ai/connect@alpha`), so an agent
+that meets either says the same thing to the user.
+
+The advertised set is **derived** from `SUPPORTED_X402_EXPECTED_VERSIONS` /
+`SUPPORTED_SWEEP_BINDING_VERSIONS`, never a second literal — including the
+rendered numbers inside `instructions`. Drift between what is advertised and what
+is enforced is the one way this feature could become a lie, so tests hold them
+together in both directions: a handshake assertion pins the advertised sets to
+the exported constants, and a behavioural test drives the real signing path with
+every advertised version and fails if the skew guard rejects any of them.
+
+The signer advertises under `capabilities.experimental` rather than the newer
+`extensions` field on purpose. Both are `Record<string, object>` in
+`@modelcontextprotocol/sdk@1.29`, but a client running an older SDK parses the
+`initialize` result with a `ServerCapabilities` schema that has no `extensions`
+key and would strip it — and an out-of-date client is exactly the population this
+feature serves.
+
+Adding a read-only capability *tool* was the documented fallback if the SDK could
+not carry this at handshake. It can (`ServerOptions.capabilities` and
+`ServerOptions.instructions`, both forwarded by `McpServer` into the `initialize`
+result), and a new tool would have been worse than redundant: the signer's
+consent hash is computed over its registered tool names, so adding one would
+invalidate every existing acknowledgement and prompt users to re-consent for a
+diagnostic.
+
+This covers the **hosted MCP + local signer** topology only. The local
+`@haven_ai/mcp` runtime signs in-process with the SDK it was installed with, so
+there is no second component to be out of step with.
 
 ## Troubleshooting
 

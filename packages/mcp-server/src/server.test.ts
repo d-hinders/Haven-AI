@@ -85,6 +85,35 @@ describe('buildHostedMcpServer', () => {
     await server.close()
   })
 
+  it('instructs the agent to compare expected-context versions before signing (#1155)', async () => {
+    // The prompt half of pre-payment skew detection. The quote result carries
+    // the number; the description is what tells the agent to look at it, and to
+    // stop rather than sign when it falls outside what the local signer
+    // advertises at its own initialize handshake.
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const server = buildHostedMcpServer(haven)
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test-client', version: '0.0.0' })
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+
+    const { tools } = await client.listTools()
+    const byName = new Map(tools.map((tool) => [tool.name, tool.description ?? '']))
+
+    for (const tool of ['haven_pay_x402_quote', 'haven_pay_mcp_tool']) {
+      const description = byName.get(tool) ?? ''
+      expect(description).toContain('signer_compatibility.x402_expected_context_version')
+      expect(description).toContain('haven/signer-compatibility')
+      // Same fix as #1143, so both surfaces tell the user the same thing.
+      expect(description).toContain('npx @haven_ai/connect@alpha')
+      expect(description).toContain('stop before signing')
+    }
+
+    await client.close()
+    await server.close()
+  })
+
   it('publishes x402 next-tool guidance with explicit MCP namespaces', async () => {
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const server = buildHostedMcpServer(haven)

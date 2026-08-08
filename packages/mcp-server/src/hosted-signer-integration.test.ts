@@ -36,7 +36,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { HavenClient, buildX402ExpectedMessage } from '@haven_ai/sdk'
 import { privateKeyToAccount } from 'viem/accounts'
 import { hashTypedData } from 'viem'
-import { createEdgeSigner, createToolHandlers as createSignerHandlers } from '@haven_ai/signer'
+import {
+  createEdgeSigner,
+  createToolHandlers as createSignerHandlers,
+  signerCompatibility,
+  SIGNER_CAPABILITY_KEY,
+} from '@haven_ai/signer'
 import { createToolHandlers as createHostedHandlers, type ToolPayload } from './tools.js'
 import { createHostedHavenClient } from './server.js'
 
@@ -408,6 +413,31 @@ describe('Hosted MCP + Edge Signer integration', () => {
     // The EIP-3009 `from` field must be the delegate address — proves the
     // header is key-bound and can't be replayed from a different key.
     expect((authorization.from as string).toLowerCase()).toBe(delegateAddress.toLowerCase())
+  })
+
+  it('lets the agent compare hosted-emitted and signer-supported versions pre-payment (#1155)', async () => {
+    // The cross-package half of #1155, and the only place both sides are in one
+    // process. The hosted server is keyless and must NOT depend on
+    // @haven_ai/signer at runtime, so it spells the capability key as a literal;
+    // this pins that literal to the signer's exported constant. A rename on
+    // either side would otherwise leave the agent looking up a key that no
+    // longer exists — a silent downgrade to no detection at all.
+    const havenKeyless = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const quote = ok<{
+      signer_compatibility: { x402_expected_context_version: number; signer_capability: string }
+    }>(
+      await createHostedHandlers(havenKeyless).haven_pay_x402_quote({
+        payment_required: PAYMENT_REQUIRED,
+      }),
+    )
+
+    expect(quote.signer_compatibility.signer_capability).toBe(SIGNER_CAPABILITY_KEY)
+    // Today's traffic is in step: what this backend fixture emits is a version
+    // the shipped signer verifies. When that stops being true, the agent sees it
+    // at quote time instead of at signing time.
+    expect(signerCompatibility().x402_expected_context_versions).toContain(
+      quote.signer_compatibility.x402_expected_context_version,
+    )
   })
 
   it('hosted MCP never has a signing path (custody guard)', () => {

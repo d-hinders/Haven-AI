@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { defaultSigningAuditPath } from './audit.js'
+import { signerCapabilityAdvertisement, signerInstructions } from './capabilities.js'
 import {
   ensureSignerConsent,
   registeredSignerToolNames,
@@ -99,7 +100,19 @@ export function buildSignerMcpServer(
   signer: EdgeSigner,
   options: Pick<SignerOptions, 'auditPath'> & { credentials?: SignerCredentials } = {},
 ): McpServer {
-  const server = new McpServer({ name: SIGNER_NAME, version: SIGNER_VERSION })
+  // #1155: the handshake states what this signer can verify, so an agent can
+  // detect expected-context skew before it quotes rather than after it signs.
+  // `SIGNER_VERSION` is a *package* version and nothing derives capability from
+  // it — both fields below are derived from the constants the signing path
+  // enforces. Advisory only: no refusal is added here, the #1143 signing-time
+  // guard remains the enforcement point.
+  const server = new McpServer(
+    { name: SIGNER_NAME, version: SIGNER_VERSION },
+    {
+      capabilities: signerCapabilityAdvertisement(),
+      instructions: signerInstructions(),
+    },
+  )
 
   const credentialsPath = options.credentials?.sourcePath
   const handlers = createToolHandlers(signer, {

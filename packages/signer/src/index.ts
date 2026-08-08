@@ -11,6 +11,14 @@ export {
 } from './core.js'
 
 export {
+  signerCapabilityAdvertisement,
+  signerCompatibility,
+  signerInstructions,
+  SIGNER_CAPABILITY_KEY,
+  type SignerCompatibility,
+} from './capabilities.js'
+
+export {
   loadSignerCredentials,
   warnIfCredentialFilePermissive,
   type SignerCredentials,

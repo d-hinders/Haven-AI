@@ -1,9 +1,24 @@
 import { FastifyInstance } from 'fastify'
-// dep-lint-exempt: 10 statements across the users / user_safes / owner-alias aggregates; verbatim extraction is a >100-line move deferred under #999's fix-or-waive budget
-import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getSafeDetails } from '../modules/accounts/index.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+import {
+  findCurrencyPreference,
+  updateCurrencyPreference,
+  updateUserName,
+  updateUserSafeAddress,
+  updateUserWalletAddress,
+} from '../infra/repositories/users.js'
+import {
+  linkDefaultUserSafe,
+  listSafesWithAccountTypeForUser,
+  type SafeWithAccountTypeRow,
+} from '../infra/repositories/user-safes.js'
+import {
+  deleteOwnerAlias,
+  listOwnerAliases,
+  upsertOwnerAlias,
+} from '../infra/repositories/owner-aliases.js'
 import { ETH_ADDRESS_RE, DEFAULT_CHAIN_ID } from '@haven_ai/core'
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
@@ -30,20 +45,6 @@ interface OwnerAliasBody {
   name: string
 }
 
-interface UserSafeRow {
-  id: string
-  safe_address: string
-  chain_id: number
-  name: string
-  /** 'delegator_hybrid' on the delegation rail; null/legacy = Safe rail (#1069). */
-  account_type: string | null
-}
-
-interface OwnerAliasRow {
-  owner_address: string
-  name: string
-}
-
 function normalizeName(name: unknown): string | null {
   if (typeof name !== 'string') return null
 
@@ -59,23 +60,11 @@ function normalizeName(name: unknown): string | null {
   return normalized
 }
 
-async function listUserSafes(userId: string): Promise<UserSafeRow[]> {
-  const result = await pool.query<UserSafeRow>(
-    `SELECT id, safe_address, chain_id, name, account_type
-     FROM user_safes
-     WHERE user_id = $1
-     ORDER BY created_at ASC`,
-    [userId],
-  )
-
-  return result.rows
-}
-
 async function getCurrentOwnerDirectory(userId: string) {
-  const safes = await listUserSafes(userId)
+  const safes = await listSafesWithAccountTypeForUser(userId)
   const ownerMap = new Map<string, {
     owner_address: string
-    accounts: UserSafeRow[]
+    accounts: SafeWithAccountTypeRow[]
   }>()
   const failedSafeIds: string[] = []
 
@@ -132,14 +121,10 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Enter a name using 80 characters or fewer' })
     }
 
-    const result = await pool.query(
-      `UPDATE users SET name = $1, updated_at = NOW()
-       WHERE id = $2
-       RETURNING id, name, email, wallet_address, safe_address, currency_preference, created_at`,
-      [normalizedName, sub],
-    )
-
-    return result.rows[0]
+    // `?? undefined` preserves the inline query's `result.rows[0]` exactly: a
+    // token whose user row no longer exists has always produced an undefined
+    // return here, not a 404. Reported rather than fixed (#1167).
+    return (await updateUserName(normalizedName, sub)) ?? undefined
   })
 
   // PUT /user/wallet
@@ -151,14 +136,7 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Invalid Ethereum address' })
     }
 
-    const result = await pool.query(
-      `UPDATE users SET wallet_address = $1, updated_at = NOW()
-       WHERE id = $2
-       RETURNING id, name, email, wallet_address, safe_address`,
-      [wallet_address, sub],
-    )
-
-    return result.rows[0]
+    return (await updateUserWalletAddress(wallet_address, sub)) ?? undefined
   })
 
   // PUT /user/safe
@@ -170,35 +148,20 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Invalid Ethereum address' })
     }
 
-    const result = await pool.query(
-      `UPDATE users SET safe_address = $1, updated_at = NOW()
-       WHERE id = $2
-       RETURNING id, name, email, wallet_address, safe_address`,
-      [safe_address, sub],
-    )
+    const updated = await updateUserSafeAddress(safe_address, sub)
 
     // Also insert into user_safes (multi-Safe support)
-    await pool.query(
-      `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default)
-       VALUES ($1, $2, $3, 'My account', true)
-       ON CONFLICT (user_id, safe_address, chain_id) DO NOTHING`,
-      [sub, safe_address, chain_id],
-    )
+    await linkDefaultUserSafe(sub, safe_address, chain_id)
 
     emitFunnelEvent(sub, 'safe_imported', { safe_address, chain_id })
-    return result.rows[0]
+    return updated ?? undefined
   })
 
   // GET /user/preferences
   app.get('/preferences', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    const result = await pool.query(
-      'SELECT currency_preference FROM users WHERE id = $1',
-      [sub],
-    )
-
-    return { currency_preference: result.rows[0]?.currency_preference ?? 'USD' }
+    return { currency_preference: (await findCurrencyPreference(sub)) ?? 'USD' }
   })
 
   // PUT /user/preferences
@@ -210,14 +173,16 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Invalid currency. Must be USD or EUR.' })
     }
 
-    const result = await pool.query(
-      `UPDATE users SET currency_preference = $1, updated_at = NOW()
-       WHERE id = $2
-       RETURNING currency_preference`,
-      [currency_preference, sub],
-    )
+    const updated = await updateCurrencyPreference(currency_preference, sub)
 
-    return { currency_preference: result.rows[0].currency_preference }
+    // The inline query read `rows[0].currency_preference` unguarded, so a
+    // vanished user row threw and surfaced as a 500. Kept as a throw rather
+    // than quietly turned into a 200 — behaviour-preserving (#1167).
+    if (!updated) {
+      throw new Error('User row not found while updating currency preference')
+    }
+
+    return { currency_preference: updated.currency_preference }
   })
 
   // GET /user/owners
@@ -228,15 +193,9 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
     const aliasMap = new Map<string, string>()
 
     if (addresses.length > 0) {
-      const aliasResult = await pool.query<OwnerAliasRow>(
-        `SELECT owner_address, name
-         FROM owner_aliases
-         WHERE user_id = $1
-           AND owner_address = ANY($2::varchar[])`,
-        [sub, addresses],
-      )
-
-      for (const row of aliasResult.rows) {
+      // Only the addresses just confirmed on-chain — that narrowing is what
+      // keeps a removed owner's alias from reappearing.
+      for (const row of await listOwnerAliases(sub, addresses)) {
         aliasMap.set(row.owner_address.toLowerCase(), row.name)
       }
     }
@@ -284,18 +243,11 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Owner not found for linked accounts' })
       }
 
-      const result = await pool.query<OwnerAliasRow>(
-        `INSERT INTO owner_aliases (user_id, owner_address, name)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (user_id, owner_address)
-         DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()
-         RETURNING owner_address, name`,
-        [sub, normalizedOwner, normalizedName],
-      )
+      const alias = await upsertOwnerAlias(sub, normalizedOwner, normalizedName)
 
       return {
-        owner_address: result.rows[0].owner_address,
-        name: result.rows[0].name,
+        owner_address: alias.owner_address,
+        name: alias.name,
       }
     },
   )
@@ -311,11 +263,7 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Invalid owner address' })
       }
 
-      await pool.query(
-        `DELETE FROM owner_aliases
-         WHERE user_id = $1 AND owner_address = $2`,
-        [sub, ownerAddress.toLowerCase()],
-      )
+      await deleteOwnerAlias(sub, ownerAddress.toLowerCase())
 
       return { success: true }
     },

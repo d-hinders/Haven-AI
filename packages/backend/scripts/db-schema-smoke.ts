@@ -224,9 +224,11 @@ import {
   FIND_OWNED_SAFE_SQL,
   FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL,
   INSERT_USER_SAFE_SQL,
+  LINK_DEFAULT_USER_SAFE_SQL,
   LIST_APPROVER_METADATA_FOR_SAFE_SQL,
   LIST_KNOWN_APPROVERS_FOR_USER_SQL,
   LIST_SAFES_FOR_USER_SQL,
+  LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL,
   ORPHAN_AGENTS_FOR_SAFE_SQL,
   ORPHAN_SELF_SIGN_AGENTS_FOR_SAFE_SQL,
   PROMOTE_SAFE_TO_DEFAULT_SQL,
@@ -251,6 +253,18 @@ import {
   LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL,
   LIST_BASIC_SAFES_FOR_USER_SQL,
 } from '../src/infra/repositories/transaction-history.js'
+import {
+  FIND_CURRENCY_PREFERENCE_SQL,
+  UPDATE_CURRENCY_PREFERENCE_SQL,
+  UPDATE_USER_NAME_SQL,
+  UPDATE_USER_SAFE_ADDRESS_SQL,
+  UPDATE_USER_WALLET_ADDRESS_SQL,
+} from '../src/infra/repositories/users.js'
+import {
+  DELETE_OWNER_ALIAS_SQL,
+  LIST_OWNER_ALIASES_SQL,
+  UPSERT_OWNER_ALIAS_SQL,
+} from '../src/infra/repositories/owner-aliases.js'
 
 interface SmokeQuery {
   name: string
@@ -336,6 +350,19 @@ const QUERIES: SmokeQuery[] = [
   { name: 'user-safes: approver metadata for safe', sql: LIST_APPROVER_METADATA_FOR_SAFE_SQL },
   { name: 'user-safes: approver metadata upsert (expression conflict target)', sql: UPSERT_APPROVER_METADATA_SQL },
   { name: 'user-safes: approver metadata delete', sql: DELETE_APPROVER_METADATA_SQL },
+  { name: 'user-safes: owner-directory list (account_type)', sql: LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL },
+  { name: 'user-safes: idempotent link from PUT /user/safe', sql: LINK_DEFAULT_USER_SAFE_SQL },
+  // Users aggregate (#1167). IMPORTED from the repository — verbatim from
+  // routes/user.ts.
+  { name: 'users: update display name', sql: UPDATE_USER_NAME_SQL },
+  { name: 'users: update connected wallet address', sql: UPDATE_USER_WALLET_ADDRESS_SQL },
+  { name: 'users: update legacy safe_address mirror', sql: UPDATE_USER_SAFE_ADDRESS_SQL },
+  { name: 'users: read currency preference', sql: FIND_CURRENCY_PREFERENCE_SQL },
+  { name: 'users: update currency preference', sql: UPDATE_CURRENCY_PREFERENCE_SQL },
+  // Owner-alias aggregate (#1167). IMPORTED — verbatim from routes/user.ts.
+  { name: 'owner-aliases: list for confirmed owners', sql: LIST_OWNER_ALIASES_SQL },
+  { name: 'owner-aliases: upsert', sql: UPSERT_OWNER_ALIAS_SQL },
+  { name: 'owner-aliases: delete', sql: DELETE_OWNER_ALIAS_SQL },
   {
     // Every authenticated agent request runs this, and it is where
     // `agent.chain_id` comes from — the value machine-payments.ts then uses for

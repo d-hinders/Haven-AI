@@ -93,9 +93,7 @@ export function recordAllowanceNonce(
   // (and must not fail) for a bookkeeping write. The store swallows its own
   // errors; the catch here covers a synchronous throw from a bad store.
   try {
-    void store
-      .raise(chainId, safe.toLowerCase(), delegate.toLowerCase(), token.toLowerCase(), nonce)
-      .catch(() => {})
+    void store.raise(chainId, safe, delegate, token, nonce).catch(() => {})
   } catch {
     /* fail-open — see the file header */
   }
@@ -116,14 +114,14 @@ export interface FreshNonceOptions {
  */
 export const DEFAULT_SHARED_READ_TIMEOUT_MS = 250
 
-/** Resolve `fallback` if `promise` has not settled within `ms`. */
-async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T | null = null) {
+/** Resolve `null` if `promise` has not settled within `ms`. */
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   let timer: NodeJS.Timeout | undefined
   try {
     return await Promise.race([
       promise,
-      new Promise<T | null>((resolve) => {
-        timer = setTimeout(() => resolve(fallback), ms)
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), ms)
         // Never hold the process open for a best-effort read.
         timer.unref?.()
       }),
@@ -169,9 +167,17 @@ export async function waitForFreshAllowanceNonce(
   // Fastify sets no request timeout, so an unbounded await here would hang a
   // payment that used to do no I/O on this path at all. Strictly worse than
   // before, which this whole tier must never be.
+  // `Promise.resolve().then(...)` rather than calling `store.find` directly:
+  // `.catch()` only attaches once a call has RETURNED, so a store that throws
+  // synchronously would escape it entirely and surface as a 500 on the money
+  // path (the call site does not wrap this). Unreachable with the real
+  // repository — it is `async`, so it cannot throw synchronously — but that is
+  // the kind of guarantee that holds until someone writes a different store,
+  // which is exactly the convention-two-files-must-remember this tier argues
+  // against. `recordAllowanceNonce` already guards its own write this way.
   const shared = await withTimeout(
-    store
-      .find(chainId, safe.toLowerCase(), delegate.toLowerCase(), token.toLowerCase())
+    Promise.resolve()
+      .then(() => store.find(chainId, safe, delegate, token))
       .catch(() => null),
     opts.sharedReadTimeoutMs ?? DEFAULT_SHARED_READ_TIMEOUT_MS,
   )

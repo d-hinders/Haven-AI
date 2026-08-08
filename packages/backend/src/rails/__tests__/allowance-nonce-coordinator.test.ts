@@ -10,65 +10,80 @@ const SAFE = '0xSafe'
 const DELEGATE = '0xDelegate'
 const TOKEN = '0xToken'
 
+/**
+ * A store that knows nothing and remembers nothing.
+ *
+ * The five #692 tests below predate the shared tier and pass no store, which
+ * bound them to the real `postgresStore`. That looked harmless locally — no
+ * Postgres reachable, so the read failed open to null — and was wrong in CI,
+ * where the database IS up with migration 055 applied: they wrote and read
+ * real rows, `__resetAllowanceNonceCoordinator()` cleared only the map, and a
+ * watermark left by one test made the next one poll to the 15 s default until
+ * vitest killed it. Flaky rather than reliably red, since the write is
+ * fire-and-forget.
+ *
+ * A unit test for this file must not reach a pool. Every assertion below is
+ * unchanged; only the store they run against is now explicit.
+ */
+const NO_SHARED_TIER = { raise: async () => {}, find: async () => null }
+
 describe('allowance-nonce coordinator (#692)', () => {
   beforeEach(() => __resetAllowanceNonceCoordinator())
 
   it('returns the initial nonce with no extra read when nothing is recorded', async () => {
     const read = vi.fn().mockResolvedValue(99)
-    expect(await waitForFreshAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 7, read)).toBe(7)
+    expect(await waitForFreshAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 7, read, {}, NO_SHARED_TIER)).toBe(7)
     expect(read).not.toHaveBeenCalled()
   })
 
   it('returns the initial nonce when it already meets the recorded one', async () => {
-    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 5)
+    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 5, NO_SHARED_TIER)
     const read = vi.fn().mockResolvedValue(99)
-    expect(await waitForFreshAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 5, read)).toBe(5)
+    expect(await waitForFreshAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 5, read, {}, NO_SHARED_TIER)).toBe(5)
     expect(read).not.toHaveBeenCalled()
   })
 
   it('waits until the recorded post-transfer nonce is visible', async () => {
-    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 5) // a prior transfer left nonce 5
+    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 5, NO_SHARED_TIER) // a prior transfer left nonce 5
     // initial read is stale (4); RPC catches up to 5.
     const read = vi.fn().mockResolvedValueOnce(4).mockResolvedValue(5)
-    const nonce = await waitForFreshAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 4, read, {
-      intervalMs: 1,
-      timeoutMs: 1000,
-    })
+    const nonce = await waitForFreshAllowanceNonce(
+      C, SAFE, DELEGATE, TOKEN, 4, read, { intervalMs: 1, timeoutMs: 1000 }, NO_SHARED_TIER,
+    )
     expect(nonce).toBe(5)
     expect(read).toHaveBeenCalled()
   })
 
   it('falls back to the latest read on timeout (never blocks a payment)', async () => {
-    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 9)
+    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 9, NO_SHARED_TIER)
     const read = vi.fn().mockResolvedValue(4) // never catches up
-    const nonce = await waitForFreshAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 4, read, {
-      intervalMs: 1,
-      timeoutMs: 10,
-    })
+    const nonce = await waitForFreshAllowanceNonce(
+      C, SAFE, DELEGATE, TOKEN, 4, read, { intervalMs: 1, timeoutMs: 10 }, NO_SHARED_TIER,
+    )
     expect(nonce).toBe(4)
   })
 
   it('keeps the highest recorded nonce and is per-delegate', async () => {
-    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 5)
-    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 3) // lower — ignored
+    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 5, NO_SHARED_TIER)
+    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 3, NO_SHARED_TIER) // lower — ignored
     const read = vi.fn().mockResolvedValue(5)
     expect(
-      await waitForFreshAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 4, read, { intervalMs: 1 }),
+      await waitForFreshAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 4, read, { intervalMs: 1 }, NO_SHARED_TIER),
     ).toBe(5)
 
     // A different delegate is unaffected — returns its initial immediately.
     const otherRead = vi.fn().mockResolvedValue(99)
-    expect(await waitForFreshAllowanceNonce(C, SAFE, '0xOther', TOKEN, 1, otherRead)).toBe(1)
+    expect(await waitForFreshAllowanceNonce(C, SAFE, '0xOther', TOKEN, 1, otherRead, {}, NO_SHARED_TIER)).toBe(1)
     expect(otherRead).not.toHaveBeenCalled()
   })
 })
 
 // ── The shared tier (#718) ───────────────────────────────────────────────────
 //
-// The tests above exercise the local map and pass a real store, which fails
-// open to null — that is the single-replica path, unchanged by #718. These
-// drive the shared tier explicitly, because the whole point is behaviour that
-// one process cannot observe on its own.
+// The tests above exercise the local map against an empty shared tier — the
+// single-replica path, unchanged by #718. These drive the shared tier
+// explicitly, because the whole point is behaviour that one process cannot
+// observe on its own.
 
 function fakeStore(initial: Record<string, number> = {}) {
   const rows = new Map(Object.entries(initial))
@@ -127,15 +142,20 @@ describe('cross-replica watermark (#718)', () => {
     ).toBe(9)
   })
 
-  it('records to BOTH tiers, lower-casing the address triple', async () => {
+  it('records to BOTH tiers, and the local key ignores casing', async () => {
     const store = fakeStore()
     recordAllowanceNonce(C, '0xSAFE', '0xDELEGATE', '0xTOKEN', 7, store)
     await new Promise((r) => setTimeout(r, 0)) // the write is fire-and-forget
 
-    expect(store.raise).toHaveBeenCalledWith(C, '0xsafe', '0xdelegate', '0xtoken', 7)
-    // Casing must not split the key: the chain sees one triple, and two rows
-    // would each hold half the truth.
-    expect(store.rows.get('84532:0xsafe:0xdelegate:0xtoken')).toBe(7)
+    expect(store.raise).toHaveBeenCalled()
+    // The local map's key is case-insensitive, so a differently-cased read
+    // finds the same entry rather than starting a second one.
+    const read = vi.fn().mockResolvedValue(7)
+    expect(
+      await waitForFreshAllowanceNonce(C, '0xsafe', '0xdelegate', '0xtoken', 6, read, { intervalMs: 1 }, fakeStore()),
+    ).toBe(7)
+    // Normalising the SHARED tier is the repository's job now, asserted in
+    // its own test — a property of the function, not an obligation on callers.
   })
 
   it('a failing store degrades to the local map — it never blocks a payment', async () => {

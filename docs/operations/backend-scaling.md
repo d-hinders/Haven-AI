@@ -21,8 +21,16 @@ may now run more than one, and the relayer is what still caps throughput.**
   advisory lock elects one executor per tick; the losers skip rather than queue.
   Without it, an N-replica deployment runs every scan N times and sends up to N
   copies of each alert.
-- **Allowance-nonce coordination** ([#718](https://github.com/d-hinders/Haven-AI/issues/718))
-  — the AllowanceModule keeps one on-chain nonce per (safe, delegate, token),
+- **Allowance-nonce coordination on the x402 authorize path**
+  ([#718](https://github.com/d-hinders/Haven-AI/issues/718)) — and only that
+  path. The coordinator is wired into `modules/x402/legacy-authorize.ts` alone;
+  `routes/payments.ts`, `modules/mpp/send.ts` and `modules/mpp/authorize.ts`
+  each build a `sign_hash` from a raw on-chain nonce and get neither tier. That
+  gap predates this work (#692 wired one call site) but this document is the
+  canonical scaling statement, so it should not read as blanket coverage —
+  tracked in [#1196](https://github.com/d-hinders/Haven-AI/issues/1196).
+
+  The AllowanceModule keeps one on-chain nonce per (safe, delegate, token),
   and after a confirmed transfer the next signature must target the incremented
   value. RPC reads lag, so [#692](https://github.com/d-hinders/Haven-AI/issues/692)
   added a coordinator that waits for the increment to become visible.
@@ -102,6 +110,16 @@ Whoever picks this up should read the interaction with two existing pieces:
 - `allowance_nonce_watermarks` is disposable. Losing it degrades to the
   pre-#718 in-process behaviour, never to incorrectness — so it needs no backup
   policy of its own.
+- **The riskier direction is a row that is too HIGH, not a missing one.** The
+  write is backed by a single confirmation, so a reorg (or an RPC reporting a
+  nonce from a dropped block, or two environments sharing a database) can
+  persist a nonce the chain never reaches — and `GREATEST` means it can never
+  come back down. The read therefore ignores any row older than **5 minutes**:
+  the window this tier closes is seconds-scale RPC lag, so an older watermark
+  carries no information, and bounding it caps the damage of a bad row at
+  minutes rather than permanently. Without that bound, one bad row would make
+  every later authorize for the triple poll to the full timeout, forever,
+  surviving restarts.
 - The watermark only ever rises (`GREATEST` in the upsert). A lower incoming
   value can only be a late write from a replica that fell behind, and honouring
   it would re-open the window the table exists to close.

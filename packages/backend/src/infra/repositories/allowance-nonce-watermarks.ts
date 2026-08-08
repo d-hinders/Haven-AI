@@ -33,15 +33,34 @@ export const UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL = `INSERT INTO allowance_nonce
      DO UPDATE SET nonce = GREATEST(allowance_nonce_watermarks.nonce, EXCLUDED.nonce),
                    updated_at = NOW()`
 
+/**
+ * Bounded by `updated_at`, and that bound is load-bearing (#718 review).
+ *
+ * `GREATEST` means a watermark can never come DOWN, and the write is backed by
+ * a single confirmation — so a reorg, an RPC reporting a nonce from a dropped
+ * block, or two environments sharing a database can persist a nonce the chain
+ * never reaches. Unbounded, that row would then make every later authorize for
+ * the triple poll to the full 15 s and burn ~10 RPC reads, forever, surviving
+ * restarts, with nothing able to lower it.
+ *
+ * The window this tier closes is seconds-scale RPC lag, so a watermark older
+ * than a few minutes carries no information anyway. Ignoring it caps the blast
+ * radius of a bad row at minutes instead of permanently — without weakening
+ * monotonicity, since a stale row is simply not consulted.
+ */
+export const WATERMARK_STALENESS_INTERVAL = '5 minutes'
+
 export const FIND_ALLOWANCE_NONCE_WATERMARK_SQL = `SELECT nonce FROM allowance_nonce_watermarks
-     WHERE chain_id = $1 AND safe_address = $2 AND delegate_address = $3 AND token_address = $4`
+     WHERE chain_id = $1 AND safe_address = $2 AND delegate_address = $3 AND token_address = $4
+       AND updated_at > NOW() - INTERVAL '${WATERMARK_STALENESS_INTERVAL}'`
 
 /**
  * Raise the watermark for one (chain, safe, delegate, token) triple.
  *
- * Addresses arrive already lower-cased — the coordinator does it at each call
- * site — so the primary key can't split on casing. The chain does not care
- * about case, and two rows for one triple would each hold half the truth.
+ * The triple is lower-cased HERE rather than trusted to arrive that way. On a
+ * primary key where casing splits the row — two rows for one triple, each
+ * holding half the truth — that is worth making a property of the function
+ * instead of an obligation on every caller. Same argument as fail-open.
  */
 export async function raiseAllowanceNonceWatermark(
   chainId: number,
@@ -54,9 +73,9 @@ export async function raiseAllowanceNonceWatermark(
   try {
     await db.query(UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL, [
       chainId,
-      safeAddress,
-      delegateAddress,
-      tokenAddress,
+      safeAddress.toLowerCase(),
+      delegateAddress.toLowerCase(),
+      tokenAddress.toLowerCase(),
       nonce,
     ])
   } catch {
@@ -75,9 +94,9 @@ export async function findAllowanceNonceWatermark(
   try {
     const result = await db.query<{ nonce: string }>(FIND_ALLOWANCE_NONCE_WATERMARK_SQL, [
       chainId,
-      safeAddress,
-      delegateAddress,
-      tokenAddress,
+      safeAddress.toLowerCase(),
+      delegateAddress.toLowerCase(),
+      tokenAddress.toLowerCase(),
     ])
     const raw = result.rows[0]?.nonce
     // BIGINT arrives as a string from pg; the nonce is far below Number's safe

@@ -447,3 +447,58 @@ describe('User routes', () => {
     })
   })
 })
+
+describe('a vanished user row is a 404, not a hang or a 500 (#1178)', () => {
+  // Reachable only if the account is deleted while a valid token for it is
+  // still in flight. Before #1178 the four writes answered that one cause two
+  // different wrong ways: three returned `undefined` — which Fastify reads as
+  // "the handler replied itself", leaving the request open until the client
+  // gives up — and the fourth threw a bare Error and 500ed.
+  let app: FastifyInstance
+
+  beforeAll(async () => {
+    app = await buildApp()
+  })
+  afterAll(async () => {
+    await app.close()
+  })
+  beforeEach(() => {
+    mockQuery.mockReset()
+  })
+
+  const token = () => app.jwt.sign({ sub: 'user-gone', email: 'gone@example.com' }, { expiresIn: '1h' })
+
+  it.each([
+    ['PUT', '/user/profile', { name: 'Ada Lovelace' }],
+    ['PUT', '/user/wallet', { wallet_address: '0x1234567890abcdef1234567890abcdef12345678' }],
+    ['PUT', '/user/safe', { safe_address: '0x1234567890abcdef1234567890abcdef12345678' }],
+    ['PUT', '/user/preferences', { currency_preference: 'EUR' }],
+  ])('%s %s answers 404', async (method, url, payload) => {
+    mockQuery.mockResolvedValue({ rows: [] })
+
+    const response = await app.inject({
+      method: method as 'PUT',
+      url,
+      headers: { authorization: `Bearer ${token()}` },
+      payload,
+    })
+
+    expect(response.statusCode).toBe(404)
+  })
+
+  it('PUT /user/safe refuses before linking the Safe', async () => {
+    mockQuery.mockResolvedValue({ rows: [] })
+
+    await app.inject({
+      method: 'PUT',
+      url: '/user/safe',
+      headers: { authorization: `Bearer ${token()}` },
+      payload: { safe_address: '0x1234567890abcdef1234567890abcdef12345678' },
+    })
+
+    // Exactly one query — the UPDATE that found nothing. Linking a Safe to an
+    // account that no longer exists is not a partial success worth keeping.
+    expect(mockQuery).toHaveBeenCalledTimes(1)
+    expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO user_safes/.test(String(sql)))).toBe(false)
+  })
+})

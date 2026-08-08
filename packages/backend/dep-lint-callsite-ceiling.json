@@ -1,0 +1,23 @@
+{
+  "total": 108,
+  "files": {
+    "packages/backend/src/index.ts": 1,
+    "packages/backend/src/infra/transaction.ts": 3,
+    "packages/backend/src/modules/accounting/accounting-entry.ts": 2,
+    "packages/backend/src/modules/catalog/catalog-discovery.ts": 2,
+    "packages/backend/src/modules/catalog/merchant-catalog.ts": 3,
+    "packages/backend/src/platform/leader-lock.ts": 2,
+    "packages/backend/src/routes/accounting.ts": 3,
+    "packages/backend/src/routes/agent-activity.ts": 14,
+    "packages/backend/src/routes/agent-delegations.ts": 14,
+    "packages/backend/src/routes/approvals.ts": 9,
+    "packages/backend/src/routes/auth.ts": 6,
+    "packages/backend/src/routes/catalog.ts": 2,
+    "packages/backend/src/routes/dashboard.ts": 9,
+    "packages/backend/src/routes/demo-mpp.ts": 4,
+    "packages/backend/src/routes/hybrid-accounts.ts": 5,
+    "packages/backend/src/routes/safe-deploy.ts": 9,
+    "packages/backend/src/routes/user.ts": 10,
+    "packages/backend/src/routes/x402-resources.ts": 10
+  }
+}

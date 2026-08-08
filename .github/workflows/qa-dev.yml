@@ -73,6 +73,13 @@ jobs:
       - run: npm ci
       - name: Build SDK dependency
         run: npm run build -w packages/sdk
+      # #1154: the hosted-MCP leg runs the REAL @haven_ai/signer in-process, and
+      # a workspace dep resolves to `packages/signer/dist` — which does not
+      # exist until it is built. Without this step that leg dies on an import
+      # error, which under the blocking completeness gate below is a red run
+      # with a cause that has nothing to do with the money path.
+      - name: Build edge signer dependency
+        run: npm run build -w packages/signer
       - name: Run money-flow QA (bounded flake-retry)
         env:
           QA_HAVEN_API_URL: ${{ github.event.inputs.haven_api_url || secrets.QA_HAVEN_API_URL }}
@@ -84,6 +91,15 @@ jobs:
           QA_DELEGATION_AGENT_API_KEY: ${{ secrets.QA_DELEGATION_AGENT_API_KEY }}
           QA_DELEGATION_DELEGATE_PRIVATE_KEY: ${{ secrets.QA_DELEGATION_DELEGATE_PRIVATE_KEY }}
           QA_DEMO_MERCHANT_URL: ${{ secrets.QA_DEMO_MERCHANT_URL }}
+          # Hosted-MCP topology (#1154). Neither value is a secret — one is a
+          # public endpoint, the other a public address — so they are read from
+          # repo VARIABLES first (visible in the run log, which makes a
+          # misconfiguration diagnosable) and fall back to secrets for operators
+          # who filed them alongside the rest of the QA_* credentials. Missing
+          # either one skips the leg, and the completeness gate below turns that
+          # skip into a red run.
+          QA_HOSTED_MCP_URL: ${{ vars.QA_HOSTED_MCP_URL || secrets.QA_HOSTED_MCP_URL }}
+          QA_X402_BINDING_SIGNER: ${{ vars.QA_X402_BINDING_SIGNER || secrets.QA_X402_BINDING_SIGNER }}
           # Flake budget (#578): the harness is idempotent-safe to re-run, so a transient
           # testnet RPC hiccup gets one more shot before the run is called red. Bump via a
           # repo variable if a chain is flaky; keep low — each attempt consumes test funds.

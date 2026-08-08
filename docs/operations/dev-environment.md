@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-08-06"
+last-verified: "2026-08-08" # #1154: the hosted MCP is now on the money-flow QA path (x402-hosted-mcp-signer), and qa-dev.yml gained a signer build step plus QA_HOSTED_MCP_URL / QA_X402_BINDING_SIGNER. Endpoints re-confirmed by a live run against dev the same day.
 ---
 
 # Dev environment
@@ -94,6 +94,14 @@ deployed that way today.
   credential problem (#1131).
   ⚠️ That was one of **three** faults found on this one service in a single
   session — see [Verifying a dev service actually works](#verifying-a-dev-service-actually-works).
+  Since #1154 this service is **on the money-flow QA path**: the
+  `x402-hosted-mcp-signer` leg drives it over HTTP with a local edge signer, so
+  a broken hosted MCP now turns `qa-dev` red instead of being discovered by
+  hand. That leg reads the endpoint from `QA_HOSTED_MCP_URL` and the Haven
+  binding-signer address from `QA_X402_BINDING_SIGNER` — both public values,
+  set as repo variables (or secrets of the same name); missing either one skips
+  the leg, which the blocking Coverage completeness step reports as a failure.
+  See [`agent-qa.md`](agent-qa.md) § *The hosted-MCP leg*.
 
 ### Verifying a dev service actually works
 

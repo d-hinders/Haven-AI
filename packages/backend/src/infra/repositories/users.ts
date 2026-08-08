@@ -150,3 +150,98 @@ export async function updateCurrencyPreference(
   ])
   return result.rows[0] ?? null
 }
+
+// ── Credentials & signup (#1180) ─────────────────────────────────────────────
+//
+// The one place in this module where `email` — not `id` — is the lookup key.
+// That is not an exception to the tenant rule: these two statements run
+// BEFORE there is a session, and establishing which account the caller may
+// act as is exactly their job. Everything after authentication is scoped by
+// `id` like the rest of the file.
+//
+// The caller must pass an already-NORMALISED address (trimmed, lower-cased).
+// The lookup is an exact match, so normalisation is what makes the address
+// unique in practice — pass the raw input and `ADA@Example.com` will not
+// collide with a stored `ada@example.com`, letting one person hold two
+// accounts with two separate treasuries. `routes/auth.ts::normalizeEmail`
+// owns that normalisation and
+// `routes/__tests__/auth-sql.characterization.test.ts` pins it.
+
+export const FIND_USER_ID_BY_EMAIL_SQL = 'SELECT id FROM users WHERE email = $1'
+
+export const INSERT_USER_SQL =
+  'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email, created_at'
+
+export const FIND_USER_CREDENTIALS_BY_EMAIL_SQL =
+  'SELECT id, name, email, password_hash, wallet_address, safe_address, currency_preference FROM users WHERE email = $1'
+
+export const FIND_USER_PROFILE_BY_ID_SQL =
+  'SELECT id, name, email, wallet_address, safe_address, currency_preference, created_at FROM users WHERE id = $1'
+
+/** The signup INSERT's projection — no `password_hash`, deliberately. */
+export interface NewUserRow {
+  id: string
+  name: string | null
+  email: string
+  created_at: string
+}
+
+/**
+ * The login projection. Carries `password_hash` — the ONLY row shape in this
+ * module that does — so it must never be spread into a response body.
+ */
+export interface UserCredentialsRow extends UserProfileRow {
+  password_hash: string
+}
+
+/**
+ * Does an account already exist for this (normalised) address?
+ *
+ * Returns the id rather than a boolean because the caller may want it, and a
+ * boolean would tempt a second round trip.
+ */
+export async function findUserIdByEmail(
+  normalisedEmail: string,
+  db: Executor = pool,
+): Promise<string | null> {
+  const result = await db.query<{ id: string }>(FIND_USER_ID_BY_EMAIL_SQL, [normalisedEmail])
+  return result.rows[0]?.id ?? null
+}
+
+/**
+ * Create the account. `passwordHash` must ALREADY be hashed — this module
+ * never sees a plaintext password and must never learn how to hash one.
+ */
+export async function insertUser(
+  name: string,
+  normalisedEmail: string,
+  passwordHash: string,
+  db: Executor = pool,
+): Promise<NewUserRow> {
+  const result = await db.query<NewUserRow>(INSERT_USER_SQL, [name, normalisedEmail, passwordHash])
+  return result.rows[0]
+}
+
+/**
+ * The login read. Returns `null` for "no such account" so the route can give
+ * the same 401 it gives for a wrong password — distinguishing the two would
+ * turn this endpoint into an account-enumeration oracle.
+ */
+export async function findUserCredentialsByEmail(
+  normalisedEmail: string,
+  db: Executor = pool,
+): Promise<UserCredentialsRow | null> {
+  const result = await db.query<UserCredentialsRow>(FIND_USER_CREDENTIALS_BY_EMAIL_SQL, [
+    normalisedEmail,
+  ])
+  return result.rows[0] ?? null
+}
+
+/** The `GET /auth/me` profile read. `userId` is the JWT subject, never client input. */
+export async function findUserProfileById(
+  userId: string,
+  db: Executor = pool,
+): Promise<UserProfileRow | null> {
+  const result = await db.query<UserProfileRow>(FIND_USER_PROFILE_BY_ID_SQL, [userId])
+  return result.rows[0] ?? null
+}

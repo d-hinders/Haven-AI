@@ -489,3 +489,37 @@ export async function findExecutionRailForAgent(
   )
   return result.rows[0]?.execution_rail ?? null
 }
+
+/**
+ * The SESSION payload's safes projection (moved from `routes/auth.ts`, #1180).
+ *
+ * A third variant, and deliberately so: it is the union of the other two —
+ * `is_default` and `created_at` from `LIST_SAFES_FOR_USER_SQL` plus
+ * `account_type` from the directory projection. `POST /auth/login` and
+ * `GET /auth/me` both return it, and `AuthContext` is what the Connect modal
+ * reads, so **`account_type` must stay in this SELECT**: without it the modal
+ * cannot tell a delegation account from a legacy one and dead-ends delegation
+ * users at the wallet approval (#1069). `auth.test.ts` guards that field.
+ */
+export const LIST_SESSION_SAFES_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name, is_default, created_at, account_type
+       FROM user_safes WHERE user_id = $1 ORDER BY created_at ASC`
+
+/** One row of the session payload's `safes` array. */
+export interface SessionSafeRow {
+  id: string
+  safe_address: string
+  chain_id: number
+  name: string | null
+  is_default: boolean
+  created_at: string
+  account_type: string | null
+}
+
+/** `userId` is REQUIRED — it is the tenant scope of the whole payload. */
+export async function listSessionSafesForUser(
+  userId: string,
+  db: Executor = pool,
+): Promise<SessionSafeRow[]> {
+  const result = await db.query<SessionSafeRow>(LIST_SESSION_SAFES_FOR_USER_SQL, [userId])
+  return result.rows
+}

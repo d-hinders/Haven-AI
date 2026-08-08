@@ -131,3 +131,20 @@ and emptied them, adding `users.ts`, `owner-aliases.ts`, `dashboard.ts` and
   already exported `agentExistsForUser` over byte-identical SQL, so the route
   now calls it instead of the codebase carrying a third copy. Check for an
   existing constant before writing a new one.
+
+#1180 then emptied `routes/auth.ts` (6 statements), taking the gauge to 69 and
+the waiver list to 12. It is the only extraction so far where the lookup key is
+not the tenant id: `findUserIdByEmail` and `findUserCredentialsByEmail` run
+*before* a session exists, and establishing which account the caller may act as
+is their whole job. Two things travel with them as contracts rather than
+conventions — the caller must pass an already-normalised address (an exact
+match on raw input lets one person hold two accounts), and the login read
+returns `null` for "no such account" so the route can answer with the same 401
+it gives a wrong password, instead of becoming an enumeration oracle.
+
+A third lesson, and the one most likely to bite the next extraction: **a guard
+test that scans a route file for SQL must move with the SQL.** `auth.test.ts`
+policed `account_type` in every `SELECT … FROM user_safes` in `auth.ts` (#1069).
+Moving the statement would have left that regex matching an empty set — still
+green, policing nothing. It now asserts the exported constant directly, and a
+second test pins that `auth.ts` holds no inline `user_safes` SQL at all.

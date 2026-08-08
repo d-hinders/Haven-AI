@@ -364,26 +364,13 @@ const QUERIES: SmokeQuery[] = [
     name: 'x402: exact-amount idempotency reload',
     sql: FIND_X402_INTENT_BY_KEY_SQL,
   },
-  {
-    name: 'payments: session intent insert (execution_rail pinned)',
-    sql: `INSERT INTO payment_intents (
-            agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-            to_address, amount_raw, amount_human, delegate_address,
-            allowance_nonce, sign_hash,
-            execution_rail, session_permission_id, session_user_op,
-            status, expires_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-            'pending_signature', NOW() + interval '10 minutes')
-          RETURNING *`,
-  },
-  {
-    name: 'rotation: guarded session switch (recordRotatedSession)',
-    sql: `UPDATE agents
-          SET session_permission_id = $1
-          WHERE id = $2
-            AND session_permission_id IS NOT DISTINCT FROM $3
-          RETURNING id`,
-  },
+  // Two pasted session-rail entries were DELETED here (#1165): the
+  // recordRotatedSession guarded switch (its source died with the #834
+  // retirement — no such function exists in src) and a session-shaped
+  // payment_intents insert whose live counterpart is the repository's
+  // imported INSERT above. Both PREPAREd fine — the columns still exist as
+  // the #834 reversibility seam — which is exactly why dead pasted copies
+  // are worse than none: they green-light a query nobody runs.
   {
     // IMPORTED since #999 — was a pasted copy.
     name: 'delegate monitor: active delegates joined to their Safe chain',

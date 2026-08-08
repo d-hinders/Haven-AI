@@ -52,6 +52,31 @@ export interface QaConfig {
    * neither. Testnet-only throwaway, same discipline as `delegateKey`.
    */
   delegationDelegateKey?: string
+  /**
+   * The deployed **hosted MCP** endpoint, e.g.
+   * `https://haven-ai-hosted-mcp-dev-25c7.up.railway.app/v1` (#1154).
+   *
+   * This is the DEFAULT topology every connect-flow user runs — hosted MCP plus
+   * a local edge signer — and until #1154 no scenario touched it: all three
+   * x402 legs built a `HavenClient` with a `delegateKey`, which is the
+   * SDK-direct path where the SDK signs in-process and the keyless branch, the
+   * Haven-signed expected context and the signer's verify-then-sign logic are
+   * all bypassed. Optional: absent, the hosted leg SKIPS.
+   */
+  hostedMcpUrl?: string
+  /**
+   * The Haven **x402 binding-signer address** the edge signer verifies the
+   * expected context against (the connect flow writes it into `signer.json` as
+   * `x402_binding_signer`; the backend derives it from
+   * `X402_BINDING_PRIVATE_KEY`).
+   *
+   * A public address, never a secret. Required by the hosted leg and NOT
+   * defaultable from the quote: taking `auth.signer` out of the very context
+   * being authenticated would make the binding check assert nothing, which is
+   * the one property the hosted topology exists to provide. Absent ⇒ the leg
+   * SKIPS rather than passing vacuously.
+   */
+  x402BindingSigner?: string
 }
 
 /** Thrown when a required `QA_*` env var is missing, with a pointer to the doc. */
@@ -94,6 +119,8 @@ export function loadQaConfig(env: NodeJS.ProcessEnv = process.env): QaConfig {
     demoMerchantUrl: env.QA_DEMO_MERCHANT_URL?.trim()?.replace(/\/+$/, '') || undefined,
     delegationAgentApiKey: env.QA_DELEGATION_AGENT_API_KEY?.trim() || undefined,
     delegationDelegateKey: env.QA_DELEGATION_DELEGATE_PRIVATE_KEY?.trim() || undefined,
+    hostedMcpUrl: env.QA_HOSTED_MCP_URL?.trim()?.replace(/\/+$/, '') || undefined,
+    x402BindingSigner: env.QA_X402_BINDING_SIGNER?.trim() || undefined,
   }
 
   if (missing.length > 0) throw new QaConfigError(missing)

@@ -19,7 +19,8 @@ covers:
   - packages/backend/src/config.ts
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-08-05"
+  - packages/mcp-server/src/x402-expected-wire-contract.test.ts
+last-verified: "2026-08-08"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -162,7 +163,7 @@ QA identities.
 
 ## Money-flow QA
 
-The deterministic harness runs seven scenarios in order:
+The deterministic harness runs ten scenarios in order:
 
 | Scenario | Expected result |
 |---|---|
@@ -175,6 +176,7 @@ The deterministic harness runs seven scenarios in order:
 | `delegation-lifecycle` | Authority can be TAKEN AWAY: on a **throwaway per-run identity** (funded ~0.006 USDC from the standing delegation identity, then abandoned) — grant → activate (relayer-deploys) → within-budget payment settles → replace leaves **exactly one** active row (the #1053-finding-4 transactional-activate regression) → owner-signed revoke → the same payment shape is refused **403 "no active budget delegation"**, never a 502 (a 502 would mean authority was still offered to the chain). Ephemeral keys, all signing client-side |
 | `x402-erc7710-settle` | The delegation rail's PRIMARY x402 path: authorize (payTo = merchant) builds a narrowed child delegation, the delegate signs it, `POST /x402/:id/settle` wraps the header, and the MERCHANT redeems `[child, budget]` on-chain — treasury pays the merchant **directly**, budget metered by the settlement itself (treasury −amount exactly), **delegate EOA untouched** (no funding leg — the #713 stranded-funds class structurally absent). Needs `MERCHANT_X402_ERC7710=1` + `MERCHANT_ERC7710_DELEGATION_MANAGER` on the dev merchant; skips (→ run FAILS under #1066) with that exact remedy when the merchant is 3009-only |
 | `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
+| `x402-hosted-mcp-signer` | The **default user topology** (#1154): the DEPLOYED hosted MCP over HTTP plus a local `@haven_ai/signer` edge signer in-process — `haven_pay_mcp_tool` → local `haven_sign_x402` → `haven_settle_mcp_tool` → merchant settles. Asserts the quote is a **v2 (delegation-rail) context** (a v1 quote FAILS the leg: the #1138 seam would have gone untouched), that the signer really signed it, that **both** on-chain legs confirmed as distinct `status = 1` transactions, that the treasury fell, and that the delegate residual is **unchanged** (exact-amount funding nets to zero). Needs `QA_HOSTED_MCP_URL` + `QA_X402_BINDING_SIGNER` on top of `QA_DELEGATION_*` |
 
 The harness exits non-zero if any non-skipped scenario fails. **A skip IS a
 failure (#1066).** Since every leg's identity is provisioned (#1063) and the
@@ -214,6 +216,12 @@ QA_DEMO_MERCHANT_URL=https://demo-merchant-dev-84e4.up.railway.app
 # Delegation-rail identity for the EIP-3009 bridge scenario (#946) — optional.
 QA_DELEGATION_AGENT_API_KEY=<testnet delegation-rail agent API key>
 QA_DELEGATION_DELEGATE_PRIVATE_KEY=<throwaway Base Sepolia delegate key>
+
+# Hosted-MCP topology (#1154). NEITHER of these is a secret: one is a public
+# endpoint, the other a public address. They live here only so the whole harness
+# config is one file.
+QA_HOSTED_MCP_URL=https://haven-ai-hosted-mcp-dev-25c7.up.railway.app/v1
+QA_X402_BINDING_SIGNER=<dev x402 binding-signer address, 0x…>
 ```
 
 `QA_DEMO_MERCHANT_URL` is technically optional in the config loader, but it is
@@ -261,6 +269,51 @@ Neither has run live yet. They are unit-covered and typechecked; their first
 real run is this seeding step, so treat an initial red as information about the
 setup as much as about the code.
 
+#### The hosted-MCP leg (`x402-hosted-mcp-signer`, #1154)
+
+This is the topology **every connect-flow user actually runs**, and until #1154
+no scenario touched it: all three x402 legs above build a `HavenClient` with a
+`delegateKey`, which is the SDK-direct path — the hosted server's keyless
+branch, the Haven-signed expected context, and the signer's verify-then-sign
+logic are all bypassed. #1138 was a hard failure of exactly that uncovered path,
+and a human driving an agent by hand found it.
+
+It reuses the delegation-rail identity above (same treasury, same delegate key,
+same ~0.001 USDC per run) and needs two more values, **neither of which is a
+secret**:
+
+| Variable | What it is | Where to get it |
+|---|---|---|
+| `QA_HOSTED_MCP_URL` | The deployed hosted MCP endpoint, e.g. `https://haven-ai-hosted-mcp-dev-25c7.up.railway.app/v1` | [`dev-environment.md`](dev-environment.md); same value as `HAVEN_HOSTED_MCP_URL` on the dev backend |
+| `QA_X402_BINDING_SIGNER` | The Haven binding-signer **address** the edge signer verifies the expected context against | `x402_binding_signer` in a connector-written `signer.json`, or the address derived from the backend's `X402_BINDING_PRIVATE_KEY` |
+
+`QA_X402_BINDING_SIGNER` is deliberately **not** defaulted from the quote. Taking
+`auth.signer` out of the very context being authenticated would make the binding
+check assert nothing — which is the one property the hosted topology exists to
+provide. Absent, the leg skips (and under `QA_REQUIRE_ALL_LEGS=1` that skip is a
+red run).
+
+The leg drives the deployed hosted MCP over HTTP and runs `@haven_ai/signer`
+**in-process** via `createEdgeSigner`, rather than spawning it as a stdio MCP:
+every piece the #1138 bug was in — the keyless branch, the wire shapes, the
+binding, the signing — is exercised either way, and stdio adds process plumbing
+to a CI leg without adding coverage. Signing goes through the signer's *tool
+handler*, not the bare `EdgeSigner` method, so the live quote also passes
+through the Zod schema where the #1143 skew surfaced.
+
+**CI build requirement.** `qa-dev.yml` builds `@haven_ai/signer` as well as
+`@haven_ai/sdk`: a workspace dep resolves to `packages/signer/dist`, which does
+not exist until it is built. Locally, run `npm run build -w packages/signer`
+before `npm run qa:dev` — a stale or absent signer `dist` makes the leg die on
+an import error, or (worse, if merely stale) refuse the v2 context with a Zod
+message about `auth.version`.
+
+Unit coverage for the same seam, which does not need credentials:
+`packages/mcp-server/src/x402-expected-wire-contract.test.ts` pins that the
+backend's expected-context message and the signer's independent reconstruction
+are byte-identical at v1 and v2, drives the v1/v2 binding matrix, and asserts the
+tool schema accepts the real hosted quote shape.
+
 ### Run locally
 
 ```bash
@@ -289,6 +342,14 @@ completeness step warns, when either is absent):
 
 - `QA_DELEGATION_AGENT_API_KEY`
 - `QA_DELEGATION_DELEGATE_PRIVATE_KEY`
+
+The hosted-MCP leg (`x402-hosted-mcp-signer`, #1154) needs two more values.
+Because neither is secret, the workflow reads repo **variables** first and falls
+back to secrets of the same name — set them wherever you prefer, but set them,
+or the leg skips and the Coverage completeness step turns that red:
+
+- `QA_HOSTED_MCP_URL`
+- `QA_X402_BINDING_SIGNER`
 
 **The delegation-rail QA identity (#1063).** Provisioned 2026-08-05 on the
 dev backend: a dedicated QA user owning a Hybrid DeleGator treasury on Base
@@ -614,10 +675,15 @@ The dotenv file was not sourced, a variable is commented out, or the shell was
 restarted. Source it and verify names without printing values:
 
 ```bash
-for name in QA_HAVEN_API_URL QA_AGENT_API_KEY QA_DELEGATE_PRIVATE_KEY QA_PAYMENT_TO QA_DEMO_MERCHANT_URL; do
+for name in QA_HAVEN_API_URL QA_AGENT_API_KEY QA_DELEGATE_PRIVATE_KEY QA_PAYMENT_TO QA_DEMO_MERCHANT_URL \
+            QA_DELEGATION_AGENT_API_KEY QA_DELEGATION_DELEGATE_PRIVATE_KEY \
+            QA_HOSTED_MCP_URL QA_X402_BINDING_SIGNER; do
   printenv "$name" >/dev/null && echo "$name: present" || echo "$name: MISSING"
 done
 ```
+
+The last four are optional to the config loader but required for the delegation
+and hosted legs; a run with `QA_REQUIRE_ALL_LEGS=1` goes red if any is missing.
 
 ### Seed returns `could not decode result data`
 

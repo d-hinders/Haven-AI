@@ -28,6 +28,21 @@ vi.mock('../../db.js', () => ({
 
 import agentActivityRoutes from '../agent-activity.js'
 
+/**
+ * Match the user-scoped approval COUNT without pinning its casing or layout.
+ * The literal `'SELECT COUNT(*) as count FROM approval_requests'` broke the
+ * moment #1179 converged the two copies into one constant with the other
+ * copy's spelling — the query was semantically identical, the string was not.
+ * Match the shape instead.
+ */
+const isUserApprovalCount = (sql: string) =>
+  /COUNT\(\*\)/i.test(sql) && /FROM\s+approval_requests\s+WHERE\s+user_id/is.test(sql)
+
+/** The per-AGENT variant of the same count — a different question, same table. */
+const isAgentApprovalCount = (sql: string) =>
+  /COUNT\(\*\)/i.test(sql) && /FROM\s+approval_requests\s+WHERE\s+agent_id/is.test(sql)
+
+
 function invocationRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'inv-1',
@@ -45,6 +60,11 @@ function invocationRow(overrides: Record<string, unknown> = {}) {
 
 function callsMatching(pattern: string) {
   return mockQuery.mock.calls.filter(([sql]) => String(sql).includes(pattern))
+}
+
+/** `callsMatching` for a predicate rather than a literal fragment. */
+function callsMatchingFn(predicate: (sql: string) => boolean) {
+  return mockQuery.mock.calls.filter(([sql]) => predicate(String(sql)))
 }
 
 describe('agent activity stats + guards (characterization, #1167)', () => {
@@ -83,7 +103,7 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         if (sql.includes('SELECT id FROM agents')) {
           return { rows: rows.agentFound === false ? [] : [{ id: 'agent-1' }] }
         }
-        if (sql.includes('SELECT COUNT(*) as count FROM approval_requests')) {
+        if (isAgentApprovalCount(sql)) {
           return { rows: [{ count: rows.pending ?? '0' }] }
         }
         if (sql.includes("created_at >= CURRENT_DATE - interval '7 days'")) {
@@ -174,7 +194,7 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         expect(call[1]).toEqual(['agent-1'])
       }
       expect(
-        callsMatching('SELECT COUNT(*) as count FROM approval_requests')[0][1],
+        callsMatchingFn(isAgentApprovalCount)[0][1],
       ).toEqual(['agent-1'])
     })
 
@@ -301,7 +321,7 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         if (sql.includes('FROM payment_intents pi')) return { rows: [] }
         if (sql.includes('FROM approval_requests ar')) return { rows: [] }
         if (sql.includes('FROM agent_tool_invocations')) return { rows: [invocationRow()] }
-        if (sql.includes('SELECT COUNT(*) as count FROM approval_requests')) {
+        if (isUserApprovalCount(sql)) {
           return { rows: [{ count: '3' }] }
         }
         throw new Error(`Unexpected query: ${sql}`)
@@ -322,7 +342,7 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         tool_name: 'haven_pay',
       })
       expect(
-        callsMatching('SELECT COUNT(*) as count FROM approval_requests')[0][1],
+        callsMatchingFn(isUserApprovalCount)[0][1],
       ).toEqual(['user-1'])
     })
 
@@ -336,7 +356,7 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         if (sql.includes('FROM agent_tool_invocations')) {
           return { rows: [invocationRow({ agent_id: 'agent-gone' })] }
         }
-        if (sql.includes('SELECT COUNT(*) as count FROM approval_requests')) {
+        if (isUserApprovalCount(sql)) {
           return { rows: [{ count: '0' }] }
         }
         throw new Error(`Unexpected query: ${sql}`)
@@ -356,7 +376,7 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         if (sql.includes('SELECT id, name FROM agents')) {
           return { rows: [{ id: 'agent-1', name: 'A' }, { id: 'agent-2', name: 'B' }] }
         }
-        if (sql.includes('SELECT COUNT(*) as count FROM approval_requests')) {
+        if (isUserApprovalCount(sql)) {
           return { rows: [{ count: '0' }] }
         }
         return { rows: [] }

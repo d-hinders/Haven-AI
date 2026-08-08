@@ -376,21 +376,14 @@ export async function sumAgentSpendThisWeek(
 // ── Approval counters ────────────────────────────────────────────────────────
 
 /**
- * Two counters over the same table with different scopes: one agent's queue,
- * and the whole user's. Kept as distinct verbatim statements because they ARE
- * distinct questions — the stats card answers "what is this agent waiting on",
- * the feed answers "what is waiting on me".
- *
- * `countActionableApprovalsForUser` is a near-twin of `dashboard.ts`'s
- * `COUNT_ACTIONABLE_APPROVALS_SQL` (same predicate, different casing and
- * layout). They were separate inline queries and are moved as they were;
- * converging them is a behaviour question for a follow-up, not an extraction.
+ * The per-AGENT approval counter — "what is this agent waiting on". Its
+ * per-user twin ("what is waiting on me") lived here too until #1179 found
+ * `dashboard.ts` asking the identical question with its own constant; the
+ * shared one now lives with the aggregate, in `approval-requests.ts`, and both
+ * surfaces call it.
  */
 export const COUNT_PENDING_APPROVALS_FOR_AGENT_SQL = `SELECT COUNT(*) as count FROM approval_requests
          WHERE agent_id = $1 AND status IN ('pending', 'approved')`
-
-export const COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL = `SELECT COUNT(*) as count FROM approval_requests
-       WHERE user_id = $1 AND status IN ('pending', 'approved')`
 
 /** Same gating contract as `listAgentPayments`. */
 export async function countPendingApprovalsForAgent(
@@ -402,10 +395,3 @@ export async function countPendingApprovalsForAgent(
 }
 
 /** `userId` is REQUIRED — this one IS tenant-scoped. */
-export async function countActionableApprovalsForUser(
-  userId: string,
-  db: Executor = pool,
-): Promise<number> {
-  const result = await db.query<{ count: string }>(COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL, [userId])
-  return Number(result.rows[0].count)
-}

@@ -282,7 +282,13 @@ Explicitly **not** part of #980, so nobody expands the epic by inference:
   remain the convention for the legacy rail.
 - **No unification of the two chain SDKs.** `ethers` for the legacy rail and
   `viem` for the delegation rail both stay; rule 4 puts a port in front of them
-  rather than picking a winner.
+  rather than picking a winner. What a port does NOT buy you is agreement: the
+  two implementations had silently drifted on `getTokenBalance`'s handling of a
+  zero token address (native balance vs. a contract call at `0x0`) because only
+  one of them had any caller. [#1149](https://github.com/d-hinders/Haven-AI/issues/1149)
+  answers that structurally — one conformance suite in
+  `infra/chain/__tests__/chain-client.test.ts` runs the same expectations
+  against **both**, so a divergence fails on whichever side moved.
 - **No frontend architecture work** beyond extracting the worst 1000+ line
   components ([#989](https://github.com/d-hinders/Haven-AI/issues/989)).
 

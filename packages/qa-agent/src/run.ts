@@ -21,6 +21,7 @@ import { x402Sweep } from './scenarios/x402-sweep.js'
 import { x402Delegation3009 } from './scenarios/x402-delegation-3009.js'
 import { x402Delegation3009Sweep } from './scenarios/x402-delegation-3009-sweep.js'
 import { x402Erc7710Settle } from './scenarios/x402-erc7710-settle.js'
+import { x402HostedMcpSigner } from './scenarios/x402-hosted-mcp-signer.js'
 import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
 
 // Deterministic, no-LLM scenarios run in order — seven money-flow invariants:
@@ -32,6 +33,13 @@ import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
 // of the account, so the seeded legacy-rail agent cannot exercise it. They are
 // ordered settle-then-sweep so a settle failure is diagnosed against a clean
 // delegate rather than one the sweep case has already left money on.
+//
+// `x402-hosted-mcp-signer` (#1154) is the DEFAULT user topology — hosted MCP
+// plus a local edge signer — and shares that delegation-rail identity. It runs
+// after the 3009 legs so that a hosted-topology failure is diagnosed against a
+// rail the two legs above have already shown to be healthy; its residual
+// assertion is a DELTA, so sub-floor dust an earlier leg left behind cannot
+// make it red for someone else's reason.
 const SCENARIOS: Scenario[] = [
   withinBudgetSettle,
   overBudgetQueue,
@@ -41,6 +49,7 @@ const SCENARIOS: Scenario[] = [
   x402Delegation3009,
   x402Delegation3009Sweep,
   x402Erc7710Settle,
+  x402HostedMcpSigner,
   delegationLifecycle,
 ]
 

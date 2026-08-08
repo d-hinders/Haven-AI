@@ -104,6 +104,13 @@ export interface FreshNonceOptions {
   intervalMs?: number
   /** Bound on the shared-tier lookup; see `DEFAULT_SHARED_READ_TIMEOUT_MS`. */
   sharedReadTimeoutMs?: number
+  /**
+   * A watermark the caller already read (#1196), e.g. alongside its on-chain
+   * reads. Supplying it skips the lookup here entirely, so the shared tier
+   * costs no serial round trip on the request path. `null` means "read it and
+   * there was none" — distinct from `undefined`, "I did not read it".
+   */
+  sharedWatermark?: number | null
 }
 
 /**
@@ -175,12 +182,15 @@ export async function waitForFreshAllowanceNonce(
   // the kind of guarantee that holds until someone writes a different store,
   // which is exactly the convention-two-files-must-remember this tier argues
   // against. `recordAllowanceNonce` already guards its own write this way.
-  const shared = await withTimeout(
-    Promise.resolve()
-      .then(() => store.find(chainId, safe, delegate, token))
-      .catch(() => null),
-    opts.sharedReadTimeoutMs ?? DEFAULT_SHARED_READ_TIMEOUT_MS,
-  )
+  const shared =
+    opts.sharedWatermark !== undefined
+      ? opts.sharedWatermark
+      : await withTimeout(
+          Promise.resolve()
+            .then(() => store.find(chainId, safe, delegate, token))
+            .catch(() => null),
+          opts.sharedReadTimeoutMs ?? DEFAULT_SHARED_READ_TIMEOUT_MS,
+        )
 
   const candidates = [local, shared].filter((n): n is number => typeof n === 'number')
   const want = candidates.length > 0 ? Math.max(...candidates) : undefined
@@ -195,6 +205,37 @@ export async function waitForFreshAllowanceNonce(
     nonce = await read()
   }
   return nonce
+}
+
+/**
+ * Read the shared watermark for a delegate, bounded and fail-open (#1196).
+ *
+ * The prefetch counterpart to `waitForFreshAllowanceNonce`'s inline read: call
+ * this alongside the on-chain reads a handler already does — every one of the
+ * four sign-hash builders has a `Promise.all([getTokenAllowance,
+ * getLatestBlockTimeSec])` — and hand the result over as
+ * `opts.sharedWatermark`. Concurrent with reads that take far longer, the
+ * lookup costs nothing measurable; done inline it is a serial round trip on
+ * the request path.
+ *
+ * The bound and the guards live HERE, not at the four call sites, so no site
+ * can prefetch and forget them. Returns `null` on any failure — the caller
+ * then behaves exactly as it did before the shared tier existed.
+ */
+export async function readSharedWatermark(
+  chainId: number,
+  safe: string,
+  delegate: string,
+  token: string,
+  opts: { timeoutMs?: number } = {},
+  store: NonceWatermarkStore = postgresStore,
+): Promise<number | null> {
+  return withTimeout(
+    Promise.resolve()
+      .then(() => store.find(chainId, safe, delegate, token))
+      .catch(() => null),
+    opts.timeoutMs ?? DEFAULT_SHARED_READ_TIMEOUT_MS,
+  )
 }
 
 /** Test-only: clear the in-process tracker. */

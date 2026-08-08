@@ -21,14 +21,20 @@ may now run more than one, and the relayer is what still caps throughput.**
   advisory lock elects one executor per tick; the losers skip rather than queue.
   Without it, an N-replica deployment runs every scan N times and sends up to N
   copies of each alert.
-- **Allowance-nonce coordination on the x402 authorize path**
-  ([#718](https://github.com/d-hinders/Haven-AI/issues/718)) — and only that
-  path. The coordinator is wired into `modules/x402/legacy-authorize.ts` alone;
-  `routes/payments.ts`, `modules/mpp/send.ts` and `modules/mpp/authorize.ts`
-  each build a `sign_hash` from a raw on-chain nonce and get neither tier. That
-  gap predates this work (#692 wired one call site) but this document is the
-  canonical scaling statement, so it should not read as blanket coverage —
-  tracked in [#1196](https://github.com/d-hinders/Haven-AI/issues/1196).
+- **Allowance-nonce coordination on every legacy-rail sign-hash builder**
+  ([#718](https://github.com/d-hinders/Haven-AI/issues/718),
+  [#1196](https://github.com/d-hinders/Haven-AI/issues/1196)). #692 wired the
+  coordinator into one call site; #1196 wired the other three
+  (`routes/payments.ts`, `modules/mpp/send.ts`, `modules/mpp/authorize.ts`), so
+  the guarantee is uniform rather than depending on which endpoint an agent
+  happens to use. A structural test asserts every `generateTransferHash` caller
+  also calls the coordinator, so a fifth builder cannot be added without one.
+
+  Each site **prefetches** the shared watermark inside the `Promise.all` it
+  already awaits for its chain reads, rather than reading it serially
+  afterwards: a single indexed lookup against reads orders of magnitude slower
+  costs nothing concurrently, and the bound and fail-open guards live in
+  `readSharedWatermark` so no call site can prefetch and forget them.
 
   The AllowanceModule keeps one on-chain nonce per (safe, delegate, token),
   and after a confirmed transfer the next signature must target the incremented

@@ -1,5 +1,5 @@
 {
-  "total": 75,
+  "total": 69,
   "files": {
     "packages/backend/src/index.ts": 1,
     "packages/backend/src/infra/transaction.ts": 3,
@@ -10,7 +10,6 @@
     "packages/backend/src/routes/accounting.ts": 3,
     "packages/backend/src/routes/agent-delegations.ts": 14,
     "packages/backend/src/routes/approvals.ts": 9,
-    "packages/backend/src/routes/auth.ts": 6,
     "packages/backend/src/routes/catalog.ts": 2,
     "packages/backend/src/routes/demo-mpp.ts": 4,
     "packages/backend/src/routes/hybrid-accounts.ts": 5,

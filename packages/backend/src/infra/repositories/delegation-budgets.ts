@@ -16,6 +16,28 @@ export interface ActiveDelegationRow {
   period_seconds: number
 }
 
+/**
+ * The signed delegations for a set of delegation ids (#1145).
+ *
+ * Deliberately NOT folded into `listActiveDelegations` or the derived budget
+ * view: a signed delegation is a capability, and those rows are spread
+ * straight into JSON responses — carrying it there would put a redeemable
+ * grant one careless spread away from the wire. Callers that genuinely need
+ * it (the on-chain remaining-budget read) ask for it explicitly.
+ */
+export const LIST_DELEGATION_JSON_BY_IDS_SQL = `SELECT id, delegation_json
+     FROM agent_delegations
+     WHERE id = ANY($1)`
+
+export async function listDelegationJsonByIds(ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map()
+  const result = await pool.query<{ id: string; delegation_json: string }>(
+    LIST_DELEGATION_JSON_BY_IDS_SQL,
+    [ids],
+  )
+  return new Map(result.rows.map((r) => [r.id, r.delegation_json]))
+}
+
 export async function listActiveDelegations(
   agentIds: string[],
 ): Promise<ActiveDelegationRow[]> {

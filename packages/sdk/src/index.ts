@@ -11,6 +11,17 @@ export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'
 
 export { HAVEN_SKILL_MD, SKILL_FOLDER_NAME } from './skill-content.js'
 
+// The Node.js floor every published Haven package enforces (#1161). Shared here
+// because connect (at setup), signer and mcp (at startup) all need the same
+// number, and a copy per package is how it drifted to begin with.
+export {
+  HAVEN_MINIMUM_NODE_VERSION,
+  compareNodeVersions,
+  isSupportedNodeVersion,
+  unsupportedNodeVersionMessage,
+  type UnsupportedNodeVersionMessageOptions,
+} from './node-version.js'
+
 export {
   AgentPaymentPhase,
   AgentPaymentNextAction,

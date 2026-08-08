@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { HavenClient } from '@haven_ai/sdk'
+import { HavenClient, isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk'
 import { loadCredentials, type HavenCredentialFile } from './credentials.js'
 import {
   createToolHandlers,
@@ -32,6 +32,8 @@ export interface HavenMcpServerOptions {
    * controlled embedding — production CLIs should not set this.
    */
   skipConsent?: boolean
+  /** Overridable so the Node-floor refusal is testable without spawning a Node. */
+  nodeVersion?: string
 }
 
 export interface ResolvedHavenClient {
@@ -102,7 +104,27 @@ export function buildMcpServer(haven: HavenClient): McpServer {
   return server
 }
 
+/**
+ * Refuse to start on an unsupported Node (#1161).
+ *
+ * Same reasoning as the signer's identical guard: install-time enforcement
+ * cannot see a Node downgrade after setup, or a version manager handing the
+ * agent runtime a different Node than the shell that connected. The local MCP
+ * server drives payment construction against the signer, so it is held to the
+ * package's declared floor rather than whatever happens to boot.
+ */
+export function assertSupportedNodeVersion(nodeVersion: string = process.versions.node): void {
+  if (isSupportedNodeVersion(nodeVersion)) return
+  const err: NodeJS.ErrnoException = new Error(
+    unsupportedNodeVersionMessage({ subject: 'The Haven MCP server', nodeVersion }),
+  )
+  err.code = 'HAVEN_MCP_UNSUPPORTED_NODE'
+  throw err
+}
+
 export async function runStdioServer(options: HavenMcpServerOptions = {}): Promise<void> {
+  assertSupportedNodeVersion(options.nodeVersion)
+
   const { client: haven, credentials } = await resolveHavenClient(options)
 
   if (!options.skipConsent) {

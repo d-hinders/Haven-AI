@@ -7,7 +7,7 @@ covers:
   - packages/connect/**
   - packages/signer/**
   - .github/workflows/publish.yml
-last-verified: "2026-08-07"
+last-verified: "2026-08-08"
 ---
 
 # MCP Runtime Compatibility
@@ -39,6 +39,36 @@ Keep this table in sync with that file.
 | `@haven_ai/signer` | `0.1.18-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
+
+## Where the Node floor is enforced
+
+`>=24.0.0` is declared in four places that must agree: each published package's
+`engines.node`, `.nvmrc`, `HAVEN_MINIMUM_NODE_VERSION` in `@haven_ai/sdk`, and
+`MCP_RUNTIME_MANIFEST.minimumNodeVersion`. The manifest field is **derived** from
+the SDK constant, and a guard test in `sdk`, `connect`, `signer`, and `mcp` pins
+each package's `engines.node` to it. They cannot drift silently.
+
+They did drift once, which is why the constant exists. `engines` said `>=24`
+everywhere while the manifest enforced `20.0.0`, so the guard meant to hold the
+floor passed Node v23 — and because that guard only ran inside local-MCP
+installation, the **default** (hosted MCP + local signer) path never called it at
+all. A full connect on Node v23.1.0 completed, installed the signer, and produced
+a real testnet payment signature ([#1161](https://github.com/d-hinders/Haven-AI/issues/1161)).
+
+Enforcement now happens at three points, all refusing rather than warning:
+
+| Point | What refuses | Why there |
+| --- | --- | --- |
+| `runConnect` (every topology) | Setup, before the setup token is resolved, credentials are written, or an agent is registered | A failed precondition must not strand a half-created agent or burn a one-shot token |
+| `prepareLocalMcpRuntime` | The `--local` install | Kept; it is the deeper of the two connect paths |
+| `runSignerStdioServer` / `runStdioServer` | Startup, before credentials are read | Install-time checks cannot see a Node **downgrade** after setup, or a version manager handing the agent runtime a different Node than the shell that connected |
+
+Refusing rather than warning is deliberate. `engines` alone is advisory — npm
+prints `EBADENGINE` and installs anyway unless the user runs `engine-strict` — so
+before this the floor held by luck. And what gets installed is the **signer**,
+which holds the delegate key and produces every payment signature; on an
+unsupported runtime the plausible failure is a wrong or missing signature. "It
+seemed to work" is exactly the evidence that cannot be trusted there.
 
 ## Release Checklist
 
@@ -133,8 +163,13 @@ hit this the first time that binding is versioned.
 - **Invalid Codex TOML:** the connector writes Codex config with a TOML string
   serializer and validates the generated Haven block before writing. The
   expected shape is `command = ".../bin/haven-mcp"` and `args = []`.
-- **Unsupported Node.js:** local MCP setup requires Node.js `>=24.0.0`. Upgrade
-  Node and rerun the setup command.
+- **Unsupported Node.js:** every Haven package requires Node.js `>=24.0.0`, and
+  since [#1161](https://github.com/d-hinders/Haven-AI/issues/1161) setup
+  **refuses** below it rather than proceeding — see
+  [Where the Node floor is enforced](#where-the-node-floor-is-enforced). The
+  message names your version and how to upgrade. Upgrade Node and rerun setup.
+  If setup succeeded but the signer now refuses to start, the runtime launching
+  it is on an older Node than the shell you upgraded.
 - **Local MCP runtime install failed:** rerun the setup command. It will reuse
   local credentials and install the pinned runtime into `~/.haven/mcp-runtime`,
   falling back from the user's default npm cache to `~/.haven/npm-cache` if the

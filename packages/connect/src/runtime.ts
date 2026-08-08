@@ -19,6 +19,8 @@ import {
   type RuntimeInstallResult,
 } from './runtime-install.js'
 import { normalizeRuntime, runtimeProfile, runtimeRequiresHardRestart } from './runtime-registry.js'
+import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
+import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
 export const CONNECTOR_VERSION = '0.1.18-alpha.0'
 
@@ -42,6 +44,8 @@ export interface ConnectDeps {
   writeCredentials?: typeof writeCredentialFiles
   installRuntime?: typeof installRuntime
   log?: (message: string) => void
+  /** Overridable so the Node-floor refusal is testable without spawning a Node. */
+  nodeVersion?: string
 }
 
 export interface ConnectResult {
@@ -52,6 +56,25 @@ export interface ConnectResult {
 }
 
 export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}): Promise<ConnectResult> {
+  // FIRST, before anything with a side effect (#1161).
+  //
+  // This runs ahead of the setup-token resolve, the storage preflight, key
+  // generation, the agent registration, and every credential write — so a
+  // refusal cannot strand a half-created agent or burn a one-shot setup token,
+  // the same discipline the hosted-MCP-URL guard adopted in #1129.
+  //
+  // It is checked on EVERY topology, which is the actual fix here. The guard
+  // already existed but only ran inside local-MCP installation, reached solely
+  // via `--local`; the default hosted-MCP + local-signer path — what nearly
+  // every user runs — never touched it. The floor was enforced on the advanced
+  // path and unenforced on the common one.
+  //
+  // Refuse rather than warn: what gets installed is the signer, which holds the
+  // delegate key and produces every payment signature. An unsupported runtime
+  // under a signing component is not a state to continue from, and npm's own
+  // EBADENGINE notice is advisory unless the user happens to run engine-strict.
+  assertSupportedNodeVersion(deps.nodeVersion, MCP_RUNTIME_MANIFEST.minimumNodeVersion)
+
   const connectorVersion = options.connectorVersion ?? CONNECTOR_VERSION
   const api = deps.api ?? createConnectApiClient(options.apiBaseUrl)
   const log = secureLogger(deps.log ?? ((message) => process.stdout.write(`${message}\n`)))

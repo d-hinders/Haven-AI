@@ -22,6 +22,7 @@ export {
   resolveSignerRuntime,
   runSignerConsentGate,
   runSignerStdioServer,
+  assertSupportedNodeVersion,
   SIGNER_NAME,
   SIGNER_VERSION,
   type ResolvedSignerRuntime,

@@ -55,18 +55,18 @@ four packages this floor governs (`sdk`, `connect`, `signer`, `mcp`), `.nvmrc`,
 the SDK constant, and a guard test in each of those four packages pins its own
 `engines.node` to it. They cannot drift silently.
 
-`@haven_ai/cli` is **out of scope and declares no `engines` floor today** — it is
-published but sits outside the connect/signer/MCP runtime this section governs.
-Neither do the unpublished workspace packages (`backend`, `frontend`, `core`,
-`mcp-server`, `demo-merchant-mcp`, `qa-agent`), which are pinned by `.nvmrc` in
-CI instead. Read "the floor" here as the agent-runtime floor, not a repo-wide one.
-
 They did drift once, which is why the constant exists. `engines` said `>=24`
 everywhere while the manifest enforced `20.0.0`, so the guard meant to hold the
 floor passed Node v23 — and because that guard only ran inside local-MCP
 installation, the **default** (hosted MCP + local signer) path never called it at
 all. A full connect on Node v23.1.0 completed, installed the signer, and produced
 a real testnet payment signature ([#1161](https://github.com/d-hinders/Haven-AI/issues/1161)).
+
+`@haven_ai/cli` is **out of scope and declares no `engines` floor today** — it is
+published but sits outside the connect/signer/MCP runtime this section governs.
+Neither do the unpublished workspace packages (`backend`, `frontend`, `core`,
+`mcp-server`, `demo-merchant-mcp`, `qa-agent`), which are pinned by `.nvmrc` in
+CI instead. Read "the floor" here as the agent-runtime floor, not a repo-wide one.
 
 Enforcement now happens at three points, all refusing rather than warning:
 
@@ -167,6 +167,18 @@ hit this the first time that binding is versioned.
 
 ## Troubleshooting
 
+- **A stale local `dist/` masquerading as version skew (#1188).** The symptoms
+  in the skew table above have a second, unrelated cause: a sibling package
+  whose `dist/` is older than its `src/`. `packages/signer`'s dist once sat four
+  weeks behind its source and produced
+  `signX402FundingTypedData is not a function` plus a pre-#1143 schema rejecting
+  `auth.version` — indistinguishable, from the error alone, from a genuinely
+  outdated installed signer. The npm scripts rebuild what they depend on
+  (`npm run test -w packages/mcp-server` builds sdk and signer first), so this
+  only bites when vitest is invoked directly. A `globalSetup` guard now refuses
+  to run those suites against a stale dist, and `npm run check:dist` reports it
+  on demand. If you see a skew-shaped error locally, check this before
+  reinstalling anything.
 - **Broken or root-owned `~/.npm`:** the MCP runtime install first tries the
   user's default npm cache with `--prefer-offline` (which `npx` just warmed, so
   the signer/sdk tarballs are reused instead of re-downloaded). If that fails —

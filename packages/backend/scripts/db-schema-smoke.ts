@@ -161,6 +161,7 @@ import {
   INSERT_MACHINE_APPROVAL_SQL,
   INSERT_PAYMENT_APPROVAL_SQL,
   INSERT_SEND_APPROVAL_SQL,
+  COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL,
 } from '../src/infra/repositories/approval-requests.js'
 import {
   CONFIRM_X402_INTENT_SQL,
@@ -240,6 +241,7 @@ import {
   FIND_OWNED_SAFE_WITH_TYPE_ANY_CHAIN_SQL,
   FIND_OWNED_SAFE_WITH_TYPE_FOR_CHAIN_SQL,
   FIND_EXECUTION_RAIL_FOR_AGENT_SQL,
+  LIST_SESSION_SAFES_FOR_USER_SQL,
 } from '../src/infra/repositories/user-safes.js'
 import {
   FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL,
@@ -255,6 +257,10 @@ import {
 } from '../src/infra/repositories/transaction-history.js'
 import {
   FIND_CURRENCY_PREFERENCE_SQL,
+  FIND_USER_CREDENTIALS_BY_EMAIL_SQL,
+  FIND_USER_ID_BY_EMAIL_SQL,
+  FIND_USER_PROFILE_BY_ID_SQL,
+  INSERT_USER_SQL,
   UPDATE_CURRENCY_PREFERENCE_SQL,
   UPDATE_USER_NAME_SQL,
   UPDATE_USER_SAFE_ADDRESS_SQL,
@@ -266,7 +272,6 @@ import {
   UPSERT_OWNER_ALIAS_SQL,
 } from '../src/infra/repositories/owner-aliases.js'
 import {
-  COUNT_ACTIONABLE_APPROVALS_SQL,
   FIND_PORTFOLIO_SNAPSHOTS_SQL,
   HAS_FIRST_AGENT_PAYMENT_SQL,
   INSERT_PORTFOLIO_SNAPSHOT_SQL,
@@ -277,7 +282,6 @@ import {
   SUM_MONTHLY_PAYMENT_SPEND_SQL,
 } from '../src/infra/repositories/dashboard.js'
 import {
-  COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL,
   COUNT_PENDING_APPROVALS_FOR_AGENT_SQL,
   LIST_AGENT_APPROVALS_SQL,
   LIST_AGENT_PAYMENTS_SQL,
@@ -386,6 +390,14 @@ const QUERIES: SmokeQuery[] = [
   { name: 'users: update legacy safe_address mirror', sql: UPDATE_USER_SAFE_ADDRESS_SQL },
   { name: 'users: read currency preference', sql: FIND_CURRENCY_PREFERENCE_SQL },
   { name: 'users: update currency preference', sql: UPDATE_CURRENCY_PREFERENCE_SQL },
+  // Signup/login (#1180). IMPORTED — verbatim from routes/auth.ts. These are
+  // the only statements that look an account up by EMAIL rather than id, so a
+  // schema change to that column would break sign-in itself.
+  { name: 'auth: existing-account check by email', sql: FIND_USER_ID_BY_EMAIL_SQL },
+  { name: 'auth: signup insert', sql: INSERT_USER_SQL },
+  { name: 'auth: login credentials read by email', sql: FIND_USER_CREDENTIALS_BY_EMAIL_SQL },
+  { name: 'auth: /me profile read by id', sql: FIND_USER_PROFILE_BY_ID_SQL },
+  { name: 'auth: session safes payload (carries account_type, #1069)', sql: LIST_SESSION_SAFES_FOR_USER_SQL },
   // Owner-alias aggregate (#1167). IMPORTED — verbatim from routes/user.ts.
   { name: 'owner-aliases: list for confirmed owners', sql: LIST_OWNER_ALIASES_SQL },
   { name: 'owner-aliases: upsert', sql: UPSERT_OWNER_ALIAS_SQL },
@@ -394,7 +406,6 @@ const QUERIES: SmokeQuery[] = [
   // routes/dashboard.ts.
   { name: 'dashboard: account list', sql: LIST_DASHBOARD_SAFES_SQL },
   { name: 'dashboard: agent preview (safe join)', sql: LIST_DASHBOARD_AGENTS_SQL },
-  { name: 'dashboard: actionable approvals count', sql: COUNT_ACTIONABLE_APPROVALS_SQL },
   { name: 'dashboard: first-agent-payment milestone', sql: HAS_FIRST_AGENT_PAYMENT_SQL },
   { name: 'dashboard: legacy allowance mirror for agents', sql: LIST_DASHBOARD_ALLOWANCES_SQL },
   { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
@@ -414,7 +425,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agent-activity: spend today', sql: SUM_AGENT_SPEND_TODAY_SQL },
   { name: 'agent-activity: spend this week', sql: SUM_AGENT_SPEND_WEEK_SQL },
   { name: 'agent-activity: pending approvals for agent', sql: COUNT_PENDING_APPROVALS_FOR_AGENT_SQL },
-  { name: 'agent-activity: actionable approvals for user', sql: COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL },
+  // One statement, two surfaces (#1179) — the dashboard and the activity feed.
+  { name: 'approvals: actionable count for user', sql: COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL },
   { name: 'agent-tool-invocations: read for agent', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL },
   { name: 'agent-tool-invocations: read for agent set', sql: LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL },
   { name: 'agents: name map for activity feed', sql: LIST_AGENT_NAMES_FOR_USER_SQL },

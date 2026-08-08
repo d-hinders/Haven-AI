@@ -24,6 +24,21 @@ const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
 const OWNER_FETCH_CONCURRENCY = 4
 
+/**
+ * Every write here is scoped by the JWT subject, so "no row matched" can only
+ * mean the account was deleted while a valid token for it was still in flight.
+ *
+ * Before #1178 the four writes disagreed about what that means: three returned
+ * `undefined`, which Fastify reads as "the handler sent the reply itself" and
+ * so leaves the request HANGING, and the fourth threw a bare `Error` and 500ed.
+ * One cause, two wrong answers, neither of them the truth — the account is
+ * gone. `GET /auth/me` already answered 404 for exactly this case, so that is
+ * the answer all of them give now.
+ */
+function userRowVanished(): never {
+  throw { statusCode: 404, message: 'User not found' }
+}
+
 interface WalletBody {
   wallet_address: string
 }
@@ -121,10 +136,7 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Enter a name using 80 characters or fewer' })
     }
 
-    // `?? undefined` preserves the inline query's `result.rows[0]` exactly: a
-    // token whose user row no longer exists has always produced an undefined
-    // return here, not a 404. Reported rather than fixed (#1167).
-    return (await updateUserName(normalizedName, sub)) ?? undefined
+    return (await updateUserName(normalizedName, sub)) ?? userRowVanished()
   })
 
   // PUT /user/wallet
@@ -136,7 +148,7 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Invalid Ethereum address' })
     }
 
-    return (await updateUserWalletAddress(wallet_address, sub)) ?? undefined
+    return (await updateUserWalletAddress(wallet_address, sub)) ?? userRowVanished()
   })
 
   // PUT /user/safe
@@ -150,11 +162,16 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
 
     const updated = await updateUserSafeAddress(safe_address, sub)
 
+    // Refuse BEFORE the link: attaching a Safe to an account that no longer
+    // exists is not a partial success worth keeping. (It also never really
+    // worked — the insert's user_id FK would have failed a moment later.)
+    if (!updated) userRowVanished()
+
     // Also insert into user_safes (multi-Safe support)
     await linkDefaultUserSafe(sub, safe_address, chain_id)
 
     emitFunnelEvent(sub, 'safe_imported', { safe_address, chain_id })
-    return updated ?? undefined
+    return updated
   })
 
   // GET /user/preferences
@@ -175,12 +192,7 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
 
     const updated = await updateCurrencyPreference(currency_preference, sub)
 
-    // The inline query read `rows[0].currency_preference` unguarded, so a
-    // vanished user row threw and surfaced as a 500. Kept as a throw rather
-    // than quietly turned into a 200 — behaviour-preserving (#1167).
-    if (!updated) {
-      throw new Error('User row not found while updating currency preference')
-    }
+    if (!updated) userRowVanished()
 
     return { currency_preference: updated.currency_preference }
   })

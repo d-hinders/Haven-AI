@@ -30,7 +30,8 @@
     "lint:deps": "node scripts/dep-lint.mjs",
     "lint:deps:test": "node --test scripts/dep-lint.test.mjs",
     "generate:api-types": "node scripts/generate-api-types.mjs",
-    "check:api-types": "node scripts/generate-api-types.mjs --check"
+    "check:api-types": "node scripts/generate-api-types.mjs --check",
+    "check:dist": "node scripts/check-dist-freshness.mjs sdk signer mcp"
   },
   "overrides": {
     "axios": "^1.16.1",

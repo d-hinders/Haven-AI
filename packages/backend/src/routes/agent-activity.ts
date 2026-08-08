@@ -3,12 +3,12 @@ import { authMiddleware } from '../middleware/auth.js'
 import { getExplorerUrl } from '../domain/chains.js'
 import { machinePaymentLifecycle } from '../domain/machine-payment-lifecycle.js'
 import { agentExistsForUser, listAgentNamesForUser } from '../infra/repositories/agents.js'
+import { countActionableApprovalsForUser } from '../infra/repositories/approval-requests.js'
 import {
   listToolInvocationsForAgent,
   listToolInvocationsForAgents,
 } from '../infra/repositories/agent-tool-invocations.js'
 import {
-  countActionableApprovalsForUser,
   countPendingApprovalsForAgent,
   listAgentApprovals,
   listAgentPayments,

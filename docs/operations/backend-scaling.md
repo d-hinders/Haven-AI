@@ -32,10 +32,14 @@ may now run more than one, and the relayer is what still caps throughput.**
   `allowance_nonce_watermarks` that any replica can read. The wait target is the
   **higher** of the two, so replica B waits on a transfer replica A confirmed.
 
-  Every database interaction on that path is **fail-open**, guarded in both the
-  repository and the coordinator. A database problem degrades this to the old
-  in-process behaviour — a retry at worst — because trading a rare retry for an
-  outage is the wrong direction on a money path. The
+  Every database interaction on that path is **fail-open**, and bounded as well
+  as guarded. Both layers catch, and the coordinator additionally races the
+  lookup against a 250 ms deadline — because a rejection is the easy failure and
+  a query that is slow but never settles is the one that would actually hang a
+  payment. Nothing else would stop it: the pool sets no `statement_timeout` and
+  Fastify sets no request timeout. A database problem therefore degrades this to
+  the old in-process behaviour — a retry at worst — because trading a rare retry
+  for an outage is the wrong direction on a money path. The
   [#693](https://github.com/d-hinders/Haven-AI/issues/693) preflight remains the
   thing that keeps the money safe under every failure mode; nothing here is
   load-bearing for correctness.

@@ -159,4 +159,48 @@ describe('cross-replica watermark (#718)', () => {
     expect(nonce).toBe(5)
     expect(broken.find).toHaveBeenCalled()
   })
+
+  it('a HANGING store does not hang the payment — the harder half of fail-open', async () => {
+    // The failure a `.catch()` cannot see. A rejection is easy; a query that is
+    // slow and never settles is what actually takes a payment down, and nothing
+    // else would stop it — the pool sets no statement_timeout and Fastify sets
+    // no request timeout. Before the bound, this test hung until vitest killed
+    // it.
+    const hanging = {
+      raise: async () => {},
+      find: () => new Promise<number | null>(() => {}), // never settles
+    }
+    recordAllowanceNonce(C, SAFE, DELEGATE, TOKEN, 5, { raise: async () => {}, find: async () => null })
+    const read = vi.fn().mockResolvedValue(5)
+
+    const started = Date.now()
+    const nonce = await waitForFreshAllowanceNonce(
+      C, SAFE, DELEGATE, TOKEN, 4, read,
+      { intervalMs: 1, timeoutMs: 200, sharedReadTimeoutMs: 20 },
+      hanging,
+    )
+
+    // The local tier still supplies 5, and the whole call stays bounded.
+    expect(nonce).toBe(5)
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('the bound does not truncate a store that answers in time', async () => {
+    const slowButFine = {
+      raise: async () => {},
+      find: async () => {
+        await new Promise((r) => setTimeout(r, 5))
+        return 8
+      },
+    }
+    const read = vi.fn().mockResolvedValueOnce(5).mockResolvedValue(8)
+
+    expect(
+      await waitForFreshAllowanceNonce(
+        C, SAFE, DELEGATE, TOKEN, 5, read,
+        { intervalMs: 1, timeoutMs: 500, sharedReadTimeoutMs: 200 },
+        slowButFine,
+      ),
+    ).toBe(8)
+  })
 })

@@ -14,6 +14,20 @@
  *     Paid MCP completion may send a signed merchant payment_header, never a key.
  *   - The payment header produced by the signer is spec-compliant wire format.
  *
+ * Scope, versus its sibling (#1187). `x402-expected-wire-contract.test.ts`
+ * pins the expected-context MESSAGE — byte-identical across all four hops,
+ * both versions, every drift refused. This file pins the FLOW around it: that
+ * the four tool calls compose, that the header comes out spec-shaped, and that
+ * no key ever reaches hosted traffic. Neither subsumes the other.
+ *
+ * It used to exercise **only v1**, with a hand-built context. That is how a
+ * `packages/signer/dist` four weeks behind its source sat undetected (#1154):
+ * the v2 entry point it lacked, `signX402FundingTypedData`, simply did not
+ * exist in that build, and nothing here called it. The v2 case below closes
+ * that hole, and takes its context from the REAL backend producer rather than
+ * a local copy — a hand-written fixture cannot drift, which sounds like a
+ * virtue until it is the only thing standing between you and a stale build.
+ *
  * docs/architecture/06-hosted-mcp-connect-flow.md
  * docs/architecture/07-edge-signer.md
  */
@@ -21,6 +35,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { HavenClient, buildX402ExpectedMessage } from '@haven_ai/sdk'
 import { privateKeyToAccount } from 'viem/accounts'
+import { hashTypedData } from 'viem'
 import { createEdgeSigner, createToolHandlers as createSignerHandlers } from '@haven_ai/signer'
 import { createToolHandlers as createHostedHandlers, type ToolPayload } from './tools.js'
 import { createHostedHavenClient } from './server.js'
@@ -53,10 +68,28 @@ const FUNDING_PAYMENT_ID = 'pay_x402_integration'
 const DELEGATE_ADDR = privateKeyToAccount(DELEGATE_KEY).address
 
 /**
+ * The EIP-712 payload a delegation-rail account validates. Shape only — what
+ * the contract turns on is the digest, and the v2 context commits to exactly
+ * that. Signing this exercises `signX402FundingTypedData`, the entry point a
+ * stale signer build simply does not have (#1154/#1187).
+ */
+const TYPED_DATA = {
+  domain: { name: 'HybridDeleGator', version: '1', chainId: 84532, verifyingContract: DELEGATE_ADDR },
+  types: {
+    PackedUserOperation: [
+      { name: 'sender', type: 'address' },
+      { name: 'nonce', type: 'uint256' },
+    ],
+  },
+  primaryType: 'PackedUserOperation',
+  message: { sender: DELEGATE_ADDR, nonce: '7' },
+} as const
+
+/**
  * Build x402 expected context in the snake_case shape the signer tool schema
  * requires (same as what haven_pay_x402_quote returns in x402.expected).
  */
-async function makeX402ExpectedAuth() {
+async function makeX402ExpectedAuth(rail: 'legacy' | 'delegation' = 'legacy') {
   // camelCase keys for SDK's buildX402ExpectedMessage
   const context = {
     paymentId: FUNDING_PAYMENT_ID,
@@ -69,11 +102,15 @@ async function makeX402ExpectedAuth() {
     // expires_at is folded into the signed binding and now required by the
     // signer tool schema, mirroring the hosted server's x402.expected output.
     expiresAt: '2099-01-01T00:00:00.000Z',
+    // v2 commits to the digest of the typed data actually delivered. Its
+    // presence is what makes the context v2 — the version is derived, never
+    // announced (#1138).
+    ...(rail === 'delegation' ? { typedDataHash: hashTypedData(TYPED_DATA as Parameters<typeof hashTypedData>[0]) } : {}),
   }
   const message = buildX402ExpectedMessage(context)
   const account = privateKeyToAccount(BINDING_KEY)
   const auth = {
-    version: 1 as const,
+    version: (rail === 'delegation' ? 2 : 1) as 1 | 2,
     message,
     signature: await account.signMessage({ message }),
     signer: BINDING_SIGNER,
@@ -91,6 +128,7 @@ async function makeX402ExpectedAuth() {
       asset: context.asset,
       network: context.network,
       expires_at: context.expiresAt,
+      ...(context.typedDataHash ? { typed_data_hash: context.typedDataHash } : {}),
       auth,
     },
     // camelCase for createEdgeSigner.signX402FundingHash
@@ -103,6 +141,7 @@ async function makeX402ExpectedAuth() {
       asset: context.asset,
       network: context.network,
       expiresAt: context.expiresAt,
+      ...(context.typedDataHash ? { typedDataHash: context.typedDataHash } : {}),
       auth,
     },
   }
@@ -118,11 +157,14 @@ interface CapturedCall {
 
 let capturedCalls: CapturedCall[]
 
-function stubHavenApi() {
+function stubHavenApi(rail: 'legacy' | 'delegation' = 'legacy') {
   capturedCalls = []
+  // The 201 body is a placeholder for the FLOW assertions; the message-level
+  // contract is the sibling file's job. What matters here is the sign_data
+  // SHAPE, which is what routes the signer down the v1 or v2 path.
   const x402ExpectedAuth = {
-    version: 1,
-    message: 'Haven x402 expected context v1',
+    version: rail === 'delegation' ? 2 : 1,
+    message: `Haven x402 expected context v${rail === 'delegation' ? 2 : 1}`,
     signature: '0x' + '11'.repeat(65),
     signer: BINDING_SIGNER,
   }
@@ -154,7 +196,12 @@ function stubHavenApi() {
         status: 'pending_signature',
         merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
         x402_expected_auth: x402ExpectedAuth,
-        sign_data: { hash: FUNDING_HASH },
+        // On the delegation rail the account validates typed data, and the
+        // hosted surface must pass BOTH through — the signer picks the path.
+        sign_data:
+          rail === 'delegation'
+            ? { hash: FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: TYPED_DATA }
+            : { hash: FUNDING_HASH },
         expires_at: '2099-01-01T00:00:00.000Z',
       })
     }
@@ -282,6 +329,55 @@ describe('Hosted MCP + Edge Signer integration', () => {
     const constructCall = havenCalls.find((c) => c.url.endsWith('/x402'))
     expect(constructCall?.body).toMatchObject({ payTo: DELEGATE_ADDR })
     expect(JSON.stringify(constructCall?.body ?? {})).not.toContain(DELEGATE_KEY)
+  })
+
+  it('completes the SAME flow on the delegation rail, signing typed data (v2)', async () => {
+    // The gap #1187 closes. Nothing in this file used to reach
+    // `signX402FundingTypedData`, so a signer build predating it stayed green
+    // here while being unusable for every delegation-rail account — which is
+    // the default account type.
+    stubHavenApi('delegation')
+
+    const havenKeyless = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const hostedHandlers = createHostedHandlers(havenKeyless)
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner)
+
+    const x402Expected = await makeX402ExpectedAuth('delegation')
+
+    // The hosted surface must relay the typed data, not just the hash — the
+    // account validates the former and the signer refuses to sign bytes the
+    // context does not commit to.
+    const quote = ok<{
+      payload_hash: string
+      signature_scheme?: string
+      typed_data?: unknown
+      x402: { expected: Record<string, unknown> }
+    }>(await hostedHandlers.haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
+
+    expect(quote.signature_scheme).toBe('eip712_userop')
+    expect(quote.typed_data).toBeDefined()
+
+    const signed = ok<{ signature: string; x402_binding: string }>(
+      await signerHandlers.haven_sign({
+        payload_hash: FUNDING_HASH,
+        typed_data: quote.typed_data,
+        x402_expected: x402Expected.snake,
+      }),
+    )
+
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+
+    // An EIP-712 signature over the typed data, NOT a raw signature over the
+    // 4337 hash — the two are different values and only one is what the
+    // account checks.
+    const rawOverHash = await privateKeyToAccount(DELEGATE_KEY).signMessage({
+      message: { raw: FUNDING_HASH as `0x${string}` },
+    })
+    expect(signed.signature).not.toBe(rawOverHash)
+
+    // Custody holds on this rail too: the key never reaches hosted traffic.
+    expect(JSON.stringify(capturedCalls)).not.toContain(DELEGATE_KEY)
   })
 
   it('wire format: decoded payment header has {x402Version, accepted, payload} with key-bound authorization.from', async () => {

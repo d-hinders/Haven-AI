@@ -123,8 +123,9 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
 Classify a change as money-path when **either** the issue carries the `money-path`
 label **or** the diff touches any of:
 
-- `routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, or `routes/machine-payments.ts`;
-- `modules/mpp/`, `domain/payment-token.ts`, `domain/payment-coverage.ts`, or `rails/allowance-module.ts`;
+- `routes/payments.ts` or `routes/x402-resources.ts` (`routes/x402.ts` and
+  `routes/machine-payments.ts` dissolved into the modules below, #996/#997);
+- `modules/x402/`, `modules/mpp/`, `domain/payment-token.ts`, `domain/payment-coverage.ts`, or `rails/allowance-module.ts`;
 - `rails/execution-rail.ts` (the rail seam);
 - `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`, `rails/hybrid-account-config.ts`, or `routes/agent-delegations.ts`
   (the delegation rail);

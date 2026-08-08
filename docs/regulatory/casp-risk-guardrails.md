@@ -49,7 +49,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-07" # #997: covers updated (lib/machine-payments.ts moved into modules/mpp/**; the shared token-resolution primitive lives in domain/payment-token.ts) — no perimeter change, the same routes/repositories still enforce it. #998: covers + body re-read after the lib/ fold (execution-rail.ts -> rails/, fortnox-connector.ts already under modules/reporting/, accounting-entry.ts/catalog-discovery.ts/merchant-catalog.ts/safe-deployer.ts relocated) — pure path move, the perimeter and the non-asserting Fortnox invariant are unchanged. #999 re-verified: fortnox-connection persistence moved verbatim behind infra/repositories, agents.ts gained the auth/last-seen queries, and the exempted routes carry inline dep-lint-exempt waivers — perimeter unchanged
+last-verified: "2026-08-08" # #997: covers updated (lib/machine-payments.ts moved into modules/mpp/**; the shared token-resolution primitive lives in domain/payment-token.ts) — no perimeter change, the same routes/repositories still enforce it. #998: covers + body re-read after the lib/ fold (execution-rail.ts -> rails/, fortnox-connector.ts already under modules/reporting/, accounting-entry.ts/catalog-discovery.ts/merchant-catalog.ts/safe-deployer.ts relocated) — pure path move, the perimeter and the non-asserting Fortnox invariant are unchanged. #999 re-verified: fortnox-connection persistence moved verbatim behind infra/repositories, agents.ts gained the auth/last-seen queries, and the exempted routes carry inline dep-lint-exempt waivers — perimeter unchanged. #1167 re-verified: routes/user.ts, routes/dashboard.ts and routes/agent-activity.ts moved their SQL verbatim behind infra/repositories (agents.ts gained a read-only id+name projection for the activity feed); no statement's predicate, scope or result changed, no new authority, nothing on the money path — perimeter unchanged
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -167,6 +167,12 @@ Haven backend
 > the `WHERE user_id = $1` authorization that used to hide in inline route
 > SQL is now a signature the type checker enforces; the SQL itself moved
 > verbatim and is PREPARE-checked against the real schema in CI.
+> #1167 extended the same treatment to the user, dashboard and agent-activity
+> surfaces. Two of those had NO tenant column to make required: the
+> agent-activity reads filter by `agent_id`, so the authorization is the
+> caller's prior ownership check rather than a parameter — stated as an
+> explicit contract in the repository's header and on each function, and
+> unchanged from what the inline SQL did.
 
 > **Current state (2026-07-27, #976):** the erc7710 settle response carries a
 > `passport` reference — `{ attestation_uid, chain_id }`, plus an optional

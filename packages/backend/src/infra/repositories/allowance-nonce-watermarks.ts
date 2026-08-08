@@ -7,7 +7,10 @@
  *
  * **Both functions are FAIL-OPEN.** A read that errors returns `null` and a
  * write that errors is swallowed, because this table is an optimisation, not
- * an authority. It exists to avoid a revert-and-retry, and the #693 preflight
+ * an authority. Note what that does and does not cover: a REJECTION is handled
+ * here, but a query that is slow and never settles is not — the coordinator
+ * bounds the read with its own timeout for that, since nothing in the pool or
+ * the HTTP layer would. It exists to avoid a revert-and-retry, and the #693 preflight
  * is what actually keeps the money safe. Letting a database hiccup here block
  * a payment would trade a rare retry for an outage — the wrong direction on a
  * money path. Callers therefore degrade to the pre-#718 in-process behaviour,
@@ -36,9 +39,9 @@ export const FIND_ALLOWANCE_NONCE_WATERMARK_SQL = `SELECT nonce FROM allowance_n
 /**
  * Raise the watermark for one (chain, safe, delegate, token) triple.
  *
- * Addresses are lower-cased by the caller (`keyOf` in the coordinator) so the
- * primary key can't split on casing — the chain does not care, and two rows for
- * one triple would each hold half the truth.
+ * Addresses arrive already lower-cased — the coordinator does it at each call
+ * site — so the primary key can't split on casing. The chain does not care
+ * about case, and two rows for one triple would each hold half the truth.
  */
 export async function raiseAllowanceNonceWatermark(
   chainId: number,

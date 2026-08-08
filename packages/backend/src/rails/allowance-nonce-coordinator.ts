@@ -104,6 +104,33 @@ export function recordAllowanceNonce(
 export interface FreshNonceOptions {
   timeoutMs?: number
   intervalMs?: number
+  /** Bound on the shared-tier lookup; see `DEFAULT_SHARED_READ_TIMEOUT_MS`. */
+  sharedReadTimeoutMs?: number
+}
+
+/**
+ * Deliberately short. Losing the shared watermark costs at most one
+ * revert-and-retry — the outcome this tier exists to make rarer, not the one
+ * it must prevent — so waiting on a struggling database is never the better
+ * trade. The on-chain read that follows takes longer than this on a good day.
+ */
+export const DEFAULT_SHARED_READ_TIMEOUT_MS = 250
+
+/** Resolve `fallback` if `promise` has not settled within `ms`. */
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T | null = null) {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T | null>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms)
+        // Never hold the process open for a best-effort read.
+        timer.unref?.()
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /**
@@ -131,13 +158,23 @@ export async function waitForFreshAllowanceNonce(
   // lower of the two would sign against a nonce that replica already consumed.
   // One indexed lookup on the money path, and it returns null rather than
   // throwing if the database is unavailable.
-  // Guarded HERE as well as in the repository. The repository catches its own
-  // errors, but that makes fail-open a convention two files have to remember
-  // rather than a property of this path — and the one that matters is this
-  // one, because a throw here would fail a payment. Structural beats agreed.
-  const shared = await store
-    .find(chainId, safe.toLowerCase(), delegate.toLowerCase(), token.toLowerCase())
-    .catch(() => null)
+  // Guarded HERE as well as in the repository, and BOUNDED as well as guarded.
+  //
+  // The repository catches its own errors, but that makes fail-open a
+  // convention two files have to remember rather than a property of this path.
+  // And catching is only half of it: a rejection is the easy failure. The one
+  // that matters is a query that is slow and never rejects — a wedged
+  // connection, a partition after the socket is up, an overloaded database.
+  // Nothing else would stop it: the pool sets no `statement_timeout` and
+  // Fastify sets no request timeout, so an unbounded await here would hang a
+  // payment that used to do no I/O on this path at all. Strictly worse than
+  // before, which this whole tier must never be.
+  const shared = await withTimeout(
+    store
+      .find(chainId, safe.toLowerCase(), delegate.toLowerCase(), token.toLowerCase())
+      .catch(() => null),
+    opts.sharedReadTimeoutMs ?? DEFAULT_SHARED_READ_TIMEOUT_MS,
+  )
 
   const candidates = [local, shared].filter((n): n is number => typeof n === 'number')
   const want = candidates.length > 0 ? Math.max(...candidates) : undefined

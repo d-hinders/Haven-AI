@@ -39,7 +39,7 @@ const AGENT = {
   status: 'active',
 }
 
-const AUTH = {
+const AUTHZ = {
   from: DELEGATE,
   to: SAFE,
   value: '40000',
@@ -48,10 +48,6 @@ const AUTH = {
   nonce: NONCE,
   token: USDC,
   chainId: 8453,
-}
-
-function authRow() {
-  return { rows: [AGENT] }
 }
 
 function preparedRow(overrides: Record<string, unknown> = {}) {
@@ -69,6 +65,47 @@ function preparedRow(overrides: Record<string, unknown> = {}) {
     tx_hash: null,
     ...overrides,
   }
+}
+
+// ── Content-dispatch DB stub (#1226) — see payments.test.ts for the model. ──
+// The sweep-claim CAS itself (exactly one winner, release-on-refusal,
+// submitted-is-terminal) is proven against real Postgres in the repository
+// suite (machine-payments.test.ts); these tests own the HANDLER: status
+// codes, relay-called-or-not, and the order of the writes it asks for.
+
+type DbRoute = [RegExp, (sql: string, params: unknown[]) => { rows: unknown[] }]
+
+function primeDb(...routes: DbRoute[]) {
+  mockQuery.mockImplementation(async (sql: unknown, params: unknown[]) => {
+    const text = String(sql)
+    for (const [re, handler] of routes) {
+      if (re.test(text)) return handler(text, params)
+    }
+    return { rows: [] }
+  })
+}
+
+const sqlCalls = () => mockQuery.mock.calls.map((c) => ({ sql: String(c[0]), params: c[1] as unknown[] }))
+const findCall = (re: RegExp) => sqlCalls().find((c) => re.test(c.sql))
+
+const AUTH_ROUTE: DbRoute = [/api_key_hash = \$1/, () => ({ rows: [AGENT] })]
+
+/** Sweep routes: the prepared-row read (optionally different after a lost claim) + the claim CAS. */
+function sweepRoutes(opts: {
+  prepared?: Record<string, unknown> | null
+  preparedAfterLostClaim?: Record<string, unknown>
+  claimWins?: boolean
+}): DbRoute[] {
+  let reads = 0
+  return [
+    AUTH_ROUTE,
+    [/SET status = 'submitting'/, () => ({ rows: opts.claimWins ? [{ id: 'sweep-id' }] : [] })],
+    [/FROM delegate_sweeps/, () => {
+      reads += 1
+      const row = reads > 1 && opts.preparedAfterLostClaim ? opts.preparedAfterLostClaim : opts.prepared
+      return { rows: row ? [row] : [] }
+    }],
+  ]
 }
 
 describe('machine payment sweep routes', () => {
@@ -92,7 +129,7 @@ describe('machine payment sweep routes', () => {
 
   describe('POST /sweep/prepare', () => {
     it('returns nothing_stranded when the delegate is empty (no row inserted)', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
+      primeDb(AUTH_ROUTE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(0n)
 
       const res = await app.inject({ method: 'POST', url: '/machine-payments/sweep/prepare', headers })
@@ -105,9 +142,9 @@ describe('machine payment sweep routes', () => {
     })
 
     it('builds an authorization and binding when funds are stranded above the floor', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
+      primeDb(AUTH_ROUTE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(2_000_000n) // 2 USDC ≥ 1 floor
-      sweepMocks.buildSweepAuthorization.mockReturnValueOnce(AUTH)
+      sweepMocks.buildSweepAuthorization.mockReturnValueOnce(AUTHZ)
       const expectedAuth = { version: 1, message: 'm', signature: '0xaa', signer: ATTACKER }
       sweepMocks.signSweepExpectedContext.mockResolvedValueOnce(expectedAuth)
 
@@ -115,7 +152,7 @@ describe('machine payment sweep routes', () => {
 
       expect(res.statusCode).toBe(201)
       const body = res.json()
-      expect(body.authorization).toEqual(AUTH)
+      expect(body.authorization).toEqual(AUTHZ)
       expect(body.expected_auth).toEqual(expectedAuth)
       expect(body.amount).toBe('2.0')
       expect(body.amount_atomic).toBe('2000000')
@@ -127,17 +164,20 @@ describe('machine payment sweep routes', () => {
       // reconciliation: agent.safe_address is the treasury Hybrid for
       // delegator accounts, and the route must stay rail-agnostic.
       const TREASURY_HYBRID = '0x' + '77'.repeat(20)
-      mockQuery.mockResolvedValueOnce({
-        rows: [{
-          ...AGENT,
-          safe_address: TREASURY_HYBRID,
-          execution_rail: 'delegation',
-          account_type: 'delegator_hybrid',
-          chain_id: 84532,
-        }],
-      })
+      primeDb([
+        /api_key_hash = \$1/,
+        () => ({
+          rows: [{
+            ...AGENT,
+            safe_address: TREASURY_HYBRID,
+            execution_rail: 'delegation',
+            account_type: 'delegator_hybrid',
+            chain_id: 84532,
+          }],
+        }),
+      ])
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(2_000_000n)
-      sweepMocks.buildSweepAuthorization.mockReturnValueOnce({ ...AUTH, to: TREASURY_HYBRID, chainId: 84532 })
+      sweepMocks.buildSweepAuthorization.mockReturnValueOnce({ ...AUTHZ, to: TREASURY_HYBRID, chainId: 84532 })
       sweepMocks.signSweepExpectedContext.mockResolvedValueOnce('0xsigned')
 
       const res = await app.inject({ method: 'POST', url: '/machine-payments/sweep/prepare', headers })
@@ -149,7 +189,7 @@ describe('machine payment sweep routes', () => {
     })
 
     it('leaves dust below the sweep floor un-swept (#700 floor)', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
+      primeDb(AUTH_ROUTE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(500_000n) // 0.5 USDC < 1 floor
 
       const res = await app.inject({ method: 'POST', url: '/machine-payments/sweep/prepare', headers })
@@ -165,9 +205,7 @@ describe('machine payment sweep routes', () => {
 
   describe('POST /sweep/submit', () => {
     it('relays when the signature recovers the delegate and balance covers it', async () => {
-      mockQuery.mockResolvedValueOnce(authRow()) // auth
-      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] }) // SELECT prepared
-      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'sweep-id' }] }) // claim (won)
+      primeDb(...sweepRoutes({ prepared: preparedRow(), claimWins: true }))
       sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
       sweepMocks.relaySweepAuthorization.mockResolvedValueOnce({ txHash: TX })
@@ -185,10 +223,13 @@ describe('machine payment sweep routes', () => {
     })
 
     it('does not relay when a concurrent submitter already claimed the sweep', async () => {
-      mockQuery.mockResolvedValueOnce(authRow()) // auth
-      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] }) // SELECT prepared
-      mockQuery.mockResolvedValueOnce({ rows: [] }) // claim lost (no row updated)
-      mockQuery.mockResolvedValueOnce({ rows: [preparedRow({ status: 'submitting' })] }) // re-read
+      primeDb(
+        ...sweepRoutes({
+          prepared: preparedRow(),
+          claimWins: false,
+          preparedAfterLostClaim: preparedRow({ status: 'submitting' }),
+        }),
+      )
       sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
 
@@ -204,12 +245,13 @@ describe('machine payment sweep routes', () => {
     })
 
     it('replays the winner tx when the claim is lost but the sweep already submitted', async () => {
-      mockQuery.mockResolvedValueOnce(authRow()) // auth
-      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] }) // SELECT prepared
-      mockQuery.mockResolvedValueOnce({ rows: [] }) // claim lost
-      mockQuery.mockResolvedValueOnce({
-        rows: [preparedRow({ status: 'submitted', tx_hash: TX })],
-      }) // re-read: winner already finished
+      primeDb(
+        ...sweepRoutes({
+          prepared: preparedRow(),
+          claimWins: false,
+          preparedAfterLostClaim: preparedRow({ status: 'submitted', tx_hash: TX }),
+        }),
+      )
       sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
 
@@ -226,8 +268,7 @@ describe('machine payment sweep routes', () => {
     })
 
     it('rejects with 403 when the signature does not recover the delegate', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
-      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] })
+      primeDb(...sweepRoutes({ prepared: preparedRow() }))
       sweepMocks.recoverSweepSigner.mockReturnValueOnce(ATTACKER)
 
       const res = await app.inject({
@@ -243,8 +284,7 @@ describe('machine payment sweep routes', () => {
     })
 
     it('returns 404 when no prepared sweep matches the nonce', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
-      mockQuery.mockResolvedValueOnce({ rows: [] })
+      primeDb(...sweepRoutes({ prepared: null }))
 
       const res = await app.inject({
         method: 'POST',
@@ -257,8 +297,7 @@ describe('machine payment sweep routes', () => {
     })
 
     it('returns 409 balance_changed when the delegate no longer covers the value', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
-      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] })
+      primeDb(...sweepRoutes({ prepared: preparedRow() }))
       sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(100n)
 
@@ -275,8 +314,7 @@ describe('machine payment sweep routes', () => {
     })
 
     it('idempotently replays an already-submitted sweep', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
-      mockQuery.mockResolvedValueOnce({ rows: [preparedRow({ status: 'submitted', tx_hash: TX })] })
+      primeDb(...sweepRoutes({ prepared: preparedRow({ status: 'submitted', tx_hash: TX }) }))
 
       const res = await app.inject({
         method: 'POST',
@@ -291,7 +329,7 @@ describe('machine payment sweep routes', () => {
     })
 
     it('rejects a malformed nonce with 400', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
+      primeDb(AUTH_ROUTE)
 
       const res = await app.inject({
         method: 'POST',
@@ -310,9 +348,7 @@ describe('machine payment sweep routes', () => {
     // modules/mpp/sweep.ts).
 
     it('#717: a relayer-budget refusal RELEASES the claim back to prepared (429), not markSweepFailed', async () => {
-      mockQuery.mockResolvedValueOnce(authRow()) // auth
-      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] }) // SELECT prepared
-      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'sweep-id' }] }) // claim (won)
+      primeDb(...sweepRoutes({ prepared: preparedRow(), claimWins: true }))
       sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
       const { RelayerBudgetExceededError } = await import('../../infra/relayer-spend-guard.js')
@@ -332,23 +368,16 @@ describe('machine payment sweep routes', () => {
 
       // The claim MUST release back to 'prepared', never 'failed' — a
       // 'failed' sweep here would strand the funds path (#717).
-      const releaseCall = mockQuery.mock.calls.find(([sql]) =>
-        typeof sql === 'string' && sql.includes("SET status = 'prepared'"),
-      )
+      const releaseCall = findCall(/SET status = 'prepared'/)
       expect(releaseCall).toBeDefined()
-      expect(releaseCall![0]).toContain("WHERE id = $1 AND status = 'submitting'")
-      expect(releaseCall![1]).toEqual([preparedRow().id])
+      expect(releaseCall!.sql).toContain("WHERE id = $1 AND status = 'submitting'")
+      expect(releaseCall!.params).toEqual([preparedRow().id])
 
-      const failCall = mockQuery.mock.calls.find(([sql]) =>
-        typeof sql === 'string' && sql.includes("SET status = 'failed'"),
-      )
-      expect(failCall).toBeUndefined()
+      expect(findCall(/SET status = 'failed'/)).toBeUndefined()
     })
 
     it('a non-budget relay failure marks the sweep failed (502), releasing nothing', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
-      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] })
-      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'sweep-id' }] }) // claim (won)
+      primeDb(...sweepRoutes({ prepared: preparedRow(), claimWins: true }))
       sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
       sweepMocks.relaySweepAuthorization.mockRejectedValueOnce(new Error('relayer RPC timed out'))
@@ -363,24 +392,20 @@ describe('machine payment sweep routes', () => {
       expect(res.statusCode).toBe(502)
       expect(res.json()).toMatchObject({ error: 'Sweep relay failed', details: 'relayer RPC timed out' })
 
-      const failCall = mockQuery.mock.calls.find(([sql]) =>
-        typeof sql === 'string' && sql.includes("SET status = 'failed'"),
-      )
+      const failCall = findCall(/SET status = 'failed'/)
       expect(failCall).toBeDefined()
-      expect(failCall![0]).toContain("WHERE id = $2 AND status = 'submitting'")
-      expect(failCall![1]).toEqual(['relayer RPC timed out', preparedRow().id])
+      expect(failCall!.sql).toContain("WHERE id = $2 AND status = 'submitting'")
+      expect(failCall!.params).toEqual(['relayer RPC timed out', preparedRow().id])
 
-      const releaseCall = mockQuery.mock.calls.find(([sql]) =>
-        typeof sql === 'string' && sql.includes("SET status = 'prepared'"),
-      )
-      expect(releaseCall).toBeUndefined()
+      expect(findCall(/SET status = 'prepared'/)).toBeUndefined()
     })
 
     it('expires a prepared sweep past validBefore (409), never reaching claim or relay', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
-      mockQuery.mockResolvedValueOnce({
-        rows: [preparedRow({ valid_before: String(Math.floor(Date.now() / 1000) - 60) })],
-      })
+      primeDb(
+        ...sweepRoutes({
+          prepared: preparedRow({ valid_before: String(Math.floor(Date.now() / 1000) - 60) }),
+        }),
+      )
 
       const res = await app.inject({
         method: 'POST',
@@ -392,20 +417,16 @@ describe('machine payment sweep routes', () => {
       expect(res.statusCode).toBe(409)
       expect(res.json().error).toMatch(/expired/i)
 
-      const expireCall = mockQuery.mock.calls.find(([sql]) =>
-        typeof sql === 'string' && sql.includes("SET status = 'expired'"),
-      )
+      const expireCall = findCall(/SET status = 'expired'/)
       expect(expireCall).toBeDefined()
-      expect(expireCall![0]).toContain("WHERE id = $1 AND status = 'prepared'")
+      expect(expireCall!.sql).toContain("WHERE id = $1 AND status = 'prepared'")
       expect(sweepMocks.recoverSweepSigner).not.toHaveBeenCalled()
       expect(sweepMocks.relaySweepAuthorization).not.toHaveBeenCalled()
       expect(allowanceMocks.getTokenBalance).not.toHaveBeenCalled()
     })
 
     it('a successful relay resolves any open stranded-funds reconciliation for the agent', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
-      mockQuery.mockResolvedValueOnce({ rows: [preparedRow()] })
-      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'sweep-id' }] }) // claim (won)
+      primeDb(...sweepRoutes({ prepared: preparedRow(), claimWins: true }))
       sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(40000n)
       sweepMocks.relaySweepAuthorization.mockResolvedValueOnce({ txHash: TX })
@@ -420,21 +441,17 @@ describe('machine payment sweep routes', () => {
       expect(res.statusCode).toBe(200)
       expect(res.json().tx_hash).toBe(TX)
 
-      const submittedCall = mockQuery.mock.calls.find(([sql]) =>
-        typeof sql === 'string' && sql.includes("SET status = 'submitted'"),
+      const calls = sqlCalls()
+      const submittedIndex = calls.findIndex((c) => /SET status = 'submitted'/.test(c.sql))
+      const resolveIndex = calls.findIndex(
+        (c) => /machine_payment_reconciliation_events/.test(c.sql) && /status = 'resolved'/.test(c.sql),
       )
-      expect(submittedCall).toBeDefined()
-      const resolveCall = mockQuery.mock.calls.find(([sql]) =>
-        typeof sql === 'string' && sql.includes('machine_payment_reconciliation_events') &&
-          sql.includes("status = 'resolved'"),
-      )
-      expect(resolveCall).toBeDefined()
-      expect(resolveCall![1]).toEqual([AGENT.id])
+      expect(submittedIndex).toBeGreaterThanOrEqual(0)
+      expect(resolveIndex).toBeGreaterThanOrEqual(0)
+      expect(calls[resolveIndex].params).toEqual([AGENT.id])
       // Ordering: markSweepSubmitted before the reconciliation resolve — a
       // sweep that fails to record 'submitted' must not silently resolve
       // reconciliation for a transfer that never landed.
-      const submittedIndex = mockQuery.mock.calls.indexOf(submittedCall!)
-      const resolveIndex = mockQuery.mock.calls.indexOf(resolveCall!)
       expect(submittedIndex).toBeLessThan(resolveIndex)
     })
   })

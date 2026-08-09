@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mockUseAuth = vi.fn()
 const mockReplace = vi.fn()
 const mockPush = vi.fn()
+const mockLogout = vi.fn()
 const mockUseDeployableChains = vi.fn()
 
 vi.mock('@/context/AuthContext', () => ({
@@ -72,6 +73,7 @@ function authValue(overrides: Record<string, unknown> = {}) {
     loading: false,
     updateUser: vi.fn(),
     refreshUser: vi.fn().mockResolvedValue(undefined),
+    logout: mockLogout,
     ...overrides,
   }
 }
@@ -79,6 +81,7 @@ function authValue(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   mockReplace.mockReset()
   mockPush.mockReset()
+  mockLogout.mockReset()
   window.sessionStorage.clear()
   mockUseAuth.mockReturnValue(authValue())
   mockUseDeployableChains.mockReturnValue({
@@ -117,6 +120,18 @@ describe('OnboardingClient (#1162)', () => {
     expect(screen.queryByText(/existing crypto wallet/i)).toBeNull()
     // ...and no step chrome, because there is only one step.
     expect(screen.queryByLabelText(/^Step \d+ of/)).toBeNull()
+  })
+
+  it('carries a way OUT of the auto-restored session (#1239)', () => {
+    // This is the only page a signed-in user without accounts can reach:
+    // /login auto-redirects here and ProtectedRoute bounces every other page
+    // back here — so without this button, switching accounts requires
+    // clearing site data.
+    render(<OnboardingClient />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Log out' }))
+    expect(mockLogout).toHaveBeenCalledOnce()
+    expect(mockReplace).toHaveBeenCalledWith('/login')
   })
 
   it('shows success in place rather than routing to a separate screen', async () => {

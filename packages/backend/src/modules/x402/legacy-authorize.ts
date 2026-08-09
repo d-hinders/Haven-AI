@@ -288,28 +288,6 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
     }
   }
 
-  // Proactively avoid the stale-nonce race (#692): if a prior transfer for this
-  // delegate just incremented the nonce, wait until that increment is visible
-  // before signing, so the sign_hash never targets an already-consumed nonce.
-  // Best-effort with a timeout fallback — the preflight + retry still cover it.
-  onChainAllowance.nonce = await waitForFreshAllowanceNonce(
-    agent.chain_id,
-    agent.safe_address,
-    agent.delegate_address,
-    tokenAddress,
-    onChainAllowance.nonce,
-    async () =>
-      (
-        await getTokenAllowance(
-          agent.chain_id,
-          agent.safe_address,
-          agent.delegate_address,
-          tokenAddress,
-        )
-      ).nonce,
-    { sharedWatermark },
-  )
-
   const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
 
   // Pre-flight: read the delegate's on-chain balance for this token before
@@ -456,6 +434,31 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
   //
   // For standard x402, `payTo` can be the agent-owned delegate EOA because
   // the protocol's merchant-facing payment header is settled from an EOA.
+  // Proactively avoid the stale-nonce race (#692): if a prior transfer for this
+  // delegate just incremented the nonce, wait until that increment is visible
+  // before signing, so the sign_hash never targets an already-consumed nonce.
+  // Best-effort with a timeout fallback — the preflight + retry still cover it.
+  // Runs AFTER the coverage decision (#1209): the insufficient and queue
+  // branches sign nothing, so the bounded wait only runs when a hash will
+  // actually be built. The nonce's only consumer is generateTransferHash.
+  onChainAllowance.nonce = await waitForFreshAllowanceNonce(
+    agent.chain_id,
+    agent.safe_address,
+    agent.delegate_address,
+    tokenAddress,
+    onChainAllowance.nonce,
+    async () =>
+      (
+        await getTokenAllowance(
+          agent.chain_id,
+          agent.safe_address,
+          agent.delegate_address,
+          tokenAddress,
+        )
+      ).nonce,
+    { sharedWatermark },
+  )
+
   // Haven does not control that EOA or its private key. This transfer is only
   // a Safe AllowanceModule top-up authorized by the agent signature and
   // constrained by the user's on-chain allowance; the backend merely relays it.

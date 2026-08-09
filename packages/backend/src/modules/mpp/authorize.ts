@@ -477,28 +477,6 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     }
   }
 
-  // #1196: this path builds a sign_hash from the allowance nonce too, so it
-  // needs the same stale-nonce protection x402 has had since #692 — the #693
-  // preflight kept it SAFE without it, but a stale nonce still meant a revert
-  // and a retry.
-  onChainAllowance.nonce = await waitForFreshAllowanceNonce(
-    agent.chain_id,
-    agent.safe_address,
-    agent.delegate_address,
-    tokenAddress,
-    onChainAllowance.nonce,
-    async () =>
-      (
-        await getTokenAllowance(
-          agent.chain_id,
-          agent.safe_address,
-          agent.delegate_address,
-          tokenAddress,
-        )
-      ).nonce,
-    { sharedWatermark },
-  )
-
   const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
   // Allowance-only coverage: MPP rails route purely on the remaining on-chain
   // allowance (the delegate balance is not consulted). x402's balance-aware
@@ -572,6 +550,29 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       },
     )
   }
+
+  // #1196: this path builds a sign_hash from the allowance nonce too, so it
+  // needs the same stale-nonce protection x402 has had since #692 — the #693
+  // preflight kept it SAFE without it, but a stale nonce still meant a revert
+  // and a retry. Runs AFTER the queue branch (#1209): the approval path signs
+  // nothing, so the bounded wait only runs when a hash will actually be built.
+  onChainAllowance.nonce = await waitForFreshAllowanceNonce(
+    agent.chain_id,
+    agent.safe_address,
+    agent.delegate_address,
+    tokenAddress,
+    onChainAllowance.nonce,
+    async () =>
+      (
+        await getTokenAllowance(
+          agent.chain_id,
+          agent.safe_address,
+          agent.delegate_address,
+          tokenAddress,
+        )
+      ).nonce,
+    { sharedWatermark },
+  )
 
   let signHash: string
   try {

@@ -57,6 +57,12 @@ describe('user preferences (characterization, #1167)', () => {
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual({ currency_preference: 'EUR' })
       expect(mockQuery.mock.calls[0][1]).toEqual(['user-1'])
+      // The executed statement, not just its params (#1208): the read must be
+      // the preference lookup scoped by id — a different SELECT with the same
+      // bind shape would satisfy the params assertion alone.
+      expect(String(mockQuery.mock.calls[0][0])).toMatch(
+        /SELECT currency_preference FROM users WHERE id = \$1/,
+      )
     })
 
     it('falls back to USD when the user row has no preference', async () => {
@@ -109,6 +115,11 @@ describe('user preferences (characterization, #1167)', () => {
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual({ currency_preference: 'EUR' })
       expect(mockQuery.mock.calls[0][1]).toEqual(['EUR', 'user-1'])
+      // The write must be an UPDATE scoped to the authenticated user (#1208) —
+      // without pinning the statement, echoing the mock back proves only that
+      // the mock echoes.
+      expect(String(mockQuery.mock.calls[0][0])).toMatch(/UPDATE users\b/)
+      expect(String(mockQuery.mock.calls[0][0])).toMatch(/WHERE id = \$2/)
     })
 
     it('accepts USD as well as EUR', async () => {
@@ -123,6 +134,10 @@ describe('user preferences (characterization, #1167)', () => {
 
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual({ currency_preference: 'USD' })
+      // Was a pure echo (#1208): with no params assertion, a route that
+      // hardcoded 'EUR' into the write — or wrote nothing the mock could
+      // see — still returned whatever the mock said. Pin what was WRITTEN.
+      expect(mockQuery.mock.calls[0][1]).toEqual(['USD', 'user-1'])
     })
 
     it('rejects an unsupported currency without touching the database', async () => {

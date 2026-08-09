@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-08" # #1155 re-verified: the signer's handshake now advertises the expected-context/sweep-binding version sets it verifies, and the hosted quote reports the version it emits. Orchestration sequences, tool set, custody invariants and the consent gate re-read against the diff and unchanged — the addition is advisory metadata, not a signing decision
+last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
 ---
 
 # Haven — Edge Signer

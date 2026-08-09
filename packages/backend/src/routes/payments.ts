@@ -338,28 +338,6 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       })
     }
 
-    // #1196: this path builds a sign_hash from the allowance nonce too, so it
-    // needs the same stale-nonce protection x402 has had since #692 — the
-    // #693 preflight kept it SAFE without it, but a stale nonce still meant a
-    // revert and a retry.
-    onChainAllowance.nonce = await waitForFreshAllowanceNonce(
-      agent.chain_id,
-      agent.safe_address,
-      agent.delegate_address,
-      tokenAddress,
-      onChainAllowance.nonce,
-      async () =>
-        (
-          await getTokenAllowance(
-            agent.chain_id,
-            agent.safe_address,
-            agent.delegate_address,
-            tokenAddress,
-          )
-        ).nonce,
-      { sharedWatermark },
-    )
-
     const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
 
     // 5a. Coverage decision (shared with the x402 / MPP money paths via
@@ -403,6 +381,32 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         expires_at: approval.expires_at,
       })
     }
+
+    // #1196: this path builds a sign_hash from the allowance nonce too, so it
+    // needs the same stale-nonce protection x402 has had since #692 — the
+    // #693 preflight kept it SAFE without it, but a stale nonce still meant a
+    // revert and a retry. Runs AFTER the coverage branch (#1209): the queue
+    // path signs nothing, so waiting up to 250ms for a nonce it would only
+    // discard taxed every over-allowance request for no benefit. The nonce's
+    // only consumer is generateTransferHash below; computeEffectiveAllowance
+    // never reads it.
+    onChainAllowance.nonce = await waitForFreshAllowanceNonce(
+      agent.chain_id,
+      agent.safe_address,
+      agent.delegate_address,
+      tokenAddress,
+      onChainAllowance.nonce,
+      async () =>
+        (
+          await getTokenAllowance(
+            agent.chain_id,
+            agent.safe_address,
+            agent.delegate_address,
+            tokenAddress,
+          )
+        ).nonce,
+      { sharedWatermark },
+    )
 
     // 6. Generate the transfer hash on-chain
     let signHash: string

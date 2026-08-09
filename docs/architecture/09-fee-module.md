@@ -11,7 +11,7 @@ covers:
   - packages/sdk/src/client.ts
   - packages/sdk/src/types.ts
   - packages/sdk/src/payment-fee.test.ts
-last-verified: "2026-08-07" # #997: covers updated (lib/machine-payment-evidence.ts moved into modules/mpp/**)
+last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
 ---
 
 # Haven — Platform fee scaffold and target design

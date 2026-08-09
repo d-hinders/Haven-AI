@@ -400,6 +400,10 @@ export async function executeSafeTx(
     refund_receiver: tx.refundReceiver,
     nonce: tx.nonce.toString(),
     signatures: signature,
+    // #1229: an account can hold a backup passkey now, so "the user's passkey
+    // on this chain" no longer names one credential. Say which one signed —
+    // the relay resolves the signer contract from it.
+    credential_id: signer.credentialId,
   })
 
   return { txHash: result.tx_hash as Hash }

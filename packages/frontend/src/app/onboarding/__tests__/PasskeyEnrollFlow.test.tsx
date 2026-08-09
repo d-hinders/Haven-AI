@@ -265,27 +265,54 @@ describe('PasskeyEnrollFlow', () => {
     ).toBeNull()
   })
 
-  it('handles the enroll race window with the corrected cross-device copy (#1229)', async () => {
-    // Resume ran against an empty list, then another tab/device enrolled
-    // before our insert landed: 409, and the re-listed credential is not
-    // ours. The message must not say "sign in" — the user IS signed in.
+  it('adopts the existing row when enroll 409s on our own credential (#1229)', async () => {
+    // The one 409 still reachable now that a chain may hold several passkeys:
+    // the credential id itself collided, because our first attempt landed
+    // after we stopped listening. Re-list finds OUR credential — adopt it and
+    // carry on rather than failing a flow that already succeeded.
     const onComplete = vi.fn()
     const onError = vi.fn()
-    mockEnrollPasskey.mockRejectedValue(new ApiRequestError('A passkey is already registered for this chain', 409))
-    mockListPasskeys
-      .mockResolvedValueOnce({ passkeys: [] })
-      .mockResolvedValueOnce({
-        passkeys: [
-          {
-            id: 'passkey-1',
-            credential_id: 'credential-other-device',
-            signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
-            chain_id: 100,
-            safe_address: null,
-            created_at: '2026-05-04T00:00:00.000Z',
-          },
-        ],
-      })
+    mockEnrollPasskey.mockRejectedValue(
+      new ApiRequestError('This credential is already registered', 409),
+    )
+    mockListPasskeys.mockResolvedValueOnce({ passkeys: [] }).mockResolvedValueOnce({
+      passkeys: [
+        {
+          id: 'passkey-1',
+          credential_id: 'credential-123',
+          signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
+          chain_id: 100,
+          safe_address: null,
+          created_at: '2026-05-04T00:00:00.000Z',
+        },
+      ],
+    })
+
+    render(
+      <PasskeyEnrollFlow
+        user={mockUser}
+        selectedChainId={100}
+        onComplete={onComplete}
+        onError={onError}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled())
+    expect(mockDeployPasskeySafe).toHaveBeenCalled()
+  })
+
+  it('surfaces the server error when the 409 is not our credential (#1229)', async () => {
+    // Same 409, but the re-list has no row for our credential — nothing to
+    // adopt, so the server's own wording stands rather than a guess about
+    // devices.
+    const onComplete = vi.fn()
+    const onError = vi.fn()
+    mockEnrollPasskey.mockRejectedValue(
+      new ApiRequestError('This credential is already registered', 409),
+    )
+    mockListPasskeys.mockResolvedValue({ passkeys: [] })
 
     render(
       <PasskeyEnrollFlow
@@ -299,12 +326,72 @@ describe('PasskeyEnrollFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
 
     await waitFor(() =>
-      expect(onError).toHaveBeenCalledWith(
-        'This account already has a passkey for this network. Open Haven in the browser or on the device where it was created to continue.',
-      ),
+      expect(onError).toHaveBeenCalledWith('This credential is already registered'),
     )
     expect(onComplete).not.toHaveBeenCalled()
     expect(mockDeployPasskeySafe).not.toHaveBeenCalled()
+  })
+
+  it('offers every enrolled passkey and resumes onto the one that answers (#1229)', async () => {
+    // A user with a backup signer holds two credentials on the chain. Pinning
+    // the assertion to the primary would dead-end whoever lost that device —
+    // the exact shape of the bug this issue is about. The account's Safe comes
+    // from the BOUND row, not the one that answered: a backup is an owner of
+    // the primary's Safe, never the root of a second one.
+    const onComplete = vi.fn()
+    const onError = vi.fn()
+    mockListPasskeys.mockResolvedValue({
+      passkeys: [
+        {
+          id: 'passkey-primary',
+          credential_id: 'credential-primary',
+          signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
+          chain_id: 100,
+          safe_address: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
+          created_at: '2026-05-04T00:00:00.000Z',
+        },
+        {
+          id: 'passkey-backup',
+          credential_id: 'credential-backup',
+          signer_address: '0x1111111111111111111111111111111111111111',
+          chain_id: 100,
+          safe_address: null,
+          created_at: '2026-06-04T00:00:00.000Z',
+        },
+      ],
+    })
+    mockGetPasskeyAssertion.mockResolvedValue({ credentialId: 'credential-backup' })
+
+    render(
+      <PasskeyEnrollFlow
+        user={mockUser}
+        selectedChainId={100}
+        onComplete={onComplete}
+        onError={onError}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled())
+    expect(onError).not.toHaveBeenCalledWith(expect.stringContaining('could not confirm'))
+    expect(mockGetPasskeyAssertion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowCredentialIds: ['credential-primary', 'credential-backup'],
+      }),
+    )
+    // Neither creates nor deploys: the account already exists.
+    expect(mockCreatePasskey).not.toHaveBeenCalled()
+    expect(mockEnrollPasskey).not.toHaveBeenCalled()
+    expect(mockDeployPasskeySafe).not.toHaveBeenCalled()
+
+    const stored = JSON.parse(
+      localStorage.getItem(
+        passkeyStorageKey('0x07058311f995c89F4DbE17Db61fa1A3CDe638975', 100),
+      ) ?? '{}',
+    )
+    expect(stored.credentialId).toBe('credential-backup')
+    expect(stored.address).toBe('0x1111111111111111111111111111111111111111')
   })
 
   it('recovers from deploy conflicts by reusing the existing safe address', async () => {

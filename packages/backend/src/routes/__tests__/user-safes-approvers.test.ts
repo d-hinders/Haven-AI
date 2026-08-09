@@ -192,4 +192,40 @@ describe('approver routes on /user/safes/:safeId/approvers', () => {
     expect(response.statusCode).toBe(400)
     expect(mockGetSafeDetails).not.toHaveBeenCalled()
   })
+
+  it('binds a passkey approver to the Safe so it can relay later (#1229)', async () => {
+    // A backup passkey is enrolled with no Safe. Without this bind, the very
+    // key the user added for recovery would be unable to reach /safe/exec
+    // through the fast path.
+    mockPoolQuery
+      .mockResolvedValueOnce({ rows: [ownedSafeRow] }) // findOwnedSafe
+      .mockResolvedValueOnce({ rows: [] }) // upsertApproverMetadata
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] }) // bindPasskeySignerToSafe
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/user/safes/${SAFE_ID}/approvers`,
+      headers: auth(),
+      payload: { address: B, type: 'passkey', label: 'Backup' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(mockPoolQuery.mock.calls[2][1]).toEqual(['user-1', 8453, B, SAFE_ADDRESS])
+  })
+
+  it('does not touch passkey rows when the approver is a wallet (#1229)', async () => {
+    mockPoolQuery
+      .mockResolvedValueOnce({ rows: [ownedSafeRow] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/user/safes/${SAFE_ID}/approvers`,
+      headers: auth(),
+      payload: { address: A, type: 'eoa' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(mockPoolQuery).toHaveBeenCalledTimes(2)
+  })
 })

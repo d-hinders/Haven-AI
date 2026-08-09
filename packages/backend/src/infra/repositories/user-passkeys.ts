@@ -9,8 +9,15 @@
  * Invariant a reader must not break: the insert deliberately does NOT verify
  * the attestation cryptographically (POC — a bad enrollment only harms the
  * enrolling user); the raw attestation is persisted for future verification.
- * Unique-violation mapping (per-chain and per-credential) stays in the route,
- * which owns the HTTP shape of those conflicts.
+ * Unique-violation mapping (credential id) stays in the route, which owns the
+ * HTTP shape of that conflict.
+ *
+ * Since #1229 a user may hold SEVERAL passkeys per chain — the extra ones are
+ * backup signers, the only recovery this rail has. So `(user_id, chain_id)`
+ * identifies a SET, never a row; resolve a single passkey by credential id
+ * (`findUserPasskeyByCredential`) or by its Safe binding
+ * (`findPasskeyForSafe`), and treat `safe_address` as a fast-path hint that
+ * only the Safe's on-chain owner list can confirm.
  */
 
 import pool from '../../db.js'
@@ -37,16 +44,51 @@ export const LIST_USER_PASSKEYS_SQL = `SELECT id, credential_id, signer_address,
        WHERE user_id = $1
        ORDER BY created_at ASC`
 
-export const FIND_PASSKEY_FOR_SAFE_SQL = `SELECT public_key_x, public_key_y, signer_address
+export const FIND_PASSKEY_FOR_SAFE_SQL = `SELECT credential_id, public_key_x, public_key_y, signer_address, safe_address
        FROM user_passkeys
        WHERE user_id = $1
          AND LOWER(safe_address) = LOWER($2)
          AND chain_id = $3`
 
+export const FIND_PASSKEY_BY_CREDENTIAL_SQL = `SELECT credential_id, public_key_x, public_key_y, signer_address, safe_address
+       FROM user_passkeys
+       WHERE user_id = $1
+         AND chain_id = $2
+         AND credential_id = $3`
+
+export const LIST_PASSKEY_SIGNERS_FOR_CHAIN_SQL = `SELECT credential_id, public_key_x, public_key_y, signer_address, safe_address
+       FROM user_passkeys
+       WHERE user_id = $1
+         AND chain_id = $2
+       ORDER BY created_at ASC`
+
+/**
+ * Claim an UNBOUND passkey row for a Safe. Deliberately `safe_address IS NULL`
+ * rather than an unconditional update: a passkey can be an owner of several
+ * Safes, and this column is a fast-path hint for the exec route, not a
+ * membership record. Overwriting it would move the hint off the Safe it was
+ * first bound to and slow that one down to the on-chain check for no gain.
+ */
+export const BIND_PASSKEY_TO_SAFE_SQL = `UPDATE user_passkeys
+       SET safe_address = $3
+       WHERE user_id = $1
+         AND credential_id = $2
+         AND safe_address IS NULL`
+
+/** Same claim, addressed by signer address — what the approver routes know. */
+export const BIND_PASSKEY_SIGNER_TO_SAFE_SQL = `UPDATE user_passkeys
+       SET safe_address = $4
+       WHERE user_id = $1
+         AND chain_id = $2
+         AND LOWER(signer_address) = LOWER($3)
+         AND safe_address IS NULL`
+
 export interface StoredPasskeySafeRow {
+  credential_id: string
   public_key_x: Buffer
   public_key_y: Buffer
   signer_address: string
+  safe_address: string | null
 }
 
 /**
@@ -103,4 +145,72 @@ export async function findPasskeyForSafe(
     chainId,
   ])
   return result.rows[0] ?? null
+}
+
+/**
+ * The passkey bound to (user, chain, credential) — the resolution the exec
+ * path uses once a user may hold more than one passkey per chain (#1229).
+ * `userId` is REQUIRED: the credential id arrives from the client, so tenant
+ * scope is what stops it naming someone else's row.
+ */
+export async function findUserPasskeyByCredential(
+  userId: string,
+  chainId: number,
+  credentialId: string,
+  db: Executor = pool,
+): Promise<StoredPasskeySafeRow | null> {
+  const result = await db.query<StoredPasskeySafeRow>(FIND_PASSKEY_BY_CREDENTIAL_SQL, [
+    userId,
+    chainId,
+    credentialId,
+  ])
+  return result.rows[0] ?? null
+}
+
+/** Every passkey the user holds on a chain, oldest first. `userId` REQUIRED. */
+export async function listPasskeySignersForChain(
+  userId: string,
+  chainId: number,
+  db: Executor = pool,
+): Promise<StoredPasskeySafeRow[]> {
+  const result = await db.query<StoredPasskeySafeRow>(LIST_PASSKEY_SIGNERS_FOR_CHAIN_SQL, [
+    userId,
+    chainId,
+  ])
+  return result.rows
+}
+
+/**
+ * Bind an as-yet-unbound passkey to a Safe. No-op when the row is already
+ * bound (see `BIND_PASSKEY_TO_SAFE_SQL`). Returns whether a row was claimed.
+ */
+export async function bindPasskeyToSafe(
+  userId: string,
+  credentialId: string,
+  safeAddress: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(BIND_PASSKEY_TO_SAFE_SQL, [userId, credentialId, safeAddress])
+  return (result.rowCount ?? 0) > 0
+}
+
+/**
+ * Bind by signer address rather than credential id — the form the approver
+ * routes have, since an owner change names an address. Same no-op-when-bound
+ * semantics as `bindPasskeyToSafe`.
+ */
+export async function bindPasskeySignerToSafe(
+  userId: string,
+  chainId: number,
+  signerAddress: string,
+  safeAddress: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(BIND_PASSKEY_SIGNER_TO_SAFE_SQL, [
+    userId,
+    chainId,
+    signerAddress,
+    safeAddress,
+  ])
+  return (result.rowCount ?? 0) > 0
 }

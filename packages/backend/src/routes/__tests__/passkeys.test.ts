@@ -110,11 +110,20 @@ describe('Passkey routes', () => {
     expect(response.json().error).toBe('public_key_x and public_key_y must be 32-byte 0x-prefixed hex values')
   })
 
-  it('POST /passkeys returns 409 on user/chain conflicts', async () => {
+  it('POST /passkeys enrols a SECOND passkey on a chain that already has one (#1229)', async () => {
+    // The backup signer. This 409'd before migration 056, which is why the
+    // legacy passkey rail had no recovery at all: the only users who could
+    // add a backup were the ones who did not need one.
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
-    mockQuery.mockRejectedValueOnce({
-      code: '23505',
-      constraint: 'user_passkeys_user_id_chain_id_key',
+    mockQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: 'passkey-2',
+          credential_id: fixtureBody.credential_id,
+          signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
+          chain_id: fixtureBody.chain_id,
+        },
+      ],
     })
 
     const response = await app.inject({
@@ -124,8 +133,7 @@ describe('Passkey routes', () => {
       payload: fixtureBody,
     })
 
-    expect(response.statusCode).toBe(409)
-    expect(response.json().error).toBe('A passkey is already registered for this chain')
+    expect(response.statusCode).toBe(201)
   })
 
   it('POST /passkeys returns 409 on credential conflicts', async () => {

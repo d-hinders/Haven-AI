@@ -81,6 +81,8 @@ export interface ExecSafeBody {
   refund_receiver: string
   nonce: string
   signatures: string
+  /** Which passkey signed — required once an account has a backup (#1229). */
+  credential_id?: string
 }
 
 export interface ExecSafeResponse {

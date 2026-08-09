@@ -200,6 +200,10 @@ jobs:
           node-version-file: '.nvmrc'
       - name: Money-path list + QA freshness gate
         run: node --test scripts/ci/*.test.mjs
+      # #1206: this suite previously ran NOWHERE — it lives outside every
+      # test glob. Dependency-free like the step above, so it belongs here.
+      - name: Dist-freshness guard self-test
+        run: node --test scripts/check-dist-freshness.test.mjs
 
   sdk_checks:
     name: SDK checks

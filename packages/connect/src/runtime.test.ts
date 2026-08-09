@@ -4,6 +4,21 @@ import { delegateKeyFromPrivateKey } from './key.js'
 import { runConnect } from './runtime.js'
 
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
+// These tests assert connect's behavior, not the machine's Node version. Since
+// #1161 runConnect refuses below the floor before doing anything, so every call
+// site pins a supported version explicitly — otherwise the suite would pass or
+// fail depending on what Node the developer happens to be running.
+const SUPPORTED_NODE = '24.0.0'
+
+/** Await a promise expected to reject, returning the Error for assertions. */
+async function expectRejection(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise
+  } catch (err) {
+    return err as Error
+  }
+  throw new Error('expected the promise to reject, but it resolved')
+}
 
 describe('runConnect', () => {
   it('generates a local key, registers only the public address, stores credentials, and redacts output', async () => {
@@ -74,6 +89,8 @@ describe('runConnect', () => {
       credentialsDir: '/tmp/haven-connect-test',
     }, {
       api,
+      // Pinned so the #1161 Node floor cannot make this test host-dependent.
+      nodeVersion: SUPPORTED_NODE,
       generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
       generateApiKey: () => 'sk_agent_supersecret',
       preflightStorage: vi.fn(async () => '/tmp/haven-connect-test'),
@@ -145,13 +162,104 @@ describe('runConnect', () => {
     expect(output).not.toContain('should appear in your next message')
   })
 
+  describe('unsupported Node.js (#1161)', () => {
+    // The gap this closes: the floor was enforced ONLY inside local-MCP
+    // installation, reached solely via `--local`. The DEFAULT topology (hosted
+    // MCP + local signer) — what nearly every user runs — never touched it, so
+    // a full connect on Node v23.1.0 completed "successfully", installed the
+    // signer, and signed a real testnet payment. These tests cover the default
+    // path specifically, because that is where the hole was.
+    const OLD_NODE = '23.1.0'
+
+    /** Every dependency that would record a side effect if the guard let go. */
+    function sideEffectSpies() {
+      return {
+        api: {
+          resolveSetup: vi.fn(),
+          registerSetup: vi.fn(),
+          updateInstallStatus: vi.fn(),
+        } as unknown as ConnectApiClient,
+        preflightStorage: vi.fn(),
+        writeCredentials: vi.fn(),
+        installRuntime: vi.fn(),
+        generateKey: vi.fn(),
+      }
+    }
+
+    it('refuses on the DEFAULT path before any side effect', async () => {
+      const spies = sideEffectSpies()
+
+      await expect(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'claude-code',
+        // No localMcp — this is the default hosted MCP + local signer topology.
+      }, { ...spies, nodeVersion: OLD_NODE })).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+
+      // Nothing may have happened yet: no setup token resolved or consumed, no
+      // agent registered, no key minted, no credential written. A failed
+      // precondition must not strand a half-created agent or burn a one-shot
+      // token (the #1129 discipline).
+      expect(spies.api.resolveSetup).not.toHaveBeenCalled()
+      expect(spies.api.registerSetup).not.toHaveBeenCalled()
+      expect(spies.api.updateInstallStatus).not.toHaveBeenCalled()
+      expect(spies.preflightStorage).not.toHaveBeenCalled()
+      expect(spies.writeCredentials).not.toHaveBeenCalled()
+      expect(spies.installRuntime).not.toHaveBeenCalled()
+      expect(spies.generateKey).not.toHaveBeenCalled()
+    })
+
+    it('refuses before the --local topology check, so every path is covered', async () => {
+      // Ordering matters: the Node floor is a property of the machine, not of
+      // the chosen topology, so it must not sit behind a flag-specific branch —
+      // that is precisely the mistake being fixed.
+      const spies = sideEffectSpies()
+      await expect(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'claude-code',
+        localMcp: true,
+      }, { ...spies, nodeVersion: OLD_NODE })).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+      expect(spies.api.resolveSetup).not.toHaveBeenCalled()
+    })
+
+    it('tells the user how to fix it, not just that it is broken', async () => {
+      const error = await expectRejection(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'claude-code',
+      }, { ...sideEffectSpies(), nodeVersion: OLD_NODE }))
+
+      expect(error.message).toContain(OLD_NODE)
+      expect(error.message).toContain('>=24.0.0')
+      expect(error.message).toContain('nvm install 24')
+      expect(error.message).toMatch(/agent runtime launching Haven/i)
+    })
+
+    it('does not affect a supported Node', async () => {
+      // The guard must be invisible on >=24 — no behavior change for the
+      // overwhelming majority of runs. The run still fails afterwards (the API
+      // stubs return nothing), which is the point: it failed LATER, having got
+      // past the guard and started real work.
+      const spies = sideEffectSpies()
+      const error = await expectRejection(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'claude-code',
+      }, { ...spies, nodeVersion: '24.0.0' }))
+
+      expect(error.message).not.toMatch(/Node\.js/)
+      expect(spies.api.resolveSetup).toHaveBeenCalled()
+    })
+  })
+
   it('rejects --local on runtimes that do not support local MCP', async () => {
     await expect(runConnect({
       setupToken: 'hv_setup_test',
       apiBaseUrl: 'https://api.haven.example',
       runtime: 'cursor',
       localMcp: true,
-    })).rejects.toThrow(/only available for Claude Code and Codex/)
+    }, { nodeVersion: SUPPORTED_NODE })).rejects.toThrow(/only available for Claude Code and Codex/)
   })
 
   it('uses the hard-restart copy on desktop GUI runtimes', async () => {
@@ -213,6 +321,7 @@ describe('runConnect', () => {
       credentialsDir: '/tmp/haven-connect-test-desktop',
     }, {
       api,
+      nodeVersion: SUPPORTED_NODE,
       generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
       generateApiKey: () => 'sk_agent_desktop',
       preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-desktop'),
@@ -291,6 +400,7 @@ describe('runConnect', () => {
       credentialsDir: '/tmp/haven-connect-test-telemetry',
     }, {
       api,
+      nodeVersion: SUPPORTED_NODE,
       generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
       generateApiKey: () => 'sk_agent_telemetry',
       preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-telemetry'),

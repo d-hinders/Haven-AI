@@ -27,10 +27,13 @@
     "lint:copy": "node scripts/frontend-copy-lint.mjs",
     "lint:copy:update": "node scripts/frontend-copy-lint.mjs --update",
     "lint:copy:test": "node --test scripts/frontend-copy-lint.test.mjs",
+    "lint:db-mocks": "node scripts/db-mock-ratchet.mjs",
+    "lint:db-mocks:test": "node --test scripts/db-mock-ratchet.test.mjs",
     "lint:deps": "node scripts/dep-lint.mjs",
     "lint:deps:test": "node --test scripts/dep-lint.test.mjs",
     "generate:api-types": "node scripts/generate-api-types.mjs",
-    "check:api-types": "node scripts/generate-api-types.mjs --check"
+    "check:api-types": "node scripts/generate-api-types.mjs --check",
+    "check:dist": "node scripts/check-dist-freshness.mjs sdk signer mcp"
   },
   "overrides": {
     "axios": "^1.16.1",

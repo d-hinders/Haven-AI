@@ -171,6 +171,31 @@ export const FIND_AGENT_ID_FOR_USER_SQL = 'SELECT id FROM agents WHERE id = $1 A
 
 export const FIND_AGENT_ID_STATUS_FOR_USER_SQL = 'SELECT id, status FROM agents WHERE id = $1 AND user_id = $2'
 
+/**
+ * The activity feed's agent-name map (moved from `routes/agent-activity.ts`,
+ * #1167). ALL statuses — a revoked agent's past payments still need a name to
+ * render against, so filtering here would relabel history "Unknown".
+ *
+ * Note there is no `user_safes` JOIN: this is a plain `agents` projection, so
+ * it does not fall under the contract `agents.test.ts` pins on the joined
+ * statements in this file (#999).
+ */
+export const LIST_AGENT_NAMES_FOR_USER_SQL = 'SELECT id, name FROM agents WHERE user_id = $1'
+
+export interface AgentNameRow {
+  id: string
+  name: string
+}
+
+/** `userId` is REQUIRED — tenant scope for the feed's agent set. */
+export async function listAgentNamesForUser(
+  userId: string,
+  db: Executor = pool,
+): Promise<AgentNameRow[]> {
+  const result = await db.query<AgentNameRow>(LIST_AGENT_NAMES_FOR_USER_SQL, [userId])
+  return result.rows
+}
+
 /** `userId` is REQUIRED — tenant scope for the dashboard agent list. */
 export async function listAgentsForUserAllStatuses(
   userId: string,

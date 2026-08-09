@@ -50,7 +50,7 @@ function markJustOnboarded() {
 }
 
 export default function OnboardingClient() {
-  const { user, loading, updateUser, refreshUser } = useAuth()
+  const { user, loading, updateUser, refreshUser, logout } = useAuth()
   const router = useRouter()
 
   const [phase, setPhase] = useState<Phase>('create')
@@ -172,7 +172,23 @@ export default function OnboardingClient() {
             <HavenMark />
             Haven
           </Link>
-          <span className="text-xs text-[var(--v2-ink-3)]">{name}</span>
+          {/* #1239: this header is the ONLY page a signed-in user without
+              accounts can reach (login auto-redirects here, ProtectedRoute
+              bounces every other page back here) — so it must carry the way
+              out, or switching accounts requires clearing site data. */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[var(--v2-ink-3)]">{name}</span>
+            <button
+              type="button"
+              onClick={() => {
+                logout()
+                router.replace('/login')
+              }}
+              className="text-xs font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
+            >
+              Log out
+            </button>
+          </div>
         </div>
       </div>
 

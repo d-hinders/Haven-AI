@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-07-27"
+last-verified: "2026-08-09" # #1228: real-DB characterization pointer added (§2) / testing-strategy rule added
 ---
 
 # Money / agent-authority playbook
@@ -18,6 +18,14 @@ Read [`docs/regulatory/casp-risk-guardrails.md`](../../regulatory/casp-risk-guar
 For any change to **existing** money-path behavior (`routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, `routes/machine-payments.ts`, `modules/mpp/`, `domain/payment-coverage.ts`, `rails/allowance-module.ts`, the rail seam `rails/execution-rail.ts`, the delegation rail `rails/delegation-*.ts` / `rails/hybrid-provisioning.ts` / `rails/hybrid-account-config.ts` / `routes/agent-delegations.ts`, `packages/sdk/src/signer.ts`, `middleware/agentAuth.ts`, `db/migrations/`), pin the current behavior with a characterization test **before** changing it, as required by the canonical skill's [Implement section](../../../.agents/skills/ship-next/SKILL.md#implement). The test encodes the invariant the change must preserve.
 
 For other files in `casp-risk-guardrails.md`'s `covers:` list (e.g. `infra/relayer.ts`, `modules/accounts/safe-deployer.ts`, the passkeys / safe-deploy / user-safes routes), the §1 required reading still applies — §2 scopes only the characterization-test requirement.
+
+Where the invariant being pinned is **the database's behaviour** —
+idempotency, locking, constraints, transactional integrity — the
+characterization test belongs in a repository test on the real-Postgres
+harness, not in a positional-mock route test:
+[`testing-strategy.md`](../testing-strategy.md) (epic #1219) has the rule,
+the layer map, and a worked example. The `lint:db-mocks` ratchet blocks the
+mock pattern from growing back.
 
 ## 3. Non-negotiables (CASP)
 

@@ -192,4 +192,58 @@ describe('approver routes on /user/safes/:safeId/approvers', () => {
     expect(response.statusCode).toBe(400)
     expect(mockGetSafeDetails).not.toHaveBeenCalled()
   })
+
+  /**
+   * Answer by WHAT is asked, not by call order — the positional chain is the
+   * failure mode the #1227 ratchet exists to shrink. The bind statement's own
+   * behaviour (unbound-only, case-blind) is proven against real Postgres in
+   * `infra/repositories/__tests__/user-passkeys.test.ts`; what this route owns
+   * is WHETHER it runs.
+   */
+  function stubApproverWrites(): void {
+    mockPoolQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql)
+      if (/FROM user_safes/.test(text)) return { rows: [ownedSafeRow] }
+      return { rowCount: 1, rows: [] }
+    })
+  }
+
+  /** The params of the passkey-binding UPDATE, if the route ran it. */
+  function passkeyBindParams(): unknown[] | null {
+    const call = mockPoolQuery.mock.calls.find(([sql]) =>
+      /UPDATE user_passkeys/.test(String(sql)),
+    )
+    return call ? (call[1] as unknown[]) : null
+  }
+
+  it('binds a passkey approver to the Safe so it can relay later (#1229)', async () => {
+    // A backup passkey is enrolled with no Safe. Without this bind, the very
+    // key the user added for recovery would be unable to reach /safe/exec
+    // through the fast path.
+    stubApproverWrites()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/user/safes/${SAFE_ID}/approvers`,
+      headers: auth(),
+      payload: { address: B, type: 'passkey', label: 'Backup' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(passkeyBindParams()).toEqual(['user-1', 8453, B, SAFE_ADDRESS])
+  })
+
+  it('does not touch passkey rows when the approver is a wallet (#1229)', async () => {
+    stubApproverWrites()
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/user/safes/${SAFE_ID}/approvers`,
+      headers: auth(),
+      payload: { address: A, type: 'eoa' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(passkeyBindParams()).toBeNull()
+  })
 })

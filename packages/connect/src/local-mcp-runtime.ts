@@ -3,6 +3,7 @@ import { access, chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk'
 import {
   MCP_RUNTIME_MANIFEST,
   mcpPackageSpec,
@@ -33,12 +34,26 @@ export interface LocalMcpRuntimeDeps {
   runCommand?: (command: string, args: string[]) => Promise<void>
 }
 
+/**
+ * Raised when the running Node is below the floor every Haven package declares.
+ *
+ * The `code` is load-bearing: `runtime-install.ts` maps it to the
+ * `local_stdio_mcp_unsupported_node_version` probe result, and Haven's install
+ * telemetry has been recording that string since the local path shipped. Kept
+ * verbatim even though the guard is no longer local-MCP-only (#1161), because
+ * renaming it would silently split one condition across two codes in the
+ * historical data.
+ */
 export class UnsupportedNodeVersionError extends Error {
   readonly code = 'local_mcp_unsupported_node_version'
+  readonly nodeVersion: string
+  readonly minimumNodeVersion: string
 
-  constructor(nodeVersion: string, minimumNodeVersion: string) {
-    super(`Node.js ${nodeVersion} is not supported. Haven local MCP requires Node.js >=${minimumNodeVersion}.`)
+  constructor(nodeVersion: string, minimumNodeVersion: string, subject = 'Haven setup') {
+    super(unsupportedNodeVersionMessage({ subject, nodeVersion, minimumNodeVersion }))
     this.name = 'UnsupportedNodeVersionError'
+    this.nodeVersion = nodeVersion
+    this.minimumNodeVersion = minimumNodeVersion
   }
 }
 
@@ -97,32 +112,23 @@ export async function prepareLocalMcpRuntime(
   }
 }
 
+/**
+ * Refuse to proceed on an unsupported Node.
+ *
+ * Called from BOTH connect paths since #1161: `runConnect` runs it before any
+ * side effect on the default (hosted MCP + local signer) topology, and
+ * `prepareLocalMcpRuntime` keeps its own call for the `--local` path. It used to
+ * exist only on the latter — the path almost nobody takes — so the documented
+ * floor was enforced where it mattered least.
+ */
 export function assertSupportedNodeVersion(
   nodeVersion = process.versions.node,
   minimumNodeVersion = MCP_RUNTIME_MANIFEST.minimumNodeVersion,
+  subject = 'Haven setup',
 ): void {
-  if (compareNodeVersions(nodeVersion, minimumNodeVersion) < 0) {
-    throw new UnsupportedNodeVersionError(nodeVersion, minimumNodeVersion)
+  if (!isSupportedNodeVersion(nodeVersion, minimumNodeVersion)) {
+    throw new UnsupportedNodeVersionError(nodeVersion, minimumNodeVersion, subject)
   }
-}
-
-function compareNodeVersions(left: string, right: string): number {
-  const leftParts = parseNodeVersion(left)
-  const rightParts = parseNodeVersion(right)
-  for (let i = 0; i < 3; i += 1) {
-    if (leftParts[i] !== rightParts[i]) return leftParts[i] > rightParts[i] ? 1 : -1
-  }
-  return 0
-}
-
-function parseNodeVersion(value: string): [number, number, number] {
-  const match = value.trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/)
-  if (!match) return [0, 0, 0]
-  return [
-    Number(match[1] ?? 0),
-    Number(match[2] ?? 0),
-    Number(match[3] ?? 0),
-  ]
 }
 
 async function installRuntimePackages(

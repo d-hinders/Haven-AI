@@ -327,3 +327,33 @@ export async function findApprovalStatusRow(
   ])
   return result.rows[0] ?? null
 }
+
+// ── Counters ─────────────────────────────────────────────────────────────────
+
+/**
+ * How many approvals is this owner expected to act on?
+ *
+ * `'approved'` is in the set deliberately: an approved request is not finished
+ * — it has been authorised but not yet executed, so it still represents
+ * outstanding work. Only terminal states (executed, rejected, expired) drop out.
+ *
+ * Converged from two byte-different copies of the same question (#1179): the
+ * dashboard and the agent-activity surface each carried their own constant,
+ * identical but for `AS`/`as` casing. They had drifted apart in spelling only,
+ * which is the cheapest moment to converge them — the aggregate owns the
+ * question, not the surfaces that ask it.
+ */
+export const COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL = `SELECT COUNT(*) AS count
+         FROM approval_requests
+         WHERE user_id = $1 AND status IN ('pending', 'approved')`
+
+/** `userId` is REQUIRED — it is the tenant scope of the count. */
+export async function countActionableApprovalsForUser(
+  userId: string,
+  db: Executor = pool,
+): Promise<number> {
+  const result = await db.query<{ count: string }>(COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL, [userId])
+  // `COUNT(*)` always returns exactly one row; the fallback is belt-and-braces
+  // for a caller that hands in a mock returning none.
+  return Number(result.rows[0]?.count ?? '0')
+}

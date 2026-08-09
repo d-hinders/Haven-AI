@@ -12,7 +12,7 @@ covers:
   - packages/backend/package.json
   - packages/frontend/package.json
   - .github/workflows/ci.yml
-last-verified: "2026-08-07" # #997: covers updated (lib/machine-payments.ts moved into modules/mpp/**)
+last-verified: "2026-08-09" # stale-claims sweep: harness table row now matches the #997 covers move
 ---
 
 # Loop Harness Index
@@ -57,7 +57,7 @@ work.
 | --- | --- | --- | --- |
 | x402 coverage branching | `packages/backend/src/domain/payment-coverage.ts` (`decideCoverage`) | invariant set over `delegateBalance + remaining` vs requested amount | bespoke Haven logic, no on-chain backstop on the merchant leg |
 | x402 tx verification decoder | `packages/backend/src/routes/x402-resources.ts` (`_verifyTx`) | AllowanceModule calldata spec (decode `executeAllowanceTransfer`) | parsing/validation surface |
-| Approval-flow state machine | `packages/backend/src/lib/machine-payments.ts` | invariant: no `executed` record without a tx hash; over-limit never auto-executes | property/invariant shape, not differential |
+| Approval-flow state machine | `packages/backend/src/modules/mpp/**` (was `lib/machine-payments.ts`, #997/#980) | invariant: no `executed` record without a tx hash; over-limit never auto-executes | property/invariant shape, not differential |
 
 ## Maintenance notes
 

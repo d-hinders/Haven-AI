@@ -12,6 +12,17 @@ vi.mock('../../db.js', () => ({
 
 import agentActivityRoutes from '../agent-activity.js'
 
+/**
+ * Match the user-scoped approval COUNT without pinning its casing or layout.
+ * The literal `'SELECT COUNT(*) as count FROM approval_requests'` broke the
+ * moment #1179 converged the two copies into one constant with the other
+ * copy's spelling — the query was semantically identical, the string was not.
+ * Match the shape instead.
+ */
+const isUserApprovalCount = (sql: string) =>
+  /COUNT\(\*\)/i.test(sql) && /FROM\s+approval_requests\s+WHERE\s+user_id/is.test(sql)
+
+
 const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
 const TOKEN_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const MERCHANT_ADDRESS = '0x2222222222222222222222222222222222222222'
@@ -195,7 +206,7 @@ describe('agent activity routes', () => {
       if (sql.includes('FROM agent_tool_invocations')) {
         return { rows: [] }
       }
-      if (sql.includes('SELECT COUNT(*) as count FROM approval_requests')) {
+      if (isUserApprovalCount(sql)) {
         return { rows: [{ count: '0' }] }
       }
       throw new Error(`Unexpected query: ${sql}`)

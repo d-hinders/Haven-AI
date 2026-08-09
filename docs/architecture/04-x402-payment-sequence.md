@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-07" # re-verified same day (#999): a dep-lint-exempt comment on routes/x402-resources.ts only — no behavior change; sequence and settle paths unchanged
+last-verified: "2026-08-09" # re-verified same day (#999): a dep-lint-exempt comment on routes/x402-resources.ts only — no behavior change; sequence and settle paths unchanged. #1155 re-verified: the hosted quote/prepare results gained signer_compatibility (the expected-context version they will emit) and the signer advertises the set it verifies at handshake — pre-payment skew detection, advisory only. No sequence step, rail branch, settle path or refusal changed. #1196 re-verified: the x402 authorize path now PREFETCHES the shared nonce watermark inside its existing Promise.all instead of reading it serially, and the same coordinator was wired into the three other legacy-rail sign-hash builders. The sequence, the rail branch, the settle path and every refusal are unchanged — this only affects WHICH nonce a signature targets, and it targets a fresher one — #1209 re-verified: the nonce-coordinator wait moved BELOW the coverage decision (queue/insufficient sign nothing), still above generateTransferHash; no sequence step, refusal or settle path changed
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -167,7 +167,18 @@ sequenceDiagram
 Before signing the funding hash, the edge signer checks payload-hash equality,
 reconstructs the canonical payment/resource/merchant/amount/asset/network/expiry
 context, verifies Haven's expected-context signature against its configured
-trusted signer. Before building the merchant header, it rejects expired context
+trusted signer.
+
+> **Every field in that context must be the value Haven SIGNED, not a locally
+> preferred one.** The hosted MCP relays the context; it is never a second
+> opinion about what it contains. `resource_url` is the worked example
+> ([#1189](https://github.com/d-hinders/Haven-AI/issues/1189)): the backend
+> signs `paymentRequired.resource.url`, and the hosted surface briefly preferred
+> the accepted option's own `resource` when a merchant set one. The
+> reconstruction then differed by one field and the signer refused — correctly,
+> but with `authentication message is invalid`, which reads as a credential
+> problem rather than a field mismatch. When a relayed field looks like it has
+> two plausible sources, the signed one wins by definition. Before building the merchant header, it rejects expired context
 and verifies that the live challenge still matches the recorded funded context.
 
 ### Expected context v1 / v2 — which payload may be signed (#1138)
@@ -210,6 +221,19 @@ raw Zod string instead of a Haven diagnosis. Widening the schema widened the err
 path only; an unrecognised version was never signable and still is not. Symptom
 strings per signer age are tabulated in
 [`mcp-runtime-compatibility.md`](../operations/mcp-runtime-compatibility.md).
+
+That refusal is still *reactive* — the agent learns by quoting and then failing
+to sign. Since [#1155](https://github.com/d-hinders/Haven-AI/issues/1155) both
+halves of the comparison are also available **before** anything is signed:
+`haven_pay_x402_quote` and `haven_pay_mcp_tool` return
+`signer_compatibility.x402_expected_context_version` (the version that quote will
+emit), and the signer states the set it verifies at its own MCP `initialize`.
+The comparison is necessarily agent-mediated — the two servers cannot introspect
+each other, and only the client sees both handshakes — so this layer ships
+information and a prompt, never a gate. A mismatch is **advisory**: nothing that
+succeeded before fails now, and the signing-time refusal above remains the
+enforcement point. See
+[`mcp-runtime-compatibility.md`](../operations/mcp-runtime-compatibility.md#detecting-skew-before-a-payment-1155).
 
 Delegation-rail UserOp signing is **local-signer-only** — the hosted/edge
 keyless path never signs an account UserOp. That is a non-custody and CASP-scope

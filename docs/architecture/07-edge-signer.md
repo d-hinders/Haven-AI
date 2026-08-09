@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-05"
+last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
 ---
 
 # Haven — Edge Signer
@@ -80,6 +80,18 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    consent acknowledgement tied to the delegate, optional wallet/agent/network
    metadata, and exposed tool set. Each signing operation appends a local audit
    row containing context hashes but no key, signature, or merchant header.
+
+   **Handshake surface (#1155).** The `initialize` result also states which
+   expected-context and sweep-binding versions this signer will verify —
+   `capabilities.experimental["haven/signer-compatibility"]` for machines, and
+   the same numbers in MCP `instructions` for the model. Both are derived from
+   `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS` in
+   `capabilities.ts`, never a second literal. It exists so version skew is
+   detectable *before* a payment: the hosted quote reports the version it will
+   emit, the agent compares, and a mismatch is a warning naming the fix — never
+   a refusal, which stays at signing time (#1143). Only the agent sees both
+   handshakes, so the comparison is agent-mediated by construction. The
+   handshake carries no key material and no authority.
 
 SDK / autonomous agents use the **core** directly (or the existing
 `HavenClient` signing). MCP-capable runtimes use the **stdio front-end**. One

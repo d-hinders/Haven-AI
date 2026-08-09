@@ -34,7 +34,10 @@ import {
   recoverSigner,
   executeAllowanceTransfer,
 } from '../../rails/allowance-module.js'
-import { waitForFreshAllowanceNonce } from '../../rails/allowance-nonce-coordinator.js'
+import {
+  readSharedWatermark,
+  waitForFreshAllowanceNonce,
+} from '../../rails/allowance-nonce-coordinator.js'
 // Evidence recording is mpp-module orchestration (#997) that x402 also needs
 // after a successful legacy-rail settlement — a genuine cross-module need,
 // so it comes through the module's public entry point (rule 6, not a deep
@@ -258,8 +261,12 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
   // 6. On-chain allowance check + auto-queue when over the remaining allowance
   let onChainAllowance
   let chainTimeSec: number
+  let sharedWatermark: number | null
   try {
-    ;[onChainAllowance, chainTimeSec] = await Promise.all([
+    // The watermark rides along with the on-chain reads (#1196) rather than
+    // going out serially afterwards: it is a single indexed lookup against
+    // reads that take orders of magnitude longer, so concurrently it is free.
+    ;[onChainAllowance, chainTimeSec, sharedWatermark] = await Promise.all([
       getTokenAllowance(
         agent.chain_id,
         agent.safe_address,
@@ -267,6 +274,12 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
         tokenAddress,
       ),
       getLatestBlockTimeSec(agent.chain_id),
+      readSharedWatermark(
+        agent.chain_id,
+        agent.safe_address,
+        agent.delegate_address,
+        tokenAddress,
+      ),
     ])
   } catch (err) {
     return {
@@ -274,27 +287,6 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
       body: { error: 'Failed to read on-chain allowance', details: err instanceof Error ? err.message : String(err) },
     }
   }
-
-  // Proactively avoid the stale-nonce race (#692): if a prior transfer for this
-  // delegate just incremented the nonce, wait until that increment is visible
-  // before signing, so the sign_hash never targets an already-consumed nonce.
-  // Best-effort with a timeout fallback — the preflight + retry still cover it.
-  onChainAllowance.nonce = await waitForFreshAllowanceNonce(
-    agent.chain_id,
-    agent.safe_address,
-    agent.delegate_address,
-    tokenAddress,
-    onChainAllowance.nonce,
-    async () =>
-      (
-        await getTokenAllowance(
-          agent.chain_id,
-          agent.safe_address,
-          agent.delegate_address,
-          tokenAddress,
-        )
-      ).nonce,
-  )
 
   const effective = computeEffectiveAllowance(onChainAllowance, chainTimeSec)
 
@@ -442,6 +434,31 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
   //
   // For standard x402, `payTo` can be the agent-owned delegate EOA because
   // the protocol's merchant-facing payment header is settled from an EOA.
+  // Proactively avoid the stale-nonce race (#692): if a prior transfer for this
+  // delegate just incremented the nonce, wait until that increment is visible
+  // before signing, so the sign_hash never targets an already-consumed nonce.
+  // Best-effort with a timeout fallback — the preflight + retry still cover it.
+  // Runs AFTER the coverage decision (#1209): the insufficient and queue
+  // branches sign nothing, so the bounded wait only runs when a hash will
+  // actually be built. The nonce's only consumer is generateTransferHash.
+  onChainAllowance.nonce = await waitForFreshAllowanceNonce(
+    agent.chain_id,
+    agent.safe_address,
+    agent.delegate_address,
+    tokenAddress,
+    onChainAllowance.nonce,
+    async () =>
+      (
+        await getTokenAllowance(
+          agent.chain_id,
+          agent.safe_address,
+          agent.delegate_address,
+          tokenAddress,
+        )
+      ).nonce,
+    { sharedWatermark },
+  )
+
   // Haven does not control that EOA or its private key. This transfer is only
   // a Safe AllowanceModule top-up authorized by the agent signature and
   // constrained by the user's on-chain allowance; the backend merely relays it.

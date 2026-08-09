@@ -7,7 +7,7 @@ covers:
   - packages/frontend/src/hooks/useAccountSigners.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/backend/src/rails/hybrid-signer-actions.ts
-last-verified: "2026-08-06"
+last-verified: "2026-08-09" # stale-claims sweep: #1153 posture (no code gate), #980 path moves
 ---
 
 # Dev testing with a wallet signer
@@ -68,9 +68,10 @@ throwaway account.
   each person needs their own dev account and wallet.
 - **Reversible** — remove the wallet again from the same card, as long as a
   usable passkey remains.
-- **Same shape as mainnet**, where two signers are required, so nothing here is a
-  dev-only hack. The exception: on Base Sepolia the floor isn't enforced, which
-  is why a dead passkey (setup done on a since-deleted preview) is survivable
-  here and wouldn't be on mainnet.
+- **Same shape as mainnet** — enrolling a second signer is exactly what the
+  post-funding backup recommendation asks for there (#1153; no chain requires
+  two signers any more), so nothing here is a dev-only hack. A dead passkey
+  (setup done on a since-deleted preview) is survivable on any chain as long
+  as one usable signer remains — which is the recommendation's whole point.
 
 See [`dev-environment.md`](dev-environment.md) for the rest of the dev stack.

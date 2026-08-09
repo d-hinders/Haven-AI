@@ -6,8 +6,9 @@ covers:
   - packages/mcp/**
   - packages/connect/**
   - packages/signer/**
+  - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-07"
+last-verified: "2026-08-08" # #1155: pre-payment skew detection documented (signer handshake advertisement + hosted quote-reported version); runtime manifest, Node-floor and release-checklist sections re-read and unchanged
 ---
 
 # MCP Runtime Compatibility
@@ -15,6 +16,21 @@ last-verified: "2026-08-07"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Two sections sit outside that scope**, each for its own reason:
+>
+> - [Where the Node floor is enforced](#where-the-node-floor-is-enforced) applies
+>   to **both** topologies. The floor is a property of the machine, not of the
+>   chosen topology — scoping it to the local path is exactly the mistake
+>   [#1161](https://github.com/d-hinders/Haven-AI/issues/1161) fixed, so it is
+>   documented in one place rather than split across two.
+> - [Signer / hosted-MCP version skew](#signer--hosted-mcp-version-skew-1138-1143)
+>   and its [pre-payment detection](#detecting-skew-before-a-payment-1155)
+>   subsection are the **opposite** case: they apply only to the hosted MCP +
+>   local signer topology, because skew needs two independently versioned
+>   components and the local runtime signs in-process with the SDK it shipped
+>   with. They live here because this is the runtime-compatibility doc, not
+>   because they describe the local path.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent
@@ -39,6 +55,43 @@ Keep this table in sync with that file.
 | `@haven_ai/signer` | `0.1.18-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
+
+## Where the Node floor is enforced
+
+`>=24.0.0` is declared in four places that must agree: the `engines.node` of the
+four packages this floor governs (`sdk`, `connect`, `signer`, `mcp`), `.nvmrc`,
+`HAVEN_MINIMUM_NODE_VERSION` in `@haven_ai/sdk`, and
+`MCP_RUNTIME_MANIFEST.minimumNodeVersion`. The manifest field is **derived** from
+the SDK constant, and a guard test in each of those four packages pins its own
+`engines.node` to it. They cannot drift silently.
+
+They did drift once, which is why the constant exists. `engines` said `>=24`
+everywhere while the manifest enforced `20.0.0`, so the guard meant to hold the
+floor passed Node v23 — and because that guard only ran inside local-MCP
+installation, the **default** (hosted MCP + local signer) path never called it at
+all. A full connect on Node v23.1.0 completed, installed the signer, and produced
+a real testnet payment signature ([#1161](https://github.com/d-hinders/Haven-AI/issues/1161)).
+
+`@haven_ai/cli` is **out of scope and declares no `engines` floor today** — it is
+published but sits outside the connect/signer/MCP runtime this section governs.
+Neither do the unpublished workspace packages (`backend`, `frontend`, `core`,
+`mcp-server`, `demo-merchant-mcp`, `qa-agent`), which are pinned by `.nvmrc` in
+CI instead. Read "the floor" here as the agent-runtime floor, not a repo-wide one.
+
+Enforcement now happens at three points, all refusing rather than warning:
+
+| Point | What refuses | Why there |
+| --- | --- | --- |
+| `runConnect` (every topology) | Setup, before the setup token is resolved, credentials are written, or an agent is registered | A failed precondition must not strand a half-created agent or burn a one-shot token |
+| `prepareLocalMcpRuntime` | The `--local` install | Kept; it is the deeper of the two connect paths |
+| `runSignerStdioServer` / `runStdioServer` | Startup, before credentials are read | Install-time checks cannot see a Node **downgrade** after setup, or a version manager handing the agent runtime a different Node than the shell that connected |
+
+Refusing rather than warning is deliberate. `engines` alone is advisory — npm
+prints `EBADENGINE` and installs anyway unless the user runs `engine-strict` — so
+before this the floor held by luck. And what gets installed is the **signer**,
+which holds the delegate key and produces every payment signature; on an
+unsupported runtime the plausible failure is a wrong or missing signature. "It
+seemed to work" is exactly the evidence that cannot be trusted there.
 
 ## Release Checklist
 
@@ -122,8 +175,74 @@ the update is the fix. The same applies to `expected_auth.version` on the sweep
 binding, which shares the mechanism (`SUPPORTED_SWEEP_BINDING_VERSIONS`) and will
 hit this the first time that binding is versioned.
 
+### Detecting skew before a payment (#1155)
+
+Every row above is a *post-quote* symptom: the agent found out by trying to pay.
+The same skew is now detectable at connection time, from two surfaces that cost
+nothing to read.
+
+| Surface | What it states | Where |
+|---|---|---|
+| Signer `initialize` result | The version sets this signer will verify — `capabilities.experimental["haven/signer-compatibility"]` (machine-readable) and the same numbers in `instructions` (what clients show the model) | `packages/signer/src/capabilities.ts`, wired in `buildSignerMcpServer` |
+| Hosted quote/prepare result | `signer_compatibility.x402_expected_context_version` — the version that quote will emit — plus the comparison instruction in-band | `packages/mcp-server/src/tools.ts` (`haven_pay_x402_quote`, `haven_pay_mcp_tool`) |
+
+**The check is agent-mediated, and cannot be otherwise.** The signer and the
+hosted MCP are two separate servers connected to the same agent client. The
+hosted server cannot introspect the signer, and the signer never calls the Haven
+API — it only signs. Only the agent sees both handshakes, so what ships is the
+information plus the prompt to compare it. The hosted tool descriptions carry
+that prompt; the signer's `instructions` carry the other half.
+
+**A mismatch warns, it does not block** (owner decision, 2026-08-07). No refusal
+was added to the payment path: a quote whose emitted version the signer may not
+know still succeeds and simply reports the number. Refusing on the strength of
+reported client metadata would let a false positive block a working payment,
+which is strictly worse than the reactive state — and the signing-time guard
+above already fails closed, so nothing is unguarded. Both surfaces name the same
+fix (update `@haven_ai/signer`; rerun `npx @haven_ai/connect@alpha`), so an agent
+that meets either says the same thing to the user.
+
+The advertised set is **derived** from `SUPPORTED_X402_EXPECTED_VERSIONS` /
+`SUPPORTED_SWEEP_BINDING_VERSIONS`, never a second literal — including the
+rendered numbers inside `instructions`. Drift between what is advertised and what
+is enforced is the one way this feature could become a lie, so tests hold them
+together in both directions: a handshake assertion pins the advertised sets to
+the exported constants, and a behavioural test drives the real signing path with
+every advertised version and fails if the skew guard rejects any of them.
+
+The signer advertises under `capabilities.experimental` rather than the newer
+`extensions` field on purpose. Both are `Record<string, object>` in
+`@modelcontextprotocol/sdk@1.29`, but a client running an older SDK parses the
+`initialize` result with a `ServerCapabilities` schema that has no `extensions`
+key and would strip it — and an out-of-date client is exactly the population this
+feature serves.
+
+Adding a read-only capability *tool* was the documented fallback if the SDK could
+not carry this at handshake. It can (`ServerOptions.capabilities` and
+`ServerOptions.instructions`, both forwarded by `McpServer` into the `initialize`
+result), and a new tool would have been worse than redundant: the signer's
+consent hash is computed over its registered tool names, so adding one would
+invalidate every existing acknowledgement and prompt users to re-consent for a
+diagnostic.
+
+This covers the **hosted MCP + local signer** topology only. The local
+`@haven_ai/mcp` runtime signs in-process with the SDK it was installed with, so
+there is no second component to be out of step with.
+
 ## Troubleshooting
 
+- **A stale local `dist/` masquerading as version skew (#1188).** The symptoms
+  in the skew table above have a second, unrelated cause: a sibling package
+  whose `dist/` is older than its `src/`. `packages/signer`'s dist once sat four
+  weeks behind its source and produced
+  `signX402FundingTypedData is not a function` plus a pre-#1143 schema rejecting
+  `auth.version` — indistinguishable, from the error alone, from a genuinely
+  outdated installed signer. The npm scripts rebuild what they depend on
+  (`npm run test -w packages/mcp-server` builds sdk and signer first), so this
+  only bites when vitest is invoked directly. A `globalSetup` guard now refuses
+  to run those suites against a stale dist, and `npm run check:dist` reports it
+  on demand. If you see a skew-shaped error locally, check this before
+  reinstalling anything.
 - **Broken or root-owned `~/.npm`:** the MCP runtime install first tries the
   user's default npm cache with `--prefer-offline` (which `npx` just warmed, so
   the signer/sdk tarballs are reused instead of re-downloaded). If that fails —
@@ -133,8 +252,14 @@ hit this the first time that binding is versioned.
 - **Invalid Codex TOML:** the connector writes Codex config with a TOML string
   serializer and validates the generated Haven block before writing. The
   expected shape is `command = ".../bin/haven-mcp"` and `args = []`.
-- **Unsupported Node.js:** local MCP setup requires Node.js `>=24.0.0`. Upgrade
-  Node and rerun the setup command.
+- **Unsupported Node.js:** the connector, signer, and MCP packages require
+  Node.js `>=24.0.0`, and
+  since [#1161](https://github.com/d-hinders/Haven-AI/issues/1161) setup
+  **refuses** below it rather than proceeding — see
+  [Where the Node floor is enforced](#where-the-node-floor-is-enforced). The
+  message names your version and how to upgrade. Upgrade Node and rerun setup.
+  If setup succeeded but the signer now refuses to start, the runtime launching
+  it is on an older Node than the shell you upgraded.
 - **Local MCP runtime install failed:** rerun the setup command. It will reuse
   local credentials and install the pinned runtime into `~/.haven/mcp-runtime`,
   falling back from the user's default npm cache to `~/.haven/npm-cache` if the

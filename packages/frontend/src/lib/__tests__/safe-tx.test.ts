@@ -1,7 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toHex, type Address } from 'viem'
 
-import { proposeSafeTx, type SafeTxParams } from '@/lib/safe-tx'
+const mockExecSafe = vi.fn()
+
+vi.mock('@/lib/api', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
+  return {
+    ...actual,
+    api: { execSafe: (...args: unknown[]) => mockExecSafe(...args) },
+  }
+})
+
+import { executeSafeTx, proposeSafeTx, type SafeTxParams } from '@/lib/safe-tx'
 
 describe('proposeSafeTx', () => {
   beforeEach(() => {
@@ -46,5 +56,45 @@ describe('proposeSafeTx', () => {
     const body = JSON.parse(request.body as string)
 
     expect(body.signature).toBe(contractSignature)
+  })
+})
+
+describe('executeSafeTx (#1229)', () => {
+  it('tells the relay WHICH passkey signed', async () => {
+    // An account can hold a backup passkey now, so "the user's passkey on this
+    // chain" no longer names one credential. Without this the relay would have
+    // to guess which signer contract to deploy and check against.
+    mockExecSafe.mockResolvedValue({ tx_hash: '0xtx', chain_id: 100 })
+
+    const safeTx: SafeTxParams = {
+      to: '0x1111111111111111111111111111111111111111' as Address,
+      value: 0n,
+      data: '0x',
+      operation: 0,
+      safeTxGas: 0n,
+      baseGas: 0n,
+      gasPrice: 0n,
+      gasToken: '0x0000000000000000000000000000000000000000' as Address,
+      refundReceiver: '0x0000000000000000000000000000000000000000' as Address,
+      nonce: 1n,
+    }
+
+    await executeSafeTx(
+      {
+        type: 'passkey',
+        address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2' as Address,
+        credentialId: 'cred-backup',
+        chainId: 100,
+      },
+      {} as never,
+      '0x07058311f995c89F4DbE17Db61fa1A3CDe638975' as Address,
+      safeTx,
+      `0x${'ab'.repeat(32)}`,
+      100,
+    )
+
+    expect(mockExecSafe).toHaveBeenCalledWith(
+      expect.objectContaining({ credential_id: 'cred-backup' }),
+    )
   })
 })

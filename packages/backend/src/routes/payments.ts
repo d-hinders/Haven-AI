@@ -31,6 +31,10 @@ import {
   recoverSigner,
   executeAllowanceTransfer,
 } from '../rails/allowance-module.js'
+import {
+  readSharedWatermark,
+  waitForFreshAllowanceNonce,
+} from '../rails/allowance-nonce-coordinator.js'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a legacy-rail send confirms, so it imports the module's
 // public entry point (same pattern as routes/x402.ts -> modules/x402/).
@@ -307,8 +311,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // the reset decision must key off chain `block.timestamp`, not wall-clock.
     let onChainAllowance
     let chainTimeSec: number
+    let sharedWatermark: number | null
     try {
-      ;[onChainAllowance, chainTimeSec] = await Promise.all([
+      ;[onChainAllowance, chainTimeSec, sharedWatermark] = await Promise.all([
         getTokenAllowance(
           agent.chain_id,
           agent.safe_address,
@@ -316,6 +321,15 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           tokenAddress,
         ),
         getLatestBlockTimeSec(agent.chain_id),
+        // Rides along with the chain reads (#1196) — a single indexed lookup
+        // against reads orders of magnitude slower, so it costs nothing here
+        // and would be a serial round trip anywhere else.
+        readSharedWatermark(
+          agent.chain_id,
+          agent.safe_address,
+          agent.delegate_address,
+          tokenAddress,
+        ),
       ])
     } catch (err) {
       return reply.code(502).send({
@@ -367,6 +381,32 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         expires_at: approval.expires_at,
       })
     }
+
+    // #1196: this path builds a sign_hash from the allowance nonce too, so it
+    // needs the same stale-nonce protection x402 has had since #692 — the
+    // #693 preflight kept it SAFE without it, but a stale nonce still meant a
+    // revert and a retry. Runs AFTER the coverage branch (#1209): the queue
+    // path signs nothing, so waiting up to 250ms for a nonce it would only
+    // discard taxed every over-allowance request for no benefit. The nonce's
+    // only consumer is generateTransferHash below; computeEffectiveAllowance
+    // never reads it.
+    onChainAllowance.nonce = await waitForFreshAllowanceNonce(
+      agent.chain_id,
+      agent.safe_address,
+      agent.delegate_address,
+      tokenAddress,
+      onChainAllowance.nonce,
+      async () =>
+        (
+          await getTokenAllowance(
+            agent.chain_id,
+            agent.safe_address,
+            agent.delegate_address,
+            tokenAddress,
+          )
+        ).nonce,
+      { sharedWatermark },
+    )
 
     // 6. Generate the transfer hash on-chain
     let signHash: string

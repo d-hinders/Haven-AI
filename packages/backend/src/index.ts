@@ -30,6 +30,8 @@ import {
   setRevoker,
   revokeOnChain,
   setReceiptSigningKey,
+  passportReadiness,
+  logPassportReadiness,
   retryPendingPassports,
   reconcilePendingRevocations,
   listStuckRevocations,
@@ -149,6 +151,13 @@ app.get('/health', async (_request, reply) => {
   const start = Date.now()
   // Cached from the hourly relayer scan — never a live RPC read on a probe.
   const relayer = getRelayerBalanceStatus()
+  // Passport configuration state (#1151). Pure env/config read, no chain or DB
+  // access. Booleans plus the already-published issuer address — never key
+  // material, never the schema UID. Reported on the degraded branch too: a
+  // passport misconfiguration is exactly the thing an operator is looking for
+  // when they curl /health, and losing it because Postgres is slow would repeat
+  // the failure this field exists to end.
+  const passport = passportReadiness()
   try {
     await pool.query('SELECT 1')
     const dbLatencyMs = Date.now() - start
@@ -157,6 +166,7 @@ app.get('/health', async (_request, reply) => {
       timestamp: new Date().toISOString(),
       db: { status: 'ok', latencyMs: dbLatencyMs },
       relayer,
+      passport,
     }
   } catch (err) {
     reply.status(503)
@@ -165,6 +175,7 @@ app.get('/health', async (_request, reply) => {
       timestamp: new Date().toISOString(),
       db: { status: 'error', error: err instanceof Error ? err.message : String(err) },
       relayer,
+      passport,
     }
   }
 })
@@ -192,6 +203,10 @@ setReceiptSigningKey(process.env.PASSPORT_RECEIPT_SIGNING_KEY ?? null, [
   config.relayerPrivateKey,
   ...SUPPORTED_CHAIN_IDS.map((id) => process.env[`RELAYER_PRIVATE_KEY_${id}`]),
 ])
+// Warn — once, at boot — when this deployment anchors passports it cannot
+// verify (#1151). Silent in every other combination. Must run AFTER the signer
+// is installed above, or it would warn on every deployment.
+logPassportReadiness(app.log)
 
 await app.register(authRoutes, { prefix: '/auth' })
 await app.register(userRoutes, { prefix: '/user' })

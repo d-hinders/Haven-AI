@@ -30,6 +30,10 @@ import { SELECT_DELEGATION_FOR_PAYMENT_SQL } from '../src/infra/repositories/del
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
 import {
+  FIND_ALLOWANCE_NONCE_WATERMARK_SQL,
+  UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL,
+} from '../src/infra/repositories/allowance-nonce-watermarks.js'
+import {
   GET_RECORDED_FEE_SQL,
   INSERT_PAYMENT_FEE_SQL,
 } from '../src/infra/repositories/payment-fees.js'
@@ -161,6 +165,7 @@ import {
   INSERT_MACHINE_APPROVAL_SQL,
   INSERT_PAYMENT_APPROVAL_SQL,
   INSERT_SEND_APPROVAL_SQL,
+  COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL,
 } from '../src/infra/repositories/approval-requests.js'
 import {
   CONFIRM_X402_INTENT_SQL,
@@ -224,9 +229,11 @@ import {
   FIND_OWNED_SAFE_SQL,
   FIND_SAFE_ID_BY_ADDRESS_AND_CHAIN_SQL,
   INSERT_USER_SAFE_SQL,
+  LINK_DEFAULT_USER_SAFE_SQL,
   LIST_APPROVER_METADATA_FOR_SAFE_SQL,
   LIST_KNOWN_APPROVERS_FOR_USER_SQL,
   LIST_SAFES_FOR_USER_SQL,
+  LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL,
   ORPHAN_AGENTS_FOR_SAFE_SQL,
   ORPHAN_SELF_SIGN_AGENTS_FOR_SAFE_SQL,
   PROMOTE_SAFE_TO_DEFAULT_SQL,
@@ -238,6 +245,7 @@ import {
   FIND_OWNED_SAFE_WITH_TYPE_ANY_CHAIN_SQL,
   FIND_OWNED_SAFE_WITH_TYPE_FOR_CHAIN_SQL,
   FIND_EXECUTION_RAIL_FOR_AGENT_SQL,
+  LIST_SESSION_SAFES_FOR_USER_SQL,
 } from '../src/infra/repositories/user-safes.js'
 import {
   FIND_APPROVAL_REQUEST_AGENT_MATCHES_SQL,
@@ -251,6 +259,47 @@ import {
   LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL,
   LIST_BASIC_SAFES_FOR_USER_SQL,
 } from '../src/infra/repositories/transaction-history.js'
+import {
+  FIND_CURRENCY_PREFERENCE_SQL,
+  FIND_USER_CREDENTIALS_BY_EMAIL_SQL,
+  FIND_USER_ID_BY_EMAIL_SQL,
+  FIND_USER_PROFILE_BY_ID_SQL,
+  INSERT_USER_SQL,
+  UPDATE_CURRENCY_PREFERENCE_SQL,
+  UPDATE_USER_NAME_SQL,
+  UPDATE_USER_SAFE_ADDRESS_SQL,
+  UPDATE_USER_WALLET_ADDRESS_SQL,
+} from '../src/infra/repositories/users.js'
+import {
+  DELETE_OWNER_ALIAS_SQL,
+  LIST_OWNER_ALIASES_SQL,
+  UPSERT_OWNER_ALIAS_SQL,
+} from '../src/infra/repositories/owner-aliases.js'
+import {
+  FIND_PORTFOLIO_SNAPSHOTS_SQL,
+  HAS_FIRST_AGENT_PAYMENT_SQL,
+  INSERT_PORTFOLIO_SNAPSHOT_SQL,
+  LIST_DASHBOARD_AGENTS_SQL,
+  LIST_DASHBOARD_ALLOWANCES_SQL,
+  LIST_DASHBOARD_SAFES_SQL,
+  SUM_MONTHLY_APPROVAL_SPEND_SQL,
+  SUM_MONTHLY_PAYMENT_SPEND_SQL,
+} from '../src/infra/repositories/dashboard.js'
+import {
+  COUNT_PENDING_APPROVALS_FOR_AGENT_SQL,
+  LIST_AGENT_APPROVALS_SQL,
+  LIST_AGENT_PAYMENTS_SQL,
+  LIST_FEED_APPROVALS_SQL,
+  LIST_FEED_PAYMENTS_SQL,
+  SUM_AGENT_SPEND_ALL_TIME_SQL,
+  SUM_AGENT_SPEND_TODAY_SQL,
+  SUM_AGENT_SPEND_WEEK_SQL,
+} from '../src/infra/repositories/agent-activity.js'
+import {
+  LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL,
+  LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL,
+} from '../src/infra/repositories/agent-tool-invocations.js'
+import { LIST_AGENT_NAMES_FOR_USER_SQL } from '../src/infra/repositories/agents.js'
 
 interface SmokeQuery {
   name: string
@@ -336,6 +385,60 @@ const QUERIES: SmokeQuery[] = [
   { name: 'user-safes: approver metadata for safe', sql: LIST_APPROVER_METADATA_FOR_SAFE_SQL },
   { name: 'user-safes: approver metadata upsert (expression conflict target)', sql: UPSERT_APPROVER_METADATA_SQL },
   { name: 'user-safes: approver metadata delete', sql: DELETE_APPROVER_METADATA_SQL },
+  { name: 'user-safes: owner-directory list (account_type)', sql: LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL },
+  { name: 'user-safes: idempotent link from PUT /user/safe', sql: LINK_DEFAULT_USER_SAFE_SQL },
+  // Users aggregate (#1167). IMPORTED from the repository — verbatim from
+  // routes/user.ts.
+  { name: 'users: update display name', sql: UPDATE_USER_NAME_SQL },
+  { name: 'users: update connected wallet address', sql: UPDATE_USER_WALLET_ADDRESS_SQL },
+  { name: 'users: update legacy safe_address mirror', sql: UPDATE_USER_SAFE_ADDRESS_SQL },
+  { name: 'users: read currency preference', sql: FIND_CURRENCY_PREFERENCE_SQL },
+  { name: 'users: update currency preference', sql: UPDATE_CURRENCY_PREFERENCE_SQL },
+  // Signup/login (#1180). IMPORTED — verbatim from routes/auth.ts. These are
+  // the only statements that look an account up by EMAIL rather than id, so a
+  // schema change to that column would break sign-in itself.
+  { name: 'auth: existing-account check by email', sql: FIND_USER_ID_BY_EMAIL_SQL },
+  { name: 'auth: signup insert', sql: INSERT_USER_SQL },
+  { name: 'auth: login credentials read by email', sql: FIND_USER_CREDENTIALS_BY_EMAIL_SQL },
+  { name: 'auth: /me profile read by id', sql: FIND_USER_PROFILE_BY_ID_SQL },
+  { name: 'auth: session safes payload (carries account_type, #1069)', sql: LIST_SESSION_SAFES_FOR_USER_SQL },
+  // Cross-replica allowance-nonce watermark (#718). The GREATEST upsert is the
+  // monotonicity guarantee — a schema change that broke it would silently
+  // re-open the stale-nonce window.
+  { name: 'nonce: raise the allowance watermark (GREATEST upsert)', sql: UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL },
+  { name: 'nonce: read the allowance watermark', sql: FIND_ALLOWANCE_NONCE_WATERMARK_SQL },
+  // Owner-alias aggregate (#1167). IMPORTED — verbatim from routes/user.ts.
+  { name: 'owner-aliases: list for confirmed owners', sql: LIST_OWNER_ALIASES_SQL },
+  { name: 'owner-aliases: upsert', sql: UPSERT_OWNER_ALIAS_SQL },
+  { name: 'owner-aliases: delete', sql: DELETE_OWNER_ALIAS_SQL },
+  // Dashboard overview aggregate (#1167). IMPORTED — verbatim from
+  // routes/dashboard.ts.
+  { name: 'dashboard: account list', sql: LIST_DASHBOARD_SAFES_SQL },
+  { name: 'dashboard: agent preview (safe join)', sql: LIST_DASHBOARD_AGENTS_SQL },
+  { name: 'dashboard: first-agent-payment milestone', sql: HAS_FIRST_AGENT_PAYMENT_SQL },
+  { name: 'dashboard: legacy allowance mirror for agents', sql: LIST_DASHBOARD_ALLOWANCES_SQL },
+  { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
+  { name: 'dashboard: portfolio snapshot upsert', sql: INSERT_PORTFOLIO_SNAPSHOT_SQL },
+  { name: 'dashboard: month-to-date payment spend', sql: SUM_MONTHLY_PAYMENT_SPEND_SQL },
+  { name: 'dashboard: month-to-date approval spend', sql: SUM_MONTHLY_APPROVAL_SPEND_SQL },
+  // Agent-activity read model (#1167). IMPORTED — verbatim from
+  // routes/agent-activity.ts. The four-table payment/approval joins are the
+  // highest-value additions in this block: they reach machine_payment_evidence
+  // and machine_payment_reconciliation_events, which no other smoke query
+  // touches from this angle.
+  { name: 'agent-activity: single-agent payments (evidence joins)', sql: LIST_AGENT_PAYMENTS_SQL },
+  { name: 'agent-activity: single-agent approvals (evidence joins)', sql: LIST_AGENT_APPROVALS_SQL },
+  { name: 'agent-activity: feed payments (evidence joins)', sql: LIST_FEED_PAYMENTS_SQL },
+  { name: 'agent-activity: feed approvals (evidence joins)', sql: LIST_FEED_APPROVALS_SQL },
+  { name: 'agent-activity: spend all time', sql: SUM_AGENT_SPEND_ALL_TIME_SQL },
+  { name: 'agent-activity: spend today', sql: SUM_AGENT_SPEND_TODAY_SQL },
+  { name: 'agent-activity: spend this week', sql: SUM_AGENT_SPEND_WEEK_SQL },
+  { name: 'agent-activity: pending approvals for agent', sql: COUNT_PENDING_APPROVALS_FOR_AGENT_SQL },
+  // One statement, two surfaces (#1179) — the dashboard and the activity feed.
+  { name: 'approvals: actionable count for user', sql: COUNT_ACTIONABLE_APPROVALS_FOR_USER_SQL },
+  { name: 'agent-tool-invocations: read for agent', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL },
+  { name: 'agent-tool-invocations: read for agent set', sql: LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL },
+  { name: 'agents: name map for activity feed', sql: LIST_AGENT_NAMES_FOR_USER_SQL },
   {
     // Every authenticated agent request runs this, and it is where
     // `agent.chain_id` comes from — the value machine-payments.ts then uses for
@@ -364,26 +467,13 @@ const QUERIES: SmokeQuery[] = [
     name: 'x402: exact-amount idempotency reload',
     sql: FIND_X402_INTENT_BY_KEY_SQL,
   },
-  {
-    name: 'payments: session intent insert (execution_rail pinned)',
-    sql: `INSERT INTO payment_intents (
-            agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
-            to_address, amount_raw, amount_human, delegate_address,
-            allowance_nonce, sign_hash,
-            execution_rail, session_permission_id, session_user_op,
-            status, expires_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-            'pending_signature', NOW() + interval '10 minutes')
-          RETURNING *`,
-  },
-  {
-    name: 'rotation: guarded session switch (recordRotatedSession)',
-    sql: `UPDATE agents
-          SET session_permission_id = $1
-          WHERE id = $2
-            AND session_permission_id IS NOT DISTINCT FROM $3
-          RETURNING id`,
-  },
+  // Two pasted session-rail entries were DELETED here (#1165): the
+  // recordRotatedSession guarded switch (its source died with the #834
+  // retirement — no such function exists in src) and a session-shaped
+  // payment_intents insert whose live counterpart is the repository's
+  // imported INSERT above. Both PREPAREd fine — the columns still exist as
+  // the #834 reversibility seam — which is exactly why dead pasted copies
+  // are worse than none: they green-light a query nobody runs.
   {
     // IMPORTED since #999 — was a pasted copy.
     name: 'delegate monitor: active delegates joined to their Safe chain',

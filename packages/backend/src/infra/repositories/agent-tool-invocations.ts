@@ -48,3 +48,67 @@ export async function insertAgentToolInvocation(
     input.statusCode,
   ])
 }
+
+// ── Reads (moved from routes/agent-activity.ts, #1167) ───────────────────────
+
+/**
+ * The audit rows as the activity surfaces render them. Note these do NOT
+ * select `user_id`: neither statement is tenant-scoped in SQL, so the caller
+ * must have established that the agent(s) belong to the requesting user before
+ * calling — see `agent-activity.ts` for the same contract on the payment side.
+ */
+export interface AgentToolInvocationRow {
+  id: string
+  tool_name: string
+  payment_id: string | null
+  result_status: string
+  next_action: string | null
+  error_code: string | null
+  status_code: number | null
+  created_at: string
+}
+
+export type FeedAgentToolInvocationRow = AgentToolInvocationRow & { agent_id: string }
+
+export const LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL = `SELECT id, tool_name, payment_id, result_status, next_action, error_code,
+              status_code, created_at
+       FROM agent_tool_invocations
+       WHERE agent_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`
+
+export const LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL = `SELECT id, agent_id, tool_name, payment_id, result_status, next_action,
+              error_code, status_code, created_at
+       FROM agent_tool_invocations
+       WHERE agent_id = ANY($1)
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`
+
+/** NOT tenant-scoped — the caller must have verified agent ownership. */
+export async function listToolInvocationsForAgent(
+  agentId: string,
+  limit: number,
+  offset: number,
+  db: Executor = pool,
+): Promise<AgentToolInvocationRow[]> {
+  const result = await db.query<AgentToolInvocationRow>(LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL, [
+    agentId,
+    limit,
+    offset,
+  ])
+  return result.rows
+}
+
+/** NOT tenant-scoped — `agentIds` must come from a `user_id`-filtered read. */
+export async function listToolInvocationsForAgents(
+  agentIds: string[],
+  limit: number,
+  offset: number,
+  db: Executor = pool,
+): Promise<FeedAgentToolInvocationRow[]> {
+  const result = await db.query<FeedAgentToolInvocationRow>(
+    LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL,
+    [agentIds, limit, offset],
+  )
+  return result.rows
+}

@@ -1,9 +1,15 @@
 import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, RelayerBudgetExceededError } from '../infra/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
-import { findPasskeyForSafe } from '../infra/repositories/user-passkeys.js'
+import {
+  bindPasskeyToSafe,
+  findPasskeyForSafe,
+  findUserPasskeyByCredential,
+  listPasskeySignersForChain,
+  type StoredPasskeySafeRow,
+} from '../infra/repositories/user-passkeys.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getChain, isSupportedChain } from '../domain/chains.js'
-import { predictSafePasskeySignerAddress } from '../modules/accounts/index.js'
+import { getSafeDetails, predictSafePasskeySignerAddress } from '../modules/accounts/index.js'
 import { getRelayer, warnIfRelayerLow, withRelayerSendLock } from '../infra/relayer.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
@@ -14,6 +20,10 @@ import {
 
 const HEX_RE = /^0x([0-9a-fA-F]{2})*$/
 const DECIMAL_RE = /^\d+$/
+// Same shape `POST /passkeys` accepts, so a credential that enrolled can also
+// be named here. Kept local rather than shared: the two routes validate the
+// same wire format, not a shared domain concept.
+const BASE64URL_RE = /^[A-Za-z0-9_-]{1,1024}$/
 
 // The provider estimate has been reliable once the signer contract exists, but
 // passkey-backed Safe admin flows still need a little headroom beyond the raw
@@ -40,8 +50,97 @@ interface ExecSafeBody {
   refund_receiver: string
   nonce: string
   signatures: string
+  /**
+   * Which of the user's passkeys signed. Optional for compatibility with
+   * clients built before a user could hold more than one passkey per chain
+   * (#1229) — see `resolveSigningPasskey` for how absence is handled.
+   */
+  credential_id?: string
 }
 
+/** Neither a resolution nor a refusal fits in a return type, so both are modelled. */
+type PasskeyResolution =
+  | { ok: true; passkey: StoredPasskeySafeRow }
+  | { ok: false; status: 400 | 403 | 502; error: string }
+
+/**
+ * Which passkey is signing, and may it act for this Safe? (#1229)
+ *
+ * Two questions, and the second is the one that matters: this route makes
+ * Haven's RELAYER pay gas, so it must not relay for a Safe the caller has no
+ * relationship with. (The Safe itself still verifies the signature on-chain —
+ * a wrong answer here cannot move funds, only waste gas.)
+ *
+ * Resolution order:
+ *  - `credential_id` given → that row, scoped to the authenticated user.
+ *  - absent, and the user holds exactly one passkey on the chain → that one.
+ *    This is every pre-#1229 client and every user who never added a backup.
+ *  - absent and ambiguous → 400 rather than a guess. Picking the oldest row
+ *    would silently relay for the wrong signer and fail on-chain with a
+ *    signature error that reads like a bug in the passkey, not a missing field.
+ *
+ * Authorisation, once resolved:
+ *  - the row is already bound to this Safe (`safe_address`) → done, no RPC.
+ *    This is the onboarding passkey, which is bound at deploy time.
+ *  - otherwise the signer must be an on-chain OWNER of the Safe. This is the
+ *    backup-signer case: a passkey enrolled later carries no binding until it
+ *    is added as an approver. On-chain ownership is the authoritative answer,
+ *    so an unbound row is checked rather than refused — and claimed on success
+ *    so the next exec takes the fast path even if the approver-add's
+ *    best-effort metadata write never landed.
+ */
+async function resolveSigningPasskey(args: {
+  userId: string
+  safeAddress: string
+  chainId: number
+  credentialId?: string
+}): Promise<PasskeyResolution> {
+  const { userId, safeAddress, chainId, credentialId } = args
+
+  let passkey: StoredPasskeySafeRow | null
+  if (typeof credentialId === 'string' && credentialId.length > 0) {
+    passkey = await findUserPasskeyByCredential(userId, chainId, credentialId)
+  } else {
+    const bound = await findPasskeyForSafe(userId, safeAddress, chainId)
+    if (bound) {
+      return { ok: true, passkey: bound }
+    }
+    const candidates = await listPasskeySignersForChain(userId, chainId)
+    if (candidates.length > 1) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'credential_id is required when the account has more than one passkey on this chain',
+      }
+    }
+    passkey = candidates[0] ?? null
+  }
+
+  if (passkey === null) {
+    return { ok: false, status: 403, error: 'Safe is not associated with the authenticated user' }
+  }
+
+  if (passkey.safe_address && passkey.safe_address.toLowerCase() === safeAddress.toLowerCase()) {
+    return { ok: true, passkey }
+  }
+
+  let owners: string[]
+  try {
+    ;({ owners } = await getSafeDetails(safeAddress, chainId))
+  } catch {
+    return { ok: false, status: 502, error: 'Could not read owners from the network. Try again.' }
+  }
+
+  const isOwner = owners.some((o) => o.toLowerCase() === passkey.signer_address.toLowerCase())
+  if (!isOwner) {
+    return { ok: false, status: 403, error: 'Safe is not associated with the authenticated user' }
+  }
+
+  // Fast-path hint for next time; a no-op when the row is bound elsewhere.
+  await bindPasskeyToSafe(userId, passkey.credential_id, safeAddress)
+
+  return { ok: true, passkey }
+}
 
 function parseHexCoordinate(value: Buffer): `0x${string}` {
   return `0x${value.toString('hex')}` as `0x${string}`
@@ -54,6 +153,10 @@ function isInsufficientFundsError(error: unknown): boolean {
 
 function isValidDecimal(value: string): boolean {
   return DECIMAL_RE.test(value)
+}
+
+function isBase64Url(value: unknown): value is string {
+  return typeof value === 'string' && BASE64URL_RE.test(value)
 }
 
 function getRelayExecGasLimit(estimatedGas: bigint | null): bigint {
@@ -103,12 +206,22 @@ export default async function safeExecRoutes(app: FastifyInstance): Promise<void
       return reply.code(400).send({ error: 'Numeric fields must be decimal strings' })
     }
 
-    // Ownership check (repository query, #999).
-    const passkey = await findPasskeyForSafe(sub, body.safe_address, body.chain_id)
-
-    if (passkey === null) {
-      return reply.code(403).send({ error: 'Safe is not associated with the authenticated user' })
+    if (body.credential_id !== undefined && !isBase64Url(body.credential_id)) {
+      return reply.code(400).send({ error: 'credential_id must be a non-empty base64url string' })
     }
+
+    // Which passkey signed, and may it act for this Safe (#1229, #999).
+    const resolved = await resolveSigningPasskey({
+      userId: sub,
+      safeAddress: body.safe_address,
+      chainId: body.chain_id,
+      credentialId: body.credential_id,
+    })
+
+    if (!resolved.ok) {
+      return reply.code(resolved.status).send({ error: resolved.error })
+    }
+    const passkey = resolved.passkey
     const chain = getChain(body.chain_id)
     const x = parseHexCoordinate(passkey.public_key_x)
     const y = parseHexCoordinate(passkey.public_key_y)

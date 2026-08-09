@@ -12,10 +12,13 @@ import {
   specifierMatchesTarget,
   applyExemptions,
   countInlineSqlCallSites,
+  checkCallSiteCeiling,
+  CEILING_PATH,
   scanAll,
   EXCLUDED,
   MIN_EXEMPT_REASON_LENGTH,
 } from './dep-lint.mjs'
+import { readFile } from 'node:fs/promises'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const ruleSet = createRequire(import.meta.url)(join(REPO_ROOT, '.dependency-cruiser.cjs'))
@@ -325,5 +328,68 @@ test('the checked-in tree is green: every violation is waived, every waiver has 
     badReasons.map((b) => `${b.file}: "${b.reason}"`),
     [],
     'a dep-lint-exempt comment carries a non-reason',
+  )
+})
+
+// ── The call-site ceiling (#1166) ───────────────────────────────────────────
+
+test('ceiling: growth fails and names exactly the files that grew', () => {
+  const gauge = {
+    callSites: 12,
+    fileCount: 3,
+    perFile: { 'a.ts': 5, 'b.ts': 4, 'c.ts': 3 },
+  }
+  const ceiling = { total: 10, files: { 'a.ts': 5, 'b.ts': 2, 'd.ts': 3 } }
+  const r = checkCallSiteCeiling(gauge, ceiling)
+  assert.equal(r.ok, false)
+  assert.deepEqual(
+    r.grown.map((g) => `${g.path} ${g.committed}→${g.count}`).sort(),
+    ['b.ts 2→4', 'c.ts 0→3'],
+    'must name the grown files (incl. brand-new ones at committed=0), never the shrunk/unchanged ones',
+  )
+})
+
+test('ceiling: redistribution under an unchanged total STILL fails (#1210)', () => {
+  // b.ts grew 2→4 while a.ts shrank 6→4 — the total (10) never moved, which
+  // the old check accepted silently, letting per-file counts go stale and any
+  // file grow for free against another file's cleanup.
+  const gauge = { callSites: 10, fileCount: 2, perFile: { 'a.ts': 4, 'b.ts': 6 } }
+  const r = checkCallSiteCeiling(gauge, { total: 10, files: { 'a.ts': 6, 'b.ts': 4 } })
+  assert.equal(r.ok, false)
+  assert.equal(r.canLower, false)
+  assert.deepEqual(
+    r.grown.map((g) => `${g.path} ${g.committed}→${g.count}`),
+    ['b.ts 4→6'],
+    'must name the grown file even though the total is within the ceiling',
+  )
+})
+
+test('ceiling: equal count passes with nothing to lower', () => {
+  const gauge = { callSites: 10, fileCount: 2, perFile: { 'a.ts': 6, 'b.ts': 4 } }
+  const r = checkCallSiteCeiling(gauge, { total: 10, files: { 'a.ts': 6, 'b.ts': 4 } })
+  assert.equal(r.ok, true)
+  assert.equal(r.canLower, false)
+})
+
+test('ceiling: shrink passes and reports the ceiling can be lowered', () => {
+  const gauge = { callSites: 7, fileCount: 2, perFile: { 'a.ts': 4, 'b.ts': 3 } }
+  const r = checkCallSiteCeiling(gauge, { total: 10, files: { 'a.ts': 6, 'b.ts': 4 } })
+  assert.equal(r.ok, true)
+  assert.equal(r.canLower, true)
+})
+
+test('ceiling: the committed JSON matches the tree (bootstrap parity, shrink-only from here)', async () => {
+  const ceiling = JSON.parse(await readFile(new URL(`../${CEILING_PATH}`, import.meta.url), 'utf8'))
+  const { scannedFiles } = await scanAll()
+  const sources = await Promise.all(
+    scannedFiles.map(async (path) => ({
+      path,
+      source: await readFile(new URL(`../${path}`, import.meta.url), 'utf8'),
+    })),
+  )
+  const gauge = countInlineSqlCallSites(sources)
+  assert.ok(
+    gauge.callSites <= ceiling.total,
+    `inline-SQL call sites grew past the committed ceiling (${gauge.callSites} > ${ceiling.total})`,
   )
 })

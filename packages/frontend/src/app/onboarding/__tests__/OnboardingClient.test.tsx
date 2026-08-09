@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mockUseAuth = vi.fn()
 const mockReplace = vi.fn()
 const mockPush = vi.fn()
+const mockLogout = vi.fn()
 const mockUseDeployableChains = vi.fn()
 
 vi.mock('@/context/AuthContext', () => ({
@@ -72,6 +73,7 @@ function authValue(overrides: Record<string, unknown> = {}) {
     loading: false,
     updateUser: vi.fn(),
     refreshUser: vi.fn().mockResolvedValue(undefined),
+    logout: mockLogout,
     ...overrides,
   }
 }
@@ -79,6 +81,7 @@ function authValue(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   mockReplace.mockReset()
   mockPush.mockReset()
+  mockLogout.mockReset()
   window.sessionStorage.clear()
   mockUseAuth.mockReturnValue(authValue())
   mockUseDeployableChains.mockReturnValue({
@@ -117,6 +120,18 @@ describe('OnboardingClient (#1162)', () => {
     expect(screen.queryByText(/existing crypto wallet/i)).toBeNull()
     // ...and no step chrome, because there is only one step.
     expect(screen.queryByLabelText(/^Step \d+ of/)).toBeNull()
+  })
+
+  it('carries a way OUT of the auto-restored session (#1239)', () => {
+    // This is the only page a signed-in user without accounts can reach:
+    // /login auto-redirects here and ProtectedRoute bounces every other page
+    // back here — so without this button, switching accounts requires
+    // clearing site data.
+    render(<OnboardingClient />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Log out' }))
+    expect(mockLogout).toHaveBeenCalledOnce()
+    expect(mockReplace).toHaveBeenCalledWith('/login')
   })
 
   it('shows success in place rather than routing to a separate screen', async () => {
@@ -190,5 +205,22 @@ describe('OnboardingClient (#1162)', () => {
 
     expect(mockReplace).not.toHaveBeenCalled()
     expect(screen.getByText(/You're in/)).toBeTruthy()
+  })
+
+  // #1153: the backup-signer recommendation moved to a funded-state trigger
+  // on the dashboard (DashboardClient) and must never come back here — the
+  // owner explicitly does not want it "in their face directly at onboarding".
+  // #1162 already removed it; this is the regression guard so a future edit
+  // can't quietly reintroduce it on either onboarding phase.
+  it('never renders the backup-signer recovery nudge anywhere in onboarding (regression guard for #1153)', async () => {
+    render(<OnboardingClient />)
+    expect(screen.queryByText('Add a backup soon')).toBeNull()
+    expect(screen.queryByText(/a lost device never means a lost account/i)).toBeNull()
+
+    await completeCreation()
+
+    expect(screen.getByText(/You're in/)).toBeTruthy()
+    expect(screen.queryByText('Add a backup soon')).toBeNull()
+    expect(screen.queryByText(/a lost device never means a lost account/i)).toBeNull()
   })
 })

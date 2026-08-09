@@ -1,25 +1,41 @@
 /**
- * Mainnet launch gate for delegation-rail accounts (#908, recorded by #890).
+ * Signer-floor classification for delegation-rail accounts.
  *
- * The criterion, verbatim from the security model (§6–7): no mainnet
- * delegation-rail account may OPERATE with fewer than two enrolled signers,
- * unless the owner has explicitly acknowledged the single-signer risk — a
- * recorded, signed-off "I understand losing my only device loses this
- * account". The onboarding nudge alone is not sufficient for mainnet.
+ * **This is no longer a gate (#1153).** It was: #908 refused provisioning,
+ * grant activation, and owner removal on any value-bearing chain for accounts
+ * below two signers, unblockable only by a recorded waiver. Nothing here
+ * refuses anything now — the module classifies, and the surfaces recommend.
  *
- * This module is the mechanism. It is enforced at BOTH authority moments:
- *   - provisioning (POST /accounts/hybrid) — before the account row exists;
- *   - grant activation (POST /agents/:id/delegations/:hash/activate) — before
- *     any delegation becomes live, covering rows created by older code.
+ * **Owner decision (2026-08-07, recorded verbatim on #1153):**
  *
- * Deliberately FAIL-CLOSED and registry-independent: the gate classifies
- * chains itself (a chain is value-bearing unless it is a KNOWN testnet), and
- * the routes run it BEFORE the pinned-contracts availability check — so
- * adding Base mainnet to the contract registry can never, on its own, open
- * mainnet without the signer floor.
+ * > "This is too hard, create a issue where this requirement is changed from
+ * > being a hard one, to a soft recommendation of adding a backup, but this
+ * > recommendation should only be displayed to the user after they have funded
+ * > the account. I do not want users to have this in their face directly at
+ * > onboarding."
+ *
+ * and, on owner removal:
+ *
+ * > "convert this from a block to a warning instead, the user should be able
+ * > to move to a one signer set up."
+ *
+ * The reason the floor existed has NOT changed and is not softened by this:
+ * a single-signer account has **no recovery**. Lose the device and the account
+ * and everything in it is gone, with no path back through Haven or anyone
+ * else. What changed is where that fact is delivered — after funding, when the
+ * user has something to protect and a reason to care — rather than as a wall
+ * in the first minute, where it blocked the one-Face-ID onboarding the
+ * delegation rail exists to offer. See
+ * `docs/security/delegation-rail-security-model.md` §6–7.
+ *
+ * The chain classification below stays FAIL-CLOSED (a chain is value-bearing
+ * unless it is a KNOWN testnet) because it still decides whether the
+ * recommendation is warranted at all — over-recommending on an unknown chain
+ * is harmless; staying quiet on a real one is not.
  */
 
-const SIGNER_FLOOR = 2
+/** Two signers is what makes an account recoverable; below it, there is no path back. */
+const RECOMMENDED_SIGNER_FLOOR = 2
 
 /**
  * Known TESTNET chain ids — everything else is treated as value-bearing.
@@ -42,27 +58,29 @@ export interface SignerFloorCheck {
   /** Enrolled signers: passkeys + the EOA owner if present. */
   signerCount: number
   /**
-   * The owner's explicit, recorded acknowledgment of single-signer risk —
-   * either sent with this request (provisioning) or previously recorded on
-   * the account row (activation).
+   * The owner's explicit, recorded acknowledgment of single-signer risk.
+   * Retained on the type because provisioning still RECORDS it as history —
+   * it no longer affects whether anything proceeds (#1153).
    */
-  waiverAcknowledged: boolean
+  waiverAcknowledged?: boolean
 }
 
 /**
- * Pure gate core: returns null when the operation may proceed, or the
- * user-facing error message when the mainnet signer floor blocks it.
- * Testnets always pass — the floor is a MAINNET launch criterion (#908);
- * dev/QA single-signer accounts stay exactly as cheap as today.
+ * Would this account benefit from a backup signer?
+ *
+ * True when it holds real value and has fewer than two enrolled signers — the
+ * exact condition that used to refuse the operation, now the condition that
+ * makes the recommendation worth showing. Testnets are always false: a dev/QA
+ * account has nothing to lose.
+ *
+ * A recorded waiver no longer changes the answer. It never made the account
+ * recoverable; it only recorded that someone had been told. Keeping it in the
+ * predicate would hide the recommendation from precisely the users who had
+ * already said "I know" once — and the risk is ongoing, not a thing you
+ * acknowledge away. The column is still written where an acknowledgement is
+ * given (`user_safes.single_signer_waiver_at`), as history.
  */
-export function signerFloorError(check: SignerFloorCheck): string | null {
-  if (!isValueBearingChain(check.chainId)) return null
-  if (check.signerCount >= SIGNER_FLOOR) return null
-  if (check.waiverAcknowledged) return null
-  return (
-    `Mainnet accounts need at least ${SIGNER_FLOOR} enrolled signers (a backup passkey or wallet) ` +
-    'so the account can be recovered if a device is lost. Add a second signer, or explicitly ' +
-    'acknowledge the risk that losing your only device loses this account ' +
-    '(single_signer_waiver: { acknowledged: true }).'
-  )
+export function needsBackupSignerRecommendation(check: SignerFloorCheck): boolean {
+  if (!isValueBearingChain(check.chainId)) return false
+  return check.signerCount < RECOMMENDED_SIGNER_FLOOR
 }

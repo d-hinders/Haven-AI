@@ -74,10 +74,18 @@ export default async function safeDeployRoutes(app: FastifyInstance): Promise<vo
       await client.query('BEGIN')
       transactionOpen = true
 
+      // A user can hold several passkeys on a chain since #1229 (the extra
+      // ones are backup signers), so this is a SET and the row order decides
+      // the outcome. Bound-first: if ANY passkey on this chain already has a
+      // Safe, that row is picked and the 409 below fires — which is the point.
+      // Taking an arbitrary row would let a backup deploy a SECOND Safe for a
+      // user who already has one. Oldest-first among the unbound keeps a retry
+      // deterministic.
       const passkeyResult = await client.query<StoredPasskeyRow>(
         `SELECT id, public_key_x, public_key_y, signer_address, safe_address
          FROM user_passkeys
          WHERE user_id = $1 AND chain_id = $2
+         ORDER BY (safe_address IS NOT NULL) DESC, created_at ASC
          FOR UPDATE`,
         [sub, chain_id],
       )

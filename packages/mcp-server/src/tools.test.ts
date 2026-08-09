@@ -338,9 +338,10 @@ describe('haven_pay_x402_quote', () => {
     expect(result.data.x402.expected).toEqual({
       payment_id: 'pay_x402',
       payload_hash: '0xfunding',
-      resource_url:
-        (PAYMENT_REQUIRED.accepts[0] as { resource?: string }).resource ??
-        PAYMENT_REQUIRED.resource.url,
+      // The value Haven SIGNED — `paymentRequired.resource.url`. This used to
+      // mirror the implementation's `accepted.resource ?? resourceUrl`, so it
+      // passed whichever way the code went (#1189).
+      resource_url: PAYMENT_REQUIRED.resource.url,
       merchant_to: '0xMerchant',
       amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
       asset: PAYMENT_REQUIRED.accepts[0].asset,
@@ -358,6 +359,98 @@ describe('haven_pay_x402_quote', () => {
     })
     expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
     expect(JSON.stringify(calls)).not.toContain('delegate_key')
+  })
+
+  it('binds resource_url to what Haven signed, even when the option carries its own resource (#1189)', async () => {
+    // A merchant may set a `resource` on the accepted option that differs from
+    // the top-level one. The backend signs the TOP-LEVEL url, so preferring the
+    // option's here reconstructed a different message and the signer refused
+    // with "authentication message is invalid" — an error that reads as a
+    // credential problem, not a field mismatch. The signature is the authority.
+    const optionScopedResource = {
+      ...PAYMENT_REQUIRED,
+      accepts: [{ ...PAYMENT_REQUIRED.accepts[0], resource: 'https://merchant.test/option-scoped' }],
+    }
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{ x402: { expected: { resource_url: string } } }>(
+      await handlers().haven_pay_x402_quote({ payment_required: optionScopedResource }),
+    )
+
+    expect(result.data.x402.expected.resource_url).toBe(PAYMENT_REQUIRED.resource.url)
+    expect(result.data.x402.expected.resource_url).not.toBe('https://merchant.test/option-scoped')
+  })
+
+  it('reports the expected-context version this quote will emit, pre-payment (#1155)', async () => {
+    // The hosted half of pre-payment skew detection. The agent holds the
+    // signer's advertised set from that server's initialize handshake; this is
+    // the number to compare it against, available before haven_sign is called
+    // and before haven_submit moves anything.
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{
+      signer_compatibility: {
+        x402_expected_context_version: number
+        signer_capability: string
+        check: string
+      }
+    }>(await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
+
+    // Read from the binding Haven signed, not re-derived here.
+    expect(result.data.signer_compatibility.x402_expected_context_version).toBe(
+      X402_EXPECTED_AUTH.version,
+    )
+    expect(result.data.signer_compatibility.signer_capability).toBe('haven/signer-compatibility')
+  })
+
+  it('carries the skew warning in-band, naming the #1143 fix (#1155)', async () => {
+    // Warning, not refusal: the quote succeeds either way. The instruction
+    // travels with the number so an agent that never reads tool descriptions
+    // still sees it at the moment it matters.
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{ signer_compatibility: { check: string } }>(
+      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+
+    const check = result.data.signer_compatibility.check
+    expect(check).toContain('@haven_ai/signer')
+    expect(check).toContain('npx @haven_ai/connect@alpha')
+    expect(check).toMatch(/STOP before signing/)
+    // Same standing instruction as the signing-time error (#1143).
+    expect(check).toMatch(/invalidates the signature/)
+  })
+
+  it('does not refuse a quote whose emitted version the signer may not know (#1155)', async () => {
+    // The skew scenario itself. A newer backend emits a version no shipped
+    // signer knows; the quote must still succeed and simply report it. Refusing
+    // here on reported client metadata would let a false positive block a
+    // working payment — strictly worse than the current state.
+    const futureVersionIntent = {
+      ...X402_INTENT_RESPONSE,
+      x402_expected_auth: { ...X402_EXPECTED_AUTH, version: 99 },
+    }
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: futureVersionIntent },
+    })
+
+    const result = ok<{
+      payload_hash: string
+      signer_compatibility: { x402_expected_context_version: number }
+    }>(await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
+
+    expect(result.data.payload_hash).toBe('0xfunding')
+    expect(result.data.signer_compatibility.x402_expected_context_version).toBe(99)
   })
 
   it('surfaces pending_approval (no hash) when the x402 amount is over budget', async () => {

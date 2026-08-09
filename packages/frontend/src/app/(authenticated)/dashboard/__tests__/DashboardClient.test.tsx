@@ -10,6 +10,7 @@ const mockUseDashboardOverview = vi.fn()
 const mockUseBalances = vi.fn()
 const mockUseSafeDetails = vi.fn()
 const mockUseSafeOperationGate = vi.fn()
+const mockUseSafeApprovers = vi.fn()
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
@@ -45,6 +46,10 @@ vi.mock('@/hooks/useSafeDetails', () => ({
 
 vi.mock('@/hooks/useSafeOperationGate', () => ({
   useSafeOperationGate: () => mockUseSafeOperationGate(),
+}))
+
+vi.mock('@/hooks/useSafeApprovers', () => ({
+  useSafeApprovers: (...args: unknown[]) => mockUseSafeApprovers(...args),
 }))
 
 vi.mock('@/components/DashboardOnboardingGuide', () => ({
@@ -181,6 +186,15 @@ function mockBaseState() {
     error: null,
   })
   mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
+  // Default: nothing to ask about (no passkey Safe), which is what the real
+  // hook does with a null id — it never stops loading, so the nudge stays off.
+  mockUseSafeApprovers.mockReturnValue({
+    approvers: [],
+    threshold: 1,
+    loading: true,
+    error: null,
+    refetch: vi.fn(),
+  })
 }
 
 describe('DashboardClient', () => {
@@ -411,6 +425,215 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Agent preview unavailable')).toBeInTheDocument()
     expect(screen.getByText('Activity preview unavailable')).toBeInTheDocument()
     expect(screen.queryByText('No transactions yet')).not.toBeInTheDocument()
+  })
+
+  describe('backup-signer recovery nudge (#1153 funded-state trigger)', () => {
+    const DELEGATOR_SAFE = { ...SAFE, account_type: 'delegator_hybrid' }
+
+    /** The signer set AuthContext resolves on login, as the dashboard reads it. */
+    const storeSigners = (passkeys: number, owner: string | null) => {
+      window.localStorage.setItem(
+        `haven_hybrid_signers_${DELEGATOR_SAFE.safe_address.toLowerCase()}_${DELEGATOR_SAFE.chain_id}`,
+        JSON.stringify({
+          account_address: DELEGATOR_SAFE.safe_address,
+          chain_id: DELEGATOR_SAFE.chain_id,
+          owner_address: owner,
+          passkeys: Array.from({ length: passkeys }, (_, i) => ({ key_id: `0x0${i}`, x: '0x1', y: '0x2' })),
+        }),
+      )
+    }
+
+    const asDelegationUser = () =>
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          safes: [DELEGATOR_SAFE],
+        },
+        activeSafe: DELEGATOR_SAFE,
+      })
+
+    it('shows the nudge for a funded, single-signer delegation-rail account', () => {
+      asDelegationUser()
+      storeSigners(1, null) // one passkey, no owner → no recovery
+      // mockBaseState() already sets a non-zero aggregated balance.
+
+      render(<DashboardClient />)
+
+      expect(screen.getByText('Add a backup soon')).toBeInTheDocument()
+    })
+
+    it('stays silent when the account ALREADY has a backup', () => {
+      // Recommending a backup to someone who enrolled one teaches them to
+      // ignore the banner — and it is the state the nudge is asking for.
+      asDelegationUser()
+      storeSigners(2, null)
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    it('counts an EOA owner as the second signer', () => {
+      asDelegationUser()
+      storeSigners(1, '0x5555555555555555555555555555555555555555')
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    /**
+     * #1229: the same exposure on the legacy rail — a Safe whose sole owner
+     * (threshold 1) is a passkey signer. It never got this prompt because
+     * there was nothing to prompt FOR: enrolling a backup passkey 409'd on the
+     * one-per-chain constraint that migration 056 removes.
+     */
+    const asPasskeySafeUser = (approverCount: number) => {
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: null,
+          safes: [SAFE],
+        },
+        activeSafe: SAFE,
+        passkeys: [
+          {
+            id: 'passkey-1',
+            credential_id: 'cred-primary',
+            signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
+            chain_id: SAFE.chain_id,
+            safe_address: SAFE.safe_address,
+            created_at: '2026-05-12T00:00:00Z',
+          },
+        ],
+      })
+      mockUseSafeApprovers.mockReturnValue({
+        approvers: Array.from({ length: approverCount }, (_, i) => ({
+          address: `0x${String(i).repeat(40)}`,
+          type: 'passkey' as const,
+          label: null,
+        })),
+        threshold: 1,
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+    }
+
+    it('shows the nudge for a funded single-owner passkey Safe (#1229)', () => {
+      asPasskeySafeUser(1)
+
+      render(<DashboardClient />)
+
+      expect(screen.getByText('Add a backup soon')).toBeInTheDocument()
+      // Legacy rail has no "Backup & recovery" screen — it must point at
+      // Approvers instead.
+      expect(screen.getByText('Approvers')).toBeInTheDocument()
+    })
+
+    it('stays silent once the passkey Safe has a second approver (#1229)', () => {
+      asPasskeySafeUser(2)
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    it('leaves an imported wallet-owned Safe alone (#1229)', () => {
+      // No passkey row points at this Safe, so its owner holds their own key
+      // and needs no advice from us.
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          safes: [SAFE],
+        },
+        activeSafe: SAFE,
+        passkeys: [],
+      })
+      mockUseSafeApprovers.mockReturnValue({
+        approvers: [{ address: '0x5555', type: 'eoa' as const, label: null }],
+        threshold: 1,
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    it('stays silent when the signer set is unknown — a failed read must not nag', () => {
+      asDelegationUser()
+      // Nothing stored: AuthContext skips per-safe failures silently, so an
+      // absent set means "we do not know", not "no backup".
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    it('does not show the nudge for an unfunded delegation-rail account', () => {
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          safes: [DELEGATOR_SAFE],
+        },
+        activeSafe: DELEGATOR_SAFE,
+      })
+      mockUseAggregatedBalances.mockReturnValue({
+        balances: [],
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    it('does not show the nudge when a transient balance-fetch failure makes funded state unknown', () => {
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          safes: [DELEGATOR_SAFE],
+        },
+        activeSafe: DELEGATOR_SAFE,
+      })
+      mockUseAggregatedBalances.mockReturnValue({
+        balances: [],
+        loading: false,
+        error: 'Failed to load balances',
+        refetch: vi.fn(),
+      })
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    it('does not show the nudge for a funded account that is not on the delegation rail', () => {
+      // mockBaseState() default SAFE has no account_type (legacy rail) and a
+      // non-zero balance.
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
   })
 
   describe('first-arrival welcome toast', () => {

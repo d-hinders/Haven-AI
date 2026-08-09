@@ -18,6 +18,12 @@ const { mockQuery, allowanceMocks, fiatMocks } = vi.hoisted(() => ({
   },
 }))
 
+// The nonce coordinator (#1196) is fail-open and orthogonal to what these
+// tests assert; stub the repository so its reads never reach the dispatcher.
+vi.mock('../../infra/repositories/allowance-nonce-watermarks.js', () => ({
+  findAllowanceNonceWatermark: async () => null,
+  raiseAllowanceNonceWatermark: async () => {},
+}))
 vi.mock('../../db.js', () => ({
   default: {
     query: (...args: unknown[]) => mockQuery(...args),
@@ -45,9 +51,32 @@ const SIGN_HASH = `0x${'11'.repeat(32)}`
 const SIGNATURE = `0x${'ab'.repeat(65)}`
 const TX_HASH = `0x${'cd'.repeat(32)}`
 
-function authRow() {
-  return { rows: [AGENT] }
+// ── Content-dispatch DB stub (#1226) ─────────────────────────────────────────
+//
+// Routes match on SQL FRAGMENTS, first hit wins, anything unmatched returns
+// zero rows. This replaces the positional mockResolvedValueOnce chains that
+// re-shuffled whenever a handler gained a query (#775) — what the database
+// DOES with these statements is proven in the repository suites on the real
+// harness (payment-intents.test.ts et al., epic #1219); these tests own only
+// the handler: status codes, response shapes, and which writes were asked for.
+
+type DbRoute = [RegExp, (sql: string, params: unknown[]) => { rows: unknown[] } | Promise<{ rows: unknown[] }>]
+
+function primeDb(...routes: DbRoute[]) {
+  mockQuery.mockImplementation(async (sql: unknown, params: unknown[]) => {
+    const text = String(sql)
+    for (const [re, handler] of routes) {
+      if (re.test(text)) return handler(text, params)
+    }
+    return { rows: [] }
+  })
 }
+
+/** Every SQL text the handler sent, for pattern-based assertions. */
+const sqlCalls = () => mockQuery.mock.calls.map((c) => ({ sql: String(c[0]), params: c[1] as unknown[] }))
+const findCall = (re: RegExp) => sqlCalls().find((c) => re.test(c.sql))
+
+const AUTH: DbRoute = [/api_key_hash = \$1/, () => ({ rows: [AGENT] })]
 
 function pendingIntent(overrides: Record<string, unknown> = {}) {
   return {
@@ -131,6 +160,12 @@ function mppApproval(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/** The approval row as BOTH the status probe and the resume fetch see it. */
+const approvalRoute = (row: Record<string, unknown> | null): DbRoute => [
+  /FROM approval_requests/,
+  () => ({ rows: row ? [row] : [] }),
+]
+
 describe('payment routes', () => {
   let app: FastifyInstance
 
@@ -147,15 +182,11 @@ describe('payment routes', () => {
     mockQuery.mockReset()
     for (const mock of Object.values(allowanceMocks)) mock.mockReset()
     for (const mock of Object.values(fiatMocks)) mock.mockReset()
+    fiatMocks.getBookTimeSekValue.mockResolvedValue(null)
   })
 
   it('rehydrates x402 resume state from an approval request id', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [x402Approval()] })
+    primeDb(AUTH, approvalRoute(x402Approval()))
 
     const response = await app.inject({
       method: 'GET',
@@ -200,12 +231,7 @@ describe('payment routes', () => {
   })
 
   it('rehydrates MPP resume state from an approval request id', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [mppApproval()] })
+    primeDb(AUTH, approvalRoute(mppApproval()))
 
     const response = await app.inject({
       method: 'GET',
@@ -245,12 +271,7 @@ describe('payment routes', () => {
   })
 
   it('does not rehydrate resume state for another agent payment or approval', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
+    primeDb(AUTH, approvalRoute(null))
 
     const response = await app.inject({
       method: 'GET',
@@ -263,12 +284,7 @@ describe('payment routes', () => {
   })
 
   it('returns 410 when an approval resume state has expired', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ status: 'expired' }] })
-      .mockResolvedValueOnce({ rows: [x402Approval({ status: 'expired' })] })
+    primeDb(AUTH, approvalRoute(x402Approval({ status: 'expired' })))
 
     const response = await app.inject({
       method: 'GET',
@@ -292,14 +308,10 @@ describe('payment routes', () => {
     // endpoint only implements x402 and MPP today. Clients must be able to
     // distinguish "rail not supported" from generic "cannot resume right
     // now" — the structured error_code makes that pattern-matchable.
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ status: 'pending' }] })
-      .mockResolvedValueOnce({
-        rows: [x402Approval({ source: 'stripe_deposit', payment_rail: 'stripe_deposit' })],
-      })
+    primeDb(
+      AUTH,
+      approvalRoute(x402Approval({ source: 'stripe_deposit', payment_rail: 'stripe_deposit' })),
+    )
 
     const response = await app.inject({
       method: 'GET',
@@ -315,17 +327,36 @@ describe('payment routes', () => {
     })
   })
 
+  // ── POST /:id/sign — the claim → execute → confirm handler ─────────────
+  //
+  // The claim CAS, double-claim refusal, release-on-429 and expiry guards
+  // are PROVEN against real Postgres in payment-intents.test.ts; here the
+  // routes' outcomes are driven by what those statements return, and the
+  // assertions are about status codes, bodies, and which writes were asked.
+
+  /** Sign-path routes: what the claim/confirm/release statements answer. */
+  function signRoutes(opts: {
+    intent?: Record<string, unknown>
+    claimWins?: boolean
+    statusNow?: string
+    overdueExpires?: boolean
+  }): DbRoute[] {
+    return [
+      AUTH,
+      [/SET signature[\s\S]*status = 'submitted'/, () => ({ rows: opts.claimWins ? [{ id: PAYMENT_ID }] : [] })],
+      [/SET status = 'confirmed'/, () => ({ rows: [{ id: PAYMENT_ID }] })],
+      [/SET status = 'expired'[\s\S]*expires_at <= NOW\(\)/, () => ({ rows: opts.overdueExpires ? [{ status: 'expired' }] : [] })],
+      [/SELECT status FROM payment_intents/, () => ({ rows: opts.statusNow ? [{ status: opts.statusNow }] : [] })],
+      [/FROM payment_intents\s+WHERE id/, () => ({ rows: opts.intent ? [opts.intent] : [] })],
+    ]
+  }
+
   it('claims a pending signature intent before executing on-chain', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
     allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '1.00', eur: '0.92' })
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [pendingIntent()] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [] })
+    primeDb(...signRoutes({ intent: pendingIntent(), claimWins: true }))
 
     const response = await app.inject({
       method: 'POST',
@@ -340,9 +371,12 @@ describe('payment routes', () => {
       status: 'confirmed',
       tx_hash: TX_HASH,
     })
-    expect(mockQuery.mock.calls[2][0]).toContain("status = 'pending_signature'")
-    expect(mockQuery.mock.calls[2][0]).toContain('expires_at > NOW()')
-    expect(mockQuery.mock.calls[3][0]).toContain("status = 'submitted'")
+    // The claim ran, guarded exactly as the repository suite proves it works:
+    const claim = findCall(/SET signature[\s\S]*status = 'submitted'/)
+    expect(claim).toBeDefined()
+    expect(claim!.sql).toContain("status = 'pending_signature'")
+    expect(claim!.sql).toContain('expires_at > NOW()')
+    expect(findCall(/SET status = 'confirmed'/)).toBeDefined()
     expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
   })
 
@@ -356,12 +390,7 @@ describe('payment routes', () => {
       new RelayerBudgetExceededError('allowance_transfer', 60, 60),
     )
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [pendingIntent()] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] }) // the 'submitted' claim
-      .mockResolvedValueOnce({ rows: [] }) // the release back to pending
+    primeDb(...signRoutes({ intent: pendingIntent(), claimWins: true }))
 
     const response = await app.inject({
       method: 'POST',
@@ -372,14 +401,12 @@ describe('payment routes', () => {
 
     expect(response.statusCode).toBe(429)
     expect(response.json()).toMatchObject({ payment_id: PAYMENT_ID, status: 'pending_signature' })
-    const release = mockQuery.mock.calls.find((c) =>
-      /SET status = 'pending_signature'/.test(String(c[0])),
-    )
-    expect(release).toBeTruthy()
-    expect(String(release![0])).toContain("status = 'submitted'")
-    expect(String(release![0])).toContain('tx_hash IS NULL')
+    const release = findCall(/SET status = 'pending_signature'/)
+    expect(release).toBeDefined()
+    expect(release!.sql).toContain("status = 'submitted'")
+    expect(release!.sql).toContain('tx_hash IS NULL')
     // Nothing burned it to failed:
-    expect(mockQuery.mock.calls.some((c) => /SET status = 'failed'/.test(String(c[0])))).toBe(false)
+    expect(findCall(/SET status = 'failed'/)).toBeUndefined()
   })
 
   it('creates base evidence after a protocol payment is confirmed', async () => {
@@ -387,32 +414,29 @@ describe('payment routes', () => {
     allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '1.00', eur: '0.92' })
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
-        rows: [pendingIntent({
-          payment_rail: 'x402',
-          source: 'x402',
-          payment_resource_url: 'https://merchant.example/data',
-          merchant_address: RECIPIENT.toLowerCase(),
-          machine_idempotency_key: 'x402:test',
-        })],
-      })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({
-        rows: [pendingIntent({
-          status: 'confirmed',
-          tx_hash: TX_HASH,
-          payment_rail: 'x402',
-          source: 'x402',
-          payment_resource_url: 'https://merchant.example/data',
-          merchant_address: RECIPIENT.toLowerCase(),
-          machine_idempotency_key: 'x402:test',
-          confirmed_at: '2026-05-19T10:00:00.000Z',
-        })],
-      })
-      .mockResolvedValueOnce({ rows: [] })
+    const x402Fields = {
+      payment_rail: 'x402',
+      source: 'x402',
+      payment_resource_url: 'https://merchant.example/data',
+      merchant_address: RECIPIENT.toLowerCase(),
+      machine_idempotency_key: 'x402:test',
+    }
+    primeDb(
+      // The evidence recorder re-reads through its own projection
+      // (`'payment_intent'::TEXT AS kind`) — answer it with the CONFIRMED row.
+      [/AS kind,/, () => ({
+        rows: [{
+          kind: 'payment_intent',
+          ...pendingIntent({
+            ...x402Fields,
+            status: 'confirmed',
+            tx_hash: TX_HASH,
+            confirmed_at: '2026-05-19T10:00:00.000Z',
+          }),
+        }],
+      })],
+      ...signRoutes({ intent: pendingIntent(x402Fields), claimWins: true }),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -422,11 +446,12 @@ describe('payment routes', () => {
     })
 
     expect(response.statusCode).toBe(200)
-    expect(mockQuery.mock.calls[4][0]).toContain('FROM payment_intents')
-    expect(mockQuery.mock.calls[5][0]).toContain('machine_payment_evidence')
-    expect(mockQuery.mock.calls[5][1]).toContain(PAYMENT_ID)
-    expect(mockQuery.mock.calls[5][1]).toContain('x402')
-    expect(mockQuery.mock.calls[5][1]).toContain(TX_HASH)
+    // The evidence write carries the confirmed payment's identity:
+    const evidence = findCall(/machine_payment_evidence/)
+    expect(evidence).toBeDefined()
+    expect(evidence!.params).toContain(PAYMENT_ID)
+    expect(evidence!.params).toContain('x402')
+    expect(evidence!.params).toContain(TX_HASH)
   })
 
   it('still returns confirmed when protocol evidence indexing fails', async () => {
@@ -434,20 +459,13 @@ describe('payment routes', () => {
     allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '1.00', eur: '0.92' })
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
-        rows: [pendingIntent({
-          payment_rail: 'x402',
-          source: 'x402',
-          payment_resource_url: 'https://merchant.example/data',
-          merchant_address: RECIPIENT.toLowerCase(),
-          machine_idempotency_key: 'x402:test',
-        })],
-      })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockRejectedValueOnce(new Error('evidence table unavailable'))
+    primeDb(
+      [/machine_payment_evidence/, () => Promise.reject(new Error('evidence table unavailable'))],
+      ...signRoutes({
+        intent: pendingIntent({ payment_rail: 'x402', source: 'x402' }),
+        claimWins: true,
+      }),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -467,12 +485,14 @@ describe('payment routes', () => {
   it('does not execute when another request already claimed the payment intent', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [pendingIntent()] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ status: 'submitted' }] })
+    primeDb(
+      ...signRoutes({
+        intent: pendingIntent(),
+        claimWins: false, // the CAS was lost…
+        overdueExpires: false, // …and not because the row was overdue
+        statusNow: 'submitted',
+      }),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -492,11 +512,13 @@ describe('payment routes', () => {
   it('returns expired when an intent expires before it can be claimed', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [pendingIntent()] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ status: 'expired' }] })
+    primeDb(
+      ...signRoutes({
+        intent: pendingIntent(),
+        claimWins: false,
+        overdueExpires: true, // the losing branch's tie-breaker says: overdue
+      }),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -507,7 +529,7 @@ describe('payment routes', () => {
 
     expect(response.statusCode).toBe(410)
     expect(response.json()).toEqual({ error: 'Payment intent has expired' })
-    expect(mockQuery.mock.calls[3][0]).toContain('expires_at <= NOW()')
+    expect(findCall(/expires_at <= NOW\(\)/)).toBeDefined()
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
@@ -515,11 +537,7 @@ describe('payment routes', () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
     allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(new Error('relayer unavailable'))
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [pendingIntent()] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+    primeDb(...signRoutes({ intent: pendingIntent(), claimWins: true }))
 
     const response = await app.inject({
       method: 'POST',
@@ -534,16 +552,21 @@ describe('payment routes', () => {
       status: 'failed',
       error: 'On-chain execution failed',
     })
-    expect(mockQuery.mock.calls[3][0]).toContain("status = 'submitted'")
+    const fail = findCall(/SET status = 'failed'/)
+    expect(fail).toBeDefined()
+    expect(fail!.sql).toContain("status = 'submitted'")
   })
 
+  // ── GET /:id and GET / — status reads with lazy expiry ─────────────────
+
   it('expires stale pending signature intents when their status is read', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
+    primeDb(
+      AUTH,
+      [/SET status = 'expired'/, () => ({ rows: [{ status: 'expired' }] })],
+      [/FROM payment_intents WHERE id/, () => ({
         rows: [pendingIntent({ expires_at: '2000-01-01T00:00:00.000Z' })],
-      })
-      .mockResolvedValueOnce({ rows: [{ status: 'expired' }] })
+      })],
+    )
 
     const response = await app.inject({
       method: 'GET',
@@ -556,13 +579,18 @@ describe('payment routes', () => {
       payment_id: PAYMENT_ID,
       status: 'expired',
     })
-    expect(mockQuery.mock.calls[2][0]).toContain("status = 'pending_signature'")
+    const expire = findCall(/SET status = 'expired'/)
+    expect(expire).toBeDefined()
+    expect(expire!.sql).toContain("status = 'pending_signature'")
   })
 
   it('surfaces the platform fee on a payment result so it is never silent (#386)', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [pendingIntent({ status: 'confirmed', tx_hash: TX_HASH })] })
+    primeDb(
+      AUTH,
+      [/FROM payment_intents WHERE id/, () => ({
+        rows: [pendingIntent({ status: 'confirmed', tx_hash: TX_HASH })],
+      })],
+    )
 
     const response = await app.inject({
       method: 'GET',
@@ -576,10 +604,10 @@ describe('payment routes', () => {
   })
 
   it('expires stale pending signature intents before listing payments', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [pendingIntent({ status: 'expired' })] })
+    primeDb(
+      AUTH,
+      [/ORDER BY created_at DESC/, () => ({ rows: [pendingIntent({ status: 'expired' })] })],
+    )
 
     const response = await app.inject({
       method: 'GET',
@@ -591,8 +619,12 @@ describe('payment routes', () => {
     expect(response.json().payments).toEqual([
       expect.objectContaining({ payment_id: PAYMENT_ID, status: 'expired' }),
     ])
-    expect(mockQuery.mock.calls[1][0]).toContain("status = 'pending_signature'")
-    expect(mockQuery.mock.calls[2][0]).toContain('ORDER BY created_at DESC')
+    // The lazy sweep ran before the list:
+    const calls = sqlCalls()
+    const sweepIdx = calls.findIndex((c) => /status = 'pending_signature'/.test(c.sql) && /expires_at < NOW\(\)/.test(c.sql))
+    const listIdx = calls.findIndex((c) => /ORDER BY created_at DESC/.test(c.sql))
+    expect(sweepIdx).toBeGreaterThanOrEqual(0)
+    expect(listIdx).toBeGreaterThan(sweepIdx)
   })
 
   // POST /payments — the normal send/transfer flow. These pin the coverage
@@ -606,16 +638,22 @@ describe('payment routes', () => {
       return { token: 'xDAI', amount: '1', to: RECIPIENT }
     }
 
+    /** Create-path routes: rail state (none → legacy), allowance config, inserts. */
+    const createRoutes: DbRoute[] = [
+      AUTH,
+      [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
+      [/INSERT INTO approval_requests/, () => ({
+        rows: [{ id: 'appr-1', status: 'pending', expires_at: '2099-01-01T00:00:00.000Z' }],
+      })],
+      [/INSERT INTO payment_intents/, () => ({ rows: [pendingIntent()] })],
+    ]
+
     it('queues for approval (202) when amount exceeds remaining allowance', async () => {
       allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
       allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
       allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI / 2n })
 
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy — resolved before the allowance guard (#835)
-        .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] }) // db allowance config
-        .mockResolvedValueOnce({ rows: [{ id: 'appr-1', status: 'pending', expires_at: '2099-01-01T00:00:00.000Z' }] }) // approval INSERT
+      primeDb(...createRoutes)
 
       const response = await app.inject({
         method: 'POST',
@@ -626,8 +664,7 @@ describe('payment routes', () => {
 
       expect(response.statusCode).toBe(202)
       expect(response.json()).toMatchObject({ payment_id: 'appr-1', status: 'pending_approval' })
-      const insert = mockQuery.mock.calls.find((c) => /INSERT INTO approval_requests/.test(c[0] as string))
-      expect(insert, 'over-allowance must INSERT an approval_requests row').toBeDefined()
+      expect(findCall(/INSERT INTO approval_requests/), 'over-allowance must INSERT an approval_requests row').toBeDefined()
       // generateTransferHash must NOT run on the queue path.
       expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
     })
@@ -638,11 +675,7 @@ describe('payment routes', () => {
       allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
       allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
 
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy — resolved before the allowance guard (#835)
-        .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
-        .mockResolvedValueOnce({ rows: [pendingIntent()] }) // payment_intents INSERT
+      primeDb(...createRoutes)
 
       const response = await app.inject({
         method: 'POST',
@@ -653,8 +686,7 @@ describe('payment routes', () => {
 
       expect(response.statusCode).toBe(201)
       expect(response.json()).toMatchObject({ payment_id: PAYMENT_ID, status: 'pending_signature' })
-      const insert = mockQuery.mock.calls.find((c) => /INSERT INTO payment_intents/.test(c[0] as string))
-      expect(insert, 'within-allowance must INSERT a payment_intents row').toBeDefined()
+      expect(findCall(/INSERT INTO payment_intents/), 'within-allowance must INSERT a payment_intents row').toBeDefined()
     })
 
     it('executes (201) at the exact allowance boundary (amount == remaining)', async () => {
@@ -665,11 +697,7 @@ describe('payment routes', () => {
       allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI })
       allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
 
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy — resolved before the allowance guard (#835)
-        .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
-        .mockResolvedValueOnce({ rows: [pendingIntent()] })
+      primeDb(...createRoutes)
 
       const response = await app.inject({
         method: 'POST',

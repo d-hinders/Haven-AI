@@ -29,6 +29,8 @@ import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifec
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import { RecoveryNudge } from '@/components/onboarding/RecoveryNudge'
+import { getStoredHybridSigners } from '@/lib/signer'
+import { useSafeApprovers } from '@/hooks/useSafeApprovers'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgent2Modal from '@/components/ConnectAgent2Modal'
 import SendModal from '@/components/SendModal'
@@ -626,7 +628,7 @@ function TransactionsSection({
 }
 
 export default function DashboardClient() {
-  const { user, activeSafe } = useAuth()
+  const { user, activeSafe, passkeys: enrolledPasskeys } = useAuth()
   const { toast } = useToast()
   const safes = user?.safes ?? []
   const { currency } = usePreferences()
@@ -655,6 +657,57 @@ export default function DashboardClient() {
   const fundingStateKnown = safes.length > 0 && !balancesLoading && !balancesError
   const dataReady = fundingStateKnown && !agentsLoading
   const hasFunds = fundingStateKnown && hasAnyBalance
+
+  // #1153: the backup recommendation needs BOTH halves — funded, AND actually
+  // missing a backup. Telling someone who already enrolled a second signer to
+  // enrol one teaches them to ignore the banner.
+  //
+  // Read from the set `AuthContext` already resolves for every delegation-rail
+  // safe on login. A plain synchronous read, so no extra request and no
+  // signing-provider context — a dashboard banner has no business requiring
+  // the wallet machinery `useAccountSigners` pulls in.
+  const delegationSafe = safes.find((safe) => safe.account_type === 'delegator_hybrid')
+  const recoverySigners = getStoredHybridSigners({
+    safeAddress: delegationSafe?.safe_address as Address | undefined,
+    chainId: delegationSafe?.chain_id,
+  })
+  // Unknown signer set → stay silent. Nagging on a failed read is worse than
+  // a late recommendation, and the next load will know.
+  const missingBackup = recoverySigners
+    ? recoverySigners.passkeys.length + (recoverySigners.owner_address ? 1 : 0) < 2
+    : false
+
+  // #1229: the legacy passkey-Safe rail carries the identical exposure — the
+  // Safe is deployed with the user's passkey as its SOLE owner, threshold 1 —
+  // and it reaches far more users, since that is what prod onboarding still
+  // builds. It never got this prompt because there was no advice to give:
+  // enrolling a backup passkey 409'd on the one-per-chain constraint. That
+  // constraint is gone, so the recommendation is now actionable here too.
+  //
+  // "Passkey Safe" is read from the passkey rows AuthContext already holds
+  // (a row's `safe_address` is the Safe that passkey owns), which keeps an
+  // imported wallet-owned Safe out of it — its owner already holds their own
+  // key and needs no advice from us.
+  const passkeys = enrolledPasskeys ?? []
+  const passkeySafe = safes.find(
+    (safe) =>
+      safe.account_type !== 'delegator_hybrid' &&
+      passkeys.some(
+        (passkey) =>
+          passkey.safe_address?.toLowerCase() === safe.safe_address.toLowerCase() &&
+          passkey.chain_id === safe.chain_id,
+      ),
+  )
+  // Owner count is the honest signal, and only the chain has it — a backup
+  // may be an EOA, which leaves no passkey row. Silent while loading or on
+  // error: `loading` never clears when there is no passkey Safe to ask about.
+  const {
+    approvers: safeApprovers,
+    loading: safeApproversLoading,
+    error: safeApproversError,
+  } = useSafeApprovers(passkeySafe?.id ?? null)
+  const safeMissingBackup =
+    !safeApproversLoading && !safeApproversError && safeApprovers.length === 1
   const hasAgents = dataReady && agents.length > 0
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
@@ -1007,15 +1060,27 @@ export default function DashboardClient() {
           />
         ) : null
 
-        // Interim home for the backup-signer prompt (#1162). Onboarding used
-        // to render it on its "You're in" screen, which #1162 removed; #1153
-        // supersedes this placement with a funded-state trigger. Dismissible,
-        // exactly as before, and kept to delegation-rail accounts — the
-        // condition it rendered under before — because "Backup & recovery" is
-        // where it sends you and that only exists on those accounts.
-        const recoveryNudge = safes.some((safe) => safe.account_type === 'delegator_hybrid') ? (
-          <RecoveryNudge />
-        ) : null
+        // Home for the backup-signer prompt (#1162, #1153). Onboarding used
+        // to render it on its "You're in" screen, which #1162 removed and
+        // relocated here; #1153 replaces the unconditional
+        // "any delegator_hybrid account" render with a funded-state trigger
+        // — the owner does not want this in front of the user before they
+        // have funds at risk. `hasFunds` is already fail-closed: it only
+        // goes true once `fundingStateKnown` is true (safes loaded, balance
+        // fetch not loading, no balance error), so a transient RPC failure
+        // reads as "not funded", never as "funded". Dismissible exactly as
+        // before, and kept to delegation-rail accounts because "Backup &
+        // recovery" is where it sends you and that only exists on those
+        // accounts.
+        // #1229 adds the legacy passkey-Safe arm. Delegation first when a user
+        // somehow has both: that rail is where new accounts live, and two
+        // stacked banners saying the same thing is worse than one.
+        const recoveryNudge =
+          hasFunds && delegationSafe && missingBackup ? (
+            <RecoveryNudge />
+          ) : hasFunds && passkeySafe && safeMissingBackup ? (
+            <RecoveryNudge rail="safe" />
+          ) : null
 
         if (isFocusedView) {
           return (

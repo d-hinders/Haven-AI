@@ -11,13 +11,18 @@
  * is a genuine two-SDK choice rather than a single hardcoded path, per the
  * issue's acceptance criteria ("Both implementations exist... and wrap
  * existing logic").
+ *
+ * Because it has no callers, only tests keep it honest: `__tests__/
+ * chain-client.test.ts` runs one conformance suite against BOTH
+ * implementations (#1149). That suite exists because they had already
+ * drifted — this file used to answer a zero token address with the NATIVE
+ * balance while `ethers-client.ts` built a contract at `0x0`.
  */
 import { createPublicClient, http, getAddress as viemGetAddress, erc20Abi, type Address as ViemAddress } from 'viem'
 import { getChain } from '../../domain/chains.js'
 import { chainForId } from '../../rails/delegation-contracts.js'
 import type { ChainClient } from '../../domain/chain-client.js'
-
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+import { assertErc20TokenAddress } from './token-address-guard.js'
 
 function publicClientFor(chainId: number) {
   return createPublicClient({
@@ -32,9 +37,7 @@ export const viemChainClient: ChainClient = {
   },
 
   async getTokenBalance(chainId, tokenAddress, address) {
-    if (!tokenAddress || tokenAddress.toLowerCase() === ZERO_ADDRESS) {
-      return publicClientFor(chainId).getBalance({ address: address as ViemAddress })
-    }
+    assertErc20TokenAddress(tokenAddress)
     return publicClientFor(chainId).readContract({
       address: tokenAddress as ViemAddress,
       abi: erc20Abi,

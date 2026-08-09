@@ -12,6 +12,7 @@
 import { ethers } from 'ethers'
 import { getProvider } from '../../rails/allowance-module.js'
 import type { ChainClient } from '../../domain/chain-client.js'
+import { assertErc20TokenAddress } from './token-address-guard.js'
 
 // Minimal ERC-20 ABI for balanceOf — same single-function ABI
 // routes/balances.ts declared inline before #994.
@@ -23,6 +24,7 @@ export const ethersChainClient: ChainClient = {
   },
 
   async getTokenBalance(chainId, tokenAddress, address) {
+    assertErc20TokenAddress(tokenAddress)
     const contract = new ethers.Contract(tokenAddress, ERC20_BALANCE_OF_ABI, getProvider(chainId))
     return (await contract.balanceOf(address)) as bigint
   },

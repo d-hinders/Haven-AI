@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/allowance-module.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/modules/mpp/**
-last-verified: "2026-08-07" # #997: covers updated (modules/mpp/evidence.ts moved into modules/mpp/**)
+last-verified: "2026-08-09" # #1209 re-verified: nonce wait reordered below the coverage decision at the sign-hash builders; nothing this report describes changed
 ---
 
 # Research — Smart-account-native x402 settlement (removing the funding leg)

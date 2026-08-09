@@ -36,10 +36,27 @@ import { prepareLocalMcpRuntime } from './local-mcp-runtime.js'
 import { probeLocalMcpTools } from './probes.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { MCP_VERSION } from '@haven_ai/mcp'
+import { HAVEN_MINIMUM_NODE_VERSION, isSupportedNodeVersion } from '@haven_ai/sdk'
 
 const execFileAsync = promisify(execFile)
 const runSmoke = process.env.HAVEN_CONNECT_PACKAGE_SMOKE === '1'
-const describeSmoke = runSmoke ? describe : describe.skip
+// The smoke installs and LAUNCHES the real runtime under the host's Node, so
+// unlike the rest of the suite it cannot pin a version — it is measuring the
+// actual process. Since #1161 the install path refuses below the declared
+// floor, so on an older Node this would fail with the refusal rather than tell
+// anyone anything about packaging. Skip with a reason instead: CI runs on
+// `.nvmrc` (24), which is where this check is meant to hold. A skip here is
+// itself the guard working — the runtime under test is one Haven declines to
+// install on.
+const hostNodeSupported = isSupportedNodeVersion()
+const describeSmoke = runSmoke && hostNodeSupported ? describe : describe.skip
+
+if (runSmoke && !hostNodeSupported) {
+  process.stderr.write(
+    `[package-smoke] skipped: host Node ${process.versions.node} is below the ` +
+      `Haven floor >=${HAVEN_MINIMUM_NODE_VERSION}; the install path refuses by design (#1161).\n`,
+  )
+}
 
 // ── Always-run: constant-parity check ────────────────────────────────────────
 // The MCP_VERSION constant in @haven_ai/mcp/src/server.ts MUST stay in sync

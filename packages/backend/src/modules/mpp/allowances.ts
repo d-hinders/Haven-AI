@@ -11,6 +11,8 @@
 import { resolveExecutionRail, sessionRailRetired } from '../../rails/execution-rail.js'
 import { listAllowanceConfigForAgent } from '../../infra/repositories/agents.js'
 import { deriveDelegationBudgets } from '../../rails/delegation-budget-view.js'
+import { listDelegationJsonByIds } from '../../infra/repositories/delegation-budgets.js'
+import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import {
   getTokenAllowance,
   getLatestBlockTimeSec,
@@ -47,13 +49,33 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
     // Delegation rail: the authority IS the active agent_delegations set,
     // derived through the #1090 shared view (agent_allowances is a frozen
     // onboarding mirror on this rail — reading it would report the
-    // onboarding budget forever). remaining = the period budget: the
-    // period-refill caveat re-arms on-chain each period and is enforced at
-    // redemption, so an over-budget attempt reverts — nothing queues.
-    // spent / nonce / reset bookkeeping have no AllowanceModule analogue
-    // here; zeros keep the wire shape the SDK already parses. No active
-    // delegation → empty array, so derived readiness stays needs_approval.
-    const budgets = (await deriveDelegationBudgets([agent.id])).get(agent.id) ?? []
+    // onboarding budget forever). No active delegation → empty array, so
+    // derived readiness stays needs_approval.
+    //
+    // `remaining` comes from the ERC20PeriodTransferEnforcer's own storage
+    // (#1145). That contract is what reverts an over-budget redemption and
+    // what re-arms at the period boundary, so reading it makes `remaining`
+    // exactly what the chain will allow. It used to report the FULL budget
+    // unconditionally, which told a mid-period exhausted agent it was ready
+    // and let it loop attempts that revert — no fund risk, since the caveat
+    // gates every redemption, but wrong guidance.
+    const all = (await deriveDelegationBudgets([agent.id])).get(agent.id) ?? []
+
+    // Scope to the agent's chain: the response carries ONE top-level
+    // chain_id, and a delegation on another chain reported under it would be
+    // a straightforwardly wrong number (#1145).
+    const budgets = all.filter((b) => b.chain_id === agent.chain_id)
+
+    const delegationJson = await listDelegationJsonByIds(budgets.map((b) => b.id))
+    const remainingByIdEntries = await Promise.all(
+      budgets.map(async (b) => {
+        const json = delegationJson.get(b.id)
+        if (!json) return [b.id, { remainingAtomic: b.budget_atomic, fromChain: false }] as const
+        return [b.id, await readRemainingBudget(b.chain_id, json, b.budget_atomic)] as const
+      }),
+    )
+    const remainingById = new Map(remainingByIdEntries)
+
     return {
       statusCode: 200,
       body: {
@@ -61,23 +83,49 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
         safe_address: agent.safe_address,
         delegate_address: agent.delegate_address,
         chain_id: agent.chain_id,
-        allowances: budgets.map((b) => ({
-          id: b.id,
-          token_address: b.token_address,
-          token_symbol: b.token_symbol,
-          configured_amount: b.allowance_amount,
-          reset_period_min: b.reset_period_min,
-          onchain: {
-            amount: b.budget_atomic,
-            spent: '0',
-            remaining: b.budget_atomic,
-            effective_spent: '0',
-            reset_time_min: b.reset_period_min,
-            last_reset_min: 0,
-            nonce: 0,
-            is_reset_pending: false,
-          },
-        })),
+        allowances: budgets.map((b) => {
+          const { remainingAtomic, fromChain } = remainingById.get(b.id) ?? {
+            remainingAtomic: b.budget_atomic,
+            fromChain: false,
+          }
+          // Deliberately NOT on the wire. The response shape is a contract the
+          // SDK parses and the OpenAPI spec pins, and an agent could do
+          // nothing differently knowing the number came from a fallback — so
+          // the provenance is logged for operators instead of widening the
+          // contract. The fallback IS the pre-#1145 answer, never a fabricated
+          // zero that would stop a funded agent.
+          if (!fromChain) {
+            console.warn(
+              `delegation-budget: on-chain remaining unavailable for delegation ${b.id} ` +
+                `(agent ${agent.id}, chain ${b.chain_id}) — reporting the full period budget`,
+            )
+          }
+          // Derived, not tracked: the enforcer reports what is LEFT, and the
+          // budget is what it re-arms to. Clamped at zero so a budget lowered
+          // mid-period (the new budget below what the old one already spent)
+          // reports 0 rather than a negative.
+          const spent = BigInt(b.budget_atomic) - BigInt(remainingAtomic)
+          const spentAtomic = (spent > 0n ? spent : 0n).toString()
+          return {
+            id: b.id,
+            token_address: b.token_address,
+            token_symbol: b.token_symbol,
+            configured_amount: b.allowance_amount,
+            reset_period_min: b.reset_period_min,
+            onchain: {
+              amount: b.budget_atomic,
+              spent: spentAtomic,
+              remaining: remainingAtomic,
+              effective_spent: spentAtomic,
+              reset_time_min: b.reset_period_min,
+              last_reset_min: 0,
+              // nonce has no analogue on this rail; the zero keeps the wire
+              // shape the SDK already parses.
+              nonce: 0,
+              is_reset_pending: false,
+            },
+          }
+        }),
       },
     }
   }

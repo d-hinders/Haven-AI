@@ -1,9 +1,14 @@
 import { FastifyInstance } from 'fastify'
 import bcrypt from 'bcrypt'
-// dep-lint-exempt: 6 signup/login statements on the users aggregate (email lookup, insert, legacy safe hydration); verbatim extraction is a >100-line move deferred under #999's fix-or-waive budget
-import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+import {
+  findUserCredentialsByEmail,
+  findUserIdByEmail,
+  findUserProfileById,
+  insertUser,
+} from '../infra/repositories/users.js'
+import { listSessionSafesForUser } from '../infra/repositories/user-safes.js'
 
 const SALT_ROUNDS = 10
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -77,22 +82,16 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Password must be 128 characters or fewer' })
     }
 
-    // Check for existing user
-    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [
-      normalizedEmail,
-    ])
-    if (existing.rows.length > 0) {
+    // The lookup takes the NORMALISED address: an exact match on the raw
+    // input would let `ADA@Example.com` pass this check against a stored
+    // `ada@example.com`, giving one person two accounts and two treasuries.
+    if (await findUserIdByEmail(normalizedEmail)) {
       return reply.code(409).send({ error: 'An account with this email already exists' })
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
 
-    const result = await pool.query(
-      'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email, created_at',
-      [normalizedName, normalizedEmail, passwordHash],
-    )
-
-    const user = result.rows[0]
+    const user = await insertUser(normalizedName, normalizedEmail, passwordHash)
     emitFunnelEvent(user.id, 'signed_up')
 
     const token = app.jwt.sign(
@@ -123,16 +122,14 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Email and password are required' })
     }
 
-    const result = await pool.query(
-      'SELECT id, name, email, password_hash, wallet_address, safe_address, currency_preference FROM users WHERE email = $1',
-      [normalizedEmail],
-    )
+    const user = await findUserCredentialsByEmail(normalizedEmail)
 
-    if (result.rows.length === 0) {
+    // Same 401 as a wrong password, deliberately: telling the two apart would
+    // make this endpoint an account-enumeration oracle.
+    if (!user) {
       return reply.code(401).send({ error: 'Invalid email or password' })
     }
 
-    const user = result.rows[0]
     const valid = await bcrypt.compare(password, user.password_hash)
 
     if (!valid) {
@@ -144,12 +141,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       { expiresIn: '7d' },
     )
 
-    // Fetch user's Safes
-    const safesResult = await pool.query(
-      `SELECT id, safe_address, chain_id, name, is_default, created_at, account_type
-       FROM user_safes WHERE user_id = $1 ORDER BY created_at ASC`,
-      [user.id],
-    )
+    const safes = await listSessionSafesForUser(user.id)
 
     return {
       token,
@@ -160,7 +152,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
         wallet_address: user.wallet_address,
         safe_address: user.safe_address,
         currency_preference: user.currency_preference ?? 'USD',
-        safes: safesResult.rows,
+        safes,
       },
     }
   })
@@ -169,25 +161,16 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get('/me', { onRequest: authMiddleware }, async (request) => {
     const { sub } = request.user as { sub: string }
 
-    const result = await pool.query(
-      'SELECT id, name, email, wallet_address, safe_address, currency_preference, created_at FROM users WHERE id = $1',
-      [sub],
-    )
+    // `sub` is the JWT subject — never a client-supplied id. Both reads below
+    // are scoped to it.
+    const profile = await findUserProfileById(sub)
 
-    if (result.rows.length === 0) {
+    if (!profile) {
       throw { statusCode: 404, message: 'User not found' }
     }
 
-    // Fetch user's Safes
-    const safesResult = await pool.query(
-      `SELECT id, safe_address, chain_id, name, is_default, created_at, account_type
-       FROM user_safes WHERE user_id = $1 ORDER BY created_at ASC`,
-      [sub],
-    )
+    const safes = await listSessionSafesForUser(sub)
 
-    return {
-      ...result.rows[0],
-      safes: safesResult.rows,
-    }
+    return { ...profile, safes }
   })
 }

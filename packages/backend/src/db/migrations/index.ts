@@ -53,6 +53,8 @@ import * as agentPassportAddresses from './051_agent_passport_addresses.js'
 import * as agentConnectionSetupPassport from './052_agent_connection_setup_passport.js'
 import * as paymentIntentBudgetDelegationHash from './053_payment_intent_budget_delegation_hash.js'
 import * as relayerGasEvents from './054_relayer_gas_events.js'
+import * as allowanceNonceWatermarks from './055_allowance_nonce_watermarks.js'
+import * as multiPasskeyPerChain from './056_multi_passkey_per_chain.js'
 
 export interface Migration {
   version: string
@@ -119,4 +121,6 @@ export const migrations: Migration[] = [
   agentConnectionSetupPassport,
   paymentIntentBudgetDelegationHash,
   relayerGasEvents,
+  allowanceNonceWatermarks,
+  multiPasskeyPerChain,
 ]

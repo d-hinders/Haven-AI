@@ -1,0 +1,252 @@
+{
+  "packages/backend/src/__tests__/health.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/infra/__tests__/delegate-balance-monitor.test.ts": {
+    "db-mock": 1,
+    "positional": 20
+  },
+  "packages/backend/src/infra/__tests__/prices.test.ts": {
+    "positional": 1
+  },
+  "packages/backend/src/infra/__tests__/relayer-spend-guard.test.ts": {
+    "db-mock": 1,
+    "positional": 8
+  },
+  "packages/backend/src/infra/repositories/__tests__/onboarding-funnel.test.ts": {
+    "db-mock": 1,
+    "positional": 6
+  },
+  "packages/backend/src/middleware/agentAuth.test.ts": {
+    "db-mock": 1,
+    "positional": 5
+  },
+  "packages/backend/src/modules/agents/__tests__/entitlements.test.ts": {
+    "db-mock": 1,
+    "positional": 6
+  },
+  "packages/backend/src/modules/mpp/__tests__/evidence-residue.test.ts": {
+    "db-mock": 1,
+    "positional": 6
+  },
+  "packages/backend/src/modules/mpp/__tests__/evidence.test.ts": {
+    "db-mock": 1,
+    "positional": 1
+  },
+  "packages/backend/src/modules/mpp/__tests__/merchant-receipt.test.ts": {
+    "db-mock": 1,
+    "positional": 5
+  },
+  "packages/backend/src/modules/passport/__tests__/duplicate-eoa-binding.test.ts": {
+    "db-mock": 1,
+    "positional": 11
+  },
+  "packages/backend/src/modules/passport/__tests__/issuance-hardening.test.ts": {
+    "db-mock": 1,
+    "positional": 17
+  },
+  "packages/backend/src/modules/passport/__tests__/passport-issuance.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/modules/passport/__tests__/passport-revocation.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/modules/reporting/__tests__/feed-dedup.integration.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/modules/reporting/__tests__/feed-sync.test.ts": {
+    "db-mock": 1,
+    "positional": 6
+  },
+  "packages/backend/src/modules/reporting/__tests__/fortnox-connection.test.ts": {
+    "db-mock": 1,
+    "positional": 5
+  },
+  "packages/backend/src/modules/reporting/__tests__/fortnox-connector.test.ts": {
+    "positional": 2
+  },
+  "packages/backend/src/modules/reporting/__tests__/receipt-underlag.test.ts": {
+    "db-mock": 1,
+    "positional": 2
+  },
+  "packages/backend/src/rails/__tests__/allowance-nonce-coordinator.test.ts": {
+    "positional": 6
+  },
+  "packages/backend/src/rails/__tests__/execution-rail.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/rails/__tests__/hybrid-account-config.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/routes/__tests__/accounting.test.ts": {
+    "db-mock": 1,
+    "positional": 1
+  },
+  "packages/backend/src/routes/__tests__/agent-activity-stats.characterization.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/routes/__tests__/agent-activity.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/routes/__tests__/agent-connection-setups.test.ts": {
+    "db-mock": 1,
+    "positional": 56
+  },
+  "packages/backend/src/routes/__tests__/agent-delegations.test.ts": {
+    "db-mock": 1,
+    "positional": 10
+  },
+  "packages/backend/src/routes/__tests__/agent-passports.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/routes/__tests__/agents-characterization.test.ts": {
+    "db-mock": 1,
+    "positional": 33
+  },
+  "packages/backend/src/routes/__tests__/agents.test.ts": {
+    "db-mock": 1,
+    "positional": 12
+  },
+  "packages/backend/src/routes/__tests__/analytics.test.ts": {
+    "db-mock": 1,
+    "positional": 4
+  },
+  "packages/backend/src/routes/__tests__/approvals.test.ts": {
+    "db-mock": 1,
+    "positional": 7
+  },
+  "packages/backend/src/routes/__tests__/auth-sql.characterization.test.ts": {
+    "db-mock": 1,
+    "positional": 14
+  },
+  "packages/backend/src/routes/__tests__/auth.test.ts": {
+    "db-mock": 1,
+    "positional": 9
+  },
+  "packages/backend/src/routes/__tests__/balances.test.ts": {
+    "db-mock": 1,
+    "positional": 4
+  },
+  "packages/backend/src/routes/__tests__/catalog.test.ts": {
+    "db-mock": 1,
+    "positional": 2
+  },
+  "packages/backend/src/routes/__tests__/contacts.test.ts": {
+    "db-mock": 1,
+    "positional": 6
+  },
+  "packages/backend/src/routes/__tests__/dashboard-aggregates.characterization.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/routes/__tests__/dashboard.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/routes/__tests__/demo-mpp.test.ts": {
+    "db-mock": 1,
+    "positional": 16
+  },
+  "packages/backend/src/routes/__tests__/hybrid-accounts.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/routes/__tests__/hybrid-signers.test.ts": {
+    "db-mock": 1,
+    "positional": 6
+  },
+  "packages/backend/src/routes/__tests__/legacy-bookkeeping-gate.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/routes/__tests__/machine-payments-sweep.test.ts": {
+    "db-mock": 1,
+    "positional": 15
+  },
+  "packages/backend/src/routes/__tests__/machine-payments.test.ts": {
+    "db-mock": 1,
+    "positional": 212
+  },
+  "packages/backend/src/routes/__tests__/non-custody-authz.contract.test.ts": {
+    "db-mock": 1,
+    "positional": 12
+  },
+  "packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts": {
+    "db-mock": 1,
+    "positional": 11
+  },
+  "packages/backend/src/routes/__tests__/non-custody-relay.contract.test.ts": {
+    "db-mock": 1,
+    "positional": 7
+  },
+  "packages/backend/src/routes/__tests__/passkeys.test.ts": {
+    "db-mock": 1,
+    "positional": 2
+  },
+  "packages/backend/src/routes/__tests__/passport-verify.test.ts": {
+    "db-mock": 1,
+    "positional": 8
+  },
+  "packages/backend/src/routes/__tests__/payments-session-rail.test.ts": {
+    "db-mock": 1,
+    "positional": 44
+  },
+  "packages/backend/src/routes/__tests__/payments.test.ts": {
+    "db-mock": 1,
+    "positional": 15
+  },
+  "packages/backend/src/routes/__tests__/portfolio.test.ts": {
+    "db-mock": 1,
+    "positional": 4
+  },
+  "packages/backend/src/routes/__tests__/safe-deploy.test.ts": {
+    "db-mock": 1,
+    "positional": 24
+  },
+  "packages/backend/src/routes/__tests__/safe-details.test.ts": {
+    "db-mock": 1,
+    "positional": 4
+  },
+  "packages/backend/src/routes/__tests__/safe-exec.test.ts": {
+    "db-mock": 1,
+    "positional": 12
+  },
+  "packages/backend/src/routes/__tests__/transactions.test.ts": {
+    "positional": 17
+  },
+  "packages/backend/src/routes/__tests__/user-preferences.characterization.test.ts": {
+    "db-mock": 1,
+    "positional": 5
+  },
+  "packages/backend/src/routes/__tests__/user-safes-approvers.test.ts": {
+    "db-mock": 1,
+    "positional": 14
+  },
+  "packages/backend/src/routes/__tests__/user-safes-characterization.test.ts": {
+    "db-mock": 1,
+    "positional": 11
+  },
+  "packages/backend/src/routes/__tests__/user-safes-delete.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/routes/__tests__/user-safes-list.test.ts": {
+    "db-mock": 1,
+    "positional": 1
+  },
+  "packages/backend/src/routes/__tests__/user.test.ts": {
+    "db-mock": 1,
+    "positional": 16
+  },
+  "packages/backend/src/routes/__tests__/x402-consolidation.characterization.test.ts": {
+    "db-mock": 1,
+    "positional": 18
+  },
+  "packages/backend/src/routes/__tests__/x402-delegation.test.ts": {
+    "db-mock": 1,
+    "positional": 15
+  },
+  "packages/backend/src/routes/__tests__/x402-resources.test.ts": {
+    "db-mock": 1,
+    "positional": 14
+  },
+  "packages/backend/src/routes/__tests__/x402.test.ts": {
+    "db-mock": 1,
+    "positional": 179
+  }
+}

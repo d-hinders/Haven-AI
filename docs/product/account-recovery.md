@@ -9,7 +9,11 @@ covers:
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx
-last-verified: "2026-08-07"
+  - packages/frontend/src/components/settings/ManageApprovers.tsx
+  - packages/frontend/src/lib/passkey-approver.ts
+  - packages/backend/src/routes/passkeys.ts
+  - packages/backend/src/routes/safe-exec.ts
+last-verified: "2026-08-09"
 ---
 
 # Account recovery (delegation-rail accounts)
@@ -38,23 +42,26 @@ enroll a replacement.
   funds in it, are unreachable — by you *and* by Haven. This is not a policy we
   can override; it is how self-custody works.
 
-Haven refuses any change that would leave fewer than two ways to approve
-("add a backup first" — a clear message rather than a failed transaction),
-and the account itself refuses on-chain to remove its *last* signer, so the
-floor holds even outside Haven.
+Removing a **backup passkey** still requires keeping two ways to approve ("add
+a backup first" — a clear message rather than a failed transaction). Removing a
+**wallet** down to a single passkey is allowed, after Haven shows you what it
+costs. And the account itself refuses on-chain to remove its *last* signer, so
+that floor holds even outside Haven.
 
 Because a fresh single-passkey account starts with exactly one way to approve,
-**On mainnet, a backup is required — not just suggested.** Real-money accounts
-must have at least two ways to approve before they can be created or grant an
-agent a budget. If you truly want to run with a single device, you must
-explicitly acknowledge that losing it loses the account — Haven records that
-choice. (On testnets this rule does not apply.)
+**A backup is strongly recommended — and it is your choice.** Haven used to
+require two ways to approve before a real-money account could be created or
+give an agent a budget. It no longer does: you can create an account, fund it,
+and run it with a single device. Nothing about the risk changed — with one
+device there is **no recovery**, and losing it loses the account and everything
+in it. What changed is that Haven tells you rather than stopping you.
 
-**Haven nudges you to add a backup right after signup — on the dashboard you
-land on, not during signup itself.** Signup is one screen and one Face ID prompt
-(#1162); the prompt to add a backup comes after it, alongside the dashboard's
-setup checklist. It is dismissible, and you can add one at any time from
-**Backup & recovery** on your account page — before you've connected any agent.
+**You'll be asked to add a backup once the account holds funds — not during
+signup.** Signup is one screen and one Face ID prompt (#1162). The prompt to add
+a backup appears on the dashboard after money arrives, because before that
+there is nothing to protect and no reason for the question. It is dismissible,
+it stops appearing once you add a backup, and you can add one at any time from
+**Backup & recovery** on your account page.
 
 ## Add a backup (do this early)
 
@@ -67,9 +74,10 @@ On your account page, open **Backup & recovery** and choose one:
 - **Add a wallet** — enrols a browser wallet address as an owner. Useful if you
   already keep a hardware or browser wallet. Adding a wallet is reversible:
   **Remove** next to it takes the account back to passkey-only. You can't
-  remove it while it's your only way to approve, and on mainnet dropping to a
-  single signer needs the same explicit single-signer acknowledgment as
-  creating a single-signer account.
+  remove it while it's your *only* way to approve — that would leave nothing
+  able to approve anything, and the account refuses it on-chain. Removing it
+  when it's your *last backup* is allowed: Haven first shows you what you are
+  giving up, and you decide.
 
 Each takes one approval from a signer you already have.
 
@@ -99,3 +107,34 @@ you hold.
 If Haven disappeared entirely, an account with an enrolled signer stays fully
 recoverable through the public contracts — see the
 [independent exit path](../exit/README.md).
+
+## Legacy passkey Safes
+
+Accounts created through the Safe onboarding path (the one production still
+uses today, before the delegation rail takes over) work the same way, with two
+differences worth stating plainly.
+
+**The exposure is identical, and the wording is not softer for being older.**
+That Safe is deployed with your passkey signer as its **sole owner**, threshold
+1. Lose that passkey with nothing else on the account and the Safe — and
+anything in it — is unreachable, by you and by Haven. There is no server-side
+reset that changes this: Haven can clear the database row so you can onboard a
+*new* account, but the old Safe stays exactly where it is, owned by a key
+nobody holds. Restoring access is not something a support ticket can do.
+
+**Where you add the backup.** These accounts don't have a **Backup & recovery**
+screen. Go to **Approvers** in settings and add either:
+
+- **a second passkey** — a new Face ID / Touch ID credential, enrolled and
+  added as an owner in one flow; or
+- **a wallet address** — any browser or hardware wallet you control.
+
+Either one is signed by the passkey you already have, and afterwards the Safe
+has two owners. If one is later lost, the other can remove it and add a
+replacement, exactly as on the delegation rail.
+
+> Until [#1229](https://github.com/d-hinders/Haven-AI/issues/1229) the second
+> passkey could not be added at all — enrolment refused a second credential on
+> the same network, so the only backup available was a wallet. If you created
+> your account before that fix and never added a wallet, adding a second
+> passkey now is the single most useful thing you can do to it.

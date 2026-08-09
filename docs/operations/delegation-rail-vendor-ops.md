@@ -8,7 +8,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-08-05"
+last-verified: "2026-08-09" # stale-claims sweep: #1153 posture (no code gate), #980 path moves
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -167,7 +167,7 @@ A backend import satisfied only by workspace hoisting passes every local
 gate but crashes the pruned production build at boot — and the platform then
 silently serves the LAST healthy build (symptom: new routes 404 while
 `/health` shows newer features). Now enforced by
-`src/lib/__tests__/dependency-parity.test.ts`: every bare import in backend
+`src/__tests__/dependency-parity.test.ts`: every bare import in backend
 `src/**` must be declared in the backend's own `package.json`. When
 debugging "route missing on dev", check WHICH build generation is live by
 probing a route from each recent merge before suspecting the code.

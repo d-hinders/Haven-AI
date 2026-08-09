@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-08-07" # #999: baseline retired, rules absolute with inline waivers; Today table records achieved state
+last-verified: "2026-08-09" # #1210: per-file counts enforced (redistribution fails), gauge figure refreshed 69→68
 ---
 
 # Module Boundaries
@@ -116,7 +116,7 @@ severity and unconditional** (#999). Enforcement status:
 |---|---|---|
 | 1. `domain/` is pure | ✅ `core-stays-pure` covers the shared kernel (#983); `domain-stays-pure` covers the backend's own `domain/` (#998), zero violations on both | landed |
 | 2. `modules/` may not import `http/` | ✗ | the `http/` directory (routes/ → http/ is not part of #998's scope — a separate future rename) |
-| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra`, absolute | #985 / #988 / #995 extracted the money path; #999 drove the residue to zero — 16 deliberate exceptions carry inline `dep-lint-exempt` waivers with their reasons |
+| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra`, absolute | #985 / #988 / #995 extracted the money path; #999 drove the residue to zero, #1167 retired three more waivers and #1180 the signup/login one — 12 deliberate exceptions carry inline `dep-lint-exempt` waivers with their reasons |
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself landed with #998; the rule's positive form (asserting infra/rails ARE the only importers, everywhere) is still follow-up work |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (see rule 2 — not part of #998) |
 | 6. Cross-module imports go through `index.ts` | ✅ every `modules/**` directory (accounts, agents, payments, catalog, accounting, reporting, fee, passport, x402, mpp, transactions) — zero violations | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`) |
@@ -218,7 +218,15 @@ The lint also prints the **inline-SQL call-site gauge**: the count of
 file-edge count and went blind exactly there — it held flat at 66 files while
 call sites grew 256 → 344 (+34%), because a file that already imported the
 pool could grow inline SQL forever without moving any metric. The gauge sees
-intensity, not just presence. It is a printed trend line, not a gate.
+intensity, not just presence. Since #1166 it is also a **shrink-only gate**:
+`packages/backend/dep-lint-callsite-ceiling.json` holds the committed total
+plus per-file counts, and the lint enforces BOTH (#1210): it fails when the
+total grows past the ceiling, and also when any single file exceeds its
+committed count even under an unchanged total — per-file counts originally
+informed only the failure message, which let a file grow for free against
+another file's cleanup. `node scripts/dep-lint.mjs --update-ceiling` locks in
+a shrink — it refuses to raise the total or any file, so growth and
+redistribution alike mean hand-editing the JSON and defending that in the PR.
 
 If a rule turns out to be **wrong** rather than merely unmet — the tree is right
 and the rule is too strict — change the rule and say why. Bending working code
@@ -232,10 +240,10 @@ Achieved state as of 2026-08-07 (#999, the epic's closing issue):
 |---|---|
 | `lib/` layout | Gone (#998) — every former file lives in `platform/`, `domain/`, `infra/`, `rails/`, or a `modules/**` directory, each `modules/**` directory with a public `index.ts` |
 | Largest route | `routes/agent-connection-setups.ts`, 1246 lines (`routes/x402.ts` split by #996, `routes/machine-payments.ts` split into `modules/mpp/` by #997); further route slimming is post-epic work |
-| Inline SQL call sites | 108 `.query(` call sites across 18 production files outside `db/`, `db.ts` and `infra/repositories/` — printed by the lint's gauge on every run |
+| Inline SQL call sites | 68 `.query(` call sites across 14 production files outside `db/`, `db.ts` and `infra/repositories/` — gauged on every lint run and capped by the shrink-only ceiling (#1166). Was 108 across 18 files; #1167 emptied `routes/user.ts`, `routes/dashboard.ts` and `routes/agent-activity.ts`, #1180 `routes/auth.ts` |
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) |
 | Rail branching outside the seam | The retirement gate is decided ONCE, in `rails/execution-rail.ts` (#993); outside migrations, no non-test file but the seam itself mentions `session_key` |
-| Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 16 deliberate `pg-only-in-infra` exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason |
+| Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 13 deliberate `pg-only-in-infra` exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason (16 until #1167 retired three) |
 | Dependency cycles | **0** — `no-circular` is absolute and unwaivable |
 
 The gauge exists because the retired baseline was a file-edge count, and that
@@ -244,9 +252,10 @@ whatever that file's query volume — `routes/agent-connection-setups.ts` was 1
 violation and 56 `.query` call sites (24 statements plus 32
 BEGIN/COMMIT/ROLLBACK) before #985 removed all of them. The baseline held flat
 at 66 from 2026-07-26 while inline SQL grew from 256 call sites to 344 in the
-same set of files. #999 fixed the measure before retiring it: the call-site
-count is now printed in every `npm run lint:deps` run, so the trend is visible
-in CI logs even though it is not (yet) a gate.
+same set of files. #999 fixed the measure before retiring it, and #1166 made
+the fixed measure enforcing: the call-site count prints in every
+`npm run lint:deps` run AND fails the lint if it grows past the committed
+ceiling — the ratchet is back, but on the dimension that actually moves.
 
 Reproduce: `npm run lint:deps` prints both the waiver list and the gauge.
 
@@ -276,7 +285,13 @@ Explicitly **not** part of #980, so nobody expands the epic by inference:
   remain the convention for the legacy rail.
 - **No unification of the two chain SDKs.** `ethers` for the legacy rail and
   `viem` for the delegation rail both stay; rule 4 puts a port in front of them
-  rather than picking a winner.
+  rather than picking a winner. What a port does NOT buy you is agreement: the
+  two implementations had silently drifted on `getTokenBalance`'s handling of a
+  zero token address (native balance vs. a contract call at `0x0`) because only
+  one of them had any caller. [#1149](https://github.com/d-hinders/Haven-AI/issues/1149)
+  answers that structurally — one conformance suite in
+  `infra/chain/__tests__/chain-client.test.ts` runs the same expectations
+  against **both**, so a divergence fails on whichever side moved.
 - **No frontend architecture work** beyond extracting the worst 1000+ line
   components ([#989](https://github.com/d-hinders/Haven-AI/issues/989)).
 

@@ -29,6 +29,7 @@ import {
   setLegacyUserSafeAddress,
   upsertApproverMetadata,
 } from '../infra/repositories/user-safes.js'
+import { bindPasskeySignerToSafe } from '../infra/repositories/user-passkeys.js'
 
 const APPROVER_TYPES = new Set(['eoa', 'passkey'])
 
@@ -310,6 +311,19 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
           : null
 
       await upsertApproverMetadata(safe.id, address, type, label)
+
+      // #1229: a backup passkey is enrolled with no Safe — it gets one here,
+      // when it becomes an approver. Deliberately non-fatal: the binding is a
+      // fast-path hint, and `/safe/exec` re-derives it from the Safe's on-chain
+      // owner list when it is missing. Failing the metadata write over a
+      // missing optimisation would be the tail wagging the dog.
+      if (type === 'passkey') {
+        try {
+          await bindPasskeySignerToSafe(sub, safe.chain_id, address, safe.safe_address)
+        } catch (err) {
+          request.log.warn({ err, safeId: safe.id }, 'Could not bind passkey approver to safe')
+        }
+      }
 
       return { success: true }
     },

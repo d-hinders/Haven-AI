@@ -48,7 +48,17 @@ export interface ChainClient {
   /** The chain-native currency balance (wei-equivalent) for `address`. */
   getNativeBalance(chainId: number, address: string): Promise<bigint>
 
-  /** An ERC-20 `balanceOf` read for `address` against `tokenAddress`. */
+  /**
+   * An ERC-20 `balanceOf` read for `address` against `tokenAddress`.
+   *
+   * `tokenAddress` must be a real ERC-20 contract. The chain-native currency
+   * is `getNativeBalance`, and the token registry marks native with
+   * `address: null` — never the zero address — so a null/empty/zero token
+   * address here is a caller bug, and BOTH implementations throw on it
+   * (#1149). They used to disagree: viem silently returned the native
+   * balance, ethers built a contract at 0x0; same call, two answers, and
+   * whichever you got depended on the rail.
+   */
   getTokenBalance(chainId: number, tokenAddress: string, address: string): Promise<bigint>
 
   /**

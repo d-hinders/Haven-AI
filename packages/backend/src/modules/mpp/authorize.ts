@@ -51,6 +51,10 @@ import {
   recoverSigner,
   executeAllowanceTransfer,
 } from '../../rails/allowance-module.js'
+import {
+  readSharedWatermark,
+  waitForFreshAllowanceNonce,
+} from '../../rails/allowance-nonce-coordinator.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from './evidence.js'
 import { decideCoverage } from '../../domain/payment-coverage.js'
 import { isAddress } from '@haven_ai/core'
@@ -443,8 +447,9 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
 
   let onChainAllowance
   let chainTimeSec: number
+  let sharedWatermark: number | null
   try {
-    ;[onChainAllowance, chainTimeSec] = await Promise.all([
+    ;[onChainAllowance, chainTimeSec, sharedWatermark] = await Promise.all([
       getTokenAllowance(
         agent.chain_id,
         agent.safe_address,
@@ -452,6 +457,15 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
         tokenAddress,
       ),
       getLatestBlockTimeSec(agent.chain_id),
+      // Rides along with the chain reads (#1196) — a single indexed lookup
+      // against reads orders of magnitude slower, so it costs nothing here and
+      // would be a serial round trip anywhere else.
+      readSharedWatermark(
+        agent.chain_id,
+        agent.safe_address,
+        agent.delegate_address,
+        tokenAddress,
+      ),
     ])
   } catch (err) {
     return {
@@ -536,6 +550,29 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
       },
     )
   }
+
+  // #1196: this path builds a sign_hash from the allowance nonce too, so it
+  // needs the same stale-nonce protection x402 has had since #692 — the #693
+  // preflight kept it SAFE without it, but a stale nonce still meant a revert
+  // and a retry. Runs AFTER the queue branch (#1209): the approval path signs
+  // nothing, so the bounded wait only runs when a hash will actually be built.
+  onChainAllowance.nonce = await waitForFreshAllowanceNonce(
+    agent.chain_id,
+    agent.safe_address,
+    agent.delegate_address,
+    tokenAddress,
+    onChainAllowance.nonce,
+    async () =>
+      (
+        await getTokenAllowance(
+          agent.chain_id,
+          agent.safe_address,
+          agent.delegate_address,
+          tokenAddress,
+        )
+      ).nonce,
+    { sharedWatermark },
+  )
 
   let signHash: string
   try {

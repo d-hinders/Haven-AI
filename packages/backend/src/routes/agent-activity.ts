@@ -1,85 +1,23 @@
 import { FastifyInstance } from 'fastify'
-// dep-lint-exempt: 14 read-only activity/stats aggregates, each user_id-scoped inline; the verbatim repository move is a several-hundred-line refactor deferred under #999's ~100-line fix-or-waive budget
-import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getExplorerUrl } from '../domain/chains.js'
-import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import { machinePaymentLifecycle } from '../domain/machine-payment-lifecycle.js'
-
-// ── Types ─────────────────────────────────────────────────────────
-
-interface PaymentRow {
-  id: string
-  safe_id: string | null
-  safe_address: string | null
-  safe_name: string | null
-  chain_id: number
-  token_symbol: string
-  token_address: string
-  amount_raw: string
-  amount_human: string
-  to_address: string
-  status: string
-  tx_hash: string | null
-  source: string | null
-  x402_resource_url: string | null
-  x402_merchant_address: string | null
-  payment_rail: string | null
-  payment_resource_url: string | null
-  merchant_address: string | null
-  payment_proof_status: string | null
-  payment_reconciliation_event_type: string | null
-  execution_rail: string | null
-  session_permission_id: string | null
-  delegation_hash: string | null
-  created_at: string
-  confirmed_at: string | null
-}
-
-interface ApprovalRow {
-  id: string
-  safe_id: string | null
-  safe_address: string | null
-  safe_name: string | null
-  chain_id: number
-  token_symbol: string
-  token_address: string
-  amount_human: string
-  to_address: string
-  reason: string | null
-  source: string | null
-  x402_resource_url: string | null
-  payment_rail: string | null
-  payment_resource_url: string | null
-  merchant_address: string | null
-  payment_proof_status: string | null
-  payment_reconciliation_event_type: string | null
-  status: string
-  tx_hash: string | null
-  created_at: string
-}
-
-interface ToolInvocationRow {
-  id: string
-  tool_name: string
-  payment_id: string | null
-  result_status: string
-  next_action: string | null
-  error_code: string | null
-  status_code: number | null
-  created_at: string
-}
-
-interface StatsRow {
-  token_symbol: string
-  total_spent: string
-  tx_count: string
-}
-
-interface AgentInfo {
-  id: string
-  name: string
-}
+import { agentExistsForUser, listAgentNamesForUser } from '../infra/repositories/agents.js'
+import { countActionableApprovalsForUser } from '../infra/repositories/approval-requests.js'
+import {
+  listToolInvocationsForAgent,
+  listToolInvocationsForAgents,
+} from '../infra/repositories/agent-tool-invocations.js'
+import {
+  countPendingApprovalsForAgent,
+  listAgentApprovals,
+  listAgentPayments,
+  listFeedApprovals,
+  listFeedPayments,
+  sumAgentSpendAllTime,
+  sumAgentSpendThisWeek,
+  sumAgentSpendToday,
+} from '../infra/repositories/agent-activity.js'
 
 // ── Routes ────────────────────────────────────────────────────────
 
@@ -97,109 +35,22 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     const offset = Number((request.query as Record<string, string>).offset) || 0
 
     // Verify agent belongs to user
-    const agentCheck = await pool.query(
-      'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
-      [id, sub],
-    )
-    if (agentCheck.rows.length === 0) {
+    if (!(await agentExistsForUser(id, sub))) {
       return reply.code(404).send({ error: 'Agent not found' })
     }
 
     // Fetch payments
-    const payments = await pool.query<PaymentRow>(
-      `SELECT pi.id,
-              us.id AS safe_id,
-              COALESCE(us.safe_address, pi.safe_address) AS safe_address,
-              us.name AS safe_name,
-              COALESCE(pi.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) AS chain_id,
-              pi.token_symbol,
-              pi.token_address,
-              pi.amount_raw,
-              pi.amount_human,
-              pi.to_address,
-              pi.status,
-              pi.tx_hash,
-              COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
-              COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
-              COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
-              mpe.proof_status AS payment_proof_status,
-              pi.payment_rail,
-              pi.payment_resource_url,
-              pi.merchant_address,
-              pi.execution_rail,
-              pi.session_permission_id,
-              pi.delegation_hash,
-              pi.created_at,
-              pi.confirmed_at,
-              mpre.event_type AS payment_reconciliation_event_type
-       FROM payment_intents pi
-       LEFT JOIN user_safes us
-         ON us.user_id = pi.user_id
-        AND LOWER(us.safe_address) = LOWER(pi.safe_address)
-        AND pi.chain_id IS NOT NULL
-        AND us.chain_id = pi.chain_id
-       LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
-       LEFT JOIN machine_payment_reconciliation_events mpre
-         ON mpre.payment_intent_id = pi.id
-        AND mpre.status = 'open'
-        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-       WHERE pi.agent_id = $1
-       ORDER BY pi.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [id, limit, offset],
-    )
+    const payments = await listAgentPayments(id, limit, offset)
 
     // Fetch approval requests
-    const approvals = await pool.query<ApprovalRow>(
-      `SELECT ar.id,
-              us.id AS safe_id,
-              COALESCE(us.safe_address, ar.safe_address) AS safe_address,
-              us.name AS safe_name,
-              COALESCE(ar.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
-              ar.token_symbol,
-              ar.token_address,
-              ar.amount_human,
-              ar.to_address,
-              ar.reason,
-              COALESCE(ar.payment_rail, ar.source, 'direct') AS source,
-              COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS x402_resource_url,
-              ar.payment_rail,
-              ar.payment_resource_url,
-              ar.merchant_address,
-              ar.status, ar.tx_hash, ar.created_at,
-              mpe.proof_status AS payment_proof_status,
-              mpre.event_type AS payment_reconciliation_event_type
-       FROM approval_requests ar
-       LEFT JOIN user_safes us
-         ON us.user_id = ar.user_id
-        AND LOWER(us.safe_address) = LOWER(ar.safe_address)
-        AND ar.chain_id IS NOT NULL
-        AND us.chain_id = ar.chain_id
-       LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
-       LEFT JOIN machine_payment_reconciliation_events mpre
-         ON mpre.approval_request_id = ar.id
-        AND mpre.status = 'open'
-        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-       WHERE ar.agent_id = $1
-       ORDER BY ar.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [id, limit, offset],
-    )
+    const approvals = await listAgentApprovals(id, limit, offset)
 
     // Fetch MCP tool invocations (audit log)
-    const invocations = await pool.query<ToolInvocationRow>(
-      `SELECT id, tool_name, payment_id, result_status, next_action, error_code,
-              status_code, created_at
-       FROM agent_tool_invocations
-       WHERE agent_id = $1
-       ORDER BY created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [id, limit, offset],
-    )
+    const invocations = await listToolInvocationsForAgent(id, limit, offset)
 
     // Merge and sort by created_at desc
     const activity = [
-      ...payments.rows.map((p) => {
+      ...payments.map((p) => {
         const lifecycle = machinePaymentLifecycle({
           rail: p.source,
           paymentStatus: p.status,
@@ -240,7 +91,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           created_at: p.created_at,
         }
       }),
-      ...approvals.rows.map((a) => {
+      ...approvals.map((a) => {
         const proofStatus = a.payment_proof_status ?? (a.status === 'executed' ? 'payment_confirmed' : null)
         const lifecycle = machinePaymentLifecycle({
           rail: a.source,
@@ -272,7 +123,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           created_at: a.created_at,
         }
       }),
-      ...invocations.rows.map((inv) => ({
+      ...invocations.map((inv) => ({
         type: 'mcp_tool_call' as const,
         id: inv.id,
         tool_name: inv.tool_name,
@@ -296,73 +147,39 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
       const { id } = request.params
 
       // Verify agent belongs to user
-      const agentCheck = await pool.query(
-        'SELECT id FROM agents WHERE id = $1 AND user_id = $2',
-        [id, sub],
-      )
-      if (agentCheck.rows.length === 0) {
+      if (!(await agentExistsForUser(id, sub))) {
         return reply.code(404).send({ error: 'Agent not found' })
       }
 
       // Total spent per token (confirmed only)
-      const totals = await pool.query<StatsRow>(
-        `SELECT token_symbol,
-                SUM(CAST(amount_human AS NUMERIC)) as total_spent,
-                COUNT(*) as tx_count
-         FROM payment_intents
-         WHERE agent_id = $1 AND status = 'confirmed'
-         GROUP BY token_symbol`,
-        [id],
-      )
+      const totals = await sumAgentSpendAllTime(id)
 
       // Spent today per token
-      const todayTotals = await pool.query<StatsRow>(
-        `SELECT token_symbol,
-                SUM(CAST(amount_human AS NUMERIC)) as total_spent,
-                COUNT(*) as tx_count
-         FROM payment_intents
-         WHERE agent_id = $1 AND status = 'confirmed'
-           AND created_at >= CURRENT_DATE
-         GROUP BY token_symbol`,
-        [id],
-      )
+      const todayTotals = await sumAgentSpendToday(id)
 
       // Spent this week
-      const weekTotals = await pool.query<StatsRow>(
-        `SELECT token_symbol,
-                SUM(CAST(amount_human AS NUMERIC)) as total_spent,
-                COUNT(*) as tx_count
-         FROM payment_intents
-         WHERE agent_id = $1 AND status = 'confirmed'
-           AND created_at >= CURRENT_DATE - interval '7 days'
-         GROUP BY token_symbol`,
-        [id],
-      )
+      const weekTotals = await sumAgentSpendThisWeek(id)
 
       // Pending approvals count
-      const pendingApprovals = await pool.query<{ count: string }>(
-        `SELECT COUNT(*) as count FROM approval_requests
-         WHERE agent_id = $1 AND status IN ('pending', 'approved')`,
-        [id],
-      )
+      const pendingApprovals = await countPendingApprovalsForAgent(id)
 
       return {
-        all_time: totals.rows.map((r) => ({
+        all_time: totals.map((r) => ({
           token: r.token_symbol,
           total_spent: r.total_spent,
           tx_count: Number(r.tx_count),
         })),
-        today: todayTotals.rows.map((r) => ({
+        today: todayTotals.map((r) => ({
           token: r.token_symbol,
           total_spent: r.total_spent,
           tx_count: Number(r.tx_count),
         })),
-        this_week: weekTotals.rows.map((r) => ({
+        this_week: weekTotals.map((r) => ({
           token: r.token_symbol,
           total_spent: r.total_spent,
           tx_count: Number(r.tx_count),
         })),
-        pending_approvals: Number(pendingApprovals.rows[0].count),
+        pending_approvals: pendingApprovals,
       }
     },
   )
@@ -376,114 +193,26 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
     const offset = Number((request.query as Record<string, string>).offset) || 0
 
     // All user's agents
-    const agentResult = await pool.query<AgentInfo>(
-      'SELECT id, name FROM agents WHERE user_id = $1',
-      [sub],
-    )
-    const agentNames = new Map(agentResult.rows.map((a) => [a.id, a.name]))
-    const agentIds = agentResult.rows.map((a) => a.id)
+    const agentRows = await listAgentNamesForUser(sub)
+    const agentNames = new Map(agentRows.map((a) => [a.id, a.name]))
+    const agentIds = agentRows.map((a) => a.id)
 
     if (agentIds.length === 0) {
       return { activity: [], pending_approvals: 0 }
     }
 
     // Recent payments across all agents
-    const payments = await pool.query<PaymentRow & { agent_id: string }>(
-      `SELECT pi.id,
-              pi.agent_id,
-              us.id AS safe_id,
-              COALESCE(us.safe_address, pi.safe_address) AS safe_address,
-              us.name AS safe_name,
-              COALESCE(pi.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) AS chain_id,
-              pi.token_symbol,
-              pi.token_address,
-              pi.amount_raw,
-              pi.amount_human,
-              pi.to_address,
-              pi.status,
-              pi.tx_hash,
-              COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
-              COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
-              COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
-              mpe.proof_status AS payment_proof_status,
-              pi.payment_rail,
-              pi.payment_resource_url,
-              pi.merchant_address,
-              pi.execution_rail,
-              pi.session_permission_id,
-              pi.delegation_hash,
-              pi.created_at,
-              pi.confirmed_at,
-              mpre.event_type AS payment_reconciliation_event_type
-       FROM payment_intents pi
-       LEFT JOIN user_safes us
-         ON us.user_id = pi.user_id
-        AND LOWER(us.safe_address) = LOWER(pi.safe_address)
-        AND pi.chain_id IS NOT NULL
-        AND us.chain_id = pi.chain_id
-       LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
-       LEFT JOIN machine_payment_reconciliation_events mpre
-         ON mpre.payment_intent_id = pi.id
-        AND mpre.status = 'open'
-        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-       WHERE pi.agent_id = ANY($1)
-       ORDER BY pi.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [agentIds, limit, offset],
-    )
+    const payments = await listFeedPayments(agentIds, limit, offset)
 
     // Recent approval requests
-    const approvals = await pool.query<ApprovalRow & { agent_id: string }>(
-      `SELECT ar.id,
-              ar.agent_id,
-              us.id AS safe_id,
-              COALESCE(us.safe_address, ar.safe_address) AS safe_address,
-              us.name AS safe_name,
-              COALESCE(ar.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
-              ar.token_symbol,
-              ar.token_address,
-              ar.amount_human,
-              ar.to_address,
-              ar.reason,
-              COALESCE(ar.payment_rail, ar.source, 'direct') AS source,
-              COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS x402_resource_url,
-              ar.payment_rail,
-              ar.payment_resource_url,
-              ar.merchant_address,
-              ar.status, ar.tx_hash, ar.created_at,
-              mpe.proof_status AS payment_proof_status,
-              mpre.event_type AS payment_reconciliation_event_type
-       FROM approval_requests ar
-       LEFT JOIN user_safes us
-         ON us.user_id = ar.user_id
-        AND LOWER(us.safe_address) = LOWER(ar.safe_address)
-        AND ar.chain_id IS NOT NULL
-        AND us.chain_id = ar.chain_id
-       LEFT JOIN machine_payment_evidence mpe ON mpe.approval_request_id = ar.id
-       LEFT JOIN machine_payment_reconciliation_events mpre
-         ON mpre.approval_request_id = ar.id
-        AND mpre.status = 'open'
-        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-       WHERE ar.agent_id = ANY($1)
-       ORDER BY ar.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [agentIds, limit, offset],
-    )
+    const approvals = await listFeedApprovals(agentIds, limit, offset)
 
     // Recent MCP tool invocations (audit log)
-    const invocations = await pool.query<ToolInvocationRow & { agent_id: string }>(
-      `SELECT id, agent_id, tool_name, payment_id, result_status, next_action,
-              error_code, status_code, created_at
-       FROM agent_tool_invocations
-       WHERE agent_id = ANY($1)
-       ORDER BY created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [agentIds, limit, offset],
-    )
+    const invocations = await listToolInvocationsForAgents(agentIds, limit, offset)
 
     // Merge and sort
     const activity = [
-      ...payments.rows.map((p) => {
+      ...payments.map((p) => {
         const lifecycle = machinePaymentLifecycle({
           rail: p.source,
           paymentStatus: p.status,
@@ -526,7 +255,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           created_at: p.created_at,
         }
       }),
-      ...approvals.rows.map((a) => {
+      ...approvals.map((a) => {
         const proofStatus = a.payment_proof_status ?? (a.status === 'executed' ? 'payment_confirmed' : null)
         const lifecycle = machinePaymentLifecycle({
           rail: a.source,
@@ -560,7 +289,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           created_at: a.created_at,
         }
       }),
-      ...invocations.rows.map((inv) => ({
+      ...invocations.map((inv) => ({
         type: 'mcp_tool_call' as const,
         id: inv.id,
         agent_id: inv.agent_id,
@@ -577,15 +306,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
      .slice(0, limit)
 
     // Pending approvals count
-    const pendingResult = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM approval_requests
-       WHERE user_id = $1 AND status IN ('pending', 'approved')`,
-      [sub],
-    )
+    const pendingApprovals = await countActionableApprovalsForUser(sub)
 
     return {
       activity,
-      pending_approvals: Number(pendingResult.rows[0].count),
+      pending_approvals: pendingApprovals,
     }
   })
 }

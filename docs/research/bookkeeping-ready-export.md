@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/modules/reporting/fortnox.ts
   - packages/backend/src/routes/accounting.ts
   - packages/backend/src/routes/fortnox.ts
-last-verified: "2026-08-07" # #997: covers updated (lib/machine-payment-evidence.ts moved into modules/mpp/**)
+last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
 ---
 
 # Architecture — bookkeeping-ready export (Fortnox / SIE / beyond)

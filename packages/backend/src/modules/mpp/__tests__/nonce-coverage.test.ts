@@ -10,11 +10,14 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 
+// Third column: the site's divert marker — the coverage decision whose queue/
+// insufficient branch returns WITHOUT signing (mpp send diverts on a raw
+// comparison rather than decideCoverage).
 const SIGN_HASH_BUILDERS = [
-  ['x402 authorize', '../../x402/legacy-authorize.ts'],
-  ['payments', '../../../routes/payments.ts'],
-  ['mpp send', '../send.ts'],
-  ['mpp authorize', '../authorize.ts'],
+  ['x402 authorize', '../../x402/legacy-authorize.ts', 'decideCoverage('],
+  ['payments', '../../../routes/payments.ts', 'decideCoverage('],
+  ['mpp send', '../send.ts', 'amountRaw > effective.remaining'],
+  ['mpp authorize', '../authorize.ts', 'decideCoverage('],
 ] as const
 
 describe('every legacy-rail sign_hash builder is nonce-coordinated (#1196)', () => {
@@ -39,5 +42,18 @@ describe('every legacy-rail sign_hash builder is nonce-coordinated (#1196)', () 
     // coordinator to fetch serially on the request path.
     expect(src).toMatch(/readSharedWatermark\(/)
     expect(src).toMatch(/\{ sharedWatermark \}/)
+  })
+
+  it.each(SIGN_HASH_BUILDERS)('%s waits only AFTER the divert branch (#1209)', (_name, rel, divert) => {
+    const src = readFileSync(new URL(rel, import.meta.url), 'utf8')
+    // The queue/insufficient branches sign nothing, so the bounded wait must
+    // not tax them: the coordinator assignment sits below the coverage
+    // decision, next to the hash it feeds. Position, not just presence — the
+    // #1196 assertions above stay true under either ordering.
+    const divertAt = src.indexOf(divert)
+    const waitAt = src.indexOf('onChainAllowance.nonce = await waitForFreshAllowanceNonce(')
+    expect(divertAt, `divert marker missing: ${divert}`).toBeGreaterThan(-1)
+    expect(waitAt, 'coordinator assignment missing').toBeGreaterThan(-1)
+    expect(waitAt, 'the wait must come after the divert decision').toBeGreaterThan(divertAt)
   })
 })

@@ -20,7 +20,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { displayName } from '@/lib/user'
-import { DEFAULT_CHAIN_ID, getChainConfig } from '@/lib/chains'
+import { DEFAULT_CHAIN_ID, DELEGATION_ONBOARDING_CHAIN_IDS, getChainConfig } from '@/lib/chains'
 import { useDeployableChains } from '@/hooks/useDeployableChains'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { Button } from '@/components/ui/Button'
@@ -63,12 +63,16 @@ export default function OnboardingClient() {
   // an account, which would otherwise bounce them past the success state.
   const creationStartedRef = useRef(false)
 
-  // Delegation-rail onboarding (#886): dark-launched behind a flag, and only
-  // on chains where the rail is live (Base Sepolia during the pilot). When
-  // active, the passkey path creates a Hybrid account (counterfactual, zero
-  // tx) instead of deploying a Safe.
+  // Delegation-rail onboarding (#886): dark-launched behind a flag, on the
+  // chains where the rail is live — Base Sepolia since the pilot, Base
+  // mainnet since the #908 launch prep (the flag on the prod Vercel scope is
+  // the actual launch switch; flipping it is the LAST step of the mainnet
+  // canary runbook, docs/operations/mainnet-canary.md). When active, the
+  // passkey path creates a Hybrid account (counterfactual, zero tx) instead
+  // of deploying a Safe.
   const delegationOnboarding =
-    process.env.NEXT_PUBLIC_DELEGATION_ONBOARDING === '1' && selectedChainId === 84532
+    process.env.NEXT_PUBLIC_DELEGATION_ONBOARDING === '1' &&
+    DELEGATION_ONBOARDING_CHAIN_IDS.has(selectedChainId)
 
   // Only offer chains the backend actually serves deploys on (#679). If the
   // current selection isn't served (e.g. the default is mainnet but this env

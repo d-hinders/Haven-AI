@@ -21,7 +21,7 @@ covers:
   - .github/workflows/qa-live.yml
   - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
-last-verified: "2026-08-05"
+last-verified: "2026-08-09" # re-verified for #1227 (db-mock ratchet joins the gates) — no claim here affected
 ---
 
 <!--

@@ -20,7 +20,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-08-08"
+last-verified: "2026-08-09" # re-verified for #1227 (db-mock ratchet joins the gates) — no claim here affected
 ---
 
 # Agent QA — run the automated QA layers against dev

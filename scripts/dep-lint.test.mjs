@@ -349,6 +349,21 @@ test('ceiling: growth fails and names exactly the files that grew', () => {
   )
 })
 
+test('ceiling: redistribution under an unchanged total STILL fails (#1210)', () => {
+  // b.ts grew 2→4 while a.ts shrank 6→4 — the total (10) never moved, which
+  // the old check accepted silently, letting per-file counts go stale and any
+  // file grow for free against another file's cleanup.
+  const gauge = { callSites: 10, fileCount: 2, perFile: { 'a.ts': 4, 'b.ts': 6 } }
+  const r = checkCallSiteCeiling(gauge, { total: 10, files: { 'a.ts': 6, 'b.ts': 4 } })
+  assert.equal(r.ok, false)
+  assert.equal(r.canLower, false)
+  assert.deepEqual(
+    r.grown.map((g) => `${g.path} ${g.committed}→${g.count}`),
+    ['b.ts 4→6'],
+    'must name the grown file even though the total is within the ceiling',
+  )
+})
+
 test('ceiling: equal count passes with nothing to lower', () => {
   const gauge = { callSites: 10, fileCount: 2, perFile: { 'a.ts': 6, 'b.ts': 4 } }
   const r = checkCallSiteCeiling(gauge, { total: 10, files: { 'a.ts': 6, 'b.ts': 4 } })

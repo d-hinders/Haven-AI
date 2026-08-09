@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Address, Hash } from 'viem'
 import type { User } from '@/context/AuthContext'
 import { api, ApiRequestError, type ListPasskeysResponse } from '@/lib/api'
-import { base64UrlEncode, createPasskey, PasskeyCancelledError, PasskeyUnsupportedError } from '@/lib/passkey'
+import { base64UrlEncode, createPasskey, getPasskeyAssertion, PasskeyCancelledError, PasskeyUnsupportedError } from '@/lib/passkey'
 import { displayName } from '@/lib/user'
 import {
   PASSKEY_SCHEMA_VERSION,
@@ -91,8 +91,13 @@ function getPasskeyForChain(
   return passkeys.find((passkey) => passkey.chain_id === chainId) ?? null
 }
 
+// The user IS signed in when they see these — the session is email/password;
+// the passkey is the signing key. So neither message may say "sign in" (#1229).
 const CROSS_DEVICE_PASSKEY_MESSAGE =
-  'You already enrolled a passkey on another device. Sign in there to continue.'
+  'This account already has a passkey for this network. Open Haven in the browser or on the device where it was created to continue.'
+
+const RESUME_FAILED_MESSAGE =
+  'This account already has a passkey for this network, but this device could not confirm it. Try again here, or open Haven where the passkey was created.'
 
 export default function PasskeyEnrollFlow({
   user,
@@ -133,55 +138,95 @@ export default function PasskeyEnrollFlow({
     onError('') // clear any previous failure the host screen is still showing
 
     try {
-      const createdPasskey = await createPasskey({
-        userId: getRandomUserId(),
-        userName: user.email,
-        userDisplayName: displayName(user),
-      })
+      // #1229: RESUME before create. The account may already hold a passkey
+      // for this chain (enrolled earlier, local state since cleared). The old
+      // flow always created a NEW credential first, collided with the 409,
+      // compared the fresh id against the enrolled one — necessarily
+      // different, because it was just minted — and concluded "another
+      // device" even on the device that holds the working passkey. Ask the
+      // authenticator to CONFIRM the enrolled credential instead: success
+      // proves possession and the flow continues to the (already idempotent)
+      // deploy/register steps.
+      const { passkeys: preexisting } = await api.listPasskeys()
+      const alreadyEnrolled = getPasskeyForChain(preexisting, selectedChainId)
 
       let signerAddress = ''
-      let credentialId = createdPasskey.credentialId
-      let storedPublicKey: { x: `0x${string}`; y: `0x${string}` } | undefined = createdPasskey.publicKey
+      let credentialId = ''
+      let storedPublicKey: { x: `0x${string}`; y: `0x${string}` } | undefined
 
-      setStage('enrolling')
-      try {
-        const enrolled = await api.enrollPasskey({
-          credential_id: createdPasskey.credentialId,
-          public_key_x: createdPasskey.publicKey.x,
-          public_key_y: createdPasskey.publicKey.y,
-          chain_id: selectedChainId,
-          raw_attestation_object: base64UrlEncode(createdPasskey.rawAttestationObject),
+      if (alreadyEnrolled) {
+        try {
+          await getPasskeyAssertion({
+            challenge: crypto.getRandomValues(new Uint8Array(32)),
+            allowCredentialIds: [alreadyEnrolled.credential_id],
+          })
+        } catch (err) {
+          if (err instanceof PasskeyUnsupportedError) {
+            throw err
+          }
+          // A cancel and a genuinely-absent credential both surface as
+          // NotAllowedError — WebAuthn does not let us tell them apart, so
+          // one honest message covers both rather than guessing "cancelled".
+          throw new Error(RESUME_FAILED_MESSAGE)
+        }
+        signerAddress = alreadyEnrolled.signer_address
+        credentialId = alreadyEnrolled.credential_id
+        // The server row's public key is not in the list payload; the stored
+        // signer works without it (publicKey is optional in the schema).
+      } else {
+        const createdPasskey = await createPasskey({
+          userId: getRandomUserId(),
+          userName: user.email,
+          userDisplayName: displayName(user),
         })
-        signerAddress = enrolled.signer_address
-        credentialId = enrolled.credential_id
-      } catch (err) {
-        if (!(err instanceof ApiRequestError) || err.status !== 409) {
-          throw err
-        }
 
-        const { passkeys } = await api.listPasskeys()
-        const existing = getPasskeyForChain(passkeys, selectedChainId)
-        if (!existing) {
-          throw err
-        }
-
-        if (existing.credential_id !== createdPasskey.credentialId) {
-          throw new Error(CROSS_DEVICE_PASSKEY_MESSAGE)
-        }
-
-        signerAddress = existing.signer_address
-        credentialId = existing.credential_id
+        credentialId = createdPasskey.credentialId
         storedPublicKey = createdPasskey.publicKey
+
+        setStage('enrolling')
+        try {
+          const enrolled = await api.enrollPasskey({
+            credential_id: createdPasskey.credentialId,
+            public_key_x: createdPasskey.publicKey.x,
+            public_key_y: createdPasskey.publicKey.y,
+            chain_id: selectedChainId,
+            raw_attestation_object: base64UrlEncode(createdPasskey.rawAttestationObject),
+          })
+          signerAddress = enrolled.signer_address
+          credentialId = enrolled.credential_id
+        } catch (err) {
+          // Race window only, now that the resume path runs first: another
+          // tab/device enrolled between our list and our insert.
+          if (!(err instanceof ApiRequestError) || err.status !== 409) {
+            throw err
+          }
+
+          const { passkeys } = await api.listPasskeys()
+          const existing = getPasskeyForChain(passkeys, selectedChainId)
+          if (!existing) {
+            throw err
+          }
+
+          if (existing.credential_id !== createdPasskey.credentialId) {
+            throw new Error(CROSS_DEVICE_PASSKEY_MESSAGE)
+          }
+
+          signerAddress = existing.signer_address
+          credentialId = existing.credential_id
+          storedPublicKey = createdPasskey.publicKey
+        }
       }
 
       setStage('deploying')
-      let safeAddress = '' as Address
+      let safeAddress = (alreadyEnrolled?.safe_address ?? '') as Address
       let txHash = EMPTY_TX_HASH
 
       try {
-        const deployed = await api.deployPasskeySafe({ chain_id: selectedChainId })
-        safeAddress = deployed.safe_address as Address
-        txHash = deployed.tx_hash as Hash
+        if (!safeAddress) {
+          const deployed = await api.deployPasskeySafe({ chain_id: selectedChainId })
+          safeAddress = deployed.safe_address as Address
+          txHash = deployed.tx_hash as Hash
+        }
       } catch (err) {
         if (!(err instanceof ApiRequestError) || err.status !== 409) {
           throw err
@@ -208,7 +253,7 @@ export default function PasskeyEnrollFlow({
         }
       }
 
-      rememberPasskeyCredentialOnDevice(createdPasskey.credentialId)
+      rememberPasskeyCredentialOnDevice(credentialId)
       setStoredPasskeySigner({
         schemaVersion: PASSKEY_SCHEMA_VERSION,
         address: signerAddress as Address,

@@ -105,7 +105,7 @@ jobs:
               # The dependency-boundary gate (#982) lives outside packages/ but
               # polices packages/backend. Without this case, weakening a rule or
               # the ratchet script would ship without the gate ever running.
-              .dependency-cruiser.cjs|scripts/dep-lint.mjs|scripts/dep-lint.test.mjs|scripts/lib/ratchet.mjs|scripts/generate-api-types.mjs)
+              .dependency-cruiser.cjs|scripts/dep-lint.mjs|scripts/dep-lint.test.mjs|scripts/db-mock-ratchet.mjs|scripts/db-mock-ratchet.test.mjs|scripts/lib/ratchet.mjs|scripts/generate-api-types.mjs)
                 code=true
                 backend=true
                 ;;
@@ -308,6 +308,16 @@ jobs:
         run: |
           npm run lint:deps
           npm run lint:deps:test
+
+      - name: DB-mock ratchet (#1227)
+        # Blocking, shrink-only baseline over positional DB mocking
+        # (vi.mock('db.js') + mockResolvedValueOnce counts). Database
+        # behaviour belongs in repository tests on the real-Postgres harness
+        # (#1220); this stops the mock pattern growing back. Self-tested for
+        # the same reason as lint:deps above.
+        run: |
+          npm run lint:db-mocks
+          npm run lint:db-mocks:test
 
       - name: DB schema smoke (migrations + money-path query PREPARE, #773)
         # Applies every migration to the real Postgres service, then PREPAREs the

@@ -7,7 +7,7 @@ covers:
   - package.json
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
-last-verified: "2026-08-07"
+last-verified: "2026-08-09" # #1227: lint:db-mocks added to the Backend/API verification row
 ---
 
 # PR Workflow Checklist
@@ -122,7 +122,7 @@ Use the smallest reliable set that matches the change.
 | Docs, prompts, or PR template only | `git diff --check` and `npm run docs:check` (front-matter + `covers` globs + agent-skill alignment) |
 | Any source file | `npm run docs:coupling` — the strict contract-doc gate, keyed on **code**, so the docs row above never covers the pure-code PR that needs it |
 | Payment, Safe, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
-| Backend/API | `npm run typecheck -w packages/backend`, `npm run test -w packages/backend`, and `npm run lint:deps` (dependency boundaries, #982) |
+| Backend/API | `npm run typecheck -w packages/backend`, `npm run test -w packages/backend`, `npm run lint:deps` (dependency boundaries, #982), and `npm run lint:db-mocks` (positional DB-mock ratchet, #1227) |
 | Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run design:lint -w packages/frontend`, `npm run lint:copy`, `npm run test -w packages/frontend`, and `npm run build -w packages/frontend` |
 | SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, and `npm run build -w packages/sdk` |
 | Cross-package or release-risk | `npm run quality` |

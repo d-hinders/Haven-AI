@@ -9,6 +9,7 @@ covers:
   - packages/backend/src/rails/hybrid-transfers.ts
   - packages/backend/src/infra/repositories/hybrid-signers.ts
   - packages/backend/src/rails/hybrid-account-config.ts
+  - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
 last-verified: "2026-08-09" # #999 re-verified: hybrid-account-config.ts now reads via infra/repositories (verbatim SQL, chain-scoped bind kept), agent-delegations/hybrid-accounts carry dep-lint-exempt waivers — no invariant change. Promotion-batch review re-verify: the ≥2 refusal in encodeSignerAction's remove_passkey branch gained a comment naming it as branch-specific after #1153 (the surrounding claim 'Haven's floor is ≥2 so recovery always exists' had become false of its own file); §6's record of that asymmetry was already correct and is unchanged. No enforcement point, authority or refusal moved — comment only

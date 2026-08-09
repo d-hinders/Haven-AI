@@ -164,6 +164,40 @@ describe('Safe exec routes', () => {
     return app.jwt.sign(payload, { expiresIn: '1h' })
   }
 
+  /**
+   * Answer the route's passkey queries by WHAT they ask rather than by call
+   * order. The positional chain is the failure mode the #1227 ratchet exists
+   * to shrink: adding one query to the handler re-shuffles every test that
+   * mocked the old sequence. The queries themselves are proven against real
+   * Postgres in `infra/repositories/__tests__/user-passkeys.test.ts`; what
+   * these route tests own is the DECISION taken on the result.
+   */
+  function stubPasskeyQueries(rows: {
+    /** FIND_PASSKEY_FOR_SAFE — the Safe-bound row. */
+    bound?: unknown[]
+    /** FIND_PASSKEY_BY_CREDENTIAL — the named credential. */
+    byCredential?: unknown[]
+    /** LIST_PASSKEY_SIGNERS_FOR_CHAIN — every passkey on the chain. */
+    forChain?: unknown[]
+  }): void {
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql)
+      if (/UPDATE user_passkeys/.test(text)) return { rowCount: 1, rows: [] }
+      if (/credential_id = \$3/.test(text)) return { rows: rows.byCredential ?? [] }
+      if (/LOWER\(safe_address\)/.test(text)) return { rows: rows.bound ?? [] }
+      if (/FROM user_passkeys/.test(text)) return { rows: rows.forChain ?? [] }
+      // Everything else on this route is the relayer spend guard, which is
+      // fail-open by design and covered by its own tests.
+      return { rowCount: 0, rows: [] }
+    })
+  }
+
+  /** The params the route passed to its Safe-binding UPDATE, if it ran. */
+  function bindCallParams(): unknown[] | null {
+    const call = mockQuery.mock.calls.find(([sql]) => /UPDATE user_passkeys/.test(String(sql)))
+    return call ? (call[1] as unknown[]) : null
+  }
+
   it('POST /safe/exec relays Safe execution', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     mockQuery.mockResolvedValueOnce({
@@ -229,7 +263,7 @@ describe('Safe exec routes', () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     // No Safe binding, and no passkey on the chain either (#1229 looks at the
     // whole set before refusing).
-    mockQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] })
+    stubPasskeyQueries({})
 
     const response = await app.inject({
       method: 'POST',
@@ -423,10 +457,12 @@ describe('Safe exec routes', () => {
   it('POST /safe/exec resolves the named credential without an owner read', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     // The row is already bound to this Safe — the onboarding passkey. No RPC.
-    mockQuery.mockResolvedValueOnce({
-      rows: [{ ...passkeyKeys, credential_id: 'cred-primary', safe_address: validBody.safe_address }],
+    stubPasskeyQueries({
+      byCredential: [
+        { ...passkeyKeys, credential_id: 'cred-primary', safe_address: validBody.safe_address },
+      ],
     })
-    mockExecTransaction.mockResolvedValueOnce({
+    mockExecTransaction.mockResolvedValue({
       hash: '0xtxhash',
       wait: vi.fn().mockResolvedValue({}),
     })
@@ -440,7 +476,7 @@ describe('Safe exec routes', () => {
 
     expect(response.statusCode).toBe(201)
     expect(mockGetSafeDetails).not.toHaveBeenCalled()
-    expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', 100, 'cred-primary'])
+    expect(bindCallParams()).toBeNull()
   })
 
   it('POST /safe/exec authorises an unbound backup passkey that owns the Safe', async () => {
@@ -448,16 +484,15 @@ describe('Safe exec routes', () => {
     // A backup enrolled later carries no Safe binding. On-chain ownership is
     // the authoritative answer, and the row is claimed on the way through so
     // the next exec skips the read.
-    mockQuery.mockResolvedValueOnce({
-      rows: [{ ...passkeyKeys, credential_id: 'cred-backup', safe_address: null }],
+    stubPasskeyQueries({
+      byCredential: [{ ...passkeyKeys, credential_id: 'cred-backup', safe_address: null }],
     })
-    mockGetSafeDetails.mockResolvedValueOnce({
+    mockGetSafeDetails.mockResolvedValue({
       owners: ['0xSomeoneElse', signerAddress],
       threshold: 1,
       nonce: 1,
     })
-    mockQuery.mockResolvedValueOnce({ rowCount: 1, rows: [] })
-    mockExecTransaction.mockResolvedValueOnce({
+    mockExecTransaction.mockResolvedValue({
       hash: '0xtxhash',
       wait: vi.fn().mockResolvedValue({}),
     })
@@ -471,19 +506,15 @@ describe('Safe exec routes', () => {
 
     expect(response.statusCode).toBe(201)
     expect(mockGetSafeDetails).toHaveBeenCalledWith(validBody.safe_address, 100)
-    expect(mockQuery.mock.calls[1][1]).toEqual([
-      'user-1',
-      'cred-backup',
-      validBody.safe_address,
-    ])
+    expect(bindCallParams()).toEqual(['user-1', 'cred-backup', validBody.safe_address])
   })
 
   it('POST /safe/exec returns 403 when the passkey does not own the Safe', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
-    mockQuery.mockResolvedValueOnce({
-      rows: [{ ...passkeyKeys, credential_id: 'cred-backup', safe_address: null }],
+    stubPasskeyQueries({
+      byCredential: [{ ...passkeyKeys, credential_id: 'cred-backup', safe_address: null }],
     })
-    mockGetSafeDetails.mockResolvedValueOnce({
+    mockGetSafeDetails.mockResolvedValue({
       owners: ['0xSomeoneElse'],
       threshold: 1,
       nonce: 1,
@@ -505,8 +536,8 @@ describe('Safe exec routes', () => {
     // Nothing bound to this Safe, two candidates: relaying for the wrong one
     // would fail on-chain with a signature error that reads like a broken
     // passkey, so ask instead.
-    mockQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({
-      rows: [
+    stubPasskeyQueries({
+      forChain: [
         { ...passkeyKeys, credential_id: 'cred-primary', safe_address: null },
         { ...passkeyKeys, credential_id: 'cred-backup', safe_address: null },
       ],

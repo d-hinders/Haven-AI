@@ -115,7 +115,10 @@ describe('Passkey routes', () => {
     // legacy passkey rail had no recovery at all: the only users who could
     // add a backup were the ones who did not need one.
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
-    mockQuery.mockResolvedValueOnce({
+    // Not positional: the route issues exactly one query here, and the insert's
+    // real behaviour under the widened key space is proven against Postgres in
+    // `infra/repositories/__tests__/user-passkeys.test.ts`.
+    mockQuery.mockResolvedValue({
       rows: [
         {
           id: 'passkey-2',

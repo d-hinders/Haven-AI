@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-08-07" # #999: baseline retired, rules absolute with inline waivers; Today table records achieved state
+last-verified: "2026-08-09" # #1210: per-file counts enforced (redistribution fails), gauge figure refreshed 69→68
 ---
 
 # Module Boundaries
@@ -220,10 +220,13 @@ call sites grew 256 → 344 (+34%), because a file that already imported the
 pool could grow inline SQL forever without moving any metric. The gauge sees
 intensity, not just presence. Since #1166 it is also a **shrink-only gate**:
 `packages/backend/dep-lint-callsite-ceiling.json` holds the committed total
-plus per-file counts, the lint fails when the total grows past it (naming
-exactly the files that grew), and `node scripts/dep-lint.mjs --update-ceiling`
-locks in a shrink — it refuses to raise, so growth means hand-editing the JSON
-and defending that in the PR.
+plus per-file counts, and the lint enforces BOTH (#1210): it fails when the
+total grows past the ceiling, and also when any single file exceeds its
+committed count even under an unchanged total — per-file counts originally
+informed only the failure message, which let a file grow for free against
+another file's cleanup. `node scripts/dep-lint.mjs --update-ceiling` locks in
+a shrink — it refuses to raise the total or any file, so growth and
+redistribution alike mean hand-editing the JSON and defending that in the PR.
 
 If a rule turns out to be **wrong** rather than merely unmet — the tree is right
 and the rule is too strict — change the rule and say why. Bending working code
@@ -237,7 +240,7 @@ Achieved state as of 2026-08-07 (#999, the epic's closing issue):
 |---|---|
 | `lib/` layout | Gone (#998) — every former file lives in `platform/`, `domain/`, `infra/`, `rails/`, or a `modules/**` directory, each `modules/**` directory with a public `index.ts` |
 | Largest route | `routes/agent-connection-setups.ts`, 1246 lines (`routes/x402.ts` split by #996, `routes/machine-payments.ts` split into `modules/mpp/` by #997); further route slimming is post-epic work |
-| Inline SQL call sites | 69 `.query(` call sites across 14 production files outside `db/`, `db.ts` and `infra/repositories/` — gauged on every lint run and capped by the shrink-only ceiling (#1166). Was 108 across 18 files; #1167 emptied `routes/user.ts`, `routes/dashboard.ts` and `routes/agent-activity.ts`, #1180 `routes/auth.ts` |
+| Inline SQL call sites | 68 `.query(` call sites across 14 production files outside `db/`, `db.ts` and `infra/repositories/` — gauged on every lint run and capped by the shrink-only ceiling (#1166). Was 108 across 18 files; #1167 emptied `routes/user.ts`, `routes/dashboard.ts` and `routes/agent-activity.ts`, #1180 `routes/auth.ts` |
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) |
 | Rail branching outside the seam | The retirement gate is decided ONCE, in `rails/execution-rail.ts` (#993); outside migrations, no non-test file but the seam itself mentions `session_key` |
 | Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 13 deliberate `pg-only-in-infra` exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason (16 until #1167 retired three) |

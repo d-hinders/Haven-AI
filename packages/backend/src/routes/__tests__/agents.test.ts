@@ -519,7 +519,11 @@ describe('agent payloads carry the rail (#1069/#1071 class)', () => {
     // into infra/repositories/agents.ts; this pin follows it there.)
     const { readFileSync } = await import('node:fs')
     const src = readFileSync(new URL('../../infra/repositories/agents.ts', import.meta.url), 'utf8')
-    const selects = src.match(/SELECT[\s\S]*?JOIN user_safes[^\n]*/g) ?? []
+    // Bind each match to ONE template literal (backticks can't nest), not
+    // `SELECT[\s\S]*?JOIN` — that lazy span crossed statement boundaries, so
+    // a SELECT without the join borrowed the NEXT statement's join and the
+    // account_type check ran against two statements' merged text (#1210).
+    const selects = src.match(/`[^`]*JOIN user_safes[^`]*`/g) ?? []
     expect(selects.length).toBeGreaterThanOrEqual(4)
     for (const sel of selects) {
       expect(sel, `user_safes JOIN missing account_type: ${sel.slice(0, 80)}`).toContain('account_type')

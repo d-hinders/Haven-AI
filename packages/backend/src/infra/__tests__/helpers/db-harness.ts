@@ -55,23 +55,30 @@ import { runMigrations } from '../../../db/migrate.js'
 export const WORKER_SCHEMA = `test_w${process.env.VITEST_WORKER_ID ?? '0'}`
 
 /**
- * One short-timeout probe per module load (= per test file). A dedicated
- * client rather than the app pool, so an unreachable database fails in
- * ~1.5s instead of the pool's production timeout.
+ * One probe per module load (= per test file). A dedicated client rather
+ * than the app pool, so an unreachable database fails fast instead of on
+ * the pool's production timeout. Retried: under a full parallel run the
+ * server can briefly refuse connections at its connection ceiling, and a
+ * single-attempt probe misread that as "no database" — skipping suites
+ * locally and, worse, failing them in CI (#1222 hardening; the setup file
+ * also caps DB_POOL_MAX so the ceiling is not normally reached).
  */
 async function probeDatabase(): Promise<boolean> {
-  const client = new pg.Client({
-    connectionString: process.env.DATABASE_URL,
-    connectionTimeoutMillis: 1_500,
-  })
-  try {
-    await client.connect()
-    return true
-  } catch {
-    return false
-  } finally {
-    void client.end().catch(() => {})
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const client = new pg.Client({
+      connectionString: process.env.DATABASE_URL,
+      connectionTimeoutMillis: 3_000,
+    })
+    try {
+      await client.connect()
+      return true
+    } catch {
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 500 * attempt))
+    } finally {
+      void client.end().catch(() => {})
+    }
   }
+  return false
 }
 
 const dbAvailable = await probeDatabase()

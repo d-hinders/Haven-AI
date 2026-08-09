@@ -32,13 +32,35 @@
  * answers would hang the endpoint — and nothing else would stop it, since the
  * process sets no global HTTP deadline. This path is a read an agent polls;
  * a stale-but-prompt number beats a correct one that never arrives.
+ *
+ * **`timeout` alone does not bound the call — `retryCount: 0` is what does.**
+ * viem's `timeout` bounds each ATTEMPT, and `createTransport` defaults to
+ * `retryCount: 3`. A `TimeoutError` carries no numeric `.code` and is not an
+ * `HttpRequestError`, so `shouldRetry` falls through to `return true` and
+ * retries it — making the real worst case 4 attempts plus backoff, ~9s rather
+ * than the 2s this file claimed. Found in review of the promotion batch; the
+ * claim had been written without checking viem's defaults. Both options are
+ * load-bearing, so neither may be dropped.
  */
 
 /**
  * Deliberately short. The fallback is the pre-#1145 answer, so waiting longer
  * buys accuracy that the caller can get on its next poll anyway.
+ *
+ * `allowances.ts` reads every one of an agent's budgets through a
+ * `Promise.all`, so the endpoint is gated by the SLOWEST of them — an
+ * unbounded-in-practice read here would be multiplied by an agent's budget
+ * count, not amortised across it.
  */
 export const REMAINING_READ_TIMEOUT_MS = 2_000
+
+/**
+ * Zero, and deliberately: see the note above. A retry cannot help here anyway
+ * — the fallback is a correct-enough answer available instantly, so spending
+ * three more round trips to maybe improve it is the wrong trade on a polled
+ * endpoint.
+ */
+export const REMAINING_READ_RETRY_COUNT = 0
 
 import { createPublicClient, http } from 'viem'
 import { createCaveatEnforcerClient, type Delegation } from '@metamask/smart-accounts-kit'
@@ -66,7 +88,10 @@ export async function readRemainingBudget(
   try {
     const client = createPublicClient({
       chain: chainForId(chainId),
-      transport: http(getChain(chainId).rpcUrl, { timeout: REMAINING_READ_TIMEOUT_MS }),
+      transport: http(getChain(chainId).rpcUrl, {
+        timeout: REMAINING_READ_TIMEOUT_MS,
+        retryCount: REMAINING_READ_RETRY_COUNT,
+      }),
     })
     const enforcerClient = createCaveatEnforcerClient({
       client,

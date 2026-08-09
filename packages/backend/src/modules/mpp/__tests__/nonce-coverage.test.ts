@@ -18,12 +18,19 @@ const SIGN_HASH_BUILDERS = [
 ] as const
 
 describe('every legacy-rail sign_hash builder is nonce-coordinated (#1196)', () => {
-  it.each(SIGN_HASH_BUILDERS)('%s waits for a fresh nonce', (_name, rel) => {
+  it.each(SIGN_HASH_BUILDERS)('%s waits for a fresh nonce AND USES the result', (_name, rel) => {
     const src = readFileSync(new URL(rel, import.meta.url), 'utf8')
     // It builds a transfer hash…
     expect(src).toMatch(/generateTransferHash\(/)
-    // …so it must resolve the nonce through the coordinator first.
-    expect(src).toMatch(/waitForFreshAllowanceNonce\(/)
+
+    // …so it must resolve the nonce through the coordinator AND assign the
+    // result back. Asserting the call alone was this test's own tautology,
+    // found by mutation in the promotion-batch review: dropping the
+    // assignment — `await waitForFreshAllowanceNonce(` instead of
+    // `onChainAllowance.nonce = await …` — let the stale raw nonce flow into
+    // the sign hash with all 1579 tests green. The call was never the point;
+    // the assignment is.
+    expect(src).toMatch(/onChainAllowance\.nonce\s*=\s*await\s+waitForFreshAllowanceNonce\(/)
   })
 
   it.each(SIGN_HASH_BUILDERS)('%s PREFETCHES the shared watermark', (_name, rel) => {

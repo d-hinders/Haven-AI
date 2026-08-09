@@ -294,9 +294,21 @@ describe('safes payload carries the rail (#1069)', () => {
     // The original bug was two SELECTs disagreeing about one column. Rather
     // than re-check each call site's text, assert there is only one statement
     // left to get wrong: `auth.ts` holds no inline user_safes SQL at all.
+    //
+    // COUNTING, not `toContain` — the promotion-batch review proved the old
+    // form was satisfied by the IMPORT LINE alone. Switching only /auth/me to
+    // `listSafesForUser` (which omits account_type) reintroduced #1069 with
+    // the whole suite green: login still mentioned the right function, so the
+    // grep passed. Both endpoints must CALL it.
     const { readFileSync } = await import('node:fs')
     const src = readFileSync(new URL('../auth.ts', import.meta.url), 'utf8')
     expect(src).not.toMatch(/FROM user_safes/)
-    expect(src).toContain('listSessionSafesForUser')
+
+    const calls = src.match(/listSessionSafesForUser\(/g) ?? []
+    expect(calls.length, 'both /auth/login and /auth/me must call it').toBe(2)
+
+    // And no sibling projection may be reached from here: every other
+    // user_safes list omits account_type, which is the field #1069 is about.
+    expect(src).not.toMatch(/listSafesForUser\(|listSafesWithAccountTypeForUser\(/)
   })
 })

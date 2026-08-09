@@ -21,7 +21,7 @@ covers:
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
-last-verified: "2026-08-05"
+last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
 ---
 
 # Haven Product & UX Guide

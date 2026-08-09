@@ -38,7 +38,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-08-05"
+last-verified: "2026-08-09" # stale-claims sweep: #1153 posture (no code gate), #980 path moves
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -233,7 +233,7 @@ radius shifts in a few ways worth mapping explicitly:
   its owner wallet). Haven
   stores only PUBLIC key material (`hybrid_account_passkeys`), synced to chain
   state after the op confirms and pinned to the signed calldata. Recovery and
-  the ≥2-signer floor: [account-recovery](../../docs/product/account-recovery.md)
+  the backup-signer recommendation (#1153): [account-recovery](../../docs/product/account-recovery.md)
   and the security model §6.
 
 Full invariant-by-invariant mapping (including the CI checks that enforce each

@@ -5,7 +5,7 @@ covers:
   - packages/backend/scripts/check-mainnet-reconciliation.ts
   - packages/backend/scripts/check-bundler.ts
   - packages/backend/scripts/check-delegation-contracts.ts
-last-verified: "2026-08-09" # stale-claims sweep: #1153 posture (no code gate), #980 path moves
+last-verified: "2026-08-09" # #908 prep: mainnet joined DELEGATION_ONBOARDING_CHAIN_IDS — §3.1 records the flag flip as the launch switch
 ---
 
 # Mainnet (8453) canary & reconciliation runbook (#1067)
@@ -86,8 +86,14 @@ is NOT the posture for external users.
 One agent, one small open budget, one erc7710 payment, end to end. Mirror of
 the `x402-erc7710-settle` QA leg's assertions, executed by hand on 8453.
 
-1. **Provision** a fresh account on **Base mainnet** through the production
-   app (passkey onboarding), enrol the second signer, and note the treasury
+1. **Flip the launch switch, then provision.** Since the #908 prep, the CODE
+   serves delegation onboarding on Base mainnet (`DELEGATION_ONBOARDING_CHAIN_IDS`
+   in the frontend, mirroring the backend's `DELEGATION_RAIL_CHAIN_IDS`) — the
+   remaining gate is `NEXT_PUBLIC_DELEGATION_ONBOARDING=1` on the **prod**
+   Vercel scope, which is deliberately the operator's last move (it needs a
+   redeploy to inline). Set it, then **provision** a fresh account on
+   **Base mainnet** through the production app (passkey onboarding — this now
+   creates a Hybrid, zero tx), enrol the second signer, and note the treasury
    address. Fund it with a small amount of Base USDC (≤ 5 USDC).
 2. **Create one agent** with an **open** USDC budget of ≤ 1 USDC/day and
    activate the grant (this relayer-deploys the treasury — verify the deploy

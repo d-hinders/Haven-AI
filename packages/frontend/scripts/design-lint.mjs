@@ -151,8 +151,10 @@ export function scanSource(relFile, source) {
       if (isEscaped(lines, i, 'design-lint-disable-line')) return
       // Strip line-comment content — issue refs (#857) and colour names in
       // comments are prose, not styles. Block-comment bodies starting with *
-      // are skipped the same way.
-      const text = raw.replace(/\/\/.*$/, '').replace(/^\s*\*.*$/, '')
+      // are skipped the same way. The `//` must not be preceded by `:` —
+      // otherwise the `//` inside `https://` reads as a comment opener and
+      // everything after the URL goes unscanned, for every rule (#1204).
+      const text = raw.replace(/(?<!:)\/\/.*$/, '').replace(/^\s*\*.*$/, '')
       for (const m of text.matchAll(rule.regex)) {
         hits.push({ rule: rule.id, line: i + 1, match: m[0] })
       }

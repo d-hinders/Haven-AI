@@ -59,6 +59,23 @@ describe('design-lint scanner (#855)', () => {
     expect(scan('src/components/X.tsx', 'const c = "#fa3"')).toHaveLength(1)
   })
 
+  it('keeps scanning past a URL on the same line (#1204)', () => {
+    // The comment-stripper must not read the `//` inside `https://` as a
+    // comment opener — that blinded ALL rules to the rest of any line with a
+    // URL on it. Same line, with and without the href, must agree.
+    const withUrl =
+      'const x = <a href="https://haven.example" className="bg-white text-[#123456] rounded-lg">go</a>'
+    const withoutUrl =
+      'const x = <a className="bg-white text-[#123456] rounded-lg">go</a>'
+    expect(scan('src/components/X.tsx', withUrl)).toEqual(
+      scan('src/components/X.tsx', withoutUrl),
+    )
+    expect(scan('src/components/X.tsx', withUrl).map((h) => h.rule)).toEqual(['hex-color'])
+    // A real comment AFTER the URL is still prose:
+    const urlThenComment = 'const u = "https://x.example" // prose about #1a2f3b'
+    expect(scan('src/components/X.tsx', urlThenComment)).toEqual([])
+  })
+
   it('flags micro font sizes', () => {
     const hits = scan('src/components/X.tsx', '<p className="text-[10px]" /><p className="text-[11px]" />')
     expect(hits.map((h) => h.match)).toEqual(['text-[10px]', 'text-[11px]'])

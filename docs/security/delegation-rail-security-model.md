@@ -231,7 +231,8 @@ signer's signature (invariant 13 unchanged).
 agent-scoped (`/agents/:id/account-signers/{prepare,submit}`, #888) and
 account-scoped (`POST /accounts/hybrid/:address/signers/{prepare,submit}`), the
 latter so an account with **zero agents** can enrol its second signer before
-anything else exists — which is when the ≥2-signer floor (#908) matters most.
+anything else exists — which is when the backup-signer recommendation
+(#908→#1153) matters most.
 **The frontend now uses the account-scoped surface exclusively (#1089):**
 `AccountSignersCard` is the single home for backup & recovery, rendered on the
 account page for any `delegator_hybrid` account — including one with zero
@@ -240,7 +241,9 @@ stays live server-side (it is the same shared implementation below, just
 resolved differently) but has no remaining frontend caller.
 The two surfaces differ only in how the account is resolved: agent lookup
 versus an owner-scoped `(address, chain)` lookup on `user_safes`. Authority
-rules, the ≥2-signer refusal, the calldata encoding and the signed-op matching
+rules, the last-signer refusal (§7 — the ≥2 floor itself relaxed in #1153,
+with a branch-specific remnant tracked in #1199), the calldata encoding and
+the signed-op matching
 are **one implementation** (`rails/hybrid-signer-actions.ts`), because two copies
 of a spend-authority rule is how they drift apart. Invariant 13 is asserted
 against that shared core and against both routes reaching it. Client-side, signing selects the passkey whose credential is

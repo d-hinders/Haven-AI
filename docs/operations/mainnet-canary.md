@@ -5,7 +5,7 @@ covers:
   - packages/backend/scripts/check-mainnet-reconciliation.ts
   - packages/backend/scripts/check-bundler.ts
   - packages/backend/scripts/check-delegation-contracts.ts
-last-verified: "2026-08-05"
+last-verified: "2026-08-09" # stale-claims sweep: #1153 posture (no code gate), #980 path moves
 ---
 
 # Mainnet (8453) canary & reconciliation runbook (#1067)
@@ -68,15 +68,18 @@ prod API URL.
 ## 2. Signer floor (the #908 gate, stated for THIS canary)
 
 The canary treasury MUST have **≥2 enrolled signers** before it holds real
-money — the mainnet gate enforces this at provisioning and at grant
-activation (`modules/accounts/mainnet-gate.ts`), so a single-signer canary only exists if
-someone recorded the explicit waiver (`single_signer_waiver`).
+money. This is a RUNBOOK requirement, not a code gate: since #1153 the code
+never refuses a single-signer account — `modules/accounts/mainnet-gate.ts`
+now only answers `needsBackupSignerRecommendation` — so the operator running
+this checklist is the enforcement. Verify the signer count on the account
+page before funding; the account itself only guarantees ≥1 on-chain.
 
 **Record in the launch notes which path the canary took:** two signers
 (expected — enrol the backup passkey/wallet from the account page before
-funding), or waiver (why, who decided, when). A waiver on the canary is
-acceptable only because the canary's funds are bounded below; it is NOT the
-posture for external users.
+funding), or a recorded single-signer exception (why, who decided, when —
+`single_signer_waiver_at` survives as history, #1153). A single-signer
+canary is acceptable only because the canary's funds are bounded below; it
+is NOT the posture for external users.
 
 ## 3. The canary itself
 
@@ -142,7 +145,9 @@ previous holding for its stated window:
 2. **Team accounts** — internal users, budgets ≤ 10 USDC/day, one week.
    Reconciliation check clean daily (it takes one command).
 3. **First external users** — invite-only, budgets capped at the launch
-   policy's per-user maximum. The #908 two-signer floor is NON-waivable here.
+   policy's per-user maximum. Require ≥2 signers per invited account as
+   launch policy — check it manually; since #1153 no code refuses a
+   single-signer account, so this list is where the requirement lives.
 4. **General availability** — a separate go/no-go with the owner; not this
    runbook's call.
 

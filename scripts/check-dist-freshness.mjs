@@ -50,12 +50,15 @@ async function newestMtime(dir) {
 }
 
 /**
+ * @param {string[]} pkgs
+ * @param {string} [root] repo root override — the tests point this at a fixture
+ *   tree (#1206); production callers omit it.
  * @returns {Promise<{pkg: string, state: 'fresh'|'stale'|'missing'|'no-dist-package', srcMs: number|null, distMs: number|null}[]>}
  */
-export async function checkPackages(pkgs) {
+export async function checkPackages(pkgs, root = REPO_ROOT) {
   const results = []
   for (const pkg of pkgs) {
-    const base = join(REPO_ROOT, 'packages', pkg)
+    const base = join(root, 'packages', pkg)
     const srcMs = await newestMtime(join(base, 'src'))
     const distMs = await newestMtime(join(base, 'dist'))
     if (srcMs === null) {

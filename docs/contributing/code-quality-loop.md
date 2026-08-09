@@ -12,7 +12,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/loop-engineering.md
   - docs/contributing/loop-harness-index.md
-last-verified: "2026-08-05"
+last-verified: "2026-08-09" # re-verified against the stale-claims sweep in covered docs — no claim here needed changing
 ---
 
 # Haven Code Quality Loop

@@ -5,7 +5,7 @@ covers:
   - packages/backend/scripts/check-mainnet-reconciliation.ts
   - packages/backend/scripts/check-bundler.ts
   - packages/backend/scripts/check-delegation-contracts.ts
-last-verified: "2026-08-09" # #908 prep: mainnet joined DELEGATION_ONBOARDING_CHAIN_IDS — §3.1 records the flag flip as the launch switch
+last-verified: "2026-08-09" # §1.1: the pruned prod container lacks tsx — npx variant recorded (found live during #908 pre-flight)
 ---
 
 # Mainnet (8453) canary & reconciliation runbook (#1067)
@@ -39,9 +39,18 @@ prod API URL.
    ```
 
    Exit 0 required. Exit 2 = not configured (wrong or missing credential);
-   fix the Railway **prod** env before continuing. Note the env var itself
-   lives in Railway — the probe must be run with the PROD value (Railway
-   shell, or export it locally from the dashboard without echoing it).
+   fix the Railway **prod** env before continuing. The env var lives in
+   Railway, and the prod container is a PRUNED build — `tsx` is not
+   installed there (found the hard way, 2026-08-09), so plain
+   `npm run ops:check-bundler` fails with `tsx: not found` in the shell.
+   Either run it in the Railway prod shell via npx:
+
+   ```bash
+   cd /app && CHECK_BUNDLER_CHAIN_ID=8453 npx -y tsx packages/backend/scripts/check-bundler.ts
+   ```
+
+   …or locally with the prod value exported without echoing
+   (`read -rs DELEGATION_RAIL_BUNDLER_URL && export …`, run, then `unset`).
 
 2. **Sponsorship policy bound and capped.** In the Pimlico dashboard, confirm
    `DELEGATION_RAIL_SPONSORSHIP_POLICY_ID` (prod env) names a policy that is

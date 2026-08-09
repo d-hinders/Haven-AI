@@ -55,6 +55,7 @@ import * as paymentIntentBudgetDelegationHash from './053_payment_intent_budget_
 import * as relayerGasEvents from './054_relayer_gas_events.js'
 import * as allowanceNonceWatermarks from './055_allowance_nonce_watermarks.js'
 import * as multiPasskeyPerChain from './056_multi_passkey_per_chain.js'
+import * as fixMppDemoCatalogUrl from './057_fix_mpp_demo_catalog_url.js'
 
 export interface Migration {
   version: string
@@ -123,4 +124,5 @@ export const migrations: Migration[] = [
   relayerGasEvents,
   allowanceNonceWatermarks,
   multiPasskeyPerChain,
+  fixMppDemoCatalogUrl,
 ]

@@ -157,7 +157,7 @@
   },
   "packages/backend/src/routes/__tests__/machine-payments-sweep.test.ts": {
     "db-mock": 1,
-    "positional": 50
+    "positional": 15
   },
   "packages/backend/src/routes/__tests__/machine-payments.test.ts": {
     "db-mock": 1,
@@ -189,7 +189,7 @@
   },
   "packages/backend/src/routes/__tests__/payments.test.ts": {
     "db-mock": 1,
-    "positional": 92
+    "positional": 15
   },
   "packages/backend/src/routes/__tests__/portfolio.test.ts": {
     "db-mock": 1,

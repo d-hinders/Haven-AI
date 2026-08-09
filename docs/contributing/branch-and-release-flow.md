@@ -7,7 +7,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-08-07"
+last-verified: "2026-08-09" # post-promotion sync step added (#1231) — the strict-up-to-date lesson written down where the merge-commit rule already lives
 ---
 
 # Branch & release flow
@@ -82,6 +82,14 @@ Promotions merge with a **merge commit**, never squash: a squashed promotion
 leaves `main` with a history-less copy of the batch, and the next promotion
 conflicts en masse once `dev` has refactored any of those files (#1152 → #1172;
 repaired by the `-s ours` reconcile merge #1173).
+
+**After every promotion, sync `main`'s merge commit back into `dev`.** The
+`main` ruleset enforces strict up-to-date status checks, so the NEXT promotion
+PR reports BEHIND — `dev` lacks exactly one commit, the previous promotion's
+merge commit — and cannot merge on approval alone. Direct pushes to `dev` are
+ruleset-declined; the sync travels as a PR carrying `git merge origin/main`
+(zero content change, history only) and MUST itself be MERGE-merged — a squash
+would flatten away exactly the commit being synced. First done as #1231.
 
 ## What's in prod vs. pending
 

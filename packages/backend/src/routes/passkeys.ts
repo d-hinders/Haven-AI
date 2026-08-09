@@ -94,9 +94,11 @@ export default async function passkeyRoutes(app: FastifyInstance): Promise<void>
       return reply.code(201).send(row)
     } catch (error) {
       const constraint = uniqueViolationConstraint(error)
-      if (constraint === 'user_passkeys_user_id_chain_id_key') {
-        return reply.code(409).send({ error: 'A passkey is already registered for this chain' })
-      }
+      // #1229: there is deliberately no "already has a passkey for this chain"
+      // 409 any more. A second passkey on the same chain is a BACKUP SIGNER —
+      // the only recovery this rail has — and refusing it locked every
+      // passkey-onboarded user out of protecting their account. Migration 056
+      // dropped the constraint; this branch went with it.
       if (constraint === 'user_passkeys_credential_id_key') {
         return reply.code(409).send({ error: 'This credential is already registered' })
       }

@@ -84,18 +84,31 @@ function stageHint(stage: Stage): string {
   }
 }
 
+type EnrolledPasskey = ListPasskeysResponse['passkeys'][number]
+
+function getPasskeysForChain(
+  passkeys: ListPasskeysResponse['passkeys'],
+  chainId: number,
+): EnrolledPasskey[] {
+  return passkeys.filter((passkey) => passkey.chain_id === chainId)
+}
+
+/**
+ * The passkey to resume onto, given several on the chain (#1229 allows backup
+ * signers now). Prefer one already bound to a Safe — that account exists, and
+ * resuming onto it skips the deploy. Otherwise any of them will do: the
+ * authenticator picks, and the deploy step runs.
+ */
 function getPasskeyForChain(
   passkeys: ListPasskeysResponse['passkeys'],
   chainId: number,
-): ListPasskeysResponse['passkeys'][number] | null {
-  return passkeys.find((passkey) => passkey.chain_id === chainId) ?? null
+): EnrolledPasskey | null {
+  const forChain = getPasskeysForChain(passkeys, chainId)
+  return forChain.find((passkey) => passkey.safe_address) ?? forChain[0] ?? null
 }
 
-// The user IS signed in when they see these — the session is email/password;
-// the passkey is the signing key. So neither message may say "sign in" (#1229).
-const CROSS_DEVICE_PASSKEY_MESSAGE =
-  'This account already has a passkey for this network. Open Haven in the browser or on the device where it was created to continue.'
-
+// The user IS signed in when they see this — the session is email/password;
+// the passkey is the signing key. So it may not say "sign in" (#1229).
 const RESUME_FAILED_MESSAGE =
   'This account already has a passkey for this network, but this device could not confirm it. Try again here, or open Haven where the passkey was created.'
 
@@ -148,17 +161,24 @@ export default function PasskeyEnrollFlow({
       // proves possession and the flow continues to the (already idempotent)
       // deploy/register steps.
       const { passkeys: preexisting } = await api.listPasskeys()
-      const alreadyEnrolled = getPasskeyForChain(preexisting, selectedChainId)
+      const enrolledForChain = getPasskeysForChain(preexisting, selectedChainId)
+      const accountPasskey = getPasskeyForChain(preexisting, selectedChainId)
 
       let signerAddress = ''
       let credentialId = ''
       let storedPublicKey: { x: `0x${string}`; y: `0x${string}` } | undefined
 
-      if (alreadyEnrolled) {
+      if (enrolledForChain.length > 0) {
+        // Offer EVERY passkey enrolled for this chain, not just the account's
+        // primary (#1229): once backups exist, a user whose primary device is
+        // gone still holds a credential that can prove possession, and pinning
+        // the assertion to one id would dead-end them exactly as the original
+        // bug did. The authenticator picks whichever it actually has.
+        let asserted
         try {
-          await getPasskeyAssertion({
+          asserted = await getPasskeyAssertion({
             challenge: crypto.getRandomValues(new Uint8Array(32)),
-            allowCredentialIds: [alreadyEnrolled.credential_id],
+            allowCredentialIds: enrolledForChain.map((passkey) => passkey.credential_id),
           })
         } catch (err) {
           if (err instanceof PasskeyUnsupportedError) {
@@ -169,8 +189,19 @@ export default function PasskeyEnrollFlow({
           // one honest message covers both rather than guessing "cancelled".
           throw new Error(RESUME_FAILED_MESSAGE)
         }
-        signerAddress = alreadyEnrolled.signer_address
-        credentialId = alreadyEnrolled.credential_id
+
+        // Which credential answered decides which SIGNER we store. The ACCOUNT
+        // is separate: it is whichever passkey holds the Safe, since a backup
+        // is an owner of the primary's Safe, not the root of a second one.
+        const signingPasskey = enrolledForChain.find(
+          (passkey) => passkey.credential_id === asserted.credentialId,
+        )
+        if (!signingPasskey) {
+          throw new Error(RESUME_FAILED_MESSAGE)
+        }
+
+        signerAddress = signingPasskey.signer_address
+        credentialId = signingPasskey.credential_id
         // The server row's public key is not in the list payload; the stored
         // signer works without it (publicKey is optional in the schema).
       } else {
@@ -195,20 +226,24 @@ export default function PasskeyEnrollFlow({
           signerAddress = enrolled.signer_address
           credentialId = enrolled.credential_id
         } catch (err) {
-          // Race window only, now that the resume path runs first: another
-          // tab/device enrolled between our list and our insert.
+          // #1229 dropped the one-passkey-per-chain constraint, so the only
+          // 409 left here is on the credential id: THIS credential is already
+          // registered — a duplicate submit, or a retry whose first attempt
+          // landed after we stopped listening. Both resolve the same way, by
+          // adopting the row that exists. Anything else is a real error and
+          // keeps the server's own wording.
           if (!(err instanceof ApiRequestError) || err.status !== 409) {
             throw err
           }
 
           const { passkeys } = await api.listPasskeys()
-          const existing = getPasskeyForChain(passkeys, selectedChainId)
+          const existing = passkeys.find(
+            (passkey) =>
+              passkey.credential_id === createdPasskey.credentialId &&
+              passkey.chain_id === selectedChainId,
+          )
           if (!existing) {
             throw err
-          }
-
-          if (existing.credential_id !== createdPasskey.credentialId) {
-            throw new Error(CROSS_DEVICE_PASSKEY_MESSAGE)
           }
 
           signerAddress = existing.signer_address
@@ -218,7 +253,7 @@ export default function PasskeyEnrollFlow({
       }
 
       setStage('deploying')
-      let safeAddress = (alreadyEnrolled?.safe_address ?? '') as Address
+      let safeAddress = (accountPasskey?.safe_address ?? '') as Address
       let txHash = EMPTY_TX_HASH
 
       try {

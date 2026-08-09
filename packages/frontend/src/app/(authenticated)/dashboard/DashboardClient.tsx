@@ -30,6 +30,7 @@ import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import { RecoveryNudge } from '@/components/onboarding/RecoveryNudge'
 import { getStoredHybridSigners } from '@/lib/signer'
+import { useSafeApprovers } from '@/hooks/useSafeApprovers'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgent2Modal from '@/components/ConnectAgent2Modal'
 import SendModal from '@/components/SendModal'
@@ -627,7 +628,7 @@ function TransactionsSection({
 }
 
 export default function DashboardClient() {
-  const { user, activeSafe } = useAuth()
+  const { user, activeSafe, passkeys: enrolledPasskeys } = useAuth()
   const { toast } = useToast()
   const safes = user?.safes ?? []
   const { currency } = usePreferences()
@@ -675,6 +676,38 @@ export default function DashboardClient() {
   const missingBackup = recoverySigners
     ? recoverySigners.passkeys.length + (recoverySigners.owner_address ? 1 : 0) < 2
     : false
+
+  // #1229: the legacy passkey-Safe rail carries the identical exposure — the
+  // Safe is deployed with the user's passkey as its SOLE owner, threshold 1 —
+  // and it reaches far more users, since that is what prod onboarding still
+  // builds. It never got this prompt because there was no advice to give:
+  // enrolling a backup passkey 409'd on the one-per-chain constraint. That
+  // constraint is gone, so the recommendation is now actionable here too.
+  //
+  // "Passkey Safe" is read from the passkey rows AuthContext already holds
+  // (a row's `safe_address` is the Safe that passkey owns), which keeps an
+  // imported wallet-owned Safe out of it — its owner already holds their own
+  // key and needs no advice from us.
+  const passkeys = enrolledPasskeys ?? []
+  const passkeySafe = safes.find(
+    (safe) =>
+      safe.account_type !== 'delegator_hybrid' &&
+      passkeys.some(
+        (passkey) =>
+          passkey.safe_address?.toLowerCase() === safe.safe_address.toLowerCase() &&
+          passkey.chain_id === safe.chain_id,
+      ),
+  )
+  // Owner count is the honest signal, and only the chain has it — a backup
+  // may be an EOA, which leaves no passkey row. Silent while loading or on
+  // error: `loading` never clears when there is no passkey Safe to ask about.
+  const {
+    approvers: safeApprovers,
+    loading: safeApproversLoading,
+    error: safeApproversError,
+  } = useSafeApprovers(passkeySafe?.id ?? null)
+  const safeMissingBackup =
+    !safeApproversLoading && !safeApproversError && safeApprovers.length === 1
   const hasAgents = dataReady && agents.length > 0
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
@@ -1039,8 +1072,15 @@ export default function DashboardClient() {
         // before, and kept to delegation-rail accounts because "Backup &
         // recovery" is where it sends you and that only exists on those
         // accounts.
+        // #1229 adds the legacy passkey-Safe arm. Delegation first when a user
+        // somehow has both: that rail is where new accounts live, and two
+        // stacked banners saying the same thing is worse than one.
         const recoveryNudge =
-          hasFunds && delegationSafe && missingBackup ? <RecoveryNudge /> : null
+          hasFunds && delegationSafe && missingBackup ? (
+            <RecoveryNudge />
+          ) : hasFunds && passkeySafe && safeMissingBackup ? (
+            <RecoveryNudge rail="safe" />
+          ) : null
 
         if (isFocusedView) {
           return (

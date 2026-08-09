@@ -25,6 +25,16 @@ describe('RecoveryNudge (#889)', () => {
     expect(screen.queryByText('Add a backup soon')).toBeNull()
   })
 
+  it('sends legacy passkey-Safe users to Approvers, not Backup & recovery (#1229)', () => {
+    // The risk is identical on both rails; only the destination differs, and
+    // "Backup & recovery" does not exist on a Safe account — naming it there
+    // would send the user looking for a screen they cannot reach.
+    render(<RecoveryNudge rail="safe" />)
+    expect(screen.getByText('Add a backup soon')).toBeTruthy()
+    expect(screen.getByText('Approvers')).toBeTruthy()
+    expect(screen.queryByText('Backup & recovery')).toBeNull()
+  })
+
   it('links to the recovery docs', () => {
     render(<RecoveryNudge />)
     const link = screen.getByRole('link', { name: 'How recovery works' })

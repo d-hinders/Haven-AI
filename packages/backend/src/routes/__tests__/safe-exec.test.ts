@@ -13,6 +13,7 @@ const {
   mockSafeCheckSignatures,
   mockCreateSigner,
   mockContractConstructor,
+  mockGetSafeDetails,
 } = vi.hoisted(() => {
   const execTransaction = vi.fn()
   const execTransactionStaticCall = vi.fn()
@@ -36,6 +37,7 @@ const {
     mockSafeEncodeTransactionData: safeEncodeTransactionData,
     mockSafeCheckSignatures: safeCheckSignatures,
     mockCreateSigner: createSigner,
+    mockGetSafeDetails: vi.fn(),
     mockContractConstructor: vi.fn((address: string, abi: unknown) => {
       if (Array.isArray(abi) && abi.some((item) => String(item).includes('createSigner(uint256 x, uint256 y, uint176 verifiers)'))) {
         return {
@@ -66,6 +68,18 @@ vi.mock('../../infra/relayer.js', () => ({
   // lib/relayer.test.ts; route tests only care that the submit runs.
   withRelayerSendLock: (_chainId: number, fn: () => Promise<unknown>) => fn(),
 }))
+
+// Only the owner read is faked — `predictSafePasskeySignerAddress` stays real,
+// because the route's signer-mismatch guard is meaningless against a stub.
+vi.mock('../../modules/accounts/index.js', async () => {
+  const actual = await vi.importActual<typeof import('../../modules/accounts/index.js')>(
+    '../../modules/accounts/index.js',
+  )
+  return {
+    ...actual,
+    getSafeDetails: (...args: unknown[]) => mockGetSafeDetails(...args),
+  }
+})
 
 vi.mock('ethers', async () => {
   const actual = await vi.importActual<typeof import('ethers')>('ethers')
@@ -126,6 +140,7 @@ describe('Safe exec routes', () => {
     mockSafeCheckSignatures.mockReset()
     mockCreateSigner.mockReset()
     mockContractConstructor.mockClear()
+    mockGetSafeDetails.mockReset()
 
     mockGetRelayer.mockReturnValue({
       address: '0xrelayer',
@@ -147,6 +162,40 @@ describe('Safe exec routes', () => {
 
   function signToken(payload: { sub: string; email: string }): string {
     return app.jwt.sign(payload, { expiresIn: '1h' })
+  }
+
+  /**
+   * Answer the route's passkey queries by WHAT they ask rather than by call
+   * order. The positional chain is the failure mode the #1227 ratchet exists
+   * to shrink: adding one query to the handler re-shuffles every test that
+   * mocked the old sequence. The queries themselves are proven against real
+   * Postgres in `infra/repositories/__tests__/user-passkeys.test.ts`; what
+   * these route tests own is the DECISION taken on the result.
+   */
+  function stubPasskeyQueries(rows: {
+    /** FIND_PASSKEY_FOR_SAFE — the Safe-bound row. */
+    bound?: unknown[]
+    /** FIND_PASSKEY_BY_CREDENTIAL — the named credential. */
+    byCredential?: unknown[]
+    /** LIST_PASSKEY_SIGNERS_FOR_CHAIN — every passkey on the chain. */
+    forChain?: unknown[]
+  }): void {
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql)
+      if (/UPDATE user_passkeys/.test(text)) return { rowCount: 1, rows: [] }
+      if (/credential_id = \$3/.test(text)) return { rows: rows.byCredential ?? [] }
+      if (/LOWER\(safe_address\)/.test(text)) return { rows: rows.bound ?? [] }
+      if (/FROM user_passkeys/.test(text)) return { rows: rows.forChain ?? [] }
+      // Everything else on this route is the relayer spend guard, which is
+      // fail-open by design and covered by its own tests.
+      return { rowCount: 0, rows: [] }
+    })
+  }
+
+  /** The params the route passed to its Safe-binding UPDATE, if it ran. */
+  function bindCallParams(): unknown[] | null {
+    const call = mockQuery.mock.calls.find(([sql]) => /UPDATE user_passkeys/.test(String(sql)))
+    return call ? (call[1] as unknown[]) : null
   }
 
   it('POST /safe/exec relays Safe execution', async () => {
@@ -212,7 +261,9 @@ describe('Safe exec routes', () => {
 
   it('POST /safe/exec returns 403 for an unrelated Safe', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
-    mockQuery.mockResolvedValueOnce({ rows: [] })
+    // No Safe binding, and no passkey on the chain either (#1229 looks at the
+    // whole set before refusing).
+    stubPasskeyQueries({})
 
     const response = await app.inject({
       method: 'POST',
@@ -387,6 +438,135 @@ describe('Safe exec routes', () => {
       BigInt('0xffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100'),
       BigInt('0x445a0683e494ea0c5af3e83c5159fbe47cf9e765'),
     )
+  })
+
+  // ── Multi-passkey resolution (#1229) ──────────────────────────────────
+
+  const passkeyKeys = {
+    public_key_x: Buffer.from(
+      '11223344556677889900aabbccddeeff00112233445566778899aabbccddeeff',
+      'hex',
+    ),
+    public_key_y: Buffer.from(
+      'ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100',
+      'hex',
+    ),
+    signer_address: signerAddress,
+  }
+
+  it('POST /safe/exec resolves the named credential without an owner read', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    // The row is already bound to this Safe — the onboarding passkey. No RPC.
+    stubPasskeyQueries({
+      byCredential: [
+        { ...passkeyKeys, credential_id: 'cred-primary', safe_address: validBody.safe_address },
+      ],
+    })
+    mockExecTransaction.mockResolvedValue({
+      hash: '0xtxhash',
+      wait: vi.fn().mockResolvedValue({}),
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/safe/exec',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { ...validBody, credential_id: 'cred-primary' },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(mockGetSafeDetails).not.toHaveBeenCalled()
+    expect(bindCallParams()).toBeNull()
+  })
+
+  it('POST /safe/exec authorises an unbound backup passkey that owns the Safe', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    // A backup enrolled later carries no Safe binding. On-chain ownership is
+    // the authoritative answer, and the row is claimed on the way through so
+    // the next exec skips the read.
+    stubPasskeyQueries({
+      byCredential: [{ ...passkeyKeys, credential_id: 'cred-backup', safe_address: null }],
+    })
+    mockGetSafeDetails.mockResolvedValue({
+      owners: ['0xSomeoneElse', signerAddress],
+      threshold: 1,
+      nonce: 1,
+    })
+    mockExecTransaction.mockResolvedValue({
+      hash: '0xtxhash',
+      wait: vi.fn().mockResolvedValue({}),
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/safe/exec',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { ...validBody, credential_id: 'cred-backup' },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(mockGetSafeDetails).toHaveBeenCalledWith(validBody.safe_address, 100)
+    expect(bindCallParams()).toEqual(['user-1', 'cred-backup', validBody.safe_address])
+  })
+
+  it('POST /safe/exec returns 403 when the passkey does not own the Safe', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubPasskeyQueries({
+      byCredential: [{ ...passkeyKeys, credential_id: 'cred-backup', safe_address: null }],
+    })
+    mockGetSafeDetails.mockResolvedValue({
+      owners: ['0xSomeoneElse'],
+      threshold: 1,
+      nonce: 1,
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/safe/exec',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { ...validBody, credential_id: 'cred-backup' },
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(mockExecTransaction).not.toHaveBeenCalled()
+  })
+
+  it('POST /safe/exec refuses to guess when the chain holds several passkeys', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    // Nothing bound to this Safe, two candidates: relaying for the wrong one
+    // would fail on-chain with a signature error that reads like a broken
+    // passkey, so ask instead.
+    stubPasskeyQueries({
+      forChain: [
+        { ...passkeyKeys, credential_id: 'cred-primary', safe_address: null },
+        { ...passkeyKeys, credential_id: 'cred-backup', safe_address: null },
+      ],
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/safe/exec',
+      headers: { authorization: `Bearer ${token}` },
+      payload: validBody,
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toContain('credential_id is required')
+    expect(mockExecTransaction).not.toHaveBeenCalled()
+  })
+
+  it('POST /safe/exec rejects a malformed credential_id', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/safe/exec',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { ...validBody, credential_id: 'not base64url!' },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(mockQuery).not.toHaveBeenCalled()
   })
 
   it('POST /safe/exec requires auth', async () => {

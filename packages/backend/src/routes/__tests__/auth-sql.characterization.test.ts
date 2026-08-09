@@ -58,7 +58,11 @@ describe('auth SQL characterization (pre-#1180)', () => {
       // with a stored 'ada@example.com' and the same person could hold two
       // accounts — with two different treasuries.
       expect(paramsSent()[0]).toEqual(['ada@example.com'])
-      expect(sqlSent()[0]).toMatch(/FROM users WHERE email = \$1/)
+      // Anchored to the whole statement (#1208): the bare fragment
+      // `FROM users WHERE email = $1` also matches the LOGIN lookup, so it
+      // would keep matching after the duplicate-check statement it exists to
+      // characterize was gone.
+      expect(sqlSent()[0]).toMatch(/^SELECT id FROM users WHERE email = \$1$/)
     })
 
     it('the INSERT stores the normalised address and name, never the raw ones', async () => {

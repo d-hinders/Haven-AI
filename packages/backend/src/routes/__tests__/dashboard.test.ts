@@ -157,6 +157,64 @@ describe('dashboard routes', () => {
     expect(agentQuery).toContain("a.status IN ('active', 'paused')")
   })
 
+  it('reports the actionable-approval COUNT the query returned — not merely that a query ran (#1208)', async () => {
+    // Before this test the count had zero assertions: the beforeEach mock
+    // returned '0', nothing read the payload field, and any arithmetic or
+    // wiring error shipped green. Return a distinctive value and follow it
+    // to the response.
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("status IN ('pending', 'approved')")) {
+        return Promise.resolve({ rows: [{ count: '3' }] })
+      }
+      if (sql.includes('AS has_first_agent_payment')) {
+        return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
+      }
+      if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) {
+        return Promise.resolve({ rows: [SAFE] })
+      }
+      if (sql.includes('FROM agents a')) {
+        return Promise.resolve({ rows: [AGENT] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      actionableApprovals: 3,
+      pendingApprovals: 3,
+    })
+  })
+
+  it('scopes the approval count to the requesting user — the EXECUTED call, not the constant (#1208)', async () => {
+    // The cross-tenant variant nothing guarded: drop the WHERE user_id and
+    // every tenant's approval volume leaks onto everyone's dashboard while
+    // the suite stays green. Assert against the call the route actually made
+    // (SQL text AND bind params) rather than the exported *_SQL constant —
+    // a repository that stopped using the constant would keep a
+    // constant-based assertion true forever.
+    const response = await app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(200)
+
+    const countCall = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("status IN ('pending', 'approved')"),
+    )
+    expect(countCall, 'the approval count query must run').toBeDefined()
+    const [sql, params] = countCall as [string, unknown[]]
+    expect(sql).toMatch(/FROM approval_requests/)
+    expect(sql).toMatch(/WHERE user_id = \$1/)
+    expect(params, 'the tenant bind must be the JWT sub').toEqual(['user-1'])
+  })
+
   it('counts same-address transactions on separate chains independently', async () => {
     const gnosisSafe = { ...SAFE, id: 'safe-gnosis', chain_id: 100 }
     const baseSafe = { ...SAFE, id: 'safe-base', chain_id: 8453 }

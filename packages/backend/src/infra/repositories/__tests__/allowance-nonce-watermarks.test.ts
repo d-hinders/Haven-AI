@@ -29,21 +29,34 @@ describe('allowance-nonce watermark repository (#718)', () => {
     expect(stub.query.mock.calls[0][1]).toEqual([84532, '0xsafe', '0xdelegate', '0xtoken'])
   })
 
-  it('only ever RAISES the watermark — GREATEST, never a plain assignment', () => {
+  it('only ever RAISES the watermark — GREATEST, never a plain assignment', async () => {
     // A lower incoming value can only be a late write from a replica that fell
     // behind; honouring it would re-open the window this table closes.
-    expect(UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL).toMatch(
-      /GREATEST\(allowance_nonce_watermarks\.nonce, EXCLUDED\.nonce\)/,
-    )
+    //
+    // Asserted against the SQL the function EXECUTES, not the exported
+    // constant (#1208): a rewrite that stopped using the constant would keep
+    // a constant-based assertion true while shipping a plain assignment. The
+    // constant is separately pinned equal to the executed text below, which
+    // is what keeps db-schema-smoke honest about it too.
+    const stub = db(() => ({ rows: [] }))
+    await raiseAllowanceNonceWatermark(84532, '0xa', '0xb', '0xc', 7, stub)
+    const executed = String(stub.query.mock.calls[0][0])
+    expect(executed).toMatch(/GREATEST\(allowance_nonce_watermarks\.nonce, EXCLUDED\.nonce\)/)
+    expect(executed).toBe(UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL)
   })
 
-  it('IGNORES a stale row — a too-high watermark must not be permanent', () => {
+  it('IGNORES a stale row — a too-high watermark must not be permanent', async () => {
     // GREATEST means a bad row can never come down. Backed by one confirmation,
     // a reorg can persist a nonce the chain never reaches, and every later
     // authorize for that triple would poll to the full timeout forever. The
     // window this tier closes is seconds-scale, so an old row carries no
-    // information anyway.
-    expect(FIND_ALLOWANCE_NONCE_WATERMARK_SQL).toMatch(/updated_at > NOW\(\) - INTERVAL '5 minutes'/)
+    // information anyway. Same #1208 discipline: the executed SQL, then the
+    // constant pinned to it.
+    const stub = db(() => ({ rows: [] }))
+    await findAllowanceNonceWatermark(84532, '0xa', '0xb', '0xc', stub)
+    const executed = String(stub.query.mock.calls[0][0])
+    expect(executed).toMatch(/updated_at > NOW\(\) - INTERVAL '5 minutes'/)
+    expect(executed).toBe(FIND_ALLOWANCE_NONCE_WATERMARK_SQL)
   })
 
   it('returns null instead of throwing when the read fails', async () => {

@@ -212,26 +212,28 @@ export const CEILING_PATH = 'packages/backend/dep-lint-callsite-ceiling.json'
  * Shrink-only ceiling over the gauge (#1166). The retired file-edge ratchet
  * was blind to intensity — 66 files flat while call sites grew 256 → 344 —
  * so the replacement ratchets the CALL-SITE total instead. The committed JSON
- * holds the total plus per-file counts so a failure can name what grew.
- * Lowering the ceiling is a reviewed change (`--update-ceiling` writes it,
- * and refuses to raise); raising it means hand-editing the JSON and defending
- * that in the PR.
+ * holds the total plus per-file counts, and BOTH are enforced (#1210): the
+ * per-file counts originally informed only the failure message, which let a
+ * file grow for free whenever another shrank — redistribution the total
+ * cannot see, with the JSON silently going stale. Now no file may exceed its
+ * committed count (absent files count as 0) even while the total is under
+ * the ceiling. Lowering is a reviewed change (`--update-ceiling` writes it,
+ * and refuses to raise the total or any file); deliberate growth or
+ * redistribution means hand-editing the JSON and defending that in the PR.
  */
 export function checkCallSiteCeiling(gauge, ceiling) {
-  if (gauge.callSites <= ceiling.total) {
-    return {
-      ok: true,
-      canLower: gauge.callSites < ceiling.total,
-      grown: [],
-    }
-  }
   const grown = []
   for (const [path, count] of Object.entries(gauge.perFile)) {
     const committed = ceiling.files[path] ?? 0
     if (count > committed) grown.push({ path, committed, count })
   }
   grown.sort((a, b) => b.count - b.committed - (a.count - a.committed))
-  return { ok: false, canLower: false, grown }
+  const ok = gauge.callSites <= ceiling.total && grown.length === 0
+  return {
+    ok,
+    canLower: ok && gauge.callSites < ceiling.total,
+    grown,
+  }
 }
 
 // ── Scan ────────────────────────────────────────────────────────────────────
@@ -280,10 +282,14 @@ async function main() {
   const ceilingCheck = checkCallSiteCeiling(gauge, ceiling)
 
   if (process.argv.includes('--update-ceiling')) {
-    if (gauge.callSites > ceiling.total) {
+    if (gauge.callSites > ceiling.total || ceilingCheck.grown.length > 0) {
       console.log(
-        `✗ --update-ceiling refuses to RAISE the ceiling (${ceiling.total} → ${gauge.callSites}). ` +
-          'Growth is a reviewed decision: hand-edit the JSON and defend it in the PR.',
+        gauge.callSites > ceiling.total
+          ? `✗ --update-ceiling refuses to RAISE the ceiling (${ceiling.total} → ${gauge.callSites}). ` +
+              'Growth is a reviewed decision: hand-edit the JSON and defend it in the PR.'
+          : `✗ --update-ceiling refuses to accept per-file growth (#1210): ` +
+              ceilingCheck.grown.map((g) => `${g.path} ${g.committed}→${g.count}`).join(', ') +
+              '. Redistribution is a reviewed decision: hand-edit the JSON and defend it in the PR.',
       )
       process.exit(1)
     }
@@ -299,7 +305,10 @@ async function main() {
   if (!ceilingCheck.ok) {
     failed = true
     console.log(
-      `\n✗ inline-SQL call sites grew past the ceiling: ${gauge.callSites} > ${ceiling.total}. Files that grew:\n`,
+      gauge.callSites > ceiling.total
+        ? `\n✗ inline-SQL call sites grew past the ceiling: ${gauge.callSites} > ${ceiling.total}. Files that grew:\n`
+        : `\n✗ inline-SQL call sites REDISTRIBUTED under an unchanged total (${gauge.callSites} ≤ ${ceiling.total}) — ` +
+            'the per-file counts are the ceiling too (#1210). Files that grew:\n',
     )
     for (const g of ceilingCheck.grown) {
       console.log(`  ${g.path}: ${g.committed} → ${g.count}`)

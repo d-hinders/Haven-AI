@@ -37,10 +37,15 @@ interface CreateHybridBody {
   owner_address?: string
   passkeys?: Array<{ key_id?: string; x?: string; y?: string }>
   /**
-   * #908 mainnet gate: explicit acknowledgment that a single-signer account
-   * has no recovery — "losing my only device loses this account". Required
-   * to provision a value-bearing-chain account with fewer than two signers;
-   * ignored on testnets. Recorded durably (user_safes.single_signer_waiver_at).
+   * Optional acknowledgment that a single-signer account has no recovery —
+   * "losing my only device loses this account".
+   *
+   * **Not required for anything.** It gated provisioning under #908; #1153
+   * turned the signer floor into a post-funding recommendation, so nothing
+   * refuses a single-signer account any more. Sending it records the
+   * acknowledgement durably (`user_safes.single_signer_waiver_at`) as history
+   * and changes no outcome; omitting it changes no outcome either. Kept on the
+   * request shape so existing clients that send it keep working.
    */
   single_signer_waiver?: { acknowledged?: boolean }
 }

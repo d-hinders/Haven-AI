@@ -125,9 +125,16 @@ export function encodeSignerAction(
       return { error: 'No such passkey on this account' }
     }
     if (signerCount - 1 < 2) {
-      // Haven's floor is ≥2 so recovery always exists; the chain itself only
-      // refuses removing the LAST signer (#884 CannotRemoveLastSigner) — do
-      // not claim the stricter rule is on-chain.
+      // The chain itself only refuses removing the LAST signer (#884
+      // CannotRemoveLastSigner) — do not claim the stricter rule is on-chain.
+      //
+      // This ≥2 refusal is now BRANCH-SPECIFIC, not account-wide (#1153).
+      // `remove_owner`, a few lines below, permits dropping to one signer on
+      // any chain — the owner ruled that a user may move to a single-signer
+      // setup, and that relaxation was scoped to owner removal only. So a
+      // reader here must not infer that ≥2 still holds for the account: it
+      // does not. Whether this branch should match is #1199, an open product
+      // question rather than an oversight.
       return {
         error: 'Removing this would leave fewer than two ways to approve — add a backup first.',
       }

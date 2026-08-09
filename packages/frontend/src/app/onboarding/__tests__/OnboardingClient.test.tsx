@@ -107,6 +107,21 @@ async function completeCreation() {
 }
 
 describe('OnboardingClient (#1162)', () => {
+  it('offers DELEGATION onboarding on Base MAINNET when the flag is on (#908 launch prep)', () => {
+    // The gate used to hardcode Base Sepolia; the mainnet launch is the flag
+    // flip on the prod Vercel scope, so the CODE must already serve 8453.
+    // Default selection with no NEXT_PUBLIC_HAVEN_CHAIN_ID is Base mainnet —
+    // exactly the prod configuration.
+    vi.stubEnv('NEXT_PUBLIC_DELEGATION_ONBOARDING', '1')
+    try {
+      render(<OnboardingClient />)
+      expect(screen.getByRole('button', { name: 'Hybrid create' })).toBeTruthy()
+      expect(screen.queryByRole('button', { name: /Face ID/ })).toBeNull()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('renders one screen — welcome, network, passkey action — with no signer fork', () => {
     render(<OnboardingClient />)
 

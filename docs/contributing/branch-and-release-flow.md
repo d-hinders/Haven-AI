@@ -7,7 +7,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-08-09" # post-promotion sync step added (#1231) — the strict-up-to-date lesson written down where the merge-commit rule already lives
+last-verified: "2026-08-09" # re-verified at promotion f7643dda (42 commits): the sync-back step below executed as #1242 — second use of the #1231 routine
 ---
 
 # Branch & release flow

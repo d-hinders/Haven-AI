@@ -5,7 +5,7 @@ covers:
   - packages/backend/scripts/check-mainnet-reconciliation.ts
   - packages/backend/scripts/check-bundler.ts
   - packages/backend/scripts/check-delegation-contracts.ts
-last-verified: "2026-08-09" # stale-claims sweep: #1153 posture (no code gate), #980 path moves
+last-verified: "2026-08-09" # §1.1 v2: the pruned container ships no scripts/ either — inline-Node probe is the only in-shell path that works (proven twice, live)
 ---
 
 # Mainnet (8453) canary & reconciliation runbook (#1067)
@@ -39,9 +39,35 @@ prod API URL.
    ```
 
    Exit 0 required. Exit 2 = not configured (wrong or missing credential);
-   fix the Railway **prod** env before continuing. Note the env var itself
-   lives in Railway — the probe must be run with the PROD value (Railway
-   shell, or export it locally from the dashboard without echoing it).
+   fix the Railway **prod** env before continuing.
+
+   **The prod container cannot run this script** (found the hard way,
+   2026-08-09, twice): the pruned build has no `tsx` AND does not ship
+   `packages/backend/scripts/` at all. In the Railway prod shell, use the
+   inline-Node equivalent instead — same three checks (chain-scoped URL
+   assertion, v0.7 entry point, gas oracle), never prints the URL:
+
+   ```bash
+   node --input-type=module -e '
+   const url = process.env.DELEGATION_RAIL_BUNDLER_URL
+   if (!url) { console.error("exit 2: DELEGATION_RAIL_BUNDLER_URL is not configured"); process.exit(2) }
+   if (/\/v2\/\d+\//.test(url) && !url.includes("/v2/8453/")) {
+     console.error("exit 2: credential targets a DIFFERENT chain than 8453"); process.exit(2)
+   }
+   const rpc = async (m) => { const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: m, params: [] }), signal: AbortSignal.timeout(15000) }); const b = await r.json(); if (b.error) throw new Error(m + ": " + (b.error.message ?? "rpc error")); return b.result }
+   const EP07 = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+   let ok = true
+   try { const eps = await rpc("eth_supportedEntryPoints"); const h = eps.some(e => e.toLowerCase() === EP07.toLowerCase()); console.log("bundler:   up — v0.7 " + (h ? "OK" : "MISSING")); if (!h) ok = false }
+   catch (e) { console.log("bundler:   DOWN (" + String(e.message).slice(0,80) + ")"); ok = false }
+   try { const p = await rpc("pimlico_getUserOperationGasPrice"); console.log("paymaster: up (fast " + (p?.fast?.maxFeePerGas ?? "?") + ")") }
+   catch (e) { console.log("paymaster: FAILED (" + String(e.message).slice(0,80) + ")"); ok = false }
+   if (ok) console.log("healthy for 8453"); else { console.log("degraded"); process.exit(1) }
+   '
+   ```
+
+   From a laptop the real script works as written above — export the prod
+   value without echoing (`read -rs DELEGATION_RAIL_BUNDLER_URL && export …`,
+   run, then `unset`).
 
 2. **Sponsorship policy bound and capped.** In the Pimlico dashboard, confirm
    `DELEGATION_RAIL_SPONSORSHIP_POLICY_ID` (prod env) names a policy that is
@@ -86,8 +112,14 @@ is NOT the posture for external users.
 One agent, one small open budget, one erc7710 payment, end to end. Mirror of
 the `x402-erc7710-settle` QA leg's assertions, executed by hand on 8453.
 
-1. **Provision** a fresh account on **Base mainnet** through the production
-   app (passkey onboarding), enrol the second signer, and note the treasury
+1. **Flip the launch switch, then provision.** Since the #908 prep, the CODE
+   serves delegation onboarding on Base mainnet (`DELEGATION_ONBOARDING_CHAIN_IDS`
+   in the frontend, mirroring the backend's `DELEGATION_RAIL_CHAIN_IDS`) — the
+   remaining gate is `NEXT_PUBLIC_DELEGATION_ONBOARDING=1` on the **prod**
+   Vercel scope, which is deliberately the operator's last move (it needs a
+   redeploy to inline). Set it, then **provision** a fresh account on
+   **Base mainnet** through the production app (passkey onboarding — this now
+   creates a Hybrid, zero tx), enrol the second signer, and note the treasury
    address. Fund it with a small amount of Base USDC (≤ 5 USDC).
 2. **Create one agent** with an **open** USDC budget of ≤ 1 USDC/day and
    activate the grant (this relayer-deploys the treasury — verify the deploy

@@ -135,8 +135,14 @@ describeDb('agent-connection-setups repository (#1225)', () => {
       ])
       events.push('tx1:committing')
     })
-    // Give tx1 a head start so it takes the lock first.
-    await new Promise((r) => setTimeout(r, 50))
+    // Wait until tx1 actually HOLDS the lock before starting tx2 — a fixed
+    // head start is a race against pool-connect latency (review of #1234:
+    // if tx1's connect+lock ever took longer than the sleep, tx2 would win
+    // the lock and the test would fail for scheduling reasons, not product
+    // reasons). Event-based, this cannot mis-order.
+    while (!events.includes('tx1:locked')) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
     const tx2 = inTransaction(async (tx) => {
       events.push('tx2:waiting')
       const locked = await lockSetupByTokenHash(setup.setupTokenHash, tx)

@@ -21,7 +21,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-07-27"
+last-verified: "2026-08-09" # #1228: real-DB characterization pointer added (§2) / testing-strategy rule added
 ---
 
 # Haven — CLAUDE.md
@@ -277,6 +277,7 @@ Multiple independent layers, all need to be compromised for funds to be at risk:
 - Use conventional commit messages
 - Document public API endpoints with JSDoc or OpenAPI
 - Every new doc under `docs/` (and the root gravity files) needs front-matter (`owner` / `status` / `covers` / `last-verified`) — run `npm run docs:new -- <path>` to scaffold it correctly, then fill in `covers` and the body
+- **Data-layer behaviour is proven against a real Postgres database, not against mocks** (epic #1219): assertions about what the database does — idempotency, locking, constraints, transactions, what a query returns — belong in a repository test on the real-DB harness; mocking is for collaborators a test does not own. A shrink-only ratchet (`npm run lint:db-mocks`) blocks the positional-mock pattern from growing back. Full rule, layer map, and worked example: [`docs/contributing/testing-strategy.md`](docs/contributing/testing-strategy.md)
 
 ## Releasing & publishing packages
 

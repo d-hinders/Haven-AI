@@ -5,6 +5,13 @@
 process.env.DATABASE_URL ??= 'postgres://haven:haven@localhost:5432/haven'
 process.env.JWT_SECRET ??= 'test-secret'
 
+// Cap the per-worker pool under vitest (#1222). The production default (20)
+// times a dozen parallel workers overruns Postgres's max_connections=100 —
+// observed as the real-DB suites' availability probe timing out under a full
+// run, which skips locally and FAILS in CI. Repository tests never need more
+// than a handful of concurrent connections per worker.
+process.env.DB_POOL_MAX ??= '5'
+
 // Real-DB isolation (#1220): bind this worker's connections to its own
 // schema BEFORE config.ts reads DATABASE_URL. `options` rides the postgres
 // startup packet, so every connection the pool hands out — including the

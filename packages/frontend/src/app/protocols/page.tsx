@@ -10,7 +10,7 @@ const PROTOCOLS = [
   {
     rail: 'HTTP paywalls',
     name: 'x402',
-    title: 'x402 — pay-per-request HTTP',
+    title: 'x402, pay-per-request HTTP',
     body:
       'A server returns 402, the agent asks Haven to pay, and the request is retried with proof. Haven checks the payment against your agent rules before anything settles.',
     href: '/protocols/x402',
@@ -19,7 +19,7 @@ const PROTOCOLS = [
   {
     rail: 'Stablecoin checkout',
     name: 'MPP',
-    title: 'Stripe MPP — agent-initiated payments',
+    title: 'Stripe MPP, agent-initiated payments',
     body:
       "Stripe's Machine Payments Protocol gives agents a standard way to pay merchants. Haven implements the stablecoin path today under the same agent rules layer.",
     href: '/protocols/mpp',

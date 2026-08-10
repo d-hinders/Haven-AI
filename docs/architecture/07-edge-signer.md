@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
+last-verified: "2026-08-10" # re-verified for #1255 (typed_data_b64 copy-through-safe transport on all delegation-rail signing surfaces)
 ---
 
 # Haven — Edge Signer
@@ -116,10 +116,33 @@ agent runtime drives the sequence.
 **Regular payment**
 
 ```
-hosted:  haven_pay        -> { payment_id, payload_hash }
+hosted:  haven_pay        -> { payment_id, payload_hash, signature_scheme?, typed_data?, typed_data_b64? }
 local:   haven_sign       -> { signature }     (delegate key, never leaves)
 hosted:  haven_submit     -> { status, tx_hash }
 ```
+
+On a **delegation-rail** account the `haven_pay` result also carries
+`signature_scheme: 'eip712_userop'` and the account's EIP-712 payload in TWO
+transports: `typed_data` (the object) and `typed_data_b64` (the same bytes as
+one opaque base64 string, #1255). Prefer passing `typed_data_b64` to
+`haven_sign` UNCHANGED — a redemption payload is multi-KB, and an agent
+re-emitting the nested JSON between tool calls can truncate or reshape it,
+which the signer's digest check then refuses. The Hybrid account validates
+the typed data; a bare-hash signature is rejected on-chain (AA24, #1254).
+Legacy-rail results omit all three fields and `haven_sign` signs
+`payload_hash`. The same pair rides `haven_pay_mcp_tool` /
+`haven_pay_x402_quote` results for `haven_sign_x402` / `haven_sign`, where
+`typed_data_b64` wins when both are supplied — silently, so a caller that
+supplies both must keep them in sync: on the direct path (no digest check) an
+edited `typed_data` next to a stale `typed_data_b64` would sign the stale one.
+
+Note the trust-model asymmetry: the **x402** typed-data leg
+(`signX402FundingTypedData`) verifies a Haven-authenticated expected context
+and digest equality before signing; this **direct** leg does not — like the
+legacy raw-hash path it always mirrored, the authority boundary is the
+account's on-chain caveat enforcers (budget/recipient/expiry), not a
+client-side signing gate. Do not assume `signDelegationTypedData` carries the
+x402 leg's binding protection.
 
 An over-budget result has `payload_hash: null`; stop and wait for the user to
 approve and execute the Safe payment. There is nothing for the edge signer to

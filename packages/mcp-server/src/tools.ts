@@ -217,14 +217,50 @@ const SIGNER_CAPABILITY_SOURCE =
   `capabilities.experimental["${SIGNER_CAPABILITY_KEY}"]`
 
 const PAY_DESCRIPTION = [
-  'Construct a Safe AllowanceModule payment within the agent budget and return the unsigned hash to sign.',
+  'Construct a payment within the agent budget and return the unsigned payload to sign.',
   'For read-only allowance, budget, spend-limit, remaining-amount, or reset-period questions,',
   'call haven_get_allowances instead of constructing a payment.',
   'Returns { payment_id, payload_hash, expires_at } when the amount fits the remaining',
-  'on-chain allowance. Sign payload_hash with the local signer (haven_sign) then relay with',
-  'haven_submit. Returns { status: "pending_approval", payload_hash: null } when the amount',
+  'budget. Sign with the local signer (haven_sign) then relay with haven_submit.',
+  'DELEGATION-RAIL accounts: the result also carries signature_scheme, typed_data and typed_data_b64 —',
+  'pass typed_data_b64 to haven_sign UNCHANGED alongside payload_hash (one opaque string; never',
+  're-type the nested typed_data JSON yourself, #1255); the account validates',
+  'the typed data, and a bare-hash signature is rejected on-chain (#1254).',
+  'Returns { status: "pending_approval", payload_hash: null } when the amount',
   'exceeds the budget; the user must approve it in Haven. Haven never receives the signing key.',
 ].join(' ')
+
+/**
+ * #1254: the delegation-rail signing fields, forwarded VERBATIM whenever the
+ * backend sent them. The x402 quote path always did this; the direct
+ * haven_pay/haven_send path dropped them — so the local signer raw-signed the
+ * userOp hash and the Hybrid account rejected it at validation (AA24). One
+ * helper now, so a future surface cannot re-make the mistake by omission.
+ */
+function delegationSignFields(signData: {
+  signature_scheme?: string
+  typed_data?: Record<string, unknown>
+}): Record<string, unknown> {
+  return signData.signature_scheme
+    ? {
+        signature_scheme: signData.signature_scheme,
+        typed_data: signData.typed_data,
+        // #1255: the same payload as ONE opaque base64 string. A redemption
+        // UserOp's callData makes typed_data a multi-KB nested object, and an
+        // agent re-emitting it between tool calls can truncate or reshape it —
+        // the signer's digest check then refuses (correctly) and the payment
+        // dies with no defect anywhere in the chain. The b64 form is copied
+        // as a single string; the signer decodes it into the SAME digest
+        // verification, so transport gets safer while the trust model is
+        // unchanged.
+        ...(signData.typed_data
+          ? {
+              typed_data_b64: Buffer.from(JSON.stringify(signData.typed_data)).toString('base64'),
+            }
+          : {}),
+      }
+    : {}
+}
 
 const SUBMIT_DESCRIPTION = [
   'Relay a delegate signature produced by the local signer to execute a previously constructed',
@@ -244,7 +280,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     `(${SIGNER_CAPABILITY_SOURCE} and its instructions). If it is not in that set the local signer is out of date: STOP before signing and tell the user to update ` +
     '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has been spent at that point. ' +
     'Finish with two follow-up calls (fast path, recommended): ' +
-    '(1) mcp__haven-signer__haven_sign_x402 on the local signer with payload_hash, x402_expected (the nested x402.expected context, including expires_at), and payment_required → { signature, payment_header }. '+ 'When this result carries signature_scheme and typed_data (delegation-rail accounts), pass typed_data through VERBATIM as well — that is what the account validates, and the signer will refuse to sign the bare payload_hash without it; ' +
+    '(1) mcp__haven-signer__haven_sign_x402 on the local signer with payload_hash, x402_expected (the nested x402.expected context, including expires_at), and payment_required → { signature, payment_header }. '+ 'When this result carries signature_scheme (delegation-rail accounts), also pass typed_data_b64 through UNCHANGED — one opaque string, never re-type the nested typed_data JSON (#1255) — that is what the account validates, and the signer will refuse to sign the bare payload_hash without it; ' +
     '(2) mcp__haven__haven_settle_mcp_tool with payment_id, signature, payment_header, merchant_url, tool_name, arguments, and mcp_transport to fund the delegate and settle with the merchant in one call, returning the tool result. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
@@ -532,6 +568,8 @@ export function createToolHandlers(
             status: intent.status,
             payload_hash: intent.signData.hash,
             expires_at: intent.expiresAt,
+            // #1254: same forwarding as haven_pay — see the note there.
+            ...delegationSignFields(intent.signData),
             asset: args.asset,
             amount: args.amount,
             recipient: args.recipient,
@@ -565,6 +603,12 @@ export function createToolHandlers(
             status: intent.status,
             payload_hash: intent.signData.hash,
             expires_at: intent.expiresAt,
+            // #1254: on the delegation rail the account validates TYPED DATA,
+            // not payload_hash. The x402 quote path always forwarded these;
+            // this direct path dropped them, so the local signer raw-signed
+            // the hash and the account rejected it on-chain (AA24). Found
+            // live during the #908 mainnet canary.
+            ...delegationSignFields(intent.signData),
             meta: { token: args.token, amount: args.amount, to: args.to },
           }
         } catch (err) {
@@ -1000,12 +1044,7 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
     // payload_hash. Pass both through verbatim — the local signer picks the
     // path from the Haven-signed expected context below and refuses the wrong
     // one, so this surface never has to be the thing that gets it right.
-    ...(intent.signData.signature_scheme
-      ? {
-          signature_scheme: intent.signData.signature_scheme,
-          typed_data: intent.signData.typed_data,
-        }
-      : {}),
+    ...delegationSignFields(intent.signData),
     // The edge signer needs these to build + sign the EIP-3009 merchant header
     // locally after the funding transfer is relayed via haven_submit.
     x402: {

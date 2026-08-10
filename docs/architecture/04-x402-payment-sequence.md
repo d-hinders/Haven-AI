@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-09" # re-verified same day (#999): a dep-lint-exempt comment on routes/x402-resources.ts only — no behavior change; sequence and settle paths unchanged. #1155 re-verified: the hosted quote/prepare results gained signer_compatibility (the expected-context version they will emit) and the signer advertises the set it verifies at handshake — pre-payment skew detection, advisory only. No sequence step, rail branch, settle path or refusal changed. #1196 re-verified: the x402 authorize path now PREFETCHES the shared nonce watermark inside its existing Promise.all instead of reading it serially, and the same coordinator was wired into the three other legacy-rail sign-hash builders. The sequence, the rail branch, the settle path and every refusal are unchanged — this only affects WHICH nonce a signature targets, and it targets a fresher one — #1209 re-verified: the nonce-coordinator wait moved BELOW the coverage decision (queue/insufficient sign nothing), still above generateTransferHash; no sequence step, refusal or settle path changed
+last-verified: "2026-08-10" # re-verified for #1255 (typed_data_b64 in the v2 table) + #1256 (the "capped header window" claim now means clamp(≤600)+300 margin ≤900 s; the ≤600 s erc7710 child expiry is a different bound, unchanged)
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -196,7 +196,7 @@ contents rather than announced:
 | Version | Carries | Signer may sign |
 |---|---|---|
 | v1 | no `typedDataHash` | the bare hash (raw ECDSA) — legacy rail |
-| v2 | `typedDataHash` | `sign_data.typed_data` (EIP-712) — delegation rail |
+| v2 | `typedDataHash` | `sign_data.typed_data` (EIP-712) — delegation rail. Since #1255 the same payload also travels as `typed_data_b64`, one opaque base64 string agents should relay unchanged (a re-emitted multi-KB JSON copy is the failure mode); the signer decodes it into this same digest check |
 
 The signer refuses the mismatch **in both directions**: raw-signing the hash of
 a v2 intent (the account would reject that signature on-chain, after the intent

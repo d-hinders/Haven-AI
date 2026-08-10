@@ -15,7 +15,11 @@
 import { describe, it, expect } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
 import { recoverTypedDataAddress } from 'viem'
-import { buildX402ExpectedMessage } from '@haven_ai/sdk'
+import {
+  buildX402ExpectedMessage,
+  X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
+  X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
+} from '@haven_ai/sdk'
 import { createEdgeSigner } from './core.js'
 
 // Well-known test keys (Hardhat accounts). Never used for real funds.
@@ -143,7 +147,7 @@ describe('edge signer EIP-3009 authorization fields', () => {
     expect(typeof auth.value).toBe('string')
   })
 
-  it('sets a sane validAfter/validBefore window', async () => {
+  it('sets a sane validAfter/validBefore window with forward margin past the verify rule (#1256)', async () => {
     const before = Math.floor(Date.now() / 1000)
     const { header } = await buildHeader()
     const after = Math.floor(Date.now() / 1000)
@@ -153,8 +157,21 @@ describe('edge signer EIP-3009 authorization fields', () => {
     const validBefore = Number(auth.validBefore)
 
     expect(validAfter).toBeLessThanOrEqual(after + 60)
-    expect(validBefore).toBeGreaterThan(before)
-    expect(validBefore).toBeLessThanOrEqual(after + ACCEPTED.maxTimeoutSeconds + 60)
+    // The facilitator's verify rule is `validBefore ≥ now + maxTimeoutSeconds`.
+    // The library alone leaves ZERO margin over that at signing time, so any
+    // funding/retry latency failed verify structurally (live: Anchor's 300 s
+    // requirement, 226 s left at verify). The signed window must clear the
+    // rule with real headroom — X402_SETTLEMENT_FORWARD_MARGIN_SECONDS.
+    expect(validBefore).toBeGreaterThanOrEqual(
+      before + ACCEPTED.maxTimeoutSeconds + X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
+    )
+    // ...and stay bounded: clamp + margin, never more (#715 exposure ceiling).
+    expect(validBefore).toBeLessThanOrEqual(
+      after +
+        X402_MAX_AUTHORIZATION_WINDOW_SECONDS +
+        X402_SETTLEMENT_FORWARD_MARGIN_SECONDS +
+        60,
+    )
   })
 
   it('uses a fresh 32-byte hex nonce per signing', async () => {

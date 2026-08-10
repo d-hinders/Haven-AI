@@ -27,7 +27,7 @@ const STEPS = [
   {
     step: '04',
     title: 'Add funds',
-    body: 'Add USDC, EURe, or another supported token to start making payments.',
+    body: 'Add USDC or another supported token to start making payments.',
     visual: 'fund',
   },
   {
@@ -95,7 +95,7 @@ function VisualVault() {
     <Card className="p-5">
       <div className="text-[11px] uppercase tracking-wider text-[var(--v2-ink-3)] mb-3">Haven wallet ready</div>
       <div className="text-[13px] font-mono text-[var(--v2-ink)] mb-1">0x4F3e…3bcFc</div>
-      <div className="text-[12px] text-[var(--v2-ink-3)] mb-4">Gnosis Chain · ready to fund</div>
+      <div className="text-[12px] text-[var(--v2-ink-3)] mb-4">Base · ready to fund</div>
       <div className="flex items-center gap-2 text-[12px] text-[var(--v2-success)]">
         <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
           <path d="M6.5 11.2L3.8 8.5l-1 1L6.5 13.2 14 5.7l-1-1z" />
@@ -109,7 +109,7 @@ function VisualVault() {
 function VisualFund() {
   const balances = [
     { sym: 'USDC', amt: '1,250.00', label: 'US Dollar Coin' },
-    { sym: 'EURe', amt: '480.00', label: 'Monerium EUR' },
+    { sym: 'ETH', amt: '0.48', label: 'Ether' },
   ]
   return (
     <Card className="p-0 overflow-hidden">
@@ -136,7 +136,7 @@ function VisualCredentials() {
   const rules: [string, string][] = [
     ['Daily limit', '500 USDC'],
     ['Per transaction', '50 USDC'],
-    ['Allowed assets', 'USDC, EURe'],
+    ['Allowed assets', 'USDC'],
   ]
   return (
     <Card className="p-5">
@@ -215,7 +215,7 @@ export default function HowItWorks() {
           .
         </h1>
         <p className="text-[17px] md:text-[18px] leading-relaxed text-[var(--v2-ink-2)] max-w-[560px] mb-8">
-          Your agent pays for things on its own — and you stay in control of every dollar.
+          Your agent pays for things on its own, and you stay in control of every dollar.
         </p>
         <div className="flex flex-wrap gap-3">
           <Button href="/signup" size="lg" trailingIcon>Get early access</Button>

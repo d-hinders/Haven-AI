@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { privateKeyToAccount } from 'viem/accounts'
+import { hashTypedData } from 'viem'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
@@ -187,6 +188,106 @@ describe('haven_sign tool', () => {
     const handlers = createToolHandlers(createEdgeSigner(TEST_KEY))
     const payload = await handlers.haven_sign({ payload_hash: 'nope' })
     expect(payload.success).toBe(false)
+  })
+
+  it('signs the TYPED DATA, not the raw hash, when typed_data is present (#1254)', async () => {
+    // The direct delegation-rail case found live during the #908 mainnet
+    // canary: the Hybrid account validates EIP-712 typed data, and a raw
+    // signature over payload_hash reverts on-chain with AA24. When the
+    // hosted result carries typed_data, THAT is what gets signed.
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-typed-data-audit-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    const signer = createEdgeSigner(TEST_KEY)
+    const handlers = createToolHandlers(signer, {
+      audit: {
+        auditPath,
+        delegateAddress: signer.delegateAddress,
+        safeAddress: '0x000000000000000000000000000000000000Cafe',
+        chainId: 8453,
+      },
+    })
+    const typedData = {
+      domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: `0x${'11'.repeat(20)}` },
+      types: {
+        PackedUserOperation: [
+          { name: 'sender', type: 'address' },
+          { name: 'nonce', type: 'uint256' },
+        ],
+      },
+      primaryType: 'PackedUserOperation',
+      message: { sender: `0x${'22'.repeat(20)}`, nonce: 1 },
+    }
+
+    const result = ok<{ signature: string }>(
+      await handlers.haven_sign({ payload_hash: HASH, typed_data: typedData }),
+    )
+
+    // The signature verifies against the typed data's EIP-712 digest —
+    // and does NOT verify against the raw payload_hash, which is exactly
+    // the property that failed on-chain before this fix.
+    const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+    expect(verifySignature(digest, result.data.signature, signer.delegateAddress)).toBe(true)
+    expect(verifySignature(HASH, result.data.signature, signer.delegateAddress)).toBe(false)
+    expect(JSON.stringify(result)).not.toContain(TEST_KEY.slice(2))
+
+    // The audit trail covers this branch too — a typed-data signing that
+    // left no local record would be invisible to the user.
+    const rows = (await readFile(auditPath, 'utf8')).trim().split('\n')
+    expect(rows).toHaveLength(1)
+    const entry = JSON.parse(rows[0])
+    expect(entry).toMatchObject({ tool: 'haven_sign', payload_hash: HASH })
+    expect(JSON.stringify(entry)).not.toContain(TEST_KEY.slice(2))
+    expect(JSON.stringify(entry)).not.toContain(result.data.signature)
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('accepts typed_data_b64 as the copy-through-safe form and prefers it over typed_data (#1255)', async () => {
+    const signer = createEdgeSigner(TEST_KEY)
+    const handlers = createToolHandlers(signer)
+    const typedData = {
+      domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: `0x${'11'.repeat(20)}` },
+      types: {
+        PackedUserOperation: [
+          { name: 'sender', type: 'address' },
+          { name: 'nonce', type: 'uint256' },
+        ],
+      },
+      primaryType: 'PackedUserOperation',
+      message: { sender: `0x${'22'.repeat(20)}`, nonce: 1 },
+    }
+    const b64 = Buffer.from(JSON.stringify(typedData)).toString('base64')
+
+    // b64 alone works — the live #1255 failure was the nested-JSON copy.
+    const alone = ok<{ signature: string }>(
+      await handlers.haven_sign({ payload_hash: HASH, typed_data_b64: b64 }),
+    )
+    const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+    expect(verifySignature(digest, alone.data.signature, signer.delegateAddress)).toBe(true)
+
+    // When both are present, the OPAQUE form wins: a truncated/reshaped
+    // typed_data object next to an intact b64 must not poison the signing.
+    const mangledTypedData = { ...typedData, message: { ...typedData.message, nonce: 999 } }
+    const both = ok<{ signature: string }>(
+      await handlers.haven_sign({
+        payload_hash: HASH,
+        typed_data: mangledTypedData,
+        typed_data_b64: b64,
+      }),
+    )
+    expect(verifySignature(digest, both.data.signature, signer.delegateAddress)).toBe(true)
+  })
+
+  it('refuses a typed_data_b64 that does not decode to a JSON object, with a copy-through hint (#1255)', async () => {
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY))
+    const payload = await handlers.haven_sign({
+      payload_hash: HASH,
+      typed_data_b64: Buffer.from('"just a string"').toString('base64'),
+    })
+    expect(payload.success).toBe(false)
+    if (!payload.success) {
+      expect(payload.message).toContain('typed_data_b64 did not decode to a JSON object')
+      expect(payload.message).toContain('unchanged')
+    }
   })
 
   it('appends a local audit row for signing without key material or signature', async () => {

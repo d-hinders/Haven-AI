@@ -11,6 +11,7 @@ import {
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
+  X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
 } from './x402.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 
@@ -89,7 +90,48 @@ describe('x402 helpers', () => {
         ...accepted,
         maxTimeoutSeconds: 999_999,
       })
-      expect(requirements.maxTimeoutSeconds).toBe(X402_MAX_AUTHORIZATION_WINDOW_SECONDS)
+      expect(requirements.maxTimeoutSeconds).toBe(
+        X402_MAX_AUTHORIZATION_WINDOW_SECONDS + X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
+      )
+    })
+  })
+
+  // #1256: the facilitator's verify rule is `validBefore ≥ now + maxTimeout`,
+  // but the x402 library computes `validBefore = now + maxTimeout` at SIGNING
+  // time — zero forward margin, so any funding/retry latency fails verify
+  // structurally (measured live: Anchor's 300 s requirement, 226 s left).
+  // The margin is added ONLY at the pre-sign choke point; the parse path
+  // keeps the merchant's advertised timeout unchanged.
+  describe('settlement forward margin (#1256)', () => {
+    it('adds the margin on top of the merchant timeout at the pre-sign choke point', () => {
+      const requirements = toStandardPaymentRequirements(paymentRequired, {
+        ...accepted,
+        maxTimeoutSeconds: 300,
+      })
+      expect(requirements.maxTimeoutSeconds).toBe(300 + X402_SETTLEMENT_FORWARD_MARGIN_SECONDS)
+    })
+
+    it('bounds total forward exposure at clamp + margin (≤ 900 s)', () => {
+      const requirements = toStandardPaymentRequirements(paymentRequired, {
+        ...accepted,
+        maxTimeoutSeconds: 365 * 24 * 3600,
+      })
+      expect(requirements.maxTimeoutSeconds).toBe(
+        X402_MAX_AUTHORIZATION_WINDOW_SECONDS + X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
+      )
+      expect(requirements.maxTimeoutSeconds).toBeLessThanOrEqual(900)
+    })
+
+    it('does NOT inflate the parse path — the advertised timeout stays what the merchant said', () => {
+      const body = {
+        ...paymentRequired,
+        accepts: [{ ...accepted, maxTimeoutSeconds: 300 }],
+      }
+      const response = new Response(null, {
+        status: 402,
+        headers: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(body)) },
+      })
+      expect(parsePaymentRequired(response).accepts[0].maxTimeoutSeconds).toBe(300)
     })
   })
 

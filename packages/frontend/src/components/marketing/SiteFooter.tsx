@@ -61,7 +61,7 @@ export function SiteFooter() {
       <div className="border-t border-[var(--v2-border)]">
         <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between text-[12px] text-[var(--v2-ink-3)]">
           <span>© {new Date().getFullYear()} Haven Labs</span>
-          <span>Built for agent commerce</span>
+          <span>Built for Agentic Commerce</span>
         </div>
       </div>
     </footer>

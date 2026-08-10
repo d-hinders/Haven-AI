@@ -33,6 +33,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { z } from 'zod/v3'
 import { HavenClient, buildX402ExpectedMessage } from '@haven_ai/sdk'
 import { privateKeyToAccount } from 'viem/accounts'
 import { hashTypedData } from 'viem'
@@ -88,13 +89,52 @@ const TYPED_DATA = {
   },
   primaryType: 'PackedUserOperation',
   message: { sender: DELEGATE_ADDR, nonce: '7' },
-} as const
+} as Record<string, unknown>
+
+/**
+ * A payload shaped like a LIVE delegation-rail redemption (#1255): the full
+ * PackedUserOperation type set and a multi-KB callData — the size class whose
+ * agent-side copy-through broke in production. Built exactly like the
+ * backend's `userOpTypedData` output (all bigints pre-stringified).
+ */
+const REALISTIC_TYPED_DATA = {
+  domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: DELEGATE_ADDR },
+  types: {
+    PackedUserOperation: [
+      { name: 'sender', type: 'address' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'initCode', type: 'bytes' },
+      { name: 'callData', type: 'bytes' },
+      { name: 'accountGasLimits', type: 'bytes32' },
+      { name: 'preVerificationGas', type: 'uint256' },
+      { name: 'gasFees', type: 'bytes32' },
+      { name: 'paymasterAndData', type: 'bytes' },
+      { name: 'entryPoint', type: 'address' },
+    ],
+  },
+  primaryType: 'PackedUserOperation',
+  message: {
+    sender: DELEGATE_ADDR,
+    // Keyed 4337 nonce — a >2^53 value, stringified like the backend does.
+    nonce: (0x1n << 64n | 5n).toString(),
+    initCode: '0x',
+    callData: '0x' + 'ab'.repeat(4000),
+    accountGasLimits: '0x' + '11'.repeat(32),
+    preVerificationGas: '60000',
+    gasFees: '0x' + '22'.repeat(32),
+    paymasterAndData: '0x' + 'cd'.repeat(100),
+    entryPoint: '0x0000000071727De22E5E9d8BAf0edAc6f37da032',
+  },
+} as Record<string, unknown>
 
 /**
  * Build x402 expected context in the snake_case shape the signer tool schema
  * requires (same as what haven_pay_x402_quote returns in x402.expected).
  */
-async function makeX402ExpectedAuth(rail: 'legacy' | 'delegation' = 'legacy') {
+async function makeX402ExpectedAuth(
+  rail: 'legacy' | 'delegation' = 'legacy',
+  typedData: Record<string, unknown> = TYPED_DATA,
+) {
   // camelCase keys for SDK's buildX402ExpectedMessage
   const context = {
     paymentId: FUNDING_PAYMENT_ID,
@@ -110,7 +150,7 @@ async function makeX402ExpectedAuth(rail: 'legacy' | 'delegation' = 'legacy') {
     // v2 commits to the digest of the typed data actually delivered. Its
     // presence is what makes the context v2 — the version is derived, never
     // announced (#1138).
-    ...(rail === 'delegation' ? { typedDataHash: hashTypedData(TYPED_DATA as Parameters<typeof hashTypedData>[0]) } : {}),
+    ...(rail === 'delegation' ? { typedDataHash: hashTypedData(typedData as Parameters<typeof hashTypedData>[0]) } : {}),
   }
   const message = buildX402ExpectedMessage(context)
   const account = privateKeyToAccount(BINDING_KEY)
@@ -162,7 +202,10 @@ interface CapturedCall {
 
 let capturedCalls: CapturedCall[]
 
-function stubHavenApi(rail: 'legacy' | 'delegation' = 'legacy') {
+function stubHavenApi(
+  rail: 'legacy' | 'delegation' = 'legacy',
+  typedData: Record<string, unknown> = TYPED_DATA,
+) {
   capturedCalls = []
   // The 201 body is a placeholder for the FLOW assertions; the message-level
   // contract is the sibling file's job. What matters here is the sign_data
@@ -205,7 +248,7 @@ function stubHavenApi(rail: 'legacy' | 'delegation' = 'legacy') {
         // hosted surface must pass BOTH through — the signer picks the path.
         sign_data:
           rail === 'delegation'
-            ? { hash: FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: TYPED_DATA }
+            ? { hash: FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: typedData }
             : { hash: FUNDING_HASH },
         expires_at: '2099-01-01T00:00:00.000Z',
       })
@@ -383,6 +426,118 @@ describe('Hosted MCP + Edge Signer integration', () => {
 
     // Custody holds on this rail too: the key never reaches hosted traffic.
     expect(JSON.stringify(capturedCalls)).not.toContain(DELEGATE_KEY)
+  })
+
+  it('round-trips a redemption-sized payload via typed_data_b64 — the copy-through-safe form (#1255)', async () => {
+    // The live #1255 failure: an agent re-emitting the multi-KB typed_data
+    // JSON between the hosted quote and the local signer altered it, and the
+    // signer's digest check refused. The b64 form crosses as ONE opaque
+    // string. This test walks the REAL surfaces end to end with a payload of
+    // the size class that actually broke.
+    stubHavenApi('delegation', REALISTIC_TYPED_DATA)
+
+    const havenKeyless = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const hostedHandlers = createHostedHandlers(havenKeyless)
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner)
+
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+
+    const quote = ok<{ typed_data?: unknown; typed_data_b64?: string }>(
+      await hostedHandlers.haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+    expect(quote.typed_data_b64).toBeDefined()
+    // The opaque form decodes to EXACTLY the payload the hosted surface
+    // relayed — same bytes, different transport.
+    expect(JSON.parse(Buffer.from(quote.typed_data_b64!, 'base64').toString('utf8'))).toEqual(
+      quote.typed_data,
+    )
+
+    // The signer accepts the b64 form ALONE — no nested-JSON copy anywhere.
+    const signed = ok<{ signature: string }>(
+      await signerHandlers.haven_sign({
+        payload_hash: FUNDING_HASH,
+        typed_data_b64: quote.typed_data_b64,
+        x402_expected: x402Expected.snake,
+      }),
+    )
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    expect(JSON.stringify(capturedCalls)).not.toContain(DELEGATE_KEY)
+  })
+
+  it('haven_sign_x402 (the fast path) also accepts typed_data_b64 alone (#1255)', async () => {
+    stubHavenApi('delegation', REALISTIC_TYPED_DATA)
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner)
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+
+    const signed = ok<{ signature: string; payment_header: string }>(
+      await signerHandlers.haven_sign_x402({
+        payload_hash: FUNDING_HASH,
+        typed_data_b64: Buffer.from(JSON.stringify(REALISTIC_TYPED_DATA)).toString('base64'),
+        x402_expected: x402Expected.snake,
+        payment_required: PAYMENT_REQUIRED,
+      }),
+    )
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    expect(signed.payment_header.length).toBeGreaterThan(0)
+  })
+
+  it('version skew degrades gracefully in both directions (#1255)', async () => {
+    // Old signer + new hosted: a zod v3 object schema WITHOUT typed_data_b64
+    // strips the unknown field, leaving typed_data — the pre-#1255 behavior.
+    const oldShape = z.object({
+      payload_hash: z.string(),
+      typed_data: z.record(z.string(), z.unknown()).optional(),
+    })
+    const parsed = oldShape.parse({
+      payload_hash: FUNDING_HASH,
+      typed_data: TYPED_DATA,
+      typed_data_b64: Buffer.from(JSON.stringify(TYPED_DATA)).toString('base64'),
+    })
+    expect('typed_data_b64' in parsed).toBe(false)
+    expect(parsed.typed_data).toEqual(TYPED_DATA)
+
+    // New signer + old hosted (no typed_data_b64): falls back to typed_data.
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner)
+    const x402Expected = await makeX402ExpectedAuth('delegation')
+    const signed = ok<{ signature: string }>(
+      await signerHandlers.haven_sign({
+        payload_hash: FUNDING_HASH,
+        typed_data: TYPED_DATA,
+        x402_expected: x402Expected.snake,
+      }),
+    )
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+  })
+
+  it('still refuses an altered payload: one flipped field fails the digest check (#1255)', async () => {
+    // The digest check is the guard that made the live failure SAFE — the b64
+    // transport must not weaken it. Simulate the copy-through corruption the
+    // wild produced: one field of the multi-KB payload altered.
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner)
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+
+    const truncated = {
+      ...REALISTIC_TYPED_DATA,
+      message: {
+        ...(REALISTIC_TYPED_DATA.message as Record<string, unknown>),
+        // The signature-eliding failure mode: a long hex string cut short.
+        callData: '0x' + 'ab'.repeat(100),
+      },
+    }
+    const payload = await signerHandlers.haven_sign({
+      payload_hash: FUNDING_HASH,
+      typed_data_b64: Buffer.from(JSON.stringify(truncated)).toString('base64'),
+      x402_expected: x402Expected.snake,
+    })
+    expect(payload.success).toBe(false)
+    if (!payload.success) {
+      expect(payload.message).toContain('does not match the digest')
+      expect(payload.message).toContain('typed_data_b64')
+    }
   })
 
   it('wire format: decoded payment header has {x402Version, accepted, payload} with key-bound authorization.from', async () => {

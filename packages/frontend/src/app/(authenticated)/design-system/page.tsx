@@ -620,7 +620,7 @@ export default function DesignSystemPage() {
             leadingTone="success"
             title="Trip wallet"
             subtitle="Base · 0x31bc…8d04"
-            trailing={<span className="v2-tabular text-sm font-semibold text-[var(--v2-ink)]">75.00 EURe</span>}
+            trailing={<span className="v2-tabular text-sm font-semibold text-[var(--v2-ink)]">75.00 USDC</span>}
             href="#"
           />
           <Row
@@ -1146,7 +1146,7 @@ export default function DesignSystemPage() {
         <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
           <WalletIdentityBlock
             name="Operating wallet"
-            network="Gnosis Chain"
+            network="Base"
             address={sampleAddress}
             balance="$4,280.35 available"
           />
@@ -1288,7 +1288,7 @@ export default function DesignSystemPage() {
             },
             {
               label: 'From account',
-              value: 'Operating wallet on Gnosis Chain',
+              value: 'Operating wallet on Base',
               helper: 'Payments come from this Haven account only.',
             },
             {
@@ -1460,12 +1460,12 @@ export default function DesignSystemPage() {
             <AgentBudgetCard
               agentName="Travel planner"
               walletName="Trip wallet"
-              budgets={[{ tokenSymbol: 'EURe', amount: '75', period: 'total budget' }]}
+              budgets={[{ tokenSymbol: 'USDC', amount: '75', period: 'total budget' }]}
               status="Connected"
               statusTone="success"
             />
             <ApprovalRequiredBanner title="You stay in control" tone="neutral">
-              Anything above 75 EURe waits for your manual approval before it is paid.
+              Anything above 75 USDC waits for your manual approval before it is paid.
             </ApprovalRequiredBanner>
           </div>
         </div>

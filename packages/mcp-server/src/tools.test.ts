@@ -102,6 +102,68 @@ describe('haven_pay', () => {
     expect(result.data.status).toBe('pending_signature')
   })
 
+  it('forwards signature_scheme + typed_data VERBATIM for delegation-rail intents (#1254)', async () => {
+    // Found live during the #908 mainnet canary: the x402 quote path always
+    // forwarded these, this direct path dropped them — so the local signer
+    // raw-signed the userOp hash and the Hybrid account rejected it (AA24).
+    const typedData = {
+      domain: { name: 'HybridDeleGator', chainId: 8453 },
+      types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+      primaryType: 'PackedUserOperation',
+      message: { sender: '0xabc' },
+    }
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_delegation',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: {
+            hash: '0xdeadbeef',
+            signature_scheme: 'eip712_userop',
+            typed_data: typedData,
+          },
+        },
+      },
+    })
+
+    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string }>(
+      await handlers().haven_pay({ token: 'USDC', amount: '0.10', to: '0xabc' }),
+    )
+
+    expect(result.data.signature_scheme).toBe('eip712_userop')
+    expect(result.data.typed_data).toEqual(typedData) // verbatim, never reshaped
+    // #1255: the copy-through-safe form decodes to exactly the same payload.
+    expect(result.data.typed_data_b64).toBeDefined()
+    expect(
+      JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
+    ).toEqual(typedData)
+    expect(result.data.payload_hash).toBe('0xdeadbeef')
+  })
+
+  it('omits the delegation fields entirely on legacy-rail intents (#1254)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_legacy',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef' },
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_pay({ token: 'USDC', amount: '0.10', to: '0xabc' }),
+    )
+
+    expect('signature_scheme' in result.data).toBe(false)
+    expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
+  })
+
   it('surfaces pending_approval (no hash) when over budget', async () => {
     stubFetch({
       'POST /payments': {
@@ -621,6 +683,67 @@ describe('haven_send', () => {
     expect(postCall?.body).toEqual({ token: 'USDC', amount: '5.00', to: '0xRecipient' })
     // Custody invariant
     expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
+  })
+
+  it('forwards signature_scheme + typed_data VERBATIM for delegation-rail intents (#1254)', async () => {
+    // haven_send was named in the live bug alongside haven_pay — reviewer
+    // mutation showed the shared helper's use HERE was untested (dropping it
+    // from only this handler passed the whole suite).
+    const typedData = {
+      domain: { name: 'HybridDeleGator', chainId: 8453 },
+      types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+      primaryType: 'PackedUserOperation',
+      message: { sender: '0xRecipient' },
+    }
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_delegation',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: {
+            hash: '0xsendhash',
+            signature_scheme: 'eip712_userop',
+            typed_data: typedData,
+          },
+        },
+      },
+    })
+
+    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '0.10' }),
+    )
+
+    expect(result.data.signature_scheme).toBe('eip712_userop')
+    expect(result.data.typed_data).toEqual(typedData) // verbatim, never reshaped
+    // #1255: the copy-through-safe form decodes to exactly the same payload.
+    expect(
+      JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
+    ).toEqual(typedData)
+    expect(result.data.payload_hash).toBe('0xsendhash')
+  })
+
+  it('omits the delegation fields entirely on legacy-rail intents (#1254)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_legacy',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '0.10' }),
+    )
+
+    expect('signature_scheme' in result.data).toBe(false)
+    expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
   })
 
   it('surfaces pending_approval when over allowance budget', async () => {

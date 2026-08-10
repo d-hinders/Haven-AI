@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
+last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven Screen Recipes

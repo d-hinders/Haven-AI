@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-10" # 0.1.20 train (#1263): version table bumped; the signer's new payment_id path degrades gracefully both ways (old signer strips the field and demands payload_hash; new signer against an old backend surfaces the fetch refusal and names the typed_data_b64 fallback)
+last-verified: "2026-08-10" # PR #1269 re-verify: hosted-only result-mapping change, no published-package or runtime contract change
 ---
 
 # MCP Runtime Compatibility

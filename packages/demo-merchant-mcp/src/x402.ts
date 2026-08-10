@@ -35,12 +35,27 @@ const ZERO_TX_HASH = `0x${'0'.repeat(64)}` as Hex
 // Verify-without-settle test hook (#603). Product ids listed here are verified
 // but not settled on-chain — used by the QA sweep-recovery scenario to strand the
 // delegate deterministically. Off (empty) by default; set on the dev merchant only.
+//
+// TESTNET-ONLY, enforced in code like the erc7710 flag: on any other chain a
+// listed product would hand out goods against a merely well-FORMED authorization
+// — no settlement runs, and the only balance check lives inside the settlement
+// call this hook skips, so an authorization signed from an EMPTY wallet passes.
+// A copy-pasted env var must not be able to turn that on for mainnet; refuse to
+// start rather than silently ignore the flag.
 const SKIP_SETTLE_PRODUCTS = new Set(
   (process.env.MERCHANT_SKIP_SETTLE_PRODUCT ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
 )
+if (SKIP_SETTLE_PRODUCTS.size > 0 && CHAIN_ID !== 84532) {
+  console.error(
+    'MERCHANT_SKIP_SETTLE_PRODUCT is a QA-only hook that skips on-chain settlement and is ' +
+      'testnet-only.\n' +
+      `Set MERCHANT_CHAIN_ID=84532 (Base Sepolia) to use it, or unset the flag. Got chain ${CHAIN_ID}.`,
+  )
+  process.exit(1)
+}
 
 export const PAYMENT_REQUIRED_HEADER = 'PAYMENT-REQUIRED'
 export const PAYMENT_SIGNATURE_HEADER = 'PAYMENT-SIGNATURE'

@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/allowance-module.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/modules/mpp/**
-last-verified: "2026-08-09" # #1209 re-verified: nonce wait reordered below the coverage decision at the sign-hash builders; nothing this report describes changed
+last-verified: "2026-08-10" # re-verified for #1251 (MPP refuses delegation accounts at the seam) — no claim here affected
 ---
 
 # Research — Smart-account-native x402 settlement (removing the funding leg)

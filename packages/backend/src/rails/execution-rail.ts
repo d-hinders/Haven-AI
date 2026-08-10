@@ -61,6 +61,30 @@ export function isRetiredRailIntent(executionRail: string | null | undefined): b
  * callers return this VERBATIM with nothing written — no intent row, no
  * audit side effect, no status flip.
  */
+/**
+ * The MPP surface has no delegation branch yet (#1251): x402 got
+ * `delegation-authorize.ts` and the #946 3009 fallback, MPP never did, and
+ * the silent fall-through ran a Hybrid account through LEGACY allowance
+ * coverage — AllowanceModule reads zero for a Hybrid, so every payment
+ * queued as an approval that could never execute (approving it reverts
+ * on-chain). Fail-closed at the seam, the #745/#993 pattern: one refusal
+ * shape, produced here, used by every MPP entry point.
+ */
+export function mppNotOnDelegationRail(): {
+  statusCode: 422
+  body: { error: string; error_code: 'rail_not_supported' }
+} {
+  return {
+    statusCode: 422,
+    body: {
+      error:
+        'MPP payments are not yet supported on delegation-rail accounts. ' +
+        'Use a direct payment (POST /payments) or an x402 purchase instead.',
+      error_code: 'rail_not_supported',
+    },
+  }
+}
+
 export function sessionRailRetired(kind: 'account' | 'intent'): { statusCode: 410; body: { error: string } } {
   return {
     statusCode: 410,

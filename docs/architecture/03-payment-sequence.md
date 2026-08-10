@@ -18,7 +18,7 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
+last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven — Payment Execution Sequence

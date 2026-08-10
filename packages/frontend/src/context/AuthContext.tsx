@@ -29,6 +29,15 @@ export interface UserSafe {
   created_at: string
   /** 'delegator_hybrid' on the delegation rail; null/legacy = Safe rail (#1069). */
   account_type?: string | null
+  /**
+   * #1205: server-computed by `needsBackupSignerRecommendation` — true when a
+   * delegation-rail account holds real value with fewer than two enrolled
+   * signers; null for non-delegation accounts (their signer truth is
+   * on-chain); absent on an older backend (fall back to the local read).
+   */
+  needs_backup_recommendation?: boolean | null
+  /** #1205: same single home for chain classification (testnets are false). */
+  value_bearing_chain?: boolean
 }
 
 export interface User {

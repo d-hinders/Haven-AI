@@ -36,10 +36,10 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
 }))
 
 // #1196 wired the allowance-nonce coordinator into this path, so it now reads
-// the shared watermark alongside its chain reads. These suites mock db.query
-// with POSITIONAL chains, which any new query shifts (the #775 failure mode).
-// Stub the watermark repository instead: it is fail-open and orthogonal to
-// what these tests assert, so silencing it changes nothing they measure.
+// the shared watermark alongside its chain reads. Stub the watermark
+// repository instead of adding it to the content-dispatch table below: it is
+// fail-open and orthogonal to what these tests assert, so silencing it
+// changes nothing they measure.
 vi.mock('../../infra/repositories/allowance-nonce-watermarks.js', () => ({
   findAllowanceNonceWatermark: async () => null,
   raiseAllowanceNonceWatermark: async () => {},
@@ -138,6 +138,68 @@ function sessionIntentRow(overrides: Record<string, unknown> = {}) {
   })
 }
 
+// ── Content-dispatch DB stub (#1226) ─────────────────────────────────────────
+//
+// Routes match on SQL FRAGMENTS, first hit wins, anything unmatched returns
+// zero rows. This replaces the positional mock-chains that re-shuffled
+// whenever a handler gained a query (#775) — what the database DOES with
+// these statements is proven in the repository suites on the real harness
+// (payment-intents.test.ts, epic #1219); these tests own only the handler:
+// status codes, refusals, response shapes, and which writes were requested.
+
+type DbRoute = [RegExp, (sql: string, params: unknown[]) => { rows: unknown[] } | Promise<{ rows: unknown[] }>]
+
+function primeDb(...routes: DbRoute[]) {
+  mockQuery.mockImplementation(async (sql: unknown, params: unknown[]) => {
+    const text = String(sql)
+    for (const [re, handler] of routes) {
+      if (re.test(text)) return handler(text, params)
+    }
+    return { rows: [] }
+  })
+}
+
+const AUTH: DbRoute = [/api_key_hash = \$1/, () => authRow()]
+
+/** loadExecutionRailState (POST /payments' rail resolution). */
+const railState = (row: Record<string, unknown> | null): DbRoute => [
+  /FROM agents a/,
+  () => ({ rows: row ? [row] : [] }),
+]
+
+/** hasTokenAllowanceConfigured (non-delegation rails' token-config gate). */
+const allowanceConfigured = (configured: boolean): DbRoute => [
+  /LOWER\(token_address\) = LOWER\(\$2\)/,
+  () => ({ rows: configured ? [{ allowance_amount: '1000' }] : [] }),
+]
+
+/** findIntentForAgent (POST /:id/sign's intent load). */
+const intentById = (row: Record<string, unknown> | null): DbRoute => [
+  /FROM payment_intents\s+WHERE id/,
+  () => ({ rows: row ? [row] : [] }),
+]
+
+/** claimIntentForSubmission — the CAS the double-spend guard rests on. */
+const claim = (ok: boolean): DbRoute => [
+  /SET signature[\s\S]*status = 'submitted'/,
+  () => ({ rows: ok ? [{ id: PAYMENT_ID }] : [] }),
+]
+
+/** confirmSubmittedIntent. */
+const confirm = (ok = true): DbRoute => [
+  /SET status = 'confirmed'/,
+  () => ({ rows: ok ? [{ id: PAYMENT_ID }] : [] }),
+]
+
+/** findIntentEvidenceSource — the post-confirm evidence-recorder lookup. */
+const evidenceLookup: DbRoute = [/AS kind,/, () => ({ rows: [] })]
+
+/** INSERT INTO payment_intents (legacy or delegation-rail create). */
+const insertIntent = (row: Record<string, unknown>): DbRoute => [
+  /INSERT INTO payment_intents/,
+  () => ({ rows: [row] }),
+]
+
 describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   let app: FastifyInstance
 
@@ -159,15 +221,10 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
 
   it('CHARACTERIZATION: legacy intents never touch the session rail', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
-    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '0.01', eur: '0.01' })
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '0.01', eur: '0.01' })
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [intentRow()] }) // execution_rail: null
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [] })
+    primeDb(AUTH, intentById(intentRow()), claim(true), confirm(), evidenceLookup)
 
     const response = await app.inject({
       method: 'POST',
@@ -188,9 +245,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
 
   it('POST /:id/sign REFUSES a session intent — the rail is retired (#834)', async () => {
     const signature = await sessionWallet.signMessage(getBytes(USER_OP_HASH))
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [sessionIntentRow()] })
+    primeDb(AUTH, intentById(sessionIntentRow()))
 
     const response = await app.inject({
       method: 'POST',
@@ -210,12 +265,9 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   })
 
   it('POST /payments REFUSES a session-rail account — the rail is retired (#834)', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
-        rows: [{ execution_rail: 'session_key', session_permission_id: PERMISSION_ID }],
-      })
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] }) // token-config guard
+    // The retired-session gate fires BEFORE the token-config guard runs, so
+    // only the rail-state read is ever consumed here.
+    primeDb(AUTH, railState({ execution_rail: 'session_key', session_permission_id: PERMISSION_ID }))
 
     const response = await app.inject({
       method: 'POST',
@@ -233,7 +285,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   })
 
   it('POST /payments on the delegation rail: prepares, pins the delegation, ships typed data — WITHOUT an allowance row (#829, #835)', async () => {
-    delegationMocks.prepareDelegationPayment.mockResolvedValueOnce({
+    delegationMocks.prepareDelegationPayment.mockResolvedValue({
       delegationHash: DELEGATION_HASH,
       prepared: {
         userOperation: PREPARED_USER_OP,
@@ -247,10 +299,11 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     // it 403'd a fully-configured delegation agent live until the guard was
     // scoped to non-delegation rails (#835). So the chain is auth → rail state
     // → INSERT, with no allowance lookup queued in between.
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [{ execution_rail: 'delegation', session_permission_id: null }] })
-      .mockResolvedValueOnce({ rows: [delegationIntentRow()] })
+    primeDb(
+      AUTH,
+      railState({ execution_rail: 'delegation', session_permission_id: null }),
+      insertIntent(delegationIntentRow()),
+    )
 
     const response = await app.inject({
       method: 'POST', url: '/payments',
@@ -274,10 +327,8 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   })
 
   it('POST /payments 403s when the agent has no active delegation for the recipient', async () => {
-    delegationMocks.prepareDelegationPayment.mockResolvedValueOnce(null)
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [{ execution_rail: 'delegation', session_permission_id: null }] })
+    delegationMocks.prepareDelegationPayment.mockResolvedValue(null)
+    primeDb(AUTH, railState({ execution_rail: 'delegation', session_permission_id: null }))
 
     const response = await app.inject({
       method: 'POST', url: '/payments',
@@ -294,9 +345,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     delegationMocks.prepareDelegationPayment.mockRejectedValueOnce(
       new Error('ERC20PeriodTransferEnforcer:transfer-amount-exceeded at https://api.pimlico.io/v2?apikey=pim_SECRET'),
     )
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [{ execution_rail: 'delegation', session_permission_id: null }] })
+    primeDb(AUTH, railState({ execution_rail: 'delegation', session_permission_id: null }))
 
     const response = await app.inject({
       method: 'POST', url: '/payments',
@@ -311,14 +360,9 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   })
 
   it('POST /:id/sign on a delegation intent: replays the prepared op, never touches other rails (#829)', async () => {
-    delegationMocks.submitDelegationPayment.mockResolvedValueOnce({ txHash: TX_HASH })
-    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '0.01', eur: '0.01' })
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [delegationIntentRow()] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [] })
+    delegationMocks.submitDelegationPayment.mockResolvedValue({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '0.01', eur: '0.01' })
+    primeDb(AUTH, intentById(delegationIntentRow()), claim(true), confirm(), evidenceLookup)
 
     const response = await app.inject({
       method: 'POST', url: `/payments/${PAYMENT_ID}/sign`,
@@ -335,11 +379,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   })
 
   it('POST /:id/sign fails closed when a delegation intent lost its prepared op', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [delegationIntentRow({ prepared_user_op: null })] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+    primeDb(AUTH, intentById(delegationIntentRow({ prepared_user_op: null })), claim(true), confirm())
 
     const response = await app.inject({
       method: 'POST', url: `/payments/${PAYMENT_ID}/sign`,
@@ -354,10 +394,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     // The #835 fix scopes the token-config guard OUT of the delegation rail —
     // it must remain in force everywhere else. A legacy agent (no rail state)
     // with no agent_allowances row is still rejected before anything executes.
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] }) // rail state: none → legacy
-      .mockResolvedValueOnce({ rows: [] }) // token-config guard: no allowance row
+    primeDb(AUTH, railState(null), allowanceConfigured(false))
 
     const response = await app.inject({
       method: 'POST',
@@ -373,16 +410,13 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   })
 
   it('POST /payments stays on the legacy flow when the account is not migrated', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-    allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
+    allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(USER_OP_HASH)
+    allowanceMocks.generateTransferHash.mockResolvedValue(USER_OP_HASH)
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] }) // no rail state → legacy (fail-closed)
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '1000' }] })
-      .mockResolvedValueOnce({ rows: [intentRow()] })
+    // No rail state → legacy (fail-closed).
+    primeDb(AUTH, railState(null), allowanceConfigured(true), insertIntent(intentRow()))
 
     const response = await app.inject({
       method: 'POST',
@@ -399,9 +433,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   it('a session intent with missing stored state is refused the same way (410, #834)', async () => {
     const signature = await sessionWallet.signMessage(getBytes(USER_OP_HASH))
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [sessionIntentRow({ session_user_op: null })] })
+    primeDb(AUTH, intentById(sessionIntentRow({ session_user_op: null })))
 
     const response = await app.inject({
       method: 'POST',

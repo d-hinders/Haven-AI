@@ -192,6 +192,83 @@ function mockWalletApprovalPersist(setup: SetupFixture = CONNECTED_SETUP) {
   })
 }
 
+// ── Content-dispatch DB stub for the plain pool.query() calls (#1226) ──────
+//
+// Routes match on SQL FRAGMENTS, first hit wins, anything unmatched returns
+// zero rows. This replaces the positional mockResolvedValueOnce chains that
+// re-shuffled whenever a handler gained a query (#775) — what the database
+// DOES with these statements (the `FOR UPDATE OF s` serialisation, the
+// setup+allowances one-unit write, the cancel state-machine guard) is proven
+// in infra/repositories/__tests__/agent-connection-setups.test.ts on the real
+// Postgres harness (#1225, epic #1219); these tests own only the handler:
+// status codes, response shapes, and which reads/writes were requested.
+//
+// Scope: this dispatcher answers `mockQuery` — the plain (non-transactional)
+// `db.query()` calls the repository issues with its default `pool` executor
+// (findUserSafe, findSetupByTokenHash, listSetupAllowances, …). Everything
+// inside a repository transaction (register, cancel, and applyApprovalState's
+// lock+write) runs on `mockClientQuery` via `mockConnect`, which this suite
+// already answers with its own SQL-text `mockImplementation` per test — that
+// pattern predates #1226 and needed no positional chain to begin with.
+
+type DbRoute = [RegExp, (sql: string, params: unknown[]) => { rows: unknown[] } | Promise<{ rows: unknown[] }>]
+
+function primeDb(...routes: DbRoute[]) {
+  mockQuery.mockImplementation(async (sql: unknown, params: unknown[]) => {
+    const text = String(sql)
+    for (const [re, handler] of routes) {
+      if (re.test(text)) return handler(text, params)
+    }
+    return { rows: [] }
+  })
+}
+
+/** findUserSafe (POST / — explicit safe_id or the default-wallet fallback). */
+const safeLookup = (row: Record<string, unknown> = SAFE): DbRoute => [
+  /FROM user_safes/,
+  () => ({ rows: [row] }),
+]
+/** findSetupByTokenHash (POST /resolve's token load). */
+const setupByTokenHash = (row: Record<string, unknown> | null): DbRoute => [
+  /s\.setup_token_hash = \$1\b/,
+  () => ({ rows: row ? [row] : [] }),
+]
+/** findSetupByIdAndTokenHash (install-status auth via setup_token). */
+const setupByIdAndTokenHash = (row: Record<string, unknown> | null): DbRoute => [
+  /s\.id = \$1 AND s\.setup_token_hash = \$2/,
+  () => ({ rows: row ? [row] : [] }),
+]
+/** findSetupByAgentApiKeyHash (install-status auth via API key). */
+const setupByAgentApiKey = (row: Record<string, unknown> | null): DbRoute => [
+  /a\.api_key_hash = \$2/,
+  () => ({ rows: row ? [row] : [] }),
+]
+/** findSetupForUser (GET /:setupId, wallet-approval, budget-approval). */
+const setupForUser = (row: Record<string, unknown> | null): DbRoute => [
+  /s\.id = \$1 AND s\.user_id = \$2/,
+  () => ({ rows: row ? [row] : [] }),
+]
+/** updateConnectorMetadata (resolve's optional connector-metadata write). */
+const connectorMetadataUpdate: DbRoute = [
+  /connector_version = COALESCE\(\$2, connector_version\)/,
+  () => ({ rows: [] }),
+]
+/** listSetupAllowances. */
+const setupAllowances = (rows: unknown[] = [ALLOWANCE]): DbRoute => [
+  /FROM agent_connection_setup_allowances/,
+  () => ({ rows }),
+]
+/** listActiveDelegations (budget-approval's delegation-rail authority check). */
+const activeDelegations = (rows: unknown[]): DbRoute => [
+  /FROM agent_delegations/,
+  () => ({ rows }),
+]
+/** mergeInstallStatus's RETURNING install_status. */
+const mergeInstallStatusResult = (installStatus: Record<string, unknown> | null): DbRoute => [
+  /install_status = install_status \|\| \$2::jsonb/,
+  () => ({ rows: installStatus ? [{ install_status: installStatus }] : [] }),
+]
+
 describe('agent connection setup routes', () => {
   beforeEach(() => {
     mockQuery.mockReset()
@@ -213,7 +290,7 @@ describe('agent connection setup routes', () => {
 
   it('creates a pending setup with a returned-once token stored only as a hash', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+    primeDb(safeLookup())
 
     const response = await app.inject({
       method: 'POST',
@@ -266,7 +343,7 @@ describe('agent connection setup routes', () => {
 
   it('persists the passport opt-in on the setup row for /register to act on later (#1072)', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+    primeDb(safeLookup())
 
     const response = await app.inject({
       method: 'POST',
@@ -291,7 +368,7 @@ describe('agent connection setup routes', () => {
 
   it('appends --local to the connector command when local_mcp is requested for a supported runtime', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+    primeDb(safeLookup())
 
     const response = await app.inject({
       method: 'POST',
@@ -311,7 +388,7 @@ describe('agent connection setup routes', () => {
 
   it('omits --local from the connector command by default', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+    primeDb(safeLookup())
 
     const response = await app.inject({
       method: 'POST',
@@ -330,7 +407,7 @@ describe('agent connection setup routes', () => {
 
   it('rejects local_mcp for runtimes without local MCP support', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+    primeDb(safeLookup())
 
     const response = await app.inject({
       method: 'POST',
@@ -350,7 +427,7 @@ describe('agent connection setup routes', () => {
 
   it('normalizes setup allowances before storing pending wallet approval state', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+    primeDb(safeLookup())
 
     const response = await app.inject({
       method: 'POST',
@@ -440,7 +517,7 @@ describe('agent connection setup routes', () => {
 
   it('includes Codex Desktop runtime in the generated setup command', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+    primeDb(safeLookup())
 
     const response = await app.inject({
       method: 'POST',
@@ -700,10 +777,7 @@ describe('agent connection setup routes', () => {
 
   it('resolves a setup token for the connector without returning credentials', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [SETUP] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    primeDb(setupByTokenHash(SETUP), connectorMetadataUpdate, setupAllowances([ALLOWANCE]))
 
     const response = await app.inject({
       method: 'POST',
@@ -1017,9 +1091,7 @@ describe('agent connection setup routes', () => {
 
   it('records confirmed wallet approval and activates only after on-chain allowance reconciliation', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
     mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
     mockGetTokenAllowance.mockResolvedValue({
       amount: BigInt(ALLOWANCE.allowance_amount),
@@ -1075,9 +1147,7 @@ describe('agent connection setup routes', () => {
 
   it('keeps multisig wallet approval proposals non-active', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
     mockGetTokensForDelegate.mockResolvedValue([])
     mockWalletApprovalPersist()
 
@@ -1107,9 +1177,7 @@ describe('agent connection setup routes', () => {
 
   it('does not activate when the live allowance does not match the pending setup', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
     mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
     mockGetTokenAllowance.mockResolvedValue({
       amount: 1n,
@@ -1135,9 +1203,7 @@ describe('agent connection setup routes', () => {
 
   it('records submitted confirmation evidence after a receipt timeout without activating', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
     mockGetTokensForDelegate.mockResolvedValue([])
     mockWalletApprovalPersist()
 
@@ -1166,9 +1232,7 @@ describe('agent connection setup routes', () => {
 
   it('keeps confirmed wallet approval in progress when on-chain budget is not visible yet', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
     mockGetTokensForDelegate.mockResolvedValue([])
     mockWalletApprovalPersist()
 
@@ -1207,9 +1271,7 @@ describe('agent connection setup routes', () => {
 
   it('keeps confirmed wallet approval in progress when on-chain verification is temporarily unavailable', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
     mockGetTokensForDelegate.mockRejectedValue(new Error('rpc unavailable'))
     mockWalletApprovalPersist()
 
@@ -1236,9 +1298,7 @@ describe('agent connection setup routes', () => {
 
   it('does not persist wallet approval if setup was cancelled after the initial read', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [CONNECTED_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
     mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
     mockGetTokenAllowance.mockResolvedValue({
       amount: BigInt(ALLOWANCE.allowance_amount),
@@ -1264,17 +1324,16 @@ describe('agent connection setup routes', () => {
 
   it('treats repeated confirmed wallet approval evidence as idempotent', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({
-        rows: [{
-          ...CONNECTED_SETUP,
-          status: 'active',
-          approval_status: 'confirmed',
-          tx_hash: TX_HASH,
-          safe_tx_hash: SAFE_TX_HASH,
-        }],
-      })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    primeDb(
+      setupForUser({
+        ...CONNECTED_SETUP,
+        status: 'active',
+        approval_status: 'confirmed',
+        tx_hash: TX_HASH,
+        safe_tx_hash: SAFE_TX_HASH,
+      }),
+      setupAllowances([ALLOWANCE]),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1292,16 +1351,15 @@ describe('agent connection setup routes', () => {
 
   it('recovers a proposed setup to active when status read sees live on-chain authority', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({
-        rows: [{
-          ...CONNECTED_SETUP,
-          status: 'proposed',
-          approval_status: 'proposed',
-          safe_tx_hash: SAFE_TX_HASH,
-        }],
-      })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    primeDb(
+      setupForUser({
+        ...CONNECTED_SETUP,
+        status: 'proposed',
+        approval_status: 'proposed',
+        safe_tx_hash: SAFE_TX_HASH,
+      }),
+      setupAllowances([ALLOWANCE]),
+    )
     mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
     mockGetTokenAllowance.mockResolvedValue({
       amount: BigInt(ALLOWANCE.allowance_amount),
@@ -1397,12 +1455,7 @@ describe('agent connection setup routes', () => {
 
   it('rejects cancelled setup tokens for install status updates', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({
-      rows: [{
-        ...SETUP,
-        status: 'cancelled',
-      }],
-    })
+    primeDb(setupByIdAndTokenHash({ ...SETUP, status: 'cancelled' }))
 
     const response = await app.inject({
       method: 'POST',
@@ -1465,21 +1518,18 @@ describe('agent connection setup routes', () => {
 
   it('lets a pending setup API key update install status without credential material', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ ...SETUP, status: 'connected_local', agent_id: 'agent-1' }] })
-      .mockResolvedValueOnce({
-        rows: [{
-          install_status: {
-            runtime_mcp_mode: 'local_stdio',
-            hosted_mcp_configured: false,
-            local_signer_configured: true,
-            local_mcp_configured: true,
-            local_mcp_acknowledged: true,
-            activation_command_available: true,
-            error_code: null,
-          },
-        }],
-      })
+    primeDb(
+      setupByAgentApiKey({ ...SETUP, status: 'connected_local', agent_id: 'agent-1' }),
+      mergeInstallStatusResult({
+        runtime_mcp_mode: 'local_stdio',
+        hosted_mcp_configured: false,
+        local_signer_configured: true,
+        local_mcp_configured: true,
+        local_mcp_acknowledged: true,
+        activation_command_available: true,
+        error_code: null,
+      }),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1513,13 +1563,11 @@ describe('agent connection setup routes', () => {
 
   it('rejects consumed setup tokens for install status updates', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({
-      rows: [{
-        ...SETUP,
-        status: 'connected_local',
-        setup_token_consumed_at: '2026-06-03T12:00:00.000Z',
-      }],
-    })
+    primeDb(setupByIdAndTokenHash({
+      ...SETUP,
+      status: 'connected_local',
+      setup_token_consumed_at: '2026-06-03T12:00:00.000Z',
+    }))
 
     const response = await app.inject({
       method: 'POST',
@@ -1538,12 +1586,10 @@ describe('agent connection setup routes', () => {
 
   it('rejects expired setup tokens for install status updates', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({
-      rows: [{
-        ...SETUP,
-        setup_token_expires_at: '2000-01-01T00:00:00.000Z',
-      }],
-    })
+    primeDb(setupByIdAndTokenHash({
+      ...SETUP,
+      setup_token_expires_at: '2000-01-01T00:00:00.000Z',
+    }))
 
     const response = await app.inject({
       method: 'POST',
@@ -1562,16 +1608,13 @@ describe('agent connection setup routes', () => {
 
   it('accepts a valid pre-registration setup token from the setup-token header for install status', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [SETUP] })
-      .mockResolvedValueOnce({
-        rows: [{
-          install_status: {
-            hosted_mcp_configured: false,
-            last_probe_at: '2026-06-03T12:00:00.000Z',
-          },
-        }],
-      })
+    primeDb(
+      setupByIdAndTokenHash(SETUP),
+      mergeInstallStatusResult({
+        hosted_mcp_configured: false,
+        last_probe_at: '2026-06-03T12:00:00.000Z',
+      }),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1625,7 +1668,7 @@ describe('setup allowance cap on the delegation rail (#1074)', () => {
 
   it('rejects >1 allowance on a delegator_hybrid wallet at CREATE — not as a dead end at approval', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [{ ...SAFE, account_type: 'delegator_hybrid' }] })
+    primeDb(safeLookup({ ...SAFE, account_type: 'delegator_hybrid' }))
     const response = await app.inject({
       method: 'POST',
       url: '/agent-connection-setups',
@@ -1707,10 +1750,11 @@ describe('delegation-rail budget approval (#1073)', () => {
 
   it('activates the setup and the agent once the owner-signed budget exists', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
-      .mockResolvedValueOnce({ rows: [MATCHING_DELEGATION] })
+    primeDb(
+      setupForUser(DELEGATION_SETUP),
+      setupAllowances([ALLOWANCE]),
+      activeDelegations([MATCHING_DELEGATION]),
+    )
     mockWalletApprovalPersist(DELEGATION_SETUP)
 
     const response = await approve(app)
@@ -1734,10 +1778,7 @@ describe('delegation-rail budget approval (#1073)', () => {
 
   it('refuses to activate when no signed budget exists — the client cannot assert one', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
-      .mockResolvedValueOnce({ rows: [] })
+    primeDb(setupForUser(DELEGATION_SETUP), setupAllowances([ALLOWANCE]), activeDelegations([]))
 
     const response = await approve(app)
 
@@ -1751,12 +1792,11 @@ describe('delegation-rail budget approval (#1073)', () => {
 
   it('refuses a signed budget that does not match the amount the user reviewed', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
-      .mockResolvedValueOnce({
-        rows: [{ ...MATCHING_DELEGATION, budget_atomic: '99000000' }],
-      })
+    primeDb(
+      setupForUser(DELEGATION_SETUP),
+      setupAllowances([ALLOWANCE]),
+      activeDelegations([{ ...MATCHING_DELEGATION, budget_atomic: '99000000' }]),
+    )
 
     const response = await approve(app)
 
@@ -1769,13 +1809,12 @@ describe('delegation-rail budget approval (#1073)', () => {
 
   it('refuses a signed budget whose period does not match the setup', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
-      .mockResolvedValueOnce({
-        // Weekly instead of the daily budget the user reviewed.
-        rows: [{ ...MATCHING_DELEGATION, period_seconds: 604_800 }],
-      })
+    primeDb(
+      setupForUser(DELEGATION_SETUP),
+      setupAllowances([ALLOWANCE]),
+      // Weekly instead of the daily budget the user reviewed.
+      activeDelegations([{ ...MATCHING_DELEGATION, period_seconds: 604_800 }]),
+    )
 
     const response = await approve(app)
 
@@ -1788,7 +1827,7 @@ describe('delegation-rail budget approval (#1073)', () => {
 
   it('rejects a legacy Safe account — that rail approves with a wallet transaction', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [{ ...CONNECTED_SETUP, account_type: 'safe' }] })
+    primeDb(setupForUser({ ...CONNECTED_SETUP, account_type: 'safe' }))
 
     const response = await approve(app)
 
@@ -1801,9 +1840,10 @@ describe('delegation-rail budget approval (#1073)', () => {
 
   it('requires the local connection before the budget can approve the setup', async () => {
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ ...DELEGATION_SETUP, status: 'awaiting_connection' }] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
+    primeDb(
+      setupForUser({ ...DELEGATION_SETUP, status: 'awaiting_connection' }),
+      setupAllowances([ALLOWANCE]),
+    )
 
     const response = await approve(app)
 
@@ -1925,17 +1965,16 @@ describe('cancel cannot orphan a live delegation-rail agent (#1073)', () => {
     // A recipient-pinned budget grants strictly LESS than the unpinned budget
     // the setup described, so it must still activate rather than 409.
     const app = await buildApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [DELEGATION_SETUP] })
-      .mockResolvedValueOnce({ rows: [ALLOWANCE] })
-      .mockResolvedValueOnce({
-        rows: [{
-          token_address: ALLOWANCE.token_address.toLowerCase(),
-          budget_atomic: ALLOWANCE.allowance_amount,
-          period_seconds: ALLOWANCE.reset_period_min * 60,
-          recipient_address: '0x' + 'cc'.repeat(20),
-        }],
-      })
+    primeDb(
+      setupForUser(DELEGATION_SETUP),
+      setupAllowances([ALLOWANCE]),
+      activeDelegations([{
+        token_address: ALLOWANCE.token_address.toLowerCase(),
+        budget_atomic: ALLOWANCE.allowance_amount,
+        period_seconds: ALLOWANCE.reset_period_min * 60,
+        recipient_address: '0x' + 'cc'.repeat(20),
+      }]),
+    )
     mockWalletApprovalPersist(DELEGATION_SETUP)
 
     const response = await app.inject({
@@ -1984,7 +2023,7 @@ describe('data access characterization (#985)', () => {
 
   it('falls back to the default Haven wallet when no safe_id is supplied', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+    primeDb(safeLookup())
 
     const response = await app.inject({
       method: 'POST',
@@ -2008,7 +2047,7 @@ describe('data access characterization (#985)', () => {
 
   it('scopes an explicit safe_id to the calling user', async () => {
     const app = await buildApp()
-    mockQuery.mockResolvedValueOnce({ rows: [SAFE] })
+    primeDb(safeLookup())
 
     await app.inject({
       method: 'POST',

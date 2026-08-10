@@ -7,7 +7,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-08-09" # re-verified at promotion f7643dda (42 commits): the sync-back step below executed as #1242 — second use of the #1231 routine
+last-verified: "2026-08-09" # third sync-back execution (post-ad100f38, the #908-prep promotion) — routine holding
 ---
 
 # Branch & release flow

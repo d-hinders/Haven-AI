@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import {
   computeSignerConsentHash,
   ensureSignerConsent,
@@ -61,7 +62,8 @@ describe('signer consent gate', () => {
     const block = renderSignerConsentBlock(input, hash)
     expect(block).toContain('Haven edge signer - first-launch consent')
     expect(block).toContain(input.delegateAddress)
-    expect(block).toContain('It does not call the Haven API')
+    expect(block).toContain("read-only fetch of a pending payment's signing")
+    expect(block).toContain('never sends the key')
     expect(block).toContain('cannot show a live allowance summary')
     expect(block).toContain('haven_sign')
     expect(block).toContain(`${SIGNER_ACK_ENV}=${hash}`)
@@ -148,5 +150,22 @@ describe('signer consent gate', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('consent surface version (#1263)', () => {
+  it('an acknowledgement from the pre-network surface does not carry over', () => {
+    // The v1 hash formula (before SIGNER_CONSENT_SURFACE_VERSION existed) —
+    // a user who acked "does not call the Haven API" must be re-prompted
+    // once under the corrected text, because the capability itself changed.
+    const input = {
+      delegateAddress: '0x' + 'ab'.repeat(20),
+      toolNames: ['haven_sign'] as const,
+    }
+    const v1Style = createHash('sha256')
+      .update(`${input.delegateAddress.toLowerCase()}||||\n${[...input.toolNames].sort().join(',')}`)
+      .digest('hex')
+      .slice(0, 16)
+    expect(computeSignerConsentHash({ ...input, toolNames: [...input.toolNames] })).not.toBe(v1Style)
   })
 })

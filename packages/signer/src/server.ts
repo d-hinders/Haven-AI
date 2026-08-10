@@ -17,9 +17,10 @@ import {
   type SignerToolName,
   type ToolPayload,
 } from './tools.js'
+import { loadHavenIdentity } from './sign-context.js'
 
 export const SIGNER_NAME = '@haven_ai/signer'
-export const SIGNER_VERSION = '0.1.19-alpha.0'
+export const SIGNER_VERSION = '0.1.20-alpha.0'
 
 export interface SignerOptions {
   /** Path to a Haven credential JSON file (delegate_key is read from it). */
@@ -93,8 +94,12 @@ export async function resolveSignerRuntime(
 
 /**
  * Build a local stdio MCP server exposing the sign-only tools, bound to an
- * edge signer that holds the delegate key. This server performs no network
- * I/O and exposes no construct/relay tools — it only signs.
+ * edge signer that holds the delegate key. It exposes no construct/relay
+ * tools — it only signs. Its ONE network capability (#1263) is an
+ * authenticated READ: fetching a payment's exact signing context from Haven
+ * by payment_id, so agents never have to relay multi-KB signing payloads
+ * through a model context. The signer CORE below it stays network-free, and
+ * fetched bytes pass the same verification as tool-argument bytes.
  */
 export function buildSignerMcpServer(
   signer: EdgeSigner,
@@ -121,6 +126,14 @@ export function buildSignerMcpServer(
       delegateAddress: signer.delegateAddress,
       safeAddress: options.credentials?.safeAddress,
       chainId: options.credentials?.chainId,
+    },
+    // #1263: the payment_id signing path — the ONLY network call this server
+    // can make, an authenticated read of a signing context from Haven, using
+    // the agent identity the connector stores next to the signer credential.
+    // The signer CORE stays network-free; fetched bytes still pass the same
+    // binding verification + digest re-derivation as tool-argument bytes.
+    signContext: {
+      loadIdentity: () => loadHavenIdentity(credentialsPath),
     },
   })
   const registerTool = (server as unknown as {

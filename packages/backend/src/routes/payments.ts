@@ -26,7 +26,7 @@ import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import {
   agentPaymentStatusHttpCode,
   getAgentPaymentStatus,
-} from '../modules/payments/agent-payment-status.js'
+} from '../modules/payments/index.js'
 import { hasTokenAllowanceConfigured } from '../infra/repositories/agents.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'

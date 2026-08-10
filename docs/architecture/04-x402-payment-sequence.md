@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-10" # #1275 (max_amount steering) + #1207 (POST /payments idempotency mirrors the x402/MPP key discipline) re-verified; no binding/digest/settle claim changed
+last-verified: "2026-08-10" # #1272: x402 quote tools compact by default; include_signing_payload restores the full payload
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -196,7 +196,7 @@ contents rather than announced:
 | Version | Carries | Signer may sign |
 |---|---|---|
 | v1 | no `typedDataHash` | the bare hash (raw ECDSA) — legacy rail |
-| v2 | `typedDataHash` | `sign_data.typed_data` (EIP-712) — delegation rail. Preferred transport (#1263): the signer fetches the exact payload itself via `GET /x402/:id/sign-context` when handed just `payment_id`. Fallback (#1255): `typed_data_b64`, one opaque base64 string relayed unchanged. All transports land in this same digest check |
+| v2 | `typedDataHash` | `sign_data.typed_data` (EIP-712) — delegation rail. Preferred transport (#1263): the signer fetches the exact payload itself via `GET /x402/:id/sign-context` when handed just `payment_id` — and the hosted x402 quote tools are accordingly **compact by default** (#1272): no `typed_data`/`typed_data_b64` in the response unless `include_signing_payload=true`. Fallback (#1255): re-run the quote with the same `idempotency_key` plus that flag (the replay returns the ORIGINAL sign_data, #1207), then relay `typed_data_b64` as one opaque base64 string, unchanged. All transports land in this same digest check |
 
 The signer refuses the mismatch **in both directions**: raw-signing the hash of
 a v2 intent (the account would reject that signature on-chain, after the intent

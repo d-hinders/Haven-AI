@@ -7,7 +7,7 @@ covers:
   - packages/signer/**
   - packages/frontend/src/lib/hosted-connect.ts
   - packages/frontend/src/lib/agent-runtime-snippets.ts
-last-verified: "2026-06-28"
+last-verified: "2026-08-10" # weekly #1248 audit: signer tool table completed (4 tools), the false "makes no network calls" claim replaced with the #1263 read-only fetch, delegation-rail signing added to the walkthrough, spend-gate claims rail-qualified
 ---
 
 # Migration - Local MCP To Hosted MCP
@@ -49,7 +49,8 @@ Agent runtime
   -> hosted MCP returns unsigned payload hashes
   -> local runtime or @haven_ai/signer signs with delegate key
   -> hosted MCP relays { payment_id, signature } for funding
-  -> Haven backend -> Safe AllowanceModule -> on-chain
+  -> Haven backend -> on-chain policy (AllowanceModule on legacy Safes,
+     delegation caveat enforcers on delegation-rail accounts)
 ```
 
 The split is deliberate:
@@ -61,7 +62,9 @@ The split is deliberate:
 - Paid MCP-tool completion can also send a signed, merchant-bound
   `payment_header` with the funding `payment_id` so hosted MCP can settle the
   merchant call and attach evidence.
-- On-chain Safe AllowanceModule state remains the spend gate.
+- On-chain policy state remains the spend gate: the Safe AllowanceModule on
+  imported legacy Safes, the signed delegation's caveat enforcers on
+  delegation-rail accounts (the base for new accounts).
 
 API auth is identity. Signature is authority. On-chain module state is
 enforcement.
@@ -190,11 +193,18 @@ The signer exposes local stdio MCP tools:
 
 | Tool | Purpose |
 |---|---|
-| `haven_sign` | Sign the `payload_hash` returned by hosted `haven_pay` or `haven_pay_x402_quote` |
-| `haven_x402_sign_header` | Build and sign the x402 `X-PAYMENT` header after the Haven funding leg succeeds |
+| `haven_sign` | Sign a payment: `payload_hash` (legacy rail), the delegation-rail EIP-712 `typed_data`/`typed_data_b64`, or just `payment_id` (#1263 — the signer fetches the exact payload itself) |
+| `haven_sign_x402` | One-call x402 fast path: funding signature + merchant `X-PAYMENT` header; prefers `payment_id + payment_required` |
+| `haven_x402_sign_header` | Build and sign the x402 `X-PAYMENT` header after the Haven funding leg succeeds (decomposed flow) |
+| `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless Base-USDC recovery sweep (delegate → own Safe only) |
 
-The signer does not need the API key and makes no network calls. It reads the
-delegate key locally and emits signatures/headers only.
+The signer's ONE network use (#1263) is a read-only fetch of a pending
+payment's signing context from Haven by `payment_id`, authenticated with the
+agent credential (`identity.json`) the connector stores next to the signer's
+key file — this is what lets the agent relay a small id instead of multi-KB
+signing payloads. It never sends the key, a signature, or anything else
+outbound; without `identity.json` the fetch path refuses and names the
+`typed_data_b64` fallback. The signer core itself remains network-free.
 
 ### 5. Verify The Connection
 
@@ -206,13 +216,21 @@ What is my Haven budget?
 
 It should call `haven_get_allowances`. The Haven dashboard should show recent
 agent activity / last activity after tool calls. Those timestamps and audit
-rows are informational; the Safe AllowanceModule is still the spend gate.
+rows are informational; the on-chain policy is still the spend gate — the
+Safe AllowanceModule on imported legacy Safes, the signed budget delegation's
+caveat enforcers on delegation-rail accounts.
 
 Then test a tiny in-budget payment. The expected direct payment sequence is:
 
 1. Agent calls hosted `haven_pay`.
-2. Hosted MCP returns `{ payment_id, payload_hash, expires_at }`.
-3. Agent calls local `haven_sign` with the payload hash.
+2. Hosted MCP returns `{ payment_id, payload_hash, expires_at }` — and on a
+   **delegation-rail** account (the base for new accounts) also
+   `signature_scheme`, `typed_data` and `typed_data_b64`: the Hybrid account
+   validates the EIP-712 typed data, and a bare-hash signature is rejected
+   on-chain (AA24, #1254).
+3. Agent calls local `haven_sign` — legacy rail: with the payload hash;
+   delegation rail: pass `typed_data_b64` UNCHANGED (or, for x402 intents,
+   just `payment_id` and let the signer fetch the payload, #1263).
 4. Agent calls hosted `haven_submit` with `{ payment_id, signature }`.
 5. Haven relays the independently valid signed transaction.
 
@@ -248,7 +266,9 @@ creating duplicate payments.
 - Hosted MCP has no signing path and should fail startup if a delegate key is
   injected.
 - API keys identify agents only. They do not authorize payment execution.
-- On-chain Safe AllowanceModule state constrains every automatic payment.
+- On-chain policy state constrains every automatic payment — the Safe
+  AllowanceModule on the legacy import-only rail, the delegation's caveat
+  enforcers (budget/recipient/expiry) on the delegation rail.
 - Haven can relay independently valid signed transactions, but it cannot move
   funds with the API key alone.
 

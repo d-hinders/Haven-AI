@@ -7,7 +7,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-07-12"
+last-verified: "2026-08-10" # weekly #1248 audit: every release/skills claim re-verified against the repo; roster gained the two reviewer roles added since July (design-reviewer #904, doc-reviewer)
 ---
 
 # Haven Codex Instructions
@@ -107,6 +107,8 @@ Agentic delivery is the default decision path for non-trivial Haven work. This f
 - Use `haven-ui-worker` and `haven-backend-worker` only for clean, bounded, disjoint implementation slices.
 - Keep shared files, gravity files, git hygiene, final integration, and product judgment in the captain session.
 - Use `haven-reviewer` for final product, UX, security, regression, and test review when the change touches user-facing UX, money movement, agent authority, shared behavior, or meaningful risk.
+- Use `haven-design-reviewer` in addition on `area:frontend` diffs — a rendered-UX pass over the `npm run screenshot` evidence (part of the #904 workflow; a finding from either reviewer pauses auto-merge).
+- Use `haven-doc-reviewer` after implementation to check whether the diff invalidated the docs that cover it (the `covers:` mapping) — a hard definition-of-done step in the autonomous loop.
 - Briefly tell the user which agents will be used and why, but do not ask for permission unless there is a real blocker, destructive action, credential risk, or tool limitation.
 
 Gravity files the captain should usually own:

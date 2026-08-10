@@ -43,11 +43,15 @@
  * green would appear if the agent had silently taken the legacy rail, or if the
  * signer had never been consulted. Four discriminators:
  *
- *   - **The quote must be v2.** `x402.expected.typed_data_hash` present ⇒ the
- *     delegation-rail context, and `signature_scheme` + `typed_data` present ⇒
- *     the account validates typed data. A v1 quote here means the identity is
- *     not on the rail this leg claims to cover, and the whole #1138 seam went
- *     untouched. Asserted as a FAILURE, not a skip.
+ *   - **The quote must be v2 — and compact.** `x402.expected.typed_data_hash`
+ *     present ⇒ the delegation-rail context, and `signature_scheme:
+ *     'eip712_userop'` ⇒ the account validates typed data. Since #1272 the
+ *     quote must NOT carry `typed_data`/`typed_data_b64` by default — the
+ *     signer fetches the exact bytes from Haven by `payment_id` (#1263), and
+ *     this leg asserts that production shape rather than opting out of it. A
+ *     v1 quote here means the identity is not on the rail this leg claims to
+ *     cover, and the whole #1138 seam went untouched. Asserted as a FAILURE,
+ *     not a skip.
  *   - **The signer must actually sign it.** The handler's refusal paths are the
  *     security property (#1138); a returned `success: false` is a hard failure
  *     with the signer's own message, never swallowed.
@@ -160,8 +164,18 @@ export const x402HostedMcpSigner: Scenario = {
       x402BindingSigner: ctx.cfg.x402BindingSigner,
     })
     // No `audit` option — the harness must not write to the operator's
-    // ~/.haven signing audit log.
-    const signerTools = createToolHandlers(signer)
+    // ~/.haven signing audit log. The signContext identity is what a connect
+    // install stores in identity.json — here fed from the same QA credentials
+    // the hosted client uses, so the #1263 payment_id fetch path (the
+    // production-default transport since #1272) is the one under test.
+    const signerTools = createToolHandlers(signer, {
+      signContext: {
+        loadIdentity: async () =>
+          ctx.cfg.delegationAgentApiKey
+            ? { apiUrl: ctx.cfg.apiUrl, apiKey: ctx.cfg.delegationAgentApiKey }
+            : null,
+      },
+    })
     const delegateAddress = signer.delegateAddress
 
     const hosted = new HostedMcpClient(ctx.cfg.hostedMcpUrl, ctx.cfg.delegationAgentApiKey)
@@ -224,24 +238,32 @@ export const x402HostedMcpSigner: Scenario = {
           'Is QA_DELEGATION_AGENT_API_KEY pointing at a legacy AllowanceModule agent?',
       )
     }
-    if (!quote.typed_data || quote.signature_scheme !== 'eip712_userop') {
+    if (quote.signature_scheme !== 'eip712_userop') {
       return fail(
         `hosted quote committed to typed data (typed_data_hash present) but returned ` +
-          `signature_scheme=${JSON.stringify(quote.signature_scheme)} / typed_data=` +
-          `${quote.typed_data ? 'present' : 'absent'} — the signer would refuse, correctly, ` +
-          'because the payload it must sign was not delivered',
+          `signature_scheme=${JSON.stringify(quote.signature_scheme)} — the signer would ` +
+          'refuse, correctly, because the scheme does not name the typed-data path',
+      )
+    }
+    // #1272: the production default is COMPACT — the bulk payload must be
+    // absent, because the signer fetches the exact bytes by payment_id
+    // (#1263). Bulk reappearing here is a contract regression, not a bonus.
+    if (quote.typed_data !== undefined || quote.typed_data_b64 !== undefined) {
+      return fail(
+        'hosted quote carried typed_data/typed_data_b64 without include_signing_payload — ' +
+          'the #1272 compact default regressed and every quote is shipping multi-KB blobs again',
       )
     }
 
     // ── 3. Local signing. The key never leaves this process, and the tool ────
     //      handler puts the LIVE quote through the signer's Zod schema first.
+    // The preferred #1263 form, and the ONLY form a compact quote supports:
+    // payment_id + payment_required. The signer fetches payload_hash, the
+    // typed data, and the expected context from Haven itself and runs the
+    // same binding verification + digest re-derivation on the fetched bytes.
     const signed = await signerTools.haven_sign_x402({
-      payload_hash: quote.payload_hash,
-      // The NESTED expected context, not the `x402` wrapper — passing the
-      // wrapper fails Zod with "Required at x402_expected.asset/network/…".
-      x402_expected: expected,
+      payment_id: quote.payment_id,
       payment_required: quote.payment_required,
-      typed_data: quote.typed_data,
     })
     if (!signed.success) {
       return fail(

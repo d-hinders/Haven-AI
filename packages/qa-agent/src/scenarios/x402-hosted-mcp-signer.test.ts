@@ -83,7 +83,7 @@ const quote = (over: Record<string, unknown> = {}) => ({
   status: 'pending_signature',
   payload_hash: '0x' + 'cd'.repeat(32),
   signature_scheme: 'eip712_userop',
-  typed_data: { domain: {}, types: {}, primaryType: 'X', message: {} },
+  // #1272: the production default is COMPACT — no typed_data/typed_data_b64.
   payment_required: { x402Version: 2, accepts: [] },
   x402: {
     expected: {
@@ -191,15 +191,24 @@ describe('the rail discriminator — a v1 quote means the #1138 seam went untouc
     expect(r.detail).toMatch(/v1 expected context/)
   })
 
-  it('fails when the context commits to typed data but the quote omits it', async () => {
-    // The exact shape that would make the signer refuse: Haven declared a
-    // typed-data digest and then did not send the payload it commits to.
+  it('fails when the scheme does not name the typed-data path', async () => {
     mockCallTool.mockImplementation(async (tool: string) =>
-      tool === 'haven_pay_mcp_tool' ? quote({ typed_data: undefined }) : settled(),
+      tool === 'haven_pay_mcp_tool' ? quote({ signature_scheme: undefined }) : settled(),
     )
     const r = await x402HostedMcpSigner.run(ctx())
     expect(r.pass).toBe(false)
-    expect(r.detail).toMatch(/typed_data=absent/)
+    expect(r.detail).toMatch(/scheme does not name/)
+  })
+
+  it('fails when the quote ships bulk typed data by default — the #1272 compact contract regressed', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_pay_mcp_tool'
+        ? quote({ typed_data: { domain: {}, types: {}, primaryType: 'X', message: {} } })
+        : settled(),
+    )
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/compact default regressed/)
   })
 
   it('fails when the quote is queued for approval instead of signable', async () => {
@@ -213,14 +222,17 @@ describe('the rail discriminator — a v1 quote means the #1138 seam went untouc
 })
 
 describe('the local signer is really consulted', () => {
-  it('passes the NESTED expected context, not the x402 wrapper', async () => {
-    // Gotcha from the manual run: passing `quote.x402` fails the signer's Zod
-    // schema with "Required at x402_expected.asset/network/expires_at/auth".
+  it('signs via the preferred #1263 form: payment_id + payment_required, no relayed bytes', async () => {
+    // The compact quote (#1272) leaves the signer exactly one byte source —
+    // its own authenticated fetch from Haven — so the handler call must be
+    // the production-default shape and carry no agent-relayed payload.
     await x402HostedMcpSigner.run(ctx())
     const args = mockSignX402.mock.calls[0][0] as Record<string, unknown>
-    expect(args.x402_expected).toHaveProperty('auth')
-    expect(args.x402_expected).not.toHaveProperty('expected')
-    expect(args.typed_data).toBeDefined()
+    expect(args.payment_id).toBe('pay_hosted_1')
+    expect(args.payment_required).toBeDefined()
+    expect(args.typed_data).toBeUndefined()
+    expect(args.typed_data_b64).toBeUndefined()
+    expect(args.x402_expected).toBeUndefined()
   })
 
   it('fails loudly when the signer REFUSES, quoting the signer', async () => {

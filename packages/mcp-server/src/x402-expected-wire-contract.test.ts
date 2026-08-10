@@ -222,7 +222,12 @@ async function hostedQuote(rail: 'delegation' | 'legacy'): Promise<WireQuote> {
   const haven = createHostedHavenClient({ apiKey: 'sk_agent_test', baseUrl: 'https://haven.test' })
   const hosted = createHostedHandlers(haven)
   return ok<WireQuote>(
-    await hosted.haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED as unknown as Record<string, unknown> }),
+    // #1272: this file proves the agent-relayed byte transport, which is now
+    // opt-in — the compact default is proven in tools.test.ts.
+    await hosted.haven_pay_x402_quote({
+      payment_required: PAYMENT_REQUIRED as unknown as Record<string, unknown>,
+      include_signing_payload: true,
+    }),
   )
 }
 

@@ -116,6 +116,12 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     // price exceeds this, the call is rejected before any funding transfer.
     max_amount: z.string().regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount').optional(),
     idempotency_key: z.string().optional(),
+    // #1272: the bulky delegation-rail signing payload (typed_data /
+    // typed_data_b64) is omitted by default — the signer fetches the exact
+    // bytes itself from payment_id (#1263). Set true for diagnostics or an
+    // older signer, re-running with the SAME idempotency_key: the replay
+    // contract returns the ORIGINAL sign_data, so the bytes never change.
+    include_signing_payload: z.boolean().optional(),
   },
   haven_complete_mcp_tool: {
     payment_id: z.string().min(1),
@@ -161,6 +167,8 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     // payment_required.accepts[].amount). Rejected before funding if exceeded.
     max_amount: z.string().regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount').optional(),
     idempotency_key: z.string().optional(),
+    // #1272: same contract as haven_pay_mcp_tool — see there.
+    include_signing_payload: z.boolean().optional(),
   },
   haven_resume_x402_payment: {
     payment_id: z.string().optional(),
@@ -281,7 +289,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     `(${SIGNER_CAPABILITY_SOURCE} and its instructions). If it is not in that set the local signer is out of date: STOP before signing and tell the user to update ` +
     '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has been spent at that point. ' +
     'Finish with two follow-up calls (fast path, recommended): ' +
-    '(1) mcp__haven-signer__haven_sign_x402 on the local signer. PREFERRED (#1263): pass just payment_id and payment_required — the signer fetches the exact signing payload and expected context from Haven itself, so you never copy bulky bytes. Fallback (older signers/backends): pass payload_hash, x402_expected (the nested x402.expected context, including expires_at), payment_required, and — on delegation-rail accounts — typed_data_b64 through UNCHANGED, one opaque string, never re-typed (#1255). Returns { signature, payment_header }; ' +
+    '(1) mcp__haven-signer__haven_sign_x402 on the local signer. PREFERRED (#1263): pass just payment_id and payment_required — the signer fetches the exact signing payload and expected context from Haven itself, so you never copy bulky bytes; the response is COMPACT by default (#1272: no typed_data/typed_data_b64). Fallback (older signers/backends): re-run THIS tool with the SAME idempotency_key plus include_signing_payload=true — the replay returns the ORIGINAL sign_data with typed_data_b64 — then pass payload_hash, x402_expected (the nested x402.expected context, including expires_at), payment_required, and typed_data_b64 through UNCHANGED, one opaque string, never re-typed (#1255). Returns { signature, payment_header }; ' +
     '(2) mcp__haven__haven_settle_mcp_tool with payment_id, signature, payment_header, merchant_url, tool_name, arguments, and mcp_transport to fund the delegate and settle with the merchant in one call, returning the tool result. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
@@ -339,6 +347,11 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'ALWAYS pass max_amount on paid merchant calls (#1275): atomic units of the merchant\'s asset, the user-intent cap for THIS purchase, enforced against the live quote before any funding moves — separate from the agent\'s on-chain budget. Omitting it accepts the quoted price as-is (the response carries cap_warning).',
   'Returns { payment_id, payload_hash, expires_at, x402 } where x402 carries the accepted option,',
   'resource_url, merchant_to, funding_to, and x402.expected signing context including expires_at.',
+  'COMPACT by default (#1272): typed_data/typed_data_b64 are omitted — the preferred signing call',
+  'is mcp__haven-signer__haven_sign_x402 with just payment_id and payment_required (#1263).',
+  'For diagnostics or an older signer, re-run this tool with the SAME idempotency_key plus',
+  'include_signing_payload=true: the replay returns the ORIGINAL sign_data with typed_data_b64,',
+  'to pass through UNCHANGED, one opaque string, never re-typed (#1255).',
   'If expires_at passes before signing, re-quote with the same idempotency_key before signing again.',
   'Also returns signer_compatibility.x402_expected_context_version — the expected-context version',
   'this result emits. Before signing, check it against the versions the haven-signer MCP server',
@@ -687,7 +700,7 @@ export function createToolHandlers(
             { idempotencyKey: args.idempotency_key ?? quote.idempotencyKey },
           )
           return {
-            ...buildX402SigningContext(intent),
+            ...buildX402SigningContext(intent, args.include_signing_payload === true),
             // #1275: the cap is the normal path; its absence is worth a word,
             // not a refusal (compatibility) — a soft field the agent can relay.
             ...(args.max_amount === undefined
@@ -827,7 +840,7 @@ export function createToolHandlers(
             { idempotencyKey: args.idempotency_key },
           )
           return {
-            ...buildX402SigningContext(intent),
+            ...buildX402SigningContext(intent, args.include_signing_payload === true),
             // #1275: same soft nudge as haven_pay_mcp_tool — see there.
             ...(args.max_amount === undefined
               ? {
@@ -1074,7 +1087,20 @@ export function createToolHandlers(
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Shape returned by haven_pay_x402_quote and used by haven_resume_x402_payment. */
-function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX402Intent']>>) {
+function buildX402SigningContext(
+  intent: Awaited<ReturnType<HavenClient['createX402Intent']>>,
+  // #1272: compact by default. On the x402 path the signer fetches the exact
+  // signing payload from Haven by payment_id (#1263) and verifies the same
+  // Haven-signed binding either way, so the multi-KB typed_data /
+  // typed_data_b64 blobs here are redundant in the normal flow — and every
+  // byte an agent relays by hand is a chance to recreate the #1255 corruption
+  // failure. True restores today's full shape for diagnostics and pre-#1263
+  // signers; the recovery loop is re-running the quote tool with the SAME
+  // idempotency_key, which replays the ORIGINAL sign_data (#1207 semantics).
+  // Direct payments (haven_pay/haven_send) are untouched: they have no
+  // payment_id fetch path, so the bulk stays mandatory there.
+  includeSigningPayload = false,
+) {
   return {
     payment_id: intent.paymentId,
     status: intent.status,
@@ -1090,10 +1116,17 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
     // still enforced (fail-closed) by the signer at signing time.
     signer_compatibility: signerCompatibilityNotice(intent.expectedAuth.version),
     // #1138: on the delegation rail the account validates typed data, not
-    // payload_hash. Pass both through verbatim — the local signer picks the
-    // path from the Haven-signed expected context below and refuses the wrong
-    // one, so this surface never has to be the thing that gets it right.
-    ...delegationSignFields(intent.signData),
+    // payload_hash. When the full payload is requested, pass both through
+    // verbatim — the local signer picks the path from the Haven-signed
+    // expected context below and refuses the wrong one, so this surface never
+    // has to be the thing that gets it right. The scheme marker itself is
+    // always kept: it is one small string and tells the agent which rail the
+    // intent is on.
+    ...(includeSigningPayload
+      ? delegationSignFields(intent.signData)
+      : intent.signData.signature_scheme
+        ? { signature_scheme: intent.signData.signature_scheme }
+        : {}),
     // The edge signer needs these to build + sign the EIP-3009 merchant header
     // locally after the funding transfer is relayed via haven_submit.
     x402: {

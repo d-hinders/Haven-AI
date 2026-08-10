@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-10" # re-verified for #1254: haven_sign now also signs typed_data on the DIRECT payment path; every x402 claim here (expected-context v2, x402_binding, digest equality) is unchanged
+last-verified: "2026-08-10" # re-verified for #1256: the 3009 header window claims here ("capped header window") remain true — the cap is now clamp(≤600)+300 margin ≤900 s; the ≤600 s expiry at the erc7710 child is a DIFFERENT bound and unchanged
 ---
 
 # Haven - x402 Payment Execution Sequence

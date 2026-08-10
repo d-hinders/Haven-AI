@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-09" # #999 re-verified: hybrid-account-config.ts now reads via infra/repositories (verbatim SQL, chain-scoped bind kept), agent-delegations/hybrid-accounts carry dep-lint-exempt waivers — no invariant change. Promotion-batch review re-verify: the ≥2 refusal in encodeSignerAction's remove_passkey branch gained a comment naming it as branch-specific after #1153 (the surrounding claim 'Haven's floor is ≥2 so recovery always exists' had become false of its own file); §6's record of that asymmetry was already correct and is unchanged. No enforcement point, authority or refusal moved — comment only
+last-verified: "2026-08-10" # #1256: the 3009-bridge hot-balance bound updated — header forward window is now clamp(≤600)+300 margin (≤900 s total); every other invariant, refusal and authority claim re-read and unchanged
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -364,7 +364,12 @@ compensating controls:
 
 1. **A transient hot balance returns** on the delegate EOA between funding and
    settlement. Bounded: the funding is the exact payment amount; the header's
-   validity window is capped (≤600 s, SDK-side); the delegate-balance monitor
+   forward validity window is capped SDK-side (merchant-requested timeout
+   clamped to ≤600 s, plus a 300 s settlement margin — ≤900 s total, #1256:
+   the margin is what lets the header clear the facilitator's
+   `validBefore ≥ now + maxTimeoutSeconds` verify rule after the funding leg
+   confirms; without it every purchase against a ≥300 s-timeout merchant
+   failed structurally); the delegate-balance monitor
    covers delegation-rail agents; the rail-agnostic sweep route recovers
    residuals to the **treasury Hybrid** (`agent.safe_address`), with the
    1 USDC dust floor and sub-floor residuals visible in the ledger.

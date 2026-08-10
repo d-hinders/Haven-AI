@@ -37,6 +37,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ethers } from 'ethers'
 import { HavenClient } from './client.js'
+import {
+  X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
+  X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
+} from './x402.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 
 const DELEGATE_KEY = `0x${'01'.repeat(32)}`
@@ -158,10 +162,19 @@ describe('EIP-3009 authorization fields', () => {
 
     // validAfter must already be in effect (allowing 60s clock skew).
     expect(validAfter).toBeLessThanOrEqual(after + 60)
-    // validBefore must be in the future, bounded by the option's timeout
-    // (allowing the seconds the test itself took plus 60s skew).
-    expect(validBefore).toBeGreaterThan(before)
-    expect(validBefore).toBeLessThanOrEqual(after + accepted.maxTimeoutSeconds + 60)
+    // validBefore must clear the facilitator's verify rule
+    // (`validBefore ≥ now + maxTimeoutSeconds`) with real forward margin —
+    // the library alone leaves ZERO margin at signing time (#1256) —
+    // and stay bounded by clamp + margin (#715 exposure ceiling).
+    expect(validBefore).toBeGreaterThanOrEqual(
+      before + accepted.maxTimeoutSeconds + X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
+    )
+    expect(validBefore).toBeLessThanOrEqual(
+      after +
+        X402_MAX_AUTHORIZATION_WINDOW_SECONDS +
+        X402_SETTLEMENT_FORWARD_MARGIN_SECONDS +
+        60,
+    )
   })
 
   it('uses a 32-byte hex nonce', async () => {

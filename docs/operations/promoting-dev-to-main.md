@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
-last-verified: "2026-08-05"
+last-verified: "2026-08-10" # re-verified for #1266 demo merchant x402 settlement selection/canary posture
 ---
 
 # Promoting `dev → main` (production release)

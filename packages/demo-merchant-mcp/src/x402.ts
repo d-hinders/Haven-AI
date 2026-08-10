@@ -21,10 +21,20 @@ import {
   encodePaymentResponseHeader,
 } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse } from '@x402/core/types'
-import { USDC_ADDRESS, CHAIN_ID, USDC_DOMAIN_NAME, USDC_DOMAIN_VERSION } from './products.js'
+import {
+  DEFAULT_SETTLEMENT_METHOD,
+  SUPPORTED_SETTLEMENT_METHODS,
+  USDC_ADDRESS,
+  CHAIN_ID,
+  USDC_DOMAIN_NAME,
+  USDC_DOMAIN_VERSION,
+  isSettlementMethod,
+  type SettlementMethod,
+} from './products.js'
 import type { ProductId } from './products.js'
 
-export { USDC_ADDRESS }
+export { DEFAULT_SETTLEMENT_METHOD, SUPPORTED_SETTLEMENT_METHODS, USDC_ADDRESS }
+export type { SettlementMethod }
 
 const NETWORK: `${string}:${string}` = `eip155:${CHAIN_ID}`
 const MAX_TIMEOUT_SECONDS = 300
@@ -40,7 +50,7 @@ const ZERO_TX_HASH = `0x${'0'.repeat(64)}` as Hex
 // but not settled on-chain — used by the QA sweep-recovery scenario to strand the
 // delegate deterministically. Off (empty) by default; set on the dev merchant only.
 //
-// TESTNET-ONLY, enforced in code like the erc7710 flag: on any other chain a
+// TESTNET-ONLY, enforced in code: on any other chain a
 // listed product would hand out goods against a merely well-FORMED authorization
 // — no settlement runs, and the only balance check lives inside the settlement
 // call this hook skips, so an authorization signed from an EMPTY wallet passes.
@@ -109,8 +119,9 @@ const USDC_TRANSFER_WITH_AUTHORIZATION_ABI = [
 // that signed an ERC-7710 delegation; verification is by *simulating*
 // `delegationManager.redeemDelegations(...)` (no ECDSA recovery), and settlement
 // submits that same call from the settlement key — so the settlement key is the
-// redeemer and any redeemer caveat in the delegation must name it. Testnet-only:
-// the flag is enforced at the composition root (index.ts) to Base Sepolia.
+// redeemer and any redeemer caveat in the delegation must name it. The
+// composition root pins the DelegationManager per configured Base chain and
+// omits ERC-7710 from accepts unless that pin is configured.
 
 export const ERC7710_TRANSFER_METHOD = 'erc7710'
 
@@ -183,6 +194,7 @@ export interface Erc7710SettlementClient {
 
 export interface SettledPayment {
   productId: ProductId
+  settlementMethod: SettlementMethod
   from: Address
   to: Address
   value: bigint
@@ -200,8 +212,7 @@ export interface SettlementClient {
 }
 
 export interface X402PaymentProcessorOptions {
-  /** Advertise + accept the experimental erc7710 assetTransferMethod.
-   *  Chain gating (Base Sepolia only) is enforced at the composition root. */
+  /** Advertise + accept the experimental erc7710 assetTransferMethod. */
   erc7710?: {
     /** The only DelegationManager contract this merchant will simulate against
      *  and settle through. The payload's delegationManager is attacker-supplied;
@@ -209,6 +220,7 @@ export interface X402PaymentProcessorOptions {
      *  "settle" successfully while moving zero USDC. */
     delegationManager: Address
   }
+  settlementMethods?: readonly SettlementMethod[]
 }
 
 export interface X402PaymentProcessor {
@@ -217,6 +229,7 @@ export interface X402PaymentProcessor {
     amountUsdc: bigint
     resource: string
     description: string
+    settlementMethod?: SettlementMethod
   }): PaymentRequired
   paymentRequiredHeader(paymentRequired: PaymentRequired): string
   paymentResponseHeader(response: SettleResponse): string
@@ -250,6 +263,7 @@ interface VerifiedPayment {
   payer: Address
   payTo: Address
   nonce: Hex
+  settlementMethod: SettlementMethod
   submit: () => Promise<Hex>
 }
 
@@ -257,6 +271,14 @@ export function createX402PaymentProcessor(
   settlementClient: SettlementClient,
   options: X402PaymentProcessorOptions = {},
 ): X402PaymentProcessor {
+  const settlementMethods = options.settlementMethods?.length
+    ? [...new Set(options.settlementMethods)]
+    : options.erc7710
+      ? [...SUPPORTED_SETTLEMENT_METHODS]
+      : (['eip3009'] as SettlementMethod[])
+  if (settlementMethods.includes(ERC7710_TRANSFER_METHOD) && !options.erc7710) {
+    throw new PaymentError('ERC-7710 is enabled but no trusted delegation manager was configured')
+  }
   const attempts = new Map<string, SettlementAttempt>()
   const settled = new Map<string, SettledCacheEntry>()
 
@@ -356,6 +378,7 @@ export function createX402PaymentProcessor(
     }
     return {
       productId: params.productId,
+      settlementMethod: params.verified.settlementMethod,
       from: params.verified.payer,
       to: params.verified.payTo,
       value: params.expectedAmount,
@@ -375,7 +398,7 @@ export function createX402PaymentProcessor(
     const { authorization, signature } = parseExactEvmPayload(params.payload.payload)
     assertPaymentOptionMatches(
       params.payload.accepted,
-      params.paymentRequired.accepts[0],
+      selectQuotedPaymentOption(params.payload.accepted, params.paymentRequired),
       params.merchantAddress,
       params.expectedAmount,
       'eip3009',
@@ -387,6 +410,7 @@ export function createX402PaymentProcessor(
       payer: getAddress(authorization.from),
       payTo: getAddress(authorization.to),
       nonce: authorization.nonce as Hex,
+      settlementMethod: 'eip3009',
       submit: () => settlementClient.submit(authorization, signature),
     }
   }
@@ -436,6 +460,7 @@ export function createX402PaymentProcessor(
       payer: payment.delegator,
       payTo: getAddress(params.merchantAddress),
       nonce: contextHash,
+      settlementMethod: ERC7710_TRANSFER_METHOD,
       submit: () => erc7710Client.submitRedeemDelegations(redeemCall),
     }
   }
@@ -444,7 +469,7 @@ export function createX402PaymentProcessor(
     buildPaymentRequired: (params) =>
       buildPaymentRequired({
         ...params,
-        erc7710: Boolean(options.erc7710),
+        settlementMethods,
         facilitatorAddresses: settlementClient.erc7710?.redeemerAddress
           ? [settlementClient.erc7710.redeemerAddress]
           : undefined,
@@ -565,10 +590,13 @@ export function buildPaymentRequired(params: {
   resource: string
   description: string
   erc7710?: boolean
+  settlementMethod?: SettlementMethod
+  settlementMethods?: readonly SettlementMethod[]
   /** #1058: advertised on the erc7710 option only — payers pin their child
    *  delegation's redeemer caveat to these, and must echo them verbatim. */
   facilitatorAddresses?: Address[]
 }): PaymentRequired {
+  const methods = orderedSettlementMethods(params.settlementMethod, params.settlementMethods)
   const eip3009Option: PaymentRequirements = {
     scheme: 'exact',
     network: NETWORK,
@@ -578,20 +606,18 @@ export function buildPaymentRequired(params: {
     asset: USDC_ADDRESS,
     extra: { name: USDC_DOMAIN_NAME, version: USDC_DOMAIN_VERSION },
   }
-  // The EIP-3009 option stays accepts[0] — existing clients pick the first entry
-  // and the default (no assetTransferMethod) is 'eip3009' per the exact-EVM spec.
-  const accepts: PaymentRequirements[] = [eip3009Option]
-  if (params.erc7710 === true) {
-    accepts.push({
-      ...eip3009Option,
-      extra: {
-        assetTransferMethod: ERC7710_TRANSFER_METHOD,
-        ...(params.facilitatorAddresses && params.facilitatorAddresses.length > 0
-          ? { facilitatorAddresses: params.facilitatorAddresses }
-          : {}),
-      },
-    })
+  const erc7710Option: PaymentRequirements = {
+    ...eip3009Option,
+    extra: {
+      name: USDC_DOMAIN_NAME,
+      version: USDC_DOMAIN_VERSION,
+      assetTransferMethod: ERC7710_TRANSFER_METHOD,
+      ...(params.facilitatorAddresses && params.facilitatorAddresses.length > 0
+        ? { facilitatorAddresses: params.facilitatorAddresses }
+        : {}),
+    },
   }
+  const accepts = methods.map((method) => method === ERC7710_TRANSFER_METHOD ? erc7710Option : eip3009Option)
   return {
     x402Version: 2,
     resource: {
@@ -618,6 +644,22 @@ function paymentMethod(accepted: PaymentRequirements): string {
   if (method === undefined) return 'eip3009'
   if (typeof method !== 'string') throw new PaymentError('Invalid payment header: assetTransferMethod must be a string')
   return method
+}
+
+function selectQuotedPaymentOption(accepted: PaymentRequirements, paymentRequired: PaymentRequired): PaymentRequirements {
+  const method = paymentMethod(accepted)
+  const option = paymentRequired.accepts.find(
+    (candidate) =>
+      paymentMethod(candidate) === method &&
+      candidate.scheme === accepted.scheme &&
+      candidate.network === accepted.network &&
+      candidate.amount === accepted.amount &&
+      candidate.maxTimeoutSeconds === accepted.maxTimeoutSeconds &&
+      sameAddress(candidate.payTo, accepted.payTo) &&
+      sameAddress(candidate.asset, accepted.asset),
+  )
+  if (!option) throw new PaymentError('Payment accepted option does not match a quoted settlement method')
+  return option
 }
 
 function parseExactEvmPayload(payload: Record<string, unknown>): {
@@ -709,12 +751,32 @@ function assertPaymentOptionMatches(
     if (accepted.extra?.assetTransferMethod !== ERC7710_TRANSFER_METHOD) {
       throw new PaymentError('Payment accepted option does not echo assetTransferMethod erc7710')
     }
-  } else if (
-    (accepted.extra?.name ?? null) !== USDC_DOMAIN_NAME ||
-    (accepted.extra?.version ?? null) !== USDC_DOMAIN_VERSION
-  ) {
-    throw new PaymentError('Payment accepted option is missing the expected USDC domain metadata')
+  } else if (method === 'eip3009') {
+    const acceptedMethod = accepted.extra?.assetTransferMethod
+    if (acceptedMethod !== undefined && acceptedMethod !== 'eip3009') {
+      throw new PaymentError('Payment accepted option does not echo assetTransferMethod eip3009')
+    }
+    if (
+      (accepted.extra?.name ?? null) !== USDC_DOMAIN_NAME ||
+      (accepted.extra?.version ?? null) !== USDC_DOMAIN_VERSION
+    ) {
+      throw new PaymentError('Payment accepted option is missing the expected USDC domain metadata')
+    }
+  } else {
+    throw new PaymentError(`Unsupported x402 assetTransferMethod: ${method}`)
   }
+}
+
+function orderedSettlementMethods(
+  selected?: SettlementMethod,
+  availableMethods: readonly SettlementMethod[] = SUPPORTED_SETTLEMENT_METHODS,
+): SettlementMethod[] {
+  const available = [...new Set(availableMethods)]
+  const first = selected ?? (available.includes(DEFAULT_SETTLEMENT_METHOD) ? DEFAULT_SETTLEMENT_METHOD : available[0])
+  if (!first || !available.includes(first)) {
+    throw new PaymentError(`Settlement method ${selected ?? DEFAULT_SETTLEMENT_METHOD} is not enabled for this merchant`)
+  }
+  return [first, ...available.filter((method) => method !== first)]
 }
 
 function assertResourceMatches(payload: PaymentPayload, paymentRequired: PaymentRequired): void {

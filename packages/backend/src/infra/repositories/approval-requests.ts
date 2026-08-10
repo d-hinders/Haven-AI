@@ -44,6 +44,9 @@ export interface SendApprovalReplayRow {
   expires_at: string
   token_symbol: string
   amount_human: string
+  token_address: string
+  to_address: string
+  amount_raw: string
 }
 
 export interface MachineApprovalRow {
@@ -218,7 +221,8 @@ export async function insertMachineApproval(
 
 // ── Idempotency lookups ──────────────────────────────────────────────────────
 
-export const FIND_SEND_APPROVAL_BY_KEY_SQL = `SELECT id, status, expires_at, token_symbol, amount_human
+export const FIND_SEND_APPROVAL_BY_KEY_SQL = `SELECT id, status, expires_at, token_symbol, amount_human,
+            token_address, to_address, amount_raw
      FROM approval_requests
      WHERE agent_id = $1 AND send_idempotency_key = $2
        AND status NOT IN ('rejected', 'expired')

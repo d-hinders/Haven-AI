@@ -2180,6 +2180,13 @@ export const openapiSpec = {
           token: { type: 'string', examples: ['USDC', 'EURe', 'xDAI'] },
           amount: { type: 'string', description: 'Human-readable token amount.' },
           to: address,
+          idempotency_key: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 128,
+            description:
+              'Optional dedupe key (#1207): a retried request with the same key returns the first request\'s result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer is a 409. Same contract as /machine-payments/send.',
+          },
         },
         additionalProperties: true,
       },

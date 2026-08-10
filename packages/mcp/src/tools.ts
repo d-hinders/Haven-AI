@@ -178,6 +178,9 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
             token: args.asset,
             amount: args.amount,
             to: args.recipient,
+            // #1207: was accepted by the schema but silently dropped — now
+            // carried to the backend's replay contract.
+            idempotencyKey: typeof args.idempotencyKey === 'string' ? args.idempotencyKey : undefined,
           })
           return {
             payment_id: result.paymentId,

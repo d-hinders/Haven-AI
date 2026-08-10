@@ -247,6 +247,6 @@
   },
   "packages/backend/src/routes/__tests__/x402.test.ts": {
     "db-mock": 1,
-    "positional": 179
+    "positional": 42
   }
 }

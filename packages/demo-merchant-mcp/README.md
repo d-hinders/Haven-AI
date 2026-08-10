@@ -65,6 +65,16 @@ domain name (`"USDC"` vs mainnet's `"USD Coin"`). `BASE_RPC_URL` must point at t
 matching chain's RPC (Base mainnet, or `https://sepolia.base.org` for Sepolia),
 and `SETTLEMENT_PRIVATE_KEY` must be gas-funded on that chain.
 
+## QA hook: verify-without-settle (testnet-only)
+
+`MERCHANT_SKIP_SETTLE_PRODUCT=<product_id,...>` (#603) verifies listed
+products' payments but skips on-chain settlement — the QA sweep-recovery
+scenario uses it to strand the delegate deterministically. It is
+**testnet-only, enforced in code**: startup fails unless
+`MERCHANT_CHAIN_ID=84532`, because a skipped settlement also skips the only
+balance check — on any real chain a listed product would hand out goods
+against a well-formed authorization from an empty wallet.
+
 ## Experimental: ERC-7710 smart-account payments (testnet-only)
 
 `MERCHANT_X402_ERC7710=1` enables the x402 exact-EVM `assetTransferMethod:

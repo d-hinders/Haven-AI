@@ -998,6 +998,11 @@ describe('x402 routes', () => {
     expect(insert!.params).toContain('https://mcp.soundside.ai/mcp')
     expect(insert!.params).toContain(MERCHANT.toLowerCase())
     expect(insert!.params).toContain('x402:approval')
+    // The request's category must be threaded into machine_metadata — this is
+    // the handler's mapping, not the database's, so it is proven here.
+    expect(insert!.params).toContain(
+      JSON.stringify({ protocol: 'x402', network: 'base', category: 'data', description: null })
+    )
   })
 
   it('returns 422 insufficient_funds when delegate balance + remaining allowance cannot cover the amount', async () => {

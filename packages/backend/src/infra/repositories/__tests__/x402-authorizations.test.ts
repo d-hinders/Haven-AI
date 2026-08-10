@@ -173,6 +173,57 @@ describeDb('x402-authorizations repository (#1222)', () => {
     await expect(seedIntent({ agentId, userId, x402Key: 'key-4' })).resolves.toBeTruthy()
   })
 
+  // ── Rail scoping (#1288) ────────────────────────────────────────────────
+
+  it('the rail-scoping clause excludes a same-key direct-source row from x402 lookups and refresh', async () => {
+    // x402 row seeded FIRST (older) so the assertions below are meaningful:
+    // without the rail-scoping clause, `ORDER BY created_at DESC LIMIT 1`
+    // would pick the NEWER direct row instead, not just an unscoped one.
+    const { agentId, userId } = await seedAgent()
+    const x402 = await seedIntent({ agentId, userId, source: 'x402', x402Key: 'rail-key-1' })
+    // Same agent, same idempotency key VALUE shared across the two different
+    // key columns the lookup ORs together — this is exactly the collision the
+    // issue describes: a direct-payment row (payment_rail NULL, source
+    // 'direct') that happens to share a key with an x402 replay. A different
+    // column so the two rows don't 23505 on the same partial unique index.
+    // Status stays the active default ('pending_signature') so the ACTIVE
+    // lookup's OWN status filter can't be what excludes it — only the rail
+    // clause should; an expired `expires_at` still trivially satisfies the
+    // refresh guard's staleness OR-clause below.
+    const direct = await seedIntent({
+      agentId,
+      userId,
+      source: 'direct',
+      paymentRail: null,
+      machineKey: 'rail-key-1',
+      expiresAt: '2020-01-01T00:00:00Z',
+      allowanceNonce: 1,
+      signHash: `0x${'1'.repeat(64)}`,
+    })
+
+    // Both idempotency lookups must find ONLY the x402 row — even though the
+    // direct row is NEWER (so it would win the `ORDER BY` unscoped) and
+    // matches via the OTHER key column.
+    expect((await findX402IntentByIdempotencyKey(agentId, 'rail-key-1'))?.id).toBe(x402)
+    expect((await findActiveX402IntentByIdempotencyKey(agentId, 'rail-key-1'))?.id).toBe(x402)
+
+    // refreshStaleX402Intent is keyed by id, not the idempotency key — prove
+    // it separately refuses the direct row even though every OTHER guard
+    // predicate (status='pending_signature', tx_hash/signature NULL, expired) is
+    // satisfied.
+    const refreshed = await refreshStaleX402Intent({
+      allowanceNonce: 2,
+      signHash: `0x${'2'.repeat(64)}`,
+      intentId: direct,
+      agentId,
+    })
+    expect(refreshed).toBeNull()
+    const after = await readIntent(direct)
+    expect(after.allowance_nonce).toBe(1)
+    expect(after.sign_hash).toBe(`0x${'1'.repeat(64)}`)
+    expect(after.status).toBe('pending_signature')
+  })
+
   // ── Stale-replay refresh ───────────────────────────────────────────────
 
   it('refresh revives an EXPIRED replay with a fresh nonce+hash and clears the error', async () => {

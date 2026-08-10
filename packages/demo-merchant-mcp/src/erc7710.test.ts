@@ -173,6 +173,8 @@ describe('demo merchant experimental erc7710 rail', () => {
     expect(productText).toContain('settlement_methods=erc7710,eip3009')
     expect(productText).toContain('default=erc7710')
     expect(productText).toContain('Merchant MCP URL: http://127.0.0.1:0/mcp')
+    expect(productText).toContain('dev=https://demo-merchant-dev-84e4.up.railway.app/mcp')
+    expect(productText).toContain('prod=https://enthusiastic-blessing-production-171f.up.railway.app/mcp')
     expect(paymentRequired.accepts).toHaveLength(2)
     expect(paymentRequired.accepts[0]).toMatchObject({
       scheme: 'exact',

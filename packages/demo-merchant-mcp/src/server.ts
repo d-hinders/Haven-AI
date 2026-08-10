@@ -6,6 +6,7 @@ import {
   PRODUCTS,
   SUPPORTED_SETTLEMENT_METHODS,
   CHAIN_ID,
+  HOSTED_DEMO_MERCHANT_URLS,
   formatUsdc,
   type ProductId,
   type SettlementMethod,
@@ -62,6 +63,10 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
           asset: 'USDC',
           settlement_methods: settlementMethods,
           default_settlement_method: defaultSettlementMethod,
+          hosted_urls: {
+            dev: `${HOSTED_DEMO_MERCHANT_URLS.dev}/mcp`,
+            prod: `${HOSTED_DEMO_MERCHANT_URLS.prod}/mcp`,
+          },
         },
       }))
 
@@ -72,6 +77,7 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
             `  Pris: $${r.price_usdc} USDC/månad\n` +
             `  x402: ${r.x402.network} USDC, settlement_methods=${r.x402.settlement_methods.join(',')}, default=${r.x402.default_settlement_method}\n` +
             `  Merchant MCP URL: ${r.x402.resource_url}\n` +
+            `  Hosted routing: dev=${r.x402.hosted_urls.dev}, prod=${r.x402.hosted_urls.prod}\n` +
             `  ${r.description}`,
         )
         .join('\n\n')

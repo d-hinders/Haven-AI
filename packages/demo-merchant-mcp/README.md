@@ -48,6 +48,7 @@ Every product advertises x402 capability metadata through `list_products`:
 - `settlement_methods`: `erc7710`, `eip3009` when both are enabled
 - `default_settlement_method`: `erc7710` when enabled
 - `resource_url`: the configured merchant MCP URL
+- `hosted_urls`: the canonical dev and prod MCP URLs
 
 Purchase tools accept an optional `settlement_method` argument:
 
@@ -66,12 +67,20 @@ only when you are intentionally running this package on your machine.
 
 | Environment | MCP URL |
 |---|---|
-| Production demo merchant | `https://enthusiastic-blessing-production-171f.up.railway.app/mcp` |
-| Hosted dev demo merchant | Set `BASE_URL` to that deployment's public origin and use `${BASE_URL}/mcp` |
+| Dev demo merchant (Base Sepolia) | `https://demo-merchant-dev-84e4.up.railway.app/mcp` |
+| Production demo merchant (Base mainnet) | `https://enthusiastic-blessing-production-171f.up.railway.app/mcp` |
 | Local-only merchant | `http://localhost:3456/mcp` |
 
-Hosted deployments fail startup when `BASE_URL` is missing, so generated
-requirements and tool metadata do not point prod agents at localhost.
+Routing rule:
+
+- Haven dev / Base Sepolia (`eip155:84532`) -> `https://demo-merchant-dev-84e4.up.railway.app/mcp`
+- Haven prod / Base mainnet (`eip155:8453`) -> `https://enthusiastic-blessing-production-171f.up.railway.app/mcp`
+
+Hosted deployments derive the default `BASE_URL` from `MERCHANT_CHAIN_ID` and
+reject localhost, so generated requirements and tool metadata do not point
+hosted agents at a local merchant. Agents can also read `GET /` or
+`GET /.well-known/haven-demo-merchant` on either deployment to discover the
+current environment, chain, MCP URL, and both hosted routing targets.
 
 ## Run
 
@@ -140,6 +149,13 @@ curl -fsS https://enthusiastic-blessing-production-171f.up.railway.app/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_products","arguments":{}}}'
+```
+
+Machine-readable environment discovery:
+
+```sh
+curl -fsS https://demo-merchant-dev-84e4.up.railway.app/.well-known/haven-demo-merchant
+curl -fsS https://enthusiastic-blessing-production-171f.up.railway.app/.well-known/haven-demo-merchant
 ```
 
 Default ERC-7710 quote:

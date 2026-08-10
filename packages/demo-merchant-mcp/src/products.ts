@@ -42,6 +42,19 @@ export const USDC_DOMAIN_VERSION = chain.usdcDomainVersion
 export const SUPPORTED_SETTLEMENT_METHODS = ['erc7710', 'eip3009'] as const
 export type SettlementMethod = (typeof SUPPORTED_SETTLEMENT_METHODS)[number]
 export const DEFAULT_SETTLEMENT_METHOD: SettlementMethod = 'erc7710'
+export type MerchantEnvironment = 'dev' | 'prod'
+export const HOSTED_DEMO_MERCHANT_URLS: Record<MerchantEnvironment, string> = {
+  dev: 'https://demo-merchant-dev-84e4.up.railway.app',
+  prod: 'https://enthusiastic-blessing-production-171f.up.railway.app',
+}
+
+export function merchantEnvironmentForChain(chainId = CHAIN_ID): MerchantEnvironment {
+  return chainId === 84532 ? 'dev' : 'prod'
+}
+
+export function hostedMerchantBaseUrlForChain(chainId = CHAIN_ID): string {
+  return HOSTED_DEMO_MERCHANT_URLS[merchantEnvironmentForChain(chainId)]
+}
 
 export type ProductId =
   | 'vpn_basic'

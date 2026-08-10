@@ -11,7 +11,16 @@ import {
   type SettledPayment,
   type X402PaymentProcessor,
 } from './x402.js'
-import { PRODUCTS, isSettlementMethod, type ProductId, type SettlementMethod } from './products.js'
+import {
+  CHAIN_ID,
+  HOSTED_DEMO_MERCHANT_URLS,
+  PRODUCTS,
+  formatUsdc,
+  isSettlementMethod,
+  merchantEnvironmentForChain,
+  type ProductId,
+  type SettlementMethod,
+} from './products.js'
 import { invoiceForPayment } from './invoice.js'
 import type { Address } from 'viem'
 
@@ -68,7 +77,19 @@ async function handle(
   }
 
   if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/healthz') {
-    writeJson(res, 200, { status: 'ok', merchant: options.merchantAddress })
+    writeJson(res, 200, {
+      status: 'ok',
+      merchant: options.merchantAddress,
+      environment: merchantEnvironmentForChain(CHAIN_ID),
+      chain_id: CHAIN_ID,
+      network: `eip155:${CHAIN_ID}`,
+      mcp_url: `${options.baseUrl}${options.path}`,
+    })
+    return
+  }
+
+  if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/' || url.pathname === '/.well-known/haven-demo-merchant')) {
+    writeJson(res, 200, buildDiscovery(options))
     return
   }
 
@@ -216,6 +237,50 @@ function writePaymentRequired(
     [PAYMENT_REQUIRED_HEADER]: options.paymentProcessor.paymentRequiredHeader(paymentRequired),
   })
   res.end(JSON.stringify(paymentRequired))
+}
+
+function buildDiscovery(
+  options: Required<Pick<DemoMerchantServerOptions, 'path'>> & DemoMerchantServerOptions,
+) {
+  const environment = merchantEnvironmentForChain(CHAIN_ID)
+  const settlementMethods = options.settlementMethods?.length ? [...options.settlementMethods] : ['eip3009']
+  return {
+    name: 'Haven Demo Merchant',
+    environment,
+    chain_id: CHAIN_ID,
+    network: `eip155:${CHAIN_ID}`,
+    mcp_url: `${options.baseUrl}${options.path}`,
+    current_base_url: options.baseUrl,
+    hosted_urls: {
+      dev: `${HOSTED_DEMO_MERCHANT_URLS.dev}${options.path}`,
+      prod: `${HOSTED_DEMO_MERCHANT_URLS.prod}${options.path}`,
+    },
+    routing: {
+      dev: {
+        chain_id: 84532,
+        network: 'eip155:84532',
+        mcp_url: `${HOSTED_DEMO_MERCHANT_URLS.dev}${options.path}`,
+      },
+      prod: {
+        chain_id: 8453,
+        network: 'eip155:8453',
+        mcp_url: `${HOSTED_DEMO_MERCHANT_URLS.prod}${options.path}`,
+      },
+    },
+    settlement_methods: settlementMethods,
+    default_settlement_method: settlementMethods.includes('erc7710') ? 'erc7710' : settlementMethods[0],
+    products: Object.values(PRODUCTS).map((product) => ({
+      id: product.id,
+      name: product.name,
+      category: product.category,
+      price_usdc: formatUsdc(product.price_usdc),
+      settlement_methods: product.x402.settlementMethods.filter((method) => settlementMethods.includes(method)),
+      default_settlement_method: settlementMethods.includes(product.x402.defaultSettlementMethod)
+        ? product.x402.defaultSettlementMethod
+        : settlementMethods[0],
+      tools: product.category === 'vpn' ? ['buy_vpn'] : ['buy_cloud_storage'],
+    })),
+  }
 }
 
 function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {

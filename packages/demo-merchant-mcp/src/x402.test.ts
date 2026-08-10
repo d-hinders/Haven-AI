@@ -11,6 +11,7 @@ import {
   type Eip3009Authorization,
   type SettlementClient,
 } from './x402.js'
+import { hostedMerchantBaseUrlForChain, merchantEnvironmentForChain } from './products.js'
 
 const MERCHANT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a' as const
 const OTHER = '0x2222222222222222222222222222222222222222' as const
@@ -99,6 +100,13 @@ async function signedHeader(
 }
 
 describe('x402 payment requirements', () => {
+  it('maps dev and prod chains to the correct hosted merchant URLs', () => {
+    expect(merchantEnvironmentForChain(84532)).toBe('dev')
+    expect(hostedMerchantBaseUrlForChain(84532)).toBe('https://demo-merchant-dev-84e4.up.railway.app')
+    expect(merchantEnvironmentForChain(8453)).toBe('prod')
+    expect(hostedMerchantBaseUrlForChain(8453)).toBe('https://enthusiastic-blessing-production-171f.up.railway.app')
+  })
+
   it('builds a standards-aligned Base USDC payment-required response', () => {
     const { processor } = makeProcessor()
     const pr = processor.buildPaymentRequired({

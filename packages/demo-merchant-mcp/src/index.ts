@@ -6,19 +6,22 @@ import {
   SUPPORTED_SETTLEMENT_METHODS,
   formatUsdc,
   CHAIN_ID,
+  hostedMerchantBaseUrlForChain,
   isSettlementMethod,
+  merchantEnvironmentForChain,
   type SettlementMethod,
 } from './products.js'
 import { isAddress, type Address } from 'viem'
 
 const PORT = parseInt(process.env.PORT ?? '3456', 10)
-const HOSTED_DEMO_URL = 'https://enthusiastic-blessing-production-171f.up.railway.app'
+const MERCHANT_ENVIRONMENT = merchantEnvironmentForChain(CHAIN_ID)
+const HOSTED_DEMO_URL = hostedMerchantBaseUrlForChain(CHAIN_ID)
 const IS_HOSTED_RUNTIME = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN || process.env.NODE_ENV === 'production')
-const BASE_URL = process.env.BASE_URL ?? (IS_HOSTED_RUNTIME ? undefined : `http://localhost:${PORT}`)
-if (!BASE_URL) {
+const BASE_URL = process.env.BASE_URL ?? (IS_HOSTED_RUNTIME ? HOSTED_DEMO_URL : `http://localhost:${PORT}`)
+if (IS_HOSTED_RUNTIME && BASE_URL.includes('localhost')) {
   console.error(
-    'BASE_URL env var is required for hosted demo merchant deployments.\n' +
-      `Set it to the public merchant origin, for example ${HOSTED_DEMO_URL}. ` +
+    'BASE_URL must be a public URL for hosted demo merchant deployments.\n' +
+      `For ${MERCHANT_ENVIRONMENT} on eip155:${CHAIN_ID}, use ${HOSTED_DEMO_URL}. ` +
       'Localhost is only valid when intentionally running a local merchant.',
   )
   process.exit(1)
@@ -90,7 +93,9 @@ const server = createDemoMerchantServer({
 server.listen(PORT, () => {
   console.log(`Haven Demo Merchant MCP server`)
   console.log(`  Endpoint:  ${BASE_URL}/mcp`)
+  console.log(`  Directory: ${BASE_URL}/`)
   console.log(`  Healthz:   ${BASE_URL}/healthz`)
+  console.log(`  Env:       ${MERCHANT_ENVIRONMENT}`)
   console.log(`  Merchant:  ${MERCHANT_ADDRESS}`)
   console.log(`  Network:   eip155:${CHAIN_ID}${CHAIN_ID === 84532 ? ' (Base Sepolia testnet)' : CHAIN_ID === 8453 ? ' (Base mainnet)' : ''}`)
   console.log(`  Payment:   USDC via x402 ${SETTLEMENT_METHODS.join(' + ')} (default ${DEFAULT_METHOD})`)

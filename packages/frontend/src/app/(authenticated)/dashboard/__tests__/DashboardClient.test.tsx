@@ -586,9 +586,9 @@ describe('DashboardClient', () => {
     })
 
     it('keeps the safe-rail nudge off testnet chains via the server classification (#1205)', () => {
+      // asPasskeySafeUser(1) is used for its approver-count side effect; the
+      // auth mock is then overridden with the testnet-classified safe.
       asPasskeySafeUser(1)
-      const current = mockUseAuth.mock.results[mockUseAuth.mock.results.length - 1]
-      void current
       mockUseAuth.mockReturnValue({
         user: {
           id: 'user-1',

@@ -501,15 +501,19 @@ export async function findExecutionRailForAgent(
  * cannot tell a delegation account from a legacy one and dead-ends delegation
  * users at the wallet approval (#1069). `auth.test.ts` guards that field.
  */
+// Query shape matters here: this runs on every login/me. The count is a
+// direct LEFT JOIN + GROUP BY on the PK — user_id filters first, then per-safe
+// index lookups on hybrid_account_passkeys(user_safe_id). A GROUP BY derived
+// table would hash-aggregate the WHOLE passkey table for every session
+// (review finding on the first draft of #1205).
 export const LIST_SESSION_SAFES_FOR_USER_SQL = `SELECT us.id, us.safe_address, us.chain_id, us.name, us.is_default, us.created_at, us.account_type,
               us.owner_address,
-              COALESCE(hap.passkey_count, 0)::int AS passkey_count
+              COUNT(hap.id)::int AS passkey_count
        FROM user_safes us
-       LEFT JOIN (
-         SELECT user_safe_id, COUNT(*) AS passkey_count
-           FROM hybrid_account_passkeys GROUP BY user_safe_id
-       ) hap ON hap.user_safe_id = us.id
-       WHERE us.user_id = $1 ORDER BY us.created_at ASC`
+       LEFT JOIN hybrid_account_passkeys hap ON hap.user_safe_id = us.id
+       WHERE us.user_id = $1
+       GROUP BY us.id
+       ORDER BY us.created_at ASC`
 
 /** One row of the session payload's `safes` array. */
 export interface SessionSafeRow {

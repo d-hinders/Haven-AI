@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-10" # re-verified for #1263: sign-context fetch documented as the preferred v2 transport; binding/digest/settle claims unchanged
+last-verified: "2026-08-10" # re-verified for PR #1269 (sweep-prepare result mapping in hosted MCP) — no x402 binding/digest/settle claim touched
 ---
 
 # Haven - x402 Payment Execution Sequence

@@ -19,7 +19,7 @@ import {
 } from './tools.js'
 
 export const SIGNER_NAME = '@haven_ai/signer'
-export const SIGNER_VERSION = '0.1.18-alpha.0'
+export const SIGNER_VERSION = '0.1.19-alpha.0'
 
 export interface SignerOptions {
   /** Path to a Haven credential JSON file (delegate_key is read from it). */

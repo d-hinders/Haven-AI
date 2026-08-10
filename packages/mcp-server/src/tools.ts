@@ -217,14 +217,33 @@ const SIGNER_CAPABILITY_SOURCE =
   `capabilities.experimental["${SIGNER_CAPABILITY_KEY}"]`
 
 const PAY_DESCRIPTION = [
-  'Construct a Safe AllowanceModule payment within the agent budget and return the unsigned hash to sign.',
+  'Construct a payment within the agent budget and return the unsigned payload to sign.',
   'For read-only allowance, budget, spend-limit, remaining-amount, or reset-period questions,',
   'call haven_get_allowances instead of constructing a payment.',
   'Returns { payment_id, payload_hash, expires_at } when the amount fits the remaining',
-  'on-chain allowance. Sign payload_hash with the local signer (haven_sign) then relay with',
-  'haven_submit. Returns { status: "pending_approval", payload_hash: null } when the amount',
+  'budget. Sign with the local signer (haven_sign) then relay with haven_submit.',
+  'DELEGATION-RAIL accounts: the result also carries signature_scheme and typed_data —',
+  'pass typed_data to haven_sign VERBATIM alongside payload_hash; the account validates',
+  'the typed data, and a bare-hash signature is rejected on-chain (#1254).',
+  'Returns { status: "pending_approval", payload_hash: null } when the amount',
   'exceeds the budget; the user must approve it in Haven. Haven never receives the signing key.',
 ].join(' ')
+
+/**
+ * #1254: the delegation-rail signing fields, forwarded VERBATIM whenever the
+ * backend sent them. The x402 quote path always did this; the direct
+ * haven_pay/haven_send path dropped them — so the local signer raw-signed the
+ * userOp hash and the Hybrid account rejected it at validation (AA24). One
+ * helper now, so a future surface cannot re-make the mistake by omission.
+ */
+function delegationSignFields(signData: {
+  signature_scheme?: string
+  typed_data?: Record<string, unknown>
+}): Record<string, unknown> {
+  return signData.signature_scheme
+    ? { signature_scheme: signData.signature_scheme, typed_data: signData.typed_data }
+    : {}
+}
 
 const SUBMIT_DESCRIPTION = [
   'Relay a delegate signature produced by the local signer to execute a previously constructed',
@@ -532,6 +551,8 @@ export function createToolHandlers(
             status: intent.status,
             payload_hash: intent.signData.hash,
             expires_at: intent.expiresAt,
+            // #1254: same forwarding as haven_pay — see the note there.
+            ...delegationSignFields(intent.signData),
             asset: args.asset,
             amount: args.amount,
             recipient: args.recipient,
@@ -565,6 +586,12 @@ export function createToolHandlers(
             status: intent.status,
             payload_hash: intent.signData.hash,
             expires_at: intent.expiresAt,
+            // #1254: on the delegation rail the account validates TYPED DATA,
+            // not payload_hash. The x402 quote path always forwarded these;
+            // this direct path dropped them, so the local signer raw-signed
+            // the hash and the account rejected it on-chain (AA24). Found
+            // live during the #908 mainnet canary.
+            ...delegationSignFields(intent.signData),
             meta: { token: args.token, amount: args.amount, to: args.to },
           }
         } catch (err) {
@@ -1000,12 +1027,7 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
     // payload_hash. Pass both through verbatim — the local signer picks the
     // path from the Haven-signed expected context below and refuses the wrong
     // one, so this surface never has to be the thing that gets it right.
-    ...(intent.signData.signature_scheme
-      ? {
-          signature_scheme: intent.signData.signature_scheme,
-          typed_data: intent.signData.typed_data,
-        }
-      : {}),
+    ...delegationSignFields(intent.signData),
     // The edge signer needs these to build + sign the EIP-3009 merchant header
     // locally after the funding transfer is relayed via haven_submit.
     x402: {

@@ -294,6 +294,16 @@ export function createToolHandlers(
           ? await signFundingLeg(signer, x402Expected, args.payload_hash, args.typed_data)
           : null
         if (!result) {
+          // #1254: a DIRECT delegation-rail payment carries typed_data and no
+          // x402 context — the account validates the TYPED DATA, and a raw
+          // signature over payload_hash is rejected on-chain (AA24, found
+          // live). When typed_data is present it is what gets signed; the
+          // raw-hash path below is the legacy AllowanceModule rail only.
+          if (args.typed_data) {
+            const signature = await signer.signDelegationTypedData(args.typed_data)
+            await auditSigning('haven_sign', args.payload_hash)
+            return { signature }
+          }
           const signature = signer.signPaymentHash(args.payload_hash)
           await auditSigning('haven_sign', args.payload_hash)
           return { signature }

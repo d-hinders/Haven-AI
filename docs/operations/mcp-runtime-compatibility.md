@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-10" # #1256 re-verify: SDK window-margin change alters no runtime contract — manifest, Node floor and version table unchanged on this branch (the 0.1.19 bump rides #1257)
+last-verified: "2026-08-10" # #1254 release train (version table → 0.1.19-alpha.0) + #1256 re-verify (window margin alters no runtime contract); manifest, Node floor and release checklist re-read and unchanged
 ---
 
 # MCP Runtime Compatibility
@@ -49,10 +49,10 @@ Keep this table in sync with that file.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 24.0.0 (pinned to LTS 24 in `.nvmrc` / package `engines`) |
-| `@haven_ai/connect` | `0.1.18-alpha.0` |
-| `@haven_ai/mcp` | `0.1.18-alpha.0` |
-| `@haven_ai/sdk` | `0.1.18-alpha.0` |
-| `@haven_ai/signer` | `0.1.18-alpha.0` |
+| `@haven_ai/connect` | `0.1.19-alpha.0` |
+| `@haven_ai/mcp` | `0.1.19-alpha.0` |
+| `@haven_ai/sdk` | `0.1.19-alpha.0` |
+| `@haven_ai/signer` | `0.1.19-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-08" # #1155: pre-payment skew detection documented (signer handshake advertisement + hosted quote-reported version); runtime manifest, Node-floor and release-checklist sections re-read and unchanged
+last-verified: "2026-08-10" # #1256 re-verify: SDK window-margin change alters no runtime contract — manifest, Node floor and version table unchanged on this branch (the 0.1.19 bump rides #1257)
 ---
 
 # MCP Runtime Compatibility

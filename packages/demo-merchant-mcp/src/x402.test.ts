@@ -12,6 +12,13 @@ import {
   type Eip3009Authorization,
   type SettlementClient,
 } from './x402.js'
+import {
+  TRUSTED_DELEGATION_MANAGER,
+  hostedMerchantBaseUrlForChain,
+  isTrustedDelegationManagerForChain,
+  merchantEnvironmentForChain,
+  trustedDelegationManagerForChain,
+} from './products.js'
 
 const MERCHANT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a' as const
 const OTHER = '0x2222222222222222222222222222222222222222' as const
@@ -111,6 +118,13 @@ describe('formatUsdc precision (#1279)', () => {
 })
 
 describe('x402 payment requirements', () => {
+  it('maps dev and prod chains to the correct hosted merchant URLs', () => {
+    expect(merchantEnvironmentForChain(84532)).toBe('dev')
+    expect(hostedMerchantBaseUrlForChain(84532)).toBe('https://demo-merchant-dev-84e4.up.railway.app')
+    expect(merchantEnvironmentForChain(8453)).toBe('prod')
+    expect(hostedMerchantBaseUrlForChain(8453)).toBe('https://enthusiastic-blessing-production-171f.up.railway.app')
+  })
+
   it('builds a standards-aligned Base USDC payment-required response', () => {
     const { processor } = makeProcessor()
     const pr = processor.buildPaymentRequired({
@@ -135,6 +149,13 @@ describe('x402 payment requirements', () => {
         extra: { name: 'USD Coin', version: '2' },
       }],
     })
+  })
+
+  it('pins the same trusted DelegationManager for hosted Base environments', () => {
+    expect(trustedDelegationManagerForChain(8453)).toBe(TRUSTED_DELEGATION_MANAGER)
+    expect(trustedDelegationManagerForChain(84532)).toBe(TRUSTED_DELEGATION_MANAGER)
+    expect(isTrustedDelegationManagerForChain(TRUSTED_DELEGATION_MANAGER, 8453)).toBe(true)
+    expect(isTrustedDelegationManagerForChain('0x000000000000000000000000000000000000dEaD', 8453)).toBe(false)
   })
 })
 

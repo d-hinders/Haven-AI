@@ -60,7 +60,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) + #1266 demo merchant x402 settlement selection
 ---
 
 # Haven — Architecture Overview

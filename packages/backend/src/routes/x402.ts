@@ -5,6 +5,7 @@ import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   authorizeX402,
   settleX402,
+  getX402SignContext,
   isPositiveDecimalAtomicAmount,
   normaliseAddress,
   chainIdFromX402Network,
@@ -141,6 +142,17 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Body: X402AuthorizeBody }>('/', { config: moneyPathRateLimit }, authorizeX402Handler)
   app.post<{ Body: X402AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, authorizeX402Handler)
+
+  // ── GET /x402/:id/sign-context — byte-free signing handoff (#1263) ───────
+  // Read-only: re-serves the stored delegation-rail signing payload + a fresh
+  // Haven-signed expected context so the LOCAL SIGNER can fetch exact bytes by
+  // payment_id instead of a model re-emitting them. All checks and the rebuild
+  // live in the module (`getX402SignContext`).
+  app.get<{ Params: { id: string } }>('/:id/sign-context', async (request, reply) => {
+    const agent = request.agent as AgentContext
+    const result = await getX402SignContext(agent, request.params.id)
+    return reply.code(result.code).send(result.body)
+  })
 
   // ── POST /x402/:id/settle — delegation rail (#830) ───────────────────────
   // The agent has signed the settlement child (EIP-712). Assembly, signer

@@ -512,6 +512,100 @@ describe('Hosted MCP + Edge Signer integration', () => {
     expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
   })
 
+  it('signs from payment_id ALONE — the byte-free handoff (#1263)', async () => {
+    // The durable fix for #1255/#1263: the model relays only payment_id; the
+    // signer fetches the exact bytes itself. This walks the real handler with
+    // a stubbed Haven sign-context endpoint serving the redemption-sized
+    // payload — no typed_data anywhere in the tool call.
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+    let fetchedUrl = ''
+    const signContextFetch = (async (url: unknown, init?: RequestInit) => {
+      fetchedUrl = String(url)
+      expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer sk_agent_ctx')
+      return new Response(
+        JSON.stringify({
+          payment_id: FUNDING_PAYMENT_ID,
+          sign_data: {
+            hash: FUNDING_HASH,
+            signature_scheme: 'eip712_userop',
+            typed_data: REALISTIC_TYPED_DATA,
+          },
+          x402_expected: x402Expected.snake,
+        }),
+        { status: 200 },
+      )
+    }) as typeof fetch
+
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner, {
+      signContext: {
+        loadIdentity: async () => ({ apiUrl: 'http://haven.test', apiKey: 'sk_agent_ctx' }),
+        fetchImpl: signContextFetch,
+      },
+    })
+
+    const signed = ok<{ signature: string; payment_header: string }>(
+      await signerHandlers.haven_sign_x402({
+        payment_id: FUNDING_PAYMENT_ID,
+        payment_required: PAYMENT_REQUIRED,
+      }),
+    )
+    expect(fetchedUrl).toBe(`http://haven.test/x402/${FUNDING_PAYMENT_ID}/sign-context`)
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    expect(signed.payment_header.length).toBeGreaterThan(0)
+  })
+
+  it('a fetched payload still passes the SAME digest check — provenance skips nothing (#1263)', async () => {
+    // Serve a typed_data that does NOT match the committed digest: the signer
+    // must refuse it exactly as it refuses a mangled tool argument.
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+    const mangled = {
+      ...REALISTIC_TYPED_DATA,
+      message: {
+        ...(REALISTIC_TYPED_DATA.message as Record<string, unknown>),
+        callData: '0x' + 'ab'.repeat(100),
+      },
+    }
+    const signContextFetch = (async () =>
+      new Response(
+        JSON.stringify({
+          payment_id: FUNDING_PAYMENT_ID,
+          sign_data: { hash: FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: mangled },
+          x402_expected: x402Expected.snake,
+        }),
+        { status: 200 },
+      )) as typeof fetch
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner, {
+      signContext: {
+        loadIdentity: async () => ({ apiUrl: 'http://haven.test', apiKey: 'sk_agent_ctx' }),
+        fetchImpl: signContextFetch,
+      },
+    })
+    const payload = await signerHandlers.haven_sign_x402({
+      payment_id: FUNDING_PAYMENT_ID,
+      payment_required: PAYMENT_REQUIRED,
+    })
+    expect(payload.success).toBe(false)
+    if (!payload.success) expect(payload.message).toContain('does not match the digest')
+  })
+
+  it('payment_id without a local identity refuses with the fallback named (#1263)', async () => {
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner, {
+      signContext: { loadIdentity: async () => null },
+    })
+    const payload = await signerHandlers.haven_sign_x402({
+      payment_id: FUNDING_PAYMENT_ID,
+      payment_required: PAYMENT_REQUIRED,
+    })
+    expect(payload.success).toBe(false)
+    if (!payload.success) {
+      expect(payload.message).toContain('identity.json')
+      expect(payload.message).toContain('typed_data_b64')
+    }
+  })
+
   it('still refuses an altered payload: one flipped field fails the digest check (#1255)', async () => {
     // The digest check is the guard that made the live failure SAFE — the b64
     // transport must not weaken it. Simulate the copy-through corruption the

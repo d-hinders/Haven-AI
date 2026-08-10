@@ -959,3 +959,115 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(badSig.statusCode).toBe(400)
   })
 })
+
+// ── GET /x402/:id/sign-context — the byte-free signing handoff (#1263) ────────
+describe('x402 sign-context by payment_id (#1263)', () => {
+  let app: FastifyInstance
+  beforeAll(async () => {
+    process.env.X402_BINDING_PRIVATE_KEY =
+      '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
+    app = Fastify({ logger: false })
+    await app.register(x402Routes, { prefix: '/x402' })
+  })
+  afterAll(async () => app.close())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockCompute.mockResolvedValue(DELEGATE_ACCT)
+  })
+
+  const PENDING_ROW = {
+    id: INTENT_ID,
+    status: 'pending_signature',
+    expires_at: new Date(Date.now() + 300_000).toISOString(),
+    sign_hash: `0x${'56'.repeat(32)}`,
+    prepared_user_op: { sender: DELEGATE_ACCT, nonce: '1', callData: '0x' + 'ab'.repeat(64) },
+    to_address: ('0x' + 'ee'.repeat(20)).toLowerCase(),
+    x402_merchant_address: MERCHANT.toLowerCase(),
+    x402_resource_url: 'https://merchant.example/resource',
+    amount_raw: '100000',
+    amount_human: '0.1',
+    token_address: USDC.toLowerCase(),
+    token_symbol: 'USDC',
+    chain_id: 84532,
+    safe_address: '0x' + 'aa'.repeat(20),
+    machine_metadata: { network: 'eip155:84532', settlement_scheme: 'eip3009' },
+  }
+
+  function serveIntentRow(rows: Record<string, unknown>[]) {
+    mockQuery.mockImplementation((sql: string) => {
+      if (/WHERE id = \$1 AND agent_id = \$2/.test(String(sql))) return Promise.resolve({ rows })
+      return Promise.resolve({ rows: [] })
+    })
+  }
+
+  it('serves the EXACT rebuilt sign_data + a commitment over its own digest', async () => {
+    serveIntentRow([PENDING_ROW])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.payment_id).toBe(INTENT_ID)
+    expect(body.sign_data.signature_scheme).toBe('eip712_userop')
+    expect(body.sign_data.hash).toBe(`0x${'56'.repeat(32)}`)
+    expect(body.sign_data.typed_data.primaryType).toBe('PackedUserOperation')
+    // The load-bearing property: the Haven-signed context commits to the
+    // digest of exactly the typed data THIS response serves — the signer's
+    // re-derivation (#1138) must land on the same value.
+    const { hashTypedData } = await import('viem')
+    const derived = hashTypedData(body.sign_data.typed_data)
+    const committed = JSON.parse(body.x402_expected_auth.message.split('\n')[1]).typedDataHash
+    expect(derived.toLowerCase()).toBe(committed.toLowerCase())
+    // The ready-made expected context (#1263): snake_case, atomic amount,
+    // committing to the same digest — the signer passes it through verbatim.
+    expect(body.x402_expected.payment_id).toBe(INTENT_ID)
+    expect(body.x402_expected.amount).toBe('100000') // atomic, never amount_human
+    expect(body.x402_expected.typed_data_hash.toLowerCase()).toBe(derived.toLowerCase())
+    expect(body.x402_expected.auth.version).toBe(2)
+    // A read, not a replay:
+    expect('idempotent_replay' in body).toBe(false)
+    // Read-only: nothing was written.
+    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE/i.test(String(c[0])))).toBe(false)
+  })
+
+  it('404s an unknown or foreign payment id (same answer on purpose)', async () => {
+    serveIntentRow([])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('409s an already-executed intent with its tx hash', async () => {
+    serveIntentRow([{ ...PENDING_ROW, status: 'confirmed', tx_hash: '0x' + '99'.repeat(32) }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('already_executed')
+  })
+
+  it('410s and lazy-expires a stale pending row (the #961 discipline)', async () => {
+    serveIntentRow([{ ...PENDING_ROW, expires_at: new Date(Date.now() - 1000).toISOString() }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(410)
+    expect(res.json().error_code).toBe('expired')
+    expect(mockQuery.mock.calls.some((c) => /UPDATE payment_intents/i.test(String(c[0])))).toBe(true)
+  })
+
+  it('409s a legacy-rail x402 intent (no stored signing payload)', async () => {
+    serveIntentRow([{ ...PENDING_ROW, prepared_user_op: null }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('sign_context_unavailable')
+  })
+})

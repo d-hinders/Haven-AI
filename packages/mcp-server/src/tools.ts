@@ -222,9 +222,9 @@ const PAY_DESCRIPTION = [
   'call haven_get_allowances instead of constructing a payment.',
   'Returns { payment_id, payload_hash, expires_at } when the amount fits the remaining',
   'budget. Sign with the local signer (haven_sign) then relay with haven_submit.',
-  'DELEGATION-RAIL accounts: the result also carries signature_scheme, typed_data and typed_data_b64 —',
-  'pass typed_data_b64 to haven_sign UNCHANGED alongside payload_hash (one opaque string; never',
-  're-type the nested typed_data JSON yourself, #1255); the account validates',
+  'DELEGATION-RAIL accounts (#1263): PREFERRED — call haven_sign with just payment_id; the local',
+  'signer fetches the exact signing payload from Haven itself. Fallback: pass typed_data_b64',
+  'UNCHANGED alongside payload_hash (one opaque string; never re-type the JSON); the account validates',
   'the typed data, and a bare-hash signature is rejected on-chain (#1254).',
   'Returns { status: "pending_approval", payload_hash: null } when the amount',
   'exceeds the budget; the user must approve it in Haven. Haven never receives the signing key.',
@@ -280,7 +280,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     `(${SIGNER_CAPABILITY_SOURCE} and its instructions). If it is not in that set the local signer is out of date: STOP before signing and tell the user to update ` +
     '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has been spent at that point. ' +
     'Finish with two follow-up calls (fast path, recommended): ' +
-    '(1) mcp__haven-signer__haven_sign_x402 on the local signer with payload_hash, x402_expected (the nested x402.expected context, including expires_at), and payment_required → { signature, payment_header }. '+ 'When this result carries signature_scheme (delegation-rail accounts), also pass typed_data_b64 through UNCHANGED — one opaque string, never re-type the nested typed_data JSON (#1255) — that is what the account validates, and the signer will refuse to sign the bare payload_hash without it; ' +
+    '(1) mcp__haven-signer__haven_sign_x402 on the local signer. PREFERRED (#1263): pass just payment_id and payment_required — the signer fetches the exact signing payload and expected context from Haven itself, so you never copy bulky bytes. Fallback (older signers/backends): pass payload_hash, x402_expected (the nested x402.expected context, including expires_at), payment_required, and — on delegation-rail accounts — typed_data_b64 through UNCHANGED, one opaque string, never re-typed (#1255). Returns { signature, payment_header }; ' +
     '(2) mcp__haven__haven_settle_mcp_tool with payment_id, signature, payment_header, merchant_url, tool_name, arguments, and mcp_transport to fund the delegate and settle with the merchant in one call, returning the tool result. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +

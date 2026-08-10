@@ -125,7 +125,10 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     // an agent re-emitting multi-KB nested JSON between tool calls is the
     // failure mode this field removes (a truncated/reshaped payload fails the
     // digest check and the payment refuses, correctly but pointlessly).
-    typed_data_b64: z.string().min(1).optional(),
+    // Bounded: a realistic redemption payload is ~10KB encoded; 256KB is
+    // generous headroom while keeping the offline signer from materializing
+    // arbitrarily large caller input.
+    typed_data_b64: z.string().min(1).max(262144).optional(),
   },
   haven_x402_sign_header: {
     // The parsed HTTP 402 PaymentRequired from the merchant. Typed as an object
@@ -146,7 +149,7 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     // (not z.unknown()) so MCP clients embed it as JSON rather than a string.
     typed_data: z.record(z.string(), z.unknown()).optional(),
     // #1255: see haven_sign.typed_data_b64 — the copy-through-safe form.
-    typed_data_b64: z.string().min(1).optional(),
+    typed_data_b64: z.string().min(1).max(262144).optional(),
   },
 }
 

@@ -132,7 +132,9 @@ the typed data; a bare-hash signature is rejected on-chain (AA24, #1254).
 Legacy-rail results omit all three fields and `haven_sign` signs
 `payload_hash`. The same pair rides `haven_pay_mcp_tool` /
 `haven_pay_x402_quote` results for `haven_sign_x402` / `haven_sign`, where
-`typed_data_b64` wins when both are supplied.
+`typed_data_b64` wins when both are supplied — silently, so a caller that
+supplies both must keep them in sync: on the direct path (no digest check) an
+edited `typed_data` next to a stale `typed_data_b64` would sign the stale one.
 
 Note the trust-model asymmetry: the **x402** typed-data leg
 (`signX402FundingTypedData`) verifies a Haven-authenticated expected context

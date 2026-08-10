@@ -33,6 +33,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { z } from 'zod/v3'
 import { HavenClient, buildX402ExpectedMessage } from '@haven_ai/sdk'
 import { privateKeyToAccount } from 'viem/accounts'
 import { hashTypedData } from 'viem'
@@ -462,6 +463,53 @@ describe('Hosted MCP + Edge Signer integration', () => {
     )
     expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
     expect(JSON.stringify(capturedCalls)).not.toContain(DELEGATE_KEY)
+  })
+
+  it('haven_sign_x402 (the fast path) also accepts typed_data_b64 alone (#1255)', async () => {
+    stubHavenApi('delegation', REALISTIC_TYPED_DATA)
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner)
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+
+    const signed = ok<{ signature: string; payment_header: string }>(
+      await signerHandlers.haven_sign_x402({
+        payload_hash: FUNDING_HASH,
+        typed_data_b64: Buffer.from(JSON.stringify(REALISTIC_TYPED_DATA)).toString('base64'),
+        x402_expected: x402Expected.snake,
+        payment_required: PAYMENT_REQUIRED,
+      }),
+    )
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    expect(signed.payment_header.length).toBeGreaterThan(0)
+  })
+
+  it('version skew degrades gracefully in both directions (#1255)', async () => {
+    // Old signer + new hosted: a zod v3 object schema WITHOUT typed_data_b64
+    // strips the unknown field, leaving typed_data — the pre-#1255 behavior.
+    const oldShape = z.object({
+      payload_hash: z.string(),
+      typed_data: z.record(z.string(), z.unknown()).optional(),
+    })
+    const parsed = oldShape.parse({
+      payload_hash: FUNDING_HASH,
+      typed_data: TYPED_DATA,
+      typed_data_b64: Buffer.from(JSON.stringify(TYPED_DATA)).toString('base64'),
+    })
+    expect('typed_data_b64' in parsed).toBe(false)
+    expect(parsed.typed_data).toEqual(TYPED_DATA)
+
+    // New signer + old hosted (no typed_data_b64): falls back to typed_data.
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner)
+    const x402Expected = await makeX402ExpectedAuth('delegation')
+    const signed = ok<{ signature: string }>(
+      await signerHandlers.haven_sign({
+        payload_hash: FUNDING_HASH,
+        typed_data: TYPED_DATA,
+        x402_expected: x402Expected.snake,
+      }),
+    )
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
   })
 
   it('still refuses an altered payload: one flipped field fails the digest check (#1255)', async () => {

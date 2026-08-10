@@ -7,7 +7,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-08-09" # third sync-back execution (post-ad100f38, the #908-prep promotion) — routine holding
+last-verified: "2026-08-10" # fourth sync-back execution (post-994a4082, the 0.1.19 canary-fix promotion) — routine holding
 ---
 
 # Branch & release flow

@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-10" # PR #1269 re-verify: hosted-only result-mapping change, no published-package or runtime contract change
+last-verified: "2026-08-10" # #1275 re-verify: hosted-only description/response-field change, no published-package or runtime contract change
 ---
 
 # MCP Runtime Compatibility

@@ -60,6 +60,13 @@ export interface PaymentRequest {
 
   /** Recipient Ethereum address (0x...) */
   to: string
+
+  /**
+   * Optional dedupe key (#1207): a retried request with the same key returns
+   * the FIRST request's result instead of minting a second transfer or a
+   * second approval. Same contract as /machine-payments/send. Max 128 chars.
+   */
+  idempotencyKey?: string
 }
 
 export interface SignData {

@@ -627,6 +627,218 @@ describe('payment routes', () => {
     expect(listIdx).toBeGreaterThan(sweepIdx)
   })
 
+  // POST /payments idempotency (#1207) — the same contract the MPP routes
+  // carry, on the same key column (migration 020). A retry returns the FIRST
+  // request's result: no second transfer, no second approval.
+  describe('POST /payments idempotency (#1207)', () => {
+    const ONE_XDAI = 1_000_000_000_000_000_000n
+    const KEY = 'agent-key-1'
+
+    function keyedBody(overrides: Record<string, unknown> = {}) {
+      return { token: 'xDAI', amount: '1', to: RECIPIENT, idempotency_key: KEY, ...overrides }
+    }
+
+    function sendReplayRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: PAYMENT_ID,
+        status: 'pending_signature',
+        expires_at: '2099-01-01T00:00:00.000Z',
+        token_address: TOKEN,
+        token_symbol: 'xDAI',
+        to_address: RECIPIENT.toLowerCase(),
+        amount_raw: '1000000000000000000',
+        amount_human: '1',
+        allowance_nonce: 7,
+        sign_hash: SIGN_HASH,
+        execution_rail: null,
+        prepared_user_op: null,
+        chain_id: AGENT.chain_id,
+        ...overrides,
+      }
+    }
+
+    const intentKeyLookup = (rows: unknown[]): DbRoute => [
+      /send_idempotency_key = \$2[\s\S]*FROM payment_intents|FROM payment_intents[\s\S]*send_idempotency_key = \$2/,
+      () => ({ rows }),
+    ]
+    const approvalKeyLookup = (rows: unknown[]): DbRoute => [
+      /FROM approval_requests[\s\S]*send_idempotency_key = \$2|send_idempotency_key = \$2[\s\S]*FROM approval_requests/,
+      () => ({ rows }),
+    ]
+
+    it('replays a still-signable legacy intent — same sign_data, no new transfer, no chain reads', async () => {
+      primeDb(AUTH, intentKeyLookup([sendReplayRow()]))
+
+      const response = await app.inject({
+        method: 'POST', url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: keyedBody(),
+      })
+
+      expect(response.statusCode).toBe(201)
+      const body = response.json()
+      expect(body).toMatchObject({ payment_id: PAYMENT_ID, idempotent_replay: true })
+      expect(body.sign_data.hash).toBe(SIGN_HASH)
+      expect(body.sign_data.components.nonce).toBe(7)
+      // The whole point: nothing was minted and no chain work ran.
+      expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+      expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
+    })
+
+    it('replays a pending approval as 202 — a retry never opens a second approval', async () => {
+      primeDb(
+        AUTH,
+        intentKeyLookup([]),
+        approvalKeyLookup([
+          {
+            id: 'appr-1',
+            status: 'pending',
+            expires_at: '2099-01-01T00:00:00.000Z',
+            token_symbol: 'xDAI',
+            amount_human: '1',
+            token_address: TOKEN,
+            to_address: RECIPIENT.toLowerCase(),
+            amount_raw: '1000000000000000000',
+          },
+        ]),
+      )
+
+      const response = await app.inject({
+        method: 'POST', url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: keyedBody(),
+      })
+
+      expect(response.statusCode).toBe(202)
+      expect(response.json()).toMatchObject({
+        payment_id: 'appr-1',
+        status: 'pending_approval',
+        idempotent_replay: true,
+      })
+      expect(findCall(/INSERT INTO approval_requests/)).toBeUndefined()
+    })
+
+    it('409s a key reused for a DIFFERENT transfer', async () => {
+      primeDb(AUTH, intentKeyLookup([sendReplayRow({ amount_raw: '999' })]))
+
+      const response = await app.inject({
+        method: 'POST', url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: keyedBody(),
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(response.json().error).toMatch(/different amount/)
+      expect(findCall(/INSERT INTO/)).toBeUndefined()
+    })
+
+    it('lazy-expires a stale pending row and creates fresh — the key never dead-ends (#961 M2)', async () => {
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
+      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+      primeDb(
+        AUTH,
+        intentKeyLookup([sendReplayRow({ expires_at: '2020-01-01T00:00:00.000Z' })]),
+        [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
+        [/INSERT INTO payment_intents/, () => ({ rows: [pendingIntent()] })],
+      )
+
+      const response = await app.inject({
+        method: 'POST', url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: keyedBody(),
+      })
+
+      expect(response.statusCode).toBe(201)
+      expect(response.json().idempotent_replay).toBeUndefined()
+      // Expired the stale row, then minted a fresh one.
+      expect(findCall(/UPDATE payment_intents[\s\S]*expired/)).toBeDefined()
+      expect(findCall(/INSERT INTO payment_intents/)).toBeDefined()
+    })
+
+    it('a fresh create persists the key on the intent row', async () => {
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
+      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+      primeDb(
+        AUTH,
+        intentKeyLookup([]),
+        approvalKeyLookup([]),
+        [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
+        [/INSERT INTO payment_intents/, () => ({ rows: [pendingIntent()] })],
+      )
+
+      const response = await app.inject({
+        method: 'POST', url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: keyedBody(),
+      })
+
+      expect(response.statusCode).toBe(201)
+      const insert = findCall(/INSERT INTO payment_intents/)
+      expect(insert?.sql).toContain('send_idempotency_key')
+      expect(insert?.params).toContain(KEY)
+    })
+
+    it('an idempotency-key race (23505) replays the winner instead of erroring', async () => {
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
+      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+      let lookups = 0
+      primeDb(
+        AUTH,
+        [
+          /send_idempotency_key = \$2[\s\S]*FROM payment_intents|FROM payment_intents[\s\S]*send_idempotency_key = \$2/,
+          // First lookup (pre-insert): nothing. Second (post-race): the winner.
+          () => ({ rows: ++lookups === 1 ? [] : [sendReplayRow()] }),
+        ],
+        approvalKeyLookup([]),
+        [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
+        [/INSERT INTO payment_intents/, () => {
+          const err = new Error('duplicate key') as Error & { code: string }
+          err.code = '23505'
+          throw err
+        }],
+      )
+
+      const response = await app.inject({
+        method: 'POST', url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: keyedBody(),
+      })
+
+      expect(response.statusCode).toBe(201)
+      expect(response.json()).toMatchObject({ payment_id: PAYMENT_ID, idempotent_replay: true })
+    })
+
+    it('a request without a key behaves exactly as before — no lookups, no key persisted', async () => {
+      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
+      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+      primeDb(
+        AUTH,
+        [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
+        [/INSERT INTO payment_intents/, () => ({ rows: [pendingIntent()] })],
+      )
+
+      const response = await app.inject({
+        method: 'POST', url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { token: 'xDAI', amount: '1', to: RECIPIENT },
+      })
+
+      expect(response.statusCode).toBe(201)
+      expect(findCall(/send_idempotency_key = \$2/)).toBeUndefined()
+      const insert = findCall(/INSERT INTO payment_intents/)
+      expect(insert?.params).toContain(null)
+    })
+  })
+
   // POST /payments — the normal send/transfer flow. These pin the coverage
   // decision now routed through decideCoverage('allowance-only'): over-allowance
   // queues (202), within-allowance executes (201), and the inclusive boundary

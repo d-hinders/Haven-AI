@@ -10,12 +10,23 @@ import {
   failSubmittedIntent,
   findIntentForAgent,
   getIntentStatus,
+  findSendIntentByIdempotencyKey,
   insertDelegationIntent,
-  insertLegacyIntent,
+  insertSendIntent,
   listIntentsForAgent,
   releaseSubmittedClaim,
+  type SendIntentReplayRow,
 } from '../infra/repositories/payment-intents.js'
-import { insertPaymentApproval } from '../infra/repositories/approval-requests.js'
+import {
+  findSendApprovalByIdempotencyKey,
+  insertSendApproval,
+} from '../infra/repositories/approval-requests.js'
+import { userOpTypedData } from '../rails/delegation-rail.js'
+import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
+import {
+  agentPaymentStatusHttpCode,
+  getAgentPaymentStatus,
+} from '../modules/payments/agent-payment-status.js'
 import { hasTokenAllowanceConfigured } from '../infra/repositories/agents.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
@@ -85,6 +96,7 @@ function buildResponseFee(intent: PaymentIntentRow) {
 
 // ── Constants ─────────────────────────────────────────────────────
 
+const PG_UNIQUE_VIOLATION = '23505'
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -92,6 +104,7 @@ interface CreatePaymentBody {
   token: string    // e.g. "USDC.e", "xDAI", "EURe"
   amount: string   // human-readable, e.g. "25.50"
   to: string       // recipient address
+  idempotency_key?: string
 }
 
 interface SignPaymentBody {
@@ -149,6 +162,158 @@ function resolveToken(chainId: number, symbol: string) {
 
 // ── Routes ────────────────────────────────────────────────────────
 
+/**
+ * Idempotent-replay lookup for POST /payments (#1207) — the same contract
+ * /machine-payments/send carries on the same key column (migration 020).
+ *
+ * A key that matches an existing row returns the FIRST request's result:
+ * a still-signable intent replays its original sign_data (delegation-rail
+ * rows rebuild the EIP-712 payload from the stored UserOperation, the #961
+ * discipline — never a fresh estimation), a pending approval replays as 202
+ * (a retry must not open a second approval), and anything that has progressed
+ * reports its real status instead of a stale instruction. A key reused for a
+ * DIFFERENT transfer is a 409; a stale pending row is lazily expired so the
+ * key frees up (the #961 M2 lesson). Returns null when the caller should
+ * create a fresh intent.
+ */
+async function findPaymentReplay(
+  agent: AgentContext,
+  idempotencyKey: string,
+  requested: { tokenAddress: string; toAddress: string; amountRaw: string },
+): Promise<{ code: number; body: Record<string, unknown> } | null> {
+  const statusReplay = async (paymentId: string) => {
+    const status = await getAgentPaymentStatus(agent, paymentId)
+    if (status) {
+      return { code: agentPaymentStatusHttpCode(status), body: { ...status, idempotent_replay: true } }
+    }
+    return {
+      code: 409,
+      body: { payment_id: paymentId, error: 'Payment already exists but could not be loaded', idempotent_replay: true },
+    }
+  }
+  const mismatch = (row: { token_address: string; to_address: string; amount_raw: string }): string | null => {
+    if (row.token_address.toLowerCase() !== requested.tokenAddress) return 'token'
+    if (row.to_address.toLowerCase() !== requested.toAddress) return 'recipient'
+    if (row.amount_raw !== requested.amountRaw) return 'amount'
+    return null
+  }
+
+  const pi = await findSendIntentByIdempotencyKey(agent.id, idempotencyKey)
+  if (pi) {
+    const field = mismatch(pi)
+    if (field) {
+      return {
+        code: 409,
+        body: {
+          payment_id: pi.id,
+          status: pi.status,
+          error: `idempotency_key already belongs to a payment with a different ${field}`,
+        },
+      }
+    }
+    if (pi.status !== 'pending_signature') return statusReplay(pi.id)
+    if (new Date(pi.expires_at) < new Date()) {
+      // Lazy-expire: the partial unique index holds the key until the status
+      // flips, so a stale pending row would 23505 every fresh retry forever.
+      await expirePendingIntent(pi.id, agent.id)
+      return null
+    }
+    return { code: 201, body: await replayIntentBody(agent, pi) }
+  }
+
+  const ar = await findSendApprovalByIdempotencyKey(agent.id, idempotencyKey)
+  if (ar) {
+    const field = mismatch(ar)
+    if (field) {
+      return {
+        code: 409,
+        body: {
+          payment_id: ar.id,
+          status: ar.status,
+          error: `idempotency_key already belongs to a payment with a different ${field}`,
+        },
+      }
+    }
+    if (ar.status !== 'pending') return statusReplay(ar.id)
+    return {
+      code: 202,
+      body: {
+        payment_id: ar.id,
+        kind: 'approval_request',
+        status: 'pending_approval',
+        phase: AgentPaymentPhase.UserApprovalRequired,
+        next_action: AgentPaymentNextAction.WaitForUserApproval,
+        message: `Payment of ${ar.amount_human} ${ar.token_symbol} is queued for owner approval.`,
+        requested: ar.amount_human,
+        token: ar.token_symbol,
+        expires_at: ar.expires_at,
+        idempotent_replay: true,
+      },
+    }
+  }
+
+  return null
+}
+
+/** The original 201 body for a still-signable intent, rebuilt from the row. */
+async function replayIntentBody(
+  agent: AgentContext,
+  pi: SendIntentReplayRow,
+): Promise<Record<string, unknown>> {
+  if (pi.execution_rail === 'delegation' && pi.prepared_user_op != null) {
+    // #961: reconstruct the EXACT signing payload from the stored
+    // UserOperation — a fresh estimation would be a different payload (new
+    // nonce/gas), and the intent pinned this one.
+    const state = deserializeUserOp(pi.prepared_user_op) as Record<string, unknown>
+    const accountAddress = await computeHybridAccountAddress(pi.chain_id, {
+      ownerAddress: agent.delegate_address as `0x${string}`,
+    })
+    return {
+      payment_id: pi.id,
+      status: pi.status,
+      expires_at: pi.expires_at,
+      idempotent_replay: true,
+      sign_data: {
+        hash: pi.sign_hash,
+        signature_scheme: 'eip712_userop',
+        typed_data: userOpTypedData(state, accountAddress as `0x${string}`, pi.chain_id),
+        components: {
+          account: accountAddress,
+          token: pi.token_address,
+          to: pi.to_address,
+          amount: pi.amount_raw,
+        },
+        instructions:
+          'Sign sign_data.typed_data with your delegate (agent) key using EIP-712 ' +
+          '(signTypedData; @haven_ai/sdk does this automatically). Then POST ' +
+          `/payments/${pi.id}/sign with { signature } — Haven relays it; ` +
+          'your budget delegation authorizes it on-chain.',
+      },
+    }
+  }
+  return {
+    payment_id: pi.id,
+    status: pi.status,
+    expires_at: pi.expires_at,
+    idempotent_replay: true,
+    sign_data: {
+      hash: pi.sign_hash,
+      components: {
+        safe: agent.safe_address,
+        token: pi.token_address,
+        to: pi.to_address,
+        amount: pi.amount_raw,
+        payment_token: ZERO_ADDRESS,
+        payment: '0',
+        nonce: pi.allowance_nonce,
+      },
+      instructions:
+        'Sign the hash with your delegate private key using raw ECDSA (not eth_sign). ' +
+        'The signature must be 65 bytes: r (32) + s (32) + v (1), where v is 27 or 28.',
+    },
+  }
+}
+
 export default async function paymentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', agentAuthMiddleware)
 
@@ -156,7 +321,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
   app.post<{ Body: CreatePaymentBody }>('/', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
-    const { token, amount, to } = request.body
+    const { token, amount, to, idempotency_key } = request.body
 
     // 1. Validate inputs
     if (!token || typeof token !== 'string') {
@@ -167,6 +332,12 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     }
     if (!to || !isValidAddress(to)) {
       return reply.code(400).send({ error: 'Valid recipient address is required' })
+    }
+    if (
+      idempotency_key !== undefined &&
+      (typeof idempotency_key !== 'string' || idempotency_key.length === 0 || idempotency_key.length > 128)
+    ) {
+      return reply.code(400).send({ error: 'idempotency_key must be a non-empty string of at most 128 characters' })
     }
 
     // 2. Resolve token for agent's chain
@@ -192,6 +363,21 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
     if (amountRaw <= 0n) {
       return reply.code(400).send({ error: 'Amount must be greater than zero' })
+    }
+
+    // 3a. Idempotent replay (#1207): a retried request must return the FIRST
+    // request's result, never mint a second transfer or a second approval —
+    // the same contract /machine-payments/send has carried since migration
+    // 020, on the same key column, so agents get one mechanism, not a
+    // per-route dialect. Runs before any chain read: a replay costs two
+    // indexed lookups.
+    if (idempotency_key) {
+      const replay = await findPaymentReplay(agent, idempotency_key, {
+        tokenAddress: tokenAddress.toLowerCase(),
+        toAddress: to.toLowerCase(),
+        amountRaw: amountRaw.toString(),
+      })
+      if (replay) return reply.code(replay.code).send(replay.body)
     }
 
     // 4. Resolve the execution rail first — the token-configuration gate is
@@ -252,26 +438,42 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         })
       }
 
-      const delegationIntent = await insertDelegationIntent({
-        agentId: agent.id,
-        userId: agent.user_id,
-        safeAddress: agent.safe_address,
-        chainId: agent.chain_id,
-        tokenSymbol: tokenConfig.symbol,
-        tokenAddress,
-        toAddress: to.toLowerCase(),
-        amountRaw: amountRaw.toString(),
-        amountHuman: amount,
-        delegateAddress: agent.delegate_address,
-        allowanceNonce: 0, // AllowanceModule-only concept; unused on this rail
-        signHash: authorization.prepared.userOpHash,
-        executionRail: 'delegation',
-        delegationHash: authorization.delegationHash,
-        // #1059: direct transfers redeem the budget itself — same value,
-        // written to both so consumers read ONE column across schemes.
-        budgetDelegationHash: authorization.delegationHash,
-        preparedUserOp: serializeUserOp(authorization.prepared.userOperation),
-      })
+      let delegationIntent
+      try {
+        delegationIntent = await insertDelegationIntent({
+          agentId: agent.id,
+          userId: agent.user_id,
+          safeAddress: agent.safe_address,
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          tokenAddress,
+          toAddress: to.toLowerCase(),
+          amountRaw: amountRaw.toString(),
+          amountHuman: amount,
+          delegateAddress: agent.delegate_address,
+          allowanceNonce: 0, // AllowanceModule-only concept; unused on this rail
+          signHash: authorization.prepared.userOpHash,
+          executionRail: 'delegation',
+          delegationHash: authorization.delegationHash,
+          // #1059: direct transfers redeem the budget itself — same value,
+          // written to both so consumers read ONE column across schemes.
+          budgetDelegationHash: authorization.delegationHash,
+          preparedUserOp: serializeUserOp(authorization.prepared.userOperation),
+          sendIdempotencyKey: idempotency_key ?? null,
+        })
+      } catch (err) {
+        // Lost the idempotency-key race with a concurrent request (migration
+        // 020's partial unique index) — replay the winner (#1207).
+        if (idempotency_key && (err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
+          const replay = await findPaymentReplay(agent, idempotency_key, {
+            tokenAddress: tokenAddress.toLowerCase(),
+            toAddress: to.toLowerCase(),
+            amountRaw: amountRaw.toString(),
+          })
+          if (replay) return reply.code(replay.code).send(replay.body)
+        }
+        throw err
+      }
 
       return reply.code(201).send({
         payment_id: delegationIntent.id,
@@ -356,18 +558,34 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         reason ??
         `Exceeds remaining allowance (${amount} ${tokenConfig.symbol} requested, ${remainingHuman} available)`
 
-      const approval = await insertPaymentApproval({
-        agentId: agent.id,
-        userId: agent.user_id,
-        safeAddress: agent.safe_address,
-        chainId: agent.chain_id,
-        tokenSymbol: tokenConfig.symbol,
-        tokenAddress,
-        toAddress: to.toLowerCase(),
-        amountRaw: amountRaw.toString(),
-        amountHuman: amount,
-        reason: approvalReason,
-      })
+      let approval
+      try {
+        approval = await insertSendApproval({
+          agentId: agent.id,
+          userId: agent.user_id,
+          safeAddress: agent.safe_address,
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          tokenAddress,
+          toAddress: to.toLowerCase(),
+          amountRaw: amountRaw.toString(),
+          amountHuman: amount,
+          reason: approvalReason,
+          sendIdempotencyKey: idempotency_key ?? null,
+        })
+      } catch (err) {
+        // A retried request whose first attempt queued an approval must
+        // return THAT approval, not open a second one (#1207).
+        if (idempotency_key && (err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
+          const replay = await findPaymentReplay(agent, idempotency_key, {
+            tokenAddress: tokenAddress.toLowerCase(),
+            toAddress: to.toLowerCase(),
+            amountRaw: amountRaw.toString(),
+          })
+          if (replay) return reply.code(replay.code).send(replay.body)
+        }
+        throw err
+      }
       return reply.code(202).send({
         payment_id: approval.id,
         kind: 'approval_request',
@@ -429,20 +647,34 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     }
 
     // 7. Store the intent
-    const intent = await insertLegacyIntent({
-      agentId: agent.id,
-      userId: agent.user_id,
-      safeAddress: agent.safe_address,
-      chainId: agent.chain_id,
-      tokenSymbol: tokenConfig.symbol,
-      tokenAddress,
-      toAddress: to.toLowerCase(),
-      amountRaw: amountRaw.toString(),
-      amountHuman: amount,
-      delegateAddress: agent.delegate_address,
-      allowanceNonce: onChainAllowance.nonce,
-      signHash,
-    })
+    let intent
+    try {
+      intent = await insertSendIntent({
+        agentId: agent.id,
+        userId: agent.user_id,
+        safeAddress: agent.safe_address,
+        chainId: agent.chain_id,
+        tokenSymbol: tokenConfig.symbol,
+        tokenAddress,
+        toAddress: to.toLowerCase(),
+        amountRaw: amountRaw.toString(),
+        amountHuman: amount,
+        delegateAddress: agent.delegate_address,
+        allowanceNonce: onChainAllowance.nonce,
+        signHash,
+        sendIdempotencyKey: idempotency_key ?? null,
+      })
+    } catch (err) {
+      if (idempotency_key && (err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
+        const replay = await findPaymentReplay(agent, idempotency_key, {
+          tokenAddress: tokenAddress.toLowerCase(),
+          toAddress: to.toLowerCase(),
+          amountRaw: amountRaw.toString(),
+        })
+        if (replay) return reply.code(replay.code).send(replay.body)
+      }
+      throw err
+    }
 
     return reply.code(201).send({
       payment_id: intent.id,

@@ -99,6 +99,7 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     token: z.string().min(1),
     amount: z.string().min(1),
     to: z.string().min(1),
+    idempotency_key: z.string().min(1).max(128).optional(),
   },
   haven_submit: {
     payment_id: z.string().min(1),
@@ -583,6 +584,9 @@ export function createToolHandlers(
             token: args.asset,
             amount: args.amount,
             to: args.recipient,
+            // #1207: was accepted by this tool's schema but silently dropped —
+            // now carried to the backend's replay contract.
+            idempotencyKey: args.idempotency_key,
           })
           return {
             payment_id: intent.paymentId,
@@ -618,6 +622,7 @@ export function createToolHandlers(
             token: args.token,
             amount: args.amount,
             to: args.to,
+            idempotencyKey: args.idempotency_key,
           })
           return {
             payment_id: intent.paymentId,

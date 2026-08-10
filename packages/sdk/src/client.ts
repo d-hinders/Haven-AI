@@ -476,6 +476,7 @@ export class HavenClient {
       token: request.token,
       amount: request.amount,
       to: request.to,
+      ...(request.idempotencyKey ? { idempotency_key: request.idempotencyKey } : {}),
     })
 
     // Haven returns HTTP 202 with this status when the requested amount

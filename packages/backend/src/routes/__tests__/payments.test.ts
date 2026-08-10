@@ -359,8 +359,8 @@ describe('payment routes', () => {
 
   it('claims a pending signature intent before executing on-chain', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
-    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '1.00', eur: '0.92' })
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '1.00', eur: '0.92' })
 
     primeDb(...signRoutes({ intent: pendingIntent(), claimWins: true }))
 
@@ -417,8 +417,8 @@ describe('payment routes', () => {
 
   it('creates base evidence after a protocol payment is confirmed', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
-    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '1.00', eur: '0.92' })
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '1.00', eur: '0.92' })
 
     const x402Fields = {
       payment_rail: 'x402',
@@ -462,8 +462,8 @@ describe('payment routes', () => {
 
   it('still returns confirmed when protocol evidence indexing fails', async () => {
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
-    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: '1.00', eur: '0.92' })
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '1.00', eur: '0.92' })
 
     primeDb(
       [/machine_payment_evidence/, () => Promise.reject(new Error('evidence table unavailable'))],
@@ -740,10 +740,10 @@ describe('payment routes', () => {
     })
 
     it('lazy-expires a stale pending row and creates fresh — the key never dead-ends (#961 M2)', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
       allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
-      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
       primeDb(
         AUTH,
         intentKeyLookup([sendReplayRow({ expires_at: '2020-01-01T00:00:00.000Z' })]),
@@ -765,10 +765,10 @@ describe('payment routes', () => {
     })
 
     it('a fresh create persists the key on the intent row', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
       allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
-      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
       primeDb(
         AUTH,
         intentKeyLookup([]),
@@ -790,10 +790,10 @@ describe('payment routes', () => {
     })
 
     it('an idempotency-key race (23505) replays the winner instead of erroring', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
       allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
-      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
       let lookups = 0
       primeDb(
         AUTH,
@@ -880,10 +880,10 @@ describe('payment routes', () => {
     })
 
     it('a request without a key behaves exactly as before — no lookups, no key persisted', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
       allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
-      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
       primeDb(
         AUTH,
         [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
@@ -925,8 +925,8 @@ describe('payment routes', () => {
     ]
 
     it('queues for approval (202) when amount exceeds remaining allowance', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
       allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI / 2n })
 
       primeDb(...createRoutes)
@@ -946,10 +946,10 @@ describe('payment routes', () => {
     })
 
     it('executes (201) when amount is within remaining allowance', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
       allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI * 2n })
-      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
 
       primeDb(...createRoutes)
 
@@ -968,10 +968,10 @@ describe('payment routes', () => {
     it('executes (201) at the exact allowance boundary (amount == remaining)', async () => {
       // Inclusive boundary: amount == remaining must execute, not queue. Guards
       // against a `>=` slip in the shared decideCoverage decision.
-      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_900_000_000)
+      allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_900_000_000)
       allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: ONE_XDAI })
-      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+      allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
 
       primeDb(...createRoutes)
 

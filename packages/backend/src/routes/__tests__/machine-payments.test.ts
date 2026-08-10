@@ -2141,28 +2141,34 @@ describe('machine payment routes', () => {
       // mismatch refusal must hold in BOTH routes, or a /payments-created key
       // replays here with the new request's labels on the old sign_data
       // (review finding on #1207 — this test fails on the pre-fix code).
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        // findSendIntentByIdempotencyKey: an existing row for a different transfer
-        .mockResolvedValueOnce({
-          rows: [
-            {
-              id: SEND_PAYMENT_ID,
-              status: 'pending_signature',
-              expires_at: '2099-01-01T00:10:00.000Z',
-              token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-              token_symbol: 'USDC',
-              to_address: '0x0000000000000000000000000000000000000abc',
-              amount_raw: '10000000',
-              amount_human: '10',
-              allowance_nonce: 5,
-              sign_hash: SEND_HASH,
-              execution_rail: null,
-              prepared_user_op: null,
-              chain_id: 8453,
-            },
-          ],
-        })
+      // Content-dispatch, not a positional chain: each query is answered by
+      // what its SQL asks for, so the test cannot pass on call-order luck.
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes('api_key_hash')) return Promise.resolve(authRow())
+        if (sql.includes('send_idempotency_key')) {
+          // findSendIntentByIdempotencyKey: an existing row for a different transfer
+          return Promise.resolve({
+            rows: [
+              {
+                id: SEND_PAYMENT_ID,
+                status: 'pending_signature',
+                expires_at: '2099-01-01T00:10:00.000Z',
+                token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+                token_symbol: 'USDC',
+                to_address: '0x0000000000000000000000000000000000000abc',
+                amount_raw: '10000000',
+                amount_human: '10',
+                allowance_nonce: 5,
+                sign_hash: SEND_HASH,
+                execution_rail: null,
+                prepared_user_op: null,
+                chain_id: 8453,
+              },
+            ],
+          })
+        }
+        throw new Error(`unexpected query in mismatch test: ${sql.slice(0, 80)}`)
+      })
 
       const response = await app.inject({
         method: 'POST',

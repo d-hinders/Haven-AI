@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-08-09" # #1210: per-file counts enforced (redistribution fails), gauge figure refreshed 69→68
+last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Module Boundaries

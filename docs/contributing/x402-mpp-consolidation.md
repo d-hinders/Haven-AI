@@ -13,7 +13,7 @@ covers:
   - packages/backend/src/routes/__tests__/x402.test.ts
   - packages/backend/src/routes/__tests__/machine-payments.test.ts
   - docs/contributing/ai-agent-workflow.md
-last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
+last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # x402 / Machine-Payment Consolidation (PT-1)

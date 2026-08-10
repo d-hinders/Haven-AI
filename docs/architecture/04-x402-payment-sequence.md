@@ -17,6 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
+  - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
 last-verified: "2026-08-10" # #1272: x402 quote tools compact by default; include_signing_payload restores the full payload
 ---
 

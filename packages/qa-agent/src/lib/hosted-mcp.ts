@@ -250,6 +250,8 @@ export interface HostedPayMcpToolResult {
   expires_at?: string
   signature_scheme?: string
   typed_data?: Record<string, unknown>
+  /** #1255 opaque transport; absent by default since #1272 (compact quotes). */
+  typed_data_b64?: string
   x402?: { expected?: HostedX402Expected }
   payment_required?: Record<string, unknown>
   amount_atomic?: string

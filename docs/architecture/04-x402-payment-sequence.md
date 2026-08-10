@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-10" # re-verified for #1254: haven_sign now also signs typed_data on the DIRECT payment path; every x402 claim here (expected-context v2, x402_binding, digest equality) is unchanged
+last-verified: "2026-08-10" # re-verified for #1255: typed_data_b64 transport documented in the v2 table; every binding/digest/settle claim unchanged
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -196,7 +196,7 @@ contents rather than announced:
 | Version | Carries | Signer may sign |
 |---|---|---|
 | v1 | no `typedDataHash` | the bare hash (raw ECDSA) — legacy rail |
-| v2 | `typedDataHash` | `sign_data.typed_data` (EIP-712) — delegation rail |
+| v2 | `typedDataHash` | `sign_data.typed_data` (EIP-712) — delegation rail. Since #1255 the same payload also travels as `typed_data_b64`, one opaque base64 string agents should relay unchanged (a re-emitted multi-KB JSON copy is the failure mode); the signer decodes it into this same digest check |
 
 The signer refuses the mismatch **in both directions**: raw-signing the hash of
 a v2 intent (the account would reject that signature on-chain, after the intent

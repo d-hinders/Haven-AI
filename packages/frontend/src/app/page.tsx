@@ -8,19 +8,19 @@ import { StepList } from '@/components/marketing/StepList'
 import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
 import { FlowCard } from '@/components/marketing/FlowCard'
 
-const INTEGRATIONS = ['Base', 'Gnosis Chain', 'x402', 'Stripe MPP', 'USDC', 'EURe']
+const INTEGRATIONS = ['Base', 'x402', 'Stripe MPP', 'USDC']
 
 const PROBLEM_CARDS = [
   {
     title: 'Agents hit paywalls and stop',
-    body: 'Most agents have no way to pay for the services they need. The moment they hit a paywall — an API call, a subscription, a per‑use fee — the workflow stalls and a human has to step in. Autonomy ends at the checkout.',
+    body: 'Most agents have no way to pay for the services they need. The moment they hit a paywall, an API call, a subscription, or a per‑use fee, the workflow stalls and a human has to step in. Autonomy ends at the checkout.',
   },
   {
     title: "Traditional payments weren't built for agents",
     body: 'Cards, bank transfers, and checkout flows assume a human is present to approve, sign in, or solve a captcha. Agents get blocked, abandoned, or forced into shared credentials. The rails simply don’t speak agent.',
   },
   {
-    title: 'Stablecoins are the obvious rail — and the obvious risk',
+    title: 'Stablecoins are the obvious rail, and the obvious risk',
     body: 'Stablecoins were practically built for AI agents: instant, programmable, global, machine‑native. But giving an agent a private key means unlimited authority, no spend caps, and no audit trail. The right rail becomes the fastest way to lose control.',
   },
 ]
@@ -28,15 +28,15 @@ const PROBLEM_CARDS = [
 const HAVEN_MODEL = [
   {
     title: 'A non‑custodial account',
-    body: 'Your funds live in a Haven account that only you control. Nothing moves without your rules clearing first — if Haven vanished tomorrow, your money would still be yours.',
+    body: 'Your funds live in a Haven account that only you control. Nothing moves without your rules clearing first. If Haven vanished tomorrow, your money would still be yours.',
   },
   {
     title: 'A policy engine',
-    body: 'Every payment is checked against your rules before it moves. Spending limits, approved currencies, approval thresholds — your policies, enforced before the transaction is sent.',
+    body: 'Every payment is checked against your rules before it moves. Spending limits, approved currencies, approval thresholds. Your policies, enforced before the transaction is sent.',
   },
   {
     title: 'A scoped agent credential',
-    body: 'Agents carry a payment credential — scoped to what you allow and revocable at any time. If a credential leaks, you rotate it; your funds stay exactly where they were.',
+    body: 'Agents carry a payment credential, scoped to what you allow and revocable at any time. If a credential leaks, you rotate it and your funds stay exactly where they were.',
   },
 ]
 
@@ -54,7 +54,7 @@ const HOW_IT_WORKS = [
   {
     step: '03',
     title: 'Connect your agent',
-    body: 'Add your Haven credential to Claude, GPT, or your own agent. It can now make payments — only within the rules you set.',
+    body: 'Add your Haven credential to Claude, GPT, or your own agent. It can now make payments, only within the rules you set.',
   },
 ]
 
@@ -68,27 +68,27 @@ const POLICY_METRICS = [
 const DIFFERENTIATORS = [
   {
     title: 'Agent‑native by design',
-    body: 'Agents send simple requests — “pay this merchant 50 USDC.” Haven takes it from there, so your agent never has to deal with the moving parts underneath.',
+    body: 'Agents send simple requests, like “pay this merchant 50 USDC.” Haven takes it from there, so your agent never has to deal with the moving parts underneath.',
   },
   {
     title: 'Works with any agent',
-    body: 'Plugs into Claude, GPT, custom scripts, or any agent framework you already use. Haven doesn’t care where or how your agents run — bring your own setup.',
+    body: 'Plugs into Claude, GPT, custom scripts, or any agent framework you already use. Haven doesn’t care where or how your agents run. Bring your own setup.',
   },
   {
     title: 'Audit‑first',
-    body: 'Every payment is logged — which agent asked, which rule let it through, and when it cleared. Pull a complete trail for any agent, anytime — for ops, for compliance, or for your own peace of mind.',
+    body: 'Every payment is logged with which agent asked, which rule let it through, and when it cleared. Pull a complete trail for any agent, anytime, for ops, for compliance, or for your own peace of mind.',
   },
   {
     title: 'Layered security',
-    body: 'Five independent layers — your Haven account, your rules, your agent credentials, your approval flows, and a full audit trail. No single point of failure.',
+    body: 'Five independent layers protect your account: your rules, your agent credentials, your approval flows, and a full audit trail. No single point of failure.',
   },
   {
     title: 'Live today',
-    body: 'Live on Gnosis Chain and Base, with USDC and EURe supported. More networks and fiat support coming next.',
+    body: 'Live on Base, with USDC supported. More networks and fiat support coming next.',
   },
   {
     title: 'Built to integrate',
-    body: 'A clean API, a credential to drop in, and the open standards your agent already uses. Connect Haven to your existing setup in minutes — not weeks.',
+    body: 'A clean API, a credential to drop in, and the open standards your agent already uses. Connect Haven to your existing setup in minutes, not weeks.',
   },
 ]
 
@@ -127,7 +127,7 @@ export default function Home() {
               </h1>
 
               <p className="text-[17px] md:text-[18px] leading-relaxed text-[var(--v2-ink-2)] mb-8 max-w-[520px]">
-                An account for your agents. You set the rules — they pay within them,
+                An account for your agents. You set the rules, and they pay within them,
                 never beyond. No shared cards. No unlimited access.
               </p>
 
@@ -162,7 +162,7 @@ export default function Home() {
       <Section
         eyebrow="The problem"
         title="Agents need money. Today, there's no safe way to give it to them."
-        lede="Hardcoded credentials, shared cards, manual approvals — every workaround undoes the value of automation."
+        lede="Hardcoded credentials, shared cards, manual approvals. Every workaround undoes the value of automation."
         className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]"
       >
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -180,7 +180,7 @@ export default function Home() {
       {/* The Haven model */}
       <Section
         eyebrow="The Haven model"
-        title="A wallet built around rules — not keys."
+        title="A wallet built around rules, not keys."
         lede="Your money stays in your account. Haven is the rules layer between your agents and your funds, checking every payment against the policies you set. Three pieces work together to make that possible."
       >
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -281,7 +281,7 @@ export default function Home() {
       <Section
         eyebrow="Protocol native"
         title="Open standards on stablecoin rails."
-        lede="Stablecoins give agents money that moves at their speed. Haven speaks the open standards that ride on those rails — x402 for pay‑per‑request flows, Stripe MPP for broader agent commerce — all under the same rule set."
+        lede="Stablecoins give agents money that moves at their speed. Haven speaks the open standards that ride on those rails: x402 for pay‑per‑request flows and Stripe MPP for broader agent commerce, all under the same rule set."
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <Card hover={false} className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group">
@@ -290,7 +290,7 @@ export default function Home() {
                 HTTP paywalls
               </div>
               <h3 className="text-[18px] font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
-                x402 — pay‑per‑request HTTP
+                x402, pay‑per‑request HTTP
               </h3>
               <p className="text-[14px] leading-relaxed text-[var(--v2-ink-2)] mb-4">
                 Agents resolve HTTP 402 paywalls autonomously. Haven evaluates the payment
@@ -311,10 +311,10 @@ export default function Home() {
                 Stablecoin checkout
               </div>
               <h3 className="text-[18px] font-semibold tracking-tight text-[var(--v2-ink)] mb-2">
-                Stripe MPP — agent‑initiated payments
+                Stripe MPP, agent‑initiated payments
               </h3>
               <p className="text-[14px] leading-relaxed text-[var(--v2-ink-2)] mb-4">
-                Stripe's Machine Payments Protocol works across rails — stablecoins on‑chain
+                Stripe's Machine Payments Protocol works across rails. Stablecoins on‑chain
                 today, fiat to follow. Haven implements the stablecoin path now.
               </p>
               <span className="text-[13px] font-medium text-[var(--v2-brand)] inline-flex items-center gap-1 group-hover:gap-2 transition-all">
@@ -332,7 +332,7 @@ export default function Home() {
       <Section
         eyebrow="Why Haven"
         title="The hard parts of agent payments, already solved."
-        lede="Safe agent payments take more than a wallet. Policy, credentials, audit, and open‑standard rails — Haven gives you all of it, wired together, on day one."
+        lede="Safe agent payments take more than a wallet. Policy, credentials, audit, and open‑standard rails all have to be wired together, and Haven gives you that on day one."
         className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]"
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">

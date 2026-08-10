@@ -317,7 +317,7 @@ export default function SignupPage() {
               <TrustRow
                 delayMs={260}
                 title="An account wallet you own"
-                description="Create it with a passkey or your existing wallet. You hold the funds — Haven never does."
+                description="Create it with a passkey or your existing wallet. You hold the funds, and Haven never does."
               />
               <TrustRow
                 delayMs={340}
@@ -327,7 +327,7 @@ export default function SignupPage() {
               <TrustRow
                 delayMs={420}
                 title="No surprises in production"
-                description="Every payment is logged with the agent, the policy, and the outcome — auditable from day one."
+                description="Every payment is logged with the agent, the policy, and the outcome, so the trail is auditable from day one."
               />
             </div>
           </div>

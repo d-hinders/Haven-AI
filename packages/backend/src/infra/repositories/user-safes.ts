@@ -501,8 +501,15 @@ export async function findExecutionRailForAgent(
  * cannot tell a delegation account from a legacy one and dead-ends delegation
  * users at the wallet approval (#1069). `auth.test.ts` guards that field.
  */
-export const LIST_SESSION_SAFES_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name, is_default, created_at, account_type
-       FROM user_safes WHERE user_id = $1 ORDER BY created_at ASC`
+export const LIST_SESSION_SAFES_FOR_USER_SQL = `SELECT us.id, us.safe_address, us.chain_id, us.name, us.is_default, us.created_at, us.account_type,
+              us.owner_address,
+              COALESCE(hap.passkey_count, 0)::int AS passkey_count
+       FROM user_safes us
+       LEFT JOIN (
+         SELECT user_safe_id, COUNT(*) AS passkey_count
+           FROM hybrid_account_passkeys GROUP BY user_safe_id
+       ) hap ON hap.user_safe_id = us.id
+       WHERE us.user_id = $1 ORDER BY us.created_at ASC`
 
 /** One row of the session payload's `safes` array. */
 export interface SessionSafeRow {
@@ -513,6 +520,16 @@ export interface SessionSafeRow {
   is_default: boolean
   created_at: string
   account_type: string | null
+  /**
+   * #1205: raw signer-set inputs for `needsBackupSignerRecommendation`. The
+   * repository serves FACTS; the auth route maps them through the predicate
+   * (`modules/accounts/mainnet-gate.ts`) so chain classification lives in
+   * exactly one place. Passkey count is the delegation-rail signer table
+   * (`hybrid_account_passkeys`); legacy-rail safes count 0 there, and their
+   * signer truth stays on-chain (the dashboard reads it via approvers).
+   */
+  owner_address: string | null
+  passkey_count: number
 }
 
 /** `userId` is REQUIRED — it is the tenant scope of the whole payload. */

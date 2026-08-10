@@ -9,6 +9,7 @@ import {
   insertUser,
 } from '../infra/repositories/users.js'
 import { listSessionSafesForUser } from '../infra/repositories/user-safes.js'
+import { sessionSafePayload } from '../modules/accounts/mainnet-gate.js'
 
 const SALT_ROUNDS = 10
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -141,7 +142,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       { expiresIn: '7d' },
     )
 
-    const safes = await listSessionSafesForUser(user.id)
+    const safes = (await listSessionSafesForUser(user.id)).map(sessionSafePayload)
 
     return {
       token,
@@ -169,7 +170,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       throw { statusCode: 404, message: 'User not found' }
     }
 
-    const safes = await listSessionSafesForUser(sub)
+    const safes = (await listSessionSafesForUser(sub)).map(sessionSafePayload)
 
     return { ...profile, safes }
   })

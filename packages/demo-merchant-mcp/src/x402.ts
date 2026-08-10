@@ -100,8 +100,9 @@ const USDC_TRANSFER_WITH_AUTHORIZATION_ABI = [
 // that signed an ERC-7710 delegation; verification is by *simulating*
 // `delegationManager.redeemDelegations(...)` (no ECDSA recovery), and settlement
 // submits that same call from the settlement key — so the settlement key is the
-// redeemer and any redeemer caveat in the delegation must name it. Testnet-only:
-// the flag is enforced at the composition root (index.ts) to Base Sepolia.
+// redeemer and any redeemer caveat in the delegation must name it. The
+// composition root pins the DelegationManager per configured Base chain and
+// omits ERC-7710 from accepts unless that pin is configured.
 
 export const ERC7710_TRANSFER_METHOD = 'erc7710'
 
@@ -192,8 +193,7 @@ export interface SettlementClient {
 }
 
 export interface X402PaymentProcessorOptions {
-  /** Advertise + accept the experimental erc7710 assetTransferMethod.
-   *  Chain gating (Base Sepolia only) is enforced at the composition root. */
+  /** Advertise + accept the experimental erc7710 assetTransferMethod. */
   erc7710?: {
     /** The only DelegationManager contract this merchant will simulate against
      *  and settle through. The payload's delegationManager is attacker-supplied;
@@ -570,7 +570,7 @@ export function buildPaymentRequired(params: {
     payTo: params.merchantAddress,
     maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
     asset: USDC_ADDRESS,
-    extra: { name: USDC_DOMAIN_NAME, version: USDC_DOMAIN_VERSION, assetTransferMethod: 'eip3009' },
+    extra: { name: USDC_DOMAIN_NAME, version: USDC_DOMAIN_VERSION },
   }
   const erc7710Option: PaymentRequirements = {
     ...eip3009Option,
@@ -716,7 +716,8 @@ function assertPaymentOptionMatches(
       throw new PaymentError('Payment accepted option does not echo assetTransferMethod erc7710')
     }
   } else if (method === 'eip3009') {
-    if (accepted.extra?.assetTransferMethod !== 'eip3009') {
+    const acceptedMethod = accepted.extra?.assetTransferMethod
+    if (acceptedMethod !== undefined && acceptedMethod !== 'eip3009') {
       throw new PaymentError('Payment accepted option does not echo assetTransferMethod eip3009')
     }
     if (

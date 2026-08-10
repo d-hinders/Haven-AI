@@ -8,10 +8,14 @@
  * Getting it wrong breaks `transferWithAuthorization` signature verification, so
  * it is tracked per chain here, not hardcoded.
  */
+import { getAddress, isAddress, type Address } from 'viem'
+
 interface MerchantChainConfig {
   usdcAddress: `0x${string}`
   usdcDomainName: string
   usdcDomainVersion: string
+  /** Pinned to the same in-repo DelegationManager registry as the backend. */
+  delegationManager: Address
 }
 
 const CHAINS: Record<number, MerchantChainConfig> = {
@@ -19,11 +23,13 @@ const CHAINS: Record<number, MerchantChainConfig> = {
     usdcAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
     usdcDomainName: 'USD Coin',
     usdcDomainVersion: '2',
+    delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
   },
   84532: {
     usdcAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     usdcDomainName: 'USDC',
     usdcDomainVersion: '2',
+    delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
   },
 }
 
@@ -39,9 +45,10 @@ if (!chain) {
 export const USDC_ADDRESS = chain.usdcAddress
 export const USDC_DOMAIN_NAME = chain.usdcDomainName
 export const USDC_DOMAIN_VERSION = chain.usdcDomainVersion
-export const SUPPORTED_SETTLEMENT_METHODS = ['erc7710', 'eip3009'] as const
+export const TRUSTED_DELEGATION_MANAGER = chain.delegationManager
+export const SUPPORTED_SETTLEMENT_METHODS = ['eip3009', 'erc7710'] as const
 export type SettlementMethod = (typeof SUPPORTED_SETTLEMENT_METHODS)[number]
-export const DEFAULT_SETTLEMENT_METHOD: SettlementMethod = 'erc7710'
+export const DEFAULT_SETTLEMENT_METHOD: SettlementMethod = 'eip3009'
 export type MerchantEnvironment = 'dev' | 'prod'
 export const HOSTED_DEMO_MERCHANT_URLS: Record<MerchantEnvironment, string> = {
   dev: 'https://demo-merchant-dev-84e4.up.railway.app',
@@ -54,6 +61,16 @@ export function merchantEnvironmentForChain(chainId = CHAIN_ID): MerchantEnviron
 
 export function hostedMerchantBaseUrlForChain(chainId = CHAIN_ID): string {
   return HOSTED_DEMO_MERCHANT_URLS[merchantEnvironmentForChain(chainId)]
+}
+
+export function trustedDelegationManagerForChain(chainId = CHAIN_ID): Address | undefined {
+  return CHAINS[chainId]?.delegationManager
+}
+
+export function isTrustedDelegationManagerForChain(value: unknown, chainId = CHAIN_ID): value is Address {
+  const trusted = trustedDelegationManagerForChain(chainId)
+  if (!trusted || typeof value !== 'string' || !isAddress(value)) return false
+  return getAddress(value) === getAddress(trusted)
 }
 
 export type ProductId =

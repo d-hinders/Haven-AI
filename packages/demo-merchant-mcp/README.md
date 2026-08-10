@@ -45,20 +45,21 @@ Every product advertises x402 capability metadata through `list_products`:
 
 - `network`: `eip155:8453` on prod/mainnet, or `eip155:84532` when configured for dev/testnet
 - `asset`: USDC
-- `settlement_methods`: `erc7710`, `eip3009` when both are enabled
-- `default_settlement_method`: `erc7710` when enabled
+- `settlement_methods`: `eip3009`, `erc7710` when both are enabled
+- `default_settlement_method`: `eip3009`
 - `resource_url`: the configured merchant MCP URL
 - `hosted_urls`: the canonical dev and prod MCP URLs
 
 Purchase tools accept an optional `settlement_method` argument:
 
-- omitted: uses `erc7710` when enabled
+- omitted: uses `eip3009`, which keeps current Haven SDK and generic x402 clients compatible
 - `erc7710`: pays directly from a smart account through the configured DelegationManager
 - `eip3009`: uses the EIP-3009 fallback path
 
-Payment requirements include both `accepts[]` options and put the selected
-method first, so clients can discover both methods before purchase and still
-honor an explicit caller preference.
+Default payment requirements keep the EIP-3009 option first because existing
+Haven SDK clients select the first matching Base USDC `exact` option and do not
+yet inspect `extra.assetTransferMethod`. ERC-7710-aware clients should select
+the option tagged with `assetTransferMethod: "erc7710"` explicitly.
 
 ## Hosted URLs
 
@@ -76,9 +77,10 @@ Routing rule:
 - Haven dev / Base Sepolia (`eip155:84532`) -> `https://demo-merchant-dev-84e4.up.railway.app/mcp`
 - Haven prod / Base mainnet (`eip155:8453`) -> `https://enthusiastic-blessing-production-171f.up.railway.app/mcp`
 
-Hosted deployments derive the default `BASE_URL` from `MERCHANT_CHAIN_ID` and
-reject localhost, so generated requirements and tool metadata do not point
-hosted agents at a local merchant. Agents can also read `GET /` or
+Hosted deployments derive the default `BASE_URL` from `MERCHANT_CHAIN_ID`.
+If a hosted deploy accidentally receives a localhost `BASE_URL`, it falls back
+to the canonical hosted URL so generated requirements and tool metadata do not
+point hosted agents at a local merchant. Agents can also read `GET /` or
 `GET /.well-known/haven-demo-merchant` on either deployment to discover the
 current environment, chain, MCP URL, and both hosted routing targets.
 
@@ -88,7 +90,7 @@ current environment, chain, MCP URL, and both hosted routing targets.
 MERCHANT_ADDRESS=0xYourBaseUsdcReceivingWallet \
 BASE_RPC_URL=https://base-mainnet.example/rpc \
 SETTLEMENT_PRIVATE_KEY=0xGasFundedSubmitterPrivateKey \
-MERCHANT_X402_SETTLEMENT_METHODS=erc7710,eip3009 \
+MERCHANT_X402_SETTLEMENT_METHODS=eip3009,erc7710 \
 MERCHANT_ERC7710_DELEGATION_MANAGER=0xTrustedDelegationManager \
 BASE_URL=http://localhost:3456 \
 PORT=3456 \
@@ -105,9 +107,11 @@ Endpoints:
 `transferWithAuthorization`; it does not need to be the receiving wallet and
 should not hold user or agent funds.
 
-`MERCHANT_X402_SETTLEMENT_METHODS` defaults to `erc7710,eip3009`. If `erc7710`
-is enabled, `MERCHANT_ERC7710_DELEGATION_MANAGER` is required and must point to
-the single DelegationManager this merchant trusts on the configured chain. Set
+`MERCHANT_X402_SETTLEMENT_METHODS` defaults to EIP-3009 only unless the trusted
+DelegationManager is configured. If `erc7710` is requested but the manager is
+missing or does not match the pinned Haven DelegationManager for the configured
+chain, the merchant starts and advertises EIP-3009 only; explicit ERC-7710
+purchases are refused instead of crashing the hosted process. Set
 `MERCHANT_X402_SETTLEMENT_METHODS=eip3009` for an EIP-3009-only fallback or
 local-only merchant.
 
@@ -121,10 +125,12 @@ and `SETTLEMENT_PRIVATE_KEY` must be gas-funded on that chain.
 
 ## ERC-7710 Smart-Account Payments
 
-ERC-7710 is the preferred demo flow when the required DelegationManager is
-configured for the selected Base environment. Startup fails clearly if
-`erc7710` is enabled without `MERCHANT_ERC7710_DELEGATION_MANAGER`, so prod
-does not hide products behind missing contract prerequisites.
+ERC-7710 is the preferred smart-account demo flow when the required
+DelegationManager is configured for the selected Base environment. The manager
+must match the in-repo Haven pin used by the backend
+(`0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3` for Base mainnet and Base
+Sepolia today); bare environment values that point elsewhere are ignored for
+ERC-7710 advertising.
 
 A smart account (the **delegator**) pays by presenting a signed ERC-7710
 delegation instead of an ECDSA authorization; the payload carries `delegator`,
@@ -158,7 +164,7 @@ curl -fsS https://demo-merchant-dev-84e4.up.railway.app/.well-known/haven-demo-m
 curl -fsS https://enthusiastic-blessing-production-171f.up.railway.app/.well-known/haven-demo-merchant
 ```
 
-Default ERC-7710 quote:
+Default EIP-3009 quote:
 
 ```sh
 curl -i -sS https://enthusiastic-blessing-production-171f.up.railway.app/mcp \
@@ -174,6 +180,15 @@ curl -i -sS https://enthusiastic-blessing-production-171f.up.railway.app/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"buy_vpn","arguments":{"plan":"basic","settlement_method":"eip3009"}}}'
+```
+
+Explicit ERC-7710 quote, only when the pinned DelegationManager is configured:
+
+```sh
+curl -i -sS https://enthusiastic-blessing-production-171f.up.railway.app/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"buy_vpn","arguments":{"plan":"basic","settlement_method":"erc7710"}}}'
 ```
 
 The payment retry must reuse the same MCP request and include a

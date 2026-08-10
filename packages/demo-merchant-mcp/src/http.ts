@@ -13,6 +13,7 @@ import {
 } from './x402.js'
 import {
   CHAIN_ID,
+  DEFAULT_SETTLEMENT_METHOD,
   HOSTED_DEMO_MERCHANT_URLS,
   PRODUCTS,
   formatUsdc,
@@ -268,7 +269,9 @@ function buildDiscovery(
       },
     },
     settlement_methods: settlementMethods,
-    default_settlement_method: settlementMethods.includes('erc7710') ? 'erc7710' : settlementMethods[0],
+    default_settlement_method: settlementMethods.includes(DEFAULT_SETTLEMENT_METHOD)
+      ? DEFAULT_SETTLEMENT_METHOD
+      : settlementMethods[0],
     products: Object.values(PRODUCTS).map((product) => ({
       id: product.id,
       name: product.name,

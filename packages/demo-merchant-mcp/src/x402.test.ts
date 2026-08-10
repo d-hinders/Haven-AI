@@ -11,7 +11,13 @@ import {
   type Eip3009Authorization,
   type SettlementClient,
 } from './x402.js'
-import { hostedMerchantBaseUrlForChain, merchantEnvironmentForChain } from './products.js'
+import {
+  TRUSTED_DELEGATION_MANAGER,
+  hostedMerchantBaseUrlForChain,
+  isTrustedDelegationManagerForChain,
+  merchantEnvironmentForChain,
+  trustedDelegationManagerForChain,
+} from './products.js'
 
 const MERCHANT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a' as const
 const OTHER = '0x2222222222222222222222222222222222222222' as const
@@ -128,9 +134,16 @@ describe('x402 payment requirements', () => {
         amount: '1000',
         payTo: MERCHANT,
         asset: USDC_ADDRESS,
-        extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'eip3009' },
+        extra: { name: 'USD Coin', version: '2' },
       }],
     })
+  })
+
+  it('pins the same trusted DelegationManager for hosted Base environments', () => {
+    expect(trustedDelegationManagerForChain(8453)).toBe(TRUSTED_DELEGATION_MANAGER)
+    expect(trustedDelegationManagerForChain(84532)).toBe(TRUSTED_DELEGATION_MANAGER)
+    expect(isTrustedDelegationManagerForChain(TRUSTED_DELEGATION_MANAGER, 8453)).toBe(true)
+    expect(isTrustedDelegationManagerForChain('0x000000000000000000000000000000000000dEaD', 8453)).toBe(false)
   })
 })
 

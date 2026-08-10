@@ -200,7 +200,7 @@ describe('demo merchant MCP x402 flow', () => {
       network: 'eip155:8453',
       amount: '1000',
       asset: USDC_ADDRESS,
-      extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'eip3009' },
+      extra: { name: 'USD Coin', version: '2' },
     })
 
     const paymentHeader = await signedHeader(paymentRequired)

@@ -6,31 +6,83 @@ import {
   SUPPORTED_SETTLEMENT_METHODS,
   formatUsdc,
   CHAIN_ID,
+  TRUSTED_DELEGATION_MANAGER,
   hostedMerchantBaseUrlForChain,
   isSettlementMethod,
+  isTrustedDelegationManagerForChain,
   merchantEnvironmentForChain,
   type SettlementMethod,
 } from './products.js'
-import { isAddress, type Address } from 'viem'
+import { type Address } from 'viem'
 
 const PORT = parseInt(process.env.PORT ?? '3456', 10)
 const MERCHANT_ENVIRONMENT = merchantEnvironmentForChain(CHAIN_ID)
 const HOSTED_DEMO_URL = hostedMerchantBaseUrlForChain(CHAIN_ID)
 const IS_HOSTED_RUNTIME = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN || process.env.NODE_ENV === 'production')
-const BASE_URL = process.env.BASE_URL ?? (IS_HOSTED_RUNTIME ? HOSTED_DEMO_URL : `http://localhost:${PORT}`)
-if (IS_HOSTED_RUNTIME && BASE_URL.includes('localhost')) {
-  console.error(
-    'BASE_URL must be a public URL for hosted demo merchant deployments.\n' +
-      `For ${MERCHANT_ENVIRONMENT} on eip155:${CHAIN_ID}, use ${HOSTED_DEMO_URL}. ` +
-      'Localhost is only valid when intentionally running a local merchant.',
-  )
-  process.exit(1)
-}
+const BASE_URL = resolveBaseUrl(process.env.BASE_URL)
 
-const SETTLEMENT_METHODS = parseSettlementMethods(process.env.MERCHANT_X402_SETTLEMENT_METHODS)
+const REQUESTED_SETTLEMENT_METHODS = parseSettlementMethods(process.env.MERCHANT_X402_SETTLEMENT_METHODS)
+const ERC7710_CONFIG = resolveErc7710Config(REQUESTED_SETTLEMENT_METHODS)
+const SETTLEMENT_METHODS = effectiveSettlementMethods(REQUESTED_SETTLEMENT_METHODS, Boolean(ERC7710_CONFIG))
 const DEFAULT_METHOD = SETTLEMENT_METHODS.includes(DEFAULT_SETTLEMENT_METHOD)
   ? DEFAULT_SETTLEMENT_METHOD
   : SETTLEMENT_METHODS[0]
+
+function resolveBaseUrl(raw: string | undefined): string {
+  if (!raw) return IS_HOSTED_RUNTIME ? HOSTED_DEMO_URL : `http://localhost:${PORT}`
+  if (IS_HOSTED_RUNTIME && raw.includes('localhost')) {
+    console.warn(
+      'Ignoring localhost BASE_URL for hosted demo merchant deployment.\n' +
+        `Using ${HOSTED_DEMO_URL} for ${MERCHANT_ENVIRONMENT} on eip155:${CHAIN_ID} instead.`,
+    )
+    return HOSTED_DEMO_URL
+  }
+  return raw
+}
+
+function resolveErc7710Config(requestedMethods: readonly SettlementMethod[] | undefined): { delegationManager: Address } | undefined {
+  const raw = process.env.MERCHANT_ERC7710_DELEGATION_MANAGER
+  const explicitlyRequested = requestedMethods?.includes('erc7710') ?? false
+  if (!raw) {
+    if (explicitlyRequested) {
+      console.warn(
+        'ERC-7710 settlement was requested but MERCHANT_ERC7710_DELEGATION_MANAGER is not set. ' +
+          'Starting with EIP-3009 only; explicit erc7710 purchases will be refused.',
+      )
+    }
+    return undefined
+  }
+  if (!isTrustedDelegationManagerForChain(raw, CHAIN_ID)) {
+    console.warn(
+      'MERCHANT_ERC7710_DELEGATION_MANAGER does not match the pinned Haven DelegationManager for this chain. ' +
+        `Expected ${TRUSTED_DELEGATION_MANAGER} for eip155:${CHAIN_ID}. ` +
+        'Starting with EIP-3009 only; explicit erc7710 purchases will be refused.',
+    )
+    return undefined
+  }
+  return { delegationManager: TRUSTED_DELEGATION_MANAGER }
+}
+
+function effectiveSettlementMethods(
+  requestedMethods: readonly SettlementMethod[] | undefined,
+  erc7710Configured: boolean,
+): SettlementMethod[] {
+  const requested = requestedMethods ?? (erc7710Configured ? SUPPORTED_SETTLEMENT_METHODS : ['eip3009'])
+  const methods = erc7710Configured ? requested : requested.filter((method) => method !== 'erc7710')
+  if (methods.length === 0) {
+    console.warn(
+      'No configured x402 settlement methods are usable. Falling back to EIP-3009 so the merchant can keep serving existing clients.',
+    )
+    return ['eip3009']
+  }
+  return [...new Set(methods)]
+}
+
+if (REQUESTED_SETTLEMENT_METHODS?.includes('erc7710') && !ERC7710_CONFIG) {
+  console.warn(
+    'ERC-7710 is omitted from advertised x402 accepts until the pinned DelegationManager is configured.',
+  )
+}
 
 const MERCHANT_ADDRESS = process.env.MERCHANT_ADDRESS as Address | undefined
 if (!MERCHANT_ADDRESS) {
@@ -61,25 +113,13 @@ if (!SETTLEMENT_PRIVATE_KEY) {
   process.exit(1)
 }
 
-const ERC7710_ENABLED = SETTLEMENT_METHODS.includes('erc7710')
-const ERC7710_DELEGATION_MANAGER = process.env.MERCHANT_ERC7710_DELEGATION_MANAGER as Address | undefined
-if (ERC7710_ENABLED && (!ERC7710_DELEGATION_MANAGER || !isAddress(ERC7710_DELEGATION_MANAGER))) {
-  console.error(
-    'MERCHANT_ERC7710_DELEGATION_MANAGER env var is required when ERC-7710 settlement is enabled.\n' +
-      'Set it to the ONLY DelegationManager contract address this merchant trusts (e.g. the ' +
-      'MetaMask Delegation Framework DelegationManager on the configured Base environment). Payments naming any ' +
-      'other delegationManager are rejected.',
-  )
-  process.exit(1)
-}
-
 const paymentProcessor = createX402PaymentProcessor(
   createViemSettlementClient({
     baseRpcUrl: BASE_RPC_URL,
     settlementPrivateKey: SETTLEMENT_PRIVATE_KEY,
   }),
-  ERC7710_ENABLED && ERC7710_DELEGATION_MANAGER
-    ? { erc7710: { delegationManager: ERC7710_DELEGATION_MANAGER }, settlementMethods: SETTLEMENT_METHODS }
+  ERC7710_CONFIG
+    ? { erc7710: ERC7710_CONFIG, settlementMethods: SETTLEMENT_METHODS }
     : { settlementMethods: SETTLEMENT_METHODS },
 )
 
@@ -115,13 +155,13 @@ server.listen(PORT, () => {
 process.on('SIGTERM', () => server.close())
 process.on('SIGINT', () => server.close())
 
-function parseSettlementMethods(raw: string | undefined): SettlementMethod[] {
-  if (!raw) return [...SUPPORTED_SETTLEMENT_METHODS]
+function parseSettlementMethods(raw: string | undefined): SettlementMethod[] | undefined {
+  if (!raw) return undefined
   const methods = raw.split(',').map((method) => method.trim()).filter(Boolean)
-  if (methods.length === 0) return [...SUPPORTED_SETTLEMENT_METHODS]
+  if (methods.length === 0) return undefined
   const invalid = methods.find((method) => !isSettlementMethod(method))
   if (invalid) {
-    console.error(`Unsupported MERCHANT_X402_SETTLEMENT_METHODS value: ${invalid}. Use erc7710,eip3009.`)
+    console.error(`Unsupported MERCHANT_X402_SETTLEMENT_METHODS value: ${invalid}. Use eip3009,erc7710.`)
     process.exit(1)
   }
   return [...new Set(methods)] as SettlementMethod[]

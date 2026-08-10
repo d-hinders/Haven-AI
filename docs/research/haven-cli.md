@@ -2,17 +2,26 @@
 owner: "@d-hinders"
 status: research
 covers:
-  - packages/connect/src/args.ts
-  - packages/connect/src/redact.ts
-  - packages/connect/src/storage.ts
-  - packages/sdk/src/client.ts
-last-verified: "2026-06-28"
+  - packages/cli/**
+last-verified: "2026-08-10" # weekly #1248 audit: package SHIPPED — status header rewritten to record what was built vs the sketch (Tier A/B live as @haven_ai/cli; Tier C/D unbuilt; no connect code reuse; unplanned SIE export shipped); covers: corrected to the package this doc is actually about
 ---
 
 # Sketch — `haven` CLI (terminal-native parallel to the dashboard)
 
-> Status: **design sketch / proposal.** No package built yet. Purpose: agree the
-> shape, the custody boundary, and a phasing before scaffolding `packages/cli`.
+> Status: **partially SHIPPED.** `packages/cli` exists and publishes as
+> `@haven_ai/cli` (bin `haven`, same release train as sdk/signer/mcp/connect).
+> What shipped matches the sketch's Tier A/B: `login/logout/whoami`, wallets,
+> agents (list/show/pause/resume/revoke/rotate-key/rename), `budget show`,
+> `activity list/export`, catalog, contacts — session at `~/.haven/session.json`
+> (0600), `--json` on reads. **Deviations from this sketch, recorded:**
+> the CLI reuses NOTHING from `packages/connect` (own `args.ts`/`session.ts`,
+> parallel construction rather than the proposed code reuse); **Tier D
+> (SDK-backed `haven pay`/`haven x402`) and Tier C (deep-link owner actions,
+> `haven connect`, `approvers`) are NOT built** — #460 tracks Tier C; and one
+> unplanned feature shipped: `haven activity export --format sie` (Fortnox/
+> Visma/Bokio-compatible SIE 4I, part of the bookkeeping-export arc). The
+> sections below are kept as the original design record; read them as
+> "proposed", with the above as what reality did.
 
 ## Goal
 

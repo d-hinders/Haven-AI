@@ -205,7 +205,10 @@ export function createEdgeSigner(
       if (digest.toLowerCase() !== expected.typedDataHash?.toLowerCase()) {
         throw new HavenSigningError(
           'x402 typed data does not match the digest Haven committed to in the expected context. ' +
-            'Refusing to sign — the payload was altered in transit or Haven declared a different one.',
+            'Refusing to sign — the payload was altered in transit or Haven declared a different one. ' +
+            'The most common cause is the typed data being truncated or reshaped while being copied ' +
+            'between tool calls (#1255): re-run the hosted quote and pass its typed_data_b64 string ' +
+            'through UNCHANGED instead of re-emitting the nested JSON.',
         )
       }
       const account = privateKeyToAccount(delegateKey as `0x${string}`)

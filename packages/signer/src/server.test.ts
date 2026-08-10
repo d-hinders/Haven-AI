@@ -241,6 +241,55 @@ describe('haven_sign tool', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
+  it('accepts typed_data_b64 as the copy-through-safe form and prefers it over typed_data (#1255)', async () => {
+    const signer = createEdgeSigner(TEST_KEY)
+    const handlers = createToolHandlers(signer)
+    const typedData = {
+      domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: `0x${'11'.repeat(20)}` },
+      types: {
+        PackedUserOperation: [
+          { name: 'sender', type: 'address' },
+          { name: 'nonce', type: 'uint256' },
+        ],
+      },
+      primaryType: 'PackedUserOperation',
+      message: { sender: `0x${'22'.repeat(20)}`, nonce: 1 },
+    }
+    const b64 = Buffer.from(JSON.stringify(typedData)).toString('base64')
+
+    // b64 alone works — the live #1255 failure was the nested-JSON copy.
+    const alone = ok<{ signature: string }>(
+      await handlers.haven_sign({ payload_hash: HASH, typed_data_b64: b64 }),
+    )
+    const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+    expect(verifySignature(digest, alone.data.signature, signer.delegateAddress)).toBe(true)
+
+    // When both are present, the OPAQUE form wins: a truncated/reshaped
+    // typed_data object next to an intact b64 must not poison the signing.
+    const mangledTypedData = { ...typedData, message: { ...typedData.message, nonce: 999 } }
+    const both = ok<{ signature: string }>(
+      await handlers.haven_sign({
+        payload_hash: HASH,
+        typed_data: mangledTypedData,
+        typed_data_b64: b64,
+      }),
+    )
+    expect(verifySignature(digest, both.data.signature, signer.delegateAddress)).toBe(true)
+  })
+
+  it('refuses a typed_data_b64 that does not decode to a JSON object, with a copy-through hint (#1255)', async () => {
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY))
+    const payload = await handlers.haven_sign({
+      payload_hash: HASH,
+      typed_data_b64: Buffer.from('"just a string"').toString('base64'),
+    })
+    expect(payload.success).toBe(false)
+    if (!payload.success) {
+      expect(payload.message).toContain('typed_data_b64 did not decode to a JSON object')
+      expect(payload.message).toContain('unchanged')
+    }
+  })
+
   it('appends a local audit row for signing without key material or signature', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-signer-tool-audit-'))
     const auditPath = join(dir, 'audit.jsonl')

@@ -128,12 +128,17 @@ describe('haven_pay', () => {
       },
     })
 
-    const result = ok<{ signature_scheme?: string; typed_data?: unknown; payload_hash: string }>(
+    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string }>(
       await handlers().haven_pay({ token: 'USDC', amount: '0.10', to: '0xabc' }),
     )
 
     expect(result.data.signature_scheme).toBe('eip712_userop')
     expect(result.data.typed_data).toEqual(typedData) // verbatim, never reshaped
+    // #1255: the copy-through-safe form decodes to exactly the same payload.
+    expect(result.data.typed_data_b64).toBeDefined()
+    expect(
+      JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
+    ).toEqual(typedData)
     expect(result.data.payload_hash).toBe('0xdeadbeef')
   })
 
@@ -156,6 +161,7 @@ describe('haven_pay', () => {
 
     expect('signature_scheme' in result.data).toBe(false)
     expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
   })
 
   it('surfaces pending_approval (no hash) when over budget', async () => {
@@ -705,12 +711,16 @@ describe('haven_send', () => {
       },
     })
 
-    const result = ok<{ signature_scheme?: string; typed_data?: unknown; payload_hash: string }>(
+    const result = ok<{ signature_scheme?: string; typed_data?: unknown; typed_data_b64?: string; payload_hash: string }>(
       await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '0.10' }),
     )
 
     expect(result.data.signature_scheme).toBe('eip712_userop')
     expect(result.data.typed_data).toEqual(typedData) // verbatim, never reshaped
+    // #1255: the copy-through-safe form decodes to exactly the same payload.
+    expect(
+      JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
+    ).toEqual(typedData)
     expect(result.data.payload_hash).toBe('0xsendhash')
   })
 
@@ -733,6 +743,7 @@ describe('haven_send', () => {
 
     expect('signature_scheme' in result.data).toBe(false)
     expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
   })
 
   it('surfaces pending_approval when over allowance budget', async () => {

@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-10" # #1254 release train (version table → 0.1.19-alpha.0) + #1256 re-verify (window margin alters no runtime contract); manifest, Node floor and release checklist re-read and unchanged
+last-verified: "2026-08-10" # 0.1.19 train: #1254 (version table), #1255 (typed_data_b64 additive on both MCP surfaces) and #1256 (window margin) all re-verified — manifest, Node floor and release checklist unchanged
 ---
 
 # MCP Runtime Compatibility

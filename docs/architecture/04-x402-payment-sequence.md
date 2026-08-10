@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-10" # re-verified for #1255: typed_data_b64 transport documented in the v2 table; every binding/digest/settle claim unchanged
+last-verified: "2026-08-10" # re-verified for #1255 (typed_data_b64 in the v2 table) + #1256 (the "capped header window" claim now means clamp(≤600)+300 margin ≤900 s; the ≤600 s erc7710 child expiry is a different bound, unchanged)
 ---
 
 # Haven - x402 Payment Execution Sequence

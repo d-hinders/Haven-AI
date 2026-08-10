@@ -22,7 +22,7 @@ import { normalizeRuntime, runtimeProfile, runtimeRequiresHardRestart } from './
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.1.19-alpha.0'
+export const CONNECTOR_VERSION = '0.1.20-alpha.0'
 
 export interface ConnectOptions {
   setupToken: string

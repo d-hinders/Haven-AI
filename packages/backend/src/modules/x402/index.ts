@@ -19,6 +19,7 @@
 export type { AuthorizeX402Input } from './authorize.js'
 export { authorizeX402 } from './authorize.js'
 export { settleX402 } from './settle.js'
+export { getX402SignContext } from './sign-context.js'
 
 export type { X402AuthorizeBody, X402ApprovalRow, X402HandlerResult } from './types.js'
 

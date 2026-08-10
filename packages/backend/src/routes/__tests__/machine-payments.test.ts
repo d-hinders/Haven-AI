@@ -2136,6 +2136,52 @@ describe('machine payment routes', () => {
       })
     }
 
+    it('409s a key reused for a DIFFERENT transfer — including one created via POST /payments (#1207)', async () => {
+      // The key column is shared with POST /payments (migration 020). The
+      // mismatch refusal must hold in BOTH routes, or a /payments-created key
+      // replays here with the new request's labels on the old sign_data
+      // (review finding on #1207 — this test fails on the pre-fix code).
+      mockQuery
+        .mockResolvedValueOnce(authRow())
+        // findSendIntentByIdempotencyKey: an existing row for a different transfer
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: SEND_PAYMENT_ID,
+              status: 'pending_signature',
+              expires_at: '2099-01-01T00:10:00.000Z',
+              token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+              token_symbol: 'USDC',
+              to_address: '0x0000000000000000000000000000000000000abc',
+              amount_raw: '10000000',
+              amount_human: '10',
+              allowance_nonce: 5,
+              sign_hash: SEND_HASH,
+              execution_rail: null,
+              prepared_user_op: null,
+              chain_id: 8453,
+            },
+          ],
+        })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/send',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: {
+          asset: 'USDC',
+          recipient: SEND_RECIPIENT,
+          amount: '1.50',
+          idempotency_key: 'shared-key-1',
+        },
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(response.json().error).toMatch(/different recipient|different amount/)
+      // Nothing minted, no chain read.
+      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
+    })
+
     it('creates a USDC payment intent within allowance and returns sign_data', async () => {
       allowanceWithRemaining(1_000_000_000n)
       allowanceMocks.generateTransferHash.mockResolvedValueOnce(SEND_HASH)
@@ -2407,6 +2453,11 @@ describe('machine payment routes', () => {
           expires_at: '2099-01-02T00:00:00.000Z',
           token_symbol: 'USDC',
           amount_human: '999',
+          // #1207: the bidirectional mismatch check reads these — they must
+          // match the request or the replay is (correctly) refused as 409.
+          token_address: USDC,
+          to_address: SEND_RECIPIENT.toLowerCase(),
+          amount_raw: '999000000',
         }] })
         // getAgentPaymentStatus: intent expire-sweep + miss, then approval expire-sweep + hit
         .mockResolvedValueOnce({ rows: [] })

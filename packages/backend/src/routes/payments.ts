@@ -171,7 +171,13 @@ function resolveToken(chainId: number, symbol: string) {
  * rows rebuild the EIP-712 payload from the stored UserOperation, the #961
  * discipline — never a fresh estimation), a pending approval replays as 202
  * (a retry must not open a second approval), and anything that has progressed
- * reports its real status instead of a stale instruction. A key reused for a
+ * reports its real status instead of a stale instruction.
+ *
+ * A null return from a 23505 catch site means the conflicting row was ALREADY
+ * terminal (or was lazily expired here) — the caller rethrows rather than
+ * retrying, accepted deliberately: the window is a freshly-inserted row dying
+ * within the same request, and a bounded auto-retry would mask real
+ * constraint bugs. The client's own retry lands on the freed key. A key reused for a
  * DIFFERENT transfer is a 409; a stale pending row is lazily expired so the
  * key frees up (the #961 M2 lesson). Returns null when the caller should
  * create a fresh intent.
@@ -365,12 +371,31 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       return reply.code(400).send({ error: 'Amount must be greater than zero' })
     }
 
-    // 3a. Idempotent replay (#1207): a retried request must return the FIRST
+    // 4. Resolve the execution rail first — the token-configuration gate is
+    // rail-specific.
+    //
+    // ── Retired-session gate (#993) — the marking alone decides; see
+    // lib/execution-rail.ts for the seam and the retirement record.
+    const railState = await loadExecutionRailState(agent)
+
+    // ── Retired-session gate (#993), BEFORE the replay lookup: a replayed key
+    // must not resurrect actionable sign_data for an account the rail
+    // retirement fail-closes (review finding on #1207 — /:id/sign re-checks
+    // independently, but the create surface should never hand it out either).
+    if (railState.safeExecutionRail !== 'delegation') {
+      const earlyDecision = resolveExecutionRail({ ...railState, chainId: agent.chain_id })
+      if (earlyDecision.rail === 'retired_session') {
+        const retired = sessionRailRetired('account')
+        return reply.code(retired.statusCode).send(retired.body)
+      }
+    }
+
+    // 4a. Idempotent replay (#1207): a retried request must return the FIRST
     // request's result, never mint a second transfer or a second approval —
     // the same contract /machine-payments/send has carried since migration
     // 020, on the same key column, so agents get one mechanism, not a
-    // per-route dialect. Runs before any chain read: a replay costs two
-    // indexed lookups.
+    // per-route dialect. Before any chain read: a replay costs two indexed
+    // lookups.
     if (idempotency_key) {
       const replay = await findPaymentReplay(agent, idempotency_key, {
         tokenAddress: tokenAddress.toLowerCase(),
@@ -379,13 +404,6 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       })
       if (replay) return reply.code(replay.code).send(replay.body)
     }
-
-    // 4. Resolve the execution rail first — the token-configuration gate is
-    // rail-specific.
-    //
-    // ── Retired-session gate (#993) — the marking alone decides; see
-    // lib/execution-rail.ts for the seam and the retirement record.
-    const railState = await loadExecutionRailState(agent)
 
     // Policy check: session/legacy rails carry the per-token policy in
     // agent_allowances (the AllowanceModule config), so a missing row means the

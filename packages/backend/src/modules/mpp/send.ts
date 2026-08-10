@@ -123,9 +123,35 @@ async function findExistingSend(
   agent: AgentContext,
   idempotencyKey: string,
   asset: SendAsset,
+  requested: { tokenAddress: string; toAddress: string; amountRaw: string },
 ): Promise<SendReplay | null> {
+  // #1207: the key column is shared with POST /payments, so BOTH routes must
+  // refuse a key reused for a different transfer — a one-directional check
+  // let a /payments-created key replay here with the new request's labels on
+  // the old request's sign_data (review finding, cross-route integrity).
+  const mismatch = (row: { token_address: string; to_address: string; amount_raw: string }): string | null => {
+    if (row.token_address.toLowerCase() !== requested.tokenAddress.toLowerCase()) return 'token'
+    if (row.to_address.toLowerCase() !== requested.toAddress.toLowerCase()) return 'recipient'
+    if (row.amount_raw !== requested.amountRaw) return 'amount'
+    return null
+  }
+  const mismatchReplay = (row: { id: string; status: string; token_address: string; to_address: string; amount_raw: string }): SendReplay | null => {
+    const field = mismatch(row)
+    if (!field) return null
+    return {
+      code: 409,
+      body: {
+        payment_id: row.id,
+        status: row.status,
+        error: `idempotency_key already belongs to a payment with a different ${field}`,
+      },
+    }
+  }
+
   const pi = await findSendIntentByIdempotencyKey(agent.id, idempotencyKey)
   if (pi) {
+    const conflict = mismatchReplay(pi)
+    if (conflict) return conflict
     // Already submitted/confirmed — report the real state, not a stale sign request.
     if (pi.status !== 'pending_signature') {
       return replayStatusOf(agent, pi.id)
@@ -153,6 +179,8 @@ async function findExistingSend(
 
   const ar = await findSendApprovalByIdempotencyKey(agent.id, idempotencyKey)
   if (ar) {
+    const conflict = mismatchReplay(ar)
+    if (conflict) return conflict
     // Owner has approved / executed it — report the real state, not "still waiting".
     if (ar.status !== 'pending') {
       return replayStatusOf(agent, ar.id)
@@ -231,7 +259,11 @@ export async function handleSend(
   // rather than minting a second one. Checked before the on-chain read so a
   // replay skips the RPC round trip entirely (see migration 020).
   if (idempotencyKey) {
-    const replay = await findExistingSend(agent, idempotencyKey, asset)
+    const replay = await findExistingSend(agent, idempotencyKey, asset, {
+      tokenAddress,
+      toAddress: recipient.toLowerCase(),
+      amountRaw: amountRaw.toString(),
+    })
     if (replay) return { statusCode: replay.code, body: replay.body }
   }
 
@@ -304,7 +336,11 @@ export async function handleSend(
     } catch (err) {
       // Lost an idempotency-key race with a concurrent send — replay the winner.
       if (idempotencyKey && (err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
-        const replay = await findExistingSend(agent, idempotencyKey, asset)
+        const replay = await findExistingSend(agent, idempotencyKey, asset, {
+          tokenAddress,
+          toAddress: recipient.toLowerCase(),
+          amountRaw: amountRaw.toString(),
+        })
         if (replay) return { statusCode: replay.code, body: replay.body }
       }
       throw err
@@ -393,7 +429,11 @@ export async function handleSend(
   } catch (err) {
     // Lost an idempotency-key race with a concurrent send — replay the winner.
     if (idempotencyKey && (err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
-      const replay = await findExistingSend(agent, idempotencyKey, asset)
+      const replay = await findExistingSend(agent, idempotencyKey, asset, {
+        tokenAddress,
+        toAddress: recipient.toLowerCase(),
+        amountRaw: amountRaw.toString(),
+      })
       if (replay) return { statusCode: replay.code, body: replay.body }
     }
     throw err

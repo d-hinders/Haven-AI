@@ -31,6 +31,12 @@ vi.mock('../../db.js', () => ({
 }))
 
 vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+// #1207: the delegation replay derives the account address; pin it so the
+// reconstructed typed data is assertable without a chain read.
+vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
+  return { ...actual, computeHybridAccountAddress: async () => '0x' + 'dd'.repeat(20) }
+})
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 
 const AGENT = {
@@ -813,6 +819,64 @@ describe('payment routes', () => {
 
       expect(response.statusCode).toBe(201)
       expect(response.json()).toMatchObject({ payment_id: PAYMENT_ID, idempotent_replay: true })
+    })
+
+    it('replays a delegation-rail intent by REBUILDING the stored signing payload (#961 discipline)', async () => {
+      // The highest-blast-radius replay path: the typed data must come from
+      // the STORED UserOperation — a fresh estimation would be a different
+      // payload than the one the intent pinned.
+      primeDb(
+        AUTH,
+        intentKeyLookup([
+          sendReplayRow({
+            execution_rail: 'delegation',
+            prepared_user_op: { sender: '0x' + 'dd'.repeat(20), nonce: '5', callData: '0xabcd' },
+            chain_id: 8453,
+          }),
+        ]),
+      )
+
+      const response = await app.inject({
+        method: 'POST', url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: keyedBody(),
+      })
+
+      expect(response.statusCode).toBe(201)
+      const body = response.json()
+      expect(body.idempotent_replay).toBe(true)
+      expect(body.sign_data.signature_scheme).toBe('eip712_userop')
+      expect(body.sign_data.hash).toBe(SIGN_HASH)
+      // Rebuilt from the STORED op: the message carries its exact fields.
+      expect(body.sign_data.typed_data.primaryType).toBe('PackedUserOperation')
+      expect(body.sign_data.typed_data.message.nonce).toBe('5')
+      expect(body.sign_data.typed_data.domain.chainId).toBe(8453)
+      expect(body.sign_data.components.account).toBe('0x' + 'dd'.repeat(20))
+      // No fresh estimation, no insert.
+      expect(findCall(/INSERT INTO payment_intents/)).toBeUndefined()
+    })
+
+    it('a key whose payment already progressed reports the REAL status, not a stale sign request', async () => {
+      primeDb(
+        AUTH,
+        intentKeyLookup([sendReplayRow({ status: 'confirmed' })]),
+        [/WHERE id = \$1 AND agent_id = \$2/, () => ({
+          rows: [pendingIntent({ status: 'confirmed', tx_hash: TX_HASH, confirmed_at: '2026-05-13T10:05:00.000Z' })],
+        })],
+      )
+
+      const response = await app.inject({
+        method: 'POST', url: '/payments',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: keyedBody(),
+      })
+
+      expect(response.statusCode).toBe(200)
+      const body = response.json()
+      expect(body.idempotent_replay).toBe(true)
+      expect(body.status).toBe('confirmed')
+      expect(body.sign_data).toBeUndefined()
+      expect(findCall(/INSERT INTO/)).toBeUndefined()
     })
 
     it('a request without a key behaves exactly as before — no lookups, no key persisted', async () => {

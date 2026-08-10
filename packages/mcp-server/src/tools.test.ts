@@ -254,6 +254,60 @@ const PAYMENT_REQUIRED = {
   ],
 }
 
+// ── haven_sweep_delegate (phase 1 mapping) ────────────────────────────────────
+
+describe('haven_sweep_delegate prepare mapping', () => {
+  it('maps a below-floor balance to below_minimum — never a dead-end signature_required (#700)', async () => {
+    // Found live on the first prod sweep attempt: the handler only branched on
+    // nothing_stranded, so a below-floor response fell through to
+    // signature_required with authorization/expected_auth undefined — an
+    // instruction to sign a payload that does not exist.
+    stubFetch({
+      'POST /machine-payments/sweep/prepare': {
+        status: 200,
+        body: {
+          below_min: true,
+          asset: 'USDC',
+          amount: '0.002',
+          amount_atomic: '2000',
+          min_usdc: '1',
+          chain_id: 8453,
+          message: 'Stranded 0.002 USDC is below the sweep floor of 1 USDC',
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(await handlers().haven_sweep_delegate({}))
+    expect(result.data.status).toBe('below_minimum')
+    expect(result.data.min_usdc).toBe('1')
+    expect('authorization' in result.data).toBe(false)
+    expect('sign_with' in result.data).toBe(false)
+  })
+
+  it('still returns the full signing payload when a sweep IS prepared', async () => {
+    const authorization = {
+      from: '0x' + 'aa'.repeat(20), to: '0x' + 'bb'.repeat(20), value: '2000000',
+      validAfter: '0', validBefore: '9999999999', nonce: '0x' + 'cc'.repeat(32),
+      token: '0x' + 'dd'.repeat(20), chainId: 8453,
+    }
+    stubFetch({
+      'POST /machine-payments/sweep/prepare': {
+        status: 201,
+        body: {
+          authorization,
+          expected_auth: { version: 1, message: 'm', signature: '0x' + '11'.repeat(65), signer: '0x' + 'ee'.repeat(20) },
+          asset: 'USDC', amount: '2.0', amount_atomic: '2000000', chain_id: 8453,
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(await handlers().haven_sweep_delegate({}))
+    expect(result.data.status).toBe('signature_required')
+    expect(result.data.authorization).toEqual(authorization)
+    expect(result.data.expected_auth).toBeDefined()
+  })
+})
+
 // ── haven_discover_tools ────────────────────────────────────────────────────
 
 describe('haven_discover_tools', () => {

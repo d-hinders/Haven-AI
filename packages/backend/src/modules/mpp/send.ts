@@ -7,7 +7,7 @@
  * lost insert), and the within-allowance / over-allowance coverage split.
  * `routes/machine-payments.ts` keeps only request-shape validation.
  */
-import { resolveExecutionRail, sessionRailRetired } from '../../rails/execution-rail.js'
+import { mppNotOnDelegationRail, resolveExecutionRail, sessionRailRetired } from '../../rails/execution-rail.js'
 import {
   findSendIntentByIdempotencyKey,
   insertSendIntent,
@@ -198,6 +198,13 @@ export async function handleSend(
   if (sendRail.rail === 'retired_session') {
     const retired = sessionRailRetired('account')
     return { statusCode: retired.statusCode, body: retired.body }
+  }
+  if (agent.execution_rail === 'delegation') {
+    // #1251: same refusal as authorize — see the note there. Raw-state check,
+    // like payments.ts. Delegation accounts send via POST /payments (direct
+    // delegation redemption).
+    const refusal = mppNotOnDelegationRail()
+    return { statusCode: refusal.statusCode, body: refusal.body }
   }
 
   // 2. Resolve asset to token config

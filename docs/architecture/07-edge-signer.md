@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-10" # re-verified for #1263 (payment_id fetch in the MCP layer — the signer's one network capability; core stays network-free)
+last-verified: "2026-08-10" # re-verified for #1263 (payment_id fetch — the signer's one network capability) + #1251 (MPP seam refusal — no claim here affected)
 ---
 
 # Haven — Edge Signer

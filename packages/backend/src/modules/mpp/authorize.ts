@@ -61,6 +61,7 @@ import { isAddress } from '@haven_ai/core'
 import {
   isRetiredRailIntent,
   loadExecutionRailState,
+  mppNotOnDelegationRail,
   resolveExecutionRail,
   sessionRailRetired,
 } from '../../rails/execution-rail.js'
@@ -414,6 +415,30 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
     return pendingApprovalResponse(existingApproval, null, rail)
   }
 
+  // ── Rail gates (#993/#1251), BEFORE the allowance-config check: an
+  // allowance row is a LEGACY concept, and refusing a delegation account
+  // with "not configured for USDC" (or worse, passing because a display
+  // row exists) would mask the honest answer.
+  const railState = await loadExecutionRailState(agent)
+  const railDecision = resolveExecutionRail({
+    ...railState,
+    chainId: agent.chain_id,
+  })
+  if (railDecision.rail === 'retired_session') {
+    // #993: retirement decided in the seam, refusal produced there too.
+    return sessionRailRetired('account')
+  }
+  if (railState.safeExecutionRail === 'delegation') {
+    // #1251: MPP has no delegation branch — without this refusal a Hybrid
+    // account fell through to LEGACY allowance coverage (AllowanceModule
+    // reads zero for a Hybrid) and every payment queued an approval that
+    // could never execute. Found live during the #908 mainnet canary.
+    // Branches on the RAW state like payments.ts does — the seam's decision
+    // deliberately only answers the retirement question.
+    const refusal = mppNotOnDelegationRail()
+    return { statusCode: refusal.statusCode, body: refusal.body }
+  }
+
   const allowanceConfigured = await hasTokenAllowanceConfigured(agent.id, tokenAddress)
   if (!allowanceConfigured) {
     return {
@@ -433,16 +458,6 @@ export async function authorizeMachinePayment(input: AuthorizeMachinePaymentInpu
         },
       }
     }
-  }
-
-  // ── Retired-session gate (#993) — the marking alone decides; see the seam.
-  const railDecision = resolveExecutionRail({
-    ...(await loadExecutionRailState(agent)),
-    chainId: agent.chain_id,
-  })
-  if (railDecision.rail === 'retired_session') {
-    // #993: retirement decided in the seam, refusal produced there too.
-    return sessionRailRetired('account')
   }
 
   let onChainAllowance

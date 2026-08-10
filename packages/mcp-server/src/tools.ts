@@ -504,6 +504,27 @@ export function createToolHandlers(
             message: prep.message ?? 'No stranded funds to recover.',
           }
         }
+        // #700: a stranded balance below the sweep floor is LEFT on the
+        // delegate — the relayer gas to sweep it would exceed its value, and
+        // the backend deliberately builds no authorization. Falling through
+        // to signature_required here handed agents a "sign this" instruction
+        // with authorization/expected_auth undefined — a dead end that read
+        // as a serializer bug (found live, first prod sweep attempt).
+        if (prep.below_min) {
+          return {
+            status: 'below_minimum',
+            asset: prep.asset ?? 'USDC',
+            amount: prep.amount,
+            amount_atomic: prep.amount_atomic,
+            min_usdc: prep.min_usdc,
+            chain_id: prep.chain_id,
+            message:
+              prep.message ??
+              `Stranded balance is below the ${prep.min_usdc ?? '1'} USDC sweep floor — ` +
+                'left on the delegate because relayer gas would exceed the recovered value. ' +
+                'It is swept automatically once the balance reaches the floor.',
+          }
+        }
         return {
           status: 'signature_required',
           authorization: prep.authorization,

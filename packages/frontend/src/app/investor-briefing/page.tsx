@@ -33,14 +33,14 @@ const SIGNAL_CARDS = [
 const PROBLEM_CARDS = [
   {
     title: 'Agents hit paywalls and stop',
-    body: 'Most agents have no way to pay for the services they need. The moment they hit a paywall — an API call, a subscription, a per‑use fee — the workflow stalls and a human has to step in. Autonomy ends at the checkout.',
+    body: 'Most agents have no way to pay for the services they need. The moment they hit a paywall, an API call, a subscription, or a per‑use fee, the workflow stalls and a human has to step in. Autonomy ends at the checkout.',
   },
   {
     title: "Traditional payments weren't built for agents",
     body: 'Cards, bank transfers, and checkout flows assume a human is present to approve, sign in, or solve a captcha. Agents get blocked, abandoned, or forced into shared credentials. The rails simply don’t speak agent.',
   },
   {
-    title: 'Stablecoins are the obvious rail — and the obvious risk',
+    title: 'Stablecoins are the obvious rail, and the obvious risk',
     body: 'Stablecoins were practically built for AI agents: instant, programmable, global, machine‑native. But giving an agent a private key means unlimited authority, no spend caps, and no audit trail. The right rail becomes the fastest way to lose control.',
   },
 ]
@@ -52,7 +52,7 @@ const PRODUCT_POINTS = [
   },
   {
     title: 'A policy engine',
-    body: 'Every payment is checked against the user’s rules before it moves. The spending limit — per‑currency budget and reset window — is enforced on‑chain by the smart account itself.',
+    body: 'Every payment is checked against the user’s rules before it moves. The spending limit, a per‑currency budget and reset window, is enforced on‑chain by the smart account itself.',
   },
   {
     title: 'A scoped agent credential',
@@ -60,7 +60,7 @@ const PRODUCT_POINTS = [
   },
   {
     title: 'Full audit trail',
-    body: 'Every request, rule check, approval, and payment is logged — which agent asked, which rule cleared it, when it went through.',
+    body: 'Every request, rule check, approval, and payment is logged with which agent asked, which rule cleared it, and when it went through.',
   },
 ]
 
@@ -88,7 +88,7 @@ const INVESTOR_STEPS = [
   {
     step: '05',
     title: 'Connect the agent',
-    body: 'The external agent receives a scoped Haven credential — not unlimited access to the wallet.',
+    body: 'The external agent receives a scoped Haven credential, not unlimited access to the wallet.',
   },
   {
     step: '06',
@@ -115,11 +115,11 @@ const WHY_NOW = [
 const STABLECOIN_REASONS = [
   {
     title: 'Enforced on‑chain, not by an admin',
-    body: 'Stablecoins are enforced by smart contracts, not banks. Haven’s spend rules live on‑chain in the smart‑account allowance itself — verifiable, and impossible to bypass by anyone, including Haven.',
+    body: 'Stablecoins are enforced by smart contracts, not banks. Haven’s spend rules live on‑chain in the smart‑account allowance itself, so they are verifiable and impossible to bypass by anyone, including Haven.',
   },
   {
     title: 'Settles in seconds, not days',
-    body: 'Bank wires take days. Card networks can cut off in 48 hours. On Base or Gnosis Chain, a stablecoin settles in seconds, 24/7, globally — no correspondent bank to fail mid‑workflow.',
+    body: 'Bank wires take days. Card networks can cut off in 48 hours. On Base, a stablecoin settles in seconds, 24/7, globally, with no correspondent bank to fail mid‑workflow.',
   },
 ]
 
@@ -237,7 +237,7 @@ export default function InvestorBriefingPage() {
       <BriefingSection
         id="product"
         eyebrow="The product"
-        title="A wallet built around rules — not keys."
+        title="A wallet built around rules, not keys."
         lede="Haven separates the agent’s right to request a payment from the rules that govern whether it goes through. The user controls the wallet and the policy; the agent gets a scoped credential, never unlimited authority."
       >
         <div className="grid grid-cols-1 lg:grid-cols-[0.9fr_1.1fr] gap-8 lg:gap-12 items-start">

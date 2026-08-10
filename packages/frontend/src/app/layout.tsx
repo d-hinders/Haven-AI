@@ -6,7 +6,7 @@ import Providers from './providers'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Haven — Agent payments within your rules',
+  title: 'Haven, agent payments within your rules',
   description:
     'An account for your agents. You set the rules; they pay within them, never beyond. No raw keys, no shared cards.',
 }

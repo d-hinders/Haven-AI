@@ -17,10 +17,10 @@ const TIMELINE = [
   { step: '01', label: 'Agent drafted payment intent', detail: 'Insightly Pro · 29.00 USDC → 0x4F3e…3bcFc', tone: 'neutral' },
   { step: '02', label: 'Agent forwarded intent to Haven', detail: 'POST /mpp/authorize · sk_agent_a1b9…7e', tone: 'brand' },
   { step: '03', label: 'Rules checked', detail: 'Per‑payment limit · network allowlist · allowance', tone: 'brand' },
-  { step: '04', label: 'Rules cleared — Haven signed the transfer', detail: 'sign_hash 0x6c1f4e93…2c6d9b3a', tone: 'brand' },
-  { step: '05', label: 'Allowance transfer submitted to Base', detail: 'Safe → ERC‑20 via AllowanceModule', tone: 'brand' },
+  { step: '04', label: 'Rules cleared; agent signed the transfer', detail: 'sign_hash 0x6c1f4e93…2c6d9b3a', tone: 'brand' },
+  { step: '05', label: 'Settled to the merchant on Base', detail: 'Haven account → merchant · USDC', tone: 'brand' },
   { step: '06', label: 'Confirmed in block 14,892,103', detail: 'tx 0x4d8a3b1d…b6c7e2f8 · gas 41,228', tone: 'success' },
-  { step: '07', label: 'Merchant verified receipt — access granted', detail: '200 OK · Insightly Pro — 1 month', tone: 'success' },
+  { step: '07', label: 'Merchant verified receipt, access granted', detail: '200 OK · Insightly Pro: 1 month', tone: 'success' },
 ] as const
 
 const TONE_DOT: Record<string, string> = {
@@ -31,7 +31,7 @@ const TONE_DOT: Record<string, string> = {
 }
 
 const RAILS = [
-  { name: 'Stablecoin', detail: 'USDC on Base, Gnosis. Settled on‑chain from your Haven account.', status: 'Live today' },
+  { name: 'Stablecoin', detail: 'USDC on Base. Settled on‑chain from your Haven account.', status: 'Live today' },
   { name: 'Cards & wallets', detail: 'Visa, Mastercard, Apple Pay, Google Pay via Stripe SPT.', status: 'Coming soon' },
   { name: 'BNPL', detail: 'Buy now, pay later flows via Stripe Shared Payment Tokens.', status: 'Coming soon' },
 ]
@@ -63,8 +63,8 @@ export default function MPP() {
         </h1>
         <p className="text-[17px] leading-relaxed text-[var(--v2-ink-2)] max-w-[640px]">
           An agent subscribes to a SaaS tool. Haven checks the payment against your agent rules and
-          settles in USDC straight from your Haven account — no card details in agent memory, no
-          unrestricted credentials, full audit trail.
+          settles in USDC straight from your Haven account. No card details sit in agent memory, no
+          credentials go unrestricted, and every payment leaves an audit trail.
         </p>
         </div>
       </section>
@@ -81,14 +81,14 @@ export default function MPP() {
           <div className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-8 items-start">
             <div className="space-y-5 text-[16px] leading-relaxed text-[var(--v2-ink-2)] max-w-[640px]">
               <p>
-                <span className="text-[var(--v2-ink)] font-medium">Stripe MPP</span> — the Machine
-                Payments Protocol — is an open standard for agent‑initiated payments across rails.
+                <span className="text-[var(--v2-ink)] font-medium">Stripe MPP</span>, the Machine
+                Payments Protocol, is an open standard for agent‑initiated payments across rails.
                 It supports direct on‑chain crypto payments as well as fiat methods such as cards,
                 wallets, and BNPL through Stripe <span className="font-mono text-[var(--v2-ink)]">Shared Payment Tokens</span>.
               </p>
               <p>
                 Where x402 focuses on programmatic HTTP 402 payment flows, MPP extends the same
-                machine‑payment idea into broader agent commerce — one‑off purchases,
+                machine‑payment idea into broader agent commerce: one‑off purchases,
                 subscriptions, and other payments an agent and a merchant need to coordinate.
               </p>
               <p>

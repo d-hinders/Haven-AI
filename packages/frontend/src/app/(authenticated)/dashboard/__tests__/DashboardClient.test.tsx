@@ -544,6 +544,77 @@ describe('DashboardClient', () => {
       expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
     })
 
+    // #1205: the recommendation's production origin is now the SERVER —
+    // needsBackupSignerRecommendation computed next to the chain
+    // classification and delivered on the session safes payload. The
+    // device-local read survives only as the older-backend fallback (which is
+    // what every test above exercises, since their fixtures omit the field).
+    it('trusts a server true — no device-local signer read required (#1205)', () => {
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          safes: [{ ...DELEGATOR_SAFE, needs_backup_recommendation: true }],
+        },
+        activeSafe: DELEGATOR_SAFE,
+      })
+      // Nothing in localStorage — the server answer must carry alone.
+
+      render(<DashboardClient />)
+
+      expect(screen.getByText('Add a backup soon')).toBeInTheDocument()
+    })
+
+    it('trusts a server false even when the stale local read says otherwise (#1205)', () => {
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          safes: [{ ...DELEGATOR_SAFE, needs_backup_recommendation: false }],
+        },
+        activeSafe: DELEGATOR_SAFE,
+      })
+      storeSigners(1, null) // stale local state claims a missing backup
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
+    it('keeps the safe-rail nudge off testnet chains via the server classification (#1205)', () => {
+      asPasskeySafeUser(1)
+      const current = mockUseAuth.mock.results[mockUseAuth.mock.results.length - 1]
+      void current
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: null,
+          safes: [{ ...SAFE, value_bearing_chain: false }],
+        },
+        activeSafe: SAFE,
+        passkeys: [
+          {
+            id: 'passkey-1',
+            credential_id: 'cred-primary',
+            signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
+            chain_id: SAFE.chain_id,
+            safe_address: SAFE.safe_address,
+            created_at: '2026-05-12T00:00:00Z',
+          },
+        ],
+      })
+
+      render(<DashboardClient />)
+
+      expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()
+    })
+
     it('leaves an imported wallet-owned Safe alone (#1229)', () => {
       // No passkey row points at this Safe, so its owner holds their own key
       // and needs no advice from us.

@@ -162,7 +162,17 @@ describe('auth SQL characterization (pre-#1180)', () => {
       mockQuery.mockResolvedValueOnce({
         rows: [{ id: 'u1', name: 'Ada', email: 'ada@example.com', password_hash: hash, currency_preference: 'EUR' }],
       })
-      mockQuery.mockResolvedValueOnce({ rows: [{ id: 's1', account_type: 'delegator_hybrid' }] })
+      mockQuery.mockResolvedValueOnce({
+        rows: [
+          {
+            id: 's1',
+            chain_id: 8453,
+            account_type: 'delegator_hybrid',
+            owner_address: null,
+            passkey_count: 1,
+          },
+        ],
+      })
 
       const res = await app.inject({
         method: 'POST',
@@ -171,9 +181,19 @@ describe('auth SQL characterization (pre-#1180)', () => {
       })
 
       expect(paramsSent()[1]).toEqual(['u1'])
-      expect(sqlSent()[1]).toMatch(/WHERE user_id = \$1/)
-      expect(sqlSent()[1]).toMatch(/ORDER BY created_at ASC/)
-      expect(res.json().user.safes).toEqual([{ id: 's1', account_type: 'delegator_hybrid' }])
+      expect(sqlSent()[1]).toMatch(/WHERE (?:us\.)?user_id = \$1/)
+      expect(sqlSent()[1]).toMatch(/ORDER BY (?:us\.)?created_at ASC/)
+      // #1205: raw signer-set inputs are consumed by sessionSafePayload; the
+      // payload carries the computed answer instead.
+      expect(res.json().user.safes).toEqual([
+        {
+          id: 's1',
+          chain_id: 8453,
+          account_type: 'delegator_hybrid',
+          value_bearing_chain: true,
+          needs_backup_recommendation: true,
+        },
+      ])
     })
   })
 

@@ -311,4 +311,22 @@ describe('safes payload carries the rail (#1069)', () => {
     // user_safes list omits account_type, which is the field #1069 is about.
     expect(src).not.toMatch(/listSafesForUser\(|listSafesWithAccountTypeForUser\(/)
   })
+
+  it('the session SELECT carries the signer-set inputs and both endpoints map them through the predicate (#1205)', async () => {
+    // The recommendation's production origin: raw facts in the SQL, the
+    // ANSWER computed by sessionSafePayload — chain classification stays in
+    // exactly one place (modules/accounts/mainnet-gate.ts). Same #1069-class
+    // guard shape: assert the statement, then count the mapping call sites.
+    const { LIST_SESSION_SAFES_FOR_USER_SQL } = await import(
+      '../../infra/repositories/user-safes.js'
+    )
+    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toContain('owner_address')
+    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toContain('passkey_count')
+    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toMatch(/hybrid_account_passkeys/)
+
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync(new URL('../auth.ts', import.meta.url), 'utf8')
+    const mapped = src.match(/\.map\(sessionSafePayload\)/g) ?? []
+    expect(mapped.length, 'both /auth/login and /auth/me must map through sessionSafePayload').toBe(2)
+  })
 })

@@ -38,6 +38,16 @@ export interface EdgeSigner {
   readonly delegateAddress: string
   /** Sign an AllowanceModule funding/transfer hash (raw ECDSA, 65 bytes). */
   signPaymentHash(hash: string): string
+  /**
+   * Sign a DIRECT delegation-rail payment's EIP-712 typed data (#1254) — the
+   * non-x402 counterpart of `signX402FundingTypedData`. The Hybrid account
+   * validates the typed data, not the bare ERC-4337 hash; raw-signing the
+   * hash produced AA24 on-chain (found live, #908 mainnet canary). Signed
+   * VERBATIM (#829): the exact structure the hosted result carried — and,
+   * unlike a blind hash, a structure whose recipient/amount/account are
+   * visible to this process's audit log.
+   */
+  signDelegationTypedData(typedData: Record<string, unknown>): Promise<string>
   /** Sign an x402 funding hash and remember the funded merchant-header context. */
   signX402FundingHash(hash: string, expected: X402ExpectedPayment): X402FundingSignatureResult
   /**
@@ -166,6 +176,14 @@ export function createEdgeSigner(
       return signAndVerify(hash)
     },
 
+    async signDelegationTypedData(typedData: Record<string, unknown>): Promise<string> {
+      const account = privateKeyToAccount(delegateKey as `0x${string}`)
+      // Signed VERBATIM (#829/#1254): the exact structure Haven sent, never
+      // one reconstructed from components — a re-derived payload is a
+      // different payload, and the account validates the original.
+      return account.signTypedData(typedData as Parameters<typeof account.signTypedData>[0])
+    },
+
     signX402FundingHash(hash: string, expected: X402ExpectedPayment): X402FundingSignatureResult {
       assertExpectedBinding(hash, expected, options.x402BindingSigner, 'hash')
       const signature = signAndVerify(hash)
@@ -187,7 +205,10 @@ export function createEdgeSigner(
       if (digest.toLowerCase() !== expected.typedDataHash?.toLowerCase()) {
         throw new HavenSigningError(
           'x402 typed data does not match the digest Haven committed to in the expected context. ' +
-            'Refusing to sign — the payload was altered in transit or Haven declared a different one.',
+            'Refusing to sign — the payload was altered in transit or Haven declared a different one. ' +
+            'The most common cause is the typed data being truncated or reshaped while being copied ' +
+            'between tool calls (#1255): re-run the hosted quote and pass its typed_data_b64 string ' +
+            'through UNCHANGED instead of re-emitting the nested JSON.',
         )
       }
       const account = privateKeyToAccount(delegateKey as `0x${string}`)

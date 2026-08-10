@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-10" # re-verified for #1263 (payment_id fetch — the signer's one network capability) + #1251 (MPP seam refusal — no claim here affected)
 ---
 
 # Haven — Edge Signer
@@ -35,7 +35,9 @@ last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no cl
 The edge signer is the local authority half of Haven's default hosted-MCP
 architecture. Hosted MCP identifies the agent, constructs unsigned payloads,
 and relays externally produced signatures; `@haven_ai/signer` holds the
-delegate key locally and performs sign-only operations without network access.
+delegate key locally and performs sign-only operations. Its only network use
+is the #1263 read-only signing-context fetch (see Current Form) — it never
+relays, submits, or exposes anything.
 
 Topology and custody contract:
 [`06-hosted-mcp-connect-flow.md`](06-hosted-mcp-connect-flow.md). That document
@@ -69,7 +71,16 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    - Returns signatures/headers only — never the key.
 
 2. **Local stdio MCP signer** — a thin MCP server exposing sign-only tools
-   backed by the core:
+   backed by the core. Since #1263 this layer holds the signer's ONE network
+   capability: an authenticated READ of a payment's exact signing context from
+   Haven by `payment_id` (`GET /x402/:id/sign-context`), using the agent
+   identity (`identity.json`) the connector stores next to the signer
+   credential. This exists because the alternative byte source is a language
+   model re-emitting multi-KB EIP-712 payloads between tool calls — runtimes
+   that elide long tool results structurally cannot do that (#1255/#1263).
+   Fetched bytes are untrusted input exactly like tool arguments: they pass
+   the same binding verification and digest re-derivation before signing. The
+   signer CORE remains network-free:
    - `haven_sign`
    - `haven_x402_sign_header`
    - `haven_sign_x402` for the one-call x402 signing fast path
@@ -116,10 +127,39 @@ agent runtime drives the sequence.
 **Regular payment**
 
 ```
-hosted:  haven_pay        -> { payment_id, payload_hash }
+hosted:  haven_pay        -> { payment_id, payload_hash, signature_scheme?, typed_data?, typed_data_b64? }
 local:   haven_sign       -> { signature }     (delegate key, never leaves)
 hosted:  haven_submit     -> { status, tx_hash }
 ```
+
+On a **delegation-rail** account the `haven_pay` result also carries
+`signature_scheme: 'eip712_userop'` and the account's EIP-712 payload in TWO
+transports: `typed_data` (the object) and `typed_data_b64` (the same bytes as
+one opaque base64 string, #1255). Prefer passing `typed_data_b64` to
+`haven_sign` UNCHANGED — a redemption payload is multi-KB, and an agent
+re-emitting the nested JSON between tool calls can truncate or reshape it,
+which the signer's digest check then refuses. The Hybrid account validates
+the typed data; a bare-hash signature is rejected on-chain (AA24, #1254).
+Legacy-rail results omit all three fields and `haven_sign` signs
+`payload_hash`. The same pair rides `haven_pay_mcp_tool` /
+`haven_pay_x402_quote` results for `haven_sign_x402` / `haven_sign`, where
+`typed_data_b64` wins when both are supplied — silently, so a caller that
+supplies both must keep them in sync: on the direct path (no digest check) an
+edited `typed_data` next to a stale `typed_data_b64` would sign the stale one.
+
+**Preferred x402 form (#1263):** pass `payment_id` alone (plus
+`payment_required` on the one-call tool) — the signer fetches `payload_hash`,
+`typed_data` and the complete expected context from Haven itself, so nothing
+bulky ever crosses the agent's context. `typed_data_b64` / `typed_data` remain
+the fallback for older backends and for the fully offline core.
+
+Note the trust-model asymmetry: the **x402** typed-data leg
+(`signX402FundingTypedData`) verifies a Haven-authenticated expected context
+and digest equality before signing; this **direct** leg does not — like the
+legacy raw-hash path it always mirrored, the authority boundary is the
+account's on-chain caveat enforcers (budget/recipient/expiry), not a
+client-side signing gate. Do not assume `signDelegationTypedData` carries the
+x402 leg's binding protection.
 
 An over-budget result has `payload_hash: null`; stop and wait for the user to
 approve and execute the Safe payment. There is nothing for the edge signer to

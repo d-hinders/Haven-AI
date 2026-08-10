@@ -5,7 +5,7 @@ covers:
   - packages/backend/scripts/check-mainnet-reconciliation.ts
   - packages/backend/scripts/check-bundler.ts
   - packages/backend/scripts/check-delegation-contracts.ts
-last-verified: "2026-08-09" # §1.1 v2: the pruned container ships no scripts/ either — inline-Node probe is the only in-shell path that works (proven twice, live)
+last-verified: "2026-08-10" # §4.1 run log added — canary completed on the 0.1.20 train; §§1-3 re-read, probe guidance unchanged
 ---
 
 # Mainnet (8453) canary & reconciliation runbook (#1067)
@@ -165,6 +165,30 @@ Read-only, keyless, moves nothing. It verifies:
 The delegate-balance monitor itself WARNs hourly in prod logs (leader-locked,
 #714); the check above is the pull-based complement an operator can run on
 demand.
+
+## 4.1 Run log — canary COMPLETED 2026-08-10
+
+Every §3 leg executed and proven on Base mainnet (8453), account
+`0x79238f83333777a43f387024ffc71dda83eaae19` (Hybrid), delegate EOA
+`0xff372e7866e727c8cbabde4565795fffa1e793fa`, budget 1.0 USDC/day open:
+
+| Leg | Proof |
+|---|---|
+| Direct payment (#1254 end-to-end) | 0.01 USDC confirmed, tx `0x3c86…5e8f` — typed data signed locally, no AA24 |
+| x402, own merchant (CloudNest 0.0005) | funding `0x627a260f5fd02d889cea6127bcaccf92c0a992b366b6e3f15e290f4166a535e0`, settlement `0xe1cd8519496543d147328fdffeba2bd8f90d81852d9d4945864df6cc26eb03e4`, invoice FAK-2026-1786370258 paid |
+| x402, external merchant (Soundside 0.02) | funding `0xc93f43f5e4d0ccf563ff8799cd1781529403fe2b6b139e2402ea41b851f0d0ec`, settlement `0x82a7d7f7af109a57a01b665a74f5e670be67e3cbb0e9c4f52b826795ca6e03f6`, goods delivered |
+| Over-budget refusal | 2 USDC > remaining → `ERC20PeriodTransferEnforcer:transfer-amount-exceeded` reverted at PREPARE (simulation), nothing signed, no queue |
+| Revoke | dashboard Stop (one signature) → next payment 403 `Agent has no active budget delegation`, `readiness: needs_approval`, empty budget view |
+| Reconciliation (§4) | delegate residual exactly 2000 atomic = the two pre-fix Anchor fundings (`0x955ba720…`, `0x4fe50221…`, both 0.001); today's purchases left zero residual. The 0.002 stays below the 1 USDC sweep floor (#700) by design |
+
+The x402 legs ran the **byte-free handoff** (#1263: the agent relayed only
+`payment_id`; the signer fetched the payload itself) on the 0.1.20-alpha.0
+train, which also carries the fixes this canary surfaced: #1254 (direct-path
+typed_data), #1255 (`typed_data_b64` transport), #1256 (EIP-3009 forward
+margin — the header showed ~10 min forward validity against the merchant's
+300 s requirement). Outstanding non-blockers: an Anchor re-test on the
+decomposed HTTP flow (its two failures predate #1256), and the #1269
+below-minimum sweep mapping reaching prod on the next promotion.
 
 ## 5. Widening
 

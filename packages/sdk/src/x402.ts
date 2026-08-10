@@ -31,16 +31,36 @@ function optionAuthorizationAmount(option: X402PaymentOption): string {
 }
 
 /**
- * Upper bound on the EIP-3009 authorization window (#715, epic #713). The
- * x402 library sets `validBefore = now + maxTimeoutSeconds` straight from the
- * MERCHANT's 402 challenge — without a cap, a malicious or sloppy merchant
- * can request a year-long window and a leaked signed authorization stays
- * spendable that whole time. 600 s is generous for any facilitator settle
- * (typical is 30–60 s); we CLAMP rather than reject so payments keep flowing
- * while exposure stays bounded. `validBefore` is a deadline, not a demand —
+ * Upper bound on the MERCHANT-requested part of the EIP-3009 authorization
+ * window (#715, epic #713). The x402 library sets
+ * `validBefore = now + maxTimeoutSeconds` straight from the MERCHANT's 402
+ * challenge — without a cap, a malicious or sloppy merchant can request a
+ * year-long window and a leaked signed authorization stays spendable that
+ * whole time. 600 s is generous for any facilitator settle (typical is
+ * 30–60 s); we CLAMP rather than reject so payments keep flowing while
+ * exposure stays bounded. `validBefore` is a deadline, not a demand —
  * settling earlier is always valid.
  */
 export const X402_MAX_AUTHORIZATION_WINDOW_SECONDS = 600
+
+/**
+ * Forward margin ADDED on top of the (clamped) merchant timeout when the
+ * authorization is actually signed (#1256). The x402 verify rule requires
+ * `validBefore ≥ now + maxTimeoutSeconds` AT THE FACILITATOR — but the
+ * upstream library computes `validBefore = now + maxTimeoutSeconds` at
+ * SIGNING time, leaving zero forward margin. Haven's flow guarantees elapsed
+ * time between the two (the funding UserOp confirms before the merchant
+ * retry, ~1 min plus latency), so every purchase against a merchant whose
+ * `maxTimeoutSeconds` exceeded that latency failed structurally — measured
+ * live on Base mainnet: Anchor requires 300 s, and 226 s remained at verify.
+ *
+ * 300 s covers funding + retry latency with room to spare. The #715 exposure
+ * ceiling becomes clamped-timeout + margin ≤ 900 s total forward — a
+ * deliberate widening from 600 s, recorded on #1256: an authorization that
+ * cannot pass verify protects no one, and 900 s is still bounded by the same
+ * clamp discipline.
+ */
+export const X402_SETTLEMENT_FORWARD_MARGIN_SECONDS = 300
 
 function clampAuthorizationWindow(seconds: number | undefined): number {
   const requested = typeof seconds === 'number' && Number.isFinite(seconds) ? seconds : 30
@@ -389,7 +409,14 @@ export function toStandardPaymentRequirements(
     // Second enforcement point (#715): the parse path clamps too, but this is
     // the last stop before the x402 library turns the timeout into
     // `validBefore` — options constructed without parsing are bounded here.
-    maxTimeoutSeconds: clampAuthorizationWindow(option.maxTimeoutSeconds),
+    // The forward margin (#1256) is added ONLY here, at signing: the parse
+    // path keeps recording the merchant's advertised timeout unchanged, and
+    // the library's `validBefore = now + this value` then carries enough
+    // slack to satisfy the facilitator's `validBefore ≥ now + maxTimeout`
+    // verify rule after our funding leg confirms.
+    maxTimeoutSeconds:
+      clampAuthorizationWindow(option.maxTimeoutSeconds) +
+      X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
     extra: option.extra,
   }
 }

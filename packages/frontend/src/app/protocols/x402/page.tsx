@@ -18,10 +18,10 @@ const TIMELINE = [
   { step: '02', label: 'Server responded 402 Payment Required', detail: '0.05 USDC on Base → 0x4F3e…3bcFc', tone: 'warning' },
   { step: '03', label: 'Agent forwarded challenge to Haven', detail: 'POST /x402/authorize · sk_agent_d4c8…9f', tone: 'brand' },
   { step: '04', label: 'Rules checked', detail: 'Per‑payment limit · network allowlist · allowance', tone: 'brand' },
-  { step: '05', label: 'Rules cleared — Haven signed the transfer', detail: 'sign_hash 0x8b2f4e93…2c6d4e8f', tone: 'brand' },
-  { step: '06', label: 'Allowance transfer submitted to Base', detail: 'Safe → ERC‑20 via AllowanceModule', tone: 'brand' },
+  { step: '05', label: 'Rules cleared; agent signed the transfer', detail: 'sign_hash 0x8b2f4e93…2c6d4e8f', tone: 'brand' },
+  { step: '06', label: 'Settled to the merchant on Base', detail: 'Haven account → merchant · USDC', tone: 'brand' },
   { step: '07', label: 'Confirmed in block 14,892,103', detail: 'tx 0x7a9e3b1d…b6c7d8e9 · gas 41,228', tone: 'success' },
-  { step: '08', label: 'Agent retried with proof — data delivered', detail: '200 OK · research.json', tone: 'success' },
+  { step: '08', label: 'Agent retried with proof, data delivered', detail: '200 OK · research.json', tone: 'success' },
 ] as const
 
 const TONE_DOT: Record<string, string> = {
@@ -57,7 +57,7 @@ export default function X402() {
           .
         </h1>
         <p className="text-[17px] leading-relaxed text-[var(--v2-ink-2)] max-w-[640px]">
-          An agent hits a paywall. Just seconds later it has the data — no card, no human, no key.
+          An agent hits a paywall. Just seconds later it has the data, with no card, no human, and no key.
           One HTTP 402 becomes a settled transaction on Base.
         </p>
         </div>
@@ -77,13 +77,13 @@ export default function X402() {
               <p>
                 <span className="text-[var(--v2-ink)] font-medium">x402</span> is an open payment standard
                 built on top of the long‑dormant <span className="font-mono text-[var(--v2-ink)]">HTTP 402 Payment Required</span> status
-                code. Originally proposed by Coinbase, it lets any web service charge for a single request — no account, no API key,
-                no card on file. The client pays a small amount in stablecoin, attaches the proof, and the server unlocks the resource.
+                code. Originally proposed by Coinbase, it lets any web service charge for a single request with no account, no API key,
+                and no card on file. The client pays a small amount in stablecoin, attaches the proof, and the server unlocks the resource.
               </p>
               <p>
                 That's the unlock for agentic workflows. Agents discover and use tools the same way humans browse the web: one request
                 at a time, often across services they've never seen before. With x402, an agent can pay per call for an API, a piece of
-                data, or a unit of compute — programmatically, without a human in the checkout loop.
+                data, or a unit of compute, programmatically, without a human in the checkout loop.
               </p>
             </div>
             <Card className="p-6">
@@ -115,7 +115,7 @@ export default function X402() {
       <Section
         eyebrow="In code"
         title="One call to authorize. Haven does the rest."
-        lede="Forward the 402 challenge. Haven checks the rules, signs from your Haven account, and returns the proof you attach to the retry."
+        lede="Forward the 402 challenge. Haven checks the rules, and your agent signs the payment from your Haven account. You attach the proof to the retry."
         className="border-t border-[var(--v2-border)] bg-[var(--v2-surface)]"
       >
         <CodeBlock filename="x402-client.ts" language="ts">{`const challenge = await fetch(url).then(r => r.json())

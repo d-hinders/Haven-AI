@@ -105,6 +105,8 @@ export {
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
+  X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
   buildX402ExpectedMessage,
   encodePaymentProof,
 } from './x402.js'

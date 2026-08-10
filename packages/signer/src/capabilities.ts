@@ -80,8 +80,10 @@ export function signerCapabilityAdvertisement(): {
 export function signerInstructions(): string {
   const compatibility = signerCompatibility()
   return [
-    'Haven edge signer: sign-only tools bound to the local delegate key. It performs no',
-    'network I/O and never emits the key.',
+    'Haven edge signer: sign-only tools bound to the local delegate key. It never emits the',
+    'key. Its one network capability is an authenticated READ of a signing context from',
+    'Haven by payment_id — pass payment_id to haven_sign / haven_sign_x402 (preferred for',
+    'delegation-rail x402) instead of relaying bulky typed-data payloads yourself.',
     '',
     'Version compatibility (check this BEFORE signing, not after):',
     `- x402 expected-context versions supported: ${compatibility.x402_expected_context_versions.join(', ')}`,

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { privateKeyToAccount } from 'viem/accounts'
+import { hashTypedData } from 'viem'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
@@ -187,6 +188,38 @@ describe('haven_sign tool', () => {
     const handlers = createToolHandlers(createEdgeSigner(TEST_KEY))
     const payload = await handlers.haven_sign({ payload_hash: 'nope' })
     expect(payload.success).toBe(false)
+  })
+
+  it('signs the TYPED DATA, not the raw hash, when typed_data is present (#1254)', async () => {
+    // The direct delegation-rail case found live during the #908 mainnet
+    // canary: the Hybrid account validates EIP-712 typed data, and a raw
+    // signature over payload_hash reverts on-chain with AA24. When the
+    // hosted result carries typed_data, THAT is what gets signed.
+    const signer = createEdgeSigner(TEST_KEY)
+    const handlers = createToolHandlers(signer)
+    const typedData = {
+      domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: `0x${'11'.repeat(20)}` },
+      types: {
+        PackedUserOperation: [
+          { name: 'sender', type: 'address' },
+          { name: 'nonce', type: 'uint256' },
+        ],
+      },
+      primaryType: 'PackedUserOperation',
+      message: { sender: `0x${'22'.repeat(20)}`, nonce: 1 },
+    }
+
+    const result = ok<{ signature: string }>(
+      await handlers.haven_sign({ payload_hash: HASH, typed_data: typedData }),
+    )
+
+    // The signature verifies against the typed data's EIP-712 digest —
+    // and does NOT verify against the raw payload_hash, which is exactly
+    // the property that failed on-chain before this fix.
+    const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+    expect(verifySignature(digest, result.data.signature, signer.delegateAddress)).toBe(true)
+    expect(verifySignature(HASH, result.data.signature, signer.delegateAddress)).toBe(false)
+    expect(JSON.stringify(result)).not.toContain(TEST_KEY.slice(2))
   })
 
   it('appends a local audit row for signing without key material or signature', async () => {

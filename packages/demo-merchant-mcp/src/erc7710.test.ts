@@ -49,6 +49,7 @@ async function startServer(params: {
     merchantAddress: MERCHANT,
     baseUrl: 'http://127.0.0.1:0',
     paymentProcessor: createX402PaymentProcessor(settlementClient, params.options),
+    settlementMethods: params.options?.settlementMethods ?? (params.options?.erc7710 ? ['eip3009', 'erc7710'] : undefined),
   })
   servers.push(server)
   await new Promise<void>((resolve, reject) => {
@@ -117,6 +118,22 @@ async function postBuyStorage(url: string, headers: Record<string, string> = {},
   })
 }
 
+async function postListProducts(url: string, id = 1) {
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: { name: 'list_products', arguments: {} },
+    }),
+  })
+}
+
 describe('demo merchant experimental erc7710 rail', () => {
   it('does not advertise erc7710 when the flag is off, and rejects erc7710 payments', async () => {
     const erc7710Client = mockErc7710Client()
@@ -144,14 +161,27 @@ describe('demo merchant experimental erc7710 rail', () => {
     expect(erc7710Client.submitRedeemDelegations).not.toHaveBeenCalled()
   })
 
-  it('advertises erc7710 alongside eip3009 when enabled, keeping eip3009 first', async () => {
+  it('advertises erc7710 alongside eip3009 when enabled, keeping eip3009 first by default', async () => {
     const { url } = await startServer({ erc7710Client: mockErc7710Client(), options: { erc7710: { delegationManager: DELEGATION_MANAGER } } })
     const unpaid = await postBuyVpn(url)
     const paymentRequired = await unpaid.json() as PaymentRequired
+    const products = await postListProducts(url, 2)
+    const productText = await products.text()
 
     expect(unpaid.status).toBe(402)
+    expect(products.status).toBe(200)
+    expect(productText).toContain('settlement_methods=eip3009,erc7710')
+    expect(productText).toContain('default=eip3009')
+    expect(productText).toContain('Merchant MCP URL: http://127.0.0.1:0/mcp')
+    expect(productText).toContain('dev=https://demo-merchant-dev-84e4.up.railway.app/mcp')
+    expect(productText).toContain('prod=https://enthusiastic-blessing-production-171f.up.railway.app/mcp')
     expect(paymentRequired.accepts).toHaveLength(2)
-    expect(paymentRequired.accepts[0].extra).toEqual({ name: 'USD Coin', version: '2' })
+    expect(paymentRequired.accepts[0]).toMatchObject({
+      scheme: 'exact',
+      amount: '1000',
+      payTo: MERCHANT,
+      extra: { name: 'USD Coin', version: '2' },
+    })
     expect(paymentRequired.accepts[1]).toMatchObject({
       scheme: 'exact',
       amount: '1000',
@@ -161,6 +191,27 @@ describe('demo merchant experimental erc7710 rail', () => {
     // The mock client names no redeemer — nothing must be advertised, so a
     // payer never pins a caveat to an address that will not redeem.
     expect(paymentRequired.accepts[1].extra).not.toHaveProperty('facilitatorAddresses')
+  })
+
+  it('puts explicit eip3009 selection first while still advertising erc7710', async () => {
+    const { url } = await startServer({ erc7710Client: mockErc7710Client(), options: { erc7710: { delegationManager: DELEGATION_MANAGER } } })
+    const unpaid = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic', settlement_method: 'eip3009' } },
+      }),
+    })
+    const paymentRequired = await unpaid.json() as PaymentRequired
+
+    expect(unpaid.status).toBe(402)
+    expect(paymentRequired.accepts.map((option) => option.extra.assetTransferMethod ?? 'eip3009')).toEqual(['eip3009', 'erc7710'])
   })
 
   // #1058: when the settlement client names its redeemer, the erc7710 option
@@ -177,10 +228,11 @@ describe('demo merchant experimental erc7710 rail', () => {
 
     expect(unpaid.status).toBe(402)
     expect(paymentRequired.accepts[1].extra).toEqual({
+      name: 'USD Coin',
+      version: '2',
       assetTransferMethod: ERC7710_TRANSFER_METHOD,
       facilitatorAddresses: [REDEEMER],
     })
-    // The eip3009 option stays untouched — facilitators are erc7710-only.
     expect(paymentRequired.accepts[0].extra).toEqual({ name: 'USD Coin', version: '2' })
   })
 
@@ -298,7 +350,7 @@ describe('demo merchant experimental erc7710 rail', () => {
     const reuse: PaymentPayload = {
       x402Version: 2,
       resource: storageRequired.resource,
-      accepted: storageRequired.accepts[1],
+      accepted: storageRequired.accepts.find((option) => option.extra?.assetTransferMethod === ERC7710_TRANSFER_METHOD)!,
       payload: { delegator: DELEGATOR, delegationManager: DELEGATION_MANAGER, permissionContext: PERMISSION_CONTEXT },
     }
     const refused = await postBuyStorage(url, { [PAYMENT_SIGNATURE_HEADER]: encodePaymentSignatureHeader(reuse) }, 5)

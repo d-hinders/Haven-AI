@@ -9,7 +9,7 @@ covers:
   - .github/workflows/ci.yml
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/code-quality-loop.md
-last-verified: "2026-08-09" # re-verified: code-quality-loop.md re-dated in the stale-claims sweep, no claim here affected
+last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Loop Engineering (oracle-grounded automated loops)

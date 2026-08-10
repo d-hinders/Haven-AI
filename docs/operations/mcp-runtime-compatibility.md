@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-10" # 0.1.20 train (#1263): version table bumped; the signer's new payment_id path degrades gracefully both ways (old signer strips the field and demands payload_hash; new signer against an old backend surfaces the fetch refusal and names the typed_data_b64 fallback)
+last-verified: "2026-08-10" # + #1272: hosted x402 quotes compact by default; new skew row (pre-#1263 signer needs the include_signing_payload re-quote) — no floor or manifest change
 ---
 
 # MCP Runtime Compatibility
@@ -49,10 +49,10 @@ Keep this table in sync with that file.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 24.0.0 (pinned to LTS 24 in `.nvmrc` / package `engines`) |
-| `@haven_ai/connect` | `0.1.20-alpha.0` |
-| `@haven_ai/mcp` | `0.1.20-alpha.0` |
-| `@haven_ai/sdk` | `0.1.20-alpha.0` |
-| `@haven_ai/signer` | `0.1.20-alpha.0` |
+| `@haven_ai/connect` | `0.1.21-alpha.0` |
+| `@haven_ai/mcp` | `0.1.21-alpha.0` |
+| `@haven_ai/sdk` | `0.1.21-alpha.0` |
+| `@haven_ai/signer` | `0.1.21-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -174,6 +174,17 @@ rewriting it invalidates the signature and misrepresents what Haven authorised �
 the update is the fix. The same applies to `expected_auth.version` on the sweep
 binding, which shares the mechanism (`SUPPORTED_SWEEP_BINDING_VERSIONS`) and will
 hit this the first time that binding is versioned.
+
+One more skew row since #1272: the hosted x402 quote tools are **compact by
+default** — no `typed_data`/`typed_data_b64` in the response. A signer old
+enough to lack the #1263 `payment_id` fetch (or an install missing
+`identity.json`) therefore has no byte source in the default flow; its error
+names the fallback, and the recovery is to re-run the quote tool with the SAME
+`idempotency_key` plus `include_signing_payload=true`, which replays the
+ORIGINAL sign_data (#1207) with the full payload. This is a transport change
+only — the signer's verification is identical on both paths — but it converts
+"old signer silently relays bulk bytes" into "old signer asks for them
+explicitly", which is the observable difference an operator will see.
 
 ### Detecting skew before a payment (#1155)
 

@@ -401,7 +401,13 @@ describe('Hosted MCP + Edge Signer integration', () => {
       signature_scheme?: string
       typed_data?: unknown
       x402: { expected: Record<string, unknown> }
-    }>(await hostedHandlers.haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
+    }>(
+      // #1272: the byte-relay transport under test here is opt-in now.
+      await hostedHandlers.haven_pay_x402_quote({
+        payment_required: PAYMENT_REQUIRED,
+        include_signing_payload: true,
+      }),
+    )
 
     expect(quote.signature_scheme).toBe('eip712_userop')
     expect(quote.typed_data).toBeDefined()
@@ -444,7 +450,11 @@ describe('Hosted MCP + Edge Signer integration', () => {
     const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
 
     const quote = ok<{ typed_data?: unknown; typed_data_b64?: string }>(
-      await hostedHandlers.haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+      // #1272: the b64 round-trip under test is the opt-in transport.
+      await hostedHandlers.haven_pay_x402_quote({
+        payment_required: PAYMENT_REQUIRED,
+        include_signing_payload: true,
+      }),
     )
     expect(quote.typed_data_b64).toBeDefined()
     // The opaque form decodes to EXACTLY the payload the hosted surface

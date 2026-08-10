@@ -120,6 +120,34 @@ async function postMcp(url: string, body: unknown, headers: Record<string, strin
 }
 
 describe('demo merchant MCP x402 flow', () => {
+  it('exposes a machine-readable merchant directory with dev and prod routing', async () => {
+    const { url } = await startServer()
+    const origin = new URL(url).origin
+    const directory = await fetch(`${origin}/`)
+    const payload = await directory.json()
+
+    expect(directory.status).toBe(200)
+    expect(payload).toMatchObject({
+      name: 'Haven Demo Merchant',
+      environment: 'prod',
+      chain_id: 8453,
+      network: 'eip155:8453',
+      hosted_urls: {
+        dev: 'https://demo-merchant-dev-84e4.up.railway.app/mcp',
+        prod: 'https://enthusiastic-blessing-production-171f.up.railway.app/mcp',
+      },
+      routing: {
+        dev: { chain_id: 84532, network: 'eip155:84532' },
+        prod: { chain_id: 8453, network: 'eip155:8453' },
+      },
+    })
+    expect(payload.mcp_url).toContain('/mcp')
+    expect(payload.products).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'vpn_basic', settlement_methods: ['eip3009'] }),
+      expect.objectContaining({ id: 'storage_50gb', settlement_methods: ['eip3009'] }),
+    ]))
+  })
+
   it('initializes with an MCP session id and leaves list_products free', async () => {
     const { url } = await startServer()
     const init = await postMcp(url, {

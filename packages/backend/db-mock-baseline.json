@@ -90,7 +90,7 @@
   },
   "packages/backend/src/routes/__tests__/agent-connection-setups.test.ts": {
     "db-mock": 1,
-    "positional": 56
+    "positional": 1
   },
   "packages/backend/src/routes/__tests__/agent-delegations.test.ts": {
     "db-mock": 1,
@@ -161,7 +161,7 @@
   },
   "packages/backend/src/routes/__tests__/machine-payments.test.ts": {
     "db-mock": 1,
-    "positional": 212
+    "positional": 1
   },
   "packages/backend/src/routes/__tests__/non-custody-authz.contract.test.ts": {
     "db-mock": 1,
@@ -184,8 +184,7 @@
     "positional": 8
   },
   "packages/backend/src/routes/__tests__/payments-session-rail.test.ts": {
-    "db-mock": 1,
-    "positional": 44
+    "db-mock": 1
   },
   "packages/backend/src/routes/__tests__/payments.test.ts": {
     "db-mock": 1,
@@ -247,6 +246,6 @@
   },
   "packages/backend/src/routes/__tests__/x402.test.ts": {
     "db-mock": 1,
-    "positional": 179
+    "positional": 42
   }
 }

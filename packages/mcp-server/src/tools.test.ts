@@ -254,6 +254,60 @@ const PAYMENT_REQUIRED = {
   ],
 }
 
+// ── haven_sweep_delegate (phase 1 mapping) ────────────────────────────────────
+
+describe('haven_sweep_delegate prepare mapping', () => {
+  it('maps a below-floor balance to below_minimum — never a dead-end signature_required (#700)', async () => {
+    // Found live on the first prod sweep attempt: the handler only branched on
+    // nothing_stranded, so a below-floor response fell through to
+    // signature_required with authorization/expected_auth undefined — an
+    // instruction to sign a payload that does not exist.
+    stubFetch({
+      'POST /machine-payments/sweep/prepare': {
+        status: 200,
+        body: {
+          below_min: true,
+          asset: 'USDC',
+          amount: '0.002',
+          amount_atomic: '2000',
+          min_usdc: '1',
+          chain_id: 8453,
+          message: 'Stranded 0.002 USDC is below the sweep floor of 1 USDC',
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(await handlers().haven_sweep_delegate({}))
+    expect(result.data.status).toBe('below_minimum')
+    expect(result.data.min_usdc).toBe('1')
+    expect('authorization' in result.data).toBe(false)
+    expect('sign_with' in result.data).toBe(false)
+  })
+
+  it('still returns the full signing payload when a sweep IS prepared', async () => {
+    const authorization = {
+      from: '0x' + 'aa'.repeat(20), to: '0x' + 'bb'.repeat(20), value: '2000000',
+      validAfter: '0', validBefore: '9999999999', nonce: '0x' + 'cc'.repeat(32),
+      token: '0x' + 'dd'.repeat(20), chainId: 8453,
+    }
+    stubFetch({
+      'POST /machine-payments/sweep/prepare': {
+        status: 201,
+        body: {
+          authorization,
+          expected_auth: { version: 1, message: 'm', signature: '0x' + '11'.repeat(65), signer: '0x' + 'ee'.repeat(20) },
+          asset: 'USDC', amount: '2.0', amount_atomic: '2000000', chain_id: 8453,
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(await handlers().haven_sweep_delegate({}))
+    expect(result.data.status).toBe('signature_required')
+    expect(result.data.authorization).toEqual(authorization)
+    expect(result.data.expected_auth).toBeDefined()
+  })
+})
+
 // ── haven_discover_tools ────────────────────────────────────────────────────
 
 describe('haven_discover_tools', () => {
@@ -855,6 +909,37 @@ describe('haven_pay_mcp_tool', () => {
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 
+  it('accepts a quote EXACTLY at max_amount — the cap is inclusive, no warning (#1275)', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_pay_x402_quote({
+        payment_required: PAYMENT_REQUIRED,
+        // Fixture's authoritative amount is maxAmountRequired 1500000.
+        max_amount: '1500000',
+      }),
+    )
+    expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
+    // Cap provided → no warning.
+    expect('cap_warning' in result.data).toBe(false)
+  })
+
+  it('carries cap_warning when max_amount is omitted — the cap is the normal path (#1275)', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{ cap_warning?: string }>(
+      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+    expect(result.data.cap_warning).toContain('max_amount')
+    expect(result.data.cap_warning).toContain('atomic units')
+  })
+
   it('proceeds and returns the live price when max_amount is high enough', async () => {
     stubFetch({
       'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
@@ -1336,5 +1421,104 @@ describe('custody invariant', () => {
     expect(wire).not.toContain(DELEGATE_KEY)
     expect(wire).not.toContain('delegate_key')
     expect(wire).not.toContain('private_key')
+  })
+})
+
+// ── #1272: compact x402 signing payload ──────────────────────────────────────
+//
+// The x402 quote surfaces omit the multi-KB typed_data/typed_data_b64 by
+// default — the signer fetches the exact bytes from Haven by payment_id
+// (#1263) — and restore them byte-identically on include_signing_payload=true
+// (the recovery path for diagnostics and pre-#1263 signers). Direct payments
+// (haven_pay/haven_send) keep the bulk unconditionally: no fetch path exists
+// there, which the existing haven_pay/haven_send tests above already prove.
+
+describe('compact x402 signing payload (#1272)', () => {
+  const TYPED_DATA = {
+    domain: { name: 'HybridDeleGator', chainId: 8453 },
+    types: { PackedUserOperation: [{ name: 'callData', type: 'bytes' }] },
+    primaryType: 'PackedUserOperation',
+    // Realistic redemption size: the callData is what makes the payload multi-KB.
+    message: { callData: `0x${'ab'.repeat(2600)}` },
+  }
+  const DELEGATION_INTENT_RESPONSE = {
+    ...X402_INTENT_RESPONSE,
+    sign_data: {
+      hash: '0xfunding',
+      signature_scheme: 'eip712_userop',
+      typed_data: TYPED_DATA,
+    },
+  }
+  const stubs = () => ({
+    'GET /machine-payments/agent': { status: 200 as const, body: AGENT_RESPONSE },
+    'POST /x402': { status: 201 as const, body: DELEGATION_INTENT_RESPONSE },
+  })
+
+  it('haven_pay_x402_quote omits typed_data/typed_data_b64 by default, keeping the compact contract', async () => {
+    stubFetch(stubs())
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+
+    expect('typed_data' in result.data).toBe(false)
+    expect('typed_data_b64' in result.data).toBe(false)
+    // Everything the compact three-call flow needs survives.
+    expect(result.data.payment_id).toBe('pay_x402')
+    expect(result.data.payload_hash).toBe('0xfunding')
+    expect(result.data.signature_scheme).toBe('eip712_userop')
+    expect(result.data.signer_compatibility).toBeDefined()
+    expect((result.data.x402 as { expected?: unknown }).expected).toBeDefined()
+  })
+
+  it('haven_pay_x402_quote include_signing_payload=true restores the full payload verbatim', async () => {
+    stubFetch(stubs())
+
+    const result = ok<{ typed_data?: unknown; typed_data_b64?: string }>(
+      await handlers().haven_pay_x402_quote({
+        payment_required: PAYMENT_REQUIRED,
+        include_signing_payload: true,
+      }),
+    )
+
+    expect(result.data.typed_data).toEqual(TYPED_DATA) // verbatim, never reshaped
+    expect(
+      JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
+    ).toEqual(TYPED_DATA)
+  })
+
+  it('haven_pay_mcp_tool omits the bulk by default and restores it on request', async () => {
+    const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+    const withProbe = () => ({
+      'POST /mcp': {
+        status: 402 as const,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader },
+      },
+      ...stubs(),
+    })
+
+    stubFetch(withProbe())
+    const compact = ok<Record<string, unknown>>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect('typed_data_b64' in compact.data).toBe(false)
+    expect(compact.data.signature_scheme).toBe('eip712_userop')
+
+    stubFetch(withProbe())
+    const full = ok<{ typed_data_b64?: string }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        include_signing_payload: true,
+      }),
+    )
+    expect(
+      JSON.parse(Buffer.from(full.data.typed_data_b64 as string, 'base64').toString('utf8')),
+    ).toEqual(TYPED_DATA)
   })
 })

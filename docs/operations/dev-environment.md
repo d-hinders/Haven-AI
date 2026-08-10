@@ -212,16 +212,17 @@ on the service, and [`.env.dev.example`](../../.env.dev.example) documents the
 service's variables rather than applying them. Turning the rail on is a manual
 variable change on the Railway demo-merchant service.
 
-1. **Set both variables together**, on the **dev** demo-merchant service only:
+1. **Set both variables together** on the demo-merchant service:
 
    ```
-   MERCHANT_X402_ERC7710=1
-   MERCHANT_ERC7710_DELEGATION_MANAGER=0x…
+   MERCHANT_X402_SETTLEMENT_METHODS=eip3009,erc7710
+   MERCHANT_ERC7710_DELEGATION_MANAGER=0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3
    ```
 
-   The flag without a valid manager address makes the service **exit at
-   startup by design** — on Railway that is a crash-loop until the second
-   variable lands. Expect it if you set them one at a time.
+   If ERC-7710 is requested without the pinned manager address, the service
+   starts EIP-3009-only and refuses explicit `settlement_method: "erc7710"`
+   quotes. Hosted prod should not crash-loop because an optional ERC-7710
+   variable is missing.
 
 2. **The pinned DelegationManager must match the buyer side — use Haven's own
    pinned value.** For Base Sepolia that is
@@ -244,17 +245,20 @@ variable change on the Railway demo-merchant service.
    `redeemDelegations`. A delegation carrying a redeemer caveat must name that
    address.
 
-4. **Testnet-only, structurally.** Startup refuses the flag on any chain other
-   than `MERCHANT_CHAIN_ID=84532`, so mainnet can never advertise erc7710. Do
-   **not** add these variables to the production merchant service — a mistaken
-   flag there fails loudly at startup rather than enabling the rail.
+4. **Mainnet is no longer structurally blocked.** PR #1266 retires the old
+   #747 testnet-only guard now that #908 pinned the Base mainnet Delegation
+   Framework contracts. Mainnet ERC-7710 still requires the canary discipline:
+   use the exact pinned DelegationManager above, keep EIP-3009 first in
+   `accepts[]`, confirm `extra.facilitatorAddresses`, and run a tiny-value
+   end-to-end payment before treating it as ready for broader agent testing.
 
 Existing variables (`MERCHANT_ADDRESS`, `BASE_RPC_URL`, `MERCHANT_CHAIN_ID`,
 `MERCHANT_SKIP_SETTLE_PRODUCT`) need no changes.
 
-To turn the rail back **off**, unset `MERCHANT_X402_ERC7710` alone; the manager
-variable can stay. The flag is the only thing consulted when building the
-processor options, so the merchant reverts to advertising EIP-3009 only.
+To turn the rail back **off**, unset `MERCHANT_X402_SETTLEMENT_METHODS` when no
+manager is configured, or set `MERCHANT_X402_SETTLEMENT_METHODS=eip3009`
+explicitly. The manager variable can stay; without ERC-7710 in the effective
+method list, the merchant advertises EIP-3009 only.
 
 To confirm it actually redeems end-to-end, the repo's one tool for this is the
 manual pilot buyer:
@@ -283,8 +287,8 @@ manual pilot buyer:
 > consequence is a **stranded delegate balance** for the sweep to reclaim, not a
 > mis-signed payment.
 
-Reference: `packages/demo-merchant-mcp/README.md` § *Experimental: ERC-7710
-smart-account payments (testnet-only)*.
+Reference: `packages/demo-merchant-mcp/README.md` § *ERC-7710 Smart-Account
+Payments*.
 
 ### The `DEV` badge
 

@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-10" # re-verified for #1263 (payment_id fetch in the MCP layer — the signer's one network capability; core stays network-free)
+last-verified: "2026-08-10" # #1272: x402 quote tools compact by default; include_signing_payload restores the full payload
 ---
 
 # Haven — Edge Signer
@@ -141,17 +141,25 @@ re-emitting the nested JSON between tool calls can truncate or reshape it,
 which the signer's digest check then refuses. The Hybrid account validates
 the typed data; a bare-hash signature is rejected on-chain (AA24, #1254).
 Legacy-rail results omit all three fields and `haven_sign` signs
-`payload_hash`. The same pair rides `haven_pay_mcp_tool` /
-`haven_pay_x402_quote` results for `haven_sign_x402` / `haven_sign`, where
-`typed_data_b64` wins when both are supplied — silently, so a caller that
-supplies both must keep them in sync: on the direct path (no digest check) an
-edited `typed_data` next to a stale `typed_data_b64` would sign the stale one.
+`payload_hash`. The `haven_pay_mcp_tool` / `haven_pay_x402_quote` results are
+**compact by default** (#1272): they keep `signature_scheme` but omit
+`typed_data`/`typed_data_b64` unless the call sets
+`include_signing_payload=true`, because the preferred signing call needs
+neither. When the full pair IS requested, `typed_data_b64` wins when both are
+supplied — silently, so a caller that supplies both must keep them in sync: on
+the direct path (no digest check) an edited `typed_data` next to a stale
+`typed_data_b64` would sign the stale one.
 
 **Preferred x402 form (#1263):** pass `payment_id` alone (plus
 `payment_required` on the one-call tool) — the signer fetches `payload_hash`,
 `typed_data` and the complete expected context from Haven itself, so nothing
-bulky ever crosses the agent's context. `typed_data_b64` / `typed_data` remain
-the fallback for older backends and for the fully offline core.
+bulky ever crosses the agent's context. For older signers and diagnostics,
+re-run the quote tool with the SAME `idempotency_key` plus
+`include_signing_payload=true`: the replay returns the ORIGINAL sign_data
+(#1207 semantics), and `typed_data_b64` / `typed_data` remain the fallback
+transport for older backends and for the fully offline core. Direct payments
+(`haven_pay`/`haven_send`) always carry the full pair — no fetch path exists
+there.
 
 Note the trust-model asymmetry: the **x402** typed-data leg
 (`signX402FundingTypedData`) verifies a Haven-authenticated expected context

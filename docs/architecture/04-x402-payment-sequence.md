@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-10" # re-verified for PR #1269 (sweep-prepare result mapping in hosted MCP) — no x402 binding/digest/settle claim touched
+last-verified: "2026-08-10" # #1275 re-verify: max_amount steering + cap_warning are description/response-field additions on the hosted quote surfaces; every binding/digest/settle claim unchanged
 ---
 
 # Haven - x402 Payment Execution Sequence

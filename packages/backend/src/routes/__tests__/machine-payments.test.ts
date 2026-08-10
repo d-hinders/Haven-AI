@@ -628,6 +628,49 @@ describe('machine payment routes', () => {
 
   // #993 (review finding on #1120): /send never consulted the seam — a
   // session-marked account could still move money through it.
+  it('REFUSES a delegation-rail account on /send — 422, zero writes (#1251)', async () => {
+    // Found live during the #908 mainnet canary: without this refusal a
+    // Hybrid account fell through to LEGACY allowance coverage and queued
+    // an approval that could never execute. Content-dispatch mock (#1226
+    // style) — the auth row carries the rail.
+    mockQuery.mockImplementation(async (sql: string) =>
+      /api_key_hash = \$1/.test(String(sql))
+        ? { rows: [{ ...AGENT, execution_rail: 'delegation' }] }
+        : { rows: [] },
+    )
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/send',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { asset: 'USDC', recipient: RECIPIENT, amount: '0.01' },
+    })
+    expect(response.statusCode).toBe(422)
+    expect(response.json().error_code).toBe('rail_not_supported')
+    expect(response.json().error).toMatch(/POST \/payments/)
+    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE|DELETE/i.test(String(c[0])))).toBe(false)
+  })
+
+  it('REFUSES a delegation-rail account on /authorize — 422, zero writes, no approval manufactured (#1251)', async () => {
+    mockQuery.mockImplementation(async (sql: string) => {
+      const text = String(sql)
+      if (/api_key_hash = \$1/.test(text)) return { rows: [AGENT] }
+      if (/us\.execution_rail/.test(text)) return { rows: [{ execution_rail: 'delegation' }] }
+      return { rows: [] }
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { challenge, idempotencyKey: 'mpp_demo:delegation-refusal' },
+    })
+    expect(response.statusCode).toBe(422)
+    expect(response.json().error_code).toBe('rail_not_supported')
+    // The bug's signature was a manufactured approval_requests row — assert
+    // the refusal writes NOTHING.
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO approval_requests/.test(String(c[0])))).toBe(false)
+    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
+  })
+
   it('REFUSES a session-marked account on /send — 410, zero writes', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [{ ...AGENT, execution_rail: 'session_key' }] })
     const response = await app.inject({
@@ -672,8 +715,8 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({
         rows: [pendingIntent()],
       })
@@ -845,8 +888,8 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
 
@@ -1035,8 +1078,8 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({
         rows: [{
           id: 'approval-123',
@@ -1265,8 +1308,8 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
 
     const response = await app.inject({
@@ -1296,8 +1339,8 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
       .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
       .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
@@ -1361,8 +1404,8 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
       .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
       .mockResolvedValueOnce({ rows: [] })
@@ -1403,8 +1446,8 @@ describe('machine payment routes', () => {
       .mockResolvedValueOnce(authRow())
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
+      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
       .mockResolvedValueOnce({ rows: [pendingIntent()] })
       .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
       .mockResolvedValueOnce({ rows: [] })

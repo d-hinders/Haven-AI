@@ -161,7 +161,7 @@
   },
   "packages/backend/src/routes/__tests__/machine-payments.test.ts": {
     "db-mock": 1,
-    "positional": 212
+    "positional": 1
   },
   "packages/backend/src/routes/__tests__/non-custody-authz.contract.test.ts": {
     "db-mock": 1,

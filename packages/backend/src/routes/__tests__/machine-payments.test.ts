@@ -27,10 +27,9 @@ const { mockQuery, allowanceMocks, fiatMocks, reportingMocks } = vi.hoisted(() =
 }))
 
 // #1196 wired the allowance-nonce coordinator into this path, so it now reads
-// the shared watermark alongside its chain reads. These suites mock db.query
-// with POSITIONAL chains, which any new query shifts (the #775 failure mode).
-// Stub the watermark repository instead: it is fail-open and orthogonal to
-// what these tests assert, so silencing it changes nothing they measure.
+// the shared watermark alongside its chain reads. It is fail-open and
+// orthogonal to what these tests assert — stub the repository rather than
+// answer its query through the content-dispatch stub below.
 vi.mock('../../infra/repositories/allowance-nonce-watermarks.js', () => ({
   findAllowanceNonceWatermark: async () => null,
   raiseAllowanceNonceWatermark: async () => {},
@@ -53,7 +52,7 @@ vi.mock('../../modules/fee/index.js', () => ({
 }))
 
 // #956 late-attach: fire-and-forget, mocked so its own DB reads never
-// interleave with these sequence-based mockQuery queues.
+// interleave with these tests.
 vi.mock('../../modules/reporting/index.js', () => reportingMocks)
 
 const AGENT = {
@@ -95,9 +94,134 @@ function expectNoAuthorizationWork() {
   expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
 }
 
-function authRow() {
-  return { rows: [AGENT] }
+// ── Content-dispatch DB stub (#1226) ─────────────────────────────────────────
+//
+// Routes match on SQL FRAGMENTS, first hit wins, anything unmatched returns
+// zero rows. This replaces the positional mockResolvedValueOnce chains that
+// re-shuffled whenever a handler gained a query (#775) — what the database
+// DOES with these statements is proven in the repository suites on the real
+// harness (payment-intents.test.ts, approval-requests.test.ts et al., epic
+// #1219); these tests own only the handler: status codes, response shapes,
+// and which writes were requested.
+
+type DbRoute = [RegExp, (sql: string, params: unknown[]) => { rows: unknown[] } | Promise<{ rows: unknown[] }>]
+
+function primeDb(...routes: DbRoute[]) {
+  mockQuery.mockImplementation(async (sql: unknown, params: unknown[]) => {
+    const text = String(sql)
+    for (const [re, handler] of routes) {
+      if (re.test(text)) return handler(text, params)
+    }
+    return { rows: [] }
+  })
 }
+
+/** Every SQL text the handler sent, for pattern-based assertions. */
+const sqlCalls = () => mockQuery.mock.calls.map((c) => ({ sql: String(c[0]), params: c[1] as unknown[] }))
+const findCall = (re: RegExp) => sqlCalls().find((c) => re.test(c.sql))
+
+const AUTH: DbRoute = [/api_key_hash = \$1/, () => ({ rows: [AGENT] })]
+/** Auth lookup answered with an overridden agent row (rail refusals, characterization). */
+const authAs = (row: Record<string, unknown>): DbRoute => [/api_key_hash = \$1/, () => ({ rows: [row] })]
+
+/** authorizeMachinePayment: loadExecutionRailState found nothing → legacy rail. */
+const RAIL_LEGACY: DbRoute = [/FROM agents a/, () => ({ rows: [] })]
+/** authorizeMachinePayment: loadExecutionRailState resolves the delegation rail. */
+const RAIL_DELEGATION: DbRoute = [/FROM agents a/, () => ({ rows: [{ execution_rail: 'delegation' }] })]
+
+/** hasTokenAllowanceConfigured (send + authorize policy gate). */
+const allowanceConfigured = (configured: boolean): DbRoute => [
+  /LOWER\(token_address\) = LOWER\(\$2\)/,
+  () => ({ rows: configured ? [{ allowance_amount: '10000' }] : [] }),
+]
+
+/** listAllowanceConfigForAgent (GET /allowances, legacy rail). */
+const allowanceConfigRows = (rows: unknown[]): DbRoute => [
+  /FROM agent_allowances\s+WHERE agent_id = \$1\s+ORDER BY created_at ASC/,
+  () => ({ rows }),
+]
+
+/** deriveDelegationBudgets / listDelegationJsonByIds (GET /allowances, delegation rail). */
+const delegationRows = (rows: unknown[]): DbRoute => [/FROM agent_delegations/, () => ({ rows })]
+
+/** findMachineIntentByKeyOrChallenge — the authorize idempotency lookup. */
+const existingIntent = (row: Record<string, unknown> | null): DbRoute => [
+  /COALESCE\(payment_rail, source\) = \$4/,
+  () => ({ rows: row ? [row] : [] }),
+]
+/** findMachineApprovalByKeyOrChallenge — the authorize idempotency lookup. */
+const existingApproval = (row: Record<string, unknown> | null): DbRoute => [
+  /status <> 'expired'/,
+  () => ({ rows: row ? [row] : [] }),
+]
+/** INSERT INTO payment_intents (send's plain insert, or authorize's ON CONFLICT machine insert). */
+const insertIntent = (row: Record<string, unknown> | null): DbRoute => [
+  /INSERT INTO payment_intents/,
+  () => ({ rows: row ? [row] : [] }),
+]
+/** INSERT INTO approval_requests (send's plain insert, or authorize's ON CONFLICT machine insert). */
+const insertApproval = (row: Record<string, unknown> | null): DbRoute => [
+  /INSERT INTO approval_requests/,
+  () => ({ rows: row ? [row] : [] }),
+]
+/** refreshMachineIntentNonce — the duplicate-pending stale-nonce guard. */
+const refreshNonce = (row: Record<string, unknown> | null): DbRoute => [
+  /SET allowance_nonce = \$1/,
+  () => ({ rows: row ? [row] : [] }),
+]
+/** recordMachineIntentSignature: pending_signature → signed, no status flip. */
+const recordSignature = (ok: boolean): DbRoute => [
+  /SET signature = \$1, signed_at = NOW\(\)/,
+  () => ({ rows: ok ? [{ id: PAYMENT_ID }] : [] }),
+]
+/** confirmMachineIntent: pending_signature → confirmed, one-shot. */
+const confirm = (ok: boolean): DbRoute => [
+  /SET status = 'confirmed'/,
+  () => ({ rows: ok ? [{ id: PAYMENT_ID }] : [] }),
+]
+/** getIntentStatus, read after a guarded write comes back empty. */
+const intentStatus = (status: string): DbRoute => [
+  /SELECT status FROM payment_intents/,
+  () => ({ rows: [{ status }] }),
+]
+
+/** findSendIntentByIdempotencyKey (POST /send idempotency lookup). */
+const sendIntentLookup = (rows: unknown[]): DbRoute => [
+  /send_idempotency_key = \$2[\s\S]*FROM payment_intents|FROM payment_intents[\s\S]*send_idempotency_key = \$2/,
+  () => ({ rows }),
+]
+/** findSendApprovalByIdempotencyKey (POST /send idempotency lookup). */
+const sendApprovalLookup = (rows: unknown[]): DbRoute => [
+  /send_idempotency_key = \$2[\s\S]*FROM approval_requests|FROM approval_requests[\s\S]*send_idempotency_key = \$2/,
+  () => ({ rows }),
+]
+
+/**
+ * findIntentStatusRow (getAgentPaymentStatus's payment_intents projection).
+ * Shared by GET /:id/status and every replay path that reports "real status".
+ */
+const intentStatusRow = (row: Record<string, unknown> | null): DbRoute => [
+  /LEFT JOIN machine_payment_reconciliation_events/,
+  () => ({ rows: row ? [row] : [] }),
+]
+/**
+ * findApprovalStatusRow / findReconciliationApproval / findApprovalForEvidenceScoped
+ * — all three share the same `id = $1 AND agent_id = $2` shape against
+ * approval_requests; never more than one runs in a single test.
+ */
+const approvalById = (row: Record<string, unknown> | null): DbRoute => [
+  /FROM approval_requests\s+WHERE id = \$1 AND agent_id = \$2/,
+  () => ({ rows: row ? [row] : [] }),
+]
+/**
+ * findIntentForEvidenceScoped / findReconciliationIntent — both share the
+ * same `id = $1 AND agent_id = $2` shape against payment_intents; never more
+ * than one runs in a single test.
+ */
+const intentById = (row: Record<string, unknown> | null): DbRoute => [
+  /FROM payment_intents\s+WHERE id = \$1 AND agent_id = \$2/,
+  () => ({ rows: row ? [row] : [] }),
+]
 
 describe('machine payment routes', () => {
   let app: FastifyInstance
@@ -217,7 +341,7 @@ describe('machine payment routes', () => {
   }
 
   it('returns the authenticated agent identity for MCP clients', async () => {
-    mockQuery.mockResolvedValueOnce(authRow())
+    primeDb(AUTH)
 
     const response = await app.inject({
       method: 'GET',
@@ -237,30 +361,29 @@ describe('machine payment routes', () => {
   })
 
   it('returns configured allowances with on-chain remaining spend', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({
+    allowanceMocks.getTokenAllowance.mockResolvedValue({
       amount: 10000n,
       spent: 2500n,
       resetTimeMin: 60,
       lastResetMin: 100,
       nonce: 7,
     })
-    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({
+    allowanceMocks.computeEffectiveAllowance.mockReturnValue({
       remaining: 7500n,
       effectiveSpent: 2500n,
       isResetPending: false,
     })
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'allowance-1',
-          token_address: USDC,
-          token_symbol: 'USDC',
-          allowance_amount: '10000',
-          reset_period_min: 60,
-        }],
-      })
+    primeDb(
+      AUTH,
+      allowanceConfigRows([{
+        id: 'allowance-1',
+        token_address: USDC,
+        token_symbol: 'USDC',
+        allowance_amount: '10000',
+        reset_period_min: 60,
+      }]),
+    )
 
     const response = await app.inject({
       method: 'GET',
@@ -306,15 +429,15 @@ describe('machine payment routes', () => {
     // prove it left this rail untouched.
 
     function legacyOnchainRead() {
-      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({
+      allowanceMocks.getTokenAllowance.mockResolvedValue({
         amount: 10000n,
         spent: 2500n,
         resetTimeMin: 60,
         lastResetMin: 100,
         nonce: 7,
       })
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_750_000_000)
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_750_000_000)
+      allowanceMocks.computeEffectiveAllowance.mockReturnValue({
         remaining: 7500n,
         effectiveSpent: 2500n,
         isResetPending: false,
@@ -323,17 +446,16 @@ describe('machine payment routes', () => {
 
     it('an explicit allowance_module rail returns the AllowanceModule snapshot byte-identically', async () => {
       legacyOnchainRead()
-      mockQuery
-        .mockResolvedValueOnce({ rows: [{ ...AGENT, execution_rail: 'allowance_module' }] })
-        .mockResolvedValueOnce({
-          rows: [{
-            id: 'allowance-1',
-            token_address: USDC,
-            token_symbol: 'USDC',
-            allowance_amount: '10000',
-            reset_period_min: 60,
-          }],
-        })
+      primeDb(
+        authAs({ ...AGENT, execution_rail: 'allowance_module' }),
+        allowanceConfigRows([{
+          id: 'allowance-1',
+          token_address: USDC,
+          token_symbol: 'USDC',
+          allowance_amount: '10000',
+          reset_period_min: 60,
+        }]),
+      )
 
       const response = await app.inject({
         method: 'GET',
@@ -374,9 +496,7 @@ describe('machine payment routes', () => {
     })
 
     it('a legacy agent with no configured tokens returns an empty allowances array (200)', async () => {
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [] })
+      primeDb(AUTH, allowanceConfigRows([]))
 
       const response = await app.inject({
         method: 'GET',
@@ -397,18 +517,17 @@ describe('machine payment routes', () => {
 
     it('an on-chain read failure returns 502 naming the token that failed', async () => {
       allowanceMocks.getTokenAllowance.mockRejectedValueOnce(new Error('rpc down'))
-      allowanceMocks.getLatestBlockTimeSec.mockResolvedValueOnce(1_750_000_000)
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({
-          rows: [{
-            id: 'allowance-1',
-            token_address: USDC,
-            token_symbol: 'USDC',
-            allowance_amount: '10000',
-            reset_period_min: 60,
-          }],
-        })
+      allowanceMocks.getLatestBlockTimeSec.mockResolvedValue(1_750_000_000)
+      primeDb(
+        AUTH,
+        allowanceConfigRows([{
+          id: 'allowance-1',
+          token_address: USDC,
+          token_symbol: 'USDC',
+          allowance_amount: '10000',
+          reset_period_min: 60,
+        }]),
+      )
 
       const response = await app.inject({
         method: 'GET',
@@ -434,24 +553,18 @@ describe('machine payment routes', () => {
       account_type: 'delegator_hybrid',
     }
 
-    function mockDelegationReads(delegations: Array<Record<string, unknown>>) {
-      mockQuery.mockImplementation(async (sql: unknown) => {
-        const s = String(sql)
-        if (/FROM agents a/.test(s)) return { rows: [DELEGATION_AGENT] }
-        if (/FROM agent_delegations/.test(s)) return { rows: delegations }
-        return { rows: [] }
-      })
-    }
-
     it('delegation rail: remaining = the ACTIVE delegation period budget, no AllowanceModule read, frozen mirror never consulted', async () => {
-      mockDelegationReads([{
-        id: 'd-1',
-        agent_id: AGENT.id,
-        chain_id: 84532,
-        token_address: SEPOLIA_USDC,
-        budget_atomic: '10000000',
-        period_seconds: 86_400,
-      }])
+      primeDb(
+        authAs(DELEGATION_AGENT),
+        delegationRows([{
+          id: 'd-1',
+          agent_id: AGENT.id,
+          chain_id: 84532,
+          token_address: SEPOLIA_USDC,
+          budget_atomic: '10000000',
+          period_seconds: 86_400,
+        }]),
+      )
 
       const response = await app.inject({
         method: 'GET',
@@ -488,11 +601,11 @@ describe('machine payment routes', () => {
       expect(allowanceMocks.getLatestBlockTimeSec).not.toHaveBeenCalled()
       // agent_allowances is a frozen onboarding mirror on this rail (#1090) —
       // consulting it would report the onboarding budget forever.
-      expect(mockQuery.mock.calls.some((c) => /FROM agent_allowances/.test(String(c[0])))).toBe(false)
+      expect(sqlCalls().some((c) => /FROM agent_allowances/.test(c.sql))).toBe(false)
     })
 
     it('delegation rail: NO active budget returns an empty allowances array — derived readiness stays needs_approval', async () => {
-      mockDelegationReads([])
+      primeDb(authAs(DELEGATION_AGENT), delegationRows([]))
 
       const response = await app.inject({
         method: 'GET',
@@ -512,7 +625,7 @@ describe('machine payment routes', () => {
     })
 
     it('session_key rail: 410 fail-closed — no state read on the retired rail (#834/#993)', async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [{ ...AGENT, execution_rail: 'session_key' }] })
+      primeDb(authAs({ ...AGENT, execution_rail: 'session_key' }))
 
       const response = await app.inject({
         method: 'GET',
@@ -524,13 +637,13 @@ describe('machine payment routes', () => {
       expect(response.json().error).toMatch(/session rail is retired/)
       // The refusal is produced from the auth context alone: no allowance
       // config read, no delegation read, no on-chain read.
-      expect(mockQuery.mock.calls.some((c) => /FROM agent_allowances|FROM agent_delegations/.test(String(c[0])))).toBe(false)
+      expect(sqlCalls().some((c) => /FROM agent_allowances|FROM agent_delegations/.test(c.sql))).toBe(false)
       expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
     })
   })
 
   it('receipts join the intent so settlement_scheme is agent-visible (#1063 finding)', async () => {
-    mockQuery.mockResolvedValueOnce(authRow()).mockResolvedValueOnce({ rows: [] })
+    primeDb(AUTH)
     const response = await app.inject({
       method: 'GET',
       url: '/machine-payments/receipts?limit=5',
@@ -539,15 +652,16 @@ describe('machine payment routes', () => {
     expect(response.statusCode).toBe(200)
     // The scheme lives in payment_intents.machine_metadata (#946); without
     // this join the QA delegation leg has nowhere to read which branch ran.
-    const sql = String(mockQuery.mock.calls.at(-1)![0])
-    expect(sql).toContain("machine_metadata->>'settlement_scheme'")
-    expect(sql).toContain('LEFT JOIN payment_intents')
+    const receiptsCall = findCall(/FROM machine_payment_evidence e/)
+    expect(receiptsCall).toBeDefined()
+    expect(receiptsCall!.sql).toContain("machine_metadata->>'settlement_scheme'")
+    expect(receiptsCall!.sql).toContain('LEFT JOIN payment_intents')
   })
 
   it('lists recent receipts without returning payment proof headers', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
+    primeDb(
+      AUTH,
+      [/FROM machine_payment_evidence e/, () => ({
         rows: [{
           id: 'evidence-1',
           payment_intent_id: PAYMENT_ID,
@@ -581,7 +695,8 @@ describe('machine payment routes', () => {
           updated_at: '2026-05-15T12:00:01.000Z',
           settlement_scheme: 'eip3009',
         }],
-      })
+      })],
+    )
 
     const response = await app.inject({
       method: 'GET',
@@ -631,13 +746,8 @@ describe('machine payment routes', () => {
   it('REFUSES a delegation-rail account on /send — 422, zero writes (#1251)', async () => {
     // Found live during the #908 mainnet canary: without this refusal a
     // Hybrid account fell through to LEGACY allowance coverage and queued
-    // an approval that could never execute. Content-dispatch mock (#1226
-    // style) — the auth row carries the rail.
-    mockQuery.mockImplementation(async (sql: string) =>
-      /api_key_hash = \$1/.test(String(sql))
-        ? { rows: [{ ...AGENT, execution_rail: 'delegation' }] }
-        : { rows: [] },
-    )
+    // an approval that could never execute.
+    primeDb(authAs({ ...AGENT, execution_rail: 'delegation' }))
     const response = await app.inject({
       method: 'POST',
       url: '/machine-payments/send',
@@ -647,16 +757,11 @@ describe('machine payment routes', () => {
     expect(response.statusCode).toBe(422)
     expect(response.json().error_code).toBe('rail_not_supported')
     expect(response.json().error).toMatch(/POST \/payments/)
-    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE|DELETE/i.test(String(c[0])))).toBe(false)
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   it('REFUSES a delegation-rail account on /authorize — 422, zero writes, no approval manufactured (#1251)', async () => {
-    mockQuery.mockImplementation(async (sql: string) => {
-      const text = String(sql)
-      if (/api_key_hash = \$1/.test(text)) return { rows: [AGENT] }
-      if (/us\.execution_rail/.test(text)) return { rows: [{ execution_rail: 'delegation' }] }
-      return { rows: [] }
-    })
+    primeDb(AUTH, RAIL_DELEGATION)
     const response = await app.inject({
       method: 'POST',
       url: '/machine-payments/authorize',
@@ -667,12 +772,12 @@ describe('machine payment routes', () => {
     expect(response.json().error_code).toBe('rail_not_supported')
     // The bug's signature was a manufactured approval_requests row — assert
     // the refusal writes NOTHING.
-    expect(mockQuery.mock.calls.some((c) => /INSERT INTO approval_requests/.test(String(c[0])))).toBe(false)
-    expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_intents/.test(String(c[0])))).toBe(false)
+    expect(sqlCalls().some((c) => /INSERT INTO approval_requests/.test(c.sql))).toBe(false)
+    expect(sqlCalls().some((c) => /INSERT INTO payment_intents/.test(c.sql))).toBe(false)
   })
 
   it('REFUSES a session-marked account on /send — 410, zero writes', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [{ ...AGENT, execution_rail: 'session_key' }] })
+    primeDb(authAs({ ...AGENT, execution_rail: 'session_key' }))
     const response = await app.inject({
       method: 'POST',
       url: '/machine-payments/send',
@@ -681,18 +786,14 @@ describe('machine payment routes', () => {
     })
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toMatch(/session rail is retired/)
-    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE|DELETE/i.test(String(c[0])))).toBe(false)
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   // #993 characterization (written BEFORE the seam change): a replayed
   // idempotency key whose EXISTING intent is session-rail gets 410 with ZERO
   // writes — no refresh, no status flip, no partial state.
   it('authorize replay of a session-rail intent — 410, zero writes (#834/#993)', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
-        rows: [pendingIntent({ execution_rail: 'session_key' })],
-      })
+    primeDb(AUTH, existingIntent(pendingIntent({ execution_rail: 'session_key' })))
 
     const response = await app.inject({
       method: 'POST',
@@ -703,23 +804,22 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(410)
     expect(response.json().error).toMatch(/session rail is retired/)
-    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE|DELETE/i.test(String(c[0])))).toBe(false)
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   it('creates an MPP demo payment intent with generic rail metadata', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
-      .mockResolvedValueOnce({
-        rows: [pendingIntent()],
-      })
+    primeDb(
+      AUTH,
+      existingIntent(null),
+      existingApproval(null),
+      RAIL_LEGACY,
+      allowanceConfigured(true),
+      insertIntent(pendingIntent()),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -777,24 +877,21 @@ describe('machine payment routes', () => {
       3,
     )
 
-    const insertCall = mockQuery.mock.calls[5]
-    expect(insertCall[0]).toContain('payment_rail')
-    expect(insertCall[0]).toContain('machine_challenge_id')
-    expect(insertCall[0]).toContain('machine_idempotency_key')
-    expect(insertCall[1]).toContain('mpp_demo')
-    expect(insertCall[1]).toContain(challenge.challengeId)
-    expect(insertCall[1]).toContain('mpp_demo:test')
+    // The write carries the rail + idempotency identity — HANDLER concern
+    // (which write was requested); the ON CONFLICT dedupe semantics are the
+    // repository's, proven on the real harness.
+    const insert = findCall(/INSERT INTO payment_intents/)
+    expect(insert).toBeDefined()
+    expect(insert!.sql).toContain('payment_rail')
+    expect(insert!.sql).toContain('machine_challenge_id')
+    expect(insert!.sql).toContain('machine_idempotency_key')
+    expect(insert!.params).toContain('mpp_demo')
+    expect(insert!.params).toContain(challenge.challengeId)
+    expect(insert!.params).toContain('mpp_demo:test')
   })
 
   it('returns a confirmed payment for idempotency replay', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
-        rows: [pendingIntent({
-          status: 'confirmed',
-          tx_hash: `0x${'ab'.repeat(32)}`,
-        })],
-      })
+    primeDb(AUTH, existingIntent(pendingIntent({ status: 'confirmed', tx_hash: `0x${'ab'.repeat(32)}` })))
 
     const response = await app.inject({
       method: 'POST',
@@ -823,29 +920,21 @@ describe('machine payment routes', () => {
     })
     expect(allowanceMocks.generateTransferHash).not.toHaveBeenCalled()
 
-    expect(mockQuery.mock.calls[1][0]).toContain('COALESCE(payment_rail, source) = $4')
-    expect(mockQuery.mock.calls[1][1]).toEqual([
-      AGENT.id,
-      'mpp_demo:test',
-      challenge.challengeId,
-      'mpp_demo',
-    ])
+    const lookup = findCall(/COALESCE\(payment_rail, source\) = \$4/)
+    expect(lookup).toBeDefined()
+    expect(lookup!.params).toEqual([AGENT.id, 'mpp_demo:test', challenge.challengeId, 'mpp_demo'])
   })
 
   it('guards stale sign data refreshes for duplicate pending intents', async () => {
     const refreshedHash = `0x${'22'.repeat(32)}`
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 4 })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(refreshedHash)
+    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 4 })
+    allowanceMocks.generateTransferHash.mockResolvedValue(refreshedHash)
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
-        rows: [pendingIntent({
-          allowance_nonce: 3,
-          sign_hash: SIGN_HASH,
-        })],
-      })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
+    primeDb(
+      AUTH,
+      existingIntent(pendingIntent({ allowance_nonce: 3, sign_hash: SIGN_HASH })),
+      refreshNonce({ id: PAYMENT_ID }),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -860,38 +949,43 @@ describe('machine payment routes', () => {
       components: { nonce: 4 },
     })
 
-    expect(mockQuery.mock.calls[1][0]).toContain('COALESCE(payment_rail, source) = $4')
-
-    const refreshCall = mockQuery.mock.calls[2]
-    expect(refreshCall[0]).toContain('UPDATE payment_intents')
-    expect(refreshCall[0]).toContain('agent_id = $4')
-    expect(refreshCall[0]).toContain('COALESCE(payment_rail, source) = $5')
-    expect(refreshCall[0]).toContain("status = 'pending_signature'")
-    expect(refreshCall[0]).toContain('tx_hash IS NULL')
-    expect(refreshCall[1]).toEqual([
-      4,
-      refreshedHash,
-      PAYMENT_ID,
-      AGENT.id,
-      'mpp_demo',
-    ])
+    const refreshCall = findCall(/SET allowance_nonce = \$1/)
+    expect(refreshCall).toBeDefined()
+    expect(refreshCall!.sql).toContain('UPDATE payment_intents')
+    expect(refreshCall!.sql).toContain('agent_id = $4')
+    expect(refreshCall!.sql).toContain('COALESCE(payment_rail, source) = $5')
+    expect(refreshCall!.sql).toContain("status = 'pending_signature'")
+    expect(refreshCall!.sql).toContain('tx_hash IS NULL')
+    expect(refreshCall!.params).toEqual([4, refreshedHash, PAYMENT_ID, AGENT.id, 'mpp_demo'])
   })
 
   it('reloads rail-scoped existing intents after insert idempotency conflicts', async () => {
-    allowanceMocks.getTokenAllowance
-      .mockResolvedValueOnce({ nonce: 3 })
-      .mockResolvedValueOnce({ nonce: 3 })
+    // Called twice (the preflight read, then returnExistingIntent's nonce
+    // compare) — both calls want the same answer, so a persistent mock covers
+    // both without a sequence.
+    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+    // findMachineIntentByKeyOrChallenge runs TWICE with the identical
+    // statement: once up front (a fresh key — nothing found) and again after
+    // the INSERT ... ON CONFLICT DO NOTHING loses the race. A stateful
+    // counter is the only way a content-dispatch stub can answer one
+    // statement differently across its two calls (#1226 style, mirroring
+    // x402.test.ts's "returns the existing approval..." case); the ON
+    // CONFLICT semantics themselves are the repository's to prove.
+    let intentReads = 0
+    primeDb(
+      AUTH,
+      [/COALESCE\(payment_rail, source\) = \$4/, () => {
+        intentReads += 1
+        return { rows: intentReads > 1 ? [pendingIntent()] : [] }
+      }],
+      existingApproval(null),
+      RAIL_LEGACY,
+      allowanceConfigured(true),
+      insertIntent(null),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -907,26 +1001,11 @@ describe('machine payment routes', () => {
       rail: 'mpp_demo',
       sign_data: { hash: SIGN_HASH },
     })
-
-    const fallbackLookup = mockQuery.mock.calls[6]
-    expect(fallbackLookup[0]).toContain('COALESCE(payment_rail, source) = $4')
-    expect(fallbackLookup[1]).toEqual([
-      AGENT.id,
-      'mpp_demo:test',
-      challenge.challengeId,
-      'mpp_demo',
-    ])
+    expect(intentReads).toBe(2)
   })
 
   it('returns unified status for confirmed payment intents', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({
-        rows: [confirmedPayment({
-          expires_at: '2099-01-02T00:00:00.000Z',
-        })],
-      })
+    primeDb(AUTH, intentStatusRow(confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' })))
 
     const response = await app.inject({
       method: 'GET',
@@ -966,15 +1045,10 @@ describe('machine payment routes', () => {
   })
 
   it('returns funded_but_unsettled phase when merchant retry was rejected after funding', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({
-        rows: [confirmedPayment({
-          funded_but_unsettled: true,
-          expires_at: '2099-01-02T00:00:00.000Z',
-        })],
-      })
+    primeDb(
+      AUTH,
+      intentStatusRow(confirmedPayment({ funded_but_unsettled: true, expires_at: '2099-01-02T00:00:00.000Z' })),
+    )
 
     const response = await app.inject({
       method: 'GET',
@@ -994,36 +1068,33 @@ describe('machine payment routes', () => {
   })
 
   it('returns unified status for approval request IDs', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'approval-123',
-          chain_id: 8453,
-          token_symbol: 'USDC',
-          token_address: USDC,
-          amount_human: '0.01',
-          amount_raw: '10000',
-          status: 'pending',
-          tx_hash: null,
-          expires_at: '2099-01-02T00:00:00.000Z',
-          source: 'mpp_demo',
-          payment_rail: 'mpp_demo',
-          payment_resource_url: challenge.resource,
-          x402_resource_url: null,
-          merchant_address: RECIPIENT.toLowerCase(),
-          machine_challenge_id: challenge.challengeId,
-          machine_idempotency_key: 'mpp_demo:test',
-          machine_metadata: JSON.stringify({
-            protocol: 'mpp',
-            network: challenge.network.name,
-            description: challenge.description,
-          }),
-        }],
-      })
+    primeDb(
+      AUTH,
+      intentStatusRow(null),
+      approvalById({
+        id: 'approval-123',
+        chain_id: 8453,
+        token_symbol: 'USDC',
+        token_address: USDC,
+        amount_human: '0.01',
+        amount_raw: '10000',
+        status: 'pending',
+        tx_hash: null,
+        expires_at: '2099-01-02T00:00:00.000Z',
+        source: 'mpp_demo',
+        payment_rail: 'mpp_demo',
+        payment_resource_url: challenge.resource,
+        x402_resource_url: null,
+        merchant_address: RECIPIENT.toLowerCase(),
+        machine_challenge_id: challenge.challengeId,
+        machine_idempotency_key: 'mpp_demo:test',
+        machine_metadata: JSON.stringify({
+          protocol: 'mpp',
+          network: challenge.network.name,
+          description: challenge.description,
+        }),
+      }),
+    )
 
     const response = await app.inject({
       method: 'GET',
@@ -1053,12 +1124,7 @@ describe('machine payment routes', () => {
   })
 
   it('does not return status for another agent payment or approval', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
+    primeDb(AUTH, intentStatusRow(null), approvalById(null))
 
     const response = await app.inject({
       method: 'GET',
@@ -1071,27 +1137,26 @@ describe('machine payment routes', () => {
   })
 
   it('queues over-allowance MPP demo payments for approval with rail metadata', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1n })
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'approval-123',
-          status: 'pending',
-          token_symbol: 'USDC',
-          amount_human: '0.01',
-          expires_at: '2099-01-02T00:00:00.000Z',
-          tx_hash: null,
-          machine_challenge_id: challenge.challengeId,
-          payment_rail: 'mpp_demo',
-        }],
-      })
+    primeDb(
+      AUTH,
+      existingIntent(null),
+      existingApproval(null),
+      RAIL_LEGACY,
+      allowanceConfigured(true),
+      insertApproval({
+        id: 'approval-123',
+        status: 'pending',
+        token_symbol: 'USDC',
+        amount_human: '0.01',
+        expires_at: '2099-01-02T00:00:00.000Z',
+        tx_hash: null,
+        machine_challenge_id: challenge.challengeId,
+        payment_rail: 'mpp_demo',
+      }),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1127,27 +1192,27 @@ describe('machine payment routes', () => {
       },
     })
 
-    const insertCall = mockQuery.mock.calls[5]
-    expect(insertCall[0]).toContain('machine_idempotency_key')
-    expect(insertCall[1]).toContain('mpp_demo:test')
+    const insert = findCall(/INSERT INTO approval_requests/)
+    expect(insert).toBeDefined()
+    expect(insert!.sql).toContain('machine_idempotency_key')
+    expect(insert!.params).toContain('mpp_demo:test')
   })
 
   it('returns a specific response for rejected approval retries', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'approval-123',
-          status: 'rejected',
-          token_symbol: 'USDC',
-          amount_human: '0.01',
-          expires_at: '2099-01-02T00:00:00.000Z',
-          tx_hash: null,
-          machine_challenge_id: challenge.challengeId,
-          payment_rail: 'mpp_demo',
-        }],
-      })
+    primeDb(
+      AUTH,
+      existingIntent(null),
+      existingApproval({
+        id: 'approval-123',
+        status: 'rejected',
+        token_symbol: 'USDC',
+        amount_human: '0.01',
+        expires_at: '2099-01-02T00:00:00.000Z',
+        tx_hash: null,
+        machine_challenge_id: challenge.challengeId,
+        payment_rail: 'mpp_demo',
+      }),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1165,7 +1230,7 @@ describe('machine payment routes', () => {
   })
 
   it('rejects expired challenges', async () => {
-    mockQuery.mockResolvedValueOnce(authRow())
+    primeDb(AUTH)
 
     const response = await app.inject({
       method: 'POST',
@@ -1187,10 +1252,9 @@ describe('machine payment routes', () => {
       '',
       null,
     ]
+    primeDb(AUTH)
 
     for (const expiresAt of invalidExpiresAtValues) {
-      mockQuery.mockResolvedValueOnce(authRow())
-
       const response = await app.inject({
         method: 'POST',
         url: '/machine-payments/authorize',
@@ -1231,7 +1295,7 @@ describe('machine payment routes', () => {
       ['wrong amount atomic (underpaying)', { amount: { display: '0.01', atomic: '1' } }, 'MPP demo payments are fixed at 0.01 USDC'],
       ['wrong amount display', { amount: { display: '1.00', atomic: '10000' } }, 'MPP demo payments are fixed at 0.01 USDC'],
     ])('%s → 400 with the exact message, zero authorization work', async (_label, overrides, expectedError) => {
-      mockQuery.mockResolvedValueOnce(authRow())
+      primeDb(AUTH)
 
       const response = await app.inject({
         method: 'POST',
@@ -1251,7 +1315,7 @@ describe('machine payment routes', () => {
   })
 
   it('rejects malformed MPP payTo before allowance, hash, or execution work', async () => {
-    mockQuery.mockResolvedValueOnce(authRow())
+    primeDb(AUTH)
 
     const response = await app.inject({
       method: 'POST',
@@ -1299,18 +1363,19 @@ describe('machine payment routes', () => {
   })
 
   it('rejects signatures from the wrong delegate', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
     allowanceMocks.recoverSigner.mockReturnValueOnce('0x0000000000000000000000000000000000000001')
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
-      .mockResolvedValueOnce({ rows: [pendingIntent()] })
+    primeDb(
+      AUTH,
+      existingIntent(null),
+      existingApproval(null),
+      RAIL_LEGACY,
+      allowanceConfigured(true),
+      insertIntent(pendingIntent()),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1328,23 +1393,23 @@ describe('machine payment routes', () => {
   })
 
   it('records one-shot signatures without marking the payment submitted before execution', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
-    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.01, eur: 0.01 })
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0.01, eur: 0.01 })
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
-      .mockResolvedValueOnce({ rows: [pendingIntent()] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [] })
+    primeDb(
+      AUTH,
+      existingIntent(null),
+      existingApproval(null),
+      RAIL_LEGACY,
+      allowanceConfigured(true),
+      insertIntent(pendingIntent()),
+      recordSignature(true),
+      confirm(true),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1361,54 +1426,54 @@ describe('machine payment routes', () => {
       tx_hash: TX_HASH,
     })
 
-    const signatureUpdateIndex = mockQuery.mock.calls.findIndex(([sql]) =>
-      typeof sql === 'string' && sql.includes('SET signature = $1, signed_at = NOW()')
-    )
-    expect(signatureUpdateIndex).toBeGreaterThanOrEqual(0)
-    const signatureUpdateCall = mockQuery.mock.calls[signatureUpdateIndex]
-    expect(signatureUpdateCall[0]).toContain('SET signature = $1, signed_at = NOW()')
-    expect(signatureUpdateCall[0]).toContain("status = 'pending_signature'")
-    expect(signatureUpdateCall[0]).toContain('agent_id = $3')
-    expect(signatureUpdateCall[0]).toContain('payment_rail = $4')
-    expect(signatureUpdateCall[0]).toContain('tx_hash IS NULL')
-    expect(signatureUpdateCall[0]).not.toContain("status = 'submitted'")
-    expect(signatureUpdateCall[0]).not.toContain('submitted_at')
-    expect(signatureUpdateCall[1]).toEqual(['0xsig', PAYMENT_ID, AGENT.id, 'mpp_demo'])
+    // The one-shot ordering invariant: the signature is durably recorded
+    // BEFORE on-chain execution runs (see the route's comment on why status
+    // never flips to 'submitted' here). What the guarded UPDATE's WHERE
+    // clause enforces is proven in the repository suite; the property this
+    // test owns is ordering and the exact values written.
+    const signatureUpdate = findCall(/SET signature = \$1, signed_at = NOW\(\)/)
+    expect(signatureUpdate).toBeDefined()
+    expect(signatureUpdate!.sql).toContain("status = 'pending_signature'")
+    expect(signatureUpdate!.sql).toContain('agent_id = $3')
+    expect(signatureUpdate!.sql).toContain('payment_rail = $4')
+    expect(signatureUpdate!.sql).toContain('tx_hash IS NULL')
+    expect(signatureUpdate!.sql).not.toContain("status = 'submitted'")
+    expect(signatureUpdate!.sql).not.toContain('submitted_at')
+    expect(signatureUpdate!.params).toEqual(['0xsig', PAYMENT_ID, AGENT.id, 'mpp_demo'])
 
+    const signatureCallIndex = mockQuery.mock.calls.findIndex(([sql]) =>
+      typeof sql === 'string' && /SET signature = \$1, signed_at = NOW\(\)/.test(sql),
+    )
     const executionOrder = allowanceMocks.executeAllowanceTransfer.mock.invocationCallOrder[0]
-    expect(mockQuery.mock.invocationCallOrder[signatureUpdateIndex]).toBeLessThan(executionOrder)
+    expect(mockQuery.mock.invocationCallOrder[signatureCallIndex]).toBeLessThan(executionOrder)
 
-    const confirmedUpdateIndex = mockQuery.mock.calls.findIndex(([sql]) =>
-      typeof sql === 'string' && sql.includes("SET status = 'confirmed'")
-    )
-    expect(confirmedUpdateIndex).toBeGreaterThanOrEqual(0)
-    const confirmedUpdateCall = mockQuery.mock.calls[confirmedUpdateIndex]
-    expect(confirmedUpdateCall[0]).toContain("SET status = 'confirmed'")
-    expect(confirmedUpdateCall[0]).toContain('tx_hash = $1')
-    expect(confirmedUpdateCall[0]).toContain('submitted_at = NOW()')
-    expect(confirmedUpdateCall[0]).toContain("status = 'pending_signature'")
-    expect(confirmedUpdateCall[0]).toContain('agent_id = $5')
-    expect(confirmedUpdateCall[0]).toContain('payment_rail = $6')
-    expect(confirmedUpdateCall[0]).toContain('tx_hash IS NULL')
-    expect(confirmedUpdateCall[1]).toEqual([TX_HASH, PAYMENT_ID, 0.01, 0.01, AGENT.id, 'mpp_demo'])
+    const confirmedUpdate = findCall(/SET status = 'confirmed'/)
+    expect(confirmedUpdate).toBeDefined()
+    expect(confirmedUpdate!.sql).toContain('tx_hash = $1')
+    expect(confirmedUpdate!.sql).toContain('submitted_at = NOW()')
+    expect(confirmedUpdate!.sql).toContain("status = 'pending_signature'")
+    expect(confirmedUpdate!.sql).toContain('agent_id = $5')
+    expect(confirmedUpdate!.sql).toContain('payment_rail = $6')
+    expect(confirmedUpdate!.sql).toContain('tx_hash IS NULL')
+    expect(confirmedUpdate!.params).toEqual([TX_HASH, PAYMENT_ID, 0.01, 0.01, AGENT.id, 'mpp_demo'])
   })
 
   it('does not overwrite one-shot terminal state after execution failures', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
     allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(new Error('relayer unavailable'))
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
-      .mockResolvedValueOnce({ rows: [pendingIntent()] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [] })
+    primeDb(
+      AUTH,
+      existingIntent(null),
+      existingApproval(null),
+      RAIL_LEGACY,
+      allowanceConfigured(true),
+      insertIntent(pendingIntent()),
+      recordSignature(true),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1424,34 +1489,34 @@ describe('machine payment routes', () => {
       error: 'On-chain execution failed',
     })
 
-    const failedUpdateCall = mockQuery.mock.calls.find(([sql]) =>
-      typeof sql === 'string' && sql.includes("SET status = 'failed'")
-    )
-    expect(failedUpdateCall?.[0]).toContain("status = 'pending_signature'")
-    expect(failedUpdateCall?.[0]).toContain('agent_id = $3')
-    expect(failedUpdateCall?.[0]).toContain('payment_rail = $4')
-    expect(failedUpdateCall?.[0]).toContain('tx_hash IS NULL')
-    expect(failedUpdateCall?.[1]).toEqual(['relayer unavailable', PAYMENT_ID, AGENT.id, 'mpp_demo'])
+    const failedUpdate = findCall(/SET status = 'failed'/)
+    expect(failedUpdate).toBeDefined()
+    expect(failedUpdate!.sql).toContain("status = 'pending_signature'")
+    expect(failedUpdate!.sql).toContain('agent_id = $3')
+    expect(failedUpdate!.sql).toContain('payment_rail = $4')
+    expect(failedUpdate!.sql).toContain('tx_hash IS NULL')
+    expect(failedUpdate!.params).toEqual(['relayer unavailable', PAYMENT_ID, AGENT.id, 'mpp_demo'])
   })
 
   it('does not record evidence when a one-shot confirmation loses a terminal-state race', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 3 })
+    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
     allowanceMocks.recoverSigner.mockReturnValueOnce(AGENT.delegate_address)
-    allowanceMocks.executeAllowanceTransfer.mockResolvedValueOnce({ txHash: TX_HASH })
-    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValueOnce({ usd: 0.01, eur: 0.01 })
+    allowanceMocks.executeAllowanceTransfer.mockResolvedValue({ txHash: TX_HASH })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0.01, eur: 0.01 })
 
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] }) // execution-rail state (#745): none → legacy
-      .mockResolvedValueOnce({ rows: [{ allowance_amount: '10000' }] })
-      .mockResolvedValueOnce({ rows: [pendingIntent()] })
-      .mockResolvedValueOnce({ rows: [{ id: PAYMENT_ID }] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ status: 'confirmed' }] })
+    primeDb(
+      AUTH,
+      existingIntent(null),
+      existingApproval(null),
+      RAIL_LEGACY,
+      allowanceConfigured(true),
+      insertIntent(pendingIntent()),
+      recordSignature(true),
+      confirm(false), // lost the terminal-state race
+      intentStatus('confirmed'),
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1467,24 +1532,17 @@ describe('machine payment routes', () => {
       error: 'Payment intent changed after on-chain execution',
     })
     expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
-    expect(
-      mockQuery.mock.calls.some(([sql]) =>
-        typeof sql === 'string' && sql.includes('machine_payment_evidence')
-      ),
-    ).toBe(false)
+    expect(sqlCalls().some((c) => /machine_payment_evidence/.test(c.sql))).toBe(false)
   })
 
   it('records a reconciliation event for confirmed payments rejected by the merchant retry', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'event-123',
-          status: 'open',
-          created_at: '2026-05-15T12:00:00.000Z',
-        }],
-      })
+    primeDb(
+      AUTH,
+      intentById(confirmedPayment()),
+      [/INSERT INTO machine_payment_reconciliation_events/, () => ({
+        rows: [{ id: 'event-123', status: 'open', created_at: '2026-05-15T12:00:00.000Z' }],
+      })],
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1509,32 +1567,29 @@ describe('machine payment routes', () => {
       event_type: 'merchant_retry_rejected_after_payment',
     })
 
-    const insertCall = mockQuery.mock.calls[2]
-    expect(insertCall[0]).toContain('machine_payment_reconciliation_events')
-    expect(insertCall[0]).toContain('ON CONFLICT (payment_intent_id, event_type)')
-    expect(insertCall[0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
-    expect(insertCall[1]).toContain(PAYMENT_ID)
-    expect(insertCall[1]).toContain('mpp_demo')
-    expect(insertCall[1]).toContain('merchant_retry_rejected_after_payment')
-    expect(insertCall[1]).toContain(TX_HASH)
-    expect(insertCall[1]).toContain(challenge.resource)
-    expect(insertCall[1]).toContain(RECIPIENT.toLowerCase())
-    expect(insertCall[1]).toContain(challenge.challengeId)
-    expect(insertCall[1]).toContain('mpp_demo:test')
+    const insert = findCall(/INSERT INTO machine_payment_reconciliation_events/)
+    expect(insert).toBeDefined()
+    expect(insert!.sql).toContain('ON CONFLICT (payment_intent_id, event_type)')
+    expect(insert!.sql).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
+    expect(insert!.params).toContain(PAYMENT_ID)
+    expect(insert!.params).toContain('mpp_demo')
+    expect(insert!.params).toContain('merchant_retry_rejected_after_payment')
+    expect(insert!.params).toContain(TX_HASH)
+    expect(insert!.params).toContain(challenge.resource)
+    expect(insert!.params).toContain(RECIPIENT.toLowerCase())
+    expect(insert!.params).toContain(challenge.challengeId)
+    expect(insert!.params).toContain('mpp_demo:test')
   })
 
   it('records a reconciliation event for executed approval requests rejected by the merchant retry', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [executedApproval()] })
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'event-approval',
-          status: 'open',
-          created_at: '2026-05-15T12:00:00.000Z',
-        }],
-      })
+    primeDb(
+      AUTH,
+      intentById(null),
+      approvalById(executedApproval()),
+      [/INSERT INTO machine_payment_reconciliation_events/, () => ({
+        rows: [{ id: 'event-approval', status: 'open', created_at: '2026-05-15T12:00:00.000Z' }],
+      })],
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1557,26 +1612,24 @@ describe('machine payment routes', () => {
       event_type: 'merchant_retry_rejected_after_payment',
     })
 
-    const insertCall = mockQuery.mock.calls[3]
-    expect(insertCall[0]).toContain('approval_request_id')
-    expect(insertCall[0]).toContain('ON CONFLICT (approval_request_id, event_type)')
-    expect(insertCall[0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
-    expect(insertCall[1]).toContain(PAYMENT_ID)
-    expect(insertCall[1]).toContain('merchant_retry_rejected_after_payment')
+    const insert = findCall(/INSERT INTO machine_payment_reconciliation_events/)
+    expect(insert).toBeDefined()
+    expect(insert!.sql).toContain('approval_request_id')
+    expect(insert!.sql).toContain('ON CONFLICT (approval_request_id, event_type)')
+    expect(insert!.sql).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
+    expect(insert!.params).toContain(PAYMENT_ID)
+    expect(insert!.params).toContain('merchant_retry_rejected_after_payment')
   })
 
   it('does not reopen resolved reconciliation events for confirmed payments', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'event-resolved',
-          status: 'resolved',
-          created_at: '2026-05-15T12:00:00.000Z',
-        }],
-      })
+    primeDb(
+      AUTH,
+      intentById(confirmedPayment()),
+      [/INSERT INTO machine_payment_reconciliation_events/, () => ({ rows: [] })], // already resolved — guarded upsert matched nothing
+      [/FROM machine_payment_reconciliation_events/, () => ({
+        rows: [{ id: 'event-resolved', status: 'resolved', created_at: '2026-05-15T12:00:00.000Z' }],
+      })],
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1598,29 +1651,24 @@ describe('machine payment routes', () => {
       status: 'resolved',
       payment_id: PAYMENT_ID,
     })
-    expect(mockQuery.mock.calls[2][0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
-    expect(mockQuery.mock.calls[3][0]).toContain('FROM machine_payment_reconciliation_events')
-    expect(mockQuery.mock.calls[3][0]).toContain('WHERE payment_intent_id = $1')
-    expect(mockQuery.mock.calls[3][1]).toEqual([
-      PAYMENT_ID,
-      AGENT.id,
-      'merchant_retry_rejected_after_payment',
-    ])
+    const upsert = findCall(/INSERT INTO machine_payment_reconciliation_events/)
+    expect(upsert!.sql).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
+    const reload = findCall(/FROM machine_payment_reconciliation_events/)
+    expect(reload).toBeDefined()
+    expect(reload!.sql).toContain('WHERE payment_intent_id = $1')
+    expect(reload!.params).toEqual([PAYMENT_ID, AGENT.id, 'merchant_retry_rejected_after_payment'])
   })
 
   it('does not reopen resolved reconciliation events for executed approval requests', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [executedApproval()] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({
-        rows: [{
-          id: 'event-approval-resolved',
-          status: 'resolved',
-          created_at: '2026-05-15T12:00:00.000Z',
-        }],
-      })
+    primeDb(
+      AUTH,
+      intentById(null),
+      approvalById(executedApproval()),
+      [/INSERT INTO machine_payment_reconciliation_events/, () => ({ rows: [] })],
+      [/FROM machine_payment_reconciliation_events/, () => ({
+        rows: [{ id: 'event-approval-resolved', status: 'resolved', created_at: '2026-05-15T12:00:00.000Z' }],
+      })],
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1641,22 +1689,19 @@ describe('machine payment routes', () => {
       status: 'resolved',
       payment_id: PAYMENT_ID,
     })
-    expect(mockQuery.mock.calls[3][0]).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
-    expect(mockQuery.mock.calls[4][0]).toContain('FROM machine_payment_reconciliation_events')
-    expect(mockQuery.mock.calls[4][0]).toContain('WHERE approval_request_id = $1')
-    expect(mockQuery.mock.calls[4][1]).toEqual([
-      PAYMENT_ID,
-      AGENT.id,
-      'merchant_retry_rejected_after_payment',
-    ])
+    const upsert = findCall(/INSERT INTO machine_payment_reconciliation_events/)
+    expect(upsert!.sql).toContain("machine_payment_reconciliation_events.status <> 'resolved'")
+    const reload = findCall(/FROM machine_payment_reconciliation_events/)
+    expect(reload).toBeDefined()
+    expect(reload!.sql).toContain('WHERE approval_request_id = $1')
+    expect(reload!.params).toEqual([PAYMENT_ID, AGENT.id, 'merchant_retry_rejected_after_payment'])
   })
 
   it('attaches SDK-reported merchant evidence for confirmed machine payments', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({
+    primeDb(
+      AUTH,
+      intentById(confirmedPayment()),
+      [/UPDATE machine_payment_evidence/, () => ({
         rows: [{
           id: 'evidence-123',
           payment_intent_id: PAYMENT_ID,
@@ -1688,7 +1733,8 @@ describe('machine payment routes', () => {
           created_at: '2026-05-15T12:00:00.000Z',
           updated_at: '2026-05-15T12:00:01.000Z',
         }],
-      })
+      })],
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1722,20 +1768,21 @@ describe('machine payment routes', () => {
       },
     })
 
-    expect(mockQuery.mock.calls[2][0]).toContain('machine_payment_evidence')
-    expect(mockQuery.mock.calls[3][0]).toContain('UPDATE machine_payment_evidence')
-    expect(mockQuery.mock.calls[4][0]).toContain('machine_payment_reconciliation_events')
-    expect(mockQuery.mock.calls[4][0]).toContain("status = 'resolved'")
-    expect(mockQuery.mock.calls[4][0]).toContain('WHERE payment_intent_id = $1')
+    expect(findCall(/INSERT INTO machine_payment_evidence/)).toBeDefined()
+    const attach = findCall(/UPDATE machine_payment_evidence/)
+    expect(attach).toBeDefined()
+    const resolve = findCall(/UPDATE machine_payment_reconciliation_events/)
+    expect(resolve).toBeDefined()
+    expect(resolve!.sql).toContain("status = 'resolved'")
+    expect(resolve!.sql).toContain('WHERE payment_intent_id = $1')
   })
 
   it('attaches SDK-reported merchant evidence for executed approval requests', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [executedApproval()] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({
+    primeDb(
+      AUTH,
+      intentById(null),
+      approvalById(executedApproval()),
+      [/UPDATE machine_payment_evidence/, () => ({
         rows: [{
           id: 'evidence-approval',
           payment_intent_id: null,
@@ -1768,7 +1815,8 @@ describe('machine payment routes', () => {
           created_at: '2026-05-15T12:00:00.000Z',
           updated_at: '2026-05-15T12:00:01.000Z',
         }],
-      })
+      })],
+    )
 
     const response = await app.inject({
       method: 'POST',
@@ -1797,17 +1845,18 @@ describe('machine payment routes', () => {
         proof_status: 'protocol_receipt_attached',
       },
     })
-    expect(mockQuery.mock.calls[3][0]).toContain('approval_request_id')
-    expect(mockQuery.mock.calls[4][0]).toContain('WHERE approval_request_id = $1')
-    expect(mockQuery.mock.calls[5][0]).toContain('machine_payment_reconciliation_events')
-    expect(mockQuery.mock.calls[5][0]).toContain("status = 'resolved'")
-    expect(mockQuery.mock.calls[5][0]).toContain('WHERE approval_request_id = $1')
+    const attach = findCall(/UPDATE machine_payment_evidence/)
+    expect(attach).toBeDefined()
+    expect(attach!.sql).toContain('approval_request_id')
+    expect(attach!.sql).toContain('WHERE approval_request_id = $1')
+    const resolve = findCall(/UPDATE machine_payment_reconciliation_events/)
+    expect(resolve).toBeDefined()
+    expect(resolve!.sql).toContain("status = 'resolved'")
+    expect(resolve!.sql).toContain('WHERE approval_request_id = $1')
   })
 
   it('rejects evidence reports whose tx hash does not match the payment', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
+    primeDb(AUTH, intentById(confirmedPayment()))
 
     const response = await app.inject({
       method: 'POST',
@@ -1822,15 +1871,13 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toBe('txHash does not match payment intent')
-    expect(mockQuery).toHaveBeenCalledTimes(2)
+    // The rejection must be write-free — a guard that still writes is the
+    // regression class this asserts against (review finding on #1292).
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   it('rejects evidence reports for unconfirmed payments', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
-        rows: [confirmedPayment({ status: 'pending_signature', tx_hash: null })],
-      })
+    primeDb(AUTH, intentById(confirmedPayment({ status: 'pending_signature', tx_hash: null })))
 
     const response = await app.inject({
       method: 'POST',
@@ -1845,14 +1892,11 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toBe('Evidence requires a confirmed payment')
-    expect(mockQuery).toHaveBeenCalledTimes(2)
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   it('does not attach evidence to another agent payment', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
+    primeDb(AUTH, intentById(null), approvalById(null))
 
     const response = await app.inject({
       method: 'POST',
@@ -1867,7 +1911,7 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(404)
     expect(response.json().error).toBe('Payment not found')
-    expect(mockQuery).toHaveBeenCalledTimes(3)
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   // ── attachMachinePaymentEvidence rejection paths (#997) ─────────────────────
@@ -1878,7 +1922,7 @@ describe('machine payment routes', () => {
   // exact settled payment) that a refactor could silently loosen.
 
   it('rejects an unsupported evidence rail before any payment lookup (400)', async () => {
-    mockQuery.mockResolvedValueOnce(authRow())
+    primeDb(AUTH)
 
     const response = await app.inject({
       method: 'POST',
@@ -1897,7 +1941,7 @@ describe('machine payment routes', () => {
   })
 
   it('rejects a malformed txHash before any payment lookup (400)', async () => {
-    mockQuery.mockResolvedValueOnce(authRow())
+    primeDb(AUTH)
 
     const response = await app.inject({
       method: 'POST',
@@ -1916,7 +1960,7 @@ describe('machine payment routes', () => {
   })
 
   it('rejects an out-of-range merchantStatus before any payment lookup (400)', async () => {
-    mockQuery.mockResolvedValueOnce(authRow())
+    primeDb(AUTH)
 
     const response = await app.inject({
       method: 'POST',
@@ -1936,9 +1980,7 @@ describe('machine payment routes', () => {
   })
 
   it('rejects evidence whose rail does not match the payment intent\'s actual rail (409)', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [confirmedPayment({ payment_rail: 'mpp_demo', source: 'mpp_demo' })] })
+    primeDb(AUTH, intentById(confirmedPayment({ payment_rail: 'mpp_demo', source: 'mpp_demo' })))
 
     const response = await app.inject({
       method: 'POST',
@@ -1956,9 +1998,7 @@ describe('machine payment routes', () => {
   })
 
   it('rejects evidence whose resourceUrl does not match the payment intent (409)', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
+    primeDb(AUTH, intentById(confirmedPayment()))
 
     const response = await app.inject({
       method: 'POST',
@@ -1983,7 +2023,7 @@ describe('machine payment routes', () => {
   // fire-and-forget call — had none.
   describe('POST /machine-payments/:id/merchant-receipt (#956)', () => {
     it('rejects a request with neither url nor json (400), no evidence lookup', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
+      primeDb(AUTH)
 
       const response = await app.inject({
         method: 'POST',
@@ -1998,9 +2038,7 @@ describe('machine payment routes', () => {
     })
 
     it('404s when no settled evidence exists for the payment', async () => {
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [] }) // findEvidenceAnchorForAgent miss
+      primeDb(AUTH, [/FROM machine_payment_evidence mpe/, () => ({ rows: [] })]) // findEvidenceAnchorForAgent miss
 
       const response = await app.inject({
         method: 'POST',
@@ -2014,10 +2052,11 @@ describe('machine payment routes', () => {
     })
 
     it('stores a first-reported receipt (201) and fires the #956 late-attach', async () => {
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [{ id: 'evidence-1', user_id: AGENT.user_id }] })
-        .mockResolvedValueOnce({ rows: [{ evidence_id: 'evidence-1' }] }) // insert won
+      primeDb(
+        AUTH,
+        [/FROM machine_payment_evidence mpe/, () => ({ rows: [{ id: 'evidence-1', user_id: AGENT.user_id }] })],
+        [/INSERT INTO merchant_receipts/, () => ({ rows: [{ evidence_id: 'evidence-1' }] })], // insert won
+      )
 
       const response = await app.inject({
         method: 'POST',
@@ -2038,10 +2077,11 @@ describe('machine payment routes', () => {
     })
 
     it('first write wins: a duplicate report (200) does NOT re-fire the late-attach', async () => {
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [{ id: 'evidence-1', user_id: AGENT.user_id }] })
-        .mockResolvedValueOnce({ rows: [] }) // ON CONFLICT DO NOTHING — already recorded
+      primeDb(
+        AUTH,
+        [/FROM machine_payment_evidence mpe/, () => ({ rows: [{ id: 'evidence-1', user_id: AGENT.user_id }] })],
+        [/INSERT INTO merchant_receipts/, () => ({ rows: [] })], // ON CONFLICT DO NOTHING — already recorded
+      )
 
       const response = await app.inject({
         method: 'POST',
@@ -2058,11 +2098,7 @@ describe('machine payment routes', () => {
   })
 
   it('does not record reconciliation events for unconfirmed payments', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({
-        rows: [confirmedPayment({ status: 'pending_signature', tx_hash: null })],
-      })
+    primeDb(AUTH, intentById(confirmedPayment({ status: 'pending_signature', tx_hash: null })))
 
     const response = await app.inject({
       method: 'POST',
@@ -2080,13 +2116,11 @@ describe('machine payment routes', () => {
       error: 'Reconciliation events require a confirmed payment',
       status: 'pending_signature',
     })
-    expect(mockQuery).toHaveBeenCalledTimes(2)
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   it('rejects reconciliation events whose tx hash does not match the payment', async () => {
-    mockQuery
-      .mockResolvedValueOnce(authRow())
-      .mockResolvedValueOnce({ rows: [confirmedPayment()] })
+    primeDb(AUTH, intentById(confirmedPayment()))
 
     const response = await app.inject({
       method: 'POST',
@@ -2102,7 +2136,7 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toBe('txHash does not match payment intent')
-    expect(mockQuery).toHaveBeenCalledTimes(2)
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   // ── POST /send ─────────────────────────────────────────────────────────────
@@ -2122,7 +2156,7 @@ describe('machine payment routes', () => {
     }
 
     function allowanceWithRemaining(remaining: bigint) {
-      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({
+      allowanceMocks.getTokenAllowance.mockResolvedValue({
         amount: 1_000_000n,
         spent: 0n,
         resetTimeMin: 1440,
@@ -2141,34 +2175,24 @@ describe('machine payment routes', () => {
       // mismatch refusal must hold in BOTH routes, or a /payments-created key
       // replays here with the new request's labels on the old sign_data
       // (review finding on #1207 — this test fails on the pre-fix code).
-      // Content-dispatch, not a positional chain: each query is answered by
-      // what its SQL asks for, so the test cannot pass on call-order luck.
-      mockQuery.mockImplementation((sql: string) => {
-        if (sql.includes('api_key_hash')) return Promise.resolve(authRow())
-        if (sql.includes('send_idempotency_key')) {
-          // findSendIntentByIdempotencyKey: an existing row for a different transfer
-          return Promise.resolve({
-            rows: [
-              {
-                id: SEND_PAYMENT_ID,
-                status: 'pending_signature',
-                expires_at: '2099-01-01T00:10:00.000Z',
-                token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-                token_symbol: 'USDC',
-                to_address: '0x0000000000000000000000000000000000000abc',
-                amount_raw: '10000000',
-                amount_human: '10',
-                allowance_nonce: 5,
-                sign_hash: SEND_HASH,
-                execution_rail: null,
-                prepared_user_op: null,
-                chain_id: 8453,
-              },
-            ],
-          })
-        }
-        throw new Error(`unexpected query in mismatch test: ${sql.slice(0, 80)}`)
-      })
+      primeDb(
+        AUTH,
+        sendIntentLookup([{
+          id: SEND_PAYMENT_ID,
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:10:00.000Z',
+          token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+          token_symbol: 'USDC',
+          to_address: '0x0000000000000000000000000000000000000abc',
+          amount_raw: '10000000',
+          amount_human: '10',
+          allowance_nonce: 5,
+          sign_hash: SEND_HASH,
+          execution_rail: null,
+          prepared_user_op: null,
+          chain_id: 8453,
+        }]),
+      )
 
       const response = await app.inject({
         method: 'POST',
@@ -2190,14 +2214,9 @@ describe('machine payment routes', () => {
 
     it('creates a USDC payment intent within allowance and returns sign_data', async () => {
       allowanceWithRemaining(1_000_000_000n)
-      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SEND_HASH)
+      allowanceMocks.generateTransferHash.mockResolvedValue(SEND_HASH)
 
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        // agent_allowances check
-        .mockResolvedValueOnce({ rows: [{ allowance_amount: '100' }] })
-        // INSERT payment_intent
-        .mockResolvedValueOnce({ rows: [sendIntentRow()] })
+      primeDb(AUTH, allowanceConfigured(true), insertIntent(sendIntentRow()))
 
       const response = await app.inject({
         method: 'POST',
@@ -2221,16 +2240,11 @@ describe('machine payment routes', () => {
     it('queues over-allowance transfer as pending_approval (202)', async () => {
       allowanceWithRemaining(0n)
 
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [{ allowance_amount: '0' }] })
-        .mockResolvedValueOnce({
-          rows: [{
-            id: SEND_PAYMENT_ID,
-            status: 'pending',
-            expires_at: '2099-01-02T00:00:00.000Z',
-          }],
-        })
+      primeDb(
+        AUTH,
+        allowanceConfigured(true),
+        insertApproval({ id: SEND_PAYMENT_ID, status: 'pending', expires_at: '2099-01-02T00:00:00.000Z' }),
+      )
 
       const response = await app.inject({
         method: 'POST',
@@ -2248,7 +2262,7 @@ describe('machine payment routes', () => {
     })
 
     it('rejects unknown asset with 400', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
+      primeDb(AUTH)
 
       const response = await app.inject({
         method: 'POST',
@@ -2263,7 +2277,7 @@ describe('machine payment routes', () => {
     })
 
     it('rejects invalid recipient address with 400', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
+      primeDb(AUTH)
 
       const response = await app.inject({
         method: 'POST',
@@ -2277,7 +2291,7 @@ describe('machine payment routes', () => {
     })
 
     it('rejects missing amount with 400', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
+      primeDb(AUTH)
 
       const response = await app.inject({
         method: 'POST',
@@ -2291,16 +2305,7 @@ describe('machine payment routes', () => {
     })
 
     it('rejects when agent has no allowance configured for the token', async () => {
-      allowanceMocks.getTokenAllowance.mockResolvedValueOnce({
-        amount: 0n, spent: 0n, resetTimeMin: 0, lastResetMin: 0, nonce: 0,
-      })
-      allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({
-        remaining: 0n, effectiveSpent: 0n, isResetPending: false,
-      })
-
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [] }) // no allowance configured
+      primeDb(AUTH, allowanceConfigured(false))
 
       const response = await app.inject({
         method: 'POST',
@@ -2331,10 +2336,7 @@ describe('machine payment routes', () => {
     }
 
     it('replays an idempotent request and returns the original intent without re-reading chain', async () => {
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        // findExistingSend: payment_intents lookup hits
-        .mockResolvedValueOnce({ rows: [existingIntentRow()] })
+      primeDb(AUTH, sendIntentLookup([existingIntentRow()]))
 
       const response = await app.inject({
         method: 'POST',
@@ -2357,14 +2359,15 @@ describe('machine payment routes', () => {
 
     it('persists the idempotency_key when creating a new intent', async () => {
       allowanceWithRemaining(1_000_000_000n)
-      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SEND_HASH)
+      allowanceMocks.generateTransferHash.mockResolvedValue(SEND_HASH)
 
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [] }) // payment_intents dedup miss
-        .mockResolvedValueOnce({ rows: [] }) // approval_requests dedup miss
-        .mockResolvedValueOnce({ rows: [{ allowance_amount: '100' }] }) // agent_allowances
-        .mockResolvedValueOnce({ rows: [sendIntentRow()] }) // INSERT
+      primeDb(
+        AUTH,
+        sendIntentLookup([]),
+        sendApprovalLookup([]),
+        allowanceConfigured(true),
+        insertIntent(sendIntentRow()),
+      )
 
       const response = await app.inject({
         method: 'POST',
@@ -2374,26 +2377,34 @@ describe('machine payment routes', () => {
       })
 
       expect(response.statusCode).toBe(201)
-      const insertCall = mockQuery.mock.calls.find(
-        ([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO payment_intents'),
-      )
-      expect(insertCall).toBeDefined()
-      expect(insertCall![1]).toContain('send-key-2')
+      const insert = findCall(/INSERT INTO payment_intents/)
+      expect(insert).toBeDefined()
+      expect(insert!.params).toContain('send-key-2')
     })
 
     it('replays the winner when a concurrent insert wins the idempotency race', async () => {
       allowanceWithRemaining(1_000_000_000n)
-      allowanceMocks.generateTransferHash.mockResolvedValueOnce(SEND_HASH)
+      allowanceMocks.generateTransferHash.mockResolvedValue(SEND_HASH)
 
       const uniqueViolation = Object.assign(new Error('duplicate key value'), { code: '23505' })
-
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [] }) // payment_intents dedup miss
-        .mockResolvedValueOnce({ rows: [] }) // approval_requests dedup miss
-        .mockResolvedValueOnce({ rows: [{ allowance_amount: '100' }] }) // agent_allowances
-        .mockRejectedValueOnce(uniqueViolation) // INSERT loses the race
-        .mockResolvedValueOnce({ rows: [existingIntentRow()] }) // re-lookup finds the winner
+      // findSendIntentByIdempotencyKey runs TWICE with the identical
+      // statement: once up front (a fresh key — nothing found) and again
+      // after the INSERT loses the unique-index race. A stateful counter is
+      // the only way a content-dispatch stub can answer one statement
+      // differently across its two calls (#1226 style).
+      let intentReads = 0
+      primeDb(
+        AUTH,
+        [/send_idempotency_key = \$2[\s\S]*FROM payment_intents|FROM payment_intents[\s\S]*send_idempotency_key = \$2/, () => {
+          intentReads += 1
+          return { rows: intentReads > 1 ? [existingIntentRow()] : [] }
+        }],
+        sendApprovalLookup([]),
+        allowanceConfigured(true),
+        [/INSERT INTO payment_intents/, () => {
+          throw uniqueViolation // INSERT loses the race
+        }],
+      )
 
       const response = await app.inject({
         method: 'POST',
@@ -2408,7 +2419,7 @@ describe('machine payment routes', () => {
     })
 
     it('rejects an empty idempotency_key with 400', async () => {
-      mockQuery.mockResolvedValueOnce(authRow())
+      primeDb(AUTH)
 
       const response = await app.inject({
         method: 'POST',
@@ -2423,13 +2434,11 @@ describe('machine payment routes', () => {
     })
 
     it('reports the real status (not a stale sign request) when replaying an already-confirmed intent', async () => {
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        // findExistingSend: payment_intents dedup hits, but it already confirmed
-        .mockResolvedValueOnce({ rows: [existingIntentRow({ status: 'confirmed' })] })
-        // getAgentPaymentStatus: expire-sweep UPDATE, then status SELECT
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' })] })
+      primeDb(
+        AUTH,
+        sendIntentLookup([existingIntentRow({ status: 'confirmed' })]),
+        intentStatusRow(confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' })),
+      )
 
       const response = await app.inject({
         method: 'POST',
@@ -2449,27 +2458,24 @@ describe('machine payment routes', () => {
     })
 
     it('reports the real status (not still-pending) when replaying an approval the owner already executed', async () => {
-      mockQuery
-        .mockResolvedValueOnce(authRow())
-        .mockResolvedValueOnce({ rows: [] }) // payment_intents dedup miss
-        // approval_requests dedup hits, but it has already been executed
-        .mockResolvedValueOnce({ rows: [{
+      primeDb(
+        AUTH,
+        sendIntentLookup([]),
+        // approval_requests dedup hits, but it has already been executed.
+        // #1207: the bidirectional mismatch check reads these — they must
+        // match the request or the replay is (correctly) refused as 409.
+        sendApprovalLookup([{
           id: 'approval-exec',
           status: 'executed',
           expires_at: '2099-01-02T00:00:00.000Z',
           token_symbol: 'USDC',
           amount_human: '999',
-          // #1207: the bidirectional mismatch check reads these — they must
-          // match the request or the replay is (correctly) refused as 409.
           token_address: USDC,
           to_address: SEND_RECIPIENT.toLowerCase(),
           amount_raw: '999000000',
-        }] })
-        // getAgentPaymentStatus: intent expire-sweep + miss, then approval expire-sweep + hit
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [{
+        }]),
+        intentStatusRow(null),
+        approvalById({
           id: 'approval-exec',
           chain_id: 8453,
           token_symbol: 'USDC',
@@ -2487,7 +2493,8 @@ describe('machine payment routes', () => {
           machine_challenge_id: null,
           machine_idempotency_key: null,
           machine_metadata: null,
-        }] })
+        }),
+      )
 
       const response = await app.inject({
         method: 'POST',

@@ -909,6 +909,37 @@ describe('haven_pay_mcp_tool', () => {
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 
+  it('accepts a quote EXACTLY at max_amount — the cap is inclusive, no warning (#1275)', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_pay_x402_quote({
+        payment_required: PAYMENT_REQUIRED,
+        // Fixture's authoritative amount is maxAmountRequired 1500000.
+        max_amount: '1500000',
+      }),
+    )
+    expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
+    // Cap provided → no warning.
+    expect('cap_warning' in result.data).toBe(false)
+  })
+
+  it('carries cap_warning when max_amount is omitted — the cap is the normal path (#1275)', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{ cap_warning?: string }>(
+      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+    expect(result.data.cap_warning).toContain('max_amount')
+    expect(result.data.cap_warning).toContain('atomic units')
+  })
+
   it('proceeds and returns the live price when max_amount is high enough', async () => {
     stubFetch({
       'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },

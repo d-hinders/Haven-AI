@@ -28,6 +28,10 @@ export { USDC_ADDRESS }
 
 const NETWORK: `${string}:${string}` = `eip155:${CHAIN_ID}`
 const MAX_TIMEOUT_SECONDS = 300
+// #1279: accepted forward-validity slack beyond the advertised timeout. Covers
+// clock skew plus client settlement margins (Haven's SDK signs
+// clamped-timeout + 300 s forward, #1256) without accepting year-long windows.
+const MAX_WINDOW_SLACK_SECONDS = 900
 const NONCE_RE = /^0x[0-9a-fA-F]{64}$/
 const HEX_BYTES_RE = /^0x(?:[0-9a-fA-F]{2})+$/
 const ZERO_TX_HASH = `0x${'0'.repeat(64)}` as Hex
@@ -734,8 +738,22 @@ async function verifyAuthorization(
   if (!isAddress(authorization.from)) throw new PaymentError('Payment payer address is invalid')
   if (!isAddress(authorization.to)) throw new PaymentError('Payment recipient address is invalid')
   if (!NONCE_RE.test(authorization.nonce)) throw new PaymentError('Payment nonce must be 32 bytes')
-  if (validBefore > 0n && nowSec >= validBefore) throw new PaymentError('Payment authorization has expired')
+  // EIP-3009 on-chain semantics: valid iff validAfter < now < validBefore.
+  // validBefore = 0 therefore means NEVER valid — the old special case read
+  // it as "no expiry", the exact opposite of what the chain would do (#1279).
+  if (nowSec >= validBefore) throw new PaymentError('Payment authorization has expired')
   if (nowSec < validAfter) throw new PaymentError('Payment authorization is not valid yet')
+  // Nit companion (#1279): the signed window must not exceed what the quote
+  // advertised by more than a generous slack — a years-long authorization
+  // only risks the BUYER, but accepting one silently makes maxTimeoutSeconds
+  // a lie. Slack covers clock skew and client-side signing margins (the
+  // Haven SDK adds a settlement margin on top of the advertised timeout).
+  const advertisedWindow = BigInt(MAX_TIMEOUT_SECONDS + MAX_WINDOW_SLACK_SECONDS)
+  if (validBefore - nowSec > advertisedWindow) {
+    throw new PaymentError(
+      'Payment authorization validity window is far longer than the quoted maxTimeoutSeconds',
+    )
+  }
   if (!sameAddress(authorization.to, merchantAddress)) throw new PaymentError('Payment is not addressed to this merchant')
   if (value !== expectedAmount) {
     throw new PaymentError(`Payment amount does not match: expected ${expectedAmount}, got ${value}`)

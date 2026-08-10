@@ -99,6 +99,17 @@ async function signedHeader(
   return encodePaymentSignatureHeader(payload)
 }
 
+describe('formatUsdc precision (#1279)', () => {
+  it('renders past-2^53 base units exactly — no Number round-trip', async () => {
+    const { formatUsdc } = await import('./products.js')
+    // 2^60 base units: Number-math renders ...770.981888, bigint math is exact.
+    expect(formatUsdc(1152921504606846976n)).toBe('1152921504606.846976')
+    expect(formatUsdc(1_000n)).toBe('0.001')
+    expect(formatUsdc(0n)).toBe('0')
+    expect(formatUsdc(500n)).toBe('0.0005')
+  })
+})
+
 describe('x402 payment requirements', () => {
   it('builds a standards-aligned Base USDC payment-required response', () => {
     const { processor } = makeProcessor()
@@ -251,6 +262,85 @@ describe('x402 payment verification and settlement', () => {
     const retry = await processor.verifyAndSettle(input)
     expect(retry.txHash).toBe(TX_HASH)
     expect(submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('a process restart cannot double-deliver: on-chain nonce uniqueness is the backstop (#1279)', async () => {
+    // The in-memory attempts/settled maps die with the process. A replayed
+    // header against a FRESH processor re-runs submit(), and the real chain
+    // rejects the reused EIP-3009 nonce — goods must NOT be delivered on that
+    // rejection. This is the restart semantics the audit found untested.
+    const pr = paymentRequired()
+    const header = await signedHeader(pr)
+    const input = {
+      productId: 'vpn_basic' as const,
+      paymentHeader: header,
+      merchantAddress: MERCHANT,
+      expectedAmount: 1_000n,
+      paymentRequired: pr,
+    }
+
+    const first = makeProcessor()
+    const settledFirst = await first.processor.verifyAndSettle(input)
+    expect(settledFirst.txHash).toBe(TX_HASH)
+
+    // "Restart": a brand-new processor with empty maps, against chain state
+    // where the nonce is now used — submit reverts.
+    const submit = vi
+      .fn<SettlementClient['submit']>()
+      .mockRejectedValue(new Error('execution reverted: authorization is used'))
+    const second = makeProcessor({ submit })
+    await expect(second.processor.verifyAndSettle(input)).rejects.toThrow('authorization is used')
+    expect(submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('the same authorization cannot settle a DIFFERENT product on the 3009 rail (#1279)', async () => {
+    // Pinned on the erc7710 rail only until now; the cross-product guard is
+    // shared code and the 3009 twin keeps it honest for both.
+    const pr = paymentRequired()
+    const header = await signedHeader(pr)
+    const { processor } = makeProcessor()
+    const base = {
+      paymentHeader: header,
+      merchantAddress: MERCHANT,
+      expectedAmount: 1_000n,
+      paymentRequired: pr,
+    }
+
+    await processor.verifyAndSettle({ ...base, productId: 'vpn_basic' as const })
+    await expect(
+      processor.verifyAndSettle({ ...base, productId: 'vpn_pro' as const }),
+    ).rejects.toThrow('already settled a different product')
+  })
+
+  it('validBefore = 0 is refused as expired — EIP-3009 means never-valid, not no-expiry (#1279)', async () => {
+    const pr = paymentRequired()
+    const header = await signedHeader(pr, { validBefore: '0' })
+    const { processor } = makeProcessor()
+    await expect(
+      processor.verifyAndSettle({
+        productId: 'vpn_basic' as const,
+        paymentHeader: header,
+        merchantAddress: MERCHANT,
+        expectedAmount: 1_000n,
+        paymentRequired: pr,
+      }),
+    ).rejects.toThrow('expired')
+  })
+
+  it('a validity window far past the quoted timeout is refused (#1279)', async () => {
+    const pr = paymentRequired()
+    const now = Math.floor(Date.now() / 1000)
+    const header = await signedHeader(pr, { validBefore: String(now + 365 * 24 * 3600) })
+    const { processor } = makeProcessor()
+    await expect(
+      processor.verifyAndSettle({
+        productId: 'vpn_basic' as const,
+        paymentHeader: header,
+        merchantAddress: MERCHANT,
+        expectedAmount: 1_000n,
+        paymentRequired: pr,
+      }),
+    ).rejects.toThrow('far longer than the quoted')
   })
 
   it.each([

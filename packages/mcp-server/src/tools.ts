@@ -286,7 +286,9 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
     'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. ' +
-    'Pass max_amount (atomic units) to reject a quote whose authorized amount exceeds the user\'s cap, before any funding moves. Haven never receives the signing key. ' +
+    'ALWAYS pass max_amount on paid merchant calls (#1275) — it is the user-intent cap for THIS purchase: atomic units of the merchant\'s asset, compared against the LIVE quote before any funding moves, separate from and additional to the agent\'s on-chain budget. ' +
+    'Example: buy_cloud_storage { tier: "50gb" } with max_amount "500" caps at 0.0005 USDC. ' +
+    'Without it the quoted price is accepted as-is (the response carries cap_warning) and a changed merchant quote can exceed what the user meant to spend. Haven never receives the signing key. ' +
     'Next: call mcp__haven-signer__haven_sign_x402.',
 })
 
@@ -334,7 +336,7 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'signer to sign. For read-only allowance, budget, spend-limit, remaining-amount, or',
   'reset-period questions, call haven_get_allowances instead of calling this tool.',
   'Pass the payment_required from haven_quote_x402 or directly from the merchant 402 response.',
-  'Pass max_amount (atomic units) to reject a quote above the user\'s cap before any funding moves.',
+  'ALWAYS pass max_amount on paid merchant calls (#1275): atomic units of the merchant\'s asset, the user-intent cap for THIS purchase, enforced against the live quote before any funding moves — separate from the agent\'s on-chain budget. Omitting it accepts the quoted price as-is (the response carries cap_warning).',
   'Returns { payment_id, payload_hash, expires_at, x402 } where x402 carries the accepted option,',
   'resource_url, merchant_to, funding_to, and x402.expected signing context including expires_at.',
   'If expires_at passes before signing, re-quote with the same idempotency_key before signing again.',
@@ -686,6 +688,16 @@ export function createToolHandlers(
           )
           return {
             ...buildX402SigningContext(intent),
+            // #1275: the cap is the normal path; its absence is worth a word,
+            // not a refusal (compatibility) — a soft field the agent can relay.
+            ...(args.max_amount === undefined
+              ? {
+                  cap_warning:
+                    'No max_amount was set — the live quoted price was accepted as-is. Pass ' +
+                    'max_amount (atomic units) on paid merchant calls so a changed quote ' +
+                    'cannot exceed what the user intended to spend.',
+                }
+              : {}),
             // The raw merchant 402 PaymentRequired — the local signer needs this
             // verbatim in haven_x402_sign_header to build the EIP-3009 header.
             payment_required: quote.paymentRequired,
@@ -814,7 +826,18 @@ export function createToolHandlers(
             args.payment_required as X402PaymentRequired,
             { idempotencyKey: args.idempotency_key },
           )
-          return buildX402SigningContext(intent)
+          return {
+            ...buildX402SigningContext(intent),
+            // #1275: same soft nudge as haven_pay_mcp_tool — see there.
+            ...(args.max_amount === undefined
+              ? {
+                  cap_warning:
+                    'No max_amount was set — the live quoted price was accepted as-is. Pass ' +
+                    'max_amount (atomic units) on paid merchant calls so a changed quote ' +
+                    'cannot exceed what the user intended to spend.',
+                }
+              : {}),
+          }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
             return { payment_id: err.paymentId, status: 'pending_approval', payload_hash: null }

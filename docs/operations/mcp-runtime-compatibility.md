@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-10" # 0.1.21 train (#1207): version table bumped; idempotency_key is additive on every surface (old backends ignore it, old clients omit it) — no floor or manifest change
+last-verified: "2026-08-10" # 0.1.21 train (#1207: idempotency_key additive on every surface) + #1275 (hosted-only description/response fields) — no floor or manifest change
 ---
 
 # MCP Runtime Compatibility

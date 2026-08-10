@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-10" # #1207 re-verify: POST /payments idempotency mirrors the x402/MPP key discipline documented here; no x402 claim changed
+last-verified: "2026-08-10" # #1275 (max_amount steering) + #1207 (POST /payments idempotency mirrors the x402/MPP key discipline) re-verified; no binding/digest/settle claim changed
 ---
 
 # Haven - x402 Payment Execution Sequence

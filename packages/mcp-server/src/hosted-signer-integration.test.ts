@@ -590,6 +590,80 @@ describe('Hosted MCP + Edge Signer integration', () => {
     if (!payload.success) expect(payload.message).toContain('does not match the digest')
   })
 
+  it('haven_sign (decomposed path) also signs from payment_id alone (#1263)', async () => {
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+    const signContextFetch = (async () =>
+      new Response(
+        JSON.stringify({
+          payment_id: FUNDING_PAYMENT_ID,
+          sign_data: { hash: FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: REALISTIC_TYPED_DATA },
+          x402_expected: x402Expected.snake,
+        }),
+        { status: 200 },
+      )) as typeof fetch
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner, {
+      signContext: {
+        loadIdentity: async () => ({ apiUrl: 'http://haven.test', apiKey: 'sk_agent_ctx' }),
+        fetchImpl: signContextFetch,
+      },
+    })
+    const signed = ok<{ signature: string; x402_binding: string }>(
+      await signerHandlers.haven_sign({ payment_id: FUNDING_PAYMENT_ID }),
+    )
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    expect(signed.x402_binding.length).toBeGreaterThan(0)
+  })
+
+  it('a caller-supplied payload_hash that disagrees with the fetch is refused (#1263)', async () => {
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+    const signContextFetch = (async () =>
+      new Response(
+        JSON.stringify({
+          payment_id: FUNDING_PAYMENT_ID,
+          sign_data: { hash: FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: REALISTIC_TYPED_DATA },
+          x402_expected: x402Expected.snake,
+        }),
+        { status: 200 },
+      )) as typeof fetch
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner, {
+      signContext: {
+        loadIdentity: async () => ({ apiUrl: 'http://haven.test', apiKey: 'sk_agent_ctx' }),
+        fetchImpl: signContextFetch,
+      },
+    })
+    const payload = await signerHandlers.haven_sign({
+      payment_id: FUNDING_PAYMENT_ID,
+      payload_hash: '0x' + '99'.repeat(32),
+    })
+    expect(payload.success).toBe(false)
+    if (!payload.success) expect(payload.message).toContain('does not match the signing context')
+  })
+
+  it('a DIRECT-payment payment_id surfaces the backend refusal with its fallback (#1263)', async () => {
+    const signContextFetch = (async () =>
+      new Response(
+        JSON.stringify({
+          error:
+            'Not an x402 intent — sign-context serves the x402 signing handoff only. ' +
+            'For a direct payment, sign the typed_data_b64 from the haven_pay/haven_send result instead.',
+          error_code: 'sign_context_unavailable',
+        }),
+        { status: 409 },
+      )) as typeof fetch
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner, {
+      signContext: {
+        loadIdentity: async () => ({ apiUrl: 'http://haven.test', apiKey: 'sk_agent_ctx' }),
+        fetchImpl: signContextFetch,
+      },
+    })
+    const payload = await signerHandlers.haven_sign({ payment_id: FUNDING_PAYMENT_ID })
+    expect(payload.success).toBe(false)
+    if (!payload.success) expect(payload.message).toContain('typed_data_b64')
+  })
+
   it('payment_id without a local identity refuses with the fallback named (#1263)', async () => {
     const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
     const signerHandlers = createSignerHandlers(edgeSigner, {

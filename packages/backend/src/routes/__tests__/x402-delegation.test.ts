@@ -1061,6 +1061,17 @@ describe('x402 sign-context by payment_id (#1263)', () => {
     expect(mockQuery.mock.calls.some((c) => /UPDATE payment_intents/i.test(String(c[0])))).toBe(true)
   })
 
+  it('409s a DIRECT (non-x402) payment intent with the fallback named', async () => {
+    serveIntentRow([{ ...PENDING_ROW, x402_resource_url: null, payment_resource_url: null }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('sign_context_unavailable')
+    expect(res.json().error).toMatch(/typed_data_b64/)
+  })
+
   it('409s a legacy-rail x402 intent (no stored signing payload)', async () => {
     serveIntentRow([{ ...PENDING_ROW, prepared_user_op: null }])
     const res = await app.inject({

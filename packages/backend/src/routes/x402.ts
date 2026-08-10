@@ -148,7 +148,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
   // Haven-signed expected context so the LOCAL SIGNER can fetch exact bytes by
   // payment_id instead of a model re-emitting them. All checks and the rebuild
   // live in the module (`getX402SignContext`).
-  app.get<{ Params: { id: string } }>('/:id/sign-context', async (request, reply) => {
+  app.get<{ Params: { id: string } }>('/:id/sign-context', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const result = await getX402SignContext(agent, request.params.id)
     return reply.code(result.code).send(result.body)

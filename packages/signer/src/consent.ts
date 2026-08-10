@@ -32,6 +32,20 @@ export interface SignerConsentOptions {
 
 export const SIGNER_ACK_ENV = 'HAVEN_SIGNER_ACK'
 
+/**
+ * The consent SURFACE version, folded into the acknowledgement hash. Bump it
+ * when what the signer can DO changes in a way the consent text describes —
+ * not for copy edits. Tool names alone cannot carry this: #1263 added the
+ * signer's first network capability (the read-only signing-context fetch)
+ * without changing any tool name, and a consent acknowledged under the old
+ * "does not call the Haven API" text must not silently cover the new
+ * behavior. Bumping this re-prompts every existing install exactly once,
+ * with the corrected text.
+ *
+ * v2: the #1263 read-only signing-context fetch.
+ */
+export const SIGNER_CONSENT_SURFACE_VERSION = 2
+
 export function computeSignerConsentHash(input: SignerConsentInput): string {
   const identity = [
     input.delegateAddress.toLowerCase(),
@@ -42,7 +56,7 @@ export function computeSignerConsentHash(input: SignerConsentInput): string {
   ].join('|')
   const toolCanonical = [...input.toolNames].sort().join(',')
   return createHash('sha256')
-    .update(`${identity}\n${toolCanonical}`)
+    .update(`${identity}\n${toolCanonical}\nsurface:v${SIGNER_CONSENT_SURFACE_VERSION}`)
     .digest('hex')
     .slice(0, 16)
 }
@@ -63,7 +77,10 @@ export function renderSignerConsentBlock(input: SignerConsentInput, hash: string
   lines.push('')
   lines.push('This local signer holds the delegate key on this machine and signs')
   lines.push('payment payloads or x402 merchant headers for the delegate address above.')
-  lines.push('It does not call the Haven API, so it cannot show a live allowance summary.')
+  lines.push("Its one network use is a read-only fetch of a pending payment's signing")
+  lines.push('payload from Haven, authenticated with the agent credential stored next to')
+  lines.push("this signer's key file - it never sends the key, a signature, or anything")
+  lines.push('else outbound, and it cannot show a live allowance summary.')
   lines.push('On-chain Safe rules remain the real spend gate, and the wallet owner can')
   lines.push('pause or revoke agent authority outside this signer.')
   lines.push('')

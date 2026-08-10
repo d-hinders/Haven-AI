@@ -1871,6 +1871,9 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toBe('txHash does not match payment intent')
+    // The rejection must be write-free — a guard that still writes is the
+    // regression class this asserts against (review finding on #1292).
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   it('rejects evidence reports for unconfirmed payments', async () => {
@@ -1889,6 +1892,7 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toBe('Evidence requires a confirmed payment')
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   it('does not attach evidence to another agent payment', async () => {
@@ -1907,6 +1911,7 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(404)
     expect(response.json().error).toBe('Payment not found')
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   // ── attachMachinePaymentEvidence rejection paths (#997) ─────────────────────
@@ -2111,6 +2116,7 @@ describe('machine payment routes', () => {
       error: 'Reconciliation events require a confirmed payment',
       status: 'pending_signature',
     })
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   it('rejects reconciliation events whose tx hash does not match the payment', async () => {
@@ -2130,6 +2136,7 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toBe('txHash does not match payment intent')
+    expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
   // ── POST /send ─────────────────────────────────────────────────────────────

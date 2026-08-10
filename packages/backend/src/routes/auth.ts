@@ -9,7 +9,7 @@ import {
   insertUser,
 } from '../infra/repositories/users.js'
 import { listSessionSafesForUser } from '../infra/repositories/user-safes.js'
-import { sessionSafePayload } from '../modules/accounts/mainnet-gate.js'
+import { sessionSafePayload } from '../modules/accounts/index.js'
 
 const SALT_ROUNDS = 10
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/

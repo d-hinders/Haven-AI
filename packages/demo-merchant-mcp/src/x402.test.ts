@@ -6,6 +6,7 @@ import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
 import {
   createX402PaymentProcessor,
   PaymentError,
+  SettlementRevertedError,
   PAYMENT_REQUIRED_HEADER,
   USDC_ADDRESS,
   type Eip3009Authorization,
@@ -194,6 +195,62 @@ describe('x402 payment verification and settlement', () => {
     expect(retry.txHash).toBe(TX_HASH)
     expect(submit).toHaveBeenCalledTimes(1)
     expect(waitForReceipt).toHaveBeenCalledTimes(2)
+  })
+
+  it('RESUBMITS after a mined-and-reverted settlement tx — the dead hash is not retried forever (#1278)', async () => {
+    // A revert is final for the SUBMISSION, not the authorization. Before the
+    // fix the attempt kept its txHash, so every replay re-confirmed the same
+    // dead hash and the buyer could never complete this authorization.
+    const secondTx = `0x${'ee'.repeat(32)}` as const
+    const submit = vi
+      .fn<SettlementClient['submit']>()
+      .mockResolvedValueOnce(TX_HASH)
+      .mockResolvedValueOnce(secondTx)
+    const waitForReceipt = vi
+      .fn<SettlementClient['waitForReceipt']>()
+      .mockRejectedValueOnce(new SettlementRevertedError(`USDC settlement transaction reverted on-chain: ${TX_HASH}`))
+      .mockResolvedValueOnce(undefined)
+    const { processor } = makeProcessor({ submit, waitForReceipt })
+    const pr = paymentRequired()
+    const header = await signedHeader(pr)
+    const input = {
+      productId: 'vpn_basic' as const,
+      paymentHeader: header,
+      merchantAddress: MERCHANT,
+      expectedAmount: 1_000n,
+      paymentRequired: pr,
+    }
+
+    await expect(processor.verifyAndSettle(input)).rejects.toThrow(/reverted on-chain.*resubmit/s)
+    const retry = await processor.verifyAndSettle(input)
+
+    expect(retry.txHash).toBe(secondTx)
+    expect(submit).toHaveBeenCalledTimes(2)
+  })
+
+  it('a transient receipt error still re-confirms the SAME hash — no double submit (#1278)', async () => {
+    // The counterpart guard: only a PROVEN revert clears the attempt. A
+    // transient fetch failure must keep the hash, else a slow-but-successful
+    // tx could be double-submitted.
+    const waitForReceipt = vi
+      .fn<SettlementClient['waitForReceipt']>()
+      .mockRejectedValueOnce(new Error('rpc hiccup'))
+      .mockResolvedValueOnce(undefined)
+    const { processor, submit } = makeProcessor({ waitForReceipt })
+    const pr = paymentRequired()
+    const header = await signedHeader(pr)
+    const input = {
+      productId: 'vpn_basic' as const,
+      paymentHeader: header,
+      merchantAddress: MERCHANT,
+      expectedAmount: 1_000n,
+      paymentRequired: pr,
+    }
+
+    await expect(processor.verifyAndSettle(input)).rejects.toThrow('rpc hiccup')
+    const retry = await processor.verifyAndSettle(input)
+    expect(retry.txHash).toBe(TX_HASH)
+    expect(submit).toHaveBeenCalledTimes(1)
   })
 
   it.each([

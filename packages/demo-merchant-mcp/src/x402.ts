@@ -302,7 +302,22 @@ export function createX402PaymentProcessor(
     productKey: string,
     txHash: Hex,
   ): Promise<SettledCacheEntry> {
-    await settlementClient.waitForReceipt(txHash)
+    try {
+      await settlementClient.waitForReceipt(txHash)
+    } catch (err) {
+      if (err instanceof SettlementRevertedError) {
+        // #1278: a mined-and-reverted tx is final for THIS submission but not
+        // for the authorization — clear the attempt so the buyer's next retry
+        // resubmits instead of re-confirming the dead hash forever. Any other
+        // error is treated as transient and keeps the hash for re-confirmation.
+        attempts.delete(params.verified.paymentKey)
+        throw new PaymentError(
+          `Settlement transaction reverted on-chain (${txHash}). ` +
+            'Retry the request with the same payment header to resubmit.',
+        )
+      }
+      throw err
+    }
     const payment = buildSettledPayment(params, txHash)
     const entry = { productId: params.productId, payment }
     settled.set(productKey, entry)
@@ -494,7 +509,7 @@ export function createViemSettlementClient(params: {
         confirmations: 1,
       })
       if (receipt.status !== 'success') {
-        throw new PaymentError(`USDC settlement transaction failed: ${txHash}`)
+        throw new SettlementRevertedError(`USDC settlement transaction reverted on-chain: ${txHash}`)
       }
     },
 
@@ -752,3 +767,14 @@ export class PaymentError extends Error {
     this.name = 'PaymentError'
   }
 }
+
+/**
+ * A settlement transaction was MINED AND REVERTED — a definitive on-chain
+ * outcome, unlike a transient failure to fetch the receipt (#1278). The
+ * processor clears the settlement attempt on this signal so a replay of the
+ * same payment header RESUBMITS instead of re-confirming the dead hash
+ * forever. Safe to resubmit: the revert is proven, and EIP-3009 nonce
+ * uniqueness (or delegation state, on the erc7710 rail) makes an accidental
+ * double-submit revert harmlessly on-chain.
+ */
+export class SettlementRevertedError extends PaymentError {}

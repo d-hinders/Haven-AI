@@ -6,7 +6,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .github/CODEOWNERS
-last-verified: "2026-07-12"
+last-verified: "2026-08-10" # weekly #1248 audit: queue mechanics, money-path-globs source of truth and CODEOWNERS carve-out all re-verified; content (incl. the #1030 qa-freshness edit) accurate as-is
 ---
 
 # Backlogs moved to GitHub Issues

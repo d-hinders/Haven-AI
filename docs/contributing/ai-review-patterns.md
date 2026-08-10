@@ -12,7 +12,7 @@ covers:
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/components/NetworkGate.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
-last-verified: "2026-07-12"
+last-verified: "2026-08-10" # weekly #1248 audit: every covers: claim re-verified (incl. the #1077 Green-Gate Evidence section); in sync with the Captain Preflight and the reviewer role trap list
 ---
 
 # AI Review Patterns

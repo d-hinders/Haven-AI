@@ -679,6 +679,62 @@ describe('haven_send', () => {
     expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
   })
 
+  it('forwards signature_scheme + typed_data VERBATIM for delegation-rail intents (#1254)', async () => {
+    // haven_send was named in the live bug alongside haven_pay — reviewer
+    // mutation showed the shared helper's use HERE was untested (dropping it
+    // from only this handler passed the whole suite).
+    const typedData = {
+      domain: { name: 'HybridDeleGator', chainId: 8453 },
+      types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+      primaryType: 'PackedUserOperation',
+      message: { sender: '0xRecipient' },
+    }
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_delegation',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: {
+            hash: '0xsendhash',
+            signature_scheme: 'eip712_userop',
+            typed_data: typedData,
+          },
+        },
+      },
+    })
+
+    const result = ok<{ signature_scheme?: string; typed_data?: unknown; payload_hash: string }>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '0.10' }),
+    )
+
+    expect(result.data.signature_scheme).toBe('eip712_userop')
+    expect(result.data.typed_data).toEqual(typedData) // verbatim, never reshaped
+    expect(result.data.payload_hash).toBe('0xsendhash')
+  })
+
+  it('omits the delegation fields entirely on legacy-rail intents (#1254)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_legacy',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '0.10' }),
+    )
+
+    expect('signature_scheme' in result.data).toBe(false)
+    expect('typed_data' in result.data).toBe(false)
+  })
+
   it('surfaces pending_approval when over allowance budget', async () => {
     stubFetch({
       'POST /payments': {

@@ -127,6 +127,14 @@ pass `typed_data` to `haven_sign` VERBATIM — the Hybrid account validates the
 typed data, and a bare-hash signature is rejected on-chain (AA24, #1254).
 Legacy-rail results omit both fields and `haven_sign` signs `payload_hash`.
 
+Note the trust-model asymmetry: the **x402** typed-data leg
+(`signX402FundingTypedData`) verifies a Haven-authenticated expected context
+and digest equality before signing; this **direct** leg does not — like the
+legacy raw-hash path it always mirrored, the authority boundary is the
+account's on-chain caveat enforcers (budget/recipient/expiry), not a
+client-side signing gate. Do not assume `signDelegationTypedData` carries the
+x402 leg's binding protection.
+
 An over-budget result has `payload_hash: null`; stop and wait for the user to
 approve and execute the Safe payment. There is nothing for the edge signer to
 sign.

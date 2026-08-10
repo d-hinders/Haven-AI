@@ -195,8 +195,17 @@ describe('haven_sign tool', () => {
     // canary: the Hybrid account validates EIP-712 typed data, and a raw
     // signature over payload_hash reverts on-chain with AA24. When the
     // hosted result carries typed_data, THAT is what gets signed.
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-typed-data-audit-'))
+    const auditPath = join(dir, 'audit.jsonl')
     const signer = createEdgeSigner(TEST_KEY)
-    const handlers = createToolHandlers(signer)
+    const handlers = createToolHandlers(signer, {
+      audit: {
+        auditPath,
+        delegateAddress: signer.delegateAddress,
+        safeAddress: '0x000000000000000000000000000000000000Cafe',
+        chainId: 8453,
+      },
+    })
     const typedData = {
       domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: `0x${'11'.repeat(20)}` },
       types: {
@@ -220,6 +229,16 @@ describe('haven_sign tool', () => {
     expect(verifySignature(digest, result.data.signature, signer.delegateAddress)).toBe(true)
     expect(verifySignature(HASH, result.data.signature, signer.delegateAddress)).toBe(false)
     expect(JSON.stringify(result)).not.toContain(TEST_KEY.slice(2))
+
+    // The audit trail covers this branch too — a typed-data signing that
+    // left no local record would be invisible to the user.
+    const rows = (await readFile(auditPath, 'utf8')).trim().split('\n')
+    expect(rows).toHaveLength(1)
+    const entry = JSON.parse(rows[0])
+    expect(entry).toMatchObject({ tool: 'haven_sign', payload_hash: HASH })
+    expect(JSON.stringify(entry)).not.toContain(TEST_KEY.slice(2))
+    expect(JSON.stringify(entry)).not.toContain(result.data.signature)
+    await rm(dir, { recursive: true, force: true })
   })
 
   it('appends a local audit row for signing without key material or signature', async () => {

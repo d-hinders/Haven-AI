@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-10" # #1254 release train: version table bumped to 0.1.19-alpha.0; runtime manifest, Node-floor and release-checklist sections re-read and unchanged
+last-verified: "2026-08-10" # #1254 release train (version table → 0.1.19-alpha.0) + #1255 re-verify: typed_data_b64 is additive on both MCP surfaces — old signer ignores the unknown field (typed_data still present), new signer falls back without it; no runtime floor or manifest change
 ---
 
 # MCP Runtime Compatibility

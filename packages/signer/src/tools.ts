@@ -120,6 +120,15 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     // #1138: delegation-rail intents sign THIS, not payload_hash. Object-typed
     // (not z.unknown()) so MCP clients embed it as JSON rather than a string.
     typed_data: z.record(z.string(), z.unknown()).optional(),
+    // #1255: the same payload as ONE opaque base64 string, exactly as returned
+    // by the hosted tools. Preferred over typed_data when both are present —
+    // an agent re-emitting multi-KB nested JSON between tool calls is the
+    // failure mode this field removes (a truncated/reshaped payload fails the
+    // digest check and the payment refuses, correctly but pointlessly).
+    // Bounded: a realistic redemption payload is ~10KB encoded; 256KB is
+    // generous headroom while keeping the offline signer from materializing
+    // arbitrarily large caller input.
+    typed_data_b64: z.string().min(1).max(262144).optional(),
   },
   haven_x402_sign_header: {
     // The parsed HTTP 402 PaymentRequired from the merchant. Typed as an object
@@ -139,6 +148,8 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     // #1138: delegation-rail intents sign THIS, not payload_hash. Object-typed
     // (not z.unknown()) so MCP clients embed it as JSON rather than a string.
     typed_data: z.record(z.string(), z.unknown()).optional(),
+    // #1255: see haven_sign.typed_data_b64 — the copy-through-safe form.
+    typed_data_b64: z.string().min(1).max(262144).optional(),
   },
 }
 
@@ -147,7 +158,8 @@ const SIGN_DESCRIPTION = [
   'this process. Pass the payload_hash returned by haven_pay or haven_pay_x402_quote.',
   'For x402, also pass x402_expected from haven_pay_x402_quote; the signer records it locally',
   'and returns { signature, x402_binding }. x402_expected includes expires_at; sign before that',
-  'window closes. DELEGATION-RAIL accounts: when the hosted result carries typed_data, pass it too —',
+  'window closes. DELEGATION-RAIL accounts: when the hosted result carries typed_data_b64, pass that',
+  'single string through UNCHANGED (preferred — never re-type the nested typed_data JSON yourself);',
   'the account validates that EIP-712 payload, not payload_hash, and signing is refused without it.',
   'Next: call mcp__haven__haven_submit with signature, then pass x402_binding',
   'to mcp__haven-signer__haven_x402_sign_header. For plain SafeTransfer payments, just pass payload_hash and',
@@ -172,7 +184,8 @@ const SIGN_X402_DESCRIPTION = [
   'haven_x402_sign_header). The delegate key never leaves this process. From the haven_pay_mcp_tool',
   'result pass payload_hash, x402_expected (the nested x402.expected object — passing the whole x402',
   'object is also accepted and unwrapped for you), and payment_required (verbatim). On a',
-  'delegation-rail account the result also carries typed_data — pass that verbatim too; the signer',
+  'delegation-rail account the result also carries typed_data_b64 — pass that single string through',
+  'UNCHANGED (preferred over re-typing the nested typed_data JSON); the signer',
   'signs it instead of payload_hash and refuses the bare hash when the context commits to typed data.',
   'Returns',
   '{ signature, x402_binding, payment_header, accepted }; hand signature + payment_header to',
@@ -223,8 +236,9 @@ async function signFundingLeg(
   if (!typedData) {
     throw new HavenSigningError(
       'This x402 funding intent is on the delegation rail: it commits to EIP-712 typed data, ' +
-        'which was not supplied. Pass sign_data.typed_data from haven_pay_mcp_tool / ' +
-        'haven_pay_x402_quote verbatim — the bare payload_hash is not what the account validates.',
+        'which was not supplied. Pass typed_data_b64 from haven_pay_mcp_tool / ' +
+        'haven_pay_x402_quote through unchanged (or typed_data verbatim) — the bare ' +
+        'payload_hash is not what the account validates.',
     )
   }
   return signer.signX402FundingTypedData(typedData as unknown as X402FundingTypedData, expected)
@@ -281,6 +295,39 @@ export interface ToolHandlerOptions {
   audit?: SigningAuditContext & { auditPath: string }
 }
 
+/**
+ * Resolve the delegation-rail signing payload from the tool arguments (#1255).
+ *
+ * `typed_data_b64` wins over `typed_data`: it is the copy-through-safe form —
+ * one opaque string the agent relays unchanged, instead of re-emitting multi-KB
+ * nested JSON (a redemption UserOp's callData) between two tool calls. The live
+ * #1255 failure was exactly that: the payload arrived altered, the digest check
+ * refused (correctly), and the purchase died with no defect anywhere in the
+ * chain. The decoded object goes through the SAME digest verification as a
+ * plain typed_data — this changes the transport, never the trust model.
+ */
+function resolveTypedData(args: {
+  typed_data?: Record<string, unknown>
+  typed_data_b64?: string
+}): Record<string, unknown> | undefined {
+  if (!args.typed_data_b64) return args.typed_data
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(args.typed_data_b64, 'base64').toString('utf8'),
+    ) as unknown
+    if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
+      throw new Error('decoded value is not an object')
+    }
+    return decoded as Record<string, unknown>
+  } catch (err) {
+    throw new HavenSigningError(
+      'typed_data_b64 did not decode to a JSON object. Pass the exact string returned by the ' +
+        'hosted Haven tool, unchanged — do not re-encode, trim, or reformat it. ' +
+        `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+}
+
 export function createToolHandlers(
   signer: EdgeSigner,
   options: ToolHandlerOptions = {},
@@ -289,9 +336,10 @@ export function createToolHandlers(
     haven_sign: async (input) =>
       runTool(async () => {
         const args = parse('haven_sign', coerceX402Expected(input))
+        const typedData = resolveTypedData(args)
         const x402Expected = args.x402_expected ? toExpectedX402(args.x402_expected) : null
         const result = x402Expected
-          ? await signFundingLeg(signer, x402Expected, args.payload_hash, args.typed_data)
+          ? await signFundingLeg(signer, x402Expected, args.payload_hash, typedData)
           : null
         if (!result) {
           // #1254: a DIRECT delegation-rail payment carries typed_data and no
@@ -299,8 +347,8 @@ export function createToolHandlers(
           // signature over payload_hash is rejected on-chain (AA24, found
           // live). When typed_data is present it is what gets signed; the
           // raw-hash path below is the legacy AllowanceModule rail only.
-          if (args.typed_data) {
-            const signature = await signer.signDelegationTypedData(args.typed_data)
+          if (typedData) {
+            const signature = await signer.signDelegationTypedData(typedData)
             await auditSigning('haven_sign', args.payload_hash)
             return { signature }
           }
@@ -344,7 +392,7 @@ export function createToolHandlers(
           signer,
           toExpectedX402(args.x402_expected),
           args.payload_hash,
-          args.typed_data,
+          resolveTypedData(args),
         )
         // 2. Build the merchant EIP-3009 header against that binding — local, no network.
         const header = await signer.buildX402PaymentHeader(

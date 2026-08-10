@@ -120,7 +120,7 @@ describe('x402 payment requirements', () => {
         amount: '1000',
         payTo: MERCHANT,
         asset: USDC_ADDRESS,
-        extra: { name: 'USD Coin', version: '2' },
+        extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'eip3009' },
       }],
     })
   })

@@ -11,7 +11,7 @@ import {
   type SettledPayment,
   type X402PaymentProcessor,
 } from './x402.js'
-import { PRODUCTS, type ProductId } from './products.js'
+import { PRODUCTS, isSettlementMethod, type ProductId, type SettlementMethod } from './products.js'
 import { invoiceForPayment } from './invoice.js'
 import type { Address } from 'viem'
 
@@ -20,11 +20,19 @@ export interface DemoMerchantServerOptions {
   baseUrl: string
   paymentProcessor: X402PaymentProcessor
   path?: string
+  settlementMethods?: readonly SettlementMethod[]
 }
 
 interface MerchantSession {
   server: ReturnType<typeof buildMerchantMcpServer>
   transport: StreamableHTTPServerTransport
+}
+
+interface PaymentToolInfo {
+  productId: ProductId
+  product: (typeof PRODUCTS)[ProductId]
+  description: string
+  settlementMethod?: SettlementMethod
 }
 
 const MAX_BODY_BYTES = 500_000
@@ -115,14 +123,15 @@ async function handlePaymentGate(
   req: IncomingMessage,
   res: ServerResponse,
   options: Required<Pick<DemoMerchantServerOptions, 'path'>> & DemoMerchantServerOptions,
-  paymentToolInfo: { productId: ProductId; product: (typeof PRODUCTS)[ProductId]; description: string },
+  paymentToolInfo: PaymentToolInfo,
 ): Promise<SettledPayment | null> {
-  const { productId, product, description } = paymentToolInfo
+  const { productId, product, description, settlementMethod } = paymentToolInfo
   const paymentRequired = options.paymentProcessor.buildPaymentRequired({
     merchantAddress: options.merchantAddress,
     amountUsdc: product.price_usdc,
     resource: `${options.baseUrl}${options.path}`,
     description,
+    settlementMethod,
   })
   const paymentHeader = getPaymentHeader(req)
 
@@ -166,6 +175,7 @@ async function getSession(
     merchantAddress: options.merchantAddress,
     baseUrl: options.baseUrl,
     buildPaymentRequired: options.paymentProcessor.buildPaymentRequired,
+    settlementMethods: options.settlementMethods,
   })
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,
@@ -208,9 +218,7 @@ function writePaymentRequired(
   res.end(JSON.stringify(paymentRequired))
 }
 
-function extractPaymentToolInfo(
-  body: unknown,
-): { productId: ProductId; product: (typeof PRODUCTS)[ProductId]; description: string } | null {
+function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
   if (!body || typeof body !== 'object') return null
   const rpc = body as Record<string, unknown>
   if (rpc.method !== 'tools/call') return null
@@ -220,6 +228,7 @@ function extractPaymentToolInfo(
 
   const toolName = params.name
   const args = (params.arguments as Record<string, unknown> | undefined) ?? {}
+  const settlementMethod = isSettlementMethod(args.settlement_method) ? args.settlement_method : undefined
 
   let productId: ProductId | null = null
   let descriptionSuffix = '1 månads abonnemang'
@@ -239,7 +248,7 @@ function extractPaymentToolInfo(
 
   if (!productId) return null
   const product = PRODUCTS[productId]
-  return { productId, product, description: `${product.name} — ${descriptionSuffix}` }
+  return { productId, product, description: `${product.name} — ${descriptionSuffix}`, settlementMethod }
 }
 
 function isInitializeRequest(body: unknown): boolean {

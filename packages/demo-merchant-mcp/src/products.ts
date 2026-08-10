@@ -39,6 +39,9 @@ if (!chain) {
 export const USDC_ADDRESS = chain.usdcAddress
 export const USDC_DOMAIN_NAME = chain.usdcDomainName
 export const USDC_DOMAIN_VERSION = chain.usdcDomainVersion
+export const SUPPORTED_SETTLEMENT_METHODS = ['erc7710', 'eip3009'] as const
+export type SettlementMethod = (typeof SUPPORTED_SETTLEMENT_METHODS)[number]
+export const DEFAULT_SETTLEMENT_METHOD: SettlementMethod = 'erc7710'
 
 export type ProductId =
   | 'vpn_basic'
@@ -55,6 +58,10 @@ export interface Product {
   /** Price in USDC base units (6 decimals). E.g. $1.00 = 1_000_000n */
   price_usdc: bigint
   category: 'vpn' | 'storage'
+  x402: {
+    settlementMethods: readonly SettlementMethod[]
+    defaultSettlementMethod: SettlementMethod
+  }
 }
 
 export const PRODUCTS: Record<ProductId, Product> = {
@@ -64,6 +71,7 @@ export const PRODUCTS: Record<ProductId, Product> = {
     description: 'Grundläggande VPN-skydd. Upp till 10 enheter. Standardhastigheter. 50+ serverplatser.',
     price_usdc: 1_000n,
     category: 'vpn',
+    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
   vpn_pro: {
     id: 'vpn_pro',
@@ -71,6 +79,7 @@ export const PRODUCTS: Record<ProductId, Product> = {
     description: 'Premium VPN. Obegränsade enheter. Höghastighetsservrar. Dubbel-VPN. 90+ länder.',
     price_usdc: 3_000n,
     category: 'vpn',
+    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
   vpn_ultra: {
     id: 'vpn_ultra',
@@ -78,6 +87,7 @@ export const PRODUCTS: Record<ProductId, Product> = {
     description: 'Ultimat sekretess. Onion-routing. Dedikerade IP-adresser. Prioritetssupport dygnet runt.',
     price_usdc: 5_000n,
     category: 'vpn',
+    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
   storage_50gb: {
     id: 'storage_50gb',
@@ -85,6 +95,7 @@ export const PRODUCTS: Record<ProductId, Product> = {
     description: 'Säker krypterad molnlagring. 50 GB. Fildelning och automatisk synk ingår.',
     price_usdc: 500n,
     category: 'storage',
+    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
   storage_200gb: {
     id: 'storage_200gb',
@@ -92,6 +103,7 @@ export const PRODUCTS: Record<ProductId, Product> = {
     description: 'Utökad lagring. 200 GB. Versionshantering, automatisk backup och prioritetsbandbredd.',
     price_usdc: 1_500n,
     category: 'storage',
+    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
   storage_1tb: {
     id: 'storage_1tb',
@@ -99,7 +111,12 @@ export const PRODUCTS: Record<ProductId, Product> = {
     description: 'Affärsklass molnlagring. 1 TB. API-åtkomst, teamdelning och SLA 99,9% drifttid.',
     price_usdc: 4_000n,
     category: 'storage',
+    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
+}
+
+export function isSettlementMethod(value: unknown): value is SettlementMethod {
+  return value === 'erc7710' || value === 'eip3009'
 }
 
 /** Format USDC base units as a human-readable USD string.

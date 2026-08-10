@@ -1,7 +1,15 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { z } from 'zod'
-import { PRODUCTS, formatUsdc, type ProductId } from './products.js'
+import {
+  DEFAULT_SETTLEMENT_METHOD,
+  PRODUCTS,
+  SUPPORTED_SETTLEMENT_METHODS,
+  CHAIN_ID,
+  formatUsdc,
+  type ProductId,
+  type SettlementMethod,
+} from './products.js'
 import { invoiceForPayment } from './invoice.js'
 import type { SettledPayment, X402PaymentProcessor } from './x402.js'
 import type { Address } from 'viem'
@@ -16,6 +24,7 @@ export interface MerchantConfig {
    *  text advertises the same accepts entries (e.g. the experimental erc7710
    *  option) as the HTTP 402 challenge. */
   buildPaymentRequired: X402PaymentProcessor['buildPaymentRequired']
+  settlementMethods?: readonly SettlementMethod[]
 }
 
 const completedPurchases = new WeakMap<SettledPayment, string>()
@@ -26,6 +35,10 @@ export function runWithSettledPayment<T>(payment: SettledPayment | undefined, fn
 
 /** Build the demo merchant MCP server. */
 export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
+  const settlementMethods = config.settlementMethods?.length ? config.settlementMethods : ['eip3009']
+  const defaultSettlementMethod = settlementMethods.includes(DEFAULT_SETTLEMENT_METHOD)
+    ? DEFAULT_SETTLEMENT_METHOD
+    : settlementMethods[0]
   const server = new McpServer({
     name: 'haven-demo-merchant',
     version: '0.1.0',
@@ -34,7 +47,7 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
   // ── list_products ──────────────────────────────────────────────────────────
   server.tool(
     'list_products',
-    'Lista alla tillgängliga produkter med priser (USDC). Kräver ingen betalning.',
+    'List available demo products, prices, merchant URL, and supported x402 settlement methods. No payment required.',
     {},
     async () => {
       const rows = Object.values(PRODUCTS).map((p) => ({
@@ -43,12 +56,23 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
         category: p.category,
         price_usdc: formatUsdc(p.price_usdc),
         description: p.description,
+        x402: {
+          resource_url: `${config.baseUrl}/mcp`,
+          network: `eip155:${CHAIN_ID}`,
+          asset: 'USDC',
+          settlement_methods: settlementMethods,
+          default_settlement_method: defaultSettlementMethod,
+        },
       }))
 
       const text = rows
         .map(
           (r) =>
-            `[${r.id}] ${r.name}\n  Pris: $${r.price_usdc} USDC/månad\n  ${r.description}`,
+            `[${r.id}] ${r.name}\n` +
+            `  Pris: $${r.price_usdc} USDC/månad\n` +
+            `  x402: ${r.x402.network} USDC, settlement_methods=${r.x402.settlement_methods.join(',')}, default=${r.x402.default_settlement_method}\n` +
+            `  Merchant MCP URL: ${r.x402.resource_url}\n` +
+            `  ${r.description}`,
         )
         .join('\n\n')
 
@@ -56,7 +80,11 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
         content: [
           {
             type: 'text',
-            text: `Tillgängliga produkter:\n\n${text}\n\nAnvänd buy_vpn eller buy_cloud_storage för att köpa. Betalning sker via x402 (USDC på Base).`,
+            text:
+              `Tillgängliga produkter:\n\n${text}\n\n` +
+              `Använd buy_vpn eller buy_cloud_storage för att köpa. ` +
+              `Utelämna settlement_method för ${defaultSettlementMethod}; ange eip3009 eller erc7710 för att välja explicit. ` +
+              `Betalning sker via x402 (USDC på Base) och måste signeras av köparens wallet eller agentruntime.`,
           },
         ],
       }
@@ -67,13 +95,14 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
   server.tool(
     'buy_vpn',
     'Köp ett NordShield VPN-abonnemang. Betalning via x402 (USDC på Base). ' +
-      'Kräver giltig PAYMENT-SIGNATURE eller X-PAYMENT header med EIP-3009 auktorisering.',
+      `settlement_method är valfritt och standard är ${defaultSettlementMethod}. Kräver giltig PAYMENT-SIGNATURE eller X-PAYMENT header.`,
     {
       plan: z.enum(['basic', 'pro', 'ultra']).describe('VPN-plan att köpa'),
+      settlement_method: z.enum(SUPPORTED_SETTLEMENT_METHODS).optional().describe('Valfri x402 settlement method'),
     },
-    async ({ plan }) => {
+    async ({ plan, settlement_method }) => {
       const productId = `vpn_${plan}` as ProductId
-      return completePurchase(config, productId, `${PRODUCTS[productId].name} — 1 månads abonnemang`)
+      return completePurchase(config, productId, `${PRODUCTS[productId].name} — 1 månads abonnemang`, settlement_method)
     },
   )
 
@@ -81,20 +110,26 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
   server.tool(
     'buy_cloud_storage',
     'Köp CloudNest molnlagring. Betalning via x402 (USDC på Base). ' +
-      'Kräver giltig PAYMENT-SIGNATURE eller X-PAYMENT header med EIP-3009 auktorisering.',
+      `settlement_method är valfritt och standard är ${defaultSettlementMethod}. Kräver giltig PAYMENT-SIGNATURE eller X-PAYMENT header.`,
     {
       tier: z.enum(['50gb', '200gb', '1tb']).describe('Lagringskapacitet att köpa'),
+      settlement_method: z.enum(SUPPORTED_SETTLEMENT_METHODS).optional().describe('Valfri x402 settlement method'),
     },
-    async ({ tier }) => {
+    async ({ tier, settlement_method }) => {
       const productId = `storage_${tier}` as ProductId
-      return completePurchase(config, productId, `${PRODUCTS[productId].name} — 1 månads lagring`)
+      return completePurchase(config, productId, `${PRODUCTS[productId].name} — 1 månads lagring`, settlement_method)
     },
   )
 
   return server
 }
 
-function completePurchase(config: MerchantConfig, productId: ProductId, description: string) {
+function completePurchase(
+  config: MerchantConfig,
+  productId: ProductId,
+  description: string,
+  settlementMethod?: SettlementMethod,
+) {
   const product = PRODUCTS[productId]
   const resource = `${config.baseUrl}/mcp`
   const payment = paymentStorage.getStore()
@@ -105,6 +140,7 @@ function completePurchase(config: MerchantConfig, productId: ProductId, descript
       amountUsdc: product.price_usdc,
       resource,
       description,
+      settlementMethod,
     })
     return {
       isError: true,

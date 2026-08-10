@@ -671,11 +671,20 @@ export default function DashboardClient() {
     safeAddress: delegationSafe?.safe_address as Address | undefined,
     chainId: delegationSafe?.chain_id,
   })
+  // #1205: the server now answers this question — computed by
+  // needsBackupSignerRecommendation next to the chain classification, so a
+  // testnet account is never nagged and the frontend holds no second copy of
+  // "which chains carry value". The device-local read remains ONLY as the
+  // fallback for an older backend that has not sent the field yet.
   // Unknown signer set → stay silent. Nagging on a failed read is worse than
   // a late recommendation, and the next load will know.
-  const missingBackup = recoverySigners
-    ? recoverySigners.passkeys.length + (recoverySigners.owner_address ? 1 : 0) < 2
-    : false
+  const serverRecommendation = delegationSafe?.needs_backup_recommendation
+  const missingBackup =
+    serverRecommendation !== undefined && serverRecommendation !== null
+      ? serverRecommendation
+      : recoverySigners
+        ? recoverySigners.passkeys.length + (recoverySigners.owner_address ? 1 : 0) < 2
+        : false
 
   // #1229: the legacy passkey-Safe rail carries the identical exposure — the
   // Safe is deployed with the user's passkey as its SOLE owner, threshold 1 —
@@ -706,8 +715,14 @@ export default function DashboardClient() {
     loading: safeApproversLoading,
     error: safeApproversError,
   } = useSafeApprovers(passkeySafe?.id ?? null)
+  // #1205: gate the safe-rail arm on the SAME server-side chain
+  // classification (absent field = older backend = fail toward showing, which
+  // matches the predicate's own unknown-chains-count-as-value-bearing rule).
   const safeMissingBackup =
-    !safeApproversLoading && !safeApproversError && safeApprovers.length === 1
+    !safeApproversLoading &&
+    !safeApproversError &&
+    safeApprovers.length === 1 &&
+    (passkeySafe?.value_bearing_chain ?? true)
   const hasAgents = dataReady && agents.length > 0
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)

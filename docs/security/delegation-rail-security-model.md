@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-10" # #1256: the 3009-bridge hot-balance bound updated — header forward window is now clamp(≤600)+300 margin (≤900 s total); every other invariant, refusal and authority claim re-read and unchanged
+last-verified: "2026-08-10" # #1205 re-verify: §7 recommendation now has its production call site (session safes payload) — no invariant, refusal or authority changed
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -315,6 +315,12 @@ moment the user has nothing at risk and no context for what a backup protects.
   condition, no refusal: it answers "would this account benefit from a backup",
   and the fail-closed chain classification stays because over-recommending on
   an unknown chain is harmless while staying quiet on a real one is not.
+  Since #1205 the predicate has its production call site: the session safes
+  payload (`/auth/me`, login) carries the computed answer
+  (`needs_backup_recommendation`) plus `value_bearing_chain`, mapped by
+  `sessionSafePayload` in the same module — so the dashboard's banner branches
+  on the server's classification instead of re-deriving chain semantics
+  client-side.
 - **The waiver column survives as history, not as an unblock.**
   `user_safes.single_signer_waiver_at` (migration 046) is still written when an
   acknowledgement is sent, and nothing requires it to proceed. It no longer

@@ -152,6 +152,12 @@ export function isSettlementMethod(value: unknown): value is SettlementMethod {
 /** Format USDC base units as a human-readable USD string.
  *  Strips trailing zeros so micropayments show correctly (e.g. 0.001 not 0.00). */
 export function formatUsdc(units: bigint): string {
-  const dollars = Number(units) / 1_000_000
-  return parseFloat(dollars.toFixed(6)).toString()
+  // Pure bigint math (#1279): this formatter renders invoice/protocol-facing
+  // amounts, and a Number round-trip silently loses precision past 2^53 base
+  // units. Unreachable with today's demo prices, but formatters get reused.
+  const negative = units < 0n
+  const abs = negative ? -units : units
+  const whole = abs / 1_000_000n
+  const frac = (abs % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '')
+  return `${negative ? '-' : ''}${whole}${frac ? `.${frac}` : ''}`
 }

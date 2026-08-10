@@ -222,9 +222,9 @@ const PAY_DESCRIPTION = [
   'call haven_get_allowances instead of constructing a payment.',
   'Returns { payment_id, payload_hash, expires_at } when the amount fits the remaining',
   'budget. Sign with the local signer (haven_sign) then relay with haven_submit.',
-  'DELEGATION-RAIL accounts: the result also carries signature_scheme, typed_data and typed_data_b64 —',
-  'pass typed_data_b64 to haven_sign UNCHANGED alongside payload_hash (one opaque string; never',
-  're-type the nested typed_data JSON yourself, #1255); the account validates',
+  'DELEGATION-RAIL accounts: pass typed_data_b64 to haven_sign UNCHANGED alongside payload_hash',
+  '(one opaque string; never re-type the nested typed_data JSON, #1255 — the payment_id fetch',
+  'covers x402 intents only, not these direct payments); the account validates',
   'the typed data, and a bare-hash signature is rejected on-chain (#1254).',
   'Returns { status: "pending_approval", payload_hash: null } when the amount',
   'exceeds the budget; the user must approve it in Haven. Haven never receives the signing key.',
@@ -280,12 +280,14 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     `(${SIGNER_CAPABILITY_SOURCE} and its instructions). If it is not in that set the local signer is out of date: STOP before signing and tell the user to update ` +
     '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has been spent at that point. ' +
     'Finish with two follow-up calls (fast path, recommended): ' +
-    '(1) mcp__haven-signer__haven_sign_x402 on the local signer with payload_hash, x402_expected (the nested x402.expected context, including expires_at), and payment_required → { signature, payment_header }. '+ 'When this result carries signature_scheme (delegation-rail accounts), also pass typed_data_b64 through UNCHANGED — one opaque string, never re-type the nested typed_data JSON (#1255) — that is what the account validates, and the signer will refuse to sign the bare payload_hash without it; ' +
+    '(1) mcp__haven-signer__haven_sign_x402 on the local signer. PREFERRED (#1263): pass just payment_id and payment_required — the signer fetches the exact signing payload and expected context from Haven itself, so you never copy bulky bytes. Fallback (older signers/backends): pass payload_hash, x402_expected (the nested x402.expected context, including expires_at), payment_required, and — on delegation-rail accounts — typed_data_b64 through UNCHANGED, one opaque string, never re-typed (#1255). Returns { signature, payment_header }; ' +
     '(2) mcp__haven__haven_settle_mcp_tool with payment_id, signature, payment_header, merchant_url, tool_name, arguments, and mcp_transport to fund the delegate and settle with the merchant in one call, returning the tool result. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
     'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. ' +
-    'Pass max_amount (atomic units) to reject a quote whose authorized amount exceeds the user\'s cap, before any funding moves. Haven never receives the signing key. ' +
+    'ALWAYS pass max_amount on paid merchant calls (#1275) — it is the user-intent cap for THIS purchase: atomic units of the merchant\'s asset, compared against the LIVE quote before any funding moves, separate from and additional to the agent\'s on-chain budget. ' +
+    'Example: buy_cloud_storage { tier: "50gb" } with max_amount "500" caps at 0.0005 USDC. ' +
+    'Without it the quoted price is accepted as-is (the response carries cap_warning) and a changed merchant quote can exceed what the user meant to spend. Haven never receives the signing key. ' +
     'Next: call mcp__haven-signer__haven_sign_x402.',
 })
 
@@ -333,7 +335,7 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'signer to sign. For read-only allowance, budget, spend-limit, remaining-amount, or',
   'reset-period questions, call haven_get_allowances instead of calling this tool.',
   'Pass the payment_required from haven_quote_x402 or directly from the merchant 402 response.',
-  'Pass max_amount (atomic units) to reject a quote above the user\'s cap before any funding moves.',
+  'ALWAYS pass max_amount on paid merchant calls (#1275): atomic units of the merchant\'s asset, the user-intent cap for THIS purchase, enforced against the live quote before any funding moves — separate from the agent\'s on-chain budget. Omitting it accepts the quoted price as-is (the response carries cap_warning).',
   'Returns { payment_id, payload_hash, expires_at, x402 } where x402 carries the accepted option,',
   'resource_url, merchant_to, funding_to, and x402.expected signing context including expires_at.',
   'If expires_at passes before signing, re-quote with the same idempotency_key before signing again.',
@@ -504,6 +506,27 @@ export function createToolHandlers(
             message: prep.message ?? 'No stranded funds to recover.',
           }
         }
+        // #700: a stranded balance below the sweep floor is LEFT on the
+        // delegate — the relayer gas to sweep it would exceed its value, and
+        // the backend deliberately builds no authorization. Falling through
+        // to signature_required here handed agents a "sign this" instruction
+        // with authorization/expected_auth undefined — a dead end that read
+        // as a serializer bug (found live, first prod sweep attempt).
+        if (prep.below_min) {
+          return {
+            status: 'below_minimum',
+            asset: prep.asset ?? 'USDC',
+            amount: prep.amount,
+            amount_atomic: prep.amount_atomic,
+            min_usdc: prep.min_usdc,
+            chain_id: prep.chain_id,
+            message:
+              prep.message ??
+              `Stranded balance is below the ${prep.min_usdc ?? '1'} USDC sweep floor — ` +
+                'left on the delegate because relayer gas would exceed the recovered value. ' +
+                'It is swept automatically once the balance reaches the floor.',
+          }
+        }
         return {
           status: 'signature_required',
           authorization: prep.authorization,
@@ -660,6 +683,16 @@ export function createToolHandlers(
           )
           return {
             ...buildX402SigningContext(intent),
+            // #1275: the cap is the normal path; its absence is worth a word,
+            // not a refusal (compatibility) — a soft field the agent can relay.
+            ...(args.max_amount === undefined
+              ? {
+                  cap_warning:
+                    'No max_amount was set — the live quoted price was accepted as-is. Pass ' +
+                    'max_amount (atomic units) on paid merchant calls so a changed quote ' +
+                    'cannot exceed what the user intended to spend.',
+                }
+              : {}),
             // The raw merchant 402 PaymentRequired — the local signer needs this
             // verbatim in haven_x402_sign_header to build the EIP-3009 header.
             payment_required: quote.paymentRequired,
@@ -788,7 +821,18 @@ export function createToolHandlers(
             args.payment_required as X402PaymentRequired,
             { idempotencyKey: args.idempotency_key },
           )
-          return buildX402SigningContext(intent)
+          return {
+            ...buildX402SigningContext(intent),
+            // #1275: same soft nudge as haven_pay_mcp_tool — see there.
+            ...(args.max_amount === undefined
+              ? {
+                  cap_warning:
+                    'No max_amount was set — the live quoted price was accepted as-is. Pass ' +
+                    'max_amount (atomic units) on paid merchant calls so a changed quote ' +
+                    'cannot exceed what the user intended to spend.',
+                }
+              : {}),
+          }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
             return { payment_id: err.paymentId, status: 'pending_approval', payload_hash: null }

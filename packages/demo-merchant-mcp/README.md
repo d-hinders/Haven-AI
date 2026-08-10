@@ -123,6 +123,16 @@ domain name (`"USDC"` vs mainnet's `"USD Coin"`). `BASE_RPC_URL` must point at t
 matching chain's RPC (Base mainnet, or `https://sepolia.base.org` for Sepolia),
 and `SETTLEMENT_PRIVATE_KEY` must be gas-funded on that chain.
 
+## QA hook: verify-without-settle (testnet-only)
+
+`MERCHANT_SKIP_SETTLE_PRODUCT=<product_id,...>` (#603) verifies listed
+products' payments but skips on-chain settlement — the QA sweep-recovery
+scenario uses it to strand the delegate deterministically. It is
+**testnet-only, enforced in code**: startup fails unless
+`MERCHANT_CHAIN_ID=84532`, because a skipped settlement also skips the only
+balance check — on any real chain a listed product would hand out goods
+against a well-formed authorization from an empty wallet.
+
 ## ERC-7710 Smart-Account Payments
 
 ERC-7710 is the preferred smart-account demo flow when the required
@@ -131,6 +141,11 @@ must match the in-repo Haven pin used by the backend
 (`0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3` for Base mainnet and Base
 Sepolia today); bare environment values that point elsewhere are ignored for
 ERC-7710 advertising.
+
+Decision recorded 2026-08-10: mainnet ERC-7710 is permitted for this demo
+merchant only when the operator-configured manager matches the pinned registry;
+the old #747 "mainnet must never advertise erc7710" guard is replaced by that
+pin-and-refuse posture.
 
 A smart account (the **delegator**) pays by presenting a signed ERC-7710
 delegation instead of an ECDSA authorization; the payload carries `delegator`,

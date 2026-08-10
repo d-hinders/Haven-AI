@@ -853,6 +853,38 @@ export const openapiSpec = {
         },
       },
     },
+    '/x402/{id}/sign-context': {
+      get: {
+        tags: ['x402'],
+        operationId: 'getX402SignContext',
+        summary: 'Fetch the exact signing payload for a pending delegation-rail x402 intent.',
+        description:
+          'Read-only byte-free signing handoff (#1263): re-serves the stored delegation-rail signing payload (sign_data.typed_data) plus a freshly Haven-signed expected context committing to its digest, so a LOCAL SIGNER can fetch exact bytes by payment_id instead of an agent re-emitting them. Constructs and signs nothing new; the signer re-derives the digest and verifies the binding exactly as against an authorize response.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Payment intent id from the quote/authorize response.',
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'The rebuilt sign_data + complete snake_case x402_expected context (field-for-field as signed).',
+            content: {
+              'application/json': { schema: x402AuthorizeResponse },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '410': errorResponse,
+        },
+      },
+    },
     '/x402': {
       post: {
         tags: ['x402'],

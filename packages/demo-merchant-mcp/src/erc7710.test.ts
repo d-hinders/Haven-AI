@@ -228,6 +228,8 @@ describe('demo merchant experimental erc7710 rail', () => {
 
     expect(unpaid.status).toBe(402)
     expect(paymentRequired.accepts[1].extra).toEqual({
+      name: 'USD Coin',
+      version: '2',
       assetTransferMethod: ERC7710_TRANSFER_METHOD,
       facilitatorAddresses: [REDEEMER],
     })

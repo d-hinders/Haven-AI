@@ -18,7 +18,7 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-10" # #1207 re-verify: POST /payments now carries the send-key idempotency contract (replay/409/lazy-expire per the #961 discipline this doc records); flow claims otherwise unchanged
 ---
 
 # Haven — Payment Execution Sequence

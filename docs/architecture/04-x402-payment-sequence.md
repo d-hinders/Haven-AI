@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-10" # #1275 re-verify: max_amount steering + cap_warning are description/response-field additions on the hosted quote surfaces; every binding/digest/settle claim unchanged
+last-verified: "2026-08-10" # #1275 (max_amount steering) + #1207 (POST /payments idempotency mirrors the x402/MPP key discipline) re-verified; no binding/digest/settle claim changed
 ---
 
 # Haven - x402 Payment Execution Sequence

@@ -136,8 +136,9 @@ export const INSERT_DELEGATION_INTENT_SQL = `INSERT INTO payment_intents (
           to_address, amount_raw, amount_human, delegate_address,
           allowance_nonce, sign_hash,
           execution_rail, delegation_hash, budget_delegation_hash, prepared_user_op,
+          send_idempotency_key,
           status, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
           'pending_signature', NOW() + interval '10 minutes')
         RETURNING *`
 
@@ -159,6 +160,9 @@ export interface NewDelegationIntent {
   /** #1059: the metering budget — same value as delegationHash on direct transfers. */
   budgetDelegationHash: string
   preparedUserOp: string
+  /** #1207: migration 020's key column, shared with /machine-payments/send —
+   *  the partial unique index is the concurrency guard (23505 → replay). */
+  sendIdempotencyKey: string | null
 }
 
 /** Direct delegation-rail transfer intent (`POST /payments`, #829). */
@@ -176,6 +180,7 @@ export async function insertDelegationIntent(
     input.delegationHash,
     input.budgetDelegationHash,
     input.preparedUserOp,
+    input.sendIdempotencyKey,
   ])
   return result.rows[0]
 }
@@ -369,8 +374,9 @@ export async function insertMachineIntent(
 
 // ── Idempotency lookups ──────────────────────────────────────────────────────
 
-export const FIND_SEND_INTENT_BY_KEY_SQL = `SELECT id, status, expires_at, token_address, to_address,
-            amount_raw, amount_human, allowance_nonce, sign_hash
+export const FIND_SEND_INTENT_BY_KEY_SQL = `SELECT id, status, expires_at, token_address, token_symbol, to_address,
+            amount_raw, amount_human, allowance_nonce, sign_hash,
+            execution_rail, prepared_user_op, chain_id
      FROM payment_intents
      WHERE agent_id = $1 AND send_idempotency_key = $2
        AND status NOT IN ('failed', 'expired')
@@ -382,11 +388,17 @@ export interface SendIntentReplayRow {
   status: string
   expires_at: string
   token_address: string
+  token_symbol: string
   to_address: string
   amount_raw: string
   amount_human: string
   allowance_nonce: number
   sign_hash: string
+  /** #1207: POST /payments shares the key column; its delegation-rail replay
+   *  rebuilds the signing payload from these (the #961 discipline). */
+  execution_rail: string | null
+  prepared_user_op: unknown
+  chain_id: number
 }
 
 export async function findSendIntentByIdempotencyKey(

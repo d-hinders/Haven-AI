@@ -28,6 +28,10 @@ export { USDC_ADDRESS }
 
 const NETWORK: `${string}:${string}` = `eip155:${CHAIN_ID}`
 const MAX_TIMEOUT_SECONDS = 300
+// #1279: accepted forward-validity slack beyond the advertised timeout. Covers
+// clock skew plus client settlement margins (Haven's SDK signs
+// clamped-timeout + 300 s forward, #1256) without accepting year-long windows.
+const MAX_WINDOW_SLACK_SECONDS = 900
 const NONCE_RE = /^0x[0-9a-fA-F]{64}$/
 const HEX_BYTES_RE = /^0x(?:[0-9a-fA-F]{2})+$/
 const ZERO_TX_HASH = `0x${'0'.repeat(64)}` as Hex
@@ -35,12 +39,27 @@ const ZERO_TX_HASH = `0x${'0'.repeat(64)}` as Hex
 // Verify-without-settle test hook (#603). Product ids listed here are verified
 // but not settled on-chain — used by the QA sweep-recovery scenario to strand the
 // delegate deterministically. Off (empty) by default; set on the dev merchant only.
+//
+// TESTNET-ONLY, enforced in code like the erc7710 flag: on any other chain a
+// listed product would hand out goods against a merely well-FORMED authorization
+// — no settlement runs, and the only balance check lives inside the settlement
+// call this hook skips, so an authorization signed from an EMPTY wallet passes.
+// A copy-pasted env var must not be able to turn that on for mainnet; refuse to
+// start rather than silently ignore the flag.
 const SKIP_SETTLE_PRODUCTS = new Set(
   (process.env.MERCHANT_SKIP_SETTLE_PRODUCT ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
 )
+if (SKIP_SETTLE_PRODUCTS.size > 0 && CHAIN_ID !== 84532) {
+  console.error(
+    'MERCHANT_SKIP_SETTLE_PRODUCT is a QA-only hook that skips on-chain settlement and is ' +
+      'testnet-only.\n' +
+      `Set MERCHANT_CHAIN_ID=84532 (Base Sepolia) to use it, or unset the flag. Got chain ${CHAIN_ID}.`,
+  )
+  process.exit(1)
+}
 
 export const PAYMENT_REQUIRED_HEADER = 'PAYMENT-REQUIRED'
 export const PAYMENT_SIGNATURE_HEADER = 'PAYMENT-SIGNATURE'
@@ -302,7 +321,22 @@ export function createX402PaymentProcessor(
     productKey: string,
     txHash: Hex,
   ): Promise<SettledCacheEntry> {
-    await settlementClient.waitForReceipt(txHash)
+    try {
+      await settlementClient.waitForReceipt(txHash)
+    } catch (err) {
+      if (err instanceof SettlementRevertedError) {
+        // #1278: a mined-and-reverted tx is final for THIS submission but not
+        // for the authorization — clear the attempt so the buyer's next retry
+        // resubmits instead of re-confirming the dead hash forever. Any other
+        // error is treated as transient and keeps the hash for re-confirmation.
+        attempts.delete(params.verified.paymentKey)
+        throw new PaymentError(
+          `Settlement transaction reverted on-chain (${txHash}). ` +
+            'Retry the request with the same payment header to resubmit.',
+        )
+      }
+      throw err
+    }
     const payment = buildSettledPayment(params, txHash)
     const entry = { productId: params.productId, payment }
     settled.set(productKey, entry)
@@ -494,7 +528,7 @@ export function createViemSettlementClient(params: {
         confirmations: 1,
       })
       if (receipt.status !== 'success') {
-        throw new PaymentError(`USDC settlement transaction failed: ${txHash}`)
+        throw new SettlementRevertedError(`USDC settlement transaction reverted on-chain: ${txHash}`)
       }
     },
 
@@ -704,8 +738,22 @@ async function verifyAuthorization(
   if (!isAddress(authorization.from)) throw new PaymentError('Payment payer address is invalid')
   if (!isAddress(authorization.to)) throw new PaymentError('Payment recipient address is invalid')
   if (!NONCE_RE.test(authorization.nonce)) throw new PaymentError('Payment nonce must be 32 bytes')
-  if (validBefore > 0n && nowSec >= validBefore) throw new PaymentError('Payment authorization has expired')
+  // EIP-3009 on-chain semantics: valid iff validAfter < now < validBefore.
+  // validBefore = 0 therefore means NEVER valid — the old special case read
+  // it as "no expiry", the exact opposite of what the chain would do (#1279).
+  if (nowSec >= validBefore) throw new PaymentError('Payment authorization has expired')
   if (nowSec < validAfter) throw new PaymentError('Payment authorization is not valid yet')
+  // Nit companion (#1279): the signed window must not exceed what the quote
+  // advertised by more than a generous slack — a years-long authorization
+  // only risks the BUYER, but accepting one silently makes maxTimeoutSeconds
+  // a lie. Slack covers clock skew and client-side signing margins (the
+  // Haven SDK adds a settlement margin on top of the advertised timeout).
+  const advertisedWindow = BigInt(MAX_TIMEOUT_SECONDS + MAX_WINDOW_SLACK_SECONDS)
+  if (validBefore - nowSec > advertisedWindow) {
+    throw new PaymentError(
+      'Payment authorization validity window is far longer than the quoted maxTimeoutSeconds',
+    )
+  }
   if (!sameAddress(authorization.to, merchantAddress)) throw new PaymentError('Payment is not addressed to this merchant')
   if (value !== expectedAmount) {
     throw new PaymentError(`Payment amount does not match: expected ${expectedAmount}, got ${value}`)
@@ -752,3 +800,14 @@ export class PaymentError extends Error {
     this.name = 'PaymentError'
   }
 }
+
+/**
+ * A settlement transaction was MINED AND REVERTED — a definitive on-chain
+ * outcome, unlike a transient failure to fetch the receipt (#1278). The
+ * processor clears the settlement attempt on this signal so a replay of the
+ * same payment header RESUBMITS instead of re-confirming the dead hash
+ * forever. Safe to resubmit: the revert is proven, and EIP-3009 nonce
+ * uniqueness (or delegation state, on the erc7710 rail) makes an accidental
+ * double-submit revert harmlessly on-chain.
+ */
+export class SettlementRevertedError extends PaymentError {}

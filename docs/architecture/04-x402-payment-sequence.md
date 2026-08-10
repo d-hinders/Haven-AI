@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-10" # re-verified for PR #1269 (sweep-prepare result mapping in hosted MCP) — no x402 binding/digest/settle claim touched
+last-verified: "2026-08-10" # #1207 re-verify: POST /payments idempotency mirrors the x402/MPP key discipline documented here; no x402 claim changed
 ---
 
 # Haven - x402 Payment Execution Sequence

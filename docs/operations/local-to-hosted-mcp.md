@@ -7,7 +7,7 @@ covers:
   - packages/signer/**
   - packages/frontend/src/lib/hosted-connect.ts
   - packages/frontend/src/lib/agent-runtime-snippets.ts
-last-verified: "2026-06-28"
+last-verified: "2026-08-10" # re-verified for #1255 (hosted x402 canonical sign_data handoff)
 ---
 
 # Migration - Local MCP To Hosted MCP
@@ -46,7 +46,7 @@ identity and signing authority.
 ```text
 Agent runtime
   -> hosted Haven MCP over HTTP (Bearer sk_agent_*)
-  -> hosted MCP returns unsigned payload hashes
+  -> hosted MCP returns unsigned signing contexts
   -> local runtime or @haven_ai/signer signs with delegate key
   -> hosted MCP relays { payment_id, signature } for funding
   -> Haven backend -> Safe AllowanceModule -> on-chain
@@ -56,7 +56,9 @@ The split is deliberate:
 
 - Hosted MCP receives the API key as identity only.
 - Hosted MCP never receives the delegate private key.
-- The local runtime or `@haven_ai/signer` signs payment hashes.
+- The local runtime or `@haven_ai/signer` signs backend-provided
+  `sign_data` contexts. Direct payments use hash signing; delegation-rail x402
+  uses typed data inside `sign_data.typed_data`.
 - Funding relay sends only `{ payment_id, signature }` back to hosted MCP.
 - Paid MCP-tool completion can also send a signed, merchant-bound
   `payment_header` with the funding `payment_id` so hosted MCP can settle the
@@ -190,7 +192,8 @@ The signer exposes local stdio MCP tools:
 
 | Tool | Purpose |
 |---|---|
-| `haven_sign` | Sign the `payload_hash` returned by hosted `haven_pay` or `haven_pay_x402_quote` |
+| `haven_sign` | Sign the `payload_hash` from direct `haven_pay`, or the canonical `sign_data` from x402 quote tools |
+| `haven_sign_x402` | Sign the recommended paid-MCP x402 funding context and merchant authorization from canonical `sign_data`, `x402.expected`, and `payment_required` |
 | `haven_x402_sign_header` | Build and sign the x402 `X-PAYMENT` header after the Haven funding leg succeeds |
 
 The signer does not need the API key and makes no network calls. It reads the
@@ -215,6 +218,11 @@ Then test a tiny in-budget payment. The expected direct payment sequence is:
 3. Agent calls local `haven_sign` with the payload hash.
 4. Agent calls hosted `haven_submit` with `{ payment_id, signature }`.
 5. Haven relays the independently valid signed transaction.
+
+For x402 quotes, pass the returned `sign_data` object verbatim to
+`haven_sign` or `haven_sign_x402` together with the returned `x402.expected`
+context. Top-level `payload_hash` and `typed_data` are compatibility aliases
+for older agents; do not combine those fields from separate quotes.
 
 If `haven_pay` returns `pending_approval`, there is no hash to sign. The user
 must approve the action in Haven, and the agent should poll status rather than

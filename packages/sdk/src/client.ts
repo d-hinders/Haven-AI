@@ -1,6 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { exact } from 'x402/schemes'
-import { hashTypedData } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { signHash, signUserOpTypedDataForDelegation, addressFromKey, verifySignature } from './signer.js'
 import { verifyPaymentReceipt, type PaymentReceipt, type ReceiptVerification } from './receipt.js'
@@ -68,6 +67,7 @@ import {
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  x402TypedDataDigest,
 } from './x402.js'
 import {
   buildMachinePaymentIdempotencyKey,
@@ -341,30 +341,6 @@ function selectJsonRpcResult(
   messages: Array<Record<string, unknown>>,
 ): Record<string, unknown> | undefined {
   return messages.find((m) => 'result' in m || 'error' in m) ?? messages[messages.length - 1]
-}
-
-/**
- * Digest of a delegation-rail signing payload, or `undefined` when there is
- * none (#1138).
- *
- * Guarded because a payload that cannot be hashed is not a recoverable
- * condition to paper over: the edge signer derives this same digest before
- * signing, so an unhashable payload can never be signed by anyone. Surfacing it
- * as a named Haven error beats letting a raw viem type error escape from the
- * middle of intent construction.
- */
-function x402TypedDataDigest(typedData: unknown): string | undefined {
-  if (!typedData || typeof typedData !== 'object') return undefined
-  try {
-    return hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
-  } catch (err) {
-    throw new HavenSigningError(
-      'The x402 funding intent carried a sign_data.typed_data that is not a valid EIP-712 ' +
-        'payload (needs domain, types, primaryType, message), so its digest cannot be derived ' +
-        'and no signer could accept it. ' +
-        `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
-    )
-  }
 }
 
 export class HavenClient {

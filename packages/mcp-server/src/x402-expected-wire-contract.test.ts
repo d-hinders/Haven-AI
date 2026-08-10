@@ -208,6 +208,11 @@ interface WireExpected {
 }
 interface WireQuote {
   payload_hash: string
+  sign_data: {
+    hash: string
+    signature_scheme?: string
+    typed_data?: Record<string, unknown>
+  }
   signature_scheme?: string
   typed_data?: Record<string, unknown>
   x402: { expected: WireExpected }
@@ -301,14 +306,27 @@ describe('cross-package wire contract: producer and reconstruction are byte-iden
     expect(ok<{ signature: string; payment_header: string }>(result).signature).toMatch(/^0x[0-9a-f]{130}$/i)
   })
 
+  it('the canonical sign_data object is enough for the v2 one-shot signer handoff (#1255)', async () => {
+    const quote = await hostedQuote('delegation')
+    const result = await localSigner().haven_sign_x402({
+      sign_data: quote.sign_data,
+      x402_expected: quote.x402.expected,
+      payment_required: PAYMENT_REQUIRED,
+    })
+    expect(result.success).toBe(true)
+    expect(ok<{ signature: string; payment_header: string }>(result).signature).toMatch(/^0x[0-9a-f]{130}$/i)
+  })
+
   it('the v2 context commits to the digest of the typed data actually delivered', async () => {
     // Three independent derivations of one digest — backend `typedDataDigest`,
     // SDK `x402TypedDataDigest`, signer `hashTypedData` at signing time. If any
     // two disagree the payment dies at the last one, after the intent is
     // claimed.
     const quote = await hostedQuote('delegation')
+    expect(quote.sign_data.typed_data).toBe(quote.typed_data)
+    expect(quote.sign_data.hash).toBe(quote.payload_hash)
     expect(quote.x402.expected.typed_data_hash).toBe(TYPED_DATA_DIGEST)
-    expect(hashTypedData(quote.typed_data as Parameters<typeof hashTypedData>[0])).toBe(TYPED_DATA_DIGEST)
+    expect(hashTypedData(quote.sign_data.typed_data as Parameters<typeof hashTypedData>[0])).toBe(TYPED_DATA_DIGEST)
   })
 })
 

@@ -6,11 +6,13 @@ import {
   HavenClient,
   HavenError,
   HavenPaymentStateError,
+  buildX402ExpectedMessage,
   composeDescription,
   selectStandardPaymentOption,
   toolDescriptions as sharedDescriptions,
   verifyPaymentReceipt,
   x402AuthorizationAmount,
+  x402TypedDataDigest,
   type PaymentReceipt,
   type MachinePaymentChallenge,
   type MppQuote,
@@ -257,13 +259,14 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
   ...sharedDescriptions.payMcpTool,
   behavior:
     'Builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. ' +
-    'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, signer_compatibility, merchant_url, tool_name, arguments, mcp_transport }. ' +
+    'Creates a funding intent and returns { payment_id, sign_data, payload_hash, expires_at, payment_required, x402, signer_compatibility, merchant_url, tool_name, arguments, mcp_transport }. ' +
     'The funding/quote window expires at expires_at; if it expires, re-run haven_pay_mcp_tool with the same idempotency_key before signing again. ' +
     'Before the signing step, check signer_compatibility.x402_expected_context_version against the versions the haven-signer MCP server advertises at initialize ' +
     `(${SIGNER_CAPABILITY_SOURCE} and its instructions). If it is not in that set the local signer is out of date: STOP before signing and tell the user to update ` +
     '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has been spent at that point. ' +
     'Finish with two follow-up calls (fast path, recommended): ' +
-    '(1) mcp__haven-signer__haven_sign_x402 on the local signer with payload_hash, x402_expected (the nested x402.expected context, including expires_at), and payment_required → { signature, payment_header }. '+ 'When this result carries signature_scheme and typed_data (delegation-rail accounts), pass typed_data through VERBATIM as well — that is what the account validates, and the signer will refuse to sign the bare payload_hash without it; ' +
+    '(1) mcp__haven-signer__haven_sign_x402 on the local signer with sign_data, x402_expected (the nested x402.expected context, including expires_at), and payment_required → { signature, payment_header }. ' +
+    'For older hosted responses, payload_hash plus typed_data are still accepted, but sign_data is the canonical handoff; pass it through VERBATIM because delegation-rail accounts validate sign_data.typed_data, and the signer will refuse to sign the bare payload_hash without it; ' +
     '(2) mcp__haven__haven_settle_mcp_tool with payment_id, signature, payment_header, merchant_url, tool_name, arguments, and mcp_transport to fund the delegate and settle with the merchant in one call, returning the tool result. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
@@ -1009,12 +1012,16 @@ export function createToolHandlers(
 
 /** Shape returned by haven_pay_x402_quote and used by haven_resume_x402_payment. */
 function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX402Intent']>>) {
-  return {
+  const context = {
     payment_id: intent.paymentId,
     status: intent.status,
     idempotency_key: intent.idempotencyKey,
     payload_hash: intent.signData.hash,
     expires_at: intent.expiresAt,
+    // Canonical signer handoff. Agents should pass this object verbatim to the
+    // local signer; top-level payload_hash/signature_scheme/typed_data stay as
+    // compatibility aliases for existing prompts and runtimes.
+    sign_data: intent.signData,
     // #1155: state the expected-context version this quote is about to emit, so
     // the agent can compare it against the local signer's advertised set BEFORE
     // signing — the #1143 guard only speaks after a quote already exists. Read
@@ -1061,6 +1068,66 @@ function buildX402SigningContext(intent: Awaited<ReturnType<HavenClient['createX
         auth: intent.expectedAuth,
       },
     },
+  }
+  assertX402SigningContextConsistent(context)
+  return context
+}
+
+function assertX402SigningContextConsistent(context: {
+  payload_hash: string
+  typed_data?: unknown
+  sign_data: { hash: string; typed_data?: unknown }
+  x402: {
+    expected: {
+      payment_id: string
+      payload_hash: string
+      resource_url: string
+      merchant_to: string
+      amount: string
+      asset: string
+      network: string
+      expires_at?: string
+      typed_data_hash?: string
+      auth: { message: string }
+    }
+  }
+}) {
+  const expected = context.x402.expected
+  if (context.payload_hash !== context.sign_data.hash || context.payload_hash !== expected.payload_hash) {
+    throw new HavenApiError('Internal x402 signing-context mismatch: funding hash drifted before signer handoff.', 500)
+  }
+
+  const typedData = context.sign_data.typed_data
+  if (expected.typed_data_hash) {
+    const actualDigest = x402TypedDataDigest(typedData)
+    if (actualDigest?.toLowerCase() !== expected.typed_data_hash.toLowerCase()) {
+      throw new HavenApiError(
+        'Internal x402 signing-context mismatch: sign_data.typed_data does not match typed_data_hash.',
+        500,
+      )
+    }
+  }
+
+  if (context.typed_data !== typedData) {
+    throw new HavenApiError('Internal x402 signing-context mismatch: typed_data alias drifted from sign_data.', 500)
+  }
+
+  const rebuiltMessage = buildX402ExpectedMessage({
+    paymentId: expected.payment_id,
+    payloadHash: expected.payload_hash,
+    resourceUrl: expected.resource_url,
+    merchantTo: expected.merchant_to,
+    amount: expected.amount,
+    asset: expected.asset,
+    network: expected.network,
+    expiresAt: expected.expires_at,
+    typedDataHash: expected.typed_data_hash,
+  })
+  if (rebuiltMessage !== expected.auth.message) {
+    throw new HavenApiError(
+      'Internal x402 signing-context mismatch: expected context does not match Haven authentication message.',
+      500,
+    )
   }
 }
 

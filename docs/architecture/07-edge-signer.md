@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-10" # re-verified for #1254 (typed_data forwarding on the direct-payment path)
+last-verified: "2026-08-10" # re-verified for #1254 (typed_data forwarding on the direct-payment path) and #1255 (hosted x402 canonical sign_data handoff)
 ---
 
 # Haven — Edge Signer
@@ -151,8 +151,8 @@ hosted:  haven_settle_mcp_tool  -> relay funding, confirm, call merchant tool
 **Decomposed x402 flow:**
 
 ```
-hosted:  haven_pay_x402_quote     -> { payment_id, payload_hash, x402.expected }
-local:   haven_sign + expected    -> funding signature + x402_binding
+hosted:  haven_pay_x402_quote     -> { payment_id, sign_data, payload_hash, x402.expected }
+local:   haven_sign + sign_data + expected -> funding signature + x402_binding
 hosted:  haven_submit             -> fund Safe -> delegate EOA
 local:   haven_x402_sign_header   -> EIP-3009 X-PAYMENT if binding matches
 agent:   retry merchant with X-PAYMENT
@@ -208,14 +208,13 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
 
 ## Scope Notes
 
-- The edge-signer surface serves the **legacy AllowanceModule rail**.
-  Delegation-rail payments (#829/#830) sign the account's EIP-712 typed data
-  verbatim via the SDK — `HavenClient` dispatches on
-  `sign_data.signature_scheme` (`eip712_userop` for payments,
-  `eip712_delegation` for x402 settlement) to
-  `signUserOpTypedDataForDelegation` — and are not exposed as edge-signer or
-  hosted-MCP tools today. The retired session rail's `eip191_userop` scheme is
-  refused (#834).
+- The edge-signer surface signs the backend-provided `sign_data` without
+  network access. AllowanceModule payments use the hash form; delegation-rail
+  x402 uses EIP-712 typed data carried in `sign_data.typed_data`. Agents should
+  pass `sign_data` verbatim from hosted MCP to `haven_sign_x402`; flat
+  `payload_hash` and `typed_data` fields are compatibility aliases and should
+  not be mixed across quotes. The retired session rail's `eip191_userop` scheme
+  is refused (#834).
 - Regular payment/AllowanceModule-hash signing is chain-neutral; the
   backend-provided payload and on-chain wallet rules define the transfer.
 - Standard merchant-verifiable x402 is exact-scheme USDC on Base and Base

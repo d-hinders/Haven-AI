@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-10" # #1254 release train: version table bumped to 0.1.19-alpha.0; runtime manifest, Node-floor and release-checklist sections re-read and unchanged
+last-verified: "2026-08-10" # #1254 release train: version table bumped to 0.1.19-alpha.0; runtime manifest, Node-floor and release-checklist sections re-read and unchanged. #1255: hosted MCP now returns canonical sign_data for x402 signer handoff, signer accepts sign_data directly, and direct viem dependencies are exact-pinned to keep EIP-712 digests aligned across separately installed runtimes.
 ---
 
 # MCP Runtime Compatibility
@@ -129,12 +129,15 @@ seemed to work" is exactly the evidence that cannot be trusted there.
 
 ## Signer / hosted-MCP version skew (#1138, #1143)
 
-`haven_sign` and `haven_sign_x402` take an optional `typed_data`, and the
-x402 expected context has a second version that carries `typedDataHash`. Both
-additions are backward compatible in the only direction that can actually occur
-— a **v1** (legacy-rail) context is byte-identical to what shipped before, so an
-older signer keeps verifying it — but the delegation rail needs both halves
-current, and the failure mode differs by which half is stale:
+`haven_sign` and `haven_sign_x402` accept the hosted quote's canonical
+`sign_data` object. They also keep the older top-level `payload_hash` and
+`typed_data` aliases for compatibility, but agents should pass `sign_data`
+verbatim so fields from different quotes cannot be mixed. The x402 expected
+context has a second version that carries `typedDataHash`. Both additions are
+backward compatible in the only direction that can actually occur — a **v1**
+(legacy-rail) context is byte-identical to what shipped before, so an older
+signer keeps verifying it — but the delegation rail needs both halves current,
+and the failure mode differs by which half is stale:
 
 | Stale half | Symptom |
 |---|---|
@@ -192,6 +195,13 @@ hosted server cannot introspect the signer, and the signer never calls the Haven
 API — it only signs. Only the agent sees both handshakes, so what ships is the
 information plus the prompt to compare it. The hosted tool descriptions carry
 that prompt; the signer's `instructions` carry the other half.
+
+The typed-data digest implementation is also a runtime-compatibility surface.
+Backend, SDK, hosted MCP, signer, frontend, QA, and demo merchant direct
+dependencies exact-pin `viem` to the same version, and
+`scripts/ci/viem-version-parity.test.mjs` fails if those direct pins drift. This
+prevents a hosted runtime and local signer from hashing the same EIP-712
+`sign_data.typed_data` with different library versions.
 
 **A mismatch warns, it does not block** (owner decision, 2026-08-07). No refusal
 was added to the payment path: a quote whose emitted version the signer may not

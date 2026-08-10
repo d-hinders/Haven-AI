@@ -1,11 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { AgentPaymentFailureCode, AgentPaymentNextAction, HavenClient } from '@haven_ai/sdk'
+import { AgentPaymentFailureCode, AgentPaymentNextAction, HavenClient, buildX402ExpectedMessage } from '@haven_ai/sdk'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
 const X402_EXPECTED_AUTH = {
   version: 1 as const,
-  message: 'Haven x402 expected context v1\n{}',
+  message: buildX402ExpectedMessage({
+    paymentId: 'pay_x402',
+    payloadHash: '0xfunding',
+    resourceUrl: 'https://merchant.test/paid',
+    merchantTo: '0xMerchant',
+    amount: '1500000',
+    asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+    network: 'base',
+    expiresAt: '2099-01-01T00:00:00.000Z',
+  }),
   signature: '0x' + '11'.repeat(65),
   signer: '0x000000000000000000000000000000000000bEEF',
 }
@@ -383,12 +392,14 @@ describe('haven_pay_x402_quote', () => {
       payment_id: string
       idempotency_key: string
       payload_hash: string
+      sign_data: { hash: string }
       x402: Record<string, unknown>
     }>(await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
 
     expect(result.data.payment_id).toBe('pay_x402')
     expect(result.data.idempotency_key).toMatch(/^x402:/)
     expect(result.data.payload_hash).toBe('0xfunding')
+    expect(result.data.sign_data).toEqual(X402_INTENT_RESPONSE.sign_data)
     expect(result.data.x402.funding_to).toBe('0xDelegate')
     expect(result.data.x402.merchant_to).toBe('0xMerchant')
     expect(result.data.x402.expected).toEqual({
@@ -879,7 +890,22 @@ describe('haven_pay_mcp_tool', () => {
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
       'POST /x402': {
         status: 201,
-        body: X402_INTENT_RESPONSE,
+        body: {
+          ...X402_INTENT_RESPONSE,
+          x402_expected_auth: {
+            ...X402_EXPECTED_AUTH,
+            message: buildX402ExpectedMessage({
+              paymentId: 'pay_x402',
+              payloadHash: '0xfunding',
+              resourceUrl: 'http://merchant.test/paid',
+              merchantTo: '0xMerchant',
+              amount: '1500000',
+              asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+              network: 'base',
+              expiresAt: '2099-01-01T00:00:00.000Z',
+            }),
+          },
+        },
       },
     })
 

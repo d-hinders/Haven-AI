@@ -105,6 +105,7 @@ export {
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  x402TypedDataDigest,
   buildX402ExpectedMessage,
   encodePaymentProof,
 } from './x402.js'

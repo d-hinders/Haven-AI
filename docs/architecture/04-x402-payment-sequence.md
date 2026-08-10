@@ -17,7 +17,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
-last-verified: "2026-08-10" # re-verified for #1254: haven_sign now also signs typed_data on the DIRECT payment path; every x402 claim here (expected-context v2, x402_binding, digest equality) is unchanged
+last-verified: "2026-08-10" # re-verified for #1254: haven_sign now also signs typed_data on the DIRECT payment path. #1255 re-verified: hosted MCP now returns canonical sign_data and self-checks it against x402.expected before handoff; signer accepts sign_data directly and still refuses digest mismatch. The x402 sequence and authority split are unchanged.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -147,9 +147,9 @@ sequenceDiagram
   Agent->>MCP: haven_pay_x402_quote { payment_required }
   MCP->>API: Construct funding intent
   alt signable funding intent
-    API-->>MCP: { payment_id, payload_hash, x402.expected }
+    API-->>MCP: { payment_id, sign_data, payload_hash, x402.expected }
     MCP-->>Agent: Unsigned funding context
-    Agent->>Signer: haven_sign { payload_hash, x402_expected }
+    Agent->>Signer: haven_sign { sign_data, x402_expected }
     Signer-->>Agent: { signature, x402_binding }
     Agent->>MCP: haven_submit { payment_id, signature }
     MCP->>API: Relay funding signature
@@ -207,6 +207,13 @@ the exact bytes signed. `buildX402ExpectedMessage` puts the version in both the
 header line and the signed payload, so neither context can be replayed as the
 other.
 
+Hosted MCP exposes `payload_hash`, `signature_scheme`, and `typed_data` as
+compatibility aliases, but `sign_data` is the canonical handoff. Agents should
+pass `sign_data` through verbatim to `haven_sign` / `haven_sign_x402`; the
+hosted server checks before returning a quote that `sign_data.hash`,
+`payload_hash`, `x402.expected.payload_hash`, and any committed
+`typedDataHash` describe the same payload.
+
 A version outside the table is a **third** refusal, and the one an operator is
 most likely to meet (#1143). The set a given signer understands is
 `SUPPORTED_X402_EXPECTED_VERSIONS` in `packages/signer/src/core.ts`; anything else
@@ -246,8 +253,8 @@ The recommended three-call fast path for an x402-protected MCP tool is:
 1. `haven_pay_mcp_tool` — hosted MCP sends a `tools/call` probe, records the MCP
    transport context, and returns the unsigned funding payload plus merchant/tool
    context.
-2. `haven_sign_x402` — the local signer signs the funding hash and creates the
-   merchant-bound payment header.
+2. `haven_sign_x402` — the local signer consumes `sign_data`, signs the funding
+   payload, and creates the merchant-bound payment header.
 3. `haven_settle_mcp_tool` — hosted MCP relays the funding signature, waits for
    confirmation, performs a fresh merchant MCP handshake, delivers the signed
    header, and returns the tool result.

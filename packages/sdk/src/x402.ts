@@ -11,7 +11,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { X402ExpectedContext, X402PaymentRequired, X402PaymentOption } from './types.js'
+import { hashTypedData } from 'viem'
+import { HavenSigningError, type X402ExpectedContext, type X402PaymentRequired, type X402PaymentOption } from './types.js'
 import type { PaymentRequirements } from 'x402/types'
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
 
@@ -356,6 +357,28 @@ export function buildX402ExpectedMessage(context: X402ExpectedContext): string {
     payload.typedDataHash = context.typedDataHash.toLowerCase()
   }
   return `Haven x402 expected context v${version}\n${stableStringify(payload)}`
+}
+
+/**
+ * Digest of a delegation-rail x402 signing payload, or `undefined` when the
+ * intent does not carry typed data.
+ *
+ * Shared so the backend/SDK/hosted-MCP/signer chain does not grow separate
+ * EIP-712 hashing rules. A delegation-rail payload that cannot be hashed is a
+ * contract defect: the local signer will refuse it before any funds move.
+ */
+export function x402TypedDataDigest(typedData: unknown): string | undefined {
+  if (!typedData || typeof typedData !== 'object') return undefined
+  try {
+    return hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+  } catch (err) {
+    throw new HavenSigningError(
+      'The x402 funding intent carried a sign_data.typed_data that is not a valid EIP-712 ' +
+        'payload (needs domain, types, primaryType, message), so its digest cannot be derived ' +
+        'and no signer could accept it. ' +
+        `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
 }
 
 export function toStandardPaymentRequirements(

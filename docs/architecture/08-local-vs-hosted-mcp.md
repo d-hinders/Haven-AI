@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/middleware/agentToolAudit.ts
-last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
+last-verified: "2026-08-10" # re-verified for #1255 (hosted x402 canonical sign_data handoff)
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -90,12 +90,13 @@ haven_pay_x402_quote → haven_sign → haven_submit
 In both cases, Haven's backend constructs and records the payment intent.
 Hosted MCP never signs; it relays already signed, context-bound payloads.
 
-The modes also differ by rail. The local flow dispatches on the
-server-provided `sign_data.signature_scheme`, including the delegation rail's
-EIP-712 typed data. The hosted keyless construct rejects typed-data funding
-intents with a hard `HavenSigningError` before any signing context reaches the
-edge signer, so x402 for delegation-rail accounts currently requires the local
-flow (`HavenClient` with `delegateKey`).
+The modes also differ by process boundary, not by signing authority. The local
+flow dispatches on the server-provided `sign_data.signature_scheme` inside one
+process. Hosted mode stays keyless by returning the same canonical `sign_data`
+to the agent and having the local edge signer sign it. For delegation-rail
+x402, agents should pass `sign_data` and `x402.expected` verbatim to
+`haven_sign_x402`; flat `payload_hash` and `typed_data` fields are
+compatibility aliases and should not be mixed across quotes.
 
 ## Related docs
 

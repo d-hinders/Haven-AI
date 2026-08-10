@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402.ts
-last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
+last-verified: "2026-08-10" # re-verified for #1255 (hosted x402 canonical sign_data handoff)
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -107,13 +107,14 @@ For balance-aware x402 coverage:
 
 Neither a queued nor rejected request returns a funding hash.
 
-The hosted keyless construct is currently allowance-rail only. When a funding
-intent demands a typed-data signing scheme (`sign_data.signature_scheme` set —
-delegation-rail accounts), the SDK's `createX402Intent` fails loudly with a
-`HavenSigningError` at authorize, before any signing context reaches the edge
-signer, directing the user to the local SDK flow (`HavenClient` with
-`delegateKey`). Hosted-signer delegation-rail agents therefore cannot pay x402
-today.
+Hosted MCP can prepare allowance-rail hash signing and delegation-rail typed
+data signing without receiving the delegate key. For x402 delegation-rail
+funding, the quote returns canonical `sign_data` with the backend-authenticated
+`x402.expected` context; `payload_hash` and top-level `typed_data` remain
+compatibility aliases only. Agents should pass `sign_data` and `x402.expected`
+verbatim to `haven_sign_x402`, and the edge signer verifies that the typed-data
+digest matches the authenticated context before producing any funding
+signature or merchant header.
 
 After a successful paid retry — including the hosted completion path
 (`completeX402MerchantCall`) — the SDK captures a merchant-issued receipt from

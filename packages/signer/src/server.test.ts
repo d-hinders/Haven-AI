@@ -25,6 +25,19 @@ const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
 const HASH = '0x' + 'cd'.repeat(32)
+const DELEGATE_ADDR = privateKeyToAccount(TEST_KEY).address
+const TYPED_DATA = {
+  domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: DELEGATE_ADDR },
+  types: {
+    PackedUserOperation: [
+      { name: 'sender', type: 'address' },
+      { name: 'nonce', type: 'uint256' },
+    ],
+  },
+  primaryType: 'PackedUserOperation',
+  message: { sender: DELEGATE_ADDR, nonce: '7' },
+} as const
+const TYPED_DATA_HASH = hashTypedData(TYPED_DATA as Parameters<typeof hashTypedData>[0])
 const PAYMENT_REQUIRED = {
   x402Version: 1,
   resource: { url: 'https://merchant.test/paid', description: 'paid data' },
@@ -50,7 +63,7 @@ const EXPECTED_X402_BASE = {
   expires_at: '2099-01-01T00:00:00.000Z',
 }
 
-async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) {
+async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> & { typed_data_hash?: string } = {}) {
   const expected = { ...EXPECTED_X402_BASE, ...overrides }
   const message = buildX402ExpectedMessage({
     paymentId: expected.payment_id,
@@ -61,12 +74,13 @@ async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) 
     asset: expected.asset,
     network: expected.network,
     expiresAt: expected.expires_at,
+    typedDataHash: expected.typed_data_hash,
   })
   const account = privateKeyToAccount(BINDING_KEY)
   return {
     ...expected,
     auth: {
-      version: 1 as const,
+      version: expected.typed_data_hash ? 2 as const : 1 as const,
       message,
       signature: await account.signMessage({ message }),
       signer: account.address,
@@ -165,6 +179,29 @@ describe('buildSignerMcpServer', () => {
     )
     expect(byName.get('haven_sign_x402')).toContain('PAYMENT_WINDOW_EXPIRED')
     expect(byName.get('haven_sign_sweep_delegate')).toContain('mcp__haven__haven_sweep_delegate')
+
+    await client.close()
+    await server.close()
+  })
+
+  it('advertises sign_data as sufficient for x402 signer handoffs (#1255)', async () => {
+    const server = buildSignerMcpServer(createEdgeSigner(TEST_KEY))
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test-client', version: '0.0.0' })
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+
+    const { tools } = await client.listTools()
+    const byName = new Map(tools.map((tool) => [tool.name, tool.inputSchema as Record<string, unknown>]))
+    const signSchema = byName.get('haven_sign') ?? {}
+    const signX402Schema = byName.get('haven_sign_x402') ?? {}
+    const signRequired = (signSchema.required as string[] | undefined) ?? []
+    const signX402Required = (signX402Schema.required as string[] | undefined) ?? []
+
+    expect(signRequired).not.toContain('payload_hash')
+    expect(signSchema.properties).toHaveProperty('sign_data')
+    expect(signX402Required).not.toContain('payload_hash')
+    expect(signX402Required).toEqual(expect.arrayContaining(['x402_expected', 'payment_required']))
+    expect(signX402Schema.properties).toHaveProperty('sign_data')
 
     await client.close()
     await server.close()
@@ -468,6 +505,45 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
     )
     expect(result.data.signature).toMatch(/^0x[0-9a-fA-F]+$/)
     expect(result.data.payment_header).toBeTruthy()
+  })
+
+  it('accepts canonical sign_data without top-level payload_hash or typed_data (#1255)', async () => {
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }))
+
+    const result = ok<{ signature: string; payment_header: string }>(
+      await handlers.haven_sign_x402({
+        sign_data: {
+          hash: HASH,
+          signature_scheme: 'eip712_userop',
+          typed_data: TYPED_DATA,
+        },
+        x402_expected: await expectedX402({ typed_data_hash: TYPED_DATA_HASH }),
+        payment_required: PAYMENT_REQUIRED,
+      }),
+    )
+
+    expect(result.data.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    expect(result.data.payment_header).toBeTruthy()
+  })
+
+  it('refuses mixed x402 signing fields before producing a digest-mismatch error (#1255)', async () => {
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }))
+
+    const payload = await handlers.haven_sign_x402({
+      sign_data: {
+        hash: HASH,
+        signature_scheme: 'eip712_userop',
+        typed_data: TYPED_DATA,
+      },
+      payload_hash: HASH,
+      typed_data: { ...TYPED_DATA, message: { ...TYPED_DATA.message, nonce: '8' } },
+      x402_expected: await expectedX402({ typed_data_hash: TYPED_DATA_HASH }),
+      payment_required: PAYMENT_REQUIRED,
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe('SIGNING_ERROR')
+    expect(payload.message).toMatch(/typed_data differs from sign_data\.typed_data/)
   })
 
   it('rejects with a clear INVALID_INPUT when x402_expected omits expires_at', async () => {

@@ -24,8 +24,9 @@
  * `{ delegationManager, permissionContext, delegator }`.
  */
 
-import { hashTypedData, pad, type Address, type Hex } from 'viem'
+import { pad, type Address, type Hex } from 'viem'
 import { Interface } from 'ethers'
+import { x402TypedDataDigest } from '@haven_ai/sdk'
 import { createDelegation, type Delegation } from '@metamask/smart-accounts-kit'
 import { encodeDelegations, hashDelegation } from '@metamask/smart-accounts-kit/utils'
 import { getDelegationContracts } from '../../rails/delegation-contracts.js'
@@ -215,7 +216,7 @@ export function settlementTransferCalldata(payTo: Address, amountAtomic: bigint)
 export function typedDataDigest(typedData: unknown): string | undefined {
   if (!typedData || typeof typedData !== 'object') return undefined
   try {
-    return hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+    return x402TypedDataDigest(typedData)
   } catch (err) {
     // Unhashable typed data is a backend defect, not a client error, and it is
     // not survivable: the edge signer re-derives this same digest and would

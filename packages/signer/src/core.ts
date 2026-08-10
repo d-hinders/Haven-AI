@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { hashMessage, hashTypedData, recoverTypedDataAddress } from 'viem'
+import { hashMessage, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { exact } from 'x402/schemes'
 import {
@@ -12,6 +12,7 @@ import {
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  x402TypedDataDigest,
   decodeBase64Json,
   encodeBase64Json,
   AgentPaymentFailureCode,
@@ -201,7 +202,12 @@ export function createEdgeSigner(
       // to equal Haven's commitment. Everything upstream is untrusted input; this
       // equality is what makes the binding cover the bytes being signed rather
       // than a hash that merely travels alongside them.
-      const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+      const digest = x402TypedDataDigest(typedData)
+      if (!digest) {
+        throw new HavenSigningError(
+          'x402 typed data was missing or invalid. Refusing to sign — the account validates EIP-712 typed data on this rail.',
+        )
+      }
       if (digest.toLowerCase() !== expected.typedDataHash?.toLowerCase()) {
         throw new HavenSigningError(
           'x402 typed data does not match the digest Haven committed to in the expected context. ' +

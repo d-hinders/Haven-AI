@@ -66,11 +66,13 @@ const sweepExpectedAuthSchema = z.object({
   signer: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'signer must be a 0x address'),
 })
 
+const payloadHashSchema = z
+  .string()
+  .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string')
+
 const x402ExpectedSchema = z.object({
   payment_id: z.string().min(1),
-  payload_hash: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string'),
+  payload_hash: payloadHashSchema,
   resource_url: z.string().url(),
   merchant_to: z.string().min(1),
   amount: z.string().min(1),
@@ -99,6 +101,14 @@ const x402ExpectedSchema = z.object({
   }),
 })
 
+const signDataSchema = z.object({
+  hash: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]+$/, 'sign_data.hash must be a 0x-prefixed hex string'),
+  signature_scheme: z.string().optional(),
+  typed_data: z.record(z.string(), z.unknown()).optional(),
+}).passthrough()
+
 export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
   haven_sign_sweep_delegate: {
     // The authorization fields prepared by Haven's POST /sweep/prepare. Passed
@@ -109,10 +119,10 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     expected_auth: sweepExpectedAuthSchema,
   },
   haven_sign: {
-    // The unsigned hash from haven_pay / haven_pay_x402_quote (payload_hash).
-    payload_hash: z
-      .string()
-      .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string'),
+    // The unsigned hash from haven_pay / older x402 quote handoffs. Optional at
+    // the schema boundary because canonical x402 handoffs may supply only
+    // sign_data; the handler requires payload_hash after sign_data normalization.
+    payload_hash: payloadHashSchema.optional(),
     // Pass x402.expected from hosted haven_pay_x402_quote when this hash funds
     // a standard x402 merchant retry. The signer records it locally and returns
     // an opaque x402_binding for the later header-signing step.
@@ -120,6 +130,9 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     // #1138: delegation-rail intents sign THIS, not payload_hash. Object-typed
     // (not z.unknown()) so MCP clients embed it as JSON rather than a string.
     typed_data: z.record(z.string(), z.unknown()).optional(),
+    // Canonical handoff from hosted MCP. If present, the handler derives
+    // payload_hash and typed_data from this object before validation.
+    sign_data: signDataSchema.optional(),
   },
   haven_x402_sign_header: {
     // The parsed HTTP 402 PaymentRequired from the merchant. Typed as an object
@@ -130,25 +143,29 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     x402_binding: z.string().min(1),
   },
   haven_sign_x402: {
-    // One-shot x402 signing: funding hash + merchant header in one local call.
-    payload_hash: z
-      .string()
-      .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string'),
+    // One-shot x402 signing: funding context + merchant header in one local
+    // call. Optional at the schema boundary because canonical hosted responses
+    // can be passed as sign_data alone.
+    payload_hash: payloadHashSchema.optional(),
     x402_expected: x402ExpectedSchema,
     payment_required: z.record(z.string(), z.unknown()),
     // #1138: delegation-rail intents sign THIS, not payload_hash. Object-typed
     // (not z.unknown()) so MCP clients embed it as JSON rather than a string.
     typed_data: z.record(z.string(), z.unknown()).optional(),
+    // Canonical handoff from hosted MCP. If present, the handler derives
+    // payload_hash and typed_data from this object before validation.
+    sign_data: signDataSchema.optional(),
   },
 }
 
 const SIGN_DESCRIPTION = [
   'Sign an unsigned Haven payment hash with the local delegate key. The delegate key never leaves',
-  'this process. Pass the payload_hash returned by haven_pay or haven_pay_x402_quote.',
-  'For x402, also pass x402_expected from haven_pay_x402_quote; the signer records it locally',
-  'and returns { signature, x402_binding }. x402_expected includes expires_at; sign before that',
-  'window closes. DELEGATION-RAIL accounts: when the hosted result carries typed_data, pass it too —',
-  'the account validates that EIP-712 payload, not payload_hash, and signing is refused without it.',
+  'this process. For direct haven_pay, pass payload_hash. For x402 quote tools, pass sign_data',
+  'verbatim with x402_expected from the hosted quote; top-level payload_hash and typed_data are',
+  'accepted only for older responses. The signer records the x402 context locally and returns',
+  '{ signature, x402_binding }. x402_expected includes expires_at; sign before that window closes.',
+  'DELEGATION-RAIL accounts validate sign_data.typed_data, not the bare hash, and signing is refused',
+  'without the typed data Haven committed to.',
   'Next: call mcp__haven__haven_submit with signature, then pass x402_binding',
   'to mcp__haven-signer__haven_x402_sign_header. For plain SafeTransfer payments, just pass payload_hash and',
   'relay the returned signature via mcp__haven__haven_submit.',
@@ -170,10 +187,11 @@ const SIGN_X402_DESCRIPTION = [
   'One-shot x402 signing for the fast 3-call flow: sign the funding hash AND build the EIP-3009',
   'X-PAYMENT header in a single local call (equivalent to haven_sign followed by',
   'haven_x402_sign_header). The delegate key never leaves this process. From the haven_pay_mcp_tool',
-  'result pass payload_hash, x402_expected (the nested x402.expected object — passing the whole x402',
-  'object is also accepted and unwrapped for you), and payment_required (verbatim). On a',
-  'delegation-rail account the result also carries typed_data — pass that verbatim too; the signer',
-  'signs it instead of payload_hash and refuses the bare hash when the context commits to typed data.',
+  'result pass sign_data verbatim, x402_expected (the nested x402.expected object — passing the whole x402',
+  'object is also accepted and unwrapped for you), and payment_required (verbatim). Top-level',
+  'payload_hash and typed_data are still accepted for older hosted results, but sign_data is the',
+  'canonical handoff. On a delegation-rail account the signer signs sign_data.typed_data instead of',
+  'payload_hash and refuses the bare hash when the context commits to typed data.',
   'Returns',
   '{ signature, x402_binding, payment_header, accepted }; hand signature + payment_header to',
   'mcp__haven__haven_settle_mcp_tool to fund and settle in one hosted call. The header is built now (before',
@@ -288,10 +306,11 @@ export function createToolHandlers(
   return {
     haven_sign: async (input) =>
       runTool(async () => {
-        const args = parse('haven_sign', coerceX402Expected(input))
+        const args = parse('haven_sign', coerceSignData(coerceX402Expected(input)))
+        const payloadHash = requirePayloadHash(args)
         const x402Expected = args.x402_expected ? toExpectedX402(args.x402_expected) : null
         const result = x402Expected
-          ? await signFundingLeg(signer, x402Expected, args.payload_hash, args.typed_data)
+          ? await signFundingLeg(signer, x402Expected, payloadHash, args.typed_data)
           : null
         if (!result) {
           // #1254: a DIRECT delegation-rail payment carries typed_data and no
@@ -301,14 +320,14 @@ export function createToolHandlers(
           // raw-hash path below is the legacy AllowanceModule rail only.
           if (args.typed_data) {
             const signature = await signer.signDelegationTypedData(args.typed_data)
-            await auditSigning('haven_sign', args.payload_hash)
+            await auditSigning('haven_sign', payloadHash)
             return { signature }
           }
-          const signature = signer.signPaymentHash(args.payload_hash)
-          await auditSigning('haven_sign', args.payload_hash)
+          const signature = signer.signPaymentHash(payloadHash)
+          await auditSigning('haven_sign', payloadHash)
           return { signature }
         }
-        await auditSigning('haven_sign', args.payload_hash)
+        await auditSigning('haven_sign', payloadHash)
         return { signature: result.signature, x402_binding: result.x402Binding }
       }),
 
@@ -336,14 +355,15 @@ export function createToolHandlers(
         // Coerce a stringified payment_required (same transport guard as
         // haven_x402_sign_header) and unwrap a whole-`x402`-object x402_expected
         // before validation.
-        const args = parse('haven_sign_x402', coerceX402Expected(coercePaymentRequired(input)))
+        const args = parse('haven_sign_x402', coerceSignData(coerceX402Expected(coercePaymentRequired(input))))
+        const payloadHash = requirePayloadHash(args)
         // 1. Sign the funding leg (records the binding + checks expiry/context).
         //    Which payload that is — bare hash or the account's typed data — is
         //    decided by the Haven-signed context, not by the caller (#1138).
         const funding = await signFundingLeg(
           signer,
           toExpectedX402(args.x402_expected),
-          args.payload_hash,
+          payloadHash,
           args.typed_data,
         )
         // 2. Build the merchant EIP-3009 header against that binding — local, no network.
@@ -354,7 +374,7 @@ export function createToolHandlers(
         // Two audit entries — one per signing operation — matching the
         // decomposed haven_sign + haven_x402_sign_header trail, so the funding
         // signature and the merchant header remain distinguishable in the log.
-        await auditSigning('haven_sign_x402', args.payload_hash)
+        await auditSigning('haven_sign_x402', payloadHash)
         await auditSigning('haven_sign_x402', hashPayloadForAudit(args.payment_required))
         return {
           signature: funding.signature,
@@ -398,6 +418,17 @@ function parse<TName extends SignerToolName>(name: TName, input: unknown): Recor
   return z.object(toolSchemas[name]).parse(input ?? {})
 }
 
+function requirePayloadHash(args: Record<string, any>): string {
+  if (typeof args.payload_hash === 'string') return args.payload_hash
+  throw new z.ZodError([
+    {
+      code: z.ZodIssueCode.custom,
+      path: ['payload_hash'],
+      message: 'payload_hash or sign_data.hash is required',
+    },
+  ])
+}
+
 /**
  * Tolerate the agent passing the whole `x402` object from haven_pay_mcp_tool /
  * haven_pay_x402_quote where only the nested `x402.expected` signing context is
@@ -428,6 +459,59 @@ function coerceX402Expected(input: unknown): unknown {
   // Parsed-from-string but already the right shape: keep the parsed object.
   if (value !== record.x402_expected) return { ...record, x402_expected: value }
   return input
+}
+
+/**
+ * Prefer the canonical hosted-MCP `sign_data` object over hand-copied aliases.
+ * If an agent passes both and they disagree, refuse before signing instead of
+ * letting a stale top-level `typed_data` produce a misleading digest mismatch.
+ */
+function coerceSignData(input: unknown): unknown {
+  if (!input || typeof input !== 'object') return input
+  const record = input as Record<string, unknown>
+  let signData: unknown = record.sign_data
+  if (typeof signData === 'string') {
+    try {
+      signData = JSON.parse(signData)
+    } catch {
+      return input
+    }
+  }
+  if (!signData || typeof signData !== 'object') return input
+
+  const obj = signData as Record<string, unknown>
+  const hash = obj.hash
+  if (typeof hash !== 'string') return input
+
+  if (
+    typeof record.payload_hash === 'string' &&
+    record.payload_hash.toLowerCase() !== hash.toLowerCase()
+  ) {
+    throw new HavenSigningError(
+      'Conflicting x402 signing input: payload_hash differs from sign_data.hash. ' +
+        'Pass the sign_data object from the hosted quote verbatim and do not mix fields across quotes.',
+    )
+  }
+
+  const typedData = obj.typed_data
+  if (
+    record.typed_data !== undefined &&
+    typedData !== undefined &&
+    record.typed_data !== typedData &&
+    JSON.stringify(record.typed_data) !== JSON.stringify(typedData)
+  ) {
+    throw new HavenSigningError(
+      'Conflicting x402 signing input: typed_data differs from sign_data.typed_data. ' +
+        'Pass the sign_data object from the hosted quote verbatim and do not mix fields across quotes.',
+    )
+  }
+
+  return {
+    ...record,
+    sign_data: signData,
+    payload_hash: hash,
+    ...(typedData !== undefined ? { typed_data: typedData } : {}),
+  }
 }
 
 /**

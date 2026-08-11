@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # agent-prompt refresh (audit A/B/E): both buildHostedMcpServer and buildMcpServer now set MCP `instructions` (version-literal-free critical path) alongside the signer's; runtime manifest, versions, and signing authority unchanged. Prior #1326: Hermes hosted runtime config is YAML and preserves unrelated source text. Prior #1321: the hosted paid-MCP quote establishes a merchant MCP session before the unpaid tools/call, using only public delegate context; local runtime compatibility, signer versions, Node floor, manifest, and signing authority unchanged. Earlier: #1309 row-one skew is machine-readable; #1306/#1307/#1308/#1301/#1300 and #1310 compatibility notes; MCP_VERSION/runtime manifest untouched.
+last-verified: "2026-08-11" # prompt-refresh (initialize-instructions på båda servrarna, skill-omskrivning) + #1319 provenance-fält; inga versioner/manifest/skew-rader ändrade
 ---
 
 # MCP Runtime Compatibility
@@ -61,9 +61,11 @@ Keep this table in sync with that file.
 The default Connect topology writes a keyless hosted Haven MCP entry plus a
 separate local `haven-signer` stdio entry; it is distinct from the local-stdio
 runtime described above. Hermes Agent is a supported hosted-runtime profile:
-Connect writes `$HERMES_HOME/config.yaml` when `HERMES_HOME` is set, otherwise
-`~/.hermes/config.yaml`, preserving source text outside `mcp_servers` and
-replacing only the `mcp_servers.haven` and `mcp_servers.haven-signer` entries.
+Connect writes `$HERMES_HOME/config.yaml` and its matching owner-only `.env`
+when `HERMES_HOME` is set, otherwise `~/.hermes/config.yaml` and `.env`. The
+hosted API key stays in `.env`; config uses the `Bearer ${MCP_HAVEN_API_KEY}`
+template. Connect preserves source text outside `mcp_servers` and replaces only
+the `mcp_servers.haven` and `mcp_servers.haven-signer` entries.
 Hermes discovers MCP servers at process startup, so start a new session (or run
 `/restart` for a gateway). Hermes also needs its Python MCP SDK installed (`pip
 install mcp`) to load MCP tools.

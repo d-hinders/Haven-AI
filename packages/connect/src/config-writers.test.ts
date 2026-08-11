@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 import {
   hermesConfigPath,
+  hermesEnvPath,
   mergeCodexToml,
+  mergeHermesEnv,
   mergeCodexTomlHosted,
   mergeHermesYaml,
   mergeJsonMcpConfig,
@@ -247,7 +249,9 @@ describe('runtime config writers', () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-config-'))
     const credentialsDir = join(dir, 'agent-1')
     const target = join(dir, '.hermes', 'config.yaml')
+    const envTarget = join(dir, '.hermes', '.env')
     await mkdir(join(dir, '.hermes'), { recursive: true })
+    await writeFile(envTarget, '# Existing Hermes secret\nOTHER_MCP_TOKEN=keep-me\n')
     await writeFile(target, [
       'model: hermes-4',
       'agent:',
@@ -273,7 +277,7 @@ describe('runtime config writers', () => {
     const parsed = parse(await readFile(target, 'utf8')) as {
       model: string
       agent: { max_turns: number }
-      mcp_servers: Record<string, { url?: string; command?: string; args?: string[]; headers?: Record<string, string> }>
+      mcp_servers: Record<string, { url?: string; command?: string; args?: string[]; headers?: Record<string, string>; enabled?: boolean }>
     }
 
     expect(result).toMatchObject({
@@ -286,17 +290,23 @@ describe('runtime config writers', () => {
     })
     expect(result.messages.join('\n')).toContain('/restart')
     expect(result.messages.join('\n')).toContain('hermes mcp list')
+    expect(result.messages.join('\n')).toContain('hermes mcp test haven')
+    expect(result.messages.join('\n')).toContain('hermes mcp test haven-signer')
     expect(result.messages.join('\n')).toContain('pip install mcp')
     expect(parsed.model).toBe('hermes-4')
     expect(parsed.agent.max_turns).toBe(8)
     expect(parsed.mcp_servers.existing.command).toBe('node')
     expect(parsed.mcp_servers.haven).toMatchObject({
       url: HOSTED_URL,
-      headers: { Authorization: `Bearer ${API_KEY}` },
+      headers: { Authorization: 'Bearer ${MCP_HAVEN_API_KEY}' },
+      enabled: true,
     })
+    expect(await readFile(target, 'utf8')).not.toContain(API_KEY)
     expect(parsed.mcp_servers.haven).not.toHaveProperty('type')
-    expect(parsed.mcp_servers['haven-signer']).toEqual({ command: WRAPPER_PATH, args: [] })
+    expect(parsed.mcp_servers['haven-signer']).toEqual({ command: WRAPPER_PATH, args: [], enabled: true })
     expect((await stat(target)).mode & 0o777).toBe(0o600)
+    expect(await readFile(envTarget, 'utf8')).toBe('# Existing Hermes secret\nOTHER_MCP_TOKEN=keep-me\nMCP_HAVEN_API_KEY=sk_agent_secret_for_config_test\n')
+    expect((await stat(envTarget)).mode & 0o777).toBe(0o600)
 
     const rerun = await writeRuntimeConfig({
       runtime: 'hermes',
@@ -305,20 +315,35 @@ describe('runtime config writers', () => {
       identityPath: join(credentialsDir, 'identity.json'),
       signerPath: SIGNER_PATH,
       credentialDirectory: credentialsDir,
+      signerCommand: { command: WRAPPER_PATH, args: [] },
       homeDir: dir,
     })
     const rerunParsed = parse(await readFile(target, 'utf8')) as {
-      mcp_servers: Record<string, { url?: string; command?: string; args?: string[]; headers?: Record<string, string> }>
+      mcp_servers: Record<string, { url?: string; command?: string; args?: string[]; headers?: Record<string, string>; enabled?: boolean }>
     }
     expect(rerun.changed).toBe(true)
     expect(rerunParsed.mcp_servers.existing).toEqual({ command: 'node', args: ['server.js'] })
     expect(rerunParsed.mcp_servers.haven.url).toBe('https://new-mcp.haven.example/v1')
-    expect(rerunParsed.mcp_servers.haven.headers?.Authorization).toBe('Bearer sk_agent_replaced')
+    expect(rerunParsed.mcp_servers.haven.headers?.Authorization).toBe('Bearer ${MCP_HAVEN_API_KEY}')
     expect(rerunParsed.mcp_servers['haven-signer']).toEqual({
-      command: 'npx',
-      args: ['-y', SIGNER_PACKAGE, '--credentials', SIGNER_PATH],
+      command: WRAPPER_PATH,
+      args: [],
+      enabled: true,
     })
     expect(Object.keys(rerunParsed.mcp_servers).filter((name) => name === 'haven')).toHaveLength(1)
+    expect(await readFile(envTarget, 'utf8')).toBe('# Existing Hermes secret\nOTHER_MCP_TOKEN=keep-me\nMCP_HAVEN_API_KEY=sk_agent_replaced\n')
+
+    const unchanged = await writeRuntimeConfig({
+      runtime: 'hermes',
+      hostedMcpUrl: 'https://new-mcp.haven.example/v1',
+      apiKey: 'sk_agent_replaced',
+      identityPath: join(credentialsDir, 'identity.json'),
+      signerPath: SIGNER_PATH,
+      credentialDirectory: credentialsDir,
+      signerCommand: { command: WRAPPER_PATH, args: [] },
+      homeDir: dir,
+    })
+    expect(unchanged.changed).toBe(false)
   })
 
   it('uses HERMES_HOME when set and otherwise writes beneath the supplied home directory', async () => {
@@ -328,6 +353,7 @@ describe('runtime config writers', () => {
     process.env.HERMES_HOME = hermesHome
     try {
       expect(hermesConfigPath(join(dir, 'unused-home'))).toBe(join(hermesHome, 'config.yaml'))
+      expect(hermesEnvPath(join(dir, 'unused-home'))).toBe(join(hermesHome, '.env'))
       const result = await writeRuntimeConfig({
         runtime: 'hermes',
         hostedMcpUrl: HOSTED_URL,
@@ -339,6 +365,7 @@ describe('runtime config writers', () => {
       })
       expect(result.errorCode).toBeUndefined()
       await expect(readFile(join(hermesHome, 'config.yaml'), 'utf8')).resolves.toContain('mcp_servers:')
+      await expect(readFile(join(hermesHome, '.env'), 'utf8')).resolves.toContain(`MCP_HAVEN_API_KEY=${API_KEY}`)
     } finally {
       if (previousHermesHome === undefined) delete process.env.HERMES_HOME
       else process.env.HERMES_HOME = previousHermesHome
@@ -348,9 +375,11 @@ describe('runtime config writers', () => {
   it('does not overwrite a Hermes config when its YAML is malformed', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-invalid-'))
     const target = join(dir, '.hermes', 'config.yaml')
+    const envTarget = join(dir, '.hermes', '.env')
     const malformed = 'mcp_servers: [Bearer sk_agent_do_not_echo\n'
     await mkdir(join(dir, '.hermes'), { recursive: true })
     await writeFile(target, malformed)
+    await writeFile(envTarget, 'OTHER_MCP_TOKEN=unchanged\n')
 
     const result = await writeRuntimeConfig({
       runtime: 'hermes',
@@ -367,6 +396,114 @@ describe('runtime config writers', () => {
     expect(result.messages.join('\n')).not.toContain('sk_agent_do_not_echo')
     expect(result.messages.join('\n')).not.toContain(malformed)
     expect(await readFile(target, 'utf8')).toBe(malformed)
+    expect(await readFile(envTarget, 'utf8')).toBe('OTHER_MCP_TOKEN=unchanged\n')
+  })
+
+  it('does not overwrite Hermes config or dotenv when the managed dotenv key is ambiguous', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-ambiguous-env-'))
+    const target = join(dir, '.hermes', 'config.yaml')
+    const envTarget = join(dir, '.hermes', '.env')
+    const existingConfig = 'model: hermes-4\n'
+    const ambiguousEnv = 'MCP_HAVEN_API_KEY # do not parse this\n'
+    await mkdir(join(dir, '.hermes'), { recursive: true })
+    await writeFile(target, existingConfig)
+    await writeFile(envTarget, ambiguousEnv)
+
+    const result = await writeRuntimeConfig({
+      runtime: 'hermes',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      identityPath: join(dir, 'identity.json'),
+      signerPath: SIGNER_PATH,
+      credentialDirectory: dir,
+      homeDir: dir,
+    })
+
+    expect(result.errorCode).toBe('runtime_config_write_failed')
+    expect(result.messages.join('\n')).not.toContain(API_KEY)
+    expect(await readFile(target, 'utf8')).toBe(existingConfig)
+    expect(await readFile(envTarget, 'utf8')).toBe(ambiguousEnv)
+  })
+
+  it('rolls back both Hermes files when writing config.yaml fails after dotenv succeeds', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-rollback-'))
+    const target = join(dir, '.hermes', 'config.yaml')
+    const envTarget = join(dir, '.hermes', '.env')
+    const existingConfig = 'model: hermes-4\nmcp_servers:\n  haven:\n    url: https://old.example/v1\n'
+    const existingEnv = 'MCP_HAVEN_API_KEY=sk_agent_previous\nOTHER_MCP_TOKEN=keep\n'
+    await mkdir(join(dir, '.hermes'), { recursive: true })
+    await writeFile(target, existingConfig)
+    await writeFile(envTarget, existingEnv)
+
+    let failConfigOnce = true
+    const result = await writeRuntimeConfig({
+      runtime: 'hermes',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      identityPath: join(dir, 'identity.json'),
+      signerPath: SIGNER_PATH,
+      credentialDirectory: dir,
+      homeDir: dir,
+    }, {
+      writeOwnerOnlyText: async (path, value) => {
+        if (path === target && failConfigOnce) {
+          failConfigOnce = false
+          await writeFile(path, 'partial write that must be rolled back\n')
+          throw new Error('simulated config write failure')
+        }
+        await writeFile(path, value)
+      },
+    })
+
+    expect(result.errorCode).toBe('runtime_config_write_failed')
+    expect(result.messages.join('\n')).not.toContain(API_KEY)
+    expect(await readFile(target, 'utf8')).toBe(existingConfig)
+    expect(await readFile(envTarget, 'utf8')).toBe(existingEnv)
+  })
+
+  it('restores the Hermes dotenv and reports incomplete recovery when config writes fail permanently', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-permanent-rollback-'))
+    const target = join(dir, '.hermes', 'config.yaml')
+    const envTarget = join(dir, '.hermes', '.env')
+    const existingConfig = 'model: hermes-4\n'
+    const existingEnv = 'MCP_HAVEN_API_KEY=sk_agent_previous\n'
+    await mkdir(join(dir, '.hermes'), { recursive: true })
+    await writeFile(target, existingConfig)
+    await writeFile(envTarget, existingEnv)
+
+    const result = await writeRuntimeConfig({
+      runtime: 'hermes',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      identityPath: join(dir, 'identity.json'),
+      signerPath: SIGNER_PATH,
+      credentialDirectory: dir,
+      homeDir: dir,
+    }, {
+      writeOwnerOnlyText: async (path, value) => {
+        if (path === target) {
+          await writeFile(path, 'partial config write\n')
+          throw new Error('simulated persistent config write failure')
+        }
+        await writeFile(path, value)
+      },
+    })
+
+    expect(result.errorCode).toBe('runtime_config_write_failed')
+    expect(result.messages.join('\n')).toContain('Recovery did not complete')
+    expect(result.messages.join('\n')).not.toContain('left unchanged')
+    expect(result.messages.join('\n')).not.toContain(API_KEY)
+    expect(await readFile(envTarget, 'utf8')).toBe(existingEnv)
+    expect(await readFile(target, 'utf8')).toBe('partial config write\n')
+  })
+
+  it('merges Hermes dotenv without rewriting unrelated lines and rejects ambiguous managed syntax', () => {
+    expect(mergeHermesEnv('# preserve\r\nOTHER=value\r\nMCP_HAVEN_API_KEY=old\r\nMCP_HAVEN_API_KEY=duplicate\r\n', API_KEY)).toBe(
+      `# preserve\r\nOTHER=value\r\nMCP_HAVEN_API_KEY=${API_KEY}\r\n`,
+    )
+    expect(mergeHermesEnv('OTHER=value', API_KEY)).toBe(`OTHER=value\nMCP_HAVEN_API_KEY=${API_KEY}\n`)
+    expect(() => mergeHermesEnv('MCP_HAVEN_API_KEY\n', API_KEY)).toThrow('ambiguous managed key')
+    expect(() => mergeHermesEnv(null, `${API_KEY}\nsecond-line`)).toThrow('single line')
   })
 
   it('replaces only malformed mcp_servers sections during a Hermes YAML merge', () => {

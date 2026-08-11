@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, chmod, unlink } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { isMap, parseDocument, stringify } from 'yaml'
@@ -6,6 +6,8 @@ import { signerPackageSpec } from './runtime-manifest.js'
 import { type RuntimeId } from './runtime-registry.js'
 
 export type RuntimeMcpMode = 'local_stdio' | 'hosted_plus_signer' | 'manual'
+
+const HERMES_API_KEY_ENV = 'MCP_HAVEN_API_KEY'
 
 /** How to launch the local edge signer as an MCP stdio server. */
 export interface SignerLaunchSpec {
@@ -50,6 +52,18 @@ export interface RuntimeConfigWriteResult {
   activationCommand?: string
 }
 
+/** Injectable file operations for failure-safe runtime-config tests. */
+export interface RuntimeConfigWriteDeps {
+  writeOwnerOnlyText?: (path: string, value: string) => Promise<void>
+}
+
+class HermesConfigRecoveryError extends Error {
+  constructor() {
+    super('Hermes configuration recovery did not complete')
+    this.name = 'HermesConfigRecoveryError'
+  }
+}
+
 export class InvalidCodexTomlError extends Error {
   constructor(message: string) {
     super(message)
@@ -57,7 +71,10 @@ export class InvalidCodexTomlError extends Error {
   }
 }
 
-export async function writeRuntimeConfig(input: RuntimeConfigInput): Promise<RuntimeConfigWriteResult> {
+export async function writeRuntimeConfig(
+  input: RuntimeConfigInput,
+  deps: RuntimeConfigWriteDeps = {},
+): Promise<RuntimeConfigWriteResult> {
   switch (input.runtime) {
     case 'codex-cli':
     case 'codex-desktop':
@@ -71,7 +88,7 @@ export async function writeRuntimeConfig(input: RuntimeConfigInput): Promise<Run
     case 'claude-desktop':
       return writeJsonRuntimeConfig(input, claudeDesktopConfigPath(input.homeDir), 'mcpServers')
     case 'hermes':
-      return writeHermesConfig(input)
+      return writeHermesConfig(input, deps)
     default:
       return {
         hostedConfigured: false,
@@ -178,6 +195,48 @@ export function mergeHermesYaml(
   }
   if (!mcpPair.value?.range) return replaceEmptyHermesMcpServers(existingYaml, mcpPair.key?.range, mergedServers)
   return replaceHermesMcpServers(existingYaml, mcpPair.key?.range, mcpPair.value.range, mergedServers)
+}
+
+/**
+ * Upsert the hosted MCP identity in Hermes's dotenv file without evaluating
+ * arbitrary dotenv syntax or rewriting unrelated lines.
+ */
+export function mergeHermesEnv(existingEnv: string | null, apiKey: string): string {
+  if (/[\r\n]/.test(apiKey)) throw new Error('Hermes API key must be a single line')
+
+  const assignment = `${HERMES_API_KEY_ENV}=${apiKey}`
+  if (!existingEnv) return `${assignment}\n`
+
+  const lineEnding = existingEnv.includes('\r\n') ? '\r\n' : '\n'
+  const hasTrailingNewline = /\r?\n$/.test(existingEnv)
+  const lines = existingEnv.split(/\r?\n/)
+  if (hasTrailingNewline) lines.pop()
+
+  let found = false
+  const merged = lines.flatMap((line) => {
+    if (isHermesEnvAssignment(line)) {
+      if (found) return []
+      found = true
+      return [assignment]
+    }
+    if (isAmbiguousHermesEnvLine(line)) {
+      throw new Error('Hermes environment contains an ambiguous managed key')
+    }
+    return [line]
+  })
+
+  if (!found) {
+    return `${existingEnv}${hasTrailingNewline ? '' : lineEnding}${assignment}${lineEnding}`
+  }
+  return `${merged.join(lineEnding)}${hasTrailingNewline ? lineEnding : ''}`
+}
+
+function isHermesEnvAssignment(line: string): boolean {
+  return /^\s*(?:export[ \t]+)?MCP_HAVEN_API_KEY[ \t]*=/.test(line)
+}
+
+function isAmbiguousHermesEnvLine(line: string): boolean {
+  return /^\s*(?:export[ \t]+)?MCP_HAVEN_API_KEY\b/.test(line)
 }
 
 function appendHermesMcpServers(source: string, servers: Record<string, unknown>): string {
@@ -329,31 +388,50 @@ async function writeJsonRuntimeConfig(
   }
 }
 
-async function writeHermesConfig(input: RuntimeConfigInput): Promise<RuntimeConfigWriteResult> {
+async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigWriteDeps): Promise<RuntimeConfigWriteResult> {
   const target = hermesConfigPath(input.homeDir)
+  const envTarget = hermesEnvPath(input.homeDir)
   try {
-    const existing = await readOptional(target)
+    const [existing, existingEnv] = await Promise.all([readOptional(target), readOptional(envTarget)])
+    const hostedServer = {
+      ...buildHostedServer(input.hostedMcpUrl, `\${${HERMES_API_KEY_ENV}}`, input.runtime),
+      enabled: true,
+    }
+    const signerServer = {
+      ...buildSignerServer(resolveSignerLaunchSpec(input), input.runtime),
+      enabled: true,
+    }
     const merged = mergeHermesYaml(
       existing,
-      buildHostedServer(input.hostedMcpUrl, input.apiKey, input.runtime),
-      buildSignerServer(resolveSignerLaunchSpec(input), input.runtime),
+      hostedServer,
+      signerServer,
     )
-    await writeOwnerOnlyText(target, merged)
+    const mergedEnv = mergeHermesEnv(existingEnv, input.apiKey)
+    const writeText = deps.writeOwnerOnlyText ?? writeOwnerOnlyText
+    await writeText(envTarget, mergedEnv)
+    try {
+      await writeText(target, merged)
+    } catch (err) {
+      const recovered = await restoreHermesFiles(target, existing, envTarget, existingEnv, writeText)
+      if (!recovered) throw new HermesConfigRecoveryError()
+      throw err
+    }
     return {
       hostedConfigured: true,
       signerConfigured: true,
       localMcpConfigured: false,
       runtimeMcpMode: 'hosted_plus_signer',
       target: 'Hermes Agent config',
-      changed: existing !== merged,
+      changed: existing !== merged || existingEnv !== mergedEnv,
       restartRequired: true,
       messages: [
-        `Updated Haven MCP entries in ${target}.`,
-        'Restart Hermes (start a new session; gateway users: /restart), then verify with `hermes mcp list` — tools appear as mcp_haven_* and mcp_haven_signer_*.',
+        `Updated Haven MCP entries in ${target}; stored the hosted MCP identity in ${envTarget}.`,
+        'Restart Hermes (start a new session; gateway users: /restart), then verify with `hermes mcp list`, `hermes mcp test haven`, and `hermes mcp test haven-signer`.',
         'If no mcp_* tools appear after restart, ensure the MCP SDK is installed in Hermes: pip install mcp',
       ],
     }
-  } catch {
+  } catch (err) {
+    const recoveryIncomplete = err instanceof HermesConfigRecoveryError
     return {
       hostedConfigured: false,
       signerConfigured: false,
@@ -362,9 +440,42 @@ async function writeHermesConfig(input: RuntimeConfigInput): Promise<RuntimeConf
       target: 'Hermes Agent config',
       changed: false,
       restartRequired: true,
-      messages: ['Could not update Hermes Agent config. Existing configuration was left unchanged.'],
+      messages: [recoveryIncomplete
+        ? 'Could not update Hermes Agent config. Recovery did not complete; inspect the Hermes configuration before retrying.'
+        : 'Could not update Hermes Agent config. Existing configuration was left unchanged.'],
       errorCode: 'runtime_config_write_failed',
     }
+  }
+}
+
+async function restoreHermesFiles(
+  configPath: string,
+  existingConfig: string | null,
+  envPath: string,
+  existingEnv: string | null,
+  writeText: (path: string, value: string) => Promise<void>,
+): Promise<boolean> {
+  const [envResult, configResult] = await Promise.allSettled([
+    restoreOptionalText(envPath, existingEnv, writeText),
+    restoreOptionalText(configPath, existingConfig, writeText),
+  ])
+  return envResult.status === 'fulfilled' && configResult.status === 'fulfilled'
+}
+
+async function restoreOptionalText(
+  path: string,
+  existing: string | null,
+  writeText: (path: string, value: string) => Promise<void>,
+): Promise<void> {
+  if (existing !== null) {
+    await writeText(path, existing)
+    return
+  }
+  try {
+    await unlink(path)
+  } catch (err) {
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') return
+    throw err
   }
 }
 
@@ -685,9 +796,15 @@ function claudeDesktopConfigPath(homeDir = homedir()): string {
 }
 
 export function hermesConfigPath(homeDir?: string): string {
-  return process.env.HERMES_HOME
-    ? join(process.env.HERMES_HOME, 'config.yaml')
-    : join(homeDir ?? homedir(), '.hermes', 'config.yaml')
+  return join(hermesHomePath(homeDir), 'config.yaml')
+}
+
+export function hermesEnvPath(homeDir?: string): string {
+  return join(hermesHomePath(homeDir), '.env')
+}
+
+function hermesHomePath(homeDir?: string): string {
+  return process.env.HERMES_HOME ?? join(homeDir ?? homedir(), '.hermes')
 }
 
 function configTargetLabel(runtime: RuntimeId): string {

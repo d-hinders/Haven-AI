@@ -23,7 +23,7 @@ covers:
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-08-11" # #1326 Hermes hosted-MCP setup and restart checklist added; prior #1227 (db-mock ratchet joins the gates) — no claim affected
+last-verified: "2026-08-11" # #1330 Hermes .env credential-reference verification added; prior #1326 hosted-MCP setup and restart checklist, #1227 db-mock ratchet — no claim affected
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
@@ -75,7 +75,9 @@ Agent, custom SDK runtime**, plus any others available.
 2. **Run the connector** in that environment (`npx @haven_ai/connect@alpha …` or
    the pasted prompt). Expect: credentials written under `~/.haven/agents/<id>/`,
    hosted MCP + `haven-signer` entries written to that runtime's config, and the
-   dashboard advancing to the approval screen.
+   dashboard advancing to the approval screen. For Hermes, verify its
+   `config.yaml` references `MCP_HAVEN_API_KEY` while the matching owner-only
+   `.env` holds the value; do not copy secrets into the run report.
 3. **Confirm MCP wiring** — the Haven tools appear in the runtime (restart only
    if the runtime needs it; CLI runtimes pick them up in-session). For Hermes,
    start a new session or run `/restart` in a gateway, then check `hermes mcp

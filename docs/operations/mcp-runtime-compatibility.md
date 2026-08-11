@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1297 tool_arguments in discovery output + #1272 compact quotes + #1271 base-URL endpoint discovery — no floor or manifest change
+last-verified: "2026-08-11" # #1300: discovery endpoint-miss predicate now keys on the typed SDK error (message check kept for skew) — no floor or manifest change
 ---
 
 # MCP Runtime Compatibility

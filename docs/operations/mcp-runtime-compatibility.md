@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-10" # + #1272: hosted x402 quotes compact by default; new skew row (pre-#1263 signer needs the include_signing_payload re-quote) — no floor or manifest change
+last-verified: "2026-08-11" # #1297: local MCP discovery output carries tool_arguments; runtime floor and manifest unchanged
 ---
 
 # MCP Runtime Compatibility

@@ -55,6 +55,7 @@ function serialize(row: CatalogRow) {
     rail: row.rail,
     protocol: row.protocol,
     tool_name: row.tool_name,
+    tool_arguments: row.tool_arguments,
     price_display: row.price_display,
     price_atomic: row.price_atomic,
     asset: row.asset,
@@ -88,6 +89,10 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
         values.push(rail)
         conditions.push(`rail = $${values.length}`)
       }
+      if (request.agent) {
+        values.push(`eip155:${request.agent.chain_id}`)
+        conditions.push(`network = $${values.length}`)
+      }
 
       const result = await pool.query<CatalogRow>(
         `SELECT * FROM merchant_catalog
@@ -102,9 +107,15 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
 
   // GET /catalog/:id — single entry detail.
   app.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
+    const conditions = [`id = $1`, `status != 'delisted'`]
+    const values = [request.params.id]
+    if (request.agent) {
+      values.push(`eip155:${request.agent.chain_id}`)
+      conditions.push(`network = $${values.length}`)
+    }
     const result = await pool.query<CatalogRow>(
-      `SELECT * FROM merchant_catalog WHERE id = $1 AND status != 'delisted' LIMIT 1`,
-      [request.params.id],
+      `SELECT * FROM merchant_catalog WHERE ${conditions.join(' AND ')} LIMIT 1`,
+      values,
     )
     const row = result.rows[0]
     if (!row) {

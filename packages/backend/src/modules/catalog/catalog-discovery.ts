@@ -177,7 +177,7 @@ export async function ingestDiscoveredCatalog(
     // Verify with the same read-only probe the refresh uses. Bazaar lists only
     // plain-HTTP x402 resources today, so probe as an x402 http merchant.
     const probe = await probeCatalogEntry(
-      { resource_url: resourceUrl, protocol: 'http', tool_name: null, rail: 'x402' },
+      { resource_url: resourceUrl, protocol: 'http', tool_name: null, tool_arguments: null, rail: 'x402' },
       fetchImpl,
     )
     if (!probe.ok) {

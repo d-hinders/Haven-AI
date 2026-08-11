@@ -1687,6 +1687,14 @@ export const openapiSpec = {
           rail: { type: 'string', enum: ['x402', 'mpp'] },
           protocol: { type: 'string', enum: ['http', 'mcp'] },
           tool_name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          tool_arguments: {
+            anyOf: [
+              { type: 'object', additionalProperties: true },
+              { type: 'null' },
+            ],
+            description:
+              'Suggested MCP tool arguments for this catalog item, when the row represents a specific product variant. Agents should pass this object unchanged to the pay tool arguments field after confirming the live merchant quote.',
+          },
           price_display: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           price_atomic: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           asset: { anyOf: [{ type: 'string' }, { type: 'null' }] },

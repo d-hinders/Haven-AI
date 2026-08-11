@@ -18,7 +18,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-10" # #1272: x402 quote tools compact by default; include_signing_payload restores the full payload
+last-verified: "2026-08-11" # #1297: catalog discovery metadata changed; x402 quote/pay execution sequence unchanged
 ---
 
 # Haven - x402 Payment Execution Sequence

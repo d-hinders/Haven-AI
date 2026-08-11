@@ -157,7 +157,7 @@ function completePurchase(
             `Betalning krävs för ${product.name}.\n\n` +
             `Pris: $${formatUsdc(product.price_usdc)} USDC (inkl. 25% moms)\n` +
             `Betalningsadress: ${config.merchantAddress}\n` +
-            `Nätverk: Base (chain ID 8453)\n\n` +
+            `Nätverk: eip155:${CHAIN_ID}\n\n` +
             `x402 betalningskrav:\n${JSON.stringify(requirements, null, 2)}\n\n` +
             `Skicka om samma HTTP-anrop med PAYMENT-SIGNATURE eller X-PAYMENT header.`,
         },

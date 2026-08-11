@@ -34,6 +34,6 @@ Use `npm run skills:check` before changing these skills. It validates required
 frontmatter without writing outside the repo. Use `npm run docs:check` for the
 full repo agent-skill validation, including wrappers and relative links.
 
-Claude slash commands in `.claude/commands` should stay thin wrappers that route
-to these skills. Codex users can invoke the installed skills directly, for
-example `$haven-reset`, `$ship-next`, or `$quality-scan`.
+Claude slash commands for portable workflows should stay thin wrappers that
+route to these skills. Codex users can invoke the installed skills directly,
+for example `$haven-reset`, `$ship-next`, or `$quality-scan`.

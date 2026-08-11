@@ -58,6 +58,7 @@ import {
   AgentPaymentPhase,
   HavenApiError,
   HavenPaymentStateError,
+  X402UnexpectedStatusError,
   HavenSigningError,
   HavenTimeoutError,
 } from './types.js'
@@ -108,6 +109,11 @@ function explorerUrlOrEmpty(chainId: number | undefined, txHash: string | null |
 }
 
 const DEFAULT_REQUEST_TIMEOUT = 30_000
+// #1300: merchant-facing default. Generous on purpose — the demo merchant
+// (and real x402 merchants) may settle on-chain synchronously inside the
+// paid retry, and a timeout that fires mid-settlement reads as a merchant
+// rejection. Override per client via config.merchantTimeout.
+const DEFAULT_MERCHANT_TIMEOUT = 60_000
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
 
@@ -373,6 +379,7 @@ export class HavenClient {
   private readonly baseUrl: string
   private readonly x402Wallet: string | undefined
   private readonly requestTimeout: number
+  private readonly merchantTimeout: number
   private readonly confirmationTimeout: number
   private readonly pollingInterval: number
   private readonly chainRpcs: Record<number, string>
@@ -405,6 +412,7 @@ export class HavenClient {
     this.baseUrl = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '')
     this.x402Wallet = config.x402Wallet
     this.requestTimeout = config.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
+    this.merchantTimeout = config.merchantTimeout ?? DEFAULT_MERCHANT_TIMEOUT
     this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT
     this.pollingInterval = config.pollingInterval ?? DEFAULT_POLLING_INTERVAL
     this.chainRpcs = config.chainRpcs ?? {}
@@ -1058,10 +1066,11 @@ export class HavenClient {
   ): Promise<X402Quote> {
     const initialInit = this.withX402Wallet(init, this.x402PayerAddress())
     const request = this.snapshotX402Request(url, initialInit)
-    const response = await globalThis.fetch(url, initialInit)
+    const response = await this.merchantFetch(url, initialInit)
 
     if (response.status !== 402) {
-      throw new HavenApiError(
+      // #1300: typed, so consumers key on the class instead of message text.
+      throw new X402UnexpectedStatusError(
         `Expected an x402 quote response with HTTP 402, got HTTP ${response.status}.`,
         response.status || 400,
       )
@@ -1221,7 +1230,7 @@ export class HavenClient {
       if (!url) {
         throw new HavenApiError('x402 resume requires the original URL or a captured request snapshot.', 400)
       }
-      const response = await globalThis.fetch(url, initialInit)
+      const response = await this.merchantFetch(url, initialInit)
       if (response.status !== 402) {
         throw new HavenApiError('Expected the original x402 request to return HTTP 402 before resuming.', 400)
       }
@@ -1277,7 +1286,7 @@ export class HavenClient {
     if (mcpSessionId) requestInit = this.withMcpHeaders(requestInit, mcpSessionId)
 
     // 1. Make the original request
-    const response = await globalThis.fetch(url, requestInit)
+    const response = await this.merchantFetch(url, requestInit)
 
     // 2. Not a 402 — return as-is (collapsing SSE for MCP sessions)
     if (response.status !== 402) {
@@ -1357,7 +1366,7 @@ export class HavenClient {
       headers.set('Accept', MCP_ACCEPT)
       if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
 
-      const response = await globalThis.fetch(url, {
+      const response = await this.merchantFetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -1411,7 +1420,7 @@ export class HavenClient {
       headers.set('mcp-session-id', sessionId)
       if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
 
-      await globalThis.fetch(url, {
+      await this.merchantFetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
@@ -1499,7 +1508,7 @@ export class HavenClient {
     }
 
     const request = this.snapshotX402Request(challengeOrUrl, init)
-    const response = await globalThis.fetch(challengeOrUrl, init)
+    const response = await this.merchantFetch(challengeOrUrl, init)
 
     if (response.status !== 402) {
       throw new HavenApiError(
@@ -1557,7 +1566,7 @@ export class HavenClient {
     const retryHeaders = new Headers(initialInit?.headers)
     retryHeaders.set('X-PAYMENT', receipt.paymentHeader)
 
-    const retryResponse = await globalThis.fetch(url, {
+    const retryResponse = await this.merchantFetch(url, {
       ...initialInit,
       headers: retryHeaders,
     })
@@ -1715,7 +1724,7 @@ export class HavenClient {
     headers.set('X-PAYMENT', input.paymentHeader)
     requestInit = { ...requestInit, headers }
 
-    const response = await globalThis.fetch(input.url, requestInit)
+    const response = await this.merchantFetch(input.url, requestInit)
     const surfaced = mcpSessionId ? await this.surfaceMcpResult(response) : response
     const protocolReceiptHeader = surfaced.headers.get('PAYMENT-RESPONSE') ?? undefined
     const settlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
@@ -1930,7 +1939,7 @@ export class HavenClient {
       if (!url) {
         throw new HavenApiError('MPP resume requires the original URL or a captured request snapshot.', 400)
       }
-      const response = await globalThis.fetch(url, initialInit)
+      const response = await this.merchantFetch(url, initialInit)
       if (response.status !== 402) {
         throw new HavenApiError('Expected the original MPP request to return HTTP 402 before resuming.', 400)
       }
@@ -1978,7 +1987,7 @@ export class HavenClient {
     const retryHeaders = new Headers(initialInit?.headers)
     retryHeaders.set('MACHINE-PAYMENT-PROOF', receipt.proofHeader)
 
-    const retryResponse = await globalThis.fetch(url, {
+    const retryResponse = await this.merchantFetch(url, {
       ...initialInit,
       headers: retryHeaders,
     })
@@ -3114,6 +3123,30 @@ export class HavenClient {
 
   private async get<T>(path: string): Promise<T> {
     return this.request<T>('GET', path)
+  }
+
+  /**
+   * #1300: every MERCHANT-facing fetch goes through here. Haven API calls
+   * have always been bounded (request() below); the merchant probes/retries
+   * called globalThis.fetch bare, so a slow-loris merchant could hold a tool
+   * call open forever. A caller-supplied signal still applies (combined via
+   * AbortSignal.any); a timeout abort surfaces as a clear HavenApiError 504
+   * naming the URL rather than a bare AbortError.
+   */
+  private async merchantFetch(url: string, init: RequestInit = {}): Promise<Response> {
+    const timeoutSignal = AbortSignal.timeout(this.merchantTimeout)
+    const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
+    try {
+      return await globalThis.fetch(url, { ...init, signal })
+    } catch (err) {
+      if (timeoutSignal.aborted) {
+        throw new HavenApiError(
+          `Merchant request timed out after ${this.merchantTimeout}ms: ${url}`,
+          504,
+        )
+      }
+      throw err
+    }
   }
 
   private async request<T>(

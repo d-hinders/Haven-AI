@@ -3,6 +3,7 @@ import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
   HavenApiError,
+  X402UnexpectedStatusError,
   HavenClient,
   HavenError,
   HavenPaymentStateError,
@@ -1190,6 +1191,9 @@ function sameUrl(a: string, b: string): boolean {
 
 /** The probe failure shape that means "this URL is not the MCP endpoint". */
 function isMerchantEndpointMiss(err: unknown): boolean {
+  // #1300: the typed class is authoritative; the message check keeps the
+  // predicate working against an older bundled SDK during version skew.
+  if (err instanceof X402UnexpectedStatusError) return true
   return err instanceof HavenApiError && err.message.includes('Expected an x402 quote response')
 }
 

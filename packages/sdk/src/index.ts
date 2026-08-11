@@ -93,6 +93,7 @@ export type { ClaudeTool, OpenAITool } from './tools.js'
 export {
   HavenError,
   HavenApiError,
+  X402UnexpectedStatusError,
   HavenPaymentStateError,
   HavenSigningError,
   HavenTimeoutError,

@@ -15,6 +15,11 @@ export interface HavenClientConfig {
 
   /** Timeout in ms for individual HTTP requests (default: 30000) */
   requestTimeout?: number
+  /** Timeout (ms) for MERCHANT-facing requests — x402/MPP probes, MCP
+   *  handshakes, paid retries. Separate from requestTimeout (Haven API):
+   *  merchants may settle on-chain synchronously, so the default is
+   *  deliberately generous. #1300. */
+  merchantTimeout?: number
 
   /** Timeout in ms when polling for tx confirmation (default: 90000) */
   confirmationTimeout?: number
@@ -1306,6 +1311,20 @@ export class HavenApiError extends HavenError {
   ) {
     super(message, 'API_ERROR', statusCode, paymentId)
     this.name = 'HavenApiError'
+  }
+}
+
+/**
+ * #1300: quoteX402 hit a URL that answered something other than 402 — the
+ * typed form of "this is not the x402 endpoint". Exists so consumers (the
+ * hosted MCP's #1271 discovery trigger) can key on a class instead of
+ * message text.
+ */
+export class X402UnexpectedStatusError extends HavenApiError {
+  readonly x402ErrorCode = 'unexpected_non_402_status' as const
+  constructor(message: string, statusCode: number) {
+    super(message, statusCode)
+    this.name = 'X402UnexpectedStatusError'
   }
 }
 

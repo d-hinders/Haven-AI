@@ -88,8 +88,12 @@
  *     is the only way settlement can succeed with none of the four present.
  *   - **The post-purchase allowance block (#1310) is present on settle**,
  *     not just documented as a field that theoretically exists. A response
- *     missing the `allowance` key entirely, carrying `allowance: null`, or
- *     reporting `settled: false`, fails.
+ *     missing the `allowance` key entirely, or reporting `settled: false`,
+ *     fails. `allowance: null` WITH the ALLOWANCE_CHECK_UNAVAILABLE warning
+ *     is the #1310/#1320 degrade contract for a transient post-settlement
+ *     read failure — pass-with-note, never a promotion-blocking red after
+ *     money provably moved (#1323 review); null WITHOUT the warning is the
+ *     degrade contract itself regressing, and still fails.
  *   - **Both on-chain legs, zero residual.** Same money proof as
  *     `x402-hosted-mcp-signer`: distinct funding/settlement tx hashes, both
  *     `status === 1`, delegate residual UNCHANGED (a delta, so an earlier
@@ -184,7 +188,14 @@ async function waitForReceipt(
  * — not a contract violation.
  */
 function isToolNotFound(err: HostedMcpTransportError, tool: string): boolean {
-  return new RegExp(`Tool ${tool} not found`, 'i').test(err.message)
+  // Text match against the pinned MCP SDK's wording, PLUS the JSON-RPC error
+  // code (-32602 InvalidParams — what McpServer throws for an unknown tool)
+  // when the transport surfaced one: the code is stabler than prose, and a
+  // reworded SDK message must degrade to skip, not a promotion-blocking FAIL
+  // (#1323 review).
+  if (new RegExp(`Tool ${tool} not found`, 'i').test(err.message)) return true
+  const code = (err as { code?: number }).code
+  return code === -32602 && /tool/i.test(err.message)
 }
 
 /** Resolve the catalog entry by the SAME triple `haven_prepare_catalog_purchase` quotes from. */
@@ -438,11 +449,25 @@ export const x402CatalogGuidedPurchase: Scenario = {
       return fail('settled response carried no allowance key at all — the #1310 post-purchase summary regressed')
     }
     if (settle.allowance === null) {
-      return fail(
-        'settled response reported allowance: null — the post-purchase read failed for this QA identity; ' +
-          `warnings: ${JSON.stringify(settle.warnings ?? [])}`,
+      // #1323 review: null-with-warning is the #1310/#1320 CONTRACT for a
+      // transient post-settlement read failure — the money already moved
+      // correctly, and a promotion-gating leg must not red on an RPC blip
+      // AFTER a proven settlement. A null with NO warning, though, is the
+      // handler violating its own degrade contract — that one still fails.
+      const hasDegradeWarning = (settle.warnings ?? []).some(
+        (w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE',
       )
+      if (!hasDegradeWarning) {
+        return fail(
+          'settled response reported allowance: null WITHOUT the ALLOWANCE_CHECK_UNAVAILABLE ' +
+            `warning — the #1310 degrade contract regressed; warnings: ${JSON.stringify(settle.warnings ?? [])}`,
+        )
+      }
     }
+    const allowanceNote =
+      settle.allowance === null
+        ? 'allowance read degraded (null + ALLOWANCE_CHECK_UNAVAILABLE, legitimate per #1310/#1320)'
+        : `remaining allowance rail=${settle.allowance.rail}`
 
     // ── 9. Both on-chain legs, not just the merchant saying yes ──────────────
     const fundingHash = settle.funding_tx_hash
@@ -511,7 +536,7 @@ export const x402CatalogGuidedPurchase: Scenario = {
       `guided catalog purchase (${entry.name}, catalog_id ${entry.id}) settled via payment_id-only ` +
         `continuation: funding ${fundingHash} (block ${fundingReceipt.blockNumber}), merchant ${merchantHash} ` +
         `(block ${merchantReceipt.blockNumber}); treasury ${fmt(treasuryBefore)} → ${fmt(treasuryAfter)}, zero ` +
-        `delegate residual${carried}; remaining allowance rail=${settle.allowance.rail}; intent ${prep.payment_id}`,
+        `delegate residual${carried}; ${allowanceNote}; intent ${prep.payment_id}`,
     )
   },
 }

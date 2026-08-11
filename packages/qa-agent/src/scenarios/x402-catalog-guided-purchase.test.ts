@@ -461,15 +461,28 @@ describe('the post-purchase allowance block (#1310)', () => {
     expect(r.detail).toMatch(/no allowance key at all/)
   })
 
-  it('fails when settle reports allowance: null', async () => {
+  it('PASSES with a note on allowance: null + ALLOWANCE_CHECK_UNAVAILABLE — the legitimate #1310/#1320 degrade (#1323 review)', async () => {
+    // A transient post-settlement read failure must never red a
+    // promotion-gating leg AFTER money provably moved.
     mockCallTool.mockImplementation(async (tool: string) =>
       tool === 'haven_prepare_catalog_purchase'
         ? prep()
         : settled({ allowance: null, warnings: [{ code: 'ALLOWANCE_CHECK_UNAVAILABLE', message: 'boom' }] }),
     )
     const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(r.detail).toMatch(/allowance read degraded/)
+  })
+
+  it('fails on allowance: null WITHOUT the warning — the degrade contract itself regressing', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_prepare_catalog_purchase'
+        ? prep()
+        : settled({ allowance: null, warnings: [] }),
+    )
+    const r = await x402CatalogGuidedPurchase.run(ctx())
     expect(r.pass).toBe(false)
-    expect(r.detail).toMatch(/allowance: null/)
+    expect(r.detail).toMatch(/WITHOUT the ALLOWANCE_CHECK_UNAVAILABLE/)
   })
 
   it('reports the remaining rail in the pass detail', async () => {

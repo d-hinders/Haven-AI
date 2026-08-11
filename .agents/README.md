@@ -31,7 +31,8 @@ npm run skills:install -- --copy
 ```
 
 Use `npm run skills:check` before changing these skills. It validates required
-frontmatter and referenced skill folders without writing outside the repo.
+frontmatter without writing outside the repo. Use `npm run docs:check` for the
+full repo agent-skill validation, including wrappers and relative links.
 
 Claude slash commands in `.claude/commands` should stay thin wrappers that route
 to these skills. Codex users can invoke the installed skills directly, for

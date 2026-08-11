@@ -13,12 +13,14 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const skillsRoot = join(repoRoot, '.agents', 'skills')
 const copyMarkerName = '.haven-agent-skill-source.json'
+const copyMarkerRepo = 'd-hinders/Haven-AI'
+const copyMarkerVersion = 1
 
 const args = new Set(process.argv.slice(2))
 const copyMode = args.has('--copy')
@@ -139,7 +141,7 @@ async function installSkill(skill, target) {
 async function ownedByRepo(existing, dest, source) {
   if (existing.isSymbolicLink()) {
     const resolved = await realpath(dest).catch(() => null)
-    return resolved === source || resolved?.endsWith(`/.agents/skills/${basename(source)}`)
+    return resolved === source
   }
 
   if (!copyMode) return false
@@ -155,7 +157,9 @@ async function ownedByRepo(existing, dest, source) {
 
   try {
     const marker = JSON.parse(markerText)
-    return marker?.source === source && marker?.skill === markerSkillName(source)
+    return marker?.repo === copyMarkerRepo &&
+      marker?.version === copyMarkerVersion &&
+      marker?.skill === markerSkillId(source)
   } catch {
     return false
   }
@@ -163,14 +167,15 @@ async function ownedByRepo(existing, dest, source) {
 
 async function writeCopyMarker(dest, skill) {
   const marker = {
-    source: skill.path,
-    skill: skill.name,
+    repo: copyMarkerRepo,
+    version: copyMarkerVersion,
+    skill: markerSkillId(skill.path),
   }
   await writeFile(join(dest, copyMarkerName), `${JSON.stringify(marker, null, 2)}\n`, 'utf8')
 }
 
-function markerSkillName(source) {
-  return basename(source)
+function markerSkillId(source) {
+  return `skills/${source.slice(source.lastIndexOf('/') + 1)}`
 }
 
 function findYamlString(frontmatter, key) {

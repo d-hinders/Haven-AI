@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # prompt-refresh (initialize-instructions på båda servrarna, skill-omskrivning) + #1319 provenance-fält; inga versioner/manifest/skew-rader ändrade
+last-verified: "2026-08-11" # prompt-refresh + #1319 re-verify (dev); inga versioner/manifest/skew-rader ändrade
 ---
 
 # MCP Runtime Compatibility

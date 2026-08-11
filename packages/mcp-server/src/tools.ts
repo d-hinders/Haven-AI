@@ -970,6 +970,27 @@ export function createToolHandlers(
               remaining_atomic: remainingAtomic,
               source,
             }
+            // #1319: the read above SUCCEEDED — this is distinct from the
+            // catch block below, which fires when it fails outright. On the
+            // delegation rail, `remaining` can still be an OPTIMISTIC number:
+            // #1145's on-chain enforcer read falls back to the full
+            // configured budget (never throws) when the RPC read itself
+            // times out, so `sufficient` here can be computed from a figure
+            // that was never actually confirmed live. `remainingIsFromChain`
+            // is only ever set on the delegation rail (#1319 wire field) —
+            // `undefined` on the legacy rail is not "optimistic", it is
+            // "not applicable", so this only warns when the flag is
+            // explicitly false.
+            if (rail === 'delegation' && match?.onchain.remainingIsFromChain === false) {
+              warnings.push({
+                code: AgentPaymentWarningCode.AllowanceReadOptimistic,
+                message:
+                  'The reported remaining delegation budget could not be read live from chain, so ' +
+                  `${remainingAtomic} ${quote.token} atomic is the configured full budget, not a confirmed ` +
+                  'live figure. The on-chain policy (the budget caveat enforcer) remains the actual ' +
+                  'spend gate at redemption regardless of this report.',
+              })
+            }
           } catch (err) {
             allowanceBlock = { rail, sufficient: null, source }
             warnings.push({

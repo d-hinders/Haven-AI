@@ -1387,7 +1387,15 @@ describe('haven_prepare_catalog_purchase', () => {
 
   const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
 
-  function allowancesFixture(remaining: string, rail: 'legacy' | 'delegation' = 'legacy') {
+  // #1319: `remainingIsFromChain` mirrors the wire's `remaining_is_from_chain`
+  // — omitted by default (matches a legacy-rail row, and most delegation
+  // fixtures don't care), set explicitly where a test exercises the
+  // provenance warning.
+  function allowancesFixture(
+    remaining: string,
+    rail: 'legacy' | 'delegation' = 'legacy',
+    options: { remainingIsFromChain?: boolean } = {},
+  ) {
     return {
       agent_id: 'agt_1',
       safe_address: '0xSafe',
@@ -1405,6 +1413,9 @@ describe('haven_prepare_catalog_purchase', () => {
           last_reset_min: rail === 'delegation' ? 0 : 100,
           nonce: rail === 'delegation' ? 0 : 7,
           is_reset_pending: false,
+          ...(options.remainingIsFromChain !== undefined
+            ? { remaining_is_from_chain: options.remainingIsFromChain }
+            : {}),
         },
       }],
     }
@@ -1667,6 +1678,119 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
     // A failed read never fails the preflight — the intent was still created.
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  // #1319: the legacy-rail case above was already covered — this is the
+  // delegation-rail twin the #1318 review flagged as untested. The strict
+  // `sufficient === false` refusal guard (step 6) protects correctness, but
+  // that guard never even runs here — `sufficient` is `null`, not `false` —
+  // so the intent is still created exactly like the legacy rail.
+  it('delegation rail: reports sufficient: null (never a fabricated guess) when the allowance/budget read fails — the preflight still succeeds and creates the intent', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
+    })
+
+    const result = ok<{
+      allowance: { rail: string; sufficient: boolean | null; source: string }
+      warnings: Array<{ code: string }>
+    }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    expect(result.data.allowance).toEqual({ rail: 'delegation', sufficient: null, source: 'active_delegations' })
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+    // A failed read degrades to null, never to a fabricated false — the
+    // delegation-rail refusal guard (step 6) only fires on a genuine false,
+    // so it never fires here and the intent is still created.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  // #1319: the #1318 review's second untested combination — a hard refusal
+  // that must fire BEFORE any funding intent exists, unlike the degrade-and-
+  // proceed allowance-read failure above.
+  it('refuses before creating any intent when haven.getAgent() fails — a hard refusal, not a degrade-and-proceed', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 500, body: { error: 'boom' } },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    // No funding intent, and no allowance read either — the agent lookup is
+    // a hard stop, before step 5 (the allowance/budget report) ever runs.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    expect(calls.find((c) => c.url.endsWith('/machine-payments/allowances'))).toBeUndefined()
+  })
+
+  // #1319: surfaces the #1145 provenance nuance — the delegation rail's
+  // on-chain enforcer read deliberately falls back to the full configured
+  // budget (never throws) when the RPC read itself fails, so this preflight's
+  // failed-read branch above never fires for that failure mode; it reports
+  // `sufficient: true` computed from an OPTIMISTIC number instead. The wire
+  // now carries that provenance (`remaining_is_from_chain`), and the
+  // preflight surfaces it as a warning rather than presenting the figure as
+  // confirmed.
+  it('delegation rail: warns ALLOWANCE_READ_OPTIMISTIC when the reported remaining is the #1145 fallback, not a live chain read', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': {
+        status: 200,
+        body: allowancesFixture('5000000', 'delegation', { remainingIsFromChain: false }),
+      },
+    })
+
+    const result = ok<{
+      allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string }
+      warnings: Array<{ code: string; message: string }>
+    }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    // sufficient still reports a real true/false — this is a fund-safe
+    // optimistic read (the caveat enforcer re-checks at redemption), never a
+    // failed read like ALLOWANCE_CHECK_UNAVAILABLE above.
+    expect(result.data.allowance).toEqual({
+      rail: 'delegation', sufficient: true, remaining_atomic: '5000000', source: 'active_delegations',
+    })
+    const warning = result.data.warnings.find((w) => w.code === 'ALLOWANCE_READ_OPTIMISTIC')
+    expect(warning).toBeDefined()
+    expect(warning?.message).toMatch(/on-chain policy .* remains the actual .*gate/)
+    // Never a refusal — the intent was still created.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('delegation rail: does NOT warn ALLOWANCE_READ_OPTIMISTIC when the reported remaining came from a live chain read', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': {
+        status: 200,
+        body: allowancesFixture('5000000', 'delegation', { remainingIsFromChain: true }),
+      },
+    })
+
+    const result = ok<{ warnings: Array<{ code: string }> }>(
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+    )
+
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_READ_OPTIMISTIC')).toBe(false)
+  })
+
+  it('legacy rail: never warns ALLOWANCE_READ_OPTIMISTIC — the provenance flag is delegation-rail only', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000', 'legacy') },
+    })
+
+    const result = ok<{ warnings: Array<{ code: string }> }>(
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+    )
+
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_READ_OPTIMISTIC')).toBe(false)
   })
 
   it('passes idempotency_key through to the merchant quote and the funding intent (#1207 replay semantics apply unchanged)', async () => {

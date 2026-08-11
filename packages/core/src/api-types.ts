@@ -1594,6 +1594,8 @@ export type components = {
                     last_reset_min: number;
                     nonce: number;
                     is_reset_pending: boolean;
+                    /** @description Delegation rail only (#1319, provenance for #1145's fallback): true when `remaining` came from a live ERC20PeriodTransferEnforcer read, false when the read failed and this is the fallback full configured budget. Absent on the legacy AllowanceModule rail, which has no fallback concept. Reporting only — the on-chain policy is the actual gate either way, this only says how fresh this number is. */
+                    remaining_is_from_chain?: boolean;
                 };
             }[];
         };

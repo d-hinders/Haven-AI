@@ -609,6 +609,10 @@ describe('machine payment routes', () => {
             last_reset_min: 0,
             nonce: 0,
             is_reset_pending: false,
+            // #1319: no delegation_json row is primed in this fixture, so
+            // readRemainingBudget is never even reached — the same fallback
+            // path #1145 takes on an RPC failure. Provenance says so.
+            remaining_is_from_chain: false,
           },
         }],
       })

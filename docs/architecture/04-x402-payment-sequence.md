@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # #1306 guided catalog-purchase preflight (haven_prepare_catalog_purchase): composes GET /catalog/:id + GET /machine-payments/agent (+execution_rail) + GET /machine-payments/allowances + POST /x402, shared quoteMcpToolCall helper with haven_pay_mcp_tool
+last-verified: "2026-08-11" # re-verified for #1309: version-skew refusal now structured (signer-side); quote/settle sequence unchanged — details in 07-edge-signer + mcp-runtime-compatibility
 ---
 
 # Haven - x402 Payment Execution Sequence

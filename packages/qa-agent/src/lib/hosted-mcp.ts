@@ -268,4 +268,72 @@ export interface HostedSettleMcpToolResult {
   settled?: boolean
   settlement_tx_hash?: string | null
   result?: unknown
+  /**
+   * #1310: rail-aware remaining-budget report attached to a settled payment.
+   * `null` only when the read itself failed (degraded, never converts a
+   * settled payment into a failure) — an ABSENT key is a contract regression,
+   * not a degraded read; the two are distinguishable by `'allowance' in`.
+   */
+  allowance?: {
+    rail: 'legacy' | 'delegation'
+    remaining_atomic: string
+    remaining_display?: string
+    token_symbol?: string
+    token_address?: string
+    reset_period?: number
+    source: 'allowance_module' | 'active_delegations'
+  } | null
+  warnings?: Array<{ code: string; message: string }>
+}
+
+/** The rail-aware allowance/budget block `haven_prepare_catalog_purchase` reports (#1306). */
+export interface HostedCatalogAllowanceBlock {
+  rail: 'legacy' | 'delegation'
+  sufficient: boolean | null
+  remaining_atomic?: string
+  source: 'allowance_module' | 'active_delegations'
+}
+
+/**
+ * `haven_prepare_catalog_purchase`'s result (#1306) — the SAME compact
+ * quote/signing shape as {@link HostedPayMcpToolResult} plus the catalog
+ * fields and the rail-aware allowance block. Never a separate signing
+ * surface: everything `x402-hosted-mcp-signer` asserts about the compact
+ * quote applies here too.
+ */
+export interface HostedPrepareCatalogPurchaseResult {
+  payment_id: string
+  status?: string
+  payload_hash: string | null
+  expires_at?: string
+  signature_scheme?: string
+  /** #1272: absent by default — see the module/scenario doc-comments. */
+  typed_data?: Record<string, unknown>
+  typed_data_b64?: string
+  x402?: { expected?: HostedX402Expected }
+  payment_required?: Record<string, unknown>
+  amount_atomic?: string
+  amount?: string
+  token?: string
+  network?: string
+  asset?: string
+  merchant_url?: string
+  tool_name?: string
+  arguments?: Record<string, unknown>
+  mcp_transport?: { handshake_required: boolean; source: 'path' | 'bazaar' }
+  catalog_id?: string
+  catalog_name?: string
+  /** Indicative only — the live quote above (amount/amount_atomic/token) is authoritative. */
+  catalog_price_atomic?: string
+  catalog_price_display?: string
+  catalog_price_is_indicative?: boolean
+  allowance?: HostedCatalogAllowanceBlock
+  /** #1308 machine-readable next-step contract. */
+  next_action?: string
+  next_tool?: string
+  next_arguments?: Record<string, unknown>
+  safe_to_continue?: boolean
+  reason?: string
+  agent_summary?: Record<string, unknown>
+  warnings?: Array<{ code: string; message: string }>
 }

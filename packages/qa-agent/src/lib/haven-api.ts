@@ -100,6 +100,21 @@ export interface MachinePaymentReceipt {
   created_at?: string
 }
 
+/**
+ * One `GET /catalog` row (#1299) as far as the guided-catalog-purchase QA
+ * scenario needs it — chain-scoped for free by the backend when the request
+ * is agent-authenticated, same as every other agent-facing catalog read.
+ */
+export interface CatalogEntry {
+  id: string
+  name: string
+  resource_url: string
+  protocol?: string | null
+  tool_name?: string | null
+  tool_arguments?: Record<string, unknown> | null
+  status?: string
+}
+
 export class HavenApi {
   /**
    * @param apiKey overrides `cfg.agentApiKey`. The delegation-rail 3009
@@ -159,6 +174,16 @@ export class HavenApi {
   /** Payment evidence for this agent, newest first. */
   listReceipts(limit = 5): Promise<ApiResponse<{ receipts?: MachinePaymentReceipt[] }>> {
     return this.call('GET', `/machine-payments/receipts?limit=${limit}`)
+  }
+
+  /**
+   * The agent's chain-scoped merchant catalog (#1299). Read-only; used by the
+   * guided-catalog-purchase scenario to RESOLVE a catalog_id by matching
+   * resource_url/tool_name/tool_arguments, rather than hardcoding a UUID that
+   * would silently go stale the moment the seed migration is re-run.
+   */
+  getCatalog(): Promise<ApiResponse<{ entries?: CatalogEntry[] }>> {
+    return this.call('GET', '/catalog')
   }
 
   /** This agent's own identity, including the account holding the funds. */

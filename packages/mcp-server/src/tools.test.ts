@@ -1720,3 +1720,85 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     expect(calls.filter((c) => c.method === 'POST').length).toBe(1)
   })
 })
+
+// ── #1308: structured next-step contract ─────────────────────────────────────
+
+describe('structured agent guidance (#1308)', () => {
+  const paymentRequiredHeader = () => btoa(JSON.stringify(PAYMENT_REQUIRED))
+  const stubs = () => ({
+    'GET /machine-payments/agent': { status: 200 as const, body: AGENT_RESPONSE },
+    'POST /x402': { status: 201 as const, body: X402_INTENT_RESPONSE },
+    'POST /mcp': {
+      status: 402 as const,
+      responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+    },
+  })
+  const pay = () =>
+    handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+      arguments: { plan: 'basic' },
+    })
+
+  it('a signable quote tells the agent EXACTLY what to do next — from the existing taxonomy', async () => {
+    stubFetch(stubs())
+    const result = ok<{
+      next_action: string
+      next_tool: string
+      next_arguments: Record<string, unknown>
+      safe_to_continue: boolean
+      agent_summary: Record<string, unknown>
+      warnings: Array<{ code: string; message: string }>
+    }>(await pay())
+
+    expect(result.data.next_action).toBe('sign_and_submit_payment') // AgentPaymentNextAction value, no parallel vocabulary
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_x402' })
+    expect(result.data.safe_to_continue).toBe(true)
+    expect(result.data.agent_summary).toMatchObject({ payment_id: 'pay_x402', status: 'pending_signature' })
+  })
+
+  it('warnings absorb the cap nudge as MISSING_MAX_AMOUNT while cap_warning stays for compat', async () => {
+    stubFetch(stubs())
+    const result = ok<{ cap_warning?: string; warnings: Array<{ code: string }> }>(await pay())
+
+    expect(result.data.cap_warning).toBeDefined()
+    expect(result.data.warnings.some((w) => w.code === 'MISSING_MAX_AMOUNT')).toBe(true)
+  })
+
+  it('passing max_amount clears BOTH the legacy field and the structured warning', async () => {
+    stubFetch(stubs())
+    const result = ok<{ cap_warning?: string; warnings: Array<{ code: string }> }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+        max_amount: '2000000',
+      }),
+    )
+    expect(result.data.cap_warning).toBeUndefined()
+    expect(result.data.warnings.some((w) => w.code === 'MISSING_MAX_AMOUNT')).toBe(false)
+  })
+
+  it('pending approval is UNSAFE to continue and points at status polling', async () => {
+    stubFetch({
+      ...stubs(),
+      'POST /x402': {
+        status: 202,
+        body: { payment_id: 'pay_pending', status: 'pending_approval' },
+      },
+    })
+    const result = ok<{
+      status: string
+      next_action: string
+      next_tool: string
+      safe_to_continue: boolean
+      agent_summary: Record<string, unknown>
+    }>(await pay())
+
+    expect(result.data.status).toBe('pending_approval')
+    expect(result.data.next_action).toBe('wait_for_user_approval')
+    expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(result.data.safe_to_continue).toBe(false)
+  })
+})

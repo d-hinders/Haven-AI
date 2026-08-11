@@ -2,8 +2,6 @@ import { randomUUID } from 'node:crypto'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
-  AgentPaymentPhase,
-  AgentPaymentRail,
   HavenApiError,
   MerchantTimeoutError,
   X402UnexpectedStatusError,
@@ -318,70 +316,85 @@ const SUBMIT_DESCRIPTION = [
 
 const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
   ...sharedDescriptions.payMcpTool,
+  // #1311: sentence 1 = what this does + its position in the purchase flow;
+  // sentence 2 = follow the structured fields; then the compact must-knows
+  // (max_amount, payment_id-first signing); protocol notes (#-references,
+  // discovery fallback, version-skew check, step-by-step alternative) are
+  // kept in full but demoted to the end — debugging detail, not the first
+  // thing an agent has to scan.
+  summary:
+    'Step 1 of the x402 MCP purchase flow: call a named tool on an MCP merchant that requires payment, probe the live price, and create the funding intent for the local signer to sign.',
   behavior:
-    'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): responses carry next_action, next_tool, next_arguments, agent_summary and warnings — act on those; the prose below is fallback and debugging detail. ' +
-    'Builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. merchant_url may be the exact MCP endpoint or a BASE merchant URL (#1271): a non-402 miss triggers one bounded same-origin discovery pass of the merchant discovery document and one retry; the returned merchant_url is the resolved endpoint — pass THAT to settle/complete. ' +
+    'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): the response carries next_action, next_tool, next_arguments, agent_summary and warnings — act on those; the prose below is fallback and debugging detail. ' +
+    'Sign with next_tool — mcp__haven-signer__haven_sign_x402, PREFERRED payment_id-first (#1263): pass just payment_id and payment_required and the signer fetches the exact signing bytes itself, so you never copy bulky bytes; the response is COMPACT by default (#1272: no typed_data/typed_data_b64). ' +
+    'Then settle with mcp__haven__haven_settle_mcp_tool using the returned signature + payment_header — merchant_url/tool_name/arguments/mcp_transport are OPTIONAL there (#1307): Haven rehydrates them from this quote by payment_id; pass them explicitly only as a version-skew fallback. Next: call mcp__haven-signer__haven_sign_x402. ' +
+    'ALWAYS pass max_amount on paid merchant calls (#1275) — it is the user-intent cap for THIS purchase: atomic units of the merchant\'s asset, compared against the LIVE quote before any funding moves, separate from and additional to the agent\'s on-chain budget. Example: buy_cloud_storage { tier: "50gb" } with max_amount "500" caps at 0.0005 USDC. Without it the quoted price is accepted as-is (the response carries cap_warning) and a changed merchant quote can exceed what the user meant to spend. ' +
+    'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. Haven never receives the signing key. ' +
+    'Protocol notes: builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. merchant_url may be the exact MCP endpoint or a BASE merchant URL (#1271): a non-402 miss triggers one bounded same-origin discovery pass of the merchant discovery document and one retry; the returned merchant_url is the resolved endpoint — pass THAT to settle/complete. ' +
     'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, signer_compatibility, merchant_url, tool_name, arguments, mcp_transport }. ' +
     'The funding/quote window expires at expires_at; if it expires, re-run haven_pay_mcp_tool with the same idempotency_key before signing again. ' +
     'Before the signing step, check signer_compatibility.x402_expected_context_version against the versions the haven-signer MCP server advertises at initialize ' +
     `(${SIGNER_CAPABILITY_SOURCE} and its instructions). If it is not in that set the local signer is out of date: STOP before signing and tell the user to update ` +
     '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has been spent at that point. ' +
-    'Finish with two follow-up calls (fast path, recommended): ' +
-    '(1) mcp__haven-signer__haven_sign_x402 on the local signer. PREFERRED (#1263): pass just payment_id and payment_required — the signer fetches the exact signing payload and expected context from Haven itself, so you never copy bulky bytes; the response is COMPACT by default (#1272: no typed_data/typed_data_b64). Fallback (older signers/backends): re-run THIS tool with the SAME idempotency_key plus include_signing_payload=true — the replay returns the ORIGINAL sign_data with typed_data_b64 — then pass payload_hash, x402_expected (the nested x402.expected context, including expires_at), payment_required, and typed_data_b64 through UNCHANGED, one opaque string, never re-typed (#1255). Returns { signature, payment_header }; ' +
-    '(2) mcp__haven__haven_settle_mcp_tool with payment_id, signature, and payment_header to fund the delegate and settle with the merchant in one call — merchant_url/tool_name/arguments/mcp_transport are OPTIONAL (#1307): Haven rehydrates them from this quote by payment_id; pass them explicitly only as a version-skew fallback. ' +
+    'Fallback for an older signer/backend, or for diagnostics: re-run THIS tool with the SAME idempotency_key plus include_signing_payload=true — the replay returns the ORIGINAL sign_data with typed_data_b64 — then pass payload_hash, x402_expected (the nested x402.expected context, including expires_at), payment_required, and typed_data_b64 through UNCHANGED, one opaque string, never re-typed (#1255). Returns { signature, payment_header }. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
-    'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
-    'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. ' +
-    'ALWAYS pass max_amount on paid merchant calls (#1275) — it is the user-intent cap for THIS purchase: atomic units of the merchant\'s asset, compared against the LIVE quote before any funding moves, separate from and additional to the agent\'s on-chain budget. ' +
-    'Example: buy_cloud_storage { tier: "50gb" } with max_amount "500" caps at 0.0005 USDC. ' +
-    'Without it the quoted price is accepted as-is (the response carries cap_warning) and a changed merchant quote can exceed what the user meant to spend. Haven never receives the signing key. ' +
-    'Next: call mcp__haven-signer__haven_sign_x402.',
+    'Pass payment_required, arguments, and mcp_transport through verbatim from this response.',
 })
 
 const PREPARE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
+  // #1311: sentence 1 (summary) states the critical-path position; behavior
+  // leads with the structured-fields instruction and the compact must-knows
+  // (max_amount required, rail-aware allowance shape, ready-to-sign shape),
+  // then demotes the catalog-scoping/404 and rail-derivation detail to a
+  // "Protocol notes" tail — kept in full, just not first to scan.
   summary:
-    'Guided preflight for a curated catalog purchase: load one Haven catalog entry by id, run the LIVE merchant quote, verify chain/cap/rail-aware allowance, and return a ready-to-sign x402 payment — starting from a catalog_id instead of a hand-copied merchant_url/tool_name/tool_arguments.',
+    'Step 1 of the guided catalog purchase flow: load one Haven catalog entry by catalog_id, run the LIVE merchant quote, verify chain/cap/rail-aware allowance, and return a ready-to-sign x402 payment — no hand-copied merchant_url/tool_name/tool_arguments.',
   selectionGuidance:
     'Use this instead of haven_pay_mcp_tool when you already have a catalog_id from haven_discover_tools and a spending cap in mind. Do NOT use for read-only allowance or budget questions — use haven_get_allowances. If the catalog row is degraded or missing tool metadata, this refuses and names haven_pay_mcp_tool as the manual fallback.',
   behavior:
-    'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): responses carry next_action, next_tool, next_arguments, agent_summary and warnings — act on those; the prose below is fallback and debugging detail. ' +
-    'Loads the catalog entry by catalog_id — chain-scoped to this agent automatically (#1299): an unknown id or one curated for a DIFFERENT chain both refuse with a 404, no separate check needed. ' +
-    'Runs the LIVE MCP quote against the entry\'s own resource_url/tool_name/tool_arguments — the same probe haven_pay_mcp_tool uses — and enforces max_amount against that LIVE price BEFORE any funding intent is created. max_amount is REQUIRED on this tool (unlike haven_pay_mcp_tool\'s optional cap): this IS the guided path, so there is no cap_warning fallback. ' +
-    'Reports a rail-aware allowance block: { rail, sufficient, remaining_atomic, source }. On the legacy AllowanceModule rail, sufficient reflects the remaining on-chain allowance and an insufficient amount still proceeds — the resulting funding intent queues for wallet-owner approval, same as haven_pay_mcp_tool. On the delegation rail, remaining is DERIVED from the agent\'s active budget delegations, and an over-budget quote REFUSES right here — there is no approval queue on that rail, an over-budget redemption would simply revert on-chain later. sufficient is reported as null (with a warning) rather than a guess when the read itself fails — this preflight never hard-fails just because the allowance/budget check could not run. ' +
-    'The catalog\'s price_atomic/price_display are only ever indicative (catalog_price_is_indicative is always true) — the live quote in this same response (amount/amount_atomic/token) is authoritative, and a CATALOG_PRICE_DIFFERS warning fires when the two disagree. ' +
-    'The ready-to-sign object returned on success is the SAME compact quote shape as haven_pay_mcp_tool/haven_pay_x402_quote (#1272: payment_id, payload_hash, expires_at, signer_compatibility, x402) plus catalog_id/catalog_name/catalog_price_* and the allowance block — never a separate signing surface. COMPACT by default; pass include_signing_payload=true only for diagnostics or an older signer.',
+    'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): the response carries next_action, next_tool, next_arguments, agent_summary and warnings — act on those; the prose below is fallback and debugging detail. ' +
+    'max_amount is REQUIRED on this tool (unlike haven_pay_mcp_tool\'s optional cap) and is enforced against the LIVE quote BEFORE any funding intent is created — this IS the guided path, so there is no cap_warning fallback. ' +
+    'Returns a rail-aware allowance block { rail, sufficient, remaining_atomic, source }: on the legacy AllowanceModule rail an insufficient amount still proceeds and the resulting funding intent queues for wallet-owner approval, same as haven_pay_mcp_tool; on the delegation rail an over-budget quote REFUSES right here, before any funding intent exists, because that rail has no approval queue — an over-budget redemption would simply revert on-chain later. ' +
+    'The ready-to-sign object returned on success is the SAME compact quote shape as haven_pay_mcp_tool/haven_pay_x402_quote (#1272: payment_id, payload_hash, expires_at, signer_compatibility, x402) plus catalog_id/catalog_name/catalog_price_* and the allowance block — never a separate signing surface. COMPACT by default; pass include_signing_payload=true only for diagnostics or an older signer. ' +
+    'Protocol notes: loads the catalog entry by catalog_id — chain-scoped to this agent automatically (#1299): an unknown id or one curated for a DIFFERENT chain both refuse with a 404, no separate check needed. ' +
+    'Runs the LIVE MCP quote against the entry\'s own resource_url/tool_name/tool_arguments — the same probe haven_pay_mcp_tool uses. ' +
+    'sufficient is reported as null (with a warning) rather than a guess when the allowance/budget read itself fails — this preflight never hard-fails just because that check could not run; the on-chain policy remains the actual gate either way. ' +
+    'The catalog\'s price_atomic/price_display are only ever indicative (catalog_price_is_indicative is always true) — the live quote in this same response (amount/amount_atomic/token) is authoritative, and a CATALOG_PRICE_DIFFERS warning fires when the two disagree.',
   nextActionGuidance:
     'Next: call mcp__haven-signer__haven_sign_x402 with { payment_id } — the signer fetches the exact signing payload itself (#1263), so you never copy bulky bytes. Then call mcp__haven__haven_settle_mcp_tool with the returned signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport from THIS response; from there the flow is identical to haven_pay_mcp_tool. ' +
     'If the response carries status "pending_approval" (legacy rail, over the remaining allowance), tell the user and poll haven_get_payment_status — do not re-quote or re-pay while pending.',
 })
 
 const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
+  // #1311: summary carries the critical-path position; behavior leads with
+  // the must-know call shape and the terminal next-step, then demotes the
+  // protocol/response-shape detail to a "Protocol notes" tail.
   summary:
-    'Complete an x402 MCP tool payment by delivering the signed X-PAYMENT header to the merchant and returning the tool result.',
+    'Final step of the x402 MCP purchase flow: deliver the signed X-PAYMENT header to the merchant after haven_x402_sign_header and return the tool result.',
   behavior:
-    'Final step after haven_x402_sign_header. Re-issues the MCP tools/call to the merchant with the X-PAYMENT header ' +
-    '(running a fresh MCP initialize/session handshake server-side) and returns the merchant tool result. ' +
-    'Pass payment_id and the payment_header from haven_x402_sign_header; merchant_url/tool_name/arguments/mcp_transport are OPTIONAL (#1307) — Haven rehydrates them from the original haven_pay_mcp_tool quote by payment_id, so pass them only as a version-skew fallback. ' +
-    'The payment_header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key; ' +
-    'Haven relays it but never holds signing authority. Call only after haven_submit has confirmed the funding transfer. ' +
-    'The payment_id is used to attach merchant evidence or reconciliation context to the already-funded payment. ' +
-    'If the funding window expired first, this returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true. ' +
-    'Next: no further Haven tool is needed on success; return the merchant tool result to the user.',
+    'Pass payment_id and the payment_header from haven_x402_sign_header; merchant_url/tool_name/arguments/mcp_transport are OPTIONAL (#1307) — Haven rehydrates them from the original haven_pay_mcp_tool quote by payment_id, so pass them only as a version-skew fallback. Call only after haven_submit has confirmed the funding transfer. ' +
+    'Next: no further Haven tool is needed on success; return the merchant tool result to the user. ' +
+    'Protocol notes: re-issues the MCP tools/call to the merchant with the X-PAYMENT header (running a fresh MCP initialize/session handshake server-side) and returns the merchant tool result. ' +
+    'The payment_header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key; Haven relays it but never holds signing authority. ' +
+    'The payment_id is also used to attach merchant evidence or reconciliation context to the already-funded payment. ' +
+    'If the funding window expired first, this returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true.',
   nextActionGuidance:
     'If the merchant rejects the payment after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with mcp__haven__haven_sweep_delegate.',
 })
 
 const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
+  // #1311: same restructuring as COMPLETE_MCP_TOOL_DESCRIPTION above — this
+  // is its fast-path sibling (haven_submit + haven_complete_mcp_tool combined).
   summary:
-    'Fund and settle an x402 MCP tool payment in one call: relay the funding signature, then deliver the signed X-PAYMENT header to the merchant and return the tool result.',
+    'Fast-path final step of the x402 MCP purchase flow: fund and settle in one call — relay the funding signature, then deliver the signed X-PAYMENT header to the merchant and return the tool result.',
   behavior:
-    'The fast-path final step, combining haven_submit + haven_complete_mcp_tool. Pass payment_id, signature, and payment_header from haven_sign_x402 — merchant_url/tool_name/arguments/mcp_transport are OPTIONAL (#1307): Haven rehydrates them from the haven_pay_mcp_tool quote by payment_id; pass them explicitly only as a version-skew fallback. ' +
-    'Relays the funding signature to fund the delegate, then (only once funding confirms) re-issues the MCP tools/call to the merchant with the X-PAYMENT header (fresh MCP handshake server-side) and returns the merchant tool result. ' +
-    'Both the signature and the payment_header are signed locally by the edge signer — Haven relays them but never holds the key. ' +
+    'Pass payment_id, signature, and payment_header from haven_sign_x402 — merchant_url/tool_name/arguments/mcp_transport are OPTIONAL (#1307): Haven rehydrates them from the haven_pay_mcp_tool quote by payment_id; pass them explicitly only as a version-skew fallback. ' +
     'If funding does not confirm (e.g. pending_approval) it returns { payment_id, settled: false, funding_status } and does not contact the merchant. ' +
+    'Next: no further Haven tool is needed on success; return the merchant tool result to the user. ' +
+    'Protocol notes: combines haven_submit + haven_complete_mcp_tool — relays the funding signature to fund the delegate, then (only once funding confirms) re-issues the MCP tools/call to the merchant with the X-PAYMENT header (fresh MCP handshake server-side) and returns the merchant tool result. ' +
+    'Both the signature and the payment_header are signed locally by the edge signer — Haven relays them but never holds the key. ' +
     'If the funding window expired it returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true. ' +
-    'Echoes payment_id on both the settled and not-settled responses so you can reconcile against haven_list_receipts / haven_get_payment_status without retaining it from haven_pay_mcp_tool. ' +
-    'Next: no further Haven tool is needed on success; return the merchant tool result to the user.',
+    'Echoes payment_id on both the settled and not-settled responses so you can reconcile against haven_list_receipts / haven_get_payment_status without retaining it from haven_pay_mcp_tool.',
   nextActionGuidance:
     'If the merchant rejects after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with mcp__haven__haven_sweep_delegate.',
 })
@@ -394,15 +407,27 @@ const QUOTE_X402_DESCRIPTION = composeDescription({
     'mcp__haven__haven_pay_x402_quote. Next: call mcp__haven__haven_pay_x402_quote.',
 })
 
+// #1311: sentence 1 = critical-path position; sentence 2 = the
+// structured-fields-first instruction; then the compact must-knows
+// (allowance routing, max_amount, the sign→submit→header chain); the
+// response-shape and signer-compatibility protocol notes are kept in full
+// but demoted to the tail.
 const PAY_X402_QUOTE_DESCRIPTION = [
-  'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): responses carry next_action, next_tool,',
-  'next_arguments, agent_summary and warnings — act on those; prose is fallback.',
-  'Construct the funding step for an x402 payment and return the unsigned hash for the local',
-  'signer to sign. For read-only allowance, budget, spend-limit, remaining-amount, or',
+  'Step 1 of a direct x402 purchase (non-MCP merchant): construct the funding step for an x402',
+  'payment and return the unsigned hash for the local signer to sign.',
+  'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): the response carries next_action, next_tool,',
+  'next_arguments, agent_summary and warnings — act on those; the prose below is fallback.',
+  'For read-only allowance, budget, spend-limit, remaining-amount, or',
   'reset-period questions, call haven_get_allowances instead of calling this tool.',
   'Pass the payment_required from haven_quote_x402 or directly from the merchant 402 response.',
   'ALWAYS pass max_amount on paid merchant calls (#1275): atomic units of the merchant\'s asset, the user-intent cap for THIS purchase, enforced against the live quote before any funding moves — separate from the agent\'s on-chain budget. Omitting it accepts the quoted price as-is (the response carries cap_warning).',
-  'Returns { payment_id, payload_hash, expires_at, x402 } where x402 carries the accepted option,',
+  'Sign payload_hash via mcp__haven-signer__haven_sign (passing x402.expected) on the local signer, then relay',
+  'with mcp__haven__haven_submit to fund the delegate wallet. After submission confirms, call',
+  'mcp__haven-signer__haven_x402_sign_header on the local signer to build the EIP-3009 X-PAYMENT header, then',
+  'retry the merchant yourself. Next: call mcp__haven-signer__haven_sign.',
+  'Returns { status: "pending_approval", payload_hash: null } when the amount exceeds the',
+  'budget. Haven never receives the signing key and never talks to the merchant.',
+  'Protocol notes: returns { payment_id, payload_hash, expires_at, x402 } where x402 carries the accepted option,',
   'resource_url, merchant_to, funding_to, and x402.expected signing context including expires_at.',
   'COMPACT by default (#1272): typed_data/typed_data_b64 are omitted — the preferred signing call',
   'is mcp__haven-signer__haven_sign_x402 with just payment_id and payment_required (#1263).',
@@ -416,18 +441,14 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'instructions). If it is not in that set the local signer is out of date: STOP before signing and',
   'tell the user to update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has',
   'been spent yet — funds move only when haven_submit relays a signature.',
-  'Sign payload_hash via mcp__haven-signer__haven_sign (passing x402.expected) on the local signer, then relay',
-  'with mcp__haven__haven_submit to fund the delegate wallet. After submission confirms, call',
-  'mcp__haven-signer__haven_x402_sign_header on the local signer to build the EIP-3009 X-PAYMENT header, then',
-  'retry the merchant yourself.',
-  'Next: call mcp__haven-signer__haven_sign.',
-  'Returns { status: "pending_approval", payload_hash: null } when the amount exceeds the',
-  'budget. Haven never receives the signing key and never talks to the merchant.',
 ].join(' ')
 
+// #1311: same restructuring pattern — critical-path position first, then
+// the must-knows (when to call, what to pass, what it returns), then the
+// signer-compatibility protocol note demoted to the tail.
 const RESUME_X402_DESCRIPTION = [
-  'Retrieve the signing context for an approved x402 payment so the local signer can build the',
-  'EIP-3009 X-PAYMENT header and the agent can retry the merchant.',
+  'Resume step of the x402 purchase flow: retrieve the signing context for an approved payment',
+  'so the local signer can build the EIP-3009 X-PAYMENT header and the agent can retry the merchant.',
   'Use after haven_get_payment_status returns nextAction=retry_original_x402_request.',
   'Pass resume_state (from the original pending-approval response) or payment_id.',
   'Returns { payment_id, payment_required, x402 } with the same signing context shape as',
@@ -438,7 +459,7 @@ const RESUME_X402_DESCRIPTION = [
   // have changed since the original quote. There is no version to echo here —
   // the resume state carries no expected context — so this prompts a re-check
   // of the one the agent already holds rather than inventing a null to compare.
-  'This result carries no signer_compatibility of its own. Before signing, re-check the',
+  'Protocol notes: this result carries no signer_compatibility of its own. Before signing, re-check the',
   'x402_expected_context_version from the ORIGINAL quote against the versions the haven-signer',
   `MCP server advertises at initialize (${SIGNER_CAPABILITY_SOURCE} and its instructions) —`,
   'a signer restart or reinstall since that quote may have changed which versions it verifies.',
@@ -483,11 +504,23 @@ const SWEEP_DELEGATE_DESCRIPTION = [
   'Recovers USDC only — stranded native ETH is not recoverable through this gasless path.',
 ].join(' ')
 
+// #1311: hosted-only override — points the guided catalog-purchase path
+// (haven_prepare_catalog_purchase, #1306) back at discovery, which the
+// shared fragment cannot name because it does not exist on the local MCP
+// surface. Everything else stays the shared summary/selectionGuidance/
+// behavior; only nextActionGuidance is extended.
+const DISCOVER_TOOLS_DESCRIPTION = composeDescription({
+  ...sharedDescriptions.discoverTools,
+  nextActionGuidance:
+    sharedDescriptions.discoverTools.nextActionGuidance +
+    ' For an MCP entry where you already have a spending cap in mind, prefer haven_prepare_catalog_purchase with the entry\'s catalog_id — it runs the live quote, cap, and rail-aware allowance check for you.',
+})
+
 export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
   haven_sweep_delegate: SWEEP_DELEGATE_DESCRIPTION,
-  haven_discover_tools: composeDescription(sharedDescriptions.discoverTools),
+  haven_discover_tools: DISCOVER_TOOLS_DESCRIPTION,
   haven_send: composeDescription(sharedDescriptions.send),
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
@@ -1479,17 +1512,11 @@ export function createToolHandlers(
     haven_get_payment_status: async (input) =>
       runTool(async () => {
         const args = parse('haven_get_payment_status', input)
-        const status = await haven.getPaymentStatus(args.payment_id)
-        // #1310: attach the same post-purchase allowance/budget summary as
-        // haven_settle_mcp_tool's settled:true branch — "where natural" means
-        // a genuinely SETTLED x402 payment (funded_but_unsettled excluded:
-        // that phase means the merchant did NOT accept the retry). Every
-        // other phase/rail returns the status untouched.
-        if (status.rail === AgentPaymentRail.X402 && status.phase === AgentPaymentPhase.PaymentConfirmed) {
-          const { allowance, warnings } = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
-          return { ...status, allowance, ...(warnings.length > 0 ? { warnings } : {}) }
-        }
-        return status
+        // #1310/#1311: shared with packages/mcp's haven_get_payment_status
+        // handler — see HavenClient.getPaymentStatusWithPostPurchaseAllowance
+        // in @haven_ai/sdk for the single home of this "settled x402 only"
+        // attach logic (was duplicated verbatim in both packages).
+        return haven.getPaymentStatusWithPostPurchaseAllowance(args.payment_id)
       }),
 
     haven_get_resume_state: async (input) =>

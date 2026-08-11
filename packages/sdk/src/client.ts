@@ -60,6 +60,7 @@ import type {
 import {
   AgentPaymentNextAction,
   AgentPaymentPhase,
+  AgentPaymentRail,
   AgentPaymentWarningCode,
   HavenApiError,
   HavenPaymentStateError,
@@ -1034,6 +1035,34 @@ export class HavenClient {
     } catch (err) {
       return unavailable(err instanceof Error ? err.message : String(err))
     }
+  }
+
+  /**
+   * `haven_get_payment_status` convenience: fetch status and, for a
+   * genuinely SETTLED x402 payment, attach the same post-purchase
+   * allowance/budget summary a settle response carries.
+   *
+   * #1310/#1311 parity: this is the ONE home for logic that was duplicated
+   * verbatim in `packages/mcp-server/src/tools.ts` and `packages/mcp/src/tools.ts`
+   * (both hosted and local `haven_get_payment_status` handlers) — extracted
+   * here because both packages already depend on `@haven_ai/sdk` and call
+   * methods on a `HavenClient` instance, so this needed no new dependency
+   * edge. `funded_but_unsettled` is deliberately excluded: that phase means
+   * the merchant did NOT accept the retry. Every other phase/rail returns
+   * the status untouched.
+   */
+  async getPaymentStatusWithPostPurchaseAllowance(paymentId: string): Promise<
+    PaymentStatusResult & {
+      allowance?: PostPurchaseAllowanceSummary | null
+      warnings?: AgentPaymentWarning[]
+    }
+  > {
+    const status = await this.getPaymentStatus(paymentId)
+    if (status.rail === AgentPaymentRail.X402 && status.phase === AgentPaymentPhase.PaymentConfirmed) {
+      const { allowance, warnings } = await this.getPostPurchaseAllowanceSummary(paymentId)
+      return { ...status, allowance, ...(warnings.length > 0 ? { warnings } : {}) }
+    }
+    return status
   }
 
   /**

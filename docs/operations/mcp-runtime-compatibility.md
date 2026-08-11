@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1300-kalibrering: 300s merchant-default + MERCHANT_UNRESPONSIVE_AFTER_FUNDING; ingen floor/manifest-ändring
+last-verified: "2026-08-11" # #1308: hosted responses gained structured guidance fields (additiva); ingen floor/manifest-ändring
 ---
 
 # MCP Runtime Compatibility

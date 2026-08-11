@@ -1529,3 +1529,167 @@ describe('compact x402 signing payload (#1272)', () => {
     ).toEqual(TYPED_DATA)
   })
 })
+
+// ── #1271: bounded same-origin merchant endpoint discovery ───────────────────
+
+describe('merchant MCP endpoint discovery (#1271)', () => {
+  const paymentRequiredHeader = () => btoa(JSON.stringify(PAYMENT_REQUIRED))
+  const DISCOVERY_DOC = { name: 'Haven Demo Merchant', mcp_url: 'http://merchant.test/mcp' }
+  const havenStubs = () => ({
+    'GET /machine-payments/agent': { status: 200 as const, body: AGENT_RESPONSE },
+    'POST /x402': { status: 201 as const, body: X402_INTENT_RESPONSE },
+  })
+
+  it('resolves a base URL through /.well-known and returns the RESOLVED merchant_url', async () => {
+    stubFetch({
+      // The base URL is not the MCP endpoint: POST / misses.
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': { status: 200, body: DISCOVERY_DOC },
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+      },
+      ...havenStubs(),
+    })
+
+    const result = ok<{ merchant_url: string; merchant_url_discovered_from?: string }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      }),
+    )
+
+    expect(result.data.merchant_url).toBe('http://merchant.test/mcp')
+    expect(result.data.merchant_url_discovered_from).toBe('http://merchant.test/')
+  })
+
+  it('does NOT run discovery when the exact endpoint answers 402', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+      },
+      ...havenStubs(),
+    })
+
+    const result = ok<{ merchant_url: string; merchant_url_discovered_from?: string }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+      }),
+    )
+
+    expect(result.data.merchant_url).toBe('http://merchant.test/mcp')
+    expect(result.data.merchant_url_discovered_from).toBeUndefined()
+    expect(calls.some((c) => String(c.url).includes('.well-known'))).toBe(false)
+  })
+
+  it('fails with actionable guidance when no discovery document exists', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': { status: 404, body: {} },
+      'GET /': { status: 404, body: {} },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.message).toMatch(/No same-origin discovery document/)
+    expect(result.message).toMatch(/<origin>\/mcp/)
+  })
+
+  it('REFUSES an off-origin mcp_url — never even fetches it (SSRF bound)', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { mcp_url: 'http://evil.example/mcp' },
+      },
+      // The root fallback also serves the off-origin doc.
+      'GET /': { status: 200, body: { mcp_url: 'http://evil.example/mcp' } },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    // The off-origin URL was refused at validation — no request ever went there.
+    expect(calls.some((c) => String(c.url).includes('evil.example'))).toBe(false)
+  })
+
+  it('a non-endpoint-miss error (merchant 500) does not trigger discovery', async () => {
+    stubFetch({
+      'POST /mcp': { status: 500, body: { error: 'boom' } },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    // 500 IS an endpoint miss by shape (non-402) — discovery may run, but the
+    // point pinned here is that failure is reported against the ORIGINAL URL
+    // and nothing beyond the two fixed same-origin paths was fetched.
+    const fetched = calls.map((c) => String(c.url))
+    expect(
+      fetched.every(
+        (u) =>
+          u.startsWith('http://merchant.test/mcp') ||
+          u === 'http://merchant.test/.well-known/haven-demo-merchant' ||
+          u === 'http://merchant.test/',
+      ),
+    ).toBe(true)
+  })
+  it('labels a retry miss with the DISCOVERED endpoint so the agent can tell the URLs apart', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { mcp_url: 'http://merchant.test/mcp' },
+      },
+      // The discovered endpoint ALSO misses.
+      'POST /mcp': { status: 404, body: { error: 'Not found' } },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.message).toMatch(/DISCOVERED endpoint http:\/\/merchant\.test\/mcp/)
+    expect(result.message).toMatch(/resolved from http:\/\/merchant\.test\//)
+  })
+
+  it('a discovery echo of the same URL (trailing slash) fails fast instead of burning the retry', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      // The document echoes the input back with only a slash difference.
+      'GET /.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { mcp_url: 'http://merchant.test' },
+      },
+      'GET /': { status: 200, body: { mcp_url: 'http://merchant.test' } },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.message).toMatch(/resolved the same URL/)
+    // Exactly one POST probe — the retry was NOT spent on the echo.
+    expect(calls.filter((c) => c.method === 'POST').length).toBe(1)
+  })
+})

@@ -989,19 +989,28 @@ export class HavenClient {
       ],
     })
     try {
-      const status = await this.getPaymentStatus(paymentId)
+      // #1320 review: all three reads in ONE parallel leg — the status result
+      // only gates the token MATCH below, so sequencing it first doubled the
+      // worst-case bound (2 × requestTimeout) for a best-effort report.
+      const [status, agent, allowanceSummary] = await Promise.all([
+        this.getPaymentStatus(paymentId),
+        this.getAgent(),
+        this.getAllowances(),
+      ])
       const tokenAddress = status.asset ?? status.x402?.asset ?? null
       if (!tokenAddress) {
         return unavailable('the settled payment does not carry a resolvable token address')
       }
-      const [agent, allowanceSummary] = await Promise.all([this.getAgent(), this.getAllowances()])
       const rail = agent.executionRail
       const source = rail === 'delegation' ? 'active_delegations' : 'allowance_module'
       const match = allowanceSummary.allowances.find(
         (a) => a.tokenAddress.toLowerCase() === tokenAddress.toLowerCase(),
       )
       if (!match) {
-        return { allowance: { rail, remaining_atomic: '0', source }, warnings: [] }
+        // #1320 review: a missing row is UNKNOWN, not zero — an unexpected
+        // address, rail mismatch, or read race must not report a confident
+        // "$0 remaining" to the user.
+        return unavailable('no allowance/budget row matches the settled token')
       }
       // Same "only format when decimals are known" discipline as
       // getAgentSummary() above — an unregistered token surfaces the exact

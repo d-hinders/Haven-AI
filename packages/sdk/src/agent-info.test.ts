@@ -322,7 +322,7 @@ describe('getPostPurchaseAllowanceSummary (#1310)', () => {
     })
   })
 
-  it('reports remaining_atomic: "0" (never a guess) when no allowance row matches the settled token', async () => {
+  it('reports UNKNOWN (null + warning) when no allowance row matches the settled token — never a fabricated zero (#1320 review)', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       const u = String(url)
       if (u.endsWith('/machine-payments/pay_1/status')) return paymentStatusResponse({ asset: '0xDifferentToken' })
@@ -334,10 +334,10 @@ describe('getPostPurchaseAllowanceSummary (#1310)', () => {
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
     const summary = await haven.getPostPurchaseAllowanceSummary('pay_1')
 
-    expect(summary).toEqual({
-      allowance: { rail: 'legacy', remaining_atomic: '0', source: 'allowance_module' },
-      warnings: [],
-    })
+    expect(summary.allowance).toBeNull()
+    expect(summary.warnings).toHaveLength(1)
+    expect(summary.warnings[0].code).toBe('ALLOWANCE_CHECK_UNAVAILABLE')
+    expect(summary.warnings[0].message).toMatch(/no allowance\/budget row matches/)
   })
 
   it('NEVER throws when the payment-status lookup fails — degrades to a null block + ALLOWANCE_CHECK_UNAVAILABLE', async () => {

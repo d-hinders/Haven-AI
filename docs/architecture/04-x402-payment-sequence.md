@@ -433,7 +433,10 @@ active delegation's caveat enforcers) remains the actual gate regardless of
 whether this summary can be produced. A failed read (payment-status lookup,
 agent lookup, or the allowance/budget lookup itself) NEVER converts a
 succeeded settlement into a failure — `getPostPurchaseAllowanceSummary`
-degrades to `{ allowance: null, warnings: [ALLOWANCE_CHECK_UNAVAILABLE] }`,
+degrades to `{ allowance: null, warnings: [ALLOWANCE_CHECK_UNAVAILABLE] }` —
+and so does a SUCCESSFUL read where no allowance/budget row matches the
+settled token (#1320 review: unknown is reported as unknown, never a
+fabricated zero) —
 folded into the response's existing `warnings[]` (#1308). `ALLOWANCE_CHECK_UNAVAILABLE`
 predates this issue (#1306) and is reused rather than respelled; per #1318 it
 was confirmed SDK-side only, never mirrored on the backend.

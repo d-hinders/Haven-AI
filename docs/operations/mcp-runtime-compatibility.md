@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1308: hosted responses gained structured guidance fields (additiva); ingen floor/manifest-ändring
+last-verified: "2026-08-11" # #1308-fixar (guidance på decomposed-pending + settle-pending); additivt, ingen floor/manifest-ändring
 ---
 
 # MCP Runtime Compatibility

@@ -18,7 +18,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # #1308 structured next-step contract on hosted purchase responses (+ #1300/#1301 same train)
+last-verified: "2026-08-11" # #1308 review-fynd: pending-tvillingen + settle-grenen täckta; AgentPaymentSummary-namnet
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -92,7 +92,8 @@ may still settle late against its valid EIP-3009 authorization.
 Since #1308 the hosted purchase responses carry a **structured next-step
 contract**: `next_action` (values from the existing AgentPaymentNextAction
 taxonomy), `next_tool` + small literal `next_arguments`, `safe_to_continue`
-(false on pending approval — over-budget is a user decision), a compact
+(false on pending approval — over-budget is a user decision, on BOTH quote
+tools and on the settle tool's queued-funding branch), a compact
 `agent_summary`, and an advisory `warnings[]` (MISSING_MAX_AMOUNT absorbs the
 #1275 cap nudge; QUOTE_EXPIRES_SOON; MERCHANT_URL_DISCOVERED). Warnings never
 replace refusals; failure codes stay authoritative.

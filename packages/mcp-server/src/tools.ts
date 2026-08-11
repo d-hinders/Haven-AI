@@ -705,11 +705,27 @@ export function createToolHandlers(
           } catch (probeErr) {
             if (!isMerchantEndpointMiss(probeErr)) throw probeErr
             const discovered = await discoverMerchantMcpUrl(merchantUrl)
-            if (!discovered || discovered === merchantUrl) {
+            // Trailing-slash/case echoes of the input are "same URL" — spend
+            // the one retry only on a genuinely different endpoint.
+            if (!discovered || sameUrl(discovered, merchantUrl)) {
               throw withDiscoveryGuidance(probeErr, merchantUrl, discovered)
             }
+            const inputUrl = merchantUrl
             merchantUrl = discovered
-            quote = await probe()
+            try {
+              quote = await probe()
+            } catch (retryErr) {
+              // Label which URL failed — the agent otherwise cannot tell the
+              // discovered endpoint's miss from the original probe's.
+              if (retryErr instanceof HavenApiError) {
+                throw new HavenApiError(
+                  `${retryErr.message} (at the DISCOVERED endpoint ${discovered}, ` +
+                    `resolved from ${inputUrl} via the merchant discovery document)`,
+                  retryErr.statusCode ?? 400,
+                )
+              }
+              throw retryErr
+            }
           }
           // Enforce the optional price cap against the LIVE merchant price,
           // before creating the funding intent. The catalog price is only a hint.
@@ -1158,6 +1174,17 @@ async function discoverMerchantMcpUrl(inputUrl: string): Promise<string | null> 
     }
   }
   return null
+}
+
+/** Trailing-slash/percent-case echoes compare equal; unparseable never does. */
+function sameUrl(a: string, b: string): boolean {
+  try {
+    const ua = new URL(a)
+    const ub = new URL(b)
+    return ua.origin === ub.origin && ua.pathname.replace(/\/+$/, '') === ub.pathname.replace(/\/+$/, '')
+  } catch {
+    return false
+  }
 }
 
 /** The probe failure shape that means "this URL is not the MCP endpoint". */

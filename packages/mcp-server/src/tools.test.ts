@@ -1641,4 +1641,48 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
       ),
     ).toBe(true)
   })
+  it('labels a retry miss with the DISCOVERED endpoint so the agent can tell the URLs apart', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { mcp_url: 'http://merchant.test/mcp' },
+      },
+      // The discovered endpoint ALSO misses.
+      'POST /mcp': { status: 404, body: { error: 'Not found' } },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.message).toMatch(/DISCOVERED endpoint http:\/\/merchant\.test\/mcp/)
+    expect(result.message).toMatch(/resolved from http:\/\/merchant\.test\//)
+  })
+
+  it('a discovery echo of the same URL (trailing slash) fails fast instead of burning the retry', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      // The document echoes the input back with only a slash difference.
+      'GET /.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { mcp_url: 'http://merchant.test' },
+      },
+      'GET /': { status: 200, body: { mcp_url: 'http://merchant.test' } },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.message).toMatch(/resolved the same URL/)
+    // Exactly one POST probe — the retry was NOT spent on the echo.
+    expect(calls.filter((c) => c.method === 'POST').length).toBe(1)
+  })
 })

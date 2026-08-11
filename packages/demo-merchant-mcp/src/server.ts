@@ -7,11 +7,13 @@ import {
   SUPPORTED_SETTLEMENT_METHODS,
   CHAIN_ID,
   HOSTED_DEMO_MERCHANT_URLS,
+  buildProductMetadata,
   formatUsdc,
+  merchantEnvironmentForChain,
   type ProductId,
   type SettlementMethod,
 } from './products.js'
-import { invoiceForPayment } from './invoice.js'
+import { invoiceForPayment, type Invoice } from './invoice.js'
 import type { SettledPayment, X402PaymentProcessor } from './x402.js'
 import type { Address } from 'viem'
 
@@ -30,13 +32,57 @@ export interface MerchantConfig {
 
 const completedPurchases = new WeakMap<SettledPayment, string>()
 
+// ── Structured purchase summary (#1273) ─────────────────────────────────────
+// DISPLAY/REPORTING DATA ONLY. This is a convenience surface for agent-facing
+// reporting ("what did I just buy") — it is never the bookkeeping or ledger
+// source of truth. That truth remains the Haven receipt (the `x-receipt-json`
+// header / invoice, set by the HTTP layer from this same `SettledPayment`) plus
+// on-chain funding/settlement state. Every field below is read straight off the
+// already-settled `SettledPayment` (never re-derived from the quoted product
+// price or caller input), so the summary cannot silently drift from what was
+// actually settled on-chain.
+export interface PurchaseSummary {
+  status: 'confirmed'
+  product_id: ProductId
+  product_name: string
+  invoice_id: string
+  amount_atomic: string
+  amount: string
+  asset: 'USDC'
+  network: string
+  /** Not known merchant-side in this demo (no funding-leg visibility here);
+   *  present for shape parity with Haven's funding+settlement two-leg rails. */
+  funding_tx_hash?: string
+  settlement_tx_hash: string
+}
+
+/** Built only from an ALREADY-SETTLED payment — status: 'confirmed' is reachable
+ *  only via this function, and only after `waitForReceipt` has proven the
+ *  on-chain transaction succeeded (see x402.ts `confirmSubmittedPayment`). */
+export function buildPurchaseSummary(payment: SettledPayment, invoice: Invoice): PurchaseSummary {
+  const product = PRODUCTS[payment.productId]
+  return {
+    status: 'confirmed',
+    product_id: payment.productId,
+    product_name: product.name,
+    invoice_id: invoice.json.fakturanummer,
+    amount_atomic: payment.value.toString(),
+    amount: formatUsdc(payment.value),
+    asset: 'USDC',
+    network: `eip155:${CHAIN_ID}`,
+    settlement_tx_hash: payment.txHash,
+  }
+}
+
 export function runWithSettledPayment<T>(payment: SettledPayment | undefined, fn: () => T): T {
   return paymentStorage.run(payment, fn)
 }
 
 /** Build the demo merchant MCP server. */
 export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
-  const settlementMethods = config.settlementMethods?.length ? config.settlementMethods : ['eip3009']
+  const settlementMethods: readonly SettlementMethod[] = config.settlementMethods?.length
+    ? config.settlementMethods
+    : ['eip3009']
   const defaultSettlementMethod = settlementMethods.includes(DEFAULT_SETTLEMENT_METHOD)
     ? DEFAULT_SETTLEMENT_METHOD
     : settlementMethods[0]
@@ -48,37 +94,27 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
   // ── list_products ──────────────────────────────────────────────────────────
   server.tool(
     'list_products',
-    'List available demo products, prices, merchant URL, and supported x402 settlement methods. No payment required.',
+    'List available demo products, prices, merchant URL, and supported x402 settlement methods. No payment required. ' +
+      'The structured output (`products`) exposes stable machine-readable fields — product_id, tool_name, ' +
+      'arguments_schema, supported_settlement_methods, default_settlement_method, mcp_url, environment — so an agent ' +
+      'can pick e.g. buy_cloud_storage { tier: "50gb" } without parsing the localized `description` prose.',
     {},
     async () => {
-      const rows = Object.values(PRODUCTS).map((p) => ({
-        id: p.id,
-        name: p.name,
-        category: p.category,
-        price_usdc: formatUsdc(p.price_usdc),
-        description: p.description,
-        x402: {
-          resource_url: `${config.baseUrl}/mcp`,
-          network: `eip155:${CHAIN_ID}`,
-          asset: 'USDC',
-          settlement_methods: settlementMethods,
-          default_settlement_method: defaultSettlementMethod,
-          hosted_urls: {
-            dev: `${HOSTED_DEMO_MERCHANT_URLS.dev}/mcp`,
-            prod: `${HOSTED_DEMO_MERCHANT_URLS.prod}/mcp`,
-          },
-        },
-      }))
+      // #1274: one builder shared per product so metadata and its display text
+      // can never drift from each other or from the erc7710 gate resolved upstream.
+      const metadata = Object.values(PRODUCTS).map((p) =>
+        buildProductMetadata(p, { enabledSettlementMethods: settlementMethods, mcpUrl: `${config.baseUrl}/mcp` }),
+      )
 
-      const text = rows
+      const text = metadata
         .map(
-          (r) =>
-            `[${r.id}] ${r.name}\n` +
-            `  Pris: $${r.price_usdc} USDC/månad\n` +
-            `  x402: ${r.x402.network} USDC, settlement_methods=${r.x402.settlement_methods.join(',')}, default=${r.x402.default_settlement_method}\n` +
-            `  Merchant MCP URL: ${r.x402.resource_url}\n` +
-            `  Hosted routing: dev=${r.x402.hosted_urls.dev}, prod=${r.x402.hosted_urls.prod}\n` +
-            `  ${r.description}`,
+          (m) =>
+            `[${m.product_id}] ${m.display_name}\n` +
+            `  Pris: ${m.display.price_formatted}/månad\n` +
+            `  x402: ${m.network} USDC, settlement_methods=${m.supported_settlement_methods.join(',')}, default=${m.default_settlement_method}\n` +
+            `  Merchant MCP URL: ${m.mcp_url}\n` +
+            `  Hosted routing: dev=${HOSTED_DEMO_MERCHANT_URLS.dev}/mcp, prod=${HOSTED_DEMO_MERCHANT_URLS.prod}/mcp\n` +
+            `  ${m.description}`,
         )
         .join('\n\n')
 
@@ -93,6 +129,11 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
               `Betalning sker via x402 (USDC på Base) och måste signeras av köparens wallet eller agentruntime.`,
           },
         ],
+        structuredContent: {
+          products: metadata,
+          environment: merchantEnvironmentForChain(CHAIN_ID),
+          mcp_url: `${config.baseUrl}/mcp`,
+        },
       }
     },
   )
@@ -101,7 +142,9 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
   server.tool(
     'buy_vpn',
     'Köp ett NordShield VPN-abonnemang. Betalning via x402 (USDC på Base). ' +
-      `settlement_method är valfritt och standard är ${defaultSettlementMethod}. Kräver giltig PAYMENT-SIGNATURE eller X-PAYMENT header.`,
+      `settlement_method är valfritt och standard är ${defaultSettlementMethod}. Kräver giltig PAYMENT-SIGNATURE eller X-PAYMENT header. ` +
+      'On success, report the purchase to the user from the structured `summary` object (status, product_name, amount, ' +
+      'settlement_tx_hash) rather than parsing the confirmation text or invoice.',
     {
       plan: z.enum(['basic', 'pro', 'ultra']).describe('VPN-plan att köpa'),
       settlement_method: z.enum(SUPPORTED_SETTLEMENT_METHODS).optional().describe('Valfri x402 settlement method'),
@@ -116,7 +159,9 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
   server.tool(
     'buy_cloud_storage',
     'Köp CloudNest molnlagring. Betalning via x402 (USDC på Base). ' +
-      `settlement_method är valfritt och standard är ${defaultSettlementMethod}. Kräver giltig PAYMENT-SIGNATURE eller X-PAYMENT header.`,
+      `settlement_method är valfritt och standard är ${defaultSettlementMethod}. Kräver giltig PAYMENT-SIGNATURE eller X-PAYMENT header. ` +
+      'On success, report the purchase to the user from the structured `summary` object (status, product_name, amount, ' +
+      'settlement_tx_hash) rather than parsing the confirmation text or invoice.',
     {
       tier: z.enum(['50gb', '200gb', '1tb']).describe('Lagringskapacitet att köpa'),
       settlement_method: z.enum(SUPPORTED_SETTLEMENT_METHODS).optional().describe('Valfri x402 settlement method'),
@@ -165,14 +210,18 @@ function completePurchase(
     }
   }
 
+  // Shared with the HTTP layer's x-receipt-json header (#956) — one invoice
+  // per settled payment, so header and text can never diverge. Recomputing on
+  // every call is cheap and deterministic (invoiceForPayment memoizes per
+  // payment), so the summary below can never disagree between a fresh
+  // purchase and a retried/duplicate one.
+  const invoice = invoiceForPayment(payment, productId)
+  const summary = buildPurchaseSummary(payment, invoice)
+
   const cachedText = completedPurchases.get(payment)
   if (cachedText) {
-    return { content: [{ type: 'text' as const, text: cachedText }] }
+    return { content: [{ type: 'text' as const, text: cachedText }], structuredContent: { summary } }
   }
-
-  // Shared with the HTTP layer's x-receipt-json header (#956) — one invoice
-  // per settled payment, so header and text can never diverge.
-  const invoice = invoiceForPayment(payment, productId)
 
   const text =
     `✅ Köp bekräftat!\n\n` +
@@ -188,5 +237,5 @@ function completePurchase(
     JSON.stringify(invoice.json, null, 2)
 
   completedPurchases.set(payment, text)
-  return { content: [{ type: 'text' as const, text }] }
+  return { content: [{ type: 'text' as const, text }], structuredContent: { summary } }
 }

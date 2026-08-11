@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { isMap, parseDocument, stringify } from 'yaml'
 import { signerPackageSpec } from './runtime-manifest.js'
 import { type RuntimeId } from './runtime-registry.js'
 
@@ -69,6 +70,8 @@ export async function writeRuntimeConfig(input: RuntimeConfigInput): Promise<Run
       return writeJsonRuntimeConfig(input, vscodeInsidersConfigPath(input.homeDir), 'servers')
     case 'claude-desktop':
       return writeJsonRuntimeConfig(input, claudeDesktopConfigPath(input.homeDir), 'mcpServers')
+    case 'hermes':
+      return writeHermesConfig(input)
     default:
       return {
         hostedConfigured: false,
@@ -148,6 +151,108 @@ export function mergeJsonMcpConfig(
   return `${JSON.stringify(config, null, 2)}\n`
 }
 
+/** Merge Haven's managed MCP entries into Hermes's YAML configuration. */
+export function mergeHermesYaml(
+  existingYaml: string | null,
+  hostedServer: Record<string, unknown>,
+  signerServer: Record<string, unknown>,
+): string {
+  if (!existingYaml?.trim()) return renderHermesYaml({ haven: hostedServer, 'haven-signer': signerServer })
+
+  const doc = parseDocument(existingYaml, { keepSourceTokens: true })
+  if (doc.errors.length > 0 || !isMap(doc.contents)) {
+    throw new Error('Hermes config must be a YAML object')
+  }
+
+  const mcpPair = doc.contents.items.find((item) => item.key?.toString() === 'mcp_servers')
+  const existingServers = mcpPair && isMap(mcpPair.value) ? mcpPair.value.toJSON() : {}
+  const servers = isRecord(existingServers) ? existingServers : {}
+  const mergedServers = {
+    ...servers,
+    haven: hostedServer,
+    'haven-signer': signerServer,
+  }
+
+  if (!mcpPair) {
+    return appendHermesMcpServers(existingYaml, mergedServers)
+  }
+  if (!mcpPair.value?.range) return replaceEmptyHermesMcpServers(existingYaml, mcpPair.key?.range, mergedServers)
+  return replaceHermesMcpServers(existingYaml, mcpPair.key?.range, mcpPair.value.range, mergedServers)
+}
+
+function appendHermesMcpServers(source: string, servers: Record<string, unknown>): string {
+  const documentEnd = /(?:^|\n)[ \t]*\.\.\.[ \t]*(?:#[^\n]*)?\r?\n?$/.exec(source)
+  if (documentEnd) {
+    const markerStart = documentEnd.index + (documentEnd[0].startsWith('\n') ? 1 : 0)
+    const beforeMarker = source.slice(0, markerStart)
+    return `${beforeMarker}${beforeMarker.endsWith('\n') ? '' : '\n'}${renderHermesMcpServers(servers, '')}\n${source.slice(markerStart)}`
+  }
+  const separator = source.endsWith('\n') ? '' : '\n'
+  return `${source}${separator}${renderHermesMcpServers(servers, '')}\n`
+}
+
+function replaceHermesMcpServers(
+  source: string,
+  keyRange: readonly number[] | undefined,
+  valueRange: readonly number[],
+  servers: Record<string, unknown>,
+): string {
+  const valueStart = valueRange[0]
+  const valueEnd = valueRange[1]
+  const valueLineStart = source.lastIndexOf('\n', valueStart - 1) + 1
+  const keyStartsOnValueLine = keyRange?.[0] !== undefined && keyRange[0] >= valueLineStart
+  const nestedIndent = `${source.slice(valueLineStart, keyRange?.[0] ?? valueLineStart)}  `
+
+  if (keyStartsOnValueLine) {
+    const keyStart = keyRange![0]
+    const keyEnd = keyRange![1]
+    const replacement = `${source.slice(keyStart, keyEnd)}:\n${renderHermesMcpServerEntries(servers, nestedIndent)}`
+    const needsTrailingNewline = valueEnd < source.length && !source.slice(valueEnd).startsWith('\n')
+    return `${source.slice(0, keyStart)}${replacement}${needsTrailingNewline ? '\n' : ''}${source.slice(valueEnd)}`
+  }
+
+  const indent = source.slice(valueLineStart, valueStart)
+  const rendered = stringify(servers, { lineWidth: 120 }).trimEnd()
+  const replacement = rendered.split('\n').map((line, index) => index === 0 ? line : `${indent}${line}`).join('\n')
+  const needsTrailingNewline = valueEnd < source.length && !source.slice(valueEnd).startsWith('\n')
+  return `${source.slice(0, valueStart)}${replacement}${needsTrailingNewline ? '\n' : ''}${source.slice(valueEnd)}`
+}
+
+function replaceEmptyHermesMcpServers(
+  source: string,
+  keyRange: readonly number[] | undefined,
+  servers: Record<string, unknown>,
+): string {
+  if (!keyRange) throw new Error('Hermes config mcp_servers key is invalid')
+  const keyStart = keyRange[0]
+  const keyEnd = keyRange[1]
+  const lineStart = source.lastIndexOf('\n', keyStart - 1) + 1
+  const lineEnd = source.indexOf('\n', keyEnd)
+  const nestedIndent = `${source.slice(lineStart, keyStart)}  `
+  const replacement = `${source.slice(keyStart, keyEnd)}:\n${renderHermesMcpServerEntries(servers, nestedIndent)}`
+  return `${source.slice(0, keyStart)}${replacement}${lineEnd === -1 ? '\n' : source.slice(lineEnd)}`
+}
+
+function renderHermesYaml(servers: Record<string, unknown>): string {
+  return `${renderHermesMcpServers(servers, '')}\n`
+}
+
+function renderHermesMcpServers(servers: Record<string, unknown>, indent: string): string {
+  return `mcp_servers:\n${renderHermesMcpServerEntries(servers, `${indent}  `)}`
+}
+
+function renderHermesMcpServerEntries(servers: Record<string, unknown>, indent: string): string {
+  return stringify(servers, { lineWidth: 120 })
+    .trimEnd()
+    .split('\n')
+    .map((line) => `${indent}${line}`)
+    .join('\n')
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 export function mergeCodexToml(existingToml: string, localMcpCommand: string): string {
   let next = removeTomlTableTree(removeTomlTableTree(existingToml, 'mcp_servers.haven'), 'mcp_servers.haven_signer')
   next = next.trimEnd()
@@ -219,6 +324,45 @@ async function writeJsonRuntimeConfig(
       changed: false,
       restartRequired: true,
       messages: [`Could not update ${configTargetLabel(input.runtime)}: ${err instanceof Error ? err.message : String(err)}`],
+      errorCode: 'runtime_config_write_failed',
+    }
+  }
+}
+
+async function writeHermesConfig(input: RuntimeConfigInput): Promise<RuntimeConfigWriteResult> {
+  const target = hermesConfigPath(input.homeDir)
+  try {
+    const existing = await readOptional(target)
+    const merged = mergeHermesYaml(
+      existing,
+      buildHostedServer(input.hostedMcpUrl, input.apiKey, input.runtime),
+      buildSignerServer(resolveSignerLaunchSpec(input), input.runtime),
+    )
+    await writeOwnerOnlyText(target, merged)
+    return {
+      hostedConfigured: true,
+      signerConfigured: true,
+      localMcpConfigured: false,
+      runtimeMcpMode: 'hosted_plus_signer',
+      target: 'Hermes Agent config',
+      changed: existing !== merged,
+      restartRequired: true,
+      messages: [
+        `Updated Haven MCP entries in ${target}.`,
+        'Restart Hermes (start a new session; gateway users: /restart), then verify with `hermes mcp list` — tools appear as mcp_haven_* and mcp_haven_signer_*.',
+        'If no mcp_* tools appear after restart, ensure the MCP SDK is installed in Hermes: pip install mcp',
+      ],
+    }
+  } catch {
+    return {
+      hostedConfigured: false,
+      signerConfigured: false,
+      localMcpConfigured: false,
+      runtimeMcpMode: 'hosted_plus_signer',
+      target: 'Hermes Agent config',
+      changed: false,
+      restartRequired: true,
+      messages: ['Could not update Hermes Agent config. Existing configuration was left unchanged.'],
       errorCode: 'runtime_config_write_failed',
     }
   }
@@ -538,6 +682,12 @@ function claudeDesktopConfigPath(homeDir = homedir()): string {
     return resolve(process.env.APPDATA ?? join(homeDir, 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json')
   }
   return resolve(homeDir, '.config', 'Claude', 'claude_desktop_config.json')
+}
+
+export function hermesConfigPath(homeDir?: string): string {
+  return process.env.HERMES_HOME
+    ? join(process.env.HERMES_HOME, 'config.yaml')
+    : join(homeDir ?? homedir(), '.hermes', 'config.yaml')
 }
 
 function configTargetLabel(runtime: RuntimeId): string {

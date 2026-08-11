@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # #1321: hosted paid-MCP quote now establishes its MCP session before the unpaid tools/call; signing, quote binding, and settle authority unchanged. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
+last-verified: "2026-08-11" # #1319: the #1306 preflight's allowance block gained ALLOWANCE_READ_OPTIMISTIC (the #1145 fallback's provenance, remaining_is_from_chain, is now on the GET /machine-payments/allowances wire, delegation-rail only); the post-purchase summary's freshness caveat updated to say the provenance exists but is not yet surfaced there. Prior #1321: hosted paid-MCP quote now establishes its MCP session before the unpaid tools/call; signing, quote binding, and settle authority unchanged. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -378,7 +378,23 @@ Sequence:
    remaining_atomic?: string, source: 'allowance_module' | 'active_delegations'
    }`. A failed read degrades to `sufficient: null` plus a warning
    (`ALLOWANCE_CHECK_UNAVAILABLE`) — it never fails the preflight, since the
-   on-chain policy remains the actual gate either way.
+   on-chain policy remains the actual gate either way; this holds on BOTH
+   rails, including the delegation rail's no-approval-queue branch below
+   (#1319: `sufficient` degrades to `null`, never a fabricated `false`, so
+   step 6's strict `=== false` refusal guard does not fire on a failed read).
+   On the delegation rail specifically, a read can also SUCCEED on an
+   OPTIMISTIC number: the on-chain enforcer read behind it
+   (`readRemainingBudget`, #1145) deliberately falls back to reporting the
+   full configured budget — never throwing — when the RPC read itself times
+   out, so this preflight's failed-read branch never fires for that failure
+   mode. The wire now carries that provenance
+   (`onchain.remaining_is_from_chain`, additive/optional, delegation-rail
+   only), and when it reads `false` this preflight adds a second, distinct
+   warning (`ALLOWANCE_READ_OPTIMISTIC`) alongside a real `sufficient`
+   true/false — the reported remaining budget could not be read live from
+   chain and is the configured full budget, not a confirmed figure; the
+   on-chain policy (the budget caveat enforcer) remains the actual gate at
+   redemption regardless.
 6. Rail behavior differs deliberately: on the **legacy** rail, an
    insufficient allowance does NOT refuse here — the flow proceeds exactly
    like `haven_pay_mcp_tool`, and the resulting funding intent queues for
@@ -442,11 +458,15 @@ folded into the response's existing `warnings[]` (#1308). `ALLOWANCE_CHECK_UNAVA
 predates this issue (#1306) and is reused rather than respelled; per #1318 it
 was confirmed SDK-side only, never mirrored on the backend.
 
-Freshness caveat, not fixed here (#1319, filed): the delegation rail's
-on-chain enforcer read can silently fall back to the optimistic full period
-budget without throwing when the RPC read itself fails (the pre-existing #1145
-design). This summary reflects the last successful chain read, not a
-guaranteed-live one — phrasing avoids claiming freshness.
+Freshness caveat (#1319): the delegation rail's on-chain enforcer read can
+silently fall back to the optimistic full period budget without throwing when
+the RPC read itself fails (the pre-existing #1145 design, deliberately
+unchanged by #1319 — the fallback stays fund-safe). The underlying wire now
+carries the provenance (`onchain.remaining_is_from_chain`, #1319), but this
+summary — unlike the #1306 catalog-purchase preflight above — does not yet
+surface it as a warning; `remaining_atomic` still reflects the last successful
+chain read, not a guaranteed-live one, and phrasing here avoids claiming
+freshness.
 
 ## Approval Resume
 

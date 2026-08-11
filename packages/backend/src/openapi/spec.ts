@@ -2684,6 +2684,16 @@ export const openapiSpec = {
                     last_reset_min: { type: 'integer' },
                     nonce: { type: 'integer' },
                     is_reset_pending: { type: 'boolean' },
+                    remaining_is_from_chain: {
+                      type: 'boolean',
+                      description:
+                        'Delegation rail only (#1319, provenance for #1145\'s fallback): true when ' +
+                        '`remaining` came from a live ERC20PeriodTransferEnforcer read, false when the ' +
+                        'read failed and this is the fallback full configured budget. Absent on the ' +
+                        'legacy AllowanceModule rail, which has no fallback concept. Reporting only — ' +
+                        'the on-chain policy is the actual gate either way, this only says how fresh ' +
+                        'this number is.',
+                    },
                   },
                   additionalProperties: false,
                 },

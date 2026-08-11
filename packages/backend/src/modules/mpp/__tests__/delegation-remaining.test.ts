@@ -73,6 +73,8 @@ describe('delegation-rail remaining reflects in-period spend (#1145)', () => {
     expect(a.onchain.spent).toBe('3500000')
     expect(a.onchain.effective_spent).toBe('3500000')
     expect(a.onchain.amount).toBe('5000000') // the budget it re-arms to
+    // #1319: a live read's provenance is on the wire too.
+    expect(a.onchain.remaining_is_from_chain).toBe(true)
   })
 
   it('an EXHAUSTED period reports zero — the bug this closes', async () => {
@@ -93,6 +95,23 @@ describe('delegation-rail remaining reflects in-period spend (#1145)', () => {
     const [a] = await onchainOf()
     expect(a.onchain.remaining).toBe('5000000')
     expect(a.onchain.spent).toBe('0')
+    // #1319: the fallback is fund-safe and UNCHANGED by this issue — but the
+    // provenance is now visible on the wire, so a caller can tell an
+    // optimistic figure from a confirmed one.
+    expect(a.onchain.remaining_is_from_chain).toBe(false)
+  })
+
+  it('#1319: the no-delegation-json branch is ALSO the fallback — same provenance as an RPC failure', async () => {
+    // No `del_1` row in the json map at all (distinct fixture from the
+    // RPC-failure case above): readRemainingBudget is never even reached,
+    // but the caller-visible provenance must read identically either way —
+    // both are "not a live read".
+    mockJson.mockResolvedValue(new Map())
+
+    const [a] = await onchainOf()
+    expect(a.onchain.remaining).toBe('5000000') // budget_atomic, the fallback
+    expect(mockRead).not.toHaveBeenCalled()
+    expect(a.onchain.remaining_is_from_chain).toBe(false)
   })
 
   it('clamps spent at zero when the budget was lowered mid-period', async () => {

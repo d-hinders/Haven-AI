@@ -945,6 +945,7 @@ export class HavenClient {
           lastResetMin: allowance.onchain.last_reset_min,
           nonce: allowance.onchain.nonce,
           isResetPending: allowance.onchain.is_reset_pending,
+          remainingIsFromChain: allowance.onchain.remaining_is_from_chain,
         },
       })),
     }
@@ -968,11 +969,15 @@ export class HavenClient {
    * successful settlement into a failure — the on-chain policy remains the
    * actual spend gate regardless of whether this report can be produced.
    *
-   * Freshness caveat (#1319, filed, not fixed here): the delegation rail's
-   * on-chain enforcer read can silently fall back to the optimistic full
-   * period budget without throwing when the RPC read itself fails — this
-   * summary reflects the last successful chain read, not a guaranteed-live
-   * one, and callers should not phrase it as guaranteed-fresh.
+   * Freshness caveat (#1319): the delegation rail's on-chain enforcer read
+   * can silently fall back to the optimistic full period budget without
+   * throwing when the RPC read itself fails (#1145's fund-safe design,
+   * unchanged here). {@link getAllowances}'s `onchain.remainingIsFromChain`
+   * now carries that provenance on the wire, and the #1306 catalog-purchase
+   * preflight (`haven_prepare_catalog_purchase`) surfaces it as a warning —
+   * this summary does not (yet). `remaining_atomic` here reflects the last
+   * successful chain read, not a guaranteed-live one, and callers should not
+   * phrase it as guaranteed-fresh.
    */
   async getPostPurchaseAllowanceSummary(
     paymentId: string,

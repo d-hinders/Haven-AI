@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-11" # #1308: quote/settle-svar bär next_action-kontraktet; signerytan oförändrad
+last-verified: "2026-08-11" # #1308-fixar: guidance täcker nu även decomposed-pending; signerytan oförändrad
 ---
 
 # Haven — Edge Signer

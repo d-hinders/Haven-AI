@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1308 guidance-fält + #1301 delad discovery (ej hosted-only) + #1300-kalibrering; ingen floor/manifest-ändring
+last-verified: "2026-08-11" # #1308 guidance-fält inkl. review-fixar + #1301 delad discovery + #1300-kalibrering; ingen floor/manifest-ändring
 ---
 
 # MCP Runtime Compatibility

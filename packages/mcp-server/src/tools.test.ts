@@ -1780,6 +1780,18 @@ describe('structured agent guidance (#1308)', () => {
     expect(result.data.warnings.some((w) => w.code === 'MISSING_MAX_AMOUNT')).toBe(false)
   })
 
+  it('the decomposed quote twin carries the SAME unsafe pending signal (#1308 review)', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 202, body: { payment_id: 'pay_pending', status: 'pending_approval' } },
+    })
+    const result = ok<{ next_action: string; safe_to_continue: boolean }>(
+      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+    expect(result.data.next_action).toBe('wait_for_user_approval')
+    expect(result.data.safe_to_continue).toBe(false)
+  })
+
   it('pending approval is UNSAFE to continue and points at status polling', async () => {
     stubFetch({
       ...stubs(),

@@ -821,6 +821,10 @@ export type components = {
             /** @enum {string} */
             protocol: "http" | "mcp";
             tool_name?: string | null;
+            /** @description Suggested MCP tool arguments for this catalog item, when the row represents a specific product variant. Agents should pass this object unchanged to the pay tool arguments field after confirming the live merchant quote. */
+            tool_arguments?: {
+                [key: string]: unknown;
+            } | null;
             price_display?: string | null;
             price_atomic?: string | null;
             asset?: string | null;

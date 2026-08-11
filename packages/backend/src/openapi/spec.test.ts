@@ -256,6 +256,17 @@ describe('openapiSpec', () => {
     })
   })
 
+  it('documents catalog MCP product arguments for agent discovery', () => {
+    const catalogEntry = openapiSpec.components.schemas.CatalogEntry
+
+    expect(catalogEntry.properties.tool_arguments).toMatchObject({
+      anyOf: [
+        { type: 'object', additionalProperties: true },
+        { type: 'null' },
+      ],
+    })
+  })
+
   it('documents machine payment evidence proof statuses', () => {
     const receiptSchema = openapiSpec.components.schemas.MachinePaymentReceipt
 

@@ -1625,7 +1625,8 @@ describe('haven_discover_tools (#349)', () => {
     {
       id: 'cat-mcp', name: 'Text generation', description: 'd', category: 'media',
       resource_url: 'https://mcp.merchant.example/mcp', rail: 'x402', protocol: 'mcp',
-      tool_name: 'create_text', price_display: '$0.01 USDC', price_atomic: '10000',
+      tool_name: 'create_text', tool_arguments: { prompt: 'hello' },
+      price_display: '$0.01 USDC', price_atomic: '10000',
       asset: 'USDC', network: 'eip155:8453', status: 'active', verified_at: '2026-06-10T00:00:00.000Z',
     },
     {
@@ -1657,7 +1658,11 @@ describe('haven_discover_tools (#349)', () => {
     const data = (result as { data: Array<Record<string, unknown>> }).data
 
     expect(data).toHaveLength(3)
-    expect(data[0]).toMatchObject({ id: 'cat-mcp', suggested_tool: 'haven_pay_mcp_tool' })
+    expect(data[0]).toMatchObject({
+      id: 'cat-mcp',
+      suggested_tool: 'haven_pay_mcp_tool',
+      tool_arguments: { prompt: 'hello' },
+    })
     expect(data[1]).toMatchObject({ id: 'cat-http', suggested_tool: 'haven_pay_x402' })
     expect(data[2]).toMatchObject({ id: 'cat-mpp', suggested_tool: 'haven_quote_mpp', status: 'degraded' })
 

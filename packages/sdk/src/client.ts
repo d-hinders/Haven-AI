@@ -925,6 +925,7 @@ export class HavenClient {
       rail: entry.rail,
       protocol: entry.protocol,
       toolName: entry.tool_name,
+      toolArguments: entry.tool_arguments ?? null,
       priceDisplay: entry.price_display,
       priceAtomic: entry.price_atomic,
       asset: entry.asset,

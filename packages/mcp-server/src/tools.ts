@@ -991,9 +991,12 @@ export function createToolHandlers(
 
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
-            rail: 'x402',
+            // #1318 review: both sourced from the INTENT (one source of truth —
+            // the quote's copies could drift on multi-option 402s), and no
+            // top-level rail key: allowance.rail is the policy rail, the
+            // protocol is implicit like every other success shape.
             network: intent.network,
-            asset: quote.asset,
+            asset: intent.asset,
             // The raw merchant 402 PaymentRequired — the local signer needs this
             // verbatim in haven_x402_sign_header to build the EIP-3009 header.
             payment_required: quote.paymentRequired,

@@ -1381,7 +1381,8 @@ describe('haven_prepare_catalog_purchase', () => {
 
     // The exact compact quote shape (#1272) — payment_id from the created intent.
     expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
-    expect(result.data.rail).toBe('x402')
+    // #1318 review: no top-level rail key — allowance.rail is the policy rail.
+    expect('rail' in result.data).toBe(false)
     expect(result.data.network).toBe('base')
     expect(result.data.asset).toBe(PAYMENT_REQUIRED.accepts[0].asset)
     expect(result.data.amount_atomic).toBe('1500000')

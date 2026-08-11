@@ -58,6 +58,7 @@ import {
   AgentPaymentPhase,
   HavenApiError,
   HavenPaymentStateError,
+  MerchantTimeoutError,
   X402UnexpectedStatusError,
   HavenSigningError,
   HavenTimeoutError,
@@ -109,11 +110,17 @@ function explorerUrlOrEmpty(chainId: number | undefined, txHash: string | null |
 }
 
 const DEFAULT_REQUEST_TIMEOUT = 30_000
-// #1300: merchant-facing default. Generous on purpose — the demo merchant
-// (and real x402 merchants) may settle on-chain synchronously inside the
-// paid retry, and a timeout that fires mid-settlement reads as a merchant
-// rejection. Override per client via config.merchantTimeout.
-const DEFAULT_MERCHANT_TIMEOUT = 60_000
+// #1300: merchant-facing default, CALIBRATED against this repo's own
+// tolerances (post-merge review finding): the demo merchant advertises
+// maxTimeoutSeconds: 300 in every PaymentRequired, and its synchronous
+// settlement wait inherits viem's 180 s waitForTransactionReceipt default —
+// so a shorter client bound would abort settlements the protocol contract
+// itself calls normal. 300 s keeps the hang bounded without racing the
+// merchant's own window. Override per client via config.merchantTimeout.
+const DEFAULT_MERCHANT_TIMEOUT = 300_000
+// The best-effort MCP initialized-notification does not deserve the
+// settlement budget — its result is discarded either way.
+const NOTIFY_TIMEOUT = 10_000
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
 
@@ -1420,11 +1427,17 @@ export class HavenClient {
       headers.set('mcp-session-id', sessionId)
       if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
 
-      await this.merchantFetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
-      })
+      // #1300 review: best-effort notification, discarded either way — do not
+      // give it the settlement-sized budget.
+      await this.merchantFetch(
+        url,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+        },
+        NOTIFY_TIMEOUT,
+      )
     } catch {
       // Best-effort — see doc comment.
     }
@@ -3133,17 +3146,18 @@ export class HavenClient {
    * AbortSignal.any); a timeout abort surfaces as a clear HavenApiError 504
    * naming the URL rather than a bare AbortError.
    */
-  private async merchantFetch(url: string, init: RequestInit = {}): Promise<Response> {
-    const timeoutSignal = AbortSignal.timeout(this.merchantTimeout)
+  private async merchantFetch(
+    url: string,
+    init: RequestInit = {},
+    timeoutMs = this.merchantTimeout,
+  ): Promise<Response> {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs)
     const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
     try {
       return await globalThis.fetch(url, { ...init, signal })
     } catch (err) {
       if (timeoutSignal.aborted) {
-        throw new HavenApiError(
-          `Merchant request timed out after ${this.merchantTimeout}ms: ${url}`,
-          504,
-        )
+        throw new MerchantTimeoutError(`Merchant request timed out after ${timeoutMs}ms: ${url}`)
       }
       throw err
     }

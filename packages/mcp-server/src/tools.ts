@@ -3,6 +3,7 @@ import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
   HavenApiError,
+  MerchantTimeoutError,
   X402UnexpectedStatusError,
   HavenClient,
   HavenError,
@@ -1427,17 +1428,45 @@ async function deliverMerchantPayment(
     method: 'tools/call',
     params: { name: args.tool_name, arguments: args.arguments ?? {} },
   }
-  const result = await haven.completeX402MerchantCall({
-    url: args.merchant_url,
-    init: {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(envelope),
-    },
-    paymentId: args.payment_id,
-    paymentHeader: args.payment_header,
-    mcpTransport: parseMcpTransport(args.mcp_transport),
-  })
+  let result: Awaited<ReturnType<HavenClient['completeX402MerchantCall']>>
+  try {
+    result = await haven.completeX402MerchantCall({
+      url: args.merchant_url,
+      init: {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(envelope),
+      },
+      paymentId: args.payment_id,
+      paymentHeader: args.payment_header,
+      mcpTransport: parseMcpTransport(args.mcp_transport),
+    })
+  } catch (err) {
+    // #1300 review finding: at this point funding is CONFIRMED on-chain, so a
+    // merchant that never answers leaves the same money-at-risk state as one
+    // that rejects — but a timeout is NOT proof of rejection: the merchant
+    // holds a valid EIP-3009 authorization and may settle late. Route it to
+    // its own guidance (verify-then-sweep), never the bare 504 and never a
+    // blind sweep that could race a late settlement.
+    if (err instanceof MerchantTimeoutError) {
+      throw new HostedToolError({
+        code: AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding,
+        message:
+          `The funding leg is confirmed on-chain, but the merchant did not answer the paid ` +
+          `retry before the timeout. The merchant may still settle late. Check ` +
+          `haven_get_payment_status and retry haven_complete_mcp_tool ONCE before considering ` +
+          `a sweep — sweep only if no settlement appears. ${err.message}`,
+        statusCode: 504,
+        paymentId: args.payment_id,
+        status: 'merchant_unresponsive_after_funding',
+        phase: 'funded_but_unsettled',
+        nextAction: AgentPaymentNextAction.SweepStrandedFunds,
+        rail: 'x402',
+        suggestedTool: 'haven_get_payment_status',
+      })
+    }
+    throw err
+  }
   if (!result.ok) {
     let status: Awaited<ReturnType<HavenClient['getPaymentStatus']>> | null = null
     try {

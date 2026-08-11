@@ -102,6 +102,7 @@ export const RUNTIME_OPTIONS = [
   { id: 'vscode', label: 'VS Code' },
   { id: 'vscode-insiders', label: 'VS Code Insiders' },
   { id: 'claude-desktop', label: 'Claude Desktop' },
+  { id: 'hermes', label: 'Hermes Agent' },
   { id: 'other', label: 'Other agent' },
 ]
 

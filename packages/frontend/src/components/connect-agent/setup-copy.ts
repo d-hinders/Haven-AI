@@ -30,6 +30,8 @@ export function restartCopyForRuntime(runtime: string): string | null {
       return "Haven tools appear in your next Claude Code message. If they don't, restart the session."
     case 'codex-cli':
       return "Haven tools appear in your next Codex message. If they don't, restart the session."
+    case 'hermes':
+      return 'Restart Hermes in a new session. Gateway users should run /restart. If Haven tools do not appear, install the MCP SDK in Hermes: pip install mcp.'
     default:
       return 'Restart the agent session so it loads Haven tools.'
   }

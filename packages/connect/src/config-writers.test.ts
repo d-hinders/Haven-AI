@@ -1,10 +1,13 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
+import { parse } from 'yaml'
 import {
+  hermesConfigPath,
   mergeCodexToml,
   mergeCodexTomlHosted,
+  mergeHermesYaml,
   mergeJsonMcpConfig,
   validateCodexToml,
   writeRuntimeConfig,
@@ -238,5 +241,190 @@ describe('runtime config writers', () => {
     expect(toml).not.toContain('npx')
     expect(toml).not.toContain(API_KEY)
     expect(toml).not.toContain(PRIVATE_KEY)
+  })
+
+  it('merges Hermes YAML without disturbing other settings and writes owner-only config', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-config-'))
+    const credentialsDir = join(dir, 'agent-1')
+    const target = join(dir, '.hermes', 'config.yaml')
+    await mkdir(join(dir, '.hermes'), { recursive: true })
+    await writeFile(target, [
+      'model: hermes-4',
+      'agent:',
+      '  max_turns: 8',
+      'mcp_servers:',
+      '  existing:',
+      '    command: node',
+      '    args: [server.js]',
+      '  haven:',
+      '    url: https://old.example/v1',
+    ].join('\n'))
+
+    const result = await writeRuntimeConfig({
+      runtime: 'hermes',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      identityPath: join(credentialsDir, 'identity.json'),
+      signerPath: SIGNER_PATH,
+      credentialDirectory: credentialsDir,
+      signerCommand: { command: WRAPPER_PATH, args: [] },
+      homeDir: dir,
+    })
+    const parsed = parse(await readFile(target, 'utf8')) as {
+      model: string
+      agent: { max_turns: number }
+      mcp_servers: Record<string, { url?: string; command?: string; args?: string[]; headers?: Record<string, string> }>
+    }
+
+    expect(result).toMatchObject({
+      hostedConfigured: true,
+      signerConfigured: true,
+      localMcpConfigured: false,
+      runtimeMcpMode: 'hosted_plus_signer',
+      target: 'Hermes Agent config',
+      restartRequired: true,
+    })
+    expect(result.messages.join('\n')).toContain('/restart')
+    expect(result.messages.join('\n')).toContain('hermes mcp list')
+    expect(result.messages.join('\n')).toContain('pip install mcp')
+    expect(parsed.model).toBe('hermes-4')
+    expect(parsed.agent.max_turns).toBe(8)
+    expect(parsed.mcp_servers.existing.command).toBe('node')
+    expect(parsed.mcp_servers.haven).toMatchObject({
+      url: HOSTED_URL,
+      headers: { Authorization: `Bearer ${API_KEY}` },
+    })
+    expect(parsed.mcp_servers.haven).not.toHaveProperty('type')
+    expect(parsed.mcp_servers['haven-signer']).toEqual({ command: WRAPPER_PATH, args: [] })
+    expect((await stat(target)).mode & 0o777).toBe(0o600)
+
+    const rerun = await writeRuntimeConfig({
+      runtime: 'hermes',
+      hostedMcpUrl: 'https://new-mcp.haven.example/v1',
+      apiKey: 'sk_agent_replaced',
+      identityPath: join(credentialsDir, 'identity.json'),
+      signerPath: SIGNER_PATH,
+      credentialDirectory: credentialsDir,
+      homeDir: dir,
+    })
+    const rerunParsed = parse(await readFile(target, 'utf8')) as {
+      mcp_servers: Record<string, { url?: string; command?: string; args?: string[]; headers?: Record<string, string> }>
+    }
+    expect(rerun.changed).toBe(true)
+    expect(rerunParsed.mcp_servers.existing).toEqual({ command: 'node', args: ['server.js'] })
+    expect(rerunParsed.mcp_servers.haven.url).toBe('https://new-mcp.haven.example/v1')
+    expect(rerunParsed.mcp_servers.haven.headers?.Authorization).toBe('Bearer sk_agent_replaced')
+    expect(rerunParsed.mcp_servers['haven-signer']).toEqual({
+      command: 'npx',
+      args: ['-y', SIGNER_PACKAGE, '--credentials', SIGNER_PATH],
+    })
+    expect(Object.keys(rerunParsed.mcp_servers).filter((name) => name === 'haven')).toHaveLength(1)
+  })
+
+  it('uses HERMES_HOME when set and otherwise writes beneath the supplied home directory', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-home-'))
+    const hermesHome = join(dir, 'custom-hermes-home')
+    const previousHermesHome = process.env.HERMES_HOME
+    process.env.HERMES_HOME = hermesHome
+    try {
+      expect(hermesConfigPath(join(dir, 'unused-home'))).toBe(join(hermesHome, 'config.yaml'))
+      const result = await writeRuntimeConfig({
+        runtime: 'hermes',
+        hostedMcpUrl: HOSTED_URL,
+        apiKey: API_KEY,
+        identityPath: join(dir, 'identity.json'),
+        signerPath: SIGNER_PATH,
+        credentialDirectory: dir,
+        homeDir: join(dir, 'unused-home'),
+      })
+      expect(result.errorCode).toBeUndefined()
+      await expect(readFile(join(hermesHome, 'config.yaml'), 'utf8')).resolves.toContain('mcp_servers:')
+    } finally {
+      if (previousHermesHome === undefined) delete process.env.HERMES_HOME
+      else process.env.HERMES_HOME = previousHermesHome
+    }
+  })
+
+  it('does not overwrite a Hermes config when its YAML is malformed', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-invalid-'))
+    const target = join(dir, '.hermes', 'config.yaml')
+    const malformed = 'mcp_servers: [Bearer sk_agent_do_not_echo\n'
+    await mkdir(join(dir, '.hermes'), { recursive: true })
+    await writeFile(target, malformed)
+
+    const result = await writeRuntimeConfig({
+      runtime: 'hermes',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      identityPath: join(dir, 'identity.json'),
+      signerPath: SIGNER_PATH,
+      credentialDirectory: dir,
+      homeDir: dir,
+    })
+
+    expect(result.errorCode).toBe('runtime_config_write_failed')
+    expect(result.changed).toBe(false)
+    expect(result.messages.join('\n')).not.toContain('sk_agent_do_not_echo')
+    expect(result.messages.join('\n')).not.toContain(malformed)
+    expect(await readFile(target, 'utf8')).toBe(malformed)
+  })
+
+  it('replaces only malformed mcp_servers sections during a Hermes YAML merge', () => {
+    const merged = mergeHermesYaml('model: hermes-4\nmcp_servers: false\n', { url: HOSTED_URL }, { command: 'npx', args: [] })
+    const parsed = parse(merged) as { model: string; mcp_servers: Record<string, unknown> }
+    expect(parsed.model).toBe('hermes-4')
+    expect(parsed.mcp_servers).toMatchObject({ haven: { url: HOSTED_URL }, 'haven-signer': { command: 'npx', args: [] } })
+  })
+
+  it('preserves unrelated Hermes YAML comments and scalar source text byte-for-byte', () => {
+    const existing = [
+      '# Keep this comment and these scalar spellings exactly.',
+      'model: 0123',
+      'release: 2026-01-01',
+      'ratio: 1e3',
+      'mcp_servers:',
+      '  existing:',
+      '    command: node',
+      'agent:',
+      '  prompt: "do not rewrite this"',
+      '',
+    ].join('\n')
+
+    const merged = mergeHermesYaml(
+      existing,
+      { url: HOSTED_URL, headers: { Authorization: `Bearer ${API_KEY}` } },
+      { command: WRAPPER_PATH, args: [] },
+    )
+
+    expect(merged).toContain('# Keep this comment and these scalar spellings exactly.\nmodel: 0123\nrelease: 2026-01-01\nratio: 1e3\n')
+    expect(merged).toContain('agent:\n  prompt: "do not rewrite this"\n')
+    expect(parse(merged)).toMatchObject({
+      mcp_servers: {
+        existing: { command: 'node' },
+        haven: { url: HOSTED_URL },
+        'haven-signer': { command: WRAPPER_PATH, args: [] },
+      },
+    })
+  })
+
+  it('inserts Hermes MCP servers before a terminal YAML document-end marker', () => {
+    const merged = mergeHermesYaml(
+      'model: hermes-4\n...\n',
+      { url: HOSTED_URL },
+      { command: WRAPPER_PATH, args: [] },
+    )
+
+    expect(merged).toBe([
+      'model: hermes-4',
+      'mcp_servers:',
+      `  haven:`,
+      `    url: ${HOSTED_URL}`,
+      '  haven-signer:',
+      `    command: ${WRAPPER_PATH}`,
+      '    args: []',
+      '...',
+      '',
+    ].join('\n'))
+    expect(parse(merged)).toMatchObject({ mcp_servers: { haven: { url: HOSTED_URL } } })
   })
 })

@@ -455,7 +455,7 @@ describe('installRuntime hosted default topology', () => {
 
   it('never produces local_stdio or manual for any known runtime by default', async () => {
     const runtimes = [
-      'claude-code', 'codex-cli', 'codex-desktop', 'cursor', 'vscode', 'vscode-insiders', 'claude-desktop',
+      'claude-code', 'codex-cli', 'codex-desktop', 'cursor', 'vscode', 'vscode-insiders', 'claude-desktop', 'hermes',
     ] as const
     for (const runtime of runtimes) {
       const dir = await mkdtemp(join(tmpdir(), `haven-connect-default-${runtime}-`))
@@ -493,6 +493,7 @@ describe('installRuntime hosted default topology', () => {
     expect(supportsLocalMcp('vscode')).toBe(false)
     expect(supportsLocalMcp('vscode-insiders')).toBe(false)
     expect(supportsLocalMcp('claude-desktop')).toBe(false)
+    expect(supportsLocalMcp('hermes')).toBe(false)
     expect(supportsLocalMcp('other')).toBe(false)
   })
 

@@ -59,6 +59,7 @@ describe('parseArgs', () => {
     expect(() => parseArgs([], {})).toThrow('--setup')
     expect(parseArgs(['--help'], {}).help).toBe(true)
     expect(helpText()).toContain('codex-desktop')
+    expect(helpText()).toContain('hermes')
     expect(helpText()).toMatch(/never sends it to Haven/)
   })
 })

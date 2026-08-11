@@ -1,0 +1,4 @@
+interface:
+  display_name: "New Task"
+  short_description: "Create a scoped Haven issue"
+  default_prompt: "Use $new-task to turn this Haven request into a scoped issue."

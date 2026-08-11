@@ -1,0 +1,4 @@
+interface:
+  display_name: "Haven Agent Workflow"
+  short_description: "Coordinate scoped Haven agent work"
+  default_prompt: "Use $haven-agent-workflow to plan and review this Haven change."

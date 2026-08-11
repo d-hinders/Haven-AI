@@ -326,6 +326,7 @@ describe('haven_discover_tools', () => {
               rail: 'x402',
               protocol: 'mcp',
               tool_name: 'create_text',
+              tool_arguments: { prompt: 'hello' },
               price_display: '$0.01 USDC',
               price_atomic: '10000',
               asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
@@ -338,13 +339,19 @@ describe('haven_discover_tools', () => {
       },
     })
 
-    const result = ok<Array<{ price_is_indicative: boolean; price_atomic: string; suggested_tool: string }>>(
+    const result = ok<Array<{
+      price_is_indicative: boolean
+      price_atomic: string
+      suggested_tool: string
+      tool_arguments: Record<string, unknown>
+    }>>(
       await handlers().haven_discover_tools({}),
     )
 
     expect(result.data[0].price_is_indicative).toBe(true)
     expect(result.data[0].price_atomic).toBe('10000')
     expect(result.data[0].suggested_tool).toBe('haven_pay_mcp_tool')
+    expect(result.data[0].tool_arguments).toEqual({ prompt: 'hello' })
   })
 })
 

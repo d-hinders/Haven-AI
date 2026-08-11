@@ -84,6 +84,16 @@ point hosted agents at a local merchant. Agents can also read `GET /` or
 `GET /.well-known/haven-demo-merchant` on either deployment to discover the
 current environment, chain, MCP URL, and both hosted routing targets.
 
+This standalone MCP service is the CloudNest/NordShield x402 demo merchant.
+Do not confuse it with backend demo surfaces:
+
+- Backend `/demo/mpp/*` is the internal Machine Payment Protocol smoke-test
+  resource. It is not the CloudNest/NordShield merchant and does not expose the
+  `buy_cloud_storage` or `buy_vpn` tools.
+- Backend `/x402/resources/*` is an experimental x402 resource registry/API
+  surface. It is not the hosted MCP merchant deployment agents should use for
+  demo product purchases.
+
 ## Run
 
 ```sh

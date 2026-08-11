@@ -575,6 +575,7 @@ export function createToolHandlers(
           rail: entry.rail,
           protocol: entry.protocol,
           tool_name: entry.toolName,
+          tool_arguments: entry.toolArguments,
           price_display: entry.priceDisplay,
           price_atomic: entry.priceAtomic,
           // Catalog price is a last-verified hint, NOT authoritative. Always

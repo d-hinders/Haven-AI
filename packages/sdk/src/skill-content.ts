@@ -93,6 +93,10 @@ normal, not an error.
   \`mcp__haven__haven_pay_mcp_tool\` with the same
   \`idempotency_key\`. Do not call the merchant yourself — Haven completes the
   merchant leg for you.
+- **Catalog tool arguments:** when \`haven_discover_tools\` returns
+  \`tool_arguments\`, pass that object unchanged as the pay tool's
+  \`arguments\` field (for example
+  \`tool_arguments: { "tier": "50gb" }\` -> \`arguments: { "tier": "50gb" }\`).
 - **Prices:** show the user the live price from the pay-tool result, never a
   catalog price. \`haven_discover_tools\` prices are indicative
   (\`price_is_indicative\`) and can be stale. The pay-tool result's \`amount\` /

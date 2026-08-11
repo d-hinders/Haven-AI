@@ -18,7 +18,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-10" # #1272 compact quotes; #1271 base-URL endpoint discovery on haven_pay_mcp_tool
+last-verified: "2026-08-11" # #1297 catalog metadata + #1272 compact quotes + #1271 base-URL endpoint discovery; execution sequence unchanged
 ---
 
 # Haven - x402 Payment Execution Sequence

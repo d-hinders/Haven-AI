@@ -1228,6 +1228,7 @@ export interface HavenCatalogEntry {
   rail: 'x402' | 'mpp'
   protocol: 'http' | 'mcp'
   toolName: string | null
+  toolArguments: Record<string, unknown> | null
   priceDisplay: string | null
   priceAtomic: string | null
   asset: string | null
@@ -1246,6 +1247,7 @@ export interface RawCatalogEntry {
   rail: 'x402' | 'mpp'
   protocol: 'http' | 'mcp'
   tool_name: string | null
+  tool_arguments: Record<string, unknown> | null
   price_display: string | null
   price_atomic: string | null
   asset: string | null

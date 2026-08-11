@@ -375,6 +375,57 @@ describe('x402 routes', () => {
     expect(insert!.params).toContain('x402:test')
   })
 
+  it('persists mcpCallContext into the legacy-rail intent metadata (#1307 write path)', async () => {
+    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
+    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+
+    primeDb(
+      AUTH,
+      ...POLICY_ROUTES,
+      insertIntent({
+        id: PAYMENT_ID,
+        expires_at: new Date('2026-05-10T20:00:00.000Z'),
+        amount_raw: '20000',
+      }),
+    )
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        idempotencyKey: 'x402:ctx',
+        mcpCallContext: {
+          merchantUrl: 'https://mcp.soundside.ai/mcp',
+          toolName: 'buy_track',
+          arguments: { id: '42' },
+        },
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    // Review finding on #1316: the stored context is what the settle leg
+    // rehydrates — prove the legacy write branch actually persists it.
+    const insert = findCall(/INSERT INTO payment_intents/)
+    const metadataParam = insert!.params.find(
+      (p) => typeof p === 'string' && p.includes('mcp_call_context'),
+    ) as string
+    expect(metadataParam).toBeDefined()
+    const metadata = JSON.parse(metadataParam)
+    expect(metadata.mcp_call_context).toMatchObject({
+      merchantUrl: 'https://mcp.soundside.ai/mcp',
+      toolName: 'buy_track',
+      arguments: { id: '42' },
+    })
+  })
+
   it('executes at the exact allowance boundary (amount == remaining, zero delegate balance)', async () => {
     // Boundary regression guard for the balance-aware coverage decision: with a
     // zero delegate balance, totalCoverage == remaining, so amount == remaining

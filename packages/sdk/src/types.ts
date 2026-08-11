@@ -802,6 +802,8 @@ export const AgentPaymentNextAction = {
   StopAndTellUser: 'stop_and_tell_user',
   /** Ask again only if the user still wants the payment after expiry. */
   RequestAgainIfUserStillWantsIt: 'request_again_if_user_still_wants_it',
+  /** #1307: retry the SAME tool call, supplying the explicit context fields the server could not rehydrate. */
+  RetryWithExplicitContext: 'retry_with_explicit_context',
   /**
    * The x402 funding/quote window expired. Re-quote the same logical merchant
    * operation with the same idempotency key to stay double-charge-safe.
@@ -927,6 +929,8 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
     'The x402 funding/quote window expired. Re-quote with the same idempotency key before asking the signer to build a merchant payment header again.',
   [AgentPaymentNextAction.FundSafeOrRaiseAllowance]:
     'Stop and tell the user that the originating Safe needs to be funded or the agent allowance raised before the payment can succeed.',
+  [AgentPaymentNextAction.RetryWithExplicitContext]:
+    'Retry the same tool call, this time passing merchant_url, tool_name, arguments, and mcp_transport explicitly — the server had no stored context to rehydrate for this payment id.',
   [AgentPaymentNextAction.SweepStrandedFunds]:
     'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating Safe.',
 }

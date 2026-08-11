@@ -1437,6 +1437,26 @@ describe('haven_settle_mcp_tool', () => {
 describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context rehydration (#1307)', () => {
   const SIG = '0x' + '11'.repeat(65)
 
+  it('REFUSES half-explicit context (only one of merchant_url/tool_name) instead of silently overriding (#1316 review)', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'getX402MerchantCallContext')
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
+      merchant_url: 'http://merchant.test/mcp',
+      // tool_name omitted — an agent that supplied merchant_url expects it used
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(payload.message).toMatch(/TOGETHER/)
+    expect(payload.next_action).toBe('retry_with_explicit_context')
+    // Neither rehydrated nor fetched anything — refused up front.
+    expect(spy).not.toHaveBeenCalled()
+  })
+
   it('haven_complete_mcp_tool: explicit merchant_url/tool_name win OUTRIGHT — rehydration is never called', async () => {
     stubFetch({})
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })

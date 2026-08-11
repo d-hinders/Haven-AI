@@ -184,6 +184,62 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(stored.child.caveats.length).toBe(bare.child.caveats.length + 1)
   })
 
+  it('persists mcpCallContext into machine_metadata on BOTH delegation branches (#1307 write path)', async () => {
+    // Review finding on #1316: the read endpoint was tested against fabricated
+    // rows, but nothing proved the quote actually STORES the context. Without
+    // this, dropping the mcp_call_context line regresses silently — the settle
+    // leg would just 409 asking for explicit re-send.
+    const mcpCallContext = {
+      merchantUrl: 'https://merchant.example/mcp',
+      toolName: 'buy_vpn',
+      arguments: { plan: 'basic' },
+      mcpTransport: { handshakeRequired: true, source: 'path' },
+    }
+
+    // Branch 1: eip3009 funding leg (default scheme).
+    mockSelect.mockResolvedValueOnce({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    let res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ mcpCallContext }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        mcp_call_context: expect.objectContaining({ merchantUrl: mcpCallContext.merchantUrl, toolName: 'buy_vpn' }),
+      }),
+    }))
+
+    // Branch 2: erc7710 direct settlement.
+    mockCreateIntent.mockClear()
+    mockSelect.mockResolvedValueOnce({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({
+        settlementScheme: 'erc7710',
+        facilitatorAddresses: ['0x' + 'fa'.repeat(20)],
+        mcpCallContext,
+      }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        mcp_call_context: expect.objectContaining({ toolName: 'buy_vpn' }),
+      }),
+    }))
+  })
+
   it('authorize 400s malformed facilitatorAddresses — garbage cannot half-pin a child', async () => {
     for (const bad of [[], ['not-an-address'], 'x', new Array(17).fill('0x' + 'aa'.repeat(20))]) {
       const res = await app.inject({

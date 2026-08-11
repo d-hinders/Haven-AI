@@ -1610,13 +1610,33 @@ async function resolveMerchantCallContext(
   haven: HavenClient,
   args: Record<string, any>,
 ): Promise<{ merchantUrl: string; toolName: string; toolArguments: Record<string, unknown>; mcpTransportRaw: unknown }> {
-  if (typeof args.merchant_url === 'string' && typeof args.tool_name === 'string') {
+  const hasUrl = typeof args.merchant_url === 'string'
+  const hasTool = typeof args.tool_name === 'string'
+  if (hasUrl && hasTool) {
     return {
       merchantUrl: args.merchant_url,
       toolName: args.tool_name,
       toolArguments: (args.arguments as Record<string, unknown> | undefined) ?? {},
       mcpTransportRaw: args.mcp_transport,
     }
+  }
+  // #1307 review: exactly ONE of the pair present is refused, not silently
+  // overridden — an agent that supplied merchant_url expects it to be used,
+  // and half-explicit input must never be combined with stored state.
+  if (hasUrl !== hasTool) {
+    throw new HostedToolError({
+      code: 'INVALID_INPUT',
+      message:
+        'merchant_url and tool_name must be supplied TOGETHER (explicit context) or both ' +
+        'omitted (rehydrated from payment_id). Passing only one is refused rather than ' +
+        'silently overridden by stored state.',
+      statusCode: 400,
+      paymentId: args.payment_id,
+      status: 'invalid_input',
+      phase: 'not_started',
+      nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+      rail: 'x402',
+    })
   }
   try {
     const ctx = await haven.getX402MerchantCallContext(args.payment_id)
@@ -1647,6 +1667,7 @@ async function resolveMerchantCallContext(
           `call context for payment ${args.payment_id} (${err.message}). Re-send merchant_url, ` +
           'tool_name, arguments, and mcp_transport explicitly.',
         statusCode: err.statusCode,
+        nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
         paymentId: args.payment_id,
         rail: 'x402',
       })

@@ -6,10 +6,12 @@ import {
   authorizeX402,
   settleX402,
   getX402SignContext,
+  getX402MerchantCallContext,
   isPositiveDecimalAtomicAmount,
   normaliseAddress,
   chainIdFromX402Network,
   type X402AuthorizeBody,
+  type X402McpCallContextInput,
 } from '../modules/x402/index.js'
 
 // Route handlers only: request validation, auth middleware wiring, rate-limit
@@ -120,6 +122,39 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       }
     }
 
+    // #1307: optional MCP merchant-call context — structural validation only
+    // (the settle-leg rehydration is a convenience for retrying the
+    // MERCHANT's own call, not payment authority; malformed input is a 400
+    // rather than silently dropped, so a client learns immediately).
+    const { mcpCallContext } = request.body
+    if (mcpCallContext !== undefined) {
+      if (
+        typeof mcpCallContext !== 'object' ||
+        mcpCallContext === null ||
+        typeof mcpCallContext.merchantUrl !== 'string' ||
+        mcpCallContext.merchantUrl.length === 0 ||
+        typeof mcpCallContext.toolName !== 'string' ||
+        mcpCallContext.toolName.length === 0
+      ) {
+        return reply.code(400).send({
+          error: 'mcpCallContext requires a non-empty merchantUrl and toolName',
+        })
+      }
+      if (mcpCallContext.mcpTransport !== undefined) {
+        const transport = mcpCallContext.mcpTransport
+        if (
+          typeof transport !== 'object' ||
+          transport === null ||
+          typeof transport.handshakeRequired !== 'boolean' ||
+          (transport.source !== 'path' && transport.source !== 'bazaar')
+        ) {
+          return reply.code(400).send({
+            error: "mcpCallContext.mcpTransport requires handshakeRequired (boolean) and source ('path'|'bazaar')",
+          })
+        }
+      }
+    }
+
     const result = await authorizeX402({
       agent,
       url,
@@ -135,6 +170,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       signature,
       settlementScheme,
       facilitatorAddresses,
+      mcpCallContext: mcpCallContext as X402McpCallContextInput | undefined,
       log: request.log,
     })
     return reply.code(result.code).send(result.body)
@@ -153,6 +189,22 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     const result = await getX402SignContext(agent, request.params.id)
     return reply.code(result.code).send(result.body)
   })
+
+  // ── GET /x402/:id/merchant-call-context — settle-leg handoff (#1307) ─────
+  // Read-only: re-serves the stored MCP merchant-call context (merchant_url,
+  // tool_name, arguments, mcp_transport) recorded at quote time, so
+  // haven_settle_mcp_tool / haven_complete_mcp_tool can rehydrate it by
+  // payment_id instead of the agent re-threading it. All checks live in the
+  // module (`getX402MerchantCallContext`).
+  app.get<{ Params: { id: string } }>(
+    '/:id/merchant-call-context',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const result = await getX402MerchantCallContext(agent, request.params.id)
+      return reply.code(result.code).send(result.body)
+    },
+  )
 
   // ── POST /x402/:id/settle — delegation rail (#830) ───────────────────────
   // The agent has signed the settlement child (EIP-712). Assembly, signer

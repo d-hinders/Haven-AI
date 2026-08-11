@@ -1082,3 +1082,152 @@ describe('x402 sign-context by payment_id (#1263)', () => {
     expect(res.json().error_code).toBe('sign_context_unavailable')
   })
 })
+
+// ── GET /x402/:id/merchant-call-context — the settle-leg handoff (#1307) ──────
+describe('x402 merchant-call-context by payment_id (#1307)', () => {
+  let app: FastifyInstance
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(x402Routes, { prefix: '/x402' })
+  })
+  afterAll(async () => app.close())
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const CALL_CONTEXT_ROW = {
+    id: INTENT_ID,
+    status: 'pending_signature',
+    expires_at: new Date(Date.now() + 300_000).toISOString(),
+    x402_resource_url: 'https://merchant.example/resource',
+    machine_metadata: {
+      network: 'eip155:84532',
+      settlement_scheme: 'eip3009',
+      mcp_call_context: {
+        merchantUrl: 'https://merchant.example/mcp',
+        toolName: 'buy_cloud_storage',
+        arguments: { tier: '50gb' },
+        mcpTransport: { handshakeRequired: true, source: 'path' },
+      },
+    },
+  }
+
+  function serveIntentRow(rows: Record<string, unknown>[]) {
+    mockQuery.mockImplementation((sql: string) => {
+      if (/WHERE id = \$1 AND agent_id = \$2/.test(String(sql))) return Promise.resolve({ rows })
+      return Promise.resolve({ rows: [] })
+    })
+  }
+
+  it('serves the stored merchant call context', async () => {
+    serveIntentRow([CALL_CONTEXT_ROW])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.payment_id).toBe(INTENT_ID)
+    expect(body.merchant_url).toBe('https://merchant.example/mcp')
+    expect(body.tool_name).toBe('buy_cloud_storage')
+    expect(body.arguments).toEqual({ tier: '50gb' })
+    expect(body.mcp_transport).toEqual({ handshakeRequired: true, source: 'path' })
+    // Read-only: nothing was written.
+    expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE/i.test(String(c[0])))).toBe(false)
+  })
+
+  it('404s an unknown or foreign payment id (same answer on purpose)', async () => {
+    serveIntentRow([])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('409s with the fallback named when no merchant call context was stored', async () => {
+    serveIntentRow([{ ...CALL_CONTEXT_ROW, machine_metadata: { network: 'eip155:84532' } }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('merchant_call_context_unavailable')
+    expect(res.json().error).toMatch(/merchant_url, tool_name/)
+  })
+
+  it('409s an incomplete stored context (missing toolName)', async () => {
+    serveIntentRow([{
+      ...CALL_CONTEXT_ROW,
+      machine_metadata: {
+        network: 'eip155:84532',
+        mcp_call_context: { merchantUrl: 'https://merchant.example/mcp' },
+      },
+    }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('merchant_call_context_unavailable')
+  })
+
+  it('409s a DIRECT (non-x402) payment intent', async () => {
+    serveIntentRow([{ ...CALL_CONTEXT_ROW, x402_resource_url: null }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(409)
+  })
+
+  it('410s and lazy-expires a stale PENDING row (the #961/#1263 discipline)', async () => {
+    serveIntentRow([{ ...CALL_CONTEXT_ROW, expires_at: new Date(Date.now() - 1000).toISOString() }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(410)
+    expect(res.json().error_code).toBe('expired')
+    expect(mockQuery.mock.calls.some((c) => /UPDATE payment_intents/i.test(String(c[0])))).toBe(true)
+  })
+
+  it('410s an already-EXPIRED row without a redundant UPDATE', async () => {
+    serveIntentRow([{ ...CALL_CONTEXT_ROW, status: 'expired' }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(410)
+    expect(mockQuery.mock.calls.some((c) => /UPDATE payment_intents/i.test(String(c[0])))).toBe(false)
+  })
+
+  // #1307: idempotent re-settle. A CONFIRMED (funded) intent past its
+  // original funding-window expires_at must stay servable — a merchant
+  // delivery retry (e.g. after MERCHANT_UNRESPONSIVE_AFTER_FUNDING) must not
+  // be forced into a fresh haven_pay_mcp_tool quote, which would mint a
+  // SECOND funding intent for what is already a funded payment. Two GETs in
+  // a row are byte-identical AND read-only.
+  it('stays servable and read-only for a CONFIRMED intent past its original expiry (no premature lazy-expire)', async () => {
+    const confirmedPastExpiry = {
+      ...CALL_CONTEXT_ROW,
+      status: 'confirmed',
+      expires_at: new Date(Date.now() - 1000).toISOString(),
+    }
+    serveIntentRow([confirmedPastExpiry])
+
+    const first = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    const second = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(first.statusCode).toBe(200)
+    expect(second.statusCode).toBe(200)
+    expect(second.json()).toEqual(first.json())
+    expect(mockQuery.mock.calls.some((c) => /UPDATE payment_intents/i.test(String(c[0])))).toBe(false)
+  })
+})

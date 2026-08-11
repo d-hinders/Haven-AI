@@ -885,6 +885,37 @@ export const openapiSpec = {
         },
       },
     },
+    '/x402/{id}/merchant-call-context': {
+      get: {
+        tags: ['x402'],
+        operationId: 'getX402MerchantCallContext',
+        summary: 'Fetch the stored MCP merchant-call context for an x402 intent.',
+        description:
+          'Read-only settle-leg handoff (#1307): re-serves the merchant_url, tool_name, arguments, and mcp_transport recorded on the intent at quote time (haven_pay_mcp_tool), so haven_settle_mcp_tool / haven_complete_mcp_tool can omit them and let Haven rehydrate by payment_id instead of the caller re-threading them. Convenience metadata for retrying the MERCHANT\'s own call — never payment authority.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Payment intent id from the quote/authorize response.',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The stored merchant call context.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/X402MerchantCallContext' } },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '410': errorResponse,
+        },
+      },
+    },
     '/x402': {
       post: {
         tags: ['x402'],
@@ -2352,6 +2383,46 @@ export const openapiSpec = {
           category: { type: 'string' },
           idempotencyKey: { type: 'string', maxLength: 128 },
           signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
+          mcpCallContext: {
+            type: 'object',
+            description:
+              '#1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time.',
+            required: ['merchantUrl', 'toolName'],
+            properties: {
+              merchantUrl: { type: 'string', format: 'uri' },
+              toolName: { type: 'string', minLength: 1 },
+              arguments: { type: 'object', additionalProperties: true },
+              mcpTransport: {
+                type: 'object',
+                required: ['handshakeRequired', 'source'],
+                properties: {
+                  handshakeRequired: { type: 'boolean' },
+                  source: { type: 'string', enum: ['path', 'bazaar'] },
+                },
+                additionalProperties: false,
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      X402MerchantCallContext: {
+        type: 'object',
+        required: ['payment_id', 'merchant_url', 'tool_name'],
+        properties: {
+          payment_id: uuid,
+          merchant_url: { type: 'string', format: 'uri' },
+          tool_name: { type: 'string' },
+          arguments: { type: 'object', additionalProperties: true },
+          mcp_transport: {
+            type: 'object',
+            properties: {
+              handshake_required: { type: 'boolean' },
+              source: { type: 'string', enum: ['path', 'bazaar'] },
+            },
+            additionalProperties: false,
+          },
         },
         additionalProperties: false,
       },

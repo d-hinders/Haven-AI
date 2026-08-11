@@ -59,7 +59,7 @@ import {
   pendingApprovalResponse,
   ZERO_ADDRESS,
 } from './helpers.js'
-import type { X402ApprovalRow, X402HandlerResult } from './types.js'
+import type { X402ApprovalRow, X402HandlerResult, X402McpCallContextInput } from './types.js'
 
 type ResolvedToken = Extract<ResolvePaymentTokenResult, { ok: true }>
 
@@ -79,12 +79,15 @@ export interface LegacyAuthorizeInput {
   tokenConfig: ResolvedToken['tokenConfig']
   tokenAddress: string
   log?: FastifyBaseLogger
+  /** #1307: optional MCP merchant-call context, persisted for settle-leg rehydration. */
+  mcpCallContext?: X402McpCallContextInput
 }
 
 export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X402HandlerResult> {
   const {
     agent, url, payTo, merchantPayTo, amountRaw, amountHuman, asset, network,
     description, category, idempotencyKey, signature, tokenConfig, tokenAddress, log,
+    mcpCallContext,
   } = input
 
   if (idempotencyKey) {
@@ -505,6 +508,8 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
       network,
       category: category ?? null,
       description: description ?? null,
+      // #1307: same merchant-call-context persistence as the delegation rail.
+      mcp_call_context: mcpCallContext ?? null,
     },
     conflictTarget: 'x402_idempotency_key',
   })

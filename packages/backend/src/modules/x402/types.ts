@@ -3,6 +3,21 @@
  * from `routes/x402.ts` — no shape changes.
  */
 
+/**
+ * #1307: the merchant MCP-tool call context a `haven_pay_mcp_tool` quote was
+ * made against — recorded at intent-creation time so the settle/complete leg
+ * can rehydrate it by `payment_id` instead of the agent re-threading it. This
+ * is convenience metadata for retrying the MERCHANT's own JSON-RPC call, not
+ * payment authority: a wrong value fails the outbound HTTP call, it cannot
+ * redirect funds (the signed payment context is verified independently).
+ */
+export interface X402McpCallContextInput {
+  merchantUrl: string
+  toolName: string
+  arguments?: Record<string, unknown>
+  mcpTransport?: { handshakeRequired: boolean; source: 'path' | 'bazaar' }
+}
+
 export interface X402AuthorizeBody {
   url: string
   payTo: string
@@ -29,6 +44,8 @@ export interface X402AuthorizeBody {
    * echoed in the v2 X-PAYMENT header's accepted entry.
    */
   facilitatorAddresses?: string[]
+  /** #1307: optional MCP merchant-call context, stored for settle-leg rehydration. */
+  mcpCallContext?: X402McpCallContextInput
 }
 
 export interface X402ApprovalRow {

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Code Quality"
-  short_description: "Run Haven quality scan or pass"
-  default_prompt: "Use $code-quality to find the next narrow quality-hardening target."

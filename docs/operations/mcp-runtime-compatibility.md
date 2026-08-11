@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1300: discovery endpoint-miss predicate now keys on the typed SDK error (message check kept for skew) — no floor or manifest change
+last-verified: "2026-08-11" # #1301: base-merchant-URL discovery (#1271) is no longer hosted-only — the local stdio runtime's haven_pay_mcp_tool now shares the same @haven_ai/sdk discovery helper; no floor or manifest change
 ---
 
 # MCP Runtime Compatibility

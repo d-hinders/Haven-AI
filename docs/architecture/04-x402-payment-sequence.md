@@ -12,13 +12,14 @@ covers:
   - packages/backend/src/rails/delegation-rail.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402.ts
+  - packages/sdk/src/merchant-discovery.ts
   - packages/mcp/src/tools.ts
   - packages/mcp-server/src/tools.ts
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # #1300 merchant-fetch timeouts + typed non-402 error; #1297/#1272/#1271 earlier same train
+last-verified: "2026-08-11" # #1301: base-merchant-URL discovery ported to the local MCP — the #1271 helper moved to @haven_ai/sdk and both surfaces now share it
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -85,12 +86,17 @@ the paid retry), caller signals combined, timeout surfaced as a clear 504
 naming the URL. A non-402 quote answer is the typed
 `X402UnexpectedStatusError`.
 
-Hosted `haven_pay_mcp_tool` additionally accepts a **base merchant URL**
-(#1271): when the probe misses (non-402), it makes one bounded same-origin
-discovery pass — GET `/.well-known/haven-demo-merchant` then `/`, no
-redirects, off-origin `mcp_url` refused unfetched — and retries once at the
-document's `mcp_url`, returning the resolved `merchant_url`. Discovery finds
-endpoints; payment authority is unchanged.
+`haven_pay_mcp_tool` additionally accepts a **base merchant URL**, in BOTH
+topologies (#1271, ported to the local runtime in #1301 — the discovery
+helper itself lives once in `@haven_ai/sdk` and both `packages/mcp` and
+`packages/mcp-server` call it): when the probe misses, it makes one bounded
+same-origin discovery pass — GET `/.well-known/haven-demo-merchant` then `/`,
+no redirects, off-origin `mcp_url` refused unfetched — and retries once at
+the document's `mcp_url`, returning the resolved `merchant_url`. The hosted
+probe's miss is the typed `X402UnexpectedStatusError` (non-402); the local
+flow has no dedicated probe step (`haven.fetch()` resolves a 402 itself), so
+its equivalent miss is a non-ok `Response` from the untouched first hop.
+Discovery finds endpoints; payment authority is unchanged.
 
 ## Standard SDK / Local MCP Flow
 

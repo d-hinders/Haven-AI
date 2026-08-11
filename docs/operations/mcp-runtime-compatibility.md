@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1301: base-merchant-URL discovery (#1271) is no longer hosted-only — the local stdio runtime's haven_pay_mcp_tool now shares the same @haven_ai/sdk discovery helper; no floor or manifest change
+last-verified: "2026-08-11" # #1300-kalibrering (300s + MERCHANT_UNRESPONSIVE_AFTER_FUNDING) + #1301: discovery delad via @haven_ai/sdk, inte längre hosted-only; ingen floor/manifest-ändring
 ---
 
 # MCP Runtime Compatibility

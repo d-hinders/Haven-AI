@@ -887,6 +887,60 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
     'The Haven funding leg succeeded, but the merchant did not answer the paid retry before the timeout. The merchant may still settle late — check haven_get_payment_status (and retry haven_complete_mcp_tool once) BEFORE sweeping; sweep only if no settlement appears.',
 }
 
+/**
+ * #1308: machine-readable warning codes carried in the `warnings` array on
+ * x402 MCP tool responses. Warnings are ADVISORY — they never replace a
+ * refusal, and existing failure codes stay authoritative for errors. The
+ * legacy `cap_warning` string field is kept for compatibility; the structured
+ * entry carries the same message under MISSING_MAX_AMOUNT.
+ */
+export const AgentPaymentWarningCode = {
+  /** No max_amount cap was supplied — the live quoted price was accepted as-is. */
+  MissingMaxAmount: 'MISSING_MAX_AMOUNT',
+  /** The signing window closes soon; sign promptly or re-quote with the same idempotency key. */
+  QuoteExpiresSoon: 'QUOTE_EXPIRES_SOON',
+  /** The merchant URL was resolved via discovery — pass the RESOLVED url forward. */
+  MerchantUrlDiscovered: 'MERCHANT_URL_DISCOVERED',
+} as const
+
+export type AgentPaymentWarningCode =
+  (typeof AgentPaymentWarningCode)[keyof typeof AgentPaymentWarningCode]
+
+export interface AgentPaymentWarning {
+  code: AgentPaymentWarningCode
+  message: string
+}
+
+/**
+ * #1308: the structured next-step contract on x402 MCP tool responses. It
+ * EXTENDS the existing taxonomy — `next_action` values come from
+ * AgentPaymentNextAction, never a parallel vocabulary. `next_arguments`
+ * carries the small, literally-usable arguments; bulky pass-through fields
+ * (payment_required) are named in `reason` and taken from the SAME response.
+ */
+export interface AgentNextStep {
+  next_action: AgentPaymentNextAction
+  /** Fully-qualified tool name for the next call, when one exists. */
+  next_tool?: string
+  /** Small literal arguments for next_tool. Bulky fields are referenced by reason. */
+  next_arguments?: Record<string, unknown>
+  /** False when the agent should stop and involve the user before continuing. */
+  safe_to_continue: boolean
+  reason: string
+}
+
+/** #1308: compact reporting summary — what the agent tells the user. */
+export interface AgentSummary {
+  payment_id: string
+  status: string
+  amount?: string
+  amount_atomic?: string
+  token?: string
+  network?: string
+  expires_at?: string
+  product?: string
+}
+
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {
   [AgentPaymentRail.Direct]: 'Standard Haven payment from the user-controlled Safe through an approved delegate allowance.',
   [AgentPaymentRail.X402]: 'x402 HTTP 402 payment flow with a Haven funding leg and merchant retry leg.',

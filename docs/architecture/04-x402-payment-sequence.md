@@ -18,7 +18,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # #1300 review: merchant timeout calibrated to 300s; funded-timeout verify-then-sweep routing
+last-verified: "2026-08-11" # #1308 structured next-step contract on hosted purchase responses (+ #1300/#1301 same train)
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -88,6 +88,14 @@ the typed `X402UnexpectedStatusError`. A timeout AFTER confirmed funding is
 routed to `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` with verify-then-sweep
 guidance — an unanswered retry is not proof of rejection, and the merchant
 may still settle late against its valid EIP-3009 authorization.
+
+Since #1308 the hosted purchase responses carry a **structured next-step
+contract**: `next_action` (values from the existing AgentPaymentNextAction
+taxonomy), `next_tool` + small literal `next_arguments`, `safe_to_continue`
+(false on pending approval — over-budget is a user decision), a compact
+`agent_summary`, and an advisory `warnings[]` (MISSING_MAX_AMOUNT absorbs the
+#1275 cap nudge; QUOTE_EXPIRES_SOON; MERCHANT_URL_DISCOVERED). Warnings never
+replace refusals; failure codes stay authoritative.
 
 Hosted `haven_pay_mcp_tool` additionally accepts a **base merchant URL**
 (#1271): when the probe misses (non-402), it makes one bounded same-origin

@@ -5,6 +5,10 @@ import {
   HavenApiError,
   MerchantTimeoutError,
   X402UnexpectedStatusError,
+  AgentPaymentWarningCode,
+  type AgentNextStep,
+  type AgentPaymentWarning,
+  type AgentSummary,
   HavenClient,
   HavenError,
   HavenPaymentStateError,
@@ -288,6 +292,7 @@ const SUBMIT_DESCRIPTION = [
 const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
   ...sharedDescriptions.payMcpTool,
   behavior:
+    'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): responses carry next_action, next_tool, next_arguments, agent_summary and warnings — act on those; the prose below is fallback and debugging detail. ' +
     'Builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. merchant_url may be the exact MCP endpoint or a BASE merchant URL (#1271): a non-402 miss triggers one bounded same-origin discovery pass of the merchant discovery document and one retry; the returned merchant_url is the resolved endpoint — pass THAT to settle/complete. ' +
     'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, signer_compatibility, merchant_url, tool_name, arguments, mcp_transport }. ' +
     'The funding/quote window expires at expires_at; if it expires, re-run haven_pay_mcp_tool with the same idempotency_key before signing again. ' +
@@ -346,6 +351,8 @@ const QUOTE_X402_DESCRIPTION = composeDescription({
 })
 
 const PAY_X402_QUOTE_DESCRIPTION = [
+  'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): responses carry next_action, next_tool,',
+  'next_arguments, agent_summary and warnings — act on those; prose is fallback.',
   'Construct the funding step for an x402 payment and return the unsigned hash for the local',
   'signer to sign. For read-only allowance, budget, spend-limit, remaining-amount, or',
   'reset-period questions, call haven_get_allowances instead of calling this tool.',
@@ -768,10 +775,54 @@ export function createToolHandlers(
             tool_name: args.tool_name,
             arguments: args.arguments ?? {},
             ...(quote.mcpTransport ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) } : {}),
+            // #1308: machine-readable next step — the agent follows this
+            // before parsing any prose.
+            ...buildAgentGuidance({
+              nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+              nextTool: 'mcp__haven-signer__haven_sign_x402',
+              nextArguments: { payment_id: intent.paymentId },
+              safeToContinue: true,
+              reason:
+                'Sign locally: call next_tool with next_arguments plus payment_required taken ' +
+                'VERBATIM from this response, then haven_settle_mcp_tool with the returned ' +
+                'signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport ' +
+                'from this response.',
+              summary: {
+                payment_id: intent.paymentId,
+                status: intent.status,
+                amount: quote.amount,
+                amount_atomic: quote.amountAtomic,
+                token: quote.token,
+                network: intent.network,
+                expires_at: intent.expiresAt,
+                product: args.tool_name,
+              },
+              warnings: quoteWarnings({
+                maxAmount: args.max_amount as string | undefined,
+                expiresAt: intent.expiresAt,
+                ...(merchantUrl !== args.merchant_url ? { discoveredFrom: args.merchant_url } : {}),
+              }),
+            }),
           }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
-            return { payment_id: err.paymentId, status: 'pending_approval', payload_hash: null }
+            return {
+              payment_id: err.paymentId,
+              status: 'pending_approval',
+              payload_hash: null,
+              // #1308: over-budget is a USER decision — never continue silently.
+              ...buildAgentGuidance({
+                nextAction: AgentPaymentNextAction.WaitForUserApproval,
+                nextTool: 'mcp__haven__haven_get_payment_status',
+                nextArguments: { payment_id: err.paymentId ?? null },
+                safeToContinue: false,
+                reason:
+                  'The amount exceeds the remaining budget, so the payment is queued for the ' +
+                  'wallet owner. Tell the user, then poll next_tool — do NOT re-quote or re-pay ' +
+                  'the same purchase while it is pending.',
+                summary: { payment_id: err.paymentId ?? 'unknown', status: 'pending_approval' },
+              }),
+            }
           }
           throw err
         }
@@ -814,6 +865,18 @@ export function createToolHandlers(
           settled: true,
           result: merchant.result,
           settlement_tx_hash: merchant.settlement_tx_hash,
+          // #1308: done — nothing left but reporting.
+          ...buildAgentGuidance({
+            nextAction: AgentPaymentNextAction.None,
+            safeToContinue: true,
+            reason:
+              'Funding and merchant settlement both succeeded. Report the result to the user ' +
+              '(amounts, settlement_tx_hash, and the merchant result/summary).',
+            summary: {
+              payment_id: args.payment_id,
+              status: 'settled',
+            },
+          }),
         }
       }),
 
@@ -893,6 +956,28 @@ export function createToolHandlers(
                     'cannot exceed what the user intended to spend.',
                 }
               : {}),
+            // #1308: decomposed-path next step.
+            ...buildAgentGuidance({
+              nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+              nextTool: 'mcp__haven-signer__haven_sign_x402',
+              nextArguments: { payment_id: intent.paymentId },
+              safeToContinue: true,
+              reason:
+                'Sign locally: call next_tool with next_arguments plus payment_required taken ' +
+                'VERBATIM from this response. Then relay via haven_submit and finish with ' +
+                'haven_x402_sign_header + the original merchant retry.',
+              summary: {
+                payment_id: intent.paymentId,
+                status: intent.status,
+                amount_atomic: intent.amountAtomic,
+                network: intent.network,
+                expires_at: intent.expiresAt,
+              },
+              warnings: quoteWarnings({
+                maxAmount: args.max_amount as string | undefined,
+                expiresAt: intent.expiresAt,
+              }),
+            }),
           }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
@@ -1177,6 +1262,68 @@ async function discoverMerchantMcpUrl(inputUrl: string): Promise<string | null> 
     }
   }
   return null
+}
+
+/**
+ * #1308: the structured next-step contract. next_action values come from the
+ * EXISTING AgentPaymentNextAction taxonomy; warnings are advisory and never
+ * replace a refusal. next_arguments carries only small literal values — the
+ * bulky pass-throughs (payment_required, mcp_transport) are named in `reason`
+ * and taken verbatim from the same response.
+ */
+const QUOTE_EXPIRES_SOON_MS = 120_000
+
+function buildAgentGuidance(input: {
+  nextAction: AgentNextStep['next_action']
+  nextTool?: string
+  nextArguments?: Record<string, unknown>
+  safeToContinue: boolean
+  reason: string
+  summary: AgentSummary
+  warnings?: AgentPaymentWarning[]
+}) {
+  return {
+    next_action: input.nextAction,
+    ...(input.nextTool ? { next_tool: input.nextTool } : {}),
+    ...(input.nextArguments ? { next_arguments: input.nextArguments } : {}),
+    safe_to_continue: input.safeToContinue,
+    reason: input.reason,
+    agent_summary: input.summary,
+    warnings: input.warnings ?? [],
+  }
+}
+
+function quoteWarnings(args: {
+  maxAmount: string | undefined
+  expiresAt: string | undefined
+  discoveredFrom?: string
+}): AgentPaymentWarning[] {
+  const warnings: AgentPaymentWarning[] = []
+  if (args.maxAmount === undefined) {
+    warnings.push({
+      code: AgentPaymentWarningCode.MissingMaxAmount,
+      // Same substance as the legacy cap_warning field, which stays for compat.
+      message:
+        'No max_amount was set — the live quoted price was accepted as-is. Pass max_amount ' +
+        '(atomic units) on paid merchant calls so a changed quote cannot exceed intent.',
+    })
+  }
+  if (args.expiresAt) {
+    const msLeft = Date.parse(args.expiresAt) - Date.now()
+    if (Number.isFinite(msLeft) && msLeft > 0 && msLeft < QUOTE_EXPIRES_SOON_MS) {
+      warnings.push({
+        code: AgentPaymentWarningCode.QuoteExpiresSoon,
+        message: `The signing window closes in ${Math.round(msLeft / 1000)}s — sign promptly or re-quote with the same idempotency_key.`,
+      })
+    }
+  }
+  if (args.discoveredFrom) {
+    warnings.push({
+      code: AgentPaymentWarningCode.MerchantUrlDiscovered,
+      message: `merchant_url was resolved via the merchant discovery document (from ${args.discoveredFrom}) — pass the RESOLVED merchant_url forward.`,
+    })
+  }
+  return warnings
 }
 
 /** Trailing-slash/percent-case echoes compare equal; unparseable never does. */

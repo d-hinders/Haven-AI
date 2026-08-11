@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { AgentPaymentFailureCode, AgentPaymentNextAction, HavenApiError, HavenClient, MerchantTimeoutError } from '@haven_ai/sdk'
+import {
+  AgentPaymentFailureCode,
+  AgentPaymentNextAction,
+  HavenApiError,
+  HavenClient,
+  MerchantTimeoutError,
+  SIGNER_UPDATE_FALLBACK,
+} from '@haven_ai/sdk'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
@@ -551,6 +558,24 @@ describe('haven_pay_x402_quote', () => {
     expect(check).toMatch(/STOP before signing/)
     // Same standing instruction as the signing-time error (#1143).
     expect(check).toMatch(/invalidates the signature/)
+  })
+
+  it('carries the recovery guidance as STRUCTURED data too, not only inside check (#1309)', async () => {
+    // #1309: signer_compatibility is the stable machine-readable compatibility
+    // contract. `fallback` is the same fix `check` states in prose, as a field
+    // an agent can read without parsing a sentence — and it is the SAME string
+    // (SIGNER_UPDATE_FALLBACK) the local signer's own structured refusal uses,
+    // so an agent that meets either surface gets identical guidance.
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{ signer_compatibility: { fallback: string } }>(
+      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+
+    expect(result.data.signer_compatibility.fallback).toBe(SIGNER_UPDATE_FALLBACK)
   })
 
   it('does not refuse a quote whose emitted version the signer may not know (#1155)', async () => {

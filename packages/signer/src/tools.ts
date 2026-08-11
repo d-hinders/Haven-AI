@@ -4,6 +4,7 @@ import {
   HavenApiError,
   HavenError,
   HavenSigningError,
+  HavenUnsupportedSignerVersionError,
   type X402PaymentRequired,
 } from '@haven_ai/sdk'
 import { z } from 'zod/v3'
@@ -327,6 +328,21 @@ export interface ToolFailure {
   next_action?: string
   retry_with_new_quote?: boolean
   suggested_tool?: string
+  /**
+   * #1309: present on `UNSUPPORTED_EXPECTED_CONTEXT_VERSION` /
+   * `UNSUPPORTED_SWEEP_BINDING_VERSION` refusals — the exact version set this
+   * signer install enforces, derived from `SUPPORTED_X402_EXPECTED_VERSIONS` /
+   * `SUPPORTED_SWEEP_BINDING_VERSIONS` at the throw site.
+   */
+  supported_versions?: number[]
+  /** #1309: the version Haven sent that triggered the refusal above. */
+  received_version?: number
+  /**
+   * #1309: precise recovery guidance as DATA, not just prose inside `message`
+   * — the same text the hosted quote's advisory `signer_compatibility.fallback`
+   * carries when the refusal is an out-of-date signer.
+   */
+  fallback?: string
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
@@ -615,6 +631,24 @@ function normalizeError(err: unknown): ToolFailure {
       code: 'INVALID_INPUT',
       message: err.errors.map((e) => `${e.path.join('.') || '(root)'}: ${e.message}`).join('; '),
       statusCode: 400,
+    }
+  }
+  if (err instanceof HavenUnsupportedSignerVersionError) {
+    // #1309: the structured signer refusal. `code` is one of
+    // SignerRefusalCode's two values (not the generic 'SIGNING_ERROR'
+    // HavenSigningError hard-codes), so an agent can route on it directly
+    // instead of matching prose. next_action reuses the EXISTING
+    // AgentPaymentNextAction taxonomy (StopAndTellUser) rather than inventing
+    // a parallel vocabulary — this refusal is exactly that: stop, don't retry
+    // as-is, tell the user what fallback says.
+    return {
+      success: false,
+      code: err.code,
+      message: err.message,
+      supported_versions: [...err.supportedVersions],
+      received_version: err.receivedVersion,
+      fallback: err.fallback,
+      next_action: AgentPaymentNextAction.StopAndTellUser,
     }
   }
   if (err instanceof HavenSigningError) {

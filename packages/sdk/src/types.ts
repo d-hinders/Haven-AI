@@ -1547,6 +1547,66 @@ export class HavenSigningError extends HavenError {
   }
 }
 
+/**
+ * Refusal codes the local signer returns when it does not recognise the
+ * VERSION of a Haven-signed binding it was asked to sign (#1309). Distinct
+ * from `AgentPaymentFailureCode`: these describe a **signer capability**
+ * problem (this install cannot evaluate what Haven sent), not a payment-domain
+ * outcome, and they never reach the backend's REST/OpenAPI surface — only the
+ * local signer's own MCP tool responses (`haven_sign` / `haven_sign_x402` /
+ * `haven_sign_sweep_delegate`). That is also why this pair does not go through
+ * the `AgentPaymentFailureCode` four-gate (sdk → backend mirror → spec →
+ * api-types): there is no backend mirror to keep in sync with.
+ */
+export const SignerRefusalCode = {
+  /** `SUPPORTED_X402_EXPECTED_VERSIONS` in `@haven_ai/signer` does not include the received version. */
+  UnsupportedExpectedContextVersion: 'UNSUPPORTED_EXPECTED_CONTEXT_VERSION',
+  /** `SUPPORTED_SWEEP_BINDING_VERSIONS` in `@haven_ai/signer` does not include the received version. */
+  UnsupportedSweepBindingVersion: 'UNSUPPORTED_SWEEP_BINDING_VERSION',
+} as const
+
+export type SignerRefusalCode = (typeof SignerRefusalCode)[keyof typeof SignerRefusalCode]
+
+/**
+ * Canonical recovery guidance for a stale local signer (#1309) — the ONE
+ * string both the signer's structured refusal (`fallback` field, carried by
+ * `HavenUnsupportedSignerVersionError`) and the hosted quote's advisory
+ * `signer_compatibility.fallback` (#1155) render, so an agent that meets
+ * either surface is told the identical fix. A second hand-maintained copy of
+ * this sentence is exactly how the two surfaces could start disagreeing about
+ * what to do.
+ */
+export const SIGNER_UPDATE_FALLBACK =
+  'Update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`, which reinstalls the ' +
+  'pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
+  'quote or payment this version came from is unaffected and does not need to be re-quoted.'
+
+/**
+ * Thrown by the local signer when a Haven-signed binding (x402 expected
+ * context or sweep authorization) carries a version outside what this signer
+ * install enforces (#1143, structured as #1309). Machine-readable: `code`,
+ * `supportedVersions`, and `receivedVersion` are DERIVED from the signer's own
+ * `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS`
+ * constants at the throw site, never a second literal — see
+ * `assertSupportedBindingVersion` in `@haven_ai/signer`.
+ *
+ * This narrows HOW the refusal is reported. It does not weaken it: nothing is
+ * signed either way, and the version stays inside the Haven-signed binding
+ * message (callers must not "fix" a mismatch by rewriting it).
+ */
+export class HavenUnsupportedSignerVersionError extends HavenError {
+  constructor(
+    message: string,
+    code: SignerRefusalCode,
+    public readonly supportedVersions: readonly number[],
+    public readonly receivedVersion: number,
+    public readonly fallback: string,
+  ) {
+    super(message, code)
+    this.name = 'HavenUnsupportedSignerVersionError'
+  }
+}
+
 export class HavenTimeoutError extends HavenError {
   constructor(paymentId: string) {
     super(

@@ -18,6 +18,9 @@ import {
   HavenError,
   HavenSigningError,
   HavenApiError,
+  HavenUnsupportedSignerVersionError,
+  SignerRefusalCode,
+  SIGNER_UPDATE_FALLBACK,
   type SweepAuthorization,
   type SweepExpectedAuth,
   type X402ExpectedAuth,
@@ -425,13 +428,24 @@ export const SUPPORTED_SWEEP_BINDING_VERSIONS: readonly number[] = [1]
 /**
  * Fail closed on a binding version this signer does not understand, with an
  * error that names the received version, the ceiling this signer supports, and
- * the fix.
+ * the fix — both as PROSE (`message`, unchanged since #1143) and, since #1309,
+ * as MACHINE-READABLE fields on the thrown error itself
+ * (`HavenUnsupportedSignerVersionError`): `code`, `supportedVersions`,
+ * `receivedVersion`, `fallback`. The tool boundary (`normalizeError` in
+ * `tools.ts`) relays those fields verbatim instead of leaving an agent to
+ * regex-parse this prose, which is the diagnosability gap
+ * `docs/operations/mcp-runtime-compatibility.md` documents.
  *
- * This is strictly about the *message*: an unrecognised version was never
- * signable and still is not. The version travels inside the Haven-signed binding
- * message, so the error also tells the caller not to "fix" it by rewriting the
- * field — an agent that does would invalidate the signature and misrepresent
- * what Haven authorised.
+ * `supportedVersions`/`receivedVersion` are DERIVED from this call's own
+ * arguments — never a second literal — so they cannot drift from
+ * `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS`,
+ * which is what the signing path always passes in.
+ *
+ * The version travels inside the Haven-signed binding message, so the message
+ * also tells the caller not to "fix" it by rewriting the field — an agent that
+ * does would invalidate the signature and misrepresent what Haven authorised.
+ * That instruction is NOT weakened by structuring the refusal: this function
+ * still throws before any content check runs, and nothing is ever signed.
  *
  * Exported so a test can pin the historical case (a v2 context against a signer
  * whose set was `{1}`) that this signer can no longer produce on its own. The
@@ -444,17 +458,41 @@ export function assertSupportedBindingVersion(
 ): void {
   if (supported.includes(received)) return
   const highest = Math.max(...supported)
-  const ceiling =
-    received > highest
-      ? `This signer is out of date: it supports ${context} versions up to ${highest}, ` +
-        `and Haven sent version ${received}. Update @haven_ai/signer — rerun the Haven ` +
-        'connector (`npx @haven_ai/connect@alpha`), which reinstalls the pinned MCP runtime.'
-      : `Unsupported ${context} version ${received}: this signer supports ` +
-        `${supported.join(', ')}.`
-  throw new HavenSigningError(
+  // The else-branch ("updating will not restore it") assumes versions retire
+  // MONOTONICALLY from the oldest end — true for how SUPPORTED_* is maintained
+  // (append new, drop old). If a future change ever makes the supported set
+  // non-contiguous, a gap version would hit that branch and the wording needs
+  // revisiting (#1322 review).
+  const outOfDate = received > highest
+  const code =
+    context === 'x402 expected context'
+      ? SignerRefusalCode.UnsupportedExpectedContextVersion
+      : SignerRefusalCode.UnsupportedSweepBindingVersion
+  const ceiling = outOfDate
+    ? `This signer is out of date: it supports ${context} versions up to ${highest}, ` +
+      `and Haven sent version ${received}. Update @haven_ai/signer — rerun the Haven ` +
+      'connector (`npx @haven_ai/connect@alpha`), which reinstalls the pinned MCP runtime.'
+    : `Unsupported ${context} version ${received}: this signer supports ` +
+      `${supported.join(', ')}.`
+  // Below-floor is the opposite skew (this signer is NEWER than what sent the
+  // context, e.g. a retired version) — updating cannot fix it, so the shared
+  // "update the signer" fallback would be actively wrong here. Only the
+  // out-of-date branch, which is the case seen in the field (#1143), uses the
+  // canonical single-source fallback shared with the hosted quote's advisory
+  // signer_compatibility.fallback (#1155, #1309).
+  const fallback = outOfDate
+    ? SIGNER_UPDATE_FALLBACK
+    : `This ${context} version (${received}) is older than what this signer enforces ` +
+      `(${supported.join(', ')}) — updating @haven_ai/signer will not restore it. Nothing ` +
+      'was signed or spent; stop and tell the user rather than retrying.'
+  throw new HavenUnsupportedSignerVersionError(
     `${ceiling} Nothing was signed. Do not rewrite the version field to a supported ` +
       'value: it is part of the Haven-signed binding message, so changing it invalidates ' +
       'the signature and would misrepresent what Haven authorised.',
+    code,
+    supported,
+    received,
+    fallback,
   )
 }
 

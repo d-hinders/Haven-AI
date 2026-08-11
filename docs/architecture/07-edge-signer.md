@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-11" # #1308-fixar: guidance täcker nu även decomposed-pending; signerytan oförändrad
+last-verified: "2026-08-11" # #1309: #1143's version-skew refusal is now structured (code/supported_versions/received_version/fallback), single-sourced with the hosted quote's advisory fallback; enforcement/perimeter unchanged
 ---
 
 # Haven — Edge Signer
@@ -103,6 +103,24 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    a refusal, which stays at signing time (#1143). Only the agent sees both
    handshakes, so the comparison is agent-mediated by construction. The
    handshake carries no key material and no authority.
+
+   **Structured signing-time refusal (#1309).** The #1143 refusal itself is
+   unchanged — an unsupported expected-context or sweep-binding version still
+   fails closed before any content check, and nothing is ever signed — but it
+   is no longer Zod-adjacent prose an agent has to pattern-match. `haven_sign`
+   / `haven_sign_x402` / `haven_sign_sweep_delegate` return
+   `{ success: false, code: 'UNSUPPORTED_EXPECTED_CONTEXT_VERSION' |
+   'UNSUPPORTED_SWEEP_BINDING_VERSION', supported_versions, received_version,
+   fallback, next_action: 'stop_and_tell_user' }`. `supported_versions` /
+   `received_version` are DERIVED at the throw site from
+   `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS`,
+   never a second literal (`assertSupportedBindingVersion` in `core.ts`).
+   `fallback` is the SAME string (`SIGNER_UPDATE_FALLBACK`, `@haven_ai/sdk`)
+   the hosted quote's advisory `signer_compatibility.fallback` carries, so an
+   agent that meets either surface gets identical recovery guidance. This
+   narrows *how* the refusal is reported, not what is enforced — see
+   `docs/operations/mcp-runtime-compatibility.md` for the diagnosability gap
+   it closes and the full skew table.
 
 SDK / autonomous agents use the **core** directly (or the existing
 `HavenClient` signing). MCP-capable runtimes use the **stdio front-end**. One

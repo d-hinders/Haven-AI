@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { getAgentPaymentStatus } from '../modules/payments/index.js'
+import { agentExecutionRailLabel } from '../rails/execution-rail.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   authorizeMachinePayment,
@@ -48,6 +49,10 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       safe_address: agent.safe_address,
       delegate_address: agent.delegate_address,
       chain_id: agent.chain_id,
+      // #1306: which on-chain policy primitive gates this agent's spend —
+      // reporting only, same two-value bucketing handleGetAllowances already
+      // branches on below.
+      execution_rail: agentExecutionRailLabel(agent.execution_rail),
     }
   })
 

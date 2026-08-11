@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1307 settle-leg skew row (merchant-call-context rehydration) + #1308 guidance-fält + #1301 delad discovery + #1300-kalibrering; ingen floor/manifest-ändring
+last-verified: "2026-08-11" # #1306 haven_prepare_catalog_purchase: added to the quote/prepare skew-detection table row + a note that its settle leg reuses the #1307 rehydration path unchanged; #1307 settle-leg skew row (merchant-call-context rehydration) + #1308 guidance-fält + #1301 delad discovery + #1300-kalibrering; ingen floor/manifest-ändring
 ---
 
 # MCP Runtime Compatibility
@@ -198,6 +198,15 @@ values `haven_pay_mcp_tool` returned at quote time). Same shape as the
 `include_signing_payload=true` fallback above: no signature verification
 changes, only which call carries the bulk bytes.
 
+`haven_prepare_catalog_purchase` (#1306) — the guided catalog-id preflight —
+persists the SAME `mcpCallContext` at quote time (it composes the identical
+`createX402Intent` call `haven_pay_mcp_tool` uses, just sourced from a
+`merchant_catalog` row instead of caller-supplied fields), so it carries no
+separate skew row: the settle leg above rehydrates a catalog-preflight-created
+intent exactly like a `haven_pay_mcp_tool`-created one, and the
+`signer_compatibility` version check on the QUOTE side (table above) applies
+identically.
+
 ### Detecting skew before a payment (#1155)
 
 Every row above is a *post-quote* symptom: the agent found out by trying to pay.
@@ -207,7 +216,7 @@ nothing to read.
 | Surface | What it states | Where |
 |---|---|---|
 | Signer `initialize` result | The version sets this signer will verify — `capabilities.experimental["haven/signer-compatibility"]` (machine-readable) and the same numbers in `instructions` (what clients show the model) | `packages/signer/src/capabilities.ts`, wired in `buildSignerMcpServer` |
-| Hosted quote/prepare result | `signer_compatibility.x402_expected_context_version` — the version that quote will emit — plus the comparison instruction in-band | `packages/mcp-server/src/tools.ts` (`haven_pay_x402_quote`, `haven_pay_mcp_tool`) |
+| Hosted quote/prepare result | `signer_compatibility.x402_expected_context_version` — the version that quote will emit — plus the comparison instruction in-band | `packages/mcp-server/src/tools.ts` (`haven_pay_x402_quote`, `haven_pay_mcp_tool`, `haven_prepare_catalog_purchase`) |
 
 **The check is agent-mediated, and cannot be otherwise.** The signer and the
 hosted MCP are two separate servers connected to the same agent client. The

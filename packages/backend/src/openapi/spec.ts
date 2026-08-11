@@ -2634,7 +2634,7 @@ export const openapiSpec = {
       },
       MachinePaymentAgent: {
         type: 'object',
-        required: ['id', 'name', 'status', 'safe_address', 'delegate_address', 'chain_id'],
+        required: ['id', 'name', 'status', 'safe_address', 'delegate_address', 'chain_id', 'execution_rail'],
         properties: {
           id: uuid,
           name: { type: 'string' },
@@ -2642,6 +2642,14 @@ export const openapiSpec = {
           safe_address: address,
           delegate_address: address,
           chain_id: { type: 'integer' },
+          execution_rail: {
+            type: 'string',
+            enum: ['legacy', 'delegation'],
+            description:
+              'Which on-chain policy primitive gates this agent\'s spend (#1306): the legacy Safe ' +
+              'AllowanceModule (import-only accounts) or the delegation rail\'s active budget ' +
+              'delegations. Reporting only — the on-chain state is the real gate either way.',
+          },
         },
         additionalProperties: false,
       },

@@ -357,7 +357,23 @@ describe('machine payment routes', () => {
       safe_address: AGENT.safe_address,
       delegate_address: AGENT.delegate_address,
       chain_id: AGENT.chain_id,
+      // #1306: AGENT fixture carries no execution_rail — buckets into legacy,
+      // same as handleGetAllowances' own branch below.
+      execution_rail: 'legacy',
     })
+  })
+
+  it('returns execution_rail: delegation for a delegation-rail agent (#1306)', async () => {
+    primeDb(authAs({ ...AGENT, execution_rail: 'delegation' }))
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/agent',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().execution_rail).toBe('delegation')
   })
 
   it('returns configured allowances with on-chain remaining spend', async () => {

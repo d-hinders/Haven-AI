@@ -1,0 +1,4 @@
+interface:
+  display_name: "Haven Reset"
+  short_description: "Reset and retest Haven local setup"
+  default_prompt: "Use $haven-reset to cleanly reset my Haven agent setup."

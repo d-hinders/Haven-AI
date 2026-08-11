@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # re-verified for #1311: prose order only; skew rows, versions and manifest unchanged
+last-verified: "2026-08-11" # #1321: the hosted paid-MCP quote now establishes a merchant MCP session before the unpaid tools/call, using only public delegate context; local runtime compatibility, signer versions, Node floor, manifest, and signing authority unchanged. Prior #1311: prose order only; skew rows, versions and manifest unchanged. Earlier: #1309 row-one skew is machine-readable; #1306/#1307/#1308/#1301/#1300 and #1310 compatibility notes; MCP_VERSION/runtime manifest untouched.
 ---
 
 # MCP Runtime Compatibility

@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # re-verified for #1311: scan-first description reorder, no sequence/field semantics changed
+last-verified: "2026-08-11" # #1321: hosted paid-MCP quote now establishes its MCP session before the unpaid tools/call; signing, quote binding, and settle authority unchanged. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -286,9 +286,10 @@ boundary (owner decision, 2026-08-06), not a sequencing preference.
 
 The recommended three-call fast path for an x402-protected MCP tool is:
 
-1. `haven_pay_mcp_tool` — hosted MCP sends a `tools/call` probe, records the MCP
-   transport context, and returns the unsigned funding payload plus merchant/tool
-   context.
+1. `haven_pay_mcp_tool` — hosted MCP establishes an MCP session (`initialize`,
+   then `notifications/initialized`) and sends the unpaid, session-bound
+   `tools/call` quote probe. It records the MCP transport context and returns
+   the unsigned funding payload plus merchant/tool context.
 2. `haven_sign_x402` — the local signer signs the funding hash and creates the
    merchant-bound payment header.
 3. `haven_settle_mcp_tool` — hosted MCP relays the funding signature, waits for

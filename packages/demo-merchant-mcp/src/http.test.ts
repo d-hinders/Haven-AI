@@ -286,6 +286,18 @@ describe('demo merchant MCP x402 flow', () => {
     expect(duplicateText).toContain(TX_HASH)
     expect(duplicateText.match(/FAK-2026-\d+/)?.[0]).toBe(text.match(/FAK-2026-\d+/)?.[0])
     expect(submit).toHaveBeenCalledTimes(1)
+    // #1273 + review finding on #1302: the cached-duplicate branch must carry
+    // the SAME structured summary as the fresh purchase — an agent retrying a
+    // settled payment reports from the identical contract, never a stripped one.
+    const freshSummary = (JSON.parse(text.slice(text.indexOf('{'))) as {
+      result: { structuredContent?: { summary?: Record<string, unknown> } }
+    }).result.structuredContent?.summary
+    const duplicateSummary = (JSON.parse(duplicateText.slice(duplicateText.indexOf('{'))) as {
+      result: { structuredContent?: { summary?: Record<string, unknown> } }
+    }).result.structuredContent?.summary
+    expect(duplicateSummary).toBeDefined()
+    expect(duplicateSummary).toEqual(freshSummary)
+    expect(duplicateSummary?.settlement_tx_hash).toBe(TX_HASH)
   })
 
   it('a successful paid purchase returns a stable structured summary (#1273)', async () => {

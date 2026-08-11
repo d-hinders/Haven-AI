@@ -55,6 +55,24 @@ describe('settlementMethodsForProduct (#1274) — preserves #1266 ordering', () 
   it('never advertises a settlement method the merchant did not enable', () => {
     expect(settlementMethodsForProduct(PRODUCTS.vpn_basic, [])).toEqual([])
   })
+
+  it('reorders when the PRODUCT declares erc7710 first — the guard owns eip3009-first, not filter order', () => {
+    // Every real PRODUCTS entry happens to list eip3009 first, so without this
+    // fixture the reorder branch is only ever exercised vacuously (review
+    // finding on #1302: deleting the branch survived the other tests). A
+    // future product authored erc7710-first must still advertise eip3009 first.
+    const reversed = {
+      ...PRODUCTS.vpn_basic,
+      x402: {
+        ...PRODUCTS.vpn_basic.x402,
+        settlementMethods: ['erc7710', 'eip3009'] as SettlementMethod[],
+      },
+    }
+    expect(settlementMethodsForProduct(reversed, ['erc7710', 'eip3009'])).toEqual([
+      'eip3009',
+      'erc7710',
+    ])
+  })
 })
 
 describe('buildProductMetadata (#1274) — machine-readable product contract', () => {

@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-10" # #1272 compact default + #1271 base-URL discovery on the one-call tool
+last-verified: "2026-08-11" # #1300-kalibrering (300s, unresponsive-routing) + #1272/#1271 same train
 ---
 
 # Haven — Edge Signer
@@ -149,6 +149,12 @@ neither. When the full pair IS requested, `typed_data_b64` wins when both are
 supplied — silently, so a caller that supplies both must keep them in sync: on
 the direct path (no digest check) an edited `typed_data` next to a stale
 `typed_data_b64` would sign the stale one.
+
+Merchant-facing fetches on the hosted path are bounded (#1300):
+`merchantTimeout` default 300 s, calibrated to the merchant's own
+`maxTimeoutSeconds: 300`; a timeout AFTER confirmed funding surfaces as
+`MERCHANT_UNRESPONSIVE_AFTER_FUNDING` with verify-then-sweep guidance —
+never a blind sweep, since the merchant may still settle late.
 
 The one-call tool also accepts a BASE merchant URL (#1271): hosted MCP
 resolves the real MCP endpoint through the merchant's same-origin discovery

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { AgentPaymentFailureCode, AgentPaymentNextAction, HavenClient } from '@haven_ai/sdk'
+import { AgentPaymentFailureCode, AgentPaymentNextAction, HavenClient, MerchantTimeoutError } from '@haven_ai/sdk'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
@@ -1056,6 +1056,33 @@ describe('haven_pay_mcp_tool', () => {
     expect(payload.code).toBe('INVALID_INPUT')
     expect(payload.message).toContain('payment_id')
     expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('routes a merchant TIMEOUT after funding to verify-then-sweep guidance, never a bare 504 (#1300)', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockRejectedValue(
+      new MerchantTimeoutError('Merchant request timed out after 300000ms: http://merchant.test/mcp'),
+    )
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: {},
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    // Funding is on-chain; an unanswered retry is the SAME money-at-risk state
+    // as a rejection — but a timeout is not proof of rejection, so the
+    // guidance is verify-then-sweep, and the code is distinct.
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding)
+    expect(payload.statusCode).toBe(504)
+    expect(payload.paymentId).toBe('pay_x402')
+    expect(payload.message).toMatch(/may still settle late/)
+    expect(payload.message).toMatch(/haven_get_payment_status/)
+    expect(payload.suggested_tool).toBe('haven_get_payment_status')
   })
 
   it('haven_complete_mcp_tool fails with a typed sweep hint when the merchant rejects after funding', async () => {

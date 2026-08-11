@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient } from './client.js'
 import { HavenApiError, X402UnexpectedStatusError } from './types.js'
+// MerchantTimeoutError asserted structurally above (name/merchantErrorCode).
 
 // #1300: every merchant-facing fetch is bounded. Haven API calls always were
 // (request()'s AbortController); the merchant probes called bare fetch, so a
@@ -25,8 +26,9 @@ describe('merchant fetch timeout (#1300)', () => {
     const client = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test', merchantTimeout: 50 })
 
     await expect(client.quoteX402('http://merchant.test/mcp')).rejects.toMatchObject({
-      name: 'HavenApiError',
+      name: 'MerchantTimeoutError',
       statusCode: 504,
+      merchantErrorCode: 'merchant_timeout',
       message: expect.stringMatching(/timed out after 50ms.*http:\/\/merchant\.test\/mcp/),
     })
   }, 5_000)
@@ -56,5 +58,21 @@ describe('merchant fetch timeout (#1300)', () => {
     expect(err).toBeInstanceOf(HavenApiError)
     expect((err as X402UnexpectedStatusError).x402ErrorCode).toBe('unexpected_non_402_status')
     expect((err as HavenApiError).statusCode).toBe(404)
+  })
+})
+
+
+describe('merchant timeout calibration (#1300 review)', () => {
+  it('the default tolerates the protocol contract: >= merchant maxTimeoutSeconds (300s)', async () => {
+    // The demo merchant advertises maxTimeoutSeconds: 300 and its synchronous
+    // settlement wait inherits viem's 180s default — a client default below
+    // either aborts settlements the contract itself calls normal.
+    const clientSrc = (await import('node:fs')).readFileSync(
+      new URL('./client.ts', import.meta.url),
+      'utf8',
+    )
+    const m = clientSrc.match(/DEFAULT_MERCHANT_TIMEOUT = ([0-9_]+)/)
+    expect(m).toBeTruthy()
+    expect(Number(m![1].replaceAll('_', ''))).toBeGreaterThanOrEqual(300_000)
   })
 })

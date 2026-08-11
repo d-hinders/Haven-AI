@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-10" # #1272: x402 quote tools compact by default; include_signing_payload restores the full payload
+last-verified: "2026-08-10" # #1272 compact default + #1271 base-URL discovery on the one-call tool
 ---
 
 # Haven — Edge Signer
@@ -149,6 +149,12 @@ neither. When the full pair IS requested, `typed_data_b64` wins when both are
 supplied — silently, so a caller that supplies both must keep them in sync: on
 the direct path (no digest check) an edited `typed_data` next to a stale
 `typed_data_b64` would sign the stale one.
+
+The one-call tool also accepts a BASE merchant URL (#1271): hosted MCP
+resolves the real MCP endpoint through the merchant's same-origin discovery
+document (bounded, no redirects, off-origin refused) and returns the RESOLVED
+`merchant_url` — the agent passes that to settle/complete. Discovery carries
+no payment authority; the signer's verification is unaffected.
 
 **Preferred x402 form (#1263):** pass `payment_id` alone (plus
 `payment_required` on the one-call tool) — the signer fetches `payload_hash`,

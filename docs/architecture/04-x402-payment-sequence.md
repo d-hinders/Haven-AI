@@ -18,7 +18,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-10" # #1272: x402 quote tools compact by default; include_signing_payload restores the full payload
+last-verified: "2026-08-10" # #1272 compact quotes; #1271 base-URL endpoint discovery on haven_pay_mcp_tool
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -77,6 +77,13 @@ response may include `PAYMENT-RESPONSE` evidence.
 `quoteX402()` and `haven_quote_x402` are read-only. They parse the challenge but
 do not create a Haven payment, approval request, signature, or on-chain
 transaction.
+
+Hosted `haven_pay_mcp_tool` additionally accepts a **base merchant URL**
+(#1271): when the probe misses (non-402), it makes one bounded same-origin
+discovery pass — GET `/.well-known/haven-demo-merchant` then `/`, no
+redirects, off-origin `mcp_url` refused unfetched — and retries once at the
+document's `mcp_url`, returning the resolved `merchant_url`. Discovery finds
+endpoints; payment authority is unchanged.
 
 ## Standard SDK / Local MCP Flow
 

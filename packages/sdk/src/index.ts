@@ -105,6 +105,9 @@ export {
   HavenPaymentStateError,
   HavenSigningError,
   HavenTimeoutError,
+  HavenUnsupportedSignerVersionError,
+  SignerRefusalCode,
+  SIGNER_UPDATE_FALLBACK,
 } from './types.js'
 
 export {

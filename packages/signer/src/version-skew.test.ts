@@ -3,7 +3,13 @@ import { hashTypedData } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { buildX402ExpectedMessage, buildSweepAuthorizationMessage } from '@haven_ai/sdk'
+import {
+  buildX402ExpectedMessage,
+  buildSweepAuthorizationMessage,
+  HavenUnsupportedSignerVersionError,
+  SignerRefusalCode,
+  SIGNER_UPDATE_FALLBACK,
+} from '@haven_ai/sdk'
 import {
   assertSupportedBindingVersion,
   createEdgeSigner,
@@ -162,6 +168,54 @@ describe('assertSupportedBindingVersion (#1143)', () => {
   })
 })
 
+describe('assertSupportedBindingVersion structured fields (#1309)', () => {
+  it('throws HavenUnsupportedSignerVersionError with code/supportedVersions/receivedVersion DERIVED from the call site', () => {
+    let error: HavenUnsupportedSignerVersionError | undefined
+    try {
+      assertSupportedBindingVersion(2, [1], 'x402 expected context')
+    } catch (err) {
+      error = err as HavenUnsupportedSignerVersionError
+    }
+    expect(error).toBeInstanceOf(HavenUnsupportedSignerVersionError)
+    expect(error?.code).toBe(SignerRefusalCode.UnsupportedExpectedContextVersion)
+    // Mutation proof: this is [1], not a hard-coded array — it is the SECOND
+    // argument passed to assertSupportedBindingVersion, echoed back exactly.
+    expect(error?.supportedVersions).toEqual([1])
+    expect(error?.receivedVersion).toBe(2)
+    // Out-of-date (received > highest supported) → the single-source fallback,
+    // byte-identical to what the hosted quote's signer_compatibility.fallback
+    // carries (#1155/#1309).
+    expect(error?.fallback).toBe(SIGNER_UPDATE_FALLBACK)
+  })
+
+  it('uses UNSUPPORTED_SWEEP_BINDING_VERSION for the sweep-binding context', () => {
+    let error: HavenUnsupportedSignerVersionError | undefined
+    try {
+      assertSupportedBindingVersion(2, [1], 'sweep authorization binding')
+    } catch (err) {
+      error = err as HavenUnsupportedSignerVersionError
+    }
+    expect(error?.code).toBe(SignerRefusalCode.UnsupportedSweepBindingVersion)
+  })
+
+  it('does NOT tell the caller to update when the version is below the floor — updating cannot fix it', () => {
+    // The opposite skew: this signer is NEWER than the (retired) version it
+    // received. SIGNER_UPDATE_FALLBACK would be actively wrong advice here, so
+    // this must be a DIFFERENT string, not the shared constant.
+    let error: HavenUnsupportedSignerVersionError | undefined
+    try {
+      assertSupportedBindingVersion(1, [2, 3], 'x402 expected context')
+    } catch (err) {
+      error = err as HavenUnsupportedSignerVersionError
+    }
+    expect(error?.fallback).toBeTruthy()
+    expect(error?.fallback).not.toBe(SIGNER_UPDATE_FALLBACK)
+    expect(error?.fallback).not.toMatch(/@haven_ai\/connect@alpha/)
+    expect(error?.supportedVersions).toEqual([2, 3])
+    expect(error?.receivedVersion).toBe(1)
+  })
+})
+
 describe('x402 funding under an unknown expected-context version (#1143)', () => {
   it('refuses the bare-hash path with the actionable error, and signs nothing', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
@@ -260,7 +314,7 @@ describe('sweep binding under an unknown version (#1143)', () => {
  * makes the tests above observable to an agent.
  */
 describe('tool boundary surfaces the skew instead of a Zod string (#1143)', () => {
-  it('returns a SIGNING_ERROR naming the fix, not INVALID_INPUT', async () => {
+  it('returns a structured refusal naming the fix, not INVALID_INPUT (#1143, structured #1309)', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
     const handlers = createToolHandlers(signer)
     const expected = await expectedWithVersion(UNKNOWN_X402_VERSION)
@@ -281,11 +335,123 @@ describe('tool boundary surfaces the skew instead of a Zod string (#1143)', () =
     })
     expect(result.success).toBe(false)
     if (result.success) return
-    // Not the schema boundary: an unknown version is now a Haven diagnosis.
-    expect(result.code).toBe('SIGNING_ERROR')
+    // Not the schema boundary, and not the old generic SIGNING_ERROR either:
+    // an unknown version is now a machine-readable Haven diagnosis with its
+    // own stable code (#1309).
+    expect(result.code).toBe('UNSUPPORTED_EXPECTED_CONTEXT_VERSION')
     expect(result.code).not.toBe('INVALID_INPUT')
+    expect(result.code).not.toBe('SIGNING_ERROR')
     expect(result.message).toMatch(/out of date/)
     expect(result.message).toContain('@haven_ai/signer')
+  })
+
+  describe('structured refusal fields (#1309)', () => {
+    it('x402 refusal carries supported_versions/received_version/fallback DERIVED from the exported constant, plus the existing next_action taxonomy', async () => {
+      const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+      const handlers = createToolHandlers(signer)
+      const expected = await expectedWithVersion(UNKNOWN_X402_VERSION)
+      const result = await handlers.haven_sign_x402({
+        payload_hash: FUNDING_HASH,
+        payment_required: PAYMENT_REQUIRED,
+        x402_expected: {
+          payment_id: expected.paymentId,
+          payload_hash: expected.payloadHash,
+          resource_url: expected.resourceUrl,
+          merchant_to: expected.merchantTo,
+          amount: expected.amount,
+          asset: expected.asset,
+          network: expected.network,
+          expires_at: expected.expiresAt,
+          auth: expected.auth,
+        },
+      })
+      expect(result.success).toBe(false)
+      if (result.success) return
+      // DERIVED, not a second literal: if this ever hard-codes a different
+      // array than the exported constant, this is the assertion that catches
+      // it (mutation proof for #1309).
+      expect(result.supported_versions).toEqual([...SUPPORTED_X402_EXPECTED_VERSIONS])
+      expect(result.received_version).toBe(UNKNOWN_X402_VERSION)
+      expect(result.fallback).toBeTruthy()
+      expect(result.fallback).toContain('@haven_ai/signer')
+      expect(result.fallback).toContain('npx @haven_ai/connect@alpha')
+      expect(result.fallback).toMatch(/unspent|unaffected/)
+      // Existing taxonomy, not a new one: AgentPaymentNextAction.StopAndTellUser.
+      expect(result.next_action).toBe('stop_and_tell_user')
+    })
+
+    it('sweep refusal uses UNSUPPORTED_SWEEP_BINDING_VERSION with the same structured shape', async () => {
+      const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+      const handlers = createToolHandlers(signer)
+      const authorization = {
+        from: '0x000000000000000000000000000000000000bEEF',
+        to: '0x000000000000000000000000000000000000cAfe',
+        value: '1000000',
+        validAfter: '0',
+        validBefore: '99999999999',
+        nonce: '0x' + '22'.repeat(32),
+        token: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        chainId: 8453,
+      }
+      const message = buildSweepAuthorizationMessage(authorization)
+      const account = privateKeyToAccount(BINDING_KEY)
+      const result = await handlers.haven_sign_sweep_delegate({
+        authorization,
+        expected_auth: {
+          version: UNKNOWN_SWEEP_VERSION,
+          message,
+          signature: await account.signMessage({ message }),
+          signer: account.address,
+        },
+      })
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.code).toBe('UNSUPPORTED_SWEEP_BINDING_VERSION')
+      expect(result.supported_versions).toEqual([...SUPPORTED_SWEEP_BINDING_VERSIONS])
+      expect(result.received_version).toBe(UNKNOWN_SWEEP_VERSION)
+      expect(result.fallback).toBeTruthy()
+      expect(result.next_action).toBe('stop_and_tell_user')
+    })
+
+    it('a compatible signer still signs unchanged — the structured refusal adds no new refusal path', async () => {
+      // v1 signs over the bare hash; v2 commits to EIP-712 typed data (#1138) —
+      // exercise both real shapes this signer actually supports, not just the
+      // version number in isolation.
+      const typedData = {
+        domain: { chainId: 84532, name: 'HybridDeleGator', version: '1' },
+        types: { Payload: [{ name: 'sender', type: 'address' }] },
+        primaryType: 'Payload',
+        message: { sender: '0x98ffBf30459a98FD80fAce18f519967769641F76' },
+      }
+      const typedDataHash = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+      const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+      const handlers = createToolHandlers(signer)
+      for (const version of SUPPORTED_X402_EXPECTED_VERSIONS) {
+        const usesTypedData = version >= 2
+        const expected = await expectedWithVersion(
+          version,
+          usesTypedData ? { typedDataHash } : {},
+        )
+        const result = await handlers.haven_sign_x402({
+          payload_hash: FUNDING_HASH,
+          payment_required: PAYMENT_REQUIRED,
+          ...(usesTypedData ? { typed_data: typedData } : {}),
+          x402_expected: {
+            payment_id: expected.paymentId,
+            payload_hash: expected.payloadHash,
+            resource_url: expected.resourceUrl,
+            merchant_to: expected.merchantTo,
+            amount: expected.amount,
+            asset: expected.asset,
+            network: expected.network,
+            expires_at: expected.expiresAt,
+            typed_data_hash: usesTypedData ? typedDataHash : undefined,
+            auth: expected.auth,
+          },
+        })
+        expect(result.success).toBe(true)
+      }
+    })
   })
 
   it('still rejects a structurally invalid version at the schema boundary (#1143)', async () => {

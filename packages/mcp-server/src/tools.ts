@@ -14,6 +14,7 @@ import {
   HavenClient,
   HavenError,
   HavenPaymentStateError,
+  SIGNER_UPDATE_FALLBACK,
   composeDescription,
   discoverMerchantMcpUrl,
   sameUrl,
@@ -1760,6 +1761,29 @@ function buildX402SigningContext(
  * is required on that binding — there is deliberately no "unknown" fallback,
  * which would imply a state the type does not allow and give the agent a null
  * to compare against.
+ *
+ * **This shape is the stable machine-readable compatibility contract (#1309
+ * acceptance: "hosted MCP quote/preflight responses surface compatibility
+ * requirements in a stable field").** It was already sufficient going into
+ * #1309 — `x402_expected_context_version` is the number to compare,
+ * `signer_capability` names where the signer advertises its side, and `check`
+ * carries the human-readable instruction. The one genuine gap was that the fix
+ * lived ONLY inside that prose; `fallback` below closes it by carrying the same
+ * recovery text as data, sourced from the same `SIGNER_UPDATE_FALLBACK`
+ * constant the signer's own structured refusal uses (`core.ts`,
+ * `assertSupportedBindingVersion`, #1309), so an agent that reads either
+ * surface gets byte-identical guidance. Do not rename or remove existing
+ * fields without treating it as a breaking change to this contract.
+ *
+ * This notice stays ADVISORY (owner decision, 2026-08-07, unchanged by
+ * #1309): hosted MCP never sees the local signer's `initialize` handshake, so
+ * it cannot know whether `emittedVersion` is actually unsupported — only the
+ * agent, which sees both sides, can compare them. The `fallback` field
+ * therefore names the fix for the case this notice CAN detect (an
+ * out-of-date signer), not a refusal of the quote itself. The signer's own
+ * signing-time refusal (structured since #1309, see `assertSupportedBindingVersion`
+ * in `@haven_ai/signer`) remains the only place an unsupported version is
+ * actually enforced.
  */
 function signerCompatibilityNotice(emittedVersion: number) {
   return {
@@ -1774,6 +1798,12 @@ function signerCompatibilityNotice(emittedVersion: number) {
       'which reinstalls the pinned MCP runtime. Do not edit the version to a supported value — ' +
       'it is part of the Haven-signed binding message, so changing it invalidates the signature. ' +
       'Nothing has been spent at this point; no funds move until haven_submit relays a signature.',
+    // #1309: the SAME recovery guidance as `check` above, as structured data
+    // instead of prose to parse — and the SAME string
+    // `assertSupportedBindingVersion` in `@haven_ai/signer` puts on its
+    // structured refusal's `fallback` field when this version turns out to be
+    // unsupported. Single source: `SIGNER_UPDATE_FALLBACK` in `@haven_ai/sdk`.
+    fallback: SIGNER_UPDATE_FALLBACK,
   }
 }
 

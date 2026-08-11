@@ -1618,7 +1618,14 @@ function isMerchantEndpointMiss(err: unknown): boolean {
   // #1300: the typed class is authoritative; the message check keeps the
   // predicate working against an older bundled SDK during version skew.
   if (err instanceof X402UnexpectedStatusError) return true
-  return err instanceof HavenApiError && err.message.includes('Expected an x402 quote response')
+  return (
+    err instanceof HavenApiError &&
+    (err.message.includes('Expected an x402 quote response') ||
+      (typeof err.body === 'object' &&
+        err.body != null &&
+        'mcpSessionNotEstablished' in err.body &&
+        err.body.mcpSessionNotEstablished === true))
+  )
 }
 
 /**
@@ -1666,7 +1673,12 @@ async function quoteMcpToolCall(
     body: JSON.stringify(envelope),
   }
   let merchantUrl = input.merchantUrl
-  const probe = () => haven.quoteX402(merchantUrl, init, { idempotencyKey: input.idempotencyKey })
+  // This is an MCP-tool purchase, so always negotiate the Streamable-HTTP
+  // lifecycle before its unpaid tools/call — exact MCP endpoints can use any
+  // same-origin path, not only `/mcp`. A base URL that cannot establish a
+  // session is treated as a bounded #1271 discovery miss; it never receives a
+  // bare tools/call probe.
+  const probe = () => haven.quoteMcpX402(merchantUrl, init, { idempotencyKey: input.idempotencyKey })
   try {
     const quote = await probe()
     return { quote, merchantUrl }

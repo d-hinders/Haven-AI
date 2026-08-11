@@ -1240,6 +1240,44 @@ export class HavenClient {
   }
 
   /**
+   * Probe an MCP tool for its x402 quote without creating a payment.
+   *
+   * Unlike the generic {@link quoteX402} helper, this completes the
+   * Streamable-HTTP MCP lifecycle before sending the unpaid `tools/call`.
+   * Hosted MCP uses this path while remaining keyless: it resolves only the
+   * agent's public delegate address for `x402-wallet`; signing remains local.
+   * It refuses before the quote when the merchant does not establish a session;
+   * callers that need a plain x402 endpoint must use {@link quoteX402}.
+   */
+  async quoteMcpX402(
+    url: string,
+    init?: RequestInit,
+    options: X402AuthorizationOptions = {},
+  ): Promise<X402Quote> {
+    const wallet = await this.resolveX402WalletForMerchantCall()
+    const sessionId = await this.mcpInitialize(url, init, wallet)
+    if (!sessionId) {
+      throw new HavenApiError(
+        'The merchant did not establish an MCP session before the x402 quote. No payment was created.',
+        502,
+        { mcpSessionNotEstablished: true },
+      )
+    }
+
+    let requestInit = this.withX402Wallet(init, wallet)
+    requestInit = this.withMcpHeaders(requestInit, sessionId)
+
+    const quote = await this.quoteX402(url, requestInit, options)
+    // This dedicated helper established an MCP session even when the endpoint
+    // uses a custom path and does not advertise Bazaar metadata. Preserve that
+    // fact for the later, fresh session used by the paid retry.
+    return {
+      ...quote,
+      mcpTransport: quote.mcpTransport ?? { handshakeRequired: true, source: 'path' },
+    }
+  }
+
+  /**
    * Pay a previously inspected x402 quote and retry the exact captured request.
    */
   async payX402Quote(

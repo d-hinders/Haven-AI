@@ -22,6 +22,7 @@ const fundingTxHash = `0x${'ab'.repeat(32)}`
 
 const mcpUrl = 'https://mcp.soundside.ai/mcp'
 const genericUrl = 'https://api.merchant.example/paid'
+const customMcpUrl = 'https://api.merchant.example/v1'
 
 function paymentRequiredFor(url: string, extras: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -267,6 +268,89 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     expect(response.headers.get('content-type')).toBe('application/json')
     expect(response.headers.has('mcp-session-id')).toBe(false)
     await expect(response.json()).resolves.toEqual({ content: [{ type: 'text', text: 'an image' }] })
+  })
+
+  it('uses the MCP lifecycle for a keyless hosted quote and never signs or funds', async () => {
+    const toolCall = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'quote-1',
+      method: 'tools/call',
+      params: { name: 'buy_cloud_storage', arguments: { tier: '200gb' } },
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const target = String(url)
+      if (target === `${backendUrl}/machine-payments/agent`) return agentResponse()
+
+      const body = JSON.parse(init?.body as string) as { method?: string }
+      if (body.method === 'initialize') return initializeOk('sess-quote')
+      if (body.method === 'notifications/initialized') return notificationAccepted()
+
+      const headers = new Headers(init?.headers)
+      // This is the former hosted quote shape: strict MCP merchants reject it
+      // before emitting the 402 challenge.
+      if (
+        headers.get('Accept') !== 'application/json, text/event-stream' ||
+        headers.get('mcp-session-id') !== 'sess-quote' ||
+        headers.get('x402-wallet') !== delegateAddress
+      ) {
+        return new Response('MCP session or response type missing', { status: 406 })
+      }
+      return new Response(JSON.stringify(paymentRequiredFor(mcpUrl)), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const haven = newKeylessHostedClient()
+
+    // The generic helper retains its plain HTTP contract, so it demonstrates
+    // the strict fixture's old 406 behaviour without creating any payment.
+    await expect(haven.quoteX402(mcpUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: toolCall,
+    })).rejects.toMatchObject({ statusCode: 406 })
+
+    const quote = await haven.quoteMcpX402(mcpUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: toolCall,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(isInitializeCall(fetchMock.mock.calls[2])).toBe(true)
+    expect(isInitializedNotificationCall(fetchMock.mock.calls[3])).toBe(true)
+    const quoteHeaders = new Headers(quote.request.headers)
+    expect(quoteHeaders.get('Accept')).toBe('application/json, text/event-stream')
+    expect(quoteHeaders.get('mcp-session-id')).toBe('sess-quote')
+    expect(quoteHeaders.get('x402-wallet')).toBe(delegateAddress)
+    expect(quote.mcpTransport).toEqual({ handshakeRequired: true, source: 'path' })
+    expect(fetchMock.mock.calls[4][1]).toMatchObject({ body: toolCall })
+    // No /x402 intent, signature, or merchant retry is issued by a quote.
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).not.toContain(`${backendUrl}/x402`)
+  })
+
+  it('refuses a hosted MCP quote when no session is established instead of retrying bare', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      // Public delegate lookup only — no signing material is available.
+      .mockResolvedValueOnce(agentResponse())
+      // Strict MCP endpoint refuses initialization.
+      .mockResolvedValueOnce(new Response('not an MCP session', { status: 406 }))
+
+    const haven = newKeylessHostedClient()
+    await expect(haven.quoteMcpX402(mcpUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'buy_vpn' } }),
+    })).rejects.toMatchObject({
+      statusCode: 502,
+      message: expect.stringContaining('No payment was created'),
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(isInitializeCall(fetchMock.mock.calls[1])).toBe(true)
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).not.toContain(`${backendUrl}/x402`)
   })
 
   it('falls back to standard x402 when a /mcp server is not actually MCP', async () => {
@@ -521,6 +605,49 @@ describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
     expect(paidHeaders.get('x402-wallet')).toBe(delegateAddress)
     expect(paidHeaders.get('X-PAYMENT')).toBe('PAYMENT_HEADER_BAZAAR')
     expect(bodyOf(paidCall).method).toBe('tools/call')
+    expect(result.body).toEqual({ ok: true })
+  })
+
+  it('preserves a custom MCP quote handshake for the later paid retry', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      // Quote: public delegate lookup, then its own MCP session.
+      .mockResolvedValueOnce(agentResponse())
+      .mockResolvedValueOnce(initializeOk('sess-custom-quote'))
+      .mockResolvedValueOnce(notificationAccepted())
+      .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequiredFor(customMcpUrl)), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      // Completion: verified funding, then a fresh session — quote sessions
+      // are intentionally not reused after approval/funding.
+      .mockResolvedValueOnce(paymentStatusReady(customMcpUrl))
+      .mockResolvedValueOnce(agentResponse())
+      .mockResolvedValueOnce(initializeOk('sess-custom-paid'))
+      .mockResolvedValueOnce(notificationAccepted())
+      .mockResolvedValueOnce(sseResponse(sse({ jsonrpc: '2.0', id: 2, result: { ok: true } })))
+      .mockResolvedValueOnce(evidenceAccepted())
+
+    const haven = newKeylessHostedClient()
+    const quote = await haven.quoteMcpX402(customMcpUrl, merchantInit)
+    expect(quote.mcpTransport).toEqual({ handshakeRequired: true, source: 'path' })
+
+    const result = await haven.completeX402MerchantCall({
+      url: customMcpUrl,
+      init: merchantInit,
+      paymentId: 'pay_123',
+      paymentHeader: 'PAYMENT_HEADER_CUSTOM',
+      mcpTransport: quote.mcpTransport,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(10)
+    expect(isInitializeCall(fetchMock.mock.calls[1])).toBe(true)
+    expect(isInitializeCall(fetchMock.mock.calls[6])).toBe(true)
+    const paidHeaders = headersOf(fetchMock.mock.calls[8])
+    expect(paidHeaders.get('mcp-session-id')).toBe('sess-custom-paid')
+    expect(paidHeaders.get('Accept')).toBe('application/json, text/event-stream')
+    expect(paidHeaders.get('x402-wallet')).toBe(delegateAddress)
+    expect(paidHeaders.get('X-PAYMENT')).toBe('PAYMENT_HEADER_CUSTOM')
     expect(result.body).toEqual({ ok: true })
   })
 

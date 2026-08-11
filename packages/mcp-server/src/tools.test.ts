@@ -38,13 +38,48 @@ function stubFetch(routes: Record<string, RouteDefinition>) {
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const method = (init.method ?? 'GET').toUpperCase()
     const path = new URL(url).pathname
+    const body = init.body ? JSON.parse(init.body as string) : undefined
     calls.push({
       url,
       method,
-      body: init.body ? JSON.parse(init.body as string) : undefined,
+      body,
       headers: (init.headers ?? {}) as Record<string, string>,
     })
     const route = routes[`${method} ${path}`]
+    // Paid MCP-tool tests model a strict streamable-HTTP merchant: before its
+    // configured 402 tool response, it establishes an MCP session and expects
+    // the lifecycle notification. This keeps existing route fixtures focused
+    // on the payment state they exercise while asserting the hosted flow uses
+    // the real transport sequence.
+    if (route && route.status !== 404 && method === 'POST' && body?.method === 'initialize') {
+      const responseHeaders = new Headers({ 'mcp-session-id': 'sess-tools-test' })
+      const bodySnapshot = { jsonrpc: '2.0', id: body.id, result: { protocolVersion: '2025-06-18' } }
+      return {
+        ok: true,
+        status: 200,
+        headers: responseHeaders,
+        json: async () => bodySnapshot,
+        text: async () => JSON.stringify(bodySnapshot),
+        clone: () => ({
+          ok: true,
+          status: 200,
+          headers: responseHeaders,
+          json: async () => bodySnapshot,
+          text: async () => JSON.stringify(bodySnapshot),
+        }),
+      }
+    }
+    if (route && route.status !== 404 && method === 'POST' && body?.method === 'notifications/initialized') {
+      const responseHeaders = new Headers()
+      return {
+        ok: true,
+        status: 202,
+        headers: responseHeaders,
+        json: async () => ({}),
+        text: async () => '',
+        clone: () => ({ ok: true, status: 202, headers: responseHeaders, json: async () => ({}), text: async () => '' }),
+      }
+    }
     const status = route?.status ?? 200
     const responseHeaders = new Headers(route?.responseHeaders ?? {})
     const bodySnapshot = route?.body
@@ -910,6 +945,14 @@ describe('haven_pay_mcp_tool', () => {
     expect(result.data.payment_required).toBeDefined()
     expect(Array.isArray(result.data.payment_required.accepts)).toBe(true)
     expect(result.data.x402).toBeDefined()
+    const initialize = calls.find((call) => call.body?.method === 'initialize')
+    const initialized = calls.find((call) => call.body?.method === 'notifications/initialized')
+    const quoteProbe = calls.find((call) => call.body?.method === 'tools/call')
+    expect(initialize).toBeDefined()
+    expect(new Headers(initialized?.headers).get('mcp-session-id')).toBe('sess-tools-test')
+    expect(new Headers(quoteProbe?.headers).get('Accept')).toBe('application/json, text/event-stream')
+    expect(new Headers(quoteProbe?.headers).get('mcp-session-id')).toBe('sess-tools-test')
+    expect(new Headers(quoteProbe?.headers).get('x402-wallet')).toBe(AGENT_RESPONSE.delegate_address)
     // createX402Intent was called (POST /x402 route was hit)
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
@@ -961,10 +1004,9 @@ describe('haven_pay_mcp_tool', () => {
     expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
     expect(payload.message).toContain('1500000')
     expect(payload.message).toContain('1000000')
-    // No funding intent was created — the guard fired before createX402Intent
-    // (which would have hit GET /agent then POST /x402). The quote probe to the
-    // merchant (POST /mcp) is expected; only the funding path must be absent.
-    expect(calls.find((c) => c.url.includes('/agent'))).toBeUndefined()
+    // No funding intent was created — the guard fired before createX402Intent.
+    // The MCP-aware quote resolves the public delegate address through /agent,
+    // but it cannot sign, fund, or construct an x402 intent.
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 
@@ -1501,10 +1543,8 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
     expect(payload.message).toContain('1500000')
     expect(payload.message).toContain('1000000')
-    // Mutation-tested ordering: the cap guard fires BEFORE any agent lookup or
-    // funding intent — if assertWithinMaxAmount ran after createX402Intent,
-    // these would be defined.
-    expect(calls.find((c) => c.url.includes('/machine-payments/agent'))).toBeUndefined()
+    // The MCP lifecycle reads the public delegate address before quoting, but
+    // the cap guard still fires before any funding intent is constructed.
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 
@@ -2422,6 +2462,71 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     expect(result.data.merchant_url_discovered_from).toBe('http://merchant.test/')
   })
 
+  it('uses the MCP handshake for a discovery-resolved endpoint that is not named /mcp', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { name: 'Custom MCP Merchant', mcp_url: 'http://merchant.test/v1' },
+      },
+      'POST /v1': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+      },
+      ...havenStubs(),
+    })
+
+    const result = ok<{ merchant_url: string }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/',
+        tool_name: 'buy_vpn',
+        arguments: {},
+        max_amount: '2000000',
+      }),
+    )
+
+    expect(result.data.merchant_url).toBe('http://merchant.test/v1')
+    const lifecycle = calls.filter((call) => call.url === 'http://merchant.test/v1')
+    expect(lifecycle.map((call) => call.body?.method)).toEqual([
+      'initialize',
+      'notifications/initialized',
+      'tools/call',
+    ])
+    expect(new Headers(lifecycle[2].headers).get('Accept')).toBe('application/json, text/event-stream')
+    expect(new Headers(lifecycle[2].headers).get('mcp-session-id')).toBe('sess-tools-test')
+  })
+
+  it('uses the MCP handshake for an explicitly supplied custom endpoint path', async () => {
+    stubFetch({
+      'POST /v1': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+      },
+      ...havenStubs(),
+    })
+
+    const result = ok<{
+      merchant_url: string
+      mcp_transport: { handshake_required: boolean; source: string }
+    }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/v1',
+        tool_name: 'buy_vpn',
+        arguments: {},
+        max_amount: '2000000',
+      }),
+    )
+
+    expect(result.data.merchant_url).toBe('http://merchant.test/v1')
+    expect(result.data.mcp_transport).toEqual({ handshake_required: true, source: 'path' })
+    expect(calls.filter((call) => call.url === 'http://merchant.test/v1').map((call) => call.body?.method)).toEqual([
+      'initialize',
+      'notifications/initialized',
+      'tools/call',
+    ])
+    expect(calls.some((call) => call.url.includes('.well-known'))).toBe(false)
+  })
+
   it('does NOT run discovery when the exact endpoint answers 402', async () => {
     stubFetch({
       'POST /mcp': {
@@ -2502,7 +2607,8 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
         (u) =>
           u.startsWith('http://merchant.test/mcp') ||
           u === 'http://merchant.test/.well-known/haven-demo-merchant' ||
-          u === 'http://merchant.test/',
+          u === 'http://merchant.test/' ||
+          u === 'http://haven.test/machine-payments/agent',
       ),
     ).toBe(true)
   })

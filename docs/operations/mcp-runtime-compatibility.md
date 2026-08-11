@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1309: row-one skew is now machine-readable (code/supported_versions/received_version/fallback on the signer's structured refusal, HavenUnsupportedSignerVersionError in @haven_ai/sdk); hosted signer_compatibility gains a `fallback` field carrying the SAME SIGNER_UPDATE_FALLBACK string; documented signer_compatibility as the stable contract; no enforcement, floor, or manifest change. Prior: #1306 haven_prepare_catalog_purchase: added to the quote/prepare skew-detection table row + a note that its settle leg reuses the #1307 rehydration path unchanged; #1307 settle-leg skew row (merchant-call-context rehydration) + #1308 guidance-fält + #1301 delad discovery + #1300-kalibrering; ingen floor/manifest-ändring; #1310 post-purchase allowance summary added to haven_settle_mcp_tool/haven_get_payment_status (mcp-server + mcp) — reuses EXISTING GET /machine-payments/agent + /allowances + /:id/status, no new backend endpoint, no signing-contract or expected-context-version change; MCP_VERSION/runtime manifest untouched (release-bump.mjs owns that, not this change)
+last-verified: "2026-08-11" # re-verified for #1311: prose order only; skew rows, versions and manifest unchanged
 ---
 
 # MCP Runtime Compatibility

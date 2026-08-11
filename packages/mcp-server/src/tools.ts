@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  AgentPaymentPhase,
+  AgentPaymentRail,
   HavenApiError,
   MerchantTimeoutError,
   X402UnexpectedStatusError,
@@ -1114,6 +1116,12 @@ export function createToolHandlers(
           }
         }
         const merchant = await deliverMerchantPayment(haven, args, funding.txHash)
+        // #1310: rail-aware remaining-budget summary so the agent can report
+        // spend without a separate haven_get_agent/haven_get_allowances round
+        // trip. A failed read NEVER converts this settled success into a
+        // failure — it degrades to a null block plus a warning, folded into
+        // the SAME warnings[] buildAgentGuidance already emits.
+        const { allowance, warnings } = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
         // Pick explicit fields — don't spread the raw HTTP status/ok, which would
         // collide with the funding/payment-status meaning an agent expects here.
         // Echo payment_id so the agent can reconcile this settled payment against
@@ -1125,17 +1133,20 @@ export function createToolHandlers(
           settled: true,
           result: merchant.result,
           settlement_tx_hash: merchant.settlement_tx_hash,
+          allowance,
           // #1308: done — nothing left but reporting.
           ...buildAgentGuidance({
             nextAction: AgentPaymentNextAction.None,
             safeToContinue: true,
             reason:
               'Funding and merchant settlement both succeeded. Report the result to the user ' +
-              '(amounts, settlement_tx_hash, and the merchant result/summary).',
+              '(amounts, settlement_tx_hash, and the merchant result/summary, plus remaining ' +
+              'allowance/budget from `allowance` when not null).',
             summary: {
               payment_id: args.payment_id,
               status: 'settled',
             },
+            warnings,
           }),
         }
       }),
@@ -1467,7 +1478,17 @@ export function createToolHandlers(
     haven_get_payment_status: async (input) =>
       runTool(async () => {
         const args = parse('haven_get_payment_status', input)
-        return haven.getPaymentStatus(args.payment_id)
+        const status = await haven.getPaymentStatus(args.payment_id)
+        // #1310: attach the same post-purchase allowance/budget summary as
+        // haven_settle_mcp_tool's settled:true branch — "where natural" means
+        // a genuinely SETTLED x402 payment (funded_but_unsettled excluded:
+        // that phase means the merchant did NOT accept the retry). Every
+        // other phase/rail returns the status untouched.
+        if (status.rail === AgentPaymentRail.X402 && status.phase === AgentPaymentPhase.PaymentConfirmed) {
+          const { allowance, warnings } = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
+          return { ...status, allowance, ...(warnings.length > 0 ? { warnings } : {}) }
+        }
+        return status
       }),
 
     haven_get_resume_state: async (input) =>

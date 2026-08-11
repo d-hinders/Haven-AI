@@ -402,6 +402,51 @@ gained one additive field (`execution_rail: 'legacy' | 'delegation'`) so the
 hosted tool can label the allowance block correctly without a second
 derivation.
 
+## Post-Purchase Allowance Summary (#1310)
+
+`haven_settle_mcp_tool`'s `settled: true` branch, and `haven_get_payment_status`
+for a genuinely settled x402 payment (`rail: 'x402'`, `phase:
+'payment_confirmed'` — `funded_but_unsettled` is deliberately excluded, since
+that phase means the merchant did NOT accept the paid retry), carry an
+`allowance` field: a rail-aware remaining-spend summary so the agent can
+report budget to the user without a separate `haven_get_agent` /
+`haven_get_allowances` round trip. No new backend endpoint here either — the
+SDK's `HavenClient.getPostPurchaseAllowanceSummary(paymentId)` resolves the
+settled token from `getPaymentStatus`, then reads through the EXACT same path
+as `getAllowances()` / #1306's preflight `allowance` block (`GET
+/machine-payments/agent` + `GET /machine-payments/allowances`; delegation-rail
+values are the #1090 `deriveDelegationBudgets`-backed enforcer read, never
+`agent_allowances`) — so it can never disagree with `haven_get_allowances` for
+the same fixture. Shape:
+
+```text
+{ rail: 'legacy' | 'delegation', remaining_atomic: string,
+  remaining_display?: string, token_symbol?: string, token_address?: string,
+  reset_period?: number, source: 'allowance_module' | 'active_delegations' }
+```
+
+Deliberately the SAME rail-labeled spelling as #1306's `allowance` block,
+minus the preflight-only `sufficient` field — post-purchase reporting answers
+"what is left", not "was this purchase covered". This is read-only reporting,
+never a spend authority claim: the on-chain policy (AllowanceModule or the
+active delegation's caveat enforcers) remains the actual gate regardless of
+whether this summary can be produced. A failed read (payment-status lookup,
+agent lookup, or the allowance/budget lookup itself) NEVER converts a
+succeeded settlement into a failure — `getPostPurchaseAllowanceSummary`
+degrades to `{ allowance: null, warnings: [ALLOWANCE_CHECK_UNAVAILABLE] }` —
+and so does a SUCCESSFUL read where no allowance/budget row matches the
+settled token (#1320 review: unknown is reported as unknown, never a
+fabricated zero) —
+folded into the response's existing `warnings[]` (#1308). `ALLOWANCE_CHECK_UNAVAILABLE`
+predates this issue (#1306) and is reused rather than respelled; per #1318 it
+was confirmed SDK-side only, never mirrored on the backend.
+
+Freshness caveat, not fixed here (#1319, filed): the delegation rail's
+on-chain enforcer read can silently fall back to the optimistic full period
+budget without throwing when the RPC read itself fails (the pre-existing #1145
+design). This summary reflects the last successful chain read, not a
+guaranteed-live one — phrasing avoids claiming freshness.
+
 ## Approval Resume
 
 When `remaining allowance < amount ≤ remaining allowance + delegate balance`,

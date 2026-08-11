@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1306 haven_prepare_catalog_purchase: added to the quote/prepare skew-detection table row + a note that its settle leg reuses the #1307 rehydration path unchanged; #1307 settle-leg skew row (merchant-call-context rehydration) + #1308 guidance-fält + #1301 delad discovery + #1300-kalibrering; ingen floor/manifest-ändring
+last-verified: "2026-08-11" # #1306 haven_prepare_catalog_purchase: added to the quote/prepare skew-detection table row + a note that its settle leg reuses the #1307 rehydration path unchanged; #1307 settle-leg skew row (merchant-call-context rehydration) + #1308 guidance-fält + #1301 delad discovery + #1300-kalibrering; ingen floor/manifest-ändring; #1310 post-purchase allowance summary added to haven_settle_mcp_tool/haven_get_payment_status (mcp-server + mcp) — reuses EXISTING GET /machine-payments/agent + /allowances + /:id/status, no new backend endpoint, no signing-contract or expected-context-version change; MCP_VERSION/runtime manifest untouched (release-bump.mjs owns that, not this change)
 ---
 
 # MCP Runtime Compatibility

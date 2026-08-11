@@ -1763,6 +1763,285 @@ describe('haven_settle_mcp_tool', () => {
   })
 })
 
+// ── haven_settle_mcp_tool: post-purchase allowance/budget summary (#1310) ─────
+
+describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () => {
+  const SIG = '0x' + '11'.repeat(65)
+  const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+  const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+
+  function allowancesFixture(remaining: string, rail: 'legacy' | 'delegation' = 'legacy') {
+    return {
+      agent_id: 'agt_1',
+      safe_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [{
+        id: rail === 'delegation' ? 'delegation-1' : 'allowance-1',
+        token_address: USDC,
+        token_symbol: 'USDC',
+        configured_amount: rail === 'delegation' ? '5.00' : '5000000',
+        reset_period_min: rail === 'delegation' ? 1440 : 60,
+        onchain: {
+          amount: remaining, spent: '0', remaining, effective_spent: '0',
+          reset_time_min: rail === 'delegation' ? 1440 : 60,
+          last_reset_min: rail === 'delegation' ? 0 : 100,
+          nonce: rail === 'delegation' ? 0 : 7,
+          is_reset_pending: false,
+        },
+      }],
+    }
+  }
+
+  // GET /machine-payments/:id/status fixture — this is how the summary
+  // resolves WHICH token was settled, without the caller passing it.
+  function statusFixture(overrides: Record<string, unknown> = {}) {
+    return {
+      payment_id: 'pay_x402',
+      kind: 'payment_intent',
+      rail: 'x402',
+      status: 'confirmed',
+      phase: 'payment_confirmed',
+      next_action: 'none',
+      amount: '1.50',
+      token: 'USDC',
+      resource_url: 'http://merchant.test/mcp',
+      merchant_address: '0xMerchant',
+      tx_hash: '0xfund',
+      expires_at: '2099-01-01T00:00:00.000Z',
+      chain_id: 8453,
+      message: 'The payment is confirmed.',
+      asset: USDC,
+      ...overrides,
+    }
+  }
+
+  function settleArgs() {
+    return {
+      payment_id: 'pay_x402',
+      signature: SIG,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      payment_header: 'eyJ4IjoxfQ==',
+    }
+  }
+
+  function havenSettled(extraRoutes: Record<string, RouteDefinition>) {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+      ...extraRoutes,
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    // Isolate the summary's OWN getPaymentStatus call (below) from
+    // ensureFundingConfirmed's unrelated, pre-existing, uncaught
+    // getPaymentStatus call — both would otherwise hit the SAME stubbed
+    // status route and conflate two different failure modes.
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+    })
+    return haven
+  }
+
+  it('attaches the rail-aware post-purchase allowance summary (legacy rail)', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000') },
+    })
+
+    const result = ok<{
+      settled: boolean
+      allowance: {
+        rail: string
+        remaining_atomic: string
+        remaining_display?: string
+        token_symbol?: string
+        token_address?: string
+        reset_period?: number
+        source: string
+      } | null
+    }>(await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()))
+
+    expect(result.data.settled).toBe(true)
+    // Deliberately the SAME rail-labeled shape as #1306's preflight `allowance`
+    // block, minus the preflight-only `sufficient` field.
+    expect(result.data.allowance).toEqual({
+      rail: 'legacy',
+      remaining_atomic: '3500000',
+      remaining_display: '3.5 USDC',
+      token_symbol: 'USDC',
+      token_address: USDC,
+      reset_period: 60,
+      source: 'allowance_module',
+    })
+  })
+
+  it('attaches source: active_delegations on the delegation rail, derived via #1090 (not agent_allowances)', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('4200000', 'delegation') },
+    })
+
+    const result = ok<{ allowance: { rail: string; source: string; remaining_atomic: string } | null }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()),
+    )
+
+    expect(result.data.allowance).toEqual(
+      expect.objectContaining({ rail: 'delegation', source: 'active_delegations', remaining_atomic: '4200000' }),
+    )
+  })
+
+  it('parity: remaining_atomic matches haven_get_allowances for the SAME fixture — same source, asserted as equality', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('1234567') },
+    })
+    const h = createToolHandlers(haven)
+
+    const settleResult = ok<{ allowance: { remaining_atomic: string; token_address?: string } | null }>(
+      await h.haven_settle_mcp_tool(settleArgs()),
+    )
+    const allowancesResult = ok<{ allowances: Array<{ tokenAddress: string; onchain: { remaining: string } }> }>(
+      await h.haven_get_allowances({}),
+    )
+    const match = allowancesResult.data.allowances.find((a) => a.tokenAddress.toLowerCase() === USDC)
+
+    expect(settleResult.data.allowance?.remaining_atomic).toBe(match?.onchain.remaining)
+    expect(settleResult.data.allowance?.remaining_atomic).toBe('1234567')
+  })
+
+  it('a failed allowance/budget read NEVER converts settled:true into failure — degrades to a null block + warning', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
+    })
+
+    const result = ok<{
+      settled: boolean
+      allowance: unknown
+      warnings: Array<{ code: string }>
+    }>(await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()))
+
+    expect(result.data.settled).toBe(true)
+    expect(result.data.allowance).toBeNull()
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+  })
+
+  it('a failed payment-status lookup (token resolution) ALSO never converts settled:true into failure', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 502, body: { error: 'boom' } },
+    })
+
+    const result = ok<{ settled: boolean; allowance: unknown; warnings: Array<{ code: string }> }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()),
+    )
+
+    expect(result.data.settled).toBe(true)
+    expect(result.data.allowance).toBeNull()
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+  })
+})
+
+// ── haven_get_payment_status: post-purchase allowance summary (#1310) ─────────
+
+describe('haven_get_payment_status: post-purchase allowance summary (#1310)', () => {
+  const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+
+  function statusFixture(overrides: Record<string, unknown> = {}) {
+    return {
+      payment_id: 'pay_x402',
+      kind: 'payment_intent',
+      rail: 'x402',
+      status: 'confirmed',
+      phase: 'payment_confirmed',
+      next_action: 'none',
+      amount: '1.50',
+      token: 'USDC',
+      resource_url: 'http://merchant.test/mcp',
+      merchant_address: '0xMerchant',
+      tx_hash: '0xfund',
+      expires_at: '2099-01-01T00:00:00.000Z',
+      chain_id: 8453,
+      message: 'The payment is confirmed.',
+      asset: USDC,
+      ...overrides,
+    }
+  }
+
+  function allowancesFixture(remaining: string) {
+    return {
+      agent_id: 'agt_1',
+      safe_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [{
+        id: 'allowance-1',
+        token_address: USDC,
+        token_symbol: 'USDC',
+        configured_amount: '5000000',
+        reset_period_min: 60,
+        onchain: {
+          amount: remaining, spent: '0', remaining, effective_spent: '0',
+          reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false,
+        },
+      }],
+    }
+  }
+
+  it('attaches allowance for a genuinely settled x402 payment (rail: x402, phase: payment_confirmed)', async () => {
+    stubFetch({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3000000') },
+    })
+
+    const result = ok<{ allowance: { rail: string; remaining_atomic: string } | null }>(
+      await handlers().haven_get_payment_status({ payment_id: 'pay_x402' }),
+    )
+
+    expect(result.data.allowance).toEqual(
+      expect.objectContaining({ rail: 'legacy', remaining_atomic: '3000000' }),
+    )
+  })
+
+  it('does NOT attach allowance for funded_but_unsettled — the merchant did not accept the retry', async () => {
+    stubFetch({
+      'GET /machine-payments/pay_x402/status': {
+        status: 200,
+        body: statusFixture({ status: 'funded_but_unsettled', phase: 'funded_but_unsettled' }),
+      },
+    })
+
+    const result = ok<{ allowance?: unknown }>(
+      await handlers().haven_get_payment_status({ payment_id: 'pay_x402' }),
+    )
+
+    expect('allowance' in result.data).toBe(false)
+    // No allowance/agent reads were made for a non-settled status.
+    expect(calls.find((c) => c.url.endsWith('/machine-payments/allowances'))).toBeUndefined()
+  })
+
+  it('does NOT attach allowance for a non-x402 rail', async () => {
+    stubFetch({
+      'GET /machine-payments/pay_direct/status': {
+        status: 200,
+        body: statusFixture({ payment_id: 'pay_direct', rail: 'direct' }),
+      },
+    })
+
+    const result = ok<{ allowance?: unknown }>(
+      await handlers().haven_get_payment_status({ payment_id: 'pay_direct' }),
+    )
+
+    expect('allowance' in result.data).toBe(false)
+  })
+})
+
 // ── merchant-call-context rehydration by payment_id (#1307) ───────────────────
 
 describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context rehydration (#1307)', () => {

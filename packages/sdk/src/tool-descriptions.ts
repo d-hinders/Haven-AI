@@ -157,7 +157,7 @@ export const toolDescriptions = {
   },
   payMcpTool: {
     summary:
-      'Call a named tool on an MCP merchant that requires an x402 payment, handling the full initialize → pay → retry round trip.',
+      'Call a named tool on an MCP merchant that requires an x402 payment, handling the full initialize → pay → retry round trip in one call.',
     selectionGuidance:
       'Use this when the agent wants to call a specific tool on an MCP merchant (e.g. Soundside, Coinbase Bazaar) and payment is required. ' +
       'Prefer this over haven_pay_x402 when you know the merchant_url and tool_name — it builds the JSON-RPC envelope internally. ' +
@@ -165,23 +165,23 @@ export const toolDescriptions = {
       'Do NOT use for read-only allowance or budget questions — use haven_get_allowances.',
     behavior:
       'Builds the JSON-RPC tools/call envelope, runs the MCP Streamable-HTTP initialize handshake automatically (if the endpoint is MCP-shaped), ' +
-      'pays any HTTP 402 x402 challenge through Haven\'s AllowanceModule path, and retries the request. ' +
-      'Returns the JSON-RPC result (the actual merchant output) on success. ' +
-      'Amounts within the on-chain allowance execute automatically; over-allowance transfers are queued as pending_approval.',
+      'pays any HTTP 402 x402 challenge through Haven\'s AllowanceModule path, and retries the request, returning the JSON-RPC result (the actual merchant output) on success. ' +
+      'Amounts within the on-chain allowance execute automatically; over-allowance transfers are queued as pending_approval — follow the response\'s nextAction when present.',
     nextActionGuidance:
       'If pending_approval is returned, preserve payment_id and resume_state and wait for the wallet owner to approve in Haven. ' +
       'Use haven_resume_x402_payment once nextAction=retry_original_x402_request.',
   },
   discoverTools: {
     summary:
-      'Discover payable services from Haven\'s curated merchant catalog — names, prices, and which pay tool to use.',
+      'Step 1 of a purchase: discover payable services from Haven\'s curated merchant catalog — names, prices, and which pay tool to use next.',
     selectionGuidance:
       'Use this when the user asks what the agent can buy, pay for, or which paid services exist — or when you need a resource URL for a service the user described. ' +
       'Do NOT use for balance, budget, or spend-limit questions — use haven_get_allowances. ' +
       'Do NOT use to pay — each returned entry names the pay tool to use next.',
     behavior:
-      'Read-only lookup against Haven\'s curated catalog. Entries are periodically re-verified against the live merchant; degraded entries are flagged. ' +
-      'Returns name, description, price, rail, resource URL, tool_name, tool_arguments, and a suggested_tool field naming the exact Haven pay tool for that entry. ' +
+      'Use each entry\'s suggested_tool field first — it names the exact next call. ' +
+      'Read-only lookup against Haven\'s curated catalog; entries are periodically re-verified against the live merchant and degraded entries are flagged. ' +
+      'Returns name, description, price, rail, resource URL, tool_name, tool_arguments, and suggested_tool. ' +
       'The catalog price (price_display/price_atomic, marked price_is_indicative) is a last-verified hint, NOT authoritative — the real price comes from the merchant\'s live 402 at pay time. ' +
       'Never creates a payment, signature, or approval.',
     nextActionGuidance:

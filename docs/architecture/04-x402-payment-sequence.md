@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # re-verified for #1309: version-skew refusal now structured (signer-side); quote/settle sequence unchanged — details in 07-edge-signer + mcp-runtime-compatibility
+last-verified: "2026-08-11" # re-verified for #1311: scan-first description reorder, no sequence/field semantics changed
 ---
 
 # Haven - x402 Payment Execution Sequence

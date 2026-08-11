@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1300-kalibrering (300s + MERCHANT_UNRESPONSIVE_AFTER_FUNDING) + #1301: discovery delad via @haven_ai/sdk, inte längre hosted-only; ingen floor/manifest-ändring
+last-verified: "2026-08-11" # #1308 guidance-fält + #1301 delad discovery (ej hosted-only) + #1300-kalibrering; ingen floor/manifest-ändring
 ---
 
 # MCP Runtime Compatibility

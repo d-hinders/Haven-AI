@@ -19,7 +19,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # #1300-kalibrering (300s + verify-then-sweep) + #1301: discovery-hjälparen delad via @haven_ai/sdk, båda MCP-ytorna
+last-verified: "2026-08-11" # #1308 next-step-kontrakt + #1301 delad discovery (båda topologier) + #1300-kalibrering
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -89,6 +89,21 @@ the typed `X402UnexpectedStatusError`. A timeout AFTER confirmed funding is
 routed to `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` with verify-then-sweep
 guidance — an unanswered retry is not proof of rejection, and the merchant
 may still settle late against its valid EIP-3009 authorization.
+
+Since #1308 the hosted purchase responses carry a **structured next-step
+contract**: `next_action` (values from the existing AgentPaymentNextAction
+taxonomy), `next_tool` + small literal `next_arguments`, `safe_to_continue`
+(false on pending approval — over-budget is a user decision), a compact
+`agent_summary`, and an advisory `warnings[]` (MISSING_MAX_AMOUNT absorbs the
+#1275 cap nudge; QUOTE_EXPIRES_SOON; MERCHANT_URL_DISCOVERED). Warnings never
+replace refusals; failure codes stay authoritative.
+
+Hosted `haven_pay_mcp_tool` additionally accepts a **base merchant URL**
+(#1271): when the probe misses (non-402), it makes one bounded same-origin
+discovery pass — GET `/.well-known/haven-demo-merchant` then `/`, no
+redirects, off-origin `mcp_url` refused unfetched — and retries once at the
+document's `mcp_url`, returning the resolved `merchant_url`. Discovery finds
+endpoints; payment authority is unchanged.
 
 `haven_pay_mcp_tool` additionally accepts a **base merchant URL**, in BOTH
 topologies (#1271, ported to the local runtime in #1301 — the discovery

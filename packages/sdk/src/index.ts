@@ -64,6 +64,9 @@ export type {
   X402ExpectedContext,
   X402RequestSnapshot,
   X402Quote,
+  AgentNextStep,
+  AgentSummary,
+  AgentPaymentWarning,
   X402ResumeState,
   PaymentResumeState,
   ResumeAuthorizedX402Input,
@@ -93,6 +96,7 @@ export type { ClaudeTool, OpenAITool } from './tools.js'
 export {
   HavenError,
   HavenApiError,
+  AgentPaymentWarningCode,
   MerchantTimeoutError,
   X402UnexpectedStatusError,
   HavenPaymentStateError,

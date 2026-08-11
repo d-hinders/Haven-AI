@@ -20,6 +20,11 @@ async function importX402With(env: Record<string, string>) {
 }
 
 describe('MERCHANT_SKIP_SETTLE_PRODUCT chain guard', () => {
+  // Each case does a fresh `vi.resetModules()` + dynamic import of x402.ts
+  // (and its transitive graph), which is consistently the slowest thing in
+  // this package's suite and — as the full-package `npx vitest run` count
+  // grows — flakes past the 5s default under collection-time load rather
+  // than any actual regression. Give this module-reimport guard real headroom.
   it('refuses to start on mainnet with the flag set', async () => {
     const exit = vi
       .spyOn(process, 'exit')
@@ -33,7 +38,7 @@ describe('MERCHANT_SKIP_SETTLE_PRODUCT chain guard', () => {
     ).rejects.toThrow('process.exit called')
     expect(exit).toHaveBeenCalledWith(1)
     expect(String(error.mock.calls[0]?.[0])).toContain('testnet-only')
-  })
+  }, 15000)
 
   it('starts on Base Sepolia with the flag set', async () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
@@ -45,7 +50,7 @@ describe('MERCHANT_SKIP_SETTLE_PRODUCT chain guard', () => {
     })
     expect(mod.createX402PaymentProcessor).toBeTypeOf('function')
     expect(exit).not.toHaveBeenCalled()
-  })
+  }, 15000)
 
   it('starts on mainnet when the flag is unset', async () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
@@ -54,5 +59,5 @@ describe('MERCHANT_SKIP_SETTLE_PRODUCT chain guard', () => {
     const mod = await importX402With({ MERCHANT_CHAIN_ID: '8453' })
     expect(mod.createX402PaymentProcessor).toBeTypeOf('function')
     expect(exit).not.toHaveBeenCalled()
-  })
+  }, 15000)
 })

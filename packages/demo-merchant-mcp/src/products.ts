@@ -149,6 +149,135 @@ export function isSettlementMethod(value: unknown): value is SettlementMethod {
   return value === 'erc7710' || value === 'eip3009'
 }
 
+// ── Machine-readable product metadata (#1274) ───────────────────────────────
+// Builds the stable, per-product contract agents can select purchases from
+// without parsing the (Swedish) freeform `description` prose. This layer only
+// CONSUMES the settlement methods the caller says are enabled — it does not
+// re-decide the erc7710/pinned-DelegationManager gate itself, so it inherits
+// #1266's compatibility decisions (eip3009 default/first, erc7710 opt-in,
+// no-boot-crash-on-missing-config) from whoever resolved that list upstream
+// (`index.ts` / `http.ts`).
+
+const VPN_PLAN_VALUES = ['basic', 'pro', 'ultra'] as const
+const STORAGE_TIER_VALUES = ['50gb', '200gb', '1tb'] as const
+
+interface ProductToolArgs {
+  toolName: 'buy_vpn' | 'buy_cloud_storage'
+  argumentName: 'plan' | 'tier'
+  argumentValue: string
+  argumentEnum: readonly string[]
+}
+
+/** Derives the exact buy-tool call (tool name + fixed argument) for a product. */
+export function productToolArgs(product: Product): ProductToolArgs {
+  if (product.category === 'vpn') {
+    return {
+      toolName: 'buy_vpn',
+      argumentName: 'plan',
+      argumentValue: product.id.slice('vpn_'.length),
+      argumentEnum: VPN_PLAN_VALUES,
+    }
+  }
+  return {
+    toolName: 'buy_cloud_storage',
+    argumentName: 'tier',
+    argumentValue: product.id.slice('storage_'.length),
+    argumentEnum: STORAGE_TIER_VALUES,
+  }
+}
+
+/** JSON-schema-ish description of the buy tool's arguments for this exact product
+ *  (the fixed `const` pins the value an agent must send to select it). */
+export function productArgumentsSchema(product: Product): Record<string, unknown> {
+  const { argumentName, argumentValue, argumentEnum, toolName } = productToolArgs(product)
+  return {
+    type: 'object',
+    properties: {
+      [argumentName]: {
+        type: 'string',
+        enum: [...argumentEnum],
+        const: argumentValue,
+        description: `Fixed value selecting "${product.name}" via the ${toolName} tool.`,
+      },
+      settlement_method: {
+        type: 'string',
+        enum: [...SUPPORTED_SETTLEMENT_METHODS],
+        description: 'Optional x402 settlement method override; omit to use default_settlement_method.',
+      },
+    },
+    required: [argumentName],
+    additionalProperties: false,
+  }
+}
+
+/** Settlement methods this product supports, filtered to the merchant's
+ *  currently-enabled set (which is where the erc7710 pinned-manager gate is
+ *  already decided) — always ordered with EIP-3009 first when present, never
+ *  letting an opt-in rail lead. */
+export function settlementMethodsForProduct(
+  product: Product,
+  enabledMethods: readonly SettlementMethod[],
+): SettlementMethod[] {
+  const supported = product.x402.settlementMethods.filter((method) => enabledMethods.includes(method))
+  const unique = [...new Set(supported)]
+  if (unique.includes(DEFAULT_SETTLEMENT_METHOD)) {
+    return [DEFAULT_SETTLEMENT_METHOD, ...unique.filter((method) => method !== DEFAULT_SETTLEMENT_METHOD)]
+  }
+  return unique
+}
+
+export type BillingPeriod = 'monthly'
+
+export interface ProductMetadata {
+  product_id: ProductId
+  display_name: string
+  /** Localized/freeform prose (Swedish demo copy) — display-only. Agents should
+   *  select products via `product_id` + `arguments_schema`, never by parsing this. */
+  description: string
+  /** Price in USDC base units (6 decimals), as a decimal string. */
+  price_atomic: string
+  asset: 'USDC'
+  network: string
+  billing_period: BillingPeriod
+  tool_name: ProductToolArgs['toolName']
+  arguments_schema: Record<string, unknown>
+  supported_settlement_methods: SettlementMethod[]
+  default_settlement_method: SettlementMethod
+  mcp_url: string
+  environment: MerchantEnvironment
+  /** Display-only formatted text alongside the stable fields above. */
+  display: {
+    price_formatted: string
+  }
+}
+
+export function buildProductMetadata(
+  product: Product,
+  opts: { enabledSettlementMethods: readonly SettlementMethod[]; mcpUrl: string; chainId?: number },
+): ProductMetadata {
+  const chainId = opts.chainId ?? CHAIN_ID
+  const supportedSettlementMethods = settlementMethodsForProduct(product, opts.enabledSettlementMethods)
+  const defaultSettlementMethod = supportedSettlementMethods[0] ?? DEFAULT_SETTLEMENT_METHOD
+  return {
+    product_id: product.id,
+    display_name: product.name,
+    description: product.description,
+    price_atomic: product.price_usdc.toString(),
+    asset: 'USDC',
+    network: `eip155:${chainId}`,
+    billing_period: 'monthly',
+    tool_name: productToolArgs(product).toolName,
+    arguments_schema: productArgumentsSchema(product),
+    supported_settlement_methods: supportedSettlementMethods,
+    default_settlement_method: defaultSettlementMethod,
+    mcp_url: opts.mcpUrl,
+    environment: merchantEnvironmentForChain(chainId),
+    display: {
+      price_formatted: `$${formatUsdc(product.price_usdc)} USDC`,
+    },
+  }
+}
+
 /** Format USDC base units as a human-readable USD string.
  *  Strips trailing zeros so micropayments show correctly (e.g. 0.001 not 0.00). */
 export function formatUsdc(units: bigint): string {

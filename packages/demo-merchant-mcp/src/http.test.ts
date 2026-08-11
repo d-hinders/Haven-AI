@@ -5,6 +5,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { decodePaymentRequiredHeader, encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
 import { createDemoMerchantServer } from './http.js'
+import { formatUsdc } from './products.js'
 import {
   LEGACY_PAYMENT_SIGNATURE_HEADER,
   PAYMENT_REQUIRED_HEADER,
@@ -119,6 +120,14 @@ async function postMcp(url: string, body: unknown, headers: Record<string, strin
   })
 }
 
+/** The streamable HTTP transport may respond as a single SSE `data:` event
+ *  rather than plain JSON. Parses either shape into the JSON-RPC envelope. */
+async function parseJsonRpcResponse(response: Response): Promise<{ result: Record<string, unknown> }> {
+  const raw = await response.text()
+  const dataLine = raw.split('\n').find((line) => line.startsWith('data:'))
+  return JSON.parse(dataLine ? dataLine.slice('data:'.length).trim() : raw)
+}
+
 describe('demo merchant MCP x402 flow', () => {
   it('exposes a machine-readable merchant directory with dev and prod routing', async () => {
     const { url } = await startServer()
@@ -172,6 +181,38 @@ describe('demo merchant MCP x402 flow', () => {
     expect(products.status).toBe(200)
     expect(text).toContain('vpn_basic')
     expect(text).toContain('$0.001 USDC')
+  })
+
+  it('list_products exposes stable machine-readable structured product metadata (#1274)', async () => {
+    const { url } = await startServer()
+    const products = await postMcp(url, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'list_products', arguments: {} },
+    })
+    const body = await parseJsonRpcResponse(products) as {
+      result: { structuredContent: { products: Array<Record<string, unknown>>; environment: string; mcp_url: string } }
+    }
+    const storage50gb = body.result.structuredContent.products.find((p) => p.product_id === 'storage_50gb')
+
+    expect(products.status).toBe(200)
+    expect(storage50gb).toMatchObject({
+      product_id: 'storage_50gb',
+      display_name: 'CloudNest 50 GB',
+      price_atomic: '500',
+      asset: 'USDC',
+      network: 'eip155:8453',
+      billing_period: 'monthly',
+      tool_name: 'buy_cloud_storage',
+      supported_settlement_methods: ['eip3009'],
+      default_settlement_method: 'eip3009',
+      environment: 'prod',
+    })
+    // An agent must be able to pick `buy_cloud_storage { tier: "50gb" }` from
+    // arguments_schema alone, without parsing the localized `description`.
+    expect((storage50gb!.arguments_schema as { properties: { tier: { const: string } } }).properties.tier.const).toBe('50gb')
+    expect(body.result.structuredContent.mcp_url).toContain('/mcp')
   })
 
   it('returns standard payment requirements, settles a paid retry, and returns an invoice', async () => {
@@ -245,6 +286,53 @@ describe('demo merchant MCP x402 flow', () => {
     expect(duplicateText).toContain(TX_HASH)
     expect(duplicateText.match(/FAK-2026-\d+/)?.[0]).toBe(text.match(/FAK-2026-\d+/)?.[0])
     expect(submit).toHaveBeenCalledTimes(1)
+    // #1273 + review finding on #1302: the cached-duplicate branch must carry
+    // the SAME structured summary as the fresh purchase — an agent retrying a
+    // settled payment reports from the identical contract, never a stripped one.
+    const freshSummary = (JSON.parse(text.slice(text.indexOf('{'))) as {
+      result: { structuredContent?: { summary?: Record<string, unknown> } }
+    }).result.structuredContent?.summary
+    const duplicateSummary = (JSON.parse(duplicateText.slice(duplicateText.indexOf('{'))) as {
+      result: { structuredContent?: { summary?: Record<string, unknown> } }
+    }).result.structuredContent?.summary
+    expect(duplicateSummary).toBeDefined()
+    expect(duplicateSummary).toEqual(freshSummary)
+    expect(duplicateSummary?.settlement_tx_hash).toBe(TX_HASH)
+  })
+
+  it('a successful paid purchase returns a stable structured summary (#1273)', async () => {
+    const { url } = await startServer()
+    const unpaid = await postMcp(url, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'buy_cloud_storage', arguments: { tier: '50gb' } },
+    })
+    const paymentRequired = await unpaid.json() as PaymentRequired
+    const paymentHeader = await signedHeader(paymentRequired)
+
+    const paid = await postMcp(url, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'buy_cloud_storage', arguments: { tier: '50gb' } },
+    }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader })
+    const body = await parseJsonRpcResponse(paid) as { result: { structuredContent: { summary: Record<string, unknown> } } }
+    const summary = body.result.structuredContent.summary
+
+    expect(paid.status).toBe(200)
+    expect(summary).toMatchObject({
+      status: 'confirmed',
+      product_id: 'storage_50gb',
+      product_name: 'CloudNest 50 GB',
+      amount_atomic: '500',
+      amount: formatUsdc(500n),
+      asset: 'USDC',
+      network: 'eip155:8453',
+      settlement_tx_hash: TX_HASH,
+    })
+    expect(typeof summary.invoice_id).toBe('string')
+    expect(summary.invoice_id).toMatch(/^FAK-\d{4}-\d+$/)
   })
 
   it('accepts the legacy X-PAYMENT retry header alias', async () => {

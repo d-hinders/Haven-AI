@@ -50,6 +50,25 @@ Every product advertises x402 capability metadata through `list_products`:
 - `resource_url`: the configured merchant MCP URL
 - `hosted_urls`: the canonical dev and prod MCP URLs
 
+`list_products` also returns a `structuredContent.products` array — one stable,
+machine-readable record per product (`product_id`, `display_name`,
+`price_atomic`, `asset`, `network`, `billing_period`, `tool_name`,
+`arguments_schema`, `supported_settlement_methods`, `default_settlement_method`,
+`mcp_url`, `environment`) — so an agent can pick e.g.
+`buy_cloud_storage { tier: "50gb" }` without parsing the localized `description`
+prose. `supported_settlement_methods` always lists `eip3009` first when present;
+`erc7710` only appears when the merchant enabled it (operator config pinned to
+Haven's registered DelegationManager — see below).
+
+A successful `buy_vpn`/`buy_cloud_storage` call also returns a
+`structuredContent.summary` object — `{ status: 'confirmed', product_id,
+product_name, invoice_id, amount_atomic, amount, asset, network,
+settlement_tx_hash }` — for agent-facing purchase reporting. It is
+**display/reporting data only**: it never replaces the `x-receipt-json` header,
+the invoice, or on-chain settlement state as the source of truth for
+bookkeeping/reconciliation, and every field is read off the already-settled
+payment (never re-derived from the quoted catalog price).
+
 Purchase tools accept an optional `settlement_method` argument:
 
 - omitted: uses `eip3009`, which keeps current Haven SDK and generic x402 clients compatible

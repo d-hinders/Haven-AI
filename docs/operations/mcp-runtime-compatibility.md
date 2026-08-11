@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1300: discovery endpoint-miss predicate now keys on the typed SDK error (message check kept for skew) — no floor or manifest change
+last-verified: "2026-08-11" # #1300-kalibrering: 300s merchant-default + MERCHANT_UNRESPONSIVE_AFTER_FUNDING; ingen floor/manifest-ändring
 ---
 
 # MCP Runtime Compatibility

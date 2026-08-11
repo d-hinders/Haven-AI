@@ -864,7 +864,7 @@ export type components = {
          * @description Stable next action an agent should take for a Haven payment state.
          * @enum {string}
          */
-        AgentPaymentNextAction: "sign_and_submit_payment" | "check_status_later" | "none" | "wait_for_user_approval" | "wait_for_user_to_complete_payment" | "retry_original_x402_request" | "stop_and_tell_user" | "request_again_if_user_still_wants_it" | "payment_window_expired" | "fund_safe_or_raise_allowance" | "sweep_stranded_funds";
+        AgentPaymentNextAction: "sign_and_submit_payment" | "check_status_later" | "none" | "wait_for_user_approval" | "wait_for_user_to_complete_payment" | "retry_original_x402_request" | "stop_and_tell_user" | "request_again_if_user_still_wants_it" | "retry_with_explicit_context" | "payment_window_expired" | "fund_safe_or_raise_allowance" | "sweep_stranded_funds";
         /**
          * @description Stable rail identifier for Haven agent payment states.
          * @enum {string}

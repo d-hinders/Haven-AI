@@ -376,9 +376,9 @@ describe('x402 routes', () => {
   })
 
   it('persists mcpCallContext into the legacy-rail intent metadata (#1307 write path)', async () => {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
+    allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 7 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1_000_000n })
-    allowanceMocks.generateTransferHash.mockResolvedValueOnce(SIGN_HASH)
+    allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
 
     primeDb(
       AUTH,

@@ -197,12 +197,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
     }
 
     // Branch 1: eip3009 funding leg (default scheme).
-    mockSelect.mockResolvedValueOnce({
+    mockSelect.mockResolvedValue({
       delegation_hash: `0x${'12'.repeat(32)}`,
       delegation_json: JSON.stringify(signedBudget),
       recipient_address: null,
     })
-    mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
     let res = await app.inject({
       method: 'POST', url: '/x402/authorize',
       headers: { authorization: 'Bearer sk_agent_test' },
@@ -217,12 +217,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
 
     // Branch 2: erc7710 direct settlement.
     mockCreateIntent.mockClear()
-    mockSelect.mockResolvedValueOnce({
+    mockSelect.mockResolvedValue({
       delegation_hash: `0x${'12'.repeat(32)}`,
       delegation_json: JSON.stringify(signedBudget),
       recipient_address: null,
     })
-    mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
     res = await app.inject({
       method: 'POST', url: '/x402/authorize',
       headers: { authorization: 'Bearer sk_agent_test' },

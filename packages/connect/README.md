@@ -40,8 +40,10 @@ spending authority.
 | Cursor | Cursor MCP configuration | Reloads automatically |
 | VS Code / VS Code Insiders | VS Code MCP configuration | Reloads automatically |
 | Claude Desktop | Claude Desktop MCP configuration | Restart the app |
-| Hermes Agent | `$HERMES_HOME/config.yaml`, or `~/.hermes/config.yaml` | Start a new session; gateway users run `/restart` |
+| Hermes Agent | `$HERMES_HOME/config.yaml` + `.env`, or `~/.hermes/config.yaml` + `.env` | Start a new session; gateway users run `/restart` |
 
+For Hermes, Connect stores the hosted-MCP API key in the matching owner-only
+`.env` file and keeps only `Bearer ${MCP_HAVEN_API_KEY}` in `config.yaml`.
 Hermes requires its Python MCP SDK support to be installed. If Haven tools do
 not appear after restart, run `pip install mcp` in the Hermes environment, then
 restart Hermes and check `hermes mcp list`.

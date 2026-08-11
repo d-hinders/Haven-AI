@@ -18,7 +18,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # #1300 merchant-fetch timeouts + typed non-402 error; #1297/#1272/#1271 earlier same train
+last-verified: "2026-08-11" # #1300 review: merchant timeout calibrated to 300s; funded-timeout verify-then-sweep routing
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -80,10 +80,14 @@ transaction.
 
 Every merchant-facing SDK fetch (probes, MCP handshakes, paid retries,
 resume retries) is bounded since #1300: `config.merchantTimeout` (default
-60 s — generous because a merchant may settle on-chain synchronously inside
-the paid retry), caller signals combined, timeout surfaced as a clear 504
-naming the URL. A non-402 quote answer is the typed
-`X402UnexpectedStatusError`.
+**300 s**, calibrated to the protocol contract — the merchant's own
+`maxTimeoutSeconds: 300` and viem's 180 s settlement wait; a test pins the
+default at or above it), caller signals combined, timeout surfaced as the
+typed `MerchantTimeoutError` (504, names the URL). A non-402 quote answer is
+the typed `X402UnexpectedStatusError`. A timeout AFTER confirmed funding is
+routed to `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` with verify-then-sweep
+guidance — an unanswered retry is not proof of rejection, and the merchant
+may still settle late against its valid EIP-3009 authorization.
 
 Hosted `haven_pay_mcp_tool` additionally accepts a **base merchant URL**
 (#1271): when the probe misses (non-402), it makes one bounded same-origin

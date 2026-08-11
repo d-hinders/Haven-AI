@@ -458,6 +458,11 @@ export function assertSupportedBindingVersion(
 ): void {
   if (supported.includes(received)) return
   const highest = Math.max(...supported)
+  // The else-branch ("updating will not restore it") assumes versions retire
+  // MONOTONICALLY from the oldest end — true for how SUPPORTED_* is maintained
+  // (append new, drop old). If a future change ever makes the supported set
+  // non-contiguous, a gap version would hit that branch and the wording needs
+  // revisiting (#1322 review).
   const outOfDate = received > highest
   const code =
     context === 'x402 expected context'

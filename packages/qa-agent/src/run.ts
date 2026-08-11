@@ -22,6 +22,7 @@ import { x402Delegation3009 } from './scenarios/x402-delegation-3009.js'
 import { x402Delegation3009Sweep } from './scenarios/x402-delegation-3009-sweep.js'
 import { x402Erc7710Settle } from './scenarios/x402-erc7710-settle.js'
 import { x402HostedMcpSigner } from './scenarios/x402-hosted-mcp-signer.js'
+import { x402CatalogGuidedPurchase } from './scenarios/x402-catalog-guided-purchase.js'
 import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
 
 // Deterministic, no-LLM scenarios run in order — seven money-flow invariants:
@@ -40,6 +41,13 @@ import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
 // rail the two legs above have already shown to be healthy; its residual
 // assertion is a DELTA, so sub-floor dust an earlier leg left behind cannot
 // make it red for someone else's reason.
+//
+// `x402-catalog-guided-purchase` (#1312) reuses that same hosted-topology
+// identity and residual discipline, retargeted at the epic #1305 guided entry
+// point (`haven_prepare_catalog_purchase` → payment_id-only sign/settle).
+// Runs immediately after `x402-hosted-mcp-signer` for the same reason: a
+// guided-path failure is diagnosed against a topology the sibling leg has
+// already shown to be healthy.
 const SCENARIOS: Scenario[] = [
   withinBudgetSettle,
   overBudgetQueue,
@@ -50,6 +58,7 @@ const SCENARIOS: Scenario[] = [
   x402Delegation3009Sweep,
   x402Erc7710Settle,
   x402HostedMcpSigner,
+  x402CatalogGuidedPurchase,
   delegationLifecycle,
 ]
 

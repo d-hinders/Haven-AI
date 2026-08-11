@@ -784,6 +784,11 @@ export const AgentPaymentFailureCode = {
   PaymentWindowExpired: 'PAYMENT_WINDOW_EXPIRED',
   /** The Haven funding leg succeeded, but the merchant rejected the paid retry. */
   MerchantRejectedAfterFunding: 'MERCHANT_REJECTED_AFTER_FUNDING',
+  /** #1300 review: funding is on-chain but the merchant never ANSWERED the
+   *  paid retry within the timeout. NOT proof of rejection — the merchant
+   *  holds a valid EIP-3009 authorization and may still settle late, so the
+   *  guidance is verify-then-sweep, never blind sweep. */
+  MerchantUnresponsiveAfterFunding: 'MERCHANT_UNRESPONSIVE_AFTER_FUNDING',
 } as const
 
 export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typeof AgentPaymentFailureCode]
@@ -878,6 +883,8 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
     'The x402 funding/quote window expired before the signer or hosted settle step could finish. Re-quote via haven_pay_mcp_tool with the same idempotency key to avoid duplicate funding.',
   [AgentPaymentFailureCode.MerchantRejectedAfterFunding]:
     'The Haven funding leg succeeded, but the merchant rejected the paid retry. Stop retrying the merchant and reconcile stranded delegate funds with haven_sweep_delegate.',
+  [AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding]:
+    'The Haven funding leg succeeded, but the merchant did not answer the paid retry before the timeout. The merchant may still settle late — check haven_get_payment_status (and retry haven_complete_mcp_tool once) BEFORE sweeping; sweep only if no settlement appears.',
 }
 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {
@@ -1320,6 +1327,20 @@ export class HavenApiError extends HavenError {
  * hosted MCP's #1271 discovery trigger) can key on a class instead of
  * message text.
  */
+/**
+ * #1300: a merchant-facing fetch hit the client-side merchantTimeout. Typed
+ * so consumers can distinguish "merchant never answered" from a real HTTP
+ * error response — the funded-retry path routes this to verify-then-sweep
+ * guidance instead of a bare 504.
+ */
+export class MerchantTimeoutError extends HavenApiError {
+  readonly merchantErrorCode = 'merchant_timeout' as const
+  constructor(message: string) {
+    super(message, 504)
+    this.name = 'MerchantTimeoutError'
+  }
+}
+
 export class X402UnexpectedStatusError extends HavenApiError {
   readonly x402ErrorCode = 'unexpected_non_402_status' as const
   constructor(message: string, statusCode: number) {

@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-08-09" # re-verified for #1209 (nonce-wait reorder; grep-checked: no claim here touches the nonce machinery)
+last-verified: "2026-08-11" # #1319: GET /machine-payments/allowances gained an additive optional remaining_is_from_chain (delegation-rail onchain rows only) — provenance for #1145's fallback, reporting only, no authority change
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -197,7 +197,14 @@ snapshot on the legacy rail, the ACTIVE budget delegations (same #1090
 derivation the dashboard uses; remaining = the period budget) on the
 delegation rail in the same response shape, and the #993 fail-closed 410 for
 retired `session_key` accounts. The SDK derives its `readiness` signal from
-this endpoint, so both rails report honest spendability.
+this endpoint, so both rails report honest spendability. On the delegation
+rail, each `onchain` row also carries an additive, optional
+`remaining_is_from_chain` boolean (#1319): true when `remaining` came from a
+live on-chain enforcer read, false when that read failed and `remaining` is
+the #1145 fallback (the full configured budget) — reporting only, absent on
+the legacy rail. `haven_prepare_catalog_purchase` (#1306) reads it to warn
+when the figure it is using is optimistic; see
+[`04-x402-payment-sequence.md`](04-x402-payment-sequence.md).
 
 Not all delegation-rail routes are in the OpenAPI spec yet: the x402 settlement
 route `POST /x402/{id}/settle` (#830) currently sits on the drift check's

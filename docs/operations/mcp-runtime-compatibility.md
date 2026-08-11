@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1330: Hermes keeps its hosted identity in owner-only .env with a YAML environment reference; #1326: YAML source preservation. Signing authority and the local runtime manifest unchanged. Prior #1321: hosted paid-MCP quote lifecycle. Earlier #1309/#1306/#1307/#1308/#1301/#1300/#1310 compatibility notes; MCP_VERSION unchanged.
+last-verified: "2026-08-11" # re-verified for #1319: additivt provenance-fält + SDK-varningskod; inga versioner/manifest/skew-rader ändrade
 ---
 
 # MCP Runtime Compatibility

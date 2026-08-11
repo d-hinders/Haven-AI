@@ -4,9 +4,10 @@
  * AllowanceModule rail it reads the live on-chain state; on the delegation
  * rail it derives remaining budget from the agent's own active, owner-signed
  * delegations (#1090); a retired session-rail account gets the #993
- * fail-closed 410 rather than a state read. Preserve exactly — tests pass
- * unmodified (`routes/__tests__/machine-payments.test.ts`'s "GET /allowances
- * — rail-aware (#1135)" and "— legacy-rail characterization" suites).
+ * fail-closed 410 rather than a state read. Behavior is pinned by
+ * `routes/__tests__/machine-payments.test.ts`'s "GET /allowances — rail-aware
+ * (#1135)" and "— legacy-rail characterization" suites — a delegation-rail
+ * `onchain` row additionally carries `remaining_is_from_chain` (#1319).
  */
 import { resolveExecutionRail, sessionRailRetired } from '../../rails/execution-rail.js'
 import { listAllowanceConfigForAgent } from '../../infra/repositories/agents.js'
@@ -88,12 +89,15 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
             remainingAtomic: b.budget_atomic,
             fromChain: false,
           }
-          // Deliberately NOT on the wire. The response shape is a contract the
-          // SDK parses and the OpenAPI spec pins, and an agent could do
-          // nothing differently knowing the number came from a fallback — so
-          // the provenance is logged for operators instead of widening the
-          // contract. The fallback IS the pre-#1145 answer, never a fabricated
-          // zero that would stop a funded agent.
+          // #1319: the provenance IS on the wire now (`remaining_is_from_chain`,
+          // additive/optional — the legacy branch below never sets it). An
+          // agent still cannot act on it directly (no new refusal, no new
+          // authority), but the #1306 preflight uses it to warn when the
+          // number it is reporting is the #1145 fallback rather than a live
+          // read, instead of silently presenting an optimistic number as
+          // certain. The fallback IS the pre-#1145 answer, never a fabricated
+          // zero that would stop a funded agent — this only makes it visibly
+          // optimistic. Still logged for operators too.
           if (!fromChain) {
             console.warn(
               `delegation-budget: on-chain remaining unavailable for delegation ${b.id} ` +
@@ -123,6 +127,12 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
               // shape the SDK already parses.
               nonce: 0,
               is_reset_pending: false,
+              // #1319: provenance of `remaining` above — true when it came
+              // from the live ERC20PeriodTransferEnforcer read, false when
+              // the read failed and this is the #1145 fallback (the full
+              // configured budget). Delegation-rail only; the legacy branch
+              // below has no fallback concept and never sets this field.
+              remaining_is_from_chain: fromChain,
             },
           }
         }),

@@ -625,6 +625,15 @@ export interface HavenAllowance {
     lastResetMin: number
     nonce: number
     isResetPending: boolean
+    /**
+     * Delegation rail only (#1319, provenance for #1145's fallback): true
+     * when `remaining` came from a live on-chain enforcer read, false when
+     * the read failed and `remaining` is the fallback full configured
+     * budget. Undefined on the legacy AllowanceModule rail, which has no
+     * fallback concept. Reporting only — the on-chain policy remains the
+     * actual spend gate either way.
+     */
+    remainingIsFromChain?: boolean
   }
 }
 
@@ -1011,6 +1020,17 @@ export const AgentPaymentWarningCode = {
    * true/false — the on-chain policy remains the actual gate either way.
    */
   AllowanceCheckUnavailable: 'ALLOWANCE_CHECK_UNAVAILABLE',
+  /**
+   * #1319: the delegation-rail read itself SUCCEEDED, but the remaining
+   * figure it returned is the #1145 fallback (the full configured budget)
+   * rather than a live ERC20PeriodTransferEnforcer read — `sufficient` is a
+   * real true/false, just computed from an optimistic number. Distinct from
+   * {@link AgentPaymentWarningCode.AllowanceCheckUnavailable}, which fires
+   * when the read failed outright and `sufficient` degrades to null. The
+   * on-chain policy re-checks at redemption either way; this only says the
+   * guidance shown here may be optimistic.
+   */
+  AllowanceReadOptimistic: 'ALLOWANCE_READ_OPTIMISTIC',
 } as const
 
 export type AgentPaymentWarningCode =
@@ -1351,6 +1371,8 @@ export interface RawHavenAllowance {
     last_reset_min: number
     nonce: number
     is_reset_pending: boolean
+    /** #1319 — see {@link HavenAllowance.onchain.remainingIsFromChain}. */
+    remaining_is_from_chain?: boolean
   }
 }
 

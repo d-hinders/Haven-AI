@@ -50,4 +50,47 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD.startsWith('---\nname: haven-pay\n')).toBe(true)
     expect(SKILL_FOLDER_NAME).toBe('haven-pay')
   })
+
+  it('names the guided catalog-purchase flow as the primary MCP-merchant path (#1306)', () => {
+    expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_discover_tools')
+    expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_prepare_catalog_purchase')
+    expect(HAVEN_SKILL_MD).toContain('catalog_id')
+    // max_amount is REQUIRED on this tool, unlike the manual-fallback tools.
+    expect(HAVEN_SKILL_MD).toContain('max_amount')
+    expect(HAVEN_SKILL_MD).toMatch(/max_amount.*REQUIRED/)
+  })
+
+  it('tells the agent to follow the response guidance fields first (#1308)', () => {
+    expect(HAVEN_SKILL_MD).toContain('next_action')
+    expect(HAVEN_SKILL_MD).toContain('next_tool')
+    expect(HAVEN_SKILL_MD).toContain('next_arguments')
+    expect(HAVEN_SKILL_MD).toMatch(/follow those fields first/i)
+    expect(HAVEN_SKILL_MD).toContain('safe_to_continue')
+  })
+
+  it('signs and settles by payment_id only, never a bare merchant_url/tool_name pass', () => {
+    // Signing: payment_id + payment_required only; typed_data is never relayed
+    // by the agent on the preferred path.
+    expect(HAVEN_SKILL_MD).toMatch(/payment_id[\s\S]*?payment_required[\s\S]*?ONLY/)
+    expect(HAVEN_SKILL_MD).toContain('never relay')
+    // Settling: payment_id + signature + payment_header only; merchant_url /
+    // tool_name are the explicit version-skew fallback, both or none.
+    expect(HAVEN_SKILL_MD).toMatch(/payment_id[\s\S]*?signature[\s\S]*?payment_header[\s\S]*?ONLY/)
+    expect(HAVEN_SKILL_MD).toMatch(/both or\s+none/)
+  })
+
+  it('distinguishes stop-and-sweep from verify-then-sweep (#1300 mutation guard)', () => {
+    expect(HAVEN_SKILL_MD).toContain('MERCHANT_UNRESPONSIVE_AFTER_FUNDING')
+    expect(HAVEN_SKILL_MD).toContain('Stop-and-sweep')
+    expect(HAVEN_SKILL_MD).toContain('Verify-then-sweep')
+    expect(HAVEN_SKILL_MD).toContain('NOT proof of rejection')
+    expect(HAVEN_SKILL_MD).toContain('ONCE')
+    expect(HAVEN_SKILL_MD).toMatch(/only sweep|sweep only/i)
+  })
+
+  it('reports post-purchase results from agent_summary and remaining allowance, no extra calls (#1310)', () => {
+    expect(HAVEN_SKILL_MD).toContain('agent_summary')
+    expect(HAVEN_SKILL_MD).toMatch(/remaining post-purchase allowance/)
+    expect(HAVEN_SKILL_MD).toMatch(/Do not\s+call[\s\S]*?again just to report/)
+  })
 })

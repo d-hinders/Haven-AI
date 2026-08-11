@@ -95,5 +95,9 @@ export function signerInstructions(): string {
     '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`, which reinstalls the pinned',
     'MCP runtime. Do not edit the version field to a supported value — it is part of the',
     'Haven-signed binding message, so changing it invalidates the signature.',
+    '',
+    'A version-mismatch refusal from haven_sign / haven_sign_x402 / haven_sign_sweep_delegate is',
+    'machine-readable, not just prose: it carries code, supported_versions, received_version, and',
+    'fallback fields alongside the message, so you can branch on it directly.',
   ].join('\n')
 }

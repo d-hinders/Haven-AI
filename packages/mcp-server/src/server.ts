@@ -11,6 +11,35 @@ import {
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
 export const HOSTED_SERVER_VERSION = '0.1.21-alpha.0'
 
+/**
+ * MCP `instructions` — the critical path, surfaced to the model at
+ * `initialize` (some clients show this even when they never render individual
+ * tool descriptions). Kept deliberately free of any version literal: nothing
+ * here should ever need a version bump to stay true, so a guard test in
+ * `server.test.ts` pins that. Full per-tool detail lives in `toolDescriptions`
+ * below; this is the orientation a model reads before picking a tool at all.
+ */
+export const HOSTED_INSTRUCTIONS = [
+  'Haven hosted MCP server: keyless. It constructs and relays payments and never',
+  'holds or receives a signing key — signing happens only in the local',
+  'haven-signer MCP server. Call haven_get_agent first, every session: identity,',
+  'readiness, and live remaining budget in one call.',
+  '',
+  'To buy from a catalogued MCP merchant: haven_discover_tools for a catalog_id,',
+  'then haven_prepare_catalog_purchase with { catalog_id, max_amount } —',
+  'max_amount is required. Every payment tool response carries next_action,',
+  'next_tool, and next_arguments — follow those fields first; description prose',
+  'is fallback, not the source of truth.',
+  '',
+  'Sign only by payment_id, through the local signer — never relay typed_data',
+  'yourself. Settle only by payment_id, signature, and payment_header.',
+  '',
+  'pending_approval, or a guidance block with safe_to_continue false, means stop',
+  'and tell the user — do not retry, re-sign, or re-pay while a payment is',
+  'pending. Spend authority is enforced on-chain by the user\'s account; Haven',
+  'never holds keys and cannot override it.',
+].join('\n')
+
 export interface HostedClientOptions {
   /** Agent API key (identity) extracted from the request Bearer token. */
   apiKey: string
@@ -64,10 +93,13 @@ export function createHostedHavenClient(options: HostedClientOptions): HavenClie
  * concurrent tenants' headers from leaking into each other.
  */
 export function buildHostedMcpServer(haven: HavenClient): McpServer {
-  const server = new McpServer({
-    name: HOSTED_SERVER_NAME,
-    version: HOSTED_SERVER_VERSION,
-  })
+  const server = new McpServer(
+    {
+      name: HOSTED_SERVER_NAME,
+      version: HOSTED_SERVER_VERSION,
+    },
+    { instructions: HOSTED_INSTRUCTIONS },
+  )
 
   const handlers = createToolHandlers(haven)
   // The fluent `.tool(name, description, schema, handler)` overload keeps this

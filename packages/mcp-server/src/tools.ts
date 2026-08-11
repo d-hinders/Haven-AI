@@ -8,7 +8,7 @@ import {
   AgentPaymentWarningCode,
   type AgentNextStep,
   type AgentPaymentWarning,
-  type AgentSummary,
+  type AgentPaymentSummary,
   HavenClient,
   HavenError,
   HavenPaymentStateError,
@@ -846,11 +846,27 @@ export function createToolHandlers(
           // merchant header — return the funding status so the agent can act.
           // Echo payment_id so the agent can cross-reference the queued payment
           // (haven_get_payment_status / haven_list_receipts) without re-deriving it.
+          const fundingPending = isPendingApproval(funding.status)
           return {
             payment_id: args.payment_id,
             funding_status: funding.status,
             funding_tx_hash: funding.txHash ?? null,
             settled: false,
+            // #1308 review: the two non-confirmed states have DIFFERENT next
+            // actions — queued-for-approval is a user decision, a transient
+            // funding state is a poll.
+            ...buildAgentGuidance({
+              nextAction: fundingPending
+                ? AgentPaymentNextAction.WaitForUserApproval
+                : AgentPaymentNextAction.CheckStatusLater,
+              nextTool: 'mcp__haven__haven_get_payment_status',
+              nextArguments: { payment_id: args.payment_id },
+              safeToContinue: !fundingPending,
+              reason: fundingPending
+                ? 'Funding is queued for the wallet owner. Tell the user; do not re-sign or re-settle while pending.'
+                : 'Funding is not confirmed yet. Poll next_tool, then finish settlement with haven_complete_mcp_tool once confirmed.',
+              summary: { payment_id: args.payment_id, status: funding.status },
+            }),
           }
         }
         const merchant = await deliverMerchantPayment(haven, args, funding.txHash)
@@ -981,7 +997,25 @@ export function createToolHandlers(
           }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
-            return { payment_id: err.paymentId, status: 'pending_approval', payload_hash: null }
+            return {
+              payment_id: err.paymentId,
+              status: 'pending_approval',
+              payload_hash: null,
+              // #1308 review: the decomposed twin gets the SAME unsafe-to-continue
+              // signal as the one-call tool — this is the state the contract
+              // exists for.
+              ...buildAgentGuidance({
+                nextAction: AgentPaymentNextAction.WaitForUserApproval,
+                nextTool: 'mcp__haven__haven_get_payment_status',
+                nextArguments: { payment_id: err.paymentId ?? null },
+                safeToContinue: false,
+                reason:
+                  'The amount exceeds the remaining budget, so the payment is queued for the ' +
+                  'wallet owner. Tell the user, then poll next_tool — do NOT re-quote or re-pay ' +
+                  'the same purchase while it is pending.',
+                summary: { payment_id: err.paymentId ?? 'unknown', status: 'pending_approval' },
+              }),
+            }
           }
           throw err
         }
@@ -1279,7 +1313,7 @@ function buildAgentGuidance(input: {
   nextArguments?: Record<string, unknown>
   safeToContinue: boolean
   reason: string
-  summary: AgentSummary
+  summary: AgentPaymentSummary
   warnings?: AgentPaymentWarning[]
 }) {
   return {

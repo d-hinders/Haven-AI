@@ -930,7 +930,7 @@ export interface AgentNextStep {
 }
 
 /** #1308: compact reporting summary — what the agent tells the user. */
-export interface AgentSummary {
+export interface AgentPaymentSummary {
   payment_id: string
   status: string
   amount?: string

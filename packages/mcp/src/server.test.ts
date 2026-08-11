@@ -2,8 +2,10 @@ import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { HavenClient } from '@haven_ai/sdk'
-import { buildMcpServer, createHavenMcpServer } from './server.js'
+import { buildMcpServer, createHavenMcpServer, MCP_INSTRUCTIONS, MCP_VERSION } from './server.js'
 
 // Pinned so the #1161 Node floor cannot make these host-dependent: the
 // guard lives at the credential/client choke point, which these exercise.
@@ -216,5 +218,38 @@ describe('Haven MCP server dispatch', () => {
     for (const row of captured) {
       expect(row.tool).toBe(row.gate === 'first' ? 'haven_get_agent' : 'haven_get_allowances')
     }
+  })
+})
+
+describe('local MCP instructions', () => {
+  it('advertises the local critical-path instructions at initialize', async () => {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const server = buildMcpServer(haven)
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test-client', version: '0.0.0' })
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+
+    const instructions = client.getInstructions()
+    expect(instructions).toBe(MCP_INSTRUCTIONS)
+    expect(instructions).toContain('haven_get_agent')
+    expect(instructions).toContain('haven_discover_tools')
+    expect(instructions).toContain('haven_pay_mcp_tool')
+    expect(instructions).toContain('haven_pay_x402')
+    expect(instructions).toContain('pending_approval')
+    // Local: signs in-process, no separate signer namespace to describe.
+    expect(instructions).not.toContain('mcp__haven-signer__')
+    expect(instructions).not.toContain('payment_id')
+
+    await client.close()
+    await server.close()
+  })
+
+  it('never carries a version literal in the local instructions (drift guard)', () => {
+    // A protocol name like x402 is allowed — it never drifts. A semver-shaped
+    // literal or the package's own version constant would.
+    expect(MCP_INSTRUCTIONS).not.toMatch(/\d+\.\d+\.\d+/)
+    expect(MCP_INSTRUCTIONS).not.toContain(MCP_VERSION)
   })
 })

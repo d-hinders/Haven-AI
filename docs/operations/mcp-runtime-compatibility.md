@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1326: Hermes hosted runtime config is YAML and preserves unrelated source text; signing authority and the local runtime manifest unchanged. Prior #1321: the hosted paid-MCP quote establishes a merchant MCP session before the unpaid tools/call, using only public delegate context; local runtime compatibility, signer versions, Node floor, manifest, and signing authority unchanged. Earlier: #1309 row-one skew is machine-readable; #1306/#1307/#1308/#1301/#1300 and #1310 compatibility notes; MCP_VERSION/runtime manifest untouched.
+last-verified: "2026-08-11" # agent-prompt refresh (audit A/B/E): both buildHostedMcpServer and buildMcpServer now set MCP `instructions` (version-literal-free critical path) alongside the signer's; runtime manifest, versions, and signing authority unchanged. Prior #1326: Hermes hosted runtime config is YAML and preserves unrelated source text. Prior #1321: the hosted paid-MCP quote establishes a merchant MCP session before the unpaid tools/call, using only public delegate context; local runtime compatibility, signer versions, Node floor, manifest, and signing authority unchanged. Earlier: #1309 row-one skew is machine-readable; #1306/#1307/#1308/#1301/#1300 and #1310 compatibility notes; MCP_VERSION/runtime manifest untouched.
 ---
 
 # MCP Runtime Compatibility
@@ -307,6 +307,15 @@ diagnostic.
 This covers the **hosted MCP + local signer** topology only. The local
 `@haven_ai/mcp` runtime signs in-process with the SDK it was installed with, so
 there is no second component to be out of step with.
+
+**Both payment-brain servers set `instructions` too (agent-prompt audit, items
+A/B).** `ServerOptions.instructions` above is the mechanism the signer's own
+handshake reuses; `buildHostedMcpServer` and `buildMcpServer` (the local
+runtime) now set it as well, with a compact critical path — deliberately free
+of any version literal, since nothing there should ever need a release to stay
+true (unlike the signer's compatibility numbers above, which are point-in-time
+by design). See [`07-edge-signer.md`](../architecture/07-edge-signer.md) for
+what each server's instructions say and why they differ in length.
 
 ## Troubleshooting
 

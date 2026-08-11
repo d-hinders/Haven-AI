@@ -154,3 +154,10 @@ export {
   encodeBase64Json,
   decodeBase64Json,
 } from './base64.js'
+
+export {
+  MERCHANT_DISCOVERY_PATHS,
+  DISCOVERY_MAX_BYTES,
+  discoverMerchantMcpUrl,
+  sameUrl,
+} from './merchant-discovery.js'

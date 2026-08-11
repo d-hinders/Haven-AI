@@ -1371,6 +1371,212 @@ describe('haven_pay_mcp_tool', () => {
   })
 })
 
+// ── #1301: bounded same-origin merchant endpoint discovery (local parity with
+// mcp-server's #1271) ─────────────────────────────────────────────────────────
+
+describe('merchant MCP endpoint discovery (#1301)', () => {
+  const DISCOVERY_DELEGATE_KEY = '0x' + 'e'.repeat(64)
+  const DISCOVERY_SIGN_HASH = `0x${'ee'.repeat(32)}`
+  const PAYMENT_REQUIRED_HEADER = btoa(JSON.stringify(x402PaymentRequired))
+
+  function discoveryHandlers() {
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      baseUrl: 'http://haven.test',
+      delegateKey: DISCOVERY_DELEGATE_KEY,
+    })
+    return createToolHandlers(haven)
+  }
+
+  /**
+   * Installs a fetch stub keyed on exact `METHOD url`, with one exception:
+   * any request whose JSON-RPC body names `method: 'initialize'` (the MCP
+   * session handshake `haven.fetch()` runs up front for a `/mcp`-suffixed
+   * URL) is answered with a plain 200 and no `mcp-session-id` header, which
+   * the SDK treats as "not an MCP session" and silently falls back to
+   * standard x402 — keeping these fixtures focused on discovery, not the
+   * MCP transport layer (covered elsewhere in this file).
+   */
+  function installDiscoveryFetch(
+    routes: Record<string, { status: number; body?: unknown; headers?: Record<string, string> } | ((hitCount: number) => { status: number; body?: unknown; headers?: Record<string, string> })>,
+  ): { url: string; method: string }[] {
+    const calls: { url: string; method: string }[] = []
+    const hitCounts: Record<string, number> = {}
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: unknown, init: RequestInit = {}) => {
+      const urlStr = String(url)
+      const method = (init.method ?? 'GET').toUpperCase()
+      calls.push({ url: urlStr, method })
+      const bodyStr = typeof init.body === 'string' ? init.body : undefined
+      let bodyJson: Record<string, unknown> | undefined
+      if (bodyStr) {
+        try {
+          bodyJson = JSON.parse(bodyStr)
+        } catch {
+          bodyJson = undefined
+        }
+      }
+      if (bodyJson?.method === 'initialize') {
+        return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      const key = `${method} ${urlStr}`
+      hitCounts[key] = (hitCounts[key] ?? 0) + 1
+      const raw = routes[key]
+      const def = typeof raw === 'function' ? raw(hitCounts[key]) : raw
+      if (!def) {
+        return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify(def.body ?? {}), {
+        status: def.status,
+        headers: { 'Content-Type': 'application/json', ...(def.headers ?? {}) },
+      })
+    })
+    return calls
+  }
+
+  function havenPaymentRoutes(paymentId: string) {
+    return {
+      'POST http://haven.test/x402': {
+        status: 201,
+        body: {
+          payment_id: paymentId,
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: {
+            hash: DISCOVERY_SIGN_HASH,
+            components: {
+              safe: '0xSafe',
+              token: '0xToken',
+              to: '0xTo',
+              amount: '10000',
+              payment_token: '0x0',
+              payment: '0',
+              nonce: 1,
+            },
+          },
+        },
+      },
+      [`POST http://haven.test/payments/${paymentId}/sign`]: {
+        status: 200,
+        body: { payment_id: paymentId, status: 'confirmed', tx_hash: '0xtx_discovery' },
+      },
+    }
+  }
+
+  it('resolves a base URL through /.well-known and returns the RESOLVED merchant_url', async () => {
+    const calls = installDiscoveryFetch({
+      'POST http://merchant.test/': { status: 404, body: { error: 'Not found' } },
+      'GET http://merchant.test/.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { name: 'Haven Demo Merchant', mcp_url: 'http://merchant.test/mcp' },
+      },
+      'POST http://merchant.test/mcp': (hit) =>
+        hit === 1
+          ? { status: 402, headers: { 'PAYMENT-REQUIRED': PAYMENT_REQUIRED_HEADER } }
+          : { status: 200, body: { ok: true, result: 'paid' } },
+      ...havenPaymentRoutes('mcp_disc_resolve'),
+    })
+
+    const result = await discoveryHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+      arguments: { plan: 'basic' },
+    })
+
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    const data = result.data as { merchant_url: string; merchant_url_discovered_from?: string }
+    expect(data.merchant_url).toBe('http://merchant.test/mcp')
+    expect(data.merchant_url_discovered_from).toBe('http://merchant.test/')
+    expect(calls.some((c) => c.url.includes('.well-known'))).toBe(true)
+  })
+
+  it('does NOT run discovery when the exact endpoint answers 402', async () => {
+    const calls = installDiscoveryFetch({
+      'POST http://merchant.test/mcp': (hit) =>
+        hit === 1
+          ? { status: 402, headers: { 'PAYMENT-REQUIRED': PAYMENT_REQUIRED_HEADER } }
+          : { status: 200, body: { ok: true, result: 'paid' } },
+      ...havenPaymentRoutes('mcp_disc_shortcircuit'),
+    })
+
+    const result = await discoveryHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    const data = result.data as { merchant_url: string; merchant_url_discovered_from?: string }
+    expect(data.merchant_url).toBe('http://merchant.test/mcp')
+    expect(data.merchant_url_discovered_from).toBeUndefined()
+    expect(calls.some((c) => c.url.includes('.well-known'))).toBe(false)
+  })
+
+  it('fails with actionable guidance when no discovery document exists', async () => {
+    installDiscoveryFetch({
+      'POST http://merchant.test/': { status: 404, body: { error: 'Not found' } },
+      'GET http://merchant.test/.well-known/haven-demo-merchant': { status: 404, body: {} },
+      'GET http://merchant.test/': { status: 404, body: {} },
+    })
+
+    const result = await discoveryHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.message).toMatch(/No same-origin discovery document/)
+    expect(result.message).toMatch(/<origin>\/mcp/)
+  })
+
+  it('REFUSES an off-origin mcp_url — never even fetches it (SSRF bound)', async () => {
+    const calls = installDiscoveryFetch({
+      'POST http://merchant.test/': { status: 404, body: { error: 'Not found' } },
+      'GET http://merchant.test/.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { mcp_url: 'http://evil.example/mcp' },
+      },
+      'GET http://merchant.test/': {
+        status: 200,
+        body: { mcp_url: 'http://evil.example/mcp' },
+      },
+    })
+
+    const result = await discoveryHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    expect(calls.some((c) => c.url.includes('evil.example'))).toBe(false)
+  })
+
+  it('bounds discovery fetches to the fixed same-origin path set even on a plain merchant failure', async () => {
+    const calls = installDiscoveryFetch({
+      'POST http://merchant.test/mcp': { status: 500, body: { error: 'boom' } },
+      'GET http://merchant.test/.well-known/haven-demo-merchant': { status: 404, body: {} },
+      'GET http://merchant.test/': { status: 404, body: {} },
+    })
+
+    const result = await discoveryHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    const fetched = calls.map((c) => c.url)
+    expect(
+      fetched.every(
+        (u) =>
+          u.startsWith('http://merchant.test/mcp') ||
+          u === 'http://merchant.test/.well-known/haven-demo-merchant' ||
+          u === 'http://merchant.test/',
+      ),
+    ).toBe(true)
+  })
+})
+
 // ── #318 Tool selection clarity ───────────────────────────────────────────────
 
 describe('Tool selection errors (#318)', () => {

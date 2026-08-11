@@ -637,6 +637,35 @@ export interface HavenAllowanceSummary {
 }
 
 /**
+ * Post-purchase allowance/budget summary attached to a settled x402 payment
+ * (#1310). Read-only reporting — the on-chain policy remains the actual
+ * spend gate either way, this only says what is left after the purchase.
+ *
+ * Deliberately the SAME rail-labeled field spelling as #1306's
+ * catalog-purchase preflight `allowance` block (never a new spelling),
+ * minus the preflight-only `sufficient` field: post-purchase reporting
+ * answers "what is left", not "was this purchase covered". Read through the
+ * exact same source as {@link HavenAllowanceSummary} / `haven_get_allowances`
+ * (`GET /machine-payments/allowances`; delegation-rail values are the #1090
+ * `deriveDelegationBudgets`-backed enforcer read, never `agent_allowances`),
+ * so this can never disagree with `haven_get_allowances` for the same
+ * fixture.
+ */
+export interface PostPurchaseAllowanceSummary {
+  /** Which on-chain policy primitive gates this agent's spend (#1306 labeling). */
+  rail: 'legacy' | 'delegation'
+  /** Remaining atomic units, read through the same source as {@link HavenAllowance.onchain.remaining}. */
+  remaining_atomic: string
+  /** Human-readable remaining, e.g. "4.96 USDC". Omitted when the token's decimals are unknown. */
+  remaining_display?: string
+  token_symbol?: string
+  token_address?: string
+  /** Minutes — mirrors {@link HavenAllowance.resetPeriodMin} / the delegation's period. */
+  reset_period?: number
+  source: 'allowance_module' | 'active_delegations'
+}
+
+/**
  * Affirmative spend-readiness for the authenticated agent, derived from the raw
  * agent status plus the remaining spend authority the backend reports per rail
  * (the on-chain AllowanceModule on the legacy rail; the active budget

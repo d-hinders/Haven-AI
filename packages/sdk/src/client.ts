@@ -47,6 +47,7 @@ import type {
   HavenAgentAllowanceSummary,
   HavenAgentReadiness,
   HavenAllowanceSummary,
+  PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
   RawHavenAgent,
   RawHavenAllowanceSummary,
@@ -54,10 +55,12 @@ import type {
   RawHavenPaymentReceipt,
   HavenCatalogEntry,
   RawCatalogEntry,
+  AgentPaymentWarning,
 } from './types.js'
 import {
   AgentPaymentNextAction,
   AgentPaymentPhase,
+  AgentPaymentWarningCode,
   HavenApiError,
   HavenPaymentStateError,
   MerchantTimeoutError,
@@ -943,6 +946,84 @@ export class HavenClient {
           isResetPending: allowance.onchain.is_reset_pending,
         },
       })),
+    }
+  }
+
+  /**
+   * Post-purchase allowance/budget summary for a settled payment (#1310).
+   *
+   * Reuses the EXACT rail-aware read path {@link getAllowances} / #1306's
+   * catalog-purchase preflight `allowance` block use — `GET
+   * /machine-payments/allowances`, with delegation-rail values coming from
+   * the #1090 `deriveDelegationBudgets`-backed enforcer read, never
+   * `agent_allowances` — so this can never disagree with
+   * {@link getAllowances} for the same fixture. The settled token is
+   * resolved from {@link getPaymentStatus} so callers pass only
+   * `paymentId`, never a second haven_get_agent-style round trip.
+   *
+   * NEVER throws: any failed read (status lookup, agent lookup, or the
+   * allowance/budget lookup itself) degrades to `{ allowance: null,
+   * warnings: [ALLOWANCE_CHECK_UNAVAILABLE] }` rather than converting a
+   * successful settlement into a failure — the on-chain policy remains the
+   * actual spend gate regardless of whether this report can be produced.
+   *
+   * Freshness caveat (#1319, filed, not fixed here): the delegation rail's
+   * on-chain enforcer read can silently fall back to the optimistic full
+   * period budget without throwing when the RPC read itself fails — this
+   * summary reflects the last successful chain read, not a guaranteed-live
+   * one, and callers should not phrase it as guaranteed-fresh.
+   */
+  async getPostPurchaseAllowanceSummary(
+    paymentId: string,
+  ): Promise<{ allowance: PostPurchaseAllowanceSummary | null; warnings: AgentPaymentWarning[] }> {
+    const unavailable = (detail: string): { allowance: null; warnings: AgentPaymentWarning[] } => ({
+      allowance: null,
+      warnings: [
+        {
+          code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
+          message:
+            `Could not read the post-purchase allowance/budget for payment ${paymentId} (${detail}). ` +
+            'The payment itself succeeded — the on-chain policy remains the actual spend gate; this ' +
+            'only affects the remaining-budget figure reported here.',
+        },
+      ],
+    })
+    try {
+      const status = await this.getPaymentStatus(paymentId)
+      const tokenAddress = status.asset ?? status.x402?.asset ?? null
+      if (!tokenAddress) {
+        return unavailable('the settled payment does not carry a resolvable token address')
+      }
+      const [agent, allowanceSummary] = await Promise.all([this.getAgent(), this.getAllowances()])
+      const rail = agent.executionRail
+      const source = rail === 'delegation' ? 'active_delegations' : 'allowance_module'
+      const match = allowanceSummary.allowances.find(
+        (a) => a.tokenAddress.toLowerCase() === tokenAddress.toLowerCase(),
+      )
+      if (!match) {
+        return { allowance: { rail, remaining_atomic: '0', source }, warnings: [] }
+      }
+      // Same "only format when decimals are known" discipline as
+      // getAgentSummary() above — an unregistered token surfaces the exact
+      // atomic value rather than a misformatted guess.
+      const token = resolveTokenFromAddress(match.tokenAddress)
+      const remainingDisplay = token
+        ? `${formatAtomicAmount(safeBigInt(match.onchain.remaining), token.decimals)} ${match.tokenSymbol}`
+        : undefined
+      return {
+        allowance: {
+          rail,
+          remaining_atomic: match.onchain.remaining,
+          ...(remainingDisplay ? { remaining_display: remainingDisplay } : {}),
+          token_symbol: match.tokenSymbol,
+          token_address: match.tokenAddress,
+          reset_period: match.resetPeriodMin,
+          source,
+        },
+        warnings: [],
+      }
+    } catch (err) {
+      return unavailable(err instanceof Error ? err.message : String(err))
     }
   }
 

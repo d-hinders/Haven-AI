@@ -10,6 +10,8 @@
  */
 import {
   AgentPaymentNextAction,
+  AgentPaymentPhase,
+  AgentPaymentRail,
   HavenApiError,
   HavenClient,
   HavenError,
@@ -421,7 +423,16 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
 
     haven_get_payment_status: async (input) => {
       const args = objectInput('haven_get_payment_status', input)
-      return runTool(async () => haven.getPaymentStatus(args.payment_id))
+      return runTool(async () => {
+        const status = await haven.getPaymentStatus(args.payment_id)
+        // #1310: parity with the hosted MCP's haven_get_payment_status — see
+        // there for why `funded_but_unsettled` is excluded from "settled".
+        if (status.rail === AgentPaymentRail.X402 && status.phase === AgentPaymentPhase.PaymentConfirmed) {
+          const { allowance, warnings } = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
+          return { ...status, allowance, ...(warnings.length > 0 ? { warnings } : {}) }
+        }
+        return status
+      })
     },
 
     haven_get_resume_state: async (input) => {

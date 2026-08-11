@@ -1944,6 +1944,83 @@ describe('haven_discover_tools (#349)', () => {
   })
 })
 
+// ── haven_get_payment_status: post-purchase allowance summary (#1310) ─────────
+// Parity with the hosted MCP's identical addition in packages/mcp-server —
+// same condition (rail: x402, phase: payment_confirmed), same SDK call.
+
+describe('haven_get_payment_status: post-purchase allowance summary (#1310)', () => {
+  const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+
+  function handlers() {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    return createToolHandlers(haven)
+  }
+
+  function statusFixture(overrides: Record<string, unknown> = {}) {
+    return {
+      payment_id: 'pay_x402', kind: 'payment_intent', rail: 'x402',
+      status: 'confirmed', phase: 'payment_confirmed', next_action: 'none',
+      amount: '1.50', token: 'USDC',
+      resource_url: 'https://merchant.example/paid', merchant_address: '0xMerchant',
+      tx_hash: txHash, expires_at: '2099-01-01T00:00:00.000Z', chain_id: 8453,
+      message: 'The payment is confirmed.', asset: USDC,
+      ...overrides,
+    }
+  }
+
+  function allowancesFixture(remaining: string) {
+    return {
+      agent_id: 'agent-1', safe_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
+      allowances: [{
+        id: 'allowance-1', token_address: USDC, token_symbol: 'USDC',
+        configured_amount: '5000000', reset_period_min: 60,
+        onchain: {
+          amount: remaining, spent: '0', remaining, effective_spent: '0',
+          reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false,
+        },
+      }],
+    }
+  }
+
+  it('attaches allowance for a genuinely settled x402 payment', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/pay_x402/status')) return jsonResponse(statusFixture())
+      if (u.endsWith('/machine-payments/agent')) {
+        return jsonResponse({
+          id: 'agent-1', name: 'A', status: 'active',
+          safe_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
+          execution_rail: 'legacy',
+        })
+      }
+      if (u.endsWith('/machine-payments/allowances')) return jsonResponse(allowancesFixture('3000000'))
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const result = await handlers().haven_get_payment_status({ payment_id: 'pay_x402' })
+    expect(result.success).toBe(true)
+    const data = (result as { data: { allowance: { rail: string; remaining_atomic: string } | null } }).data
+    expect(data.allowance).toEqual(
+      expect.objectContaining({ rail: 'legacy', remaining_atomic: '3000000' }),
+    )
+  })
+
+  it('does NOT attach allowance for a non-settled x402 phase (funded_but_unsettled)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/pay_x402/status')) {
+        return jsonResponse(statusFixture({ status: 'funded_but_unsettled', phase: 'funded_but_unsettled' }))
+      }
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const result = await handlers().haven_get_payment_status({ payment_id: 'pay_x402' })
+    expect(result.success).toBe(true)
+    const data = (result as { data: Record<string, unknown> }).data
+    expect('allowance' in data).toBe(false)
+  })
+})
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,

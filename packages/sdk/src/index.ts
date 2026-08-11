@@ -87,6 +87,7 @@ export type {
   HavenAgentReadiness,
   HavenAllowance,
   HavenAllowanceSummary,
+  PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
   SweepResult,
   SweepEntry,

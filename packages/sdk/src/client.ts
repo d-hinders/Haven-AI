@@ -25,6 +25,8 @@ import type {
   X402PaymentOption,
   X402Intent,
   X402McpTransport,
+  X402MerchantCallContext,
+  RawX402MerchantCallContext,
   X402Quote,
   X402Receipt,
   X402RequestSnapshot,
@@ -559,6 +561,8 @@ export class HavenClient {
       network: option.network,
       description: paymentRequired.resource.description,
       idempotencyKey,
+      // #1307: persisted so the settle leg can rehydrate it by payment_id.
+      ...(options.mcpCallContext ? { mcpCallContext: options.mcpCallContext } : {}),
     })
 
     // Anything other than a signable funding intent (pending_approval,
@@ -1788,6 +1792,36 @@ export class HavenClient {
       ok: surfaced.ok,
       body,
       settlementTxHash: settlement.settlementTxHash ?? undefined,
+    }
+  }
+
+  /**
+   * GET /x402/:id/merchant-call-context — the settle-leg twin of #1263's
+   * sign-context fetch (#1307). Re-serves the stored merchant MCP-tool call
+   * context (merchant_url, tool_name, arguments, mcp_transport) recorded at
+   * quote time, so `haven_settle_mcp_tool` / `haven_complete_mcp_tool` can
+   * omit those fields and let Haven rehydrate them by payment_id instead of
+   * the caller re-threading them. Throws `HavenApiError` (404 unknown/foreign
+   * payment_id, 409 no stored context, 410 expired) — the caller decides the
+   * fallback (re-send the full context explicitly).
+   */
+  async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext> {
+    const raw = await this.get<RawX402MerchantCallContext>(
+      `/x402/${paymentId}/merchant-call-context`,
+    )
+    return {
+      paymentId: raw.payment_id,
+      merchantUrl: raw.merchant_url,
+      toolName: raw.tool_name,
+      arguments: raw.arguments ?? {},
+      ...(raw.mcp_transport
+        ? {
+            mcpTransport: {
+              handshakeRequired: raw.mcp_transport.handshake_required,
+              source: raw.mcp_transport.source,
+            },
+          }
+        : {}),
     }
   }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { AgentPaymentFailureCode, AgentPaymentNextAction, HavenClient, MerchantTimeoutError } from '@haven_ai/sdk'
+import { AgentPaymentFailureCode, AgentPaymentNextAction, HavenApiError, HavenClient, MerchantTimeoutError } from '@haven_ai/sdk'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
@@ -889,6 +889,33 @@ describe('haven_pay_mcp_tool', () => {
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 
+  it('persists the merchant call context on the funding request (#1307 settle-leg rehydration)', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader },
+      },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    ok(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+
+    const intentCall = calls.find((c) => c.url.endsWith('/x402'))
+    expect(intentCall?.body?.mcpCallContext).toEqual({
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'create_text',
+      arguments: { prompt: 'Hello' },
+      mcpTransport: { handshakeRequired: true, source: 'path' },
+    })
+  })
+
   it('rejects with PRICE_EXCEEDS_MAX before funding when the live price is above max_amount', async () => {
     stubFetch({
       'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
@@ -1402,6 +1429,175 @@ describe('haven_settle_mcp_tool', () => {
     if (payload.success) throw new Error('expected a failure payload')
     expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
     expect(payload.suggested_tool).toBe('haven_sweep_delegate')
+  })
+})
+
+// ── merchant-call-context rehydration by payment_id (#1307) ───────────────────
+
+describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context rehydration (#1307)', () => {
+  const SIG = '0x' + '11'.repeat(65)
+
+  it('REFUSES half-explicit context (only one of merchant_url/tool_name) instead of silently overriding (#1316 review)', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'getX402MerchantCallContext')
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
+      merchant_url: 'http://merchant.test/mcp',
+      // tool_name omitted — an agent that supplied merchant_url expects it used
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(payload.message).toMatch(/TOGETHER/)
+    expect(payload.next_action).toBe('retry_with_explicit_context')
+    // Neither rehydrated nor fetched anything — refused up front.
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('haven_complete_mcp_tool: explicit merchant_url/tool_name win OUTRIGHT — rehydration is never called', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const rehydrateSpy = vi.spyOn(haven, 'getX402MerchantCallContext')
+    const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' },
+    })
+
+    const result = ok<{ ok: boolean }>(
+      await createToolHandlers(haven).haven_complete_mcp_tool({
+        payment_id: 'pay_x402',
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'explicit' },
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    expect(rehydrateSpy).not.toHaveBeenCalled()
+    expect(completeSpy.mock.calls[0][0].url).toBe('http://merchant.test/mcp')
+    const envelope = JSON.parse(completeSpy.mock.calls[0][0].init!.body as string)
+    expect(envelope.params).toEqual({ name: 'create_text', arguments: { prompt: 'explicit' } })
+    expect(result.data.ok).toBe(true)
+  })
+
+  it('haven_complete_mcp_tool: omitted merchant_url/tool_name rehydrate the stored context by payment_id', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const rehydrateSpy = vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
+      paymentId: 'pay_x402',
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'buy_cloud_storage',
+      arguments: { tier: '50gb' },
+      mcpTransport: { handshakeRequired: true, source: 'bazaar' },
+    })
+    const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' },
+    })
+
+    const result = ok<{ ok: boolean }>(
+      await createToolHandlers(haven).haven_complete_mcp_tool({
+        payment_id: 'pay_x402',
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    expect(rehydrateSpy).toHaveBeenCalledWith('pay_x402')
+    expect(completeSpy.mock.calls[0][0].url).toBe('http://merchant.test/mcp')
+    expect(completeSpy.mock.calls[0][0].mcpTransport).toEqual({ handshakeRequired: true, source: 'bazaar' })
+    const envelope = JSON.parse(completeSpy.mock.calls[0][0].init!.body as string)
+    expect(envelope.params).toEqual({ name: 'buy_cloud_storage', arguments: { tier: '50gb' } })
+    expect(result.data.ok).toBe(true)
+  })
+
+  it('haven_settle_mcp_tool: omitted merchant_url/tool_name rehydrate the stored context by payment_id', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const rehydrateSpy = vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
+      paymentId: 'pay_x402',
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'buy_cloud_storage',
+      arguments: { tier: '50gb' },
+    })
+    const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+    })
+
+    const result = ok<{ settled: boolean }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    expect(rehydrateSpy).toHaveBeenCalledWith('pay_x402')
+    expect(completeSpy.mock.calls[0][0].url).toBe('http://merchant.test/mcp')
+    expect(result.data.settled).toBe(true)
+  })
+
+  it('refuses with a structured, fallback-naming error when no stored context is available (409)', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError(
+        'No stored merchant call context for this intent — pass merchant_url, tool_name, ' +
+          'arguments, and mcp_transport explicitly (version-skew fallback).',
+        409,
+      ),
+    )
+    const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantCallContextUnavailable)
+    expect(payload.statusCode).toBe(409)
+    expect(payload.paymentId).toBe('pay_x402')
+    expect(payload.message).toMatch(/merchant_url, tool_name/)
+    expect(completeSpy).not.toHaveBeenCalled()
+  })
+
+  it('refuses unknown/foreign payment_id the same way as context-missing (404, never a 403 leak)', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('Payment intent not found', 404),
+    )
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_unknown',
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantCallContextUnavailable)
+    expect(payload.statusCode).toBe(404)
+  })
+
+  it('maps an expired stored context (410) to the standard re-quote payload', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('Payment window expired', 410),
+    )
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PaymentWindowExpired)
+    expect(payload.statusCode).toBe(410)
+    expect(payload.retry_with_new_quote).toBe(true)
+    expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
   })
 })
 

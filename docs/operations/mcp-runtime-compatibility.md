@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # #1308 guidance-fält inkl. review-fixar + #1301 delad discovery + #1300-kalibrering; ingen floor/manifest-ändring
+last-verified: "2026-08-11" # #1307 settle-leg skew row (merchant-call-context rehydration) + #1308 guidance-fält + #1301 delad discovery + #1300-kalibrering; ingen floor/manifest-ändring
 ---
 
 # MCP Runtime Compatibility
@@ -185,6 +185,18 @@ ORIGINAL sign_data (#1207) with the full payload. This is a transport change
 only — the signer's verification is identical on both paths — but it converts
 "old signer silently relays bulk bytes" into "old signer asks for them
 explicitly", which is the observable difference an operator will see.
+
+One more skew row since #1307, on the SETTLE leg rather than the sign leg:
+`haven_settle_mcp_tool` / `haven_complete_mcp_tool` accept `merchant_url` /
+`tool_name` / `arguments` / `mcp_transport` as optional and rehydrate them by
+`payment_id` from the stored intent when omitted. Omitting them against a
+backend that never stored a call context — pre-#1307 backend, or an intent
+that was never quoted through `haven_pay_mcp_tool` (a plain non-MCP-tool x402
+resource) — gets a structured `MERCHANT_CALL_CONTEXT_UNAVAILABLE` refusal
+naming the fallback in-band: re-send the four fields explicitly (the same
+values `haven_pay_mcp_tool` returned at quote time). Same shape as the
+`include_signing_payload=true` fallback above: no signature verification
+changes, only which call carries the bulk bytes.
 
 ### Detecting skew before a payment (#1155)
 

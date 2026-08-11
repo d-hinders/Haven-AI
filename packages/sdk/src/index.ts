@@ -57,6 +57,8 @@ export type {
   X402PaymentRequired,
   X402PaymentOption,
   X402McpTransport,
+  X402McpCallContext,
+  X402MerchantCallContext,
   X402Receipt,
   X402AuthorizationOptions,
   X402Intent,

@@ -259,6 +259,14 @@ export interface X402Receipt {
 export interface X402AuthorizationOptions {
   /** Stable caller-supplied key for this user intent. Prevents duplicate approvals across fresh 402 quotes. */
   idempotencyKey?: string
+  /**
+   * #1307: the merchant MCP-tool call context this quote was made against
+   * (merchant_url, tool_name, arguments, mcp_transport). Persisted on the
+   * intent so `getX402MerchantCallContext` can rehydrate it by payment_id at
+   * settle/complete time instead of the caller re-threading it. Optional —
+   * omit for a non-MCP-tool x402 merchant (plain HTTP resource).
+   */
+  mcpCallContext?: X402McpCallContext
 }
 
 /**
@@ -358,6 +366,44 @@ export interface X402RequestSnapshot {
 export interface X402McpTransport {
   handshakeRequired: boolean
   source: 'path' | 'bazaar'
+}
+
+/**
+ * #1307: the merchant MCP-tool call an x402 quote was made against — carried
+ * through `createX402Intent`'s options so Haven can persist it for the
+ * settle-leg rehydration handoff (`getX402MerchantCallContext`). Convenience
+ * metadata for retrying the merchant's OWN JSON-RPC call, never payment
+ * authority.
+ */
+export interface X402McpCallContext {
+  merchantUrl: string
+  toolName: string
+  arguments?: Record<string, unknown>
+  mcpTransport?: X402McpTransport
+}
+
+/**
+ * Response shape of `getX402MerchantCallContext` — the stored merchant call
+ * context for a payment_id, rehydrated instead of re-threaded (#1307).
+ */
+export interface X402MerchantCallContext {
+  paymentId: string
+  merchantUrl: string
+  toolName: string
+  arguments: Record<string, unknown>
+  mcpTransport?: X402McpTransport
+}
+
+/** @internal */
+export interface RawX402MerchantCallContext {
+  payment_id: string
+  merchant_url: string
+  tool_name: string
+  arguments?: Record<string, unknown>
+  mcp_transport?: { handshake_required: boolean; source: 'path' | 'bazaar' }
+  error?: string
+  error_code?: string
+  status?: string
 }
 
 /** Quote parsed from an HTTP 402 response without creating a Haven payment. */
@@ -756,6 +802,8 @@ export const AgentPaymentNextAction = {
   StopAndTellUser: 'stop_and_tell_user',
   /** Ask again only if the user still wants the payment after expiry. */
   RequestAgainIfUserStillWantsIt: 'request_again_if_user_still_wants_it',
+  /** #1307: retry the SAME tool call, supplying the explicit context fields the server could not rehydrate. */
+  RetryWithExplicitContext: 'retry_with_explicit_context',
   /**
    * The x402 funding/quote window expired. Re-quote the same logical merchant
    * operation with the same idempotency key to stay double-charge-safe.
@@ -789,6 +837,15 @@ export const AgentPaymentFailureCode = {
    *  holds a valid EIP-3009 authorization and may still settle late, so the
    *  guidance is verify-then-sweep, never blind sweep. */
   MerchantUnresponsiveAfterFunding: 'MERCHANT_UNRESPONSIVE_AFTER_FUNDING',
+  /**
+   * #1307: the caller omitted merchant_url/tool_name (asking Haven to
+   * rehydrate the stored MCP merchant-call context by payment_id), but no
+   * usable context was stored for this intent — either it was never an
+   * MCP-tool quote, or the stored context is incomplete. The fallback is
+   * mechanical: re-send merchant_url, tool_name, arguments, and
+   * mcp_transport explicitly (the version-skew path).
+   */
+  MerchantCallContextUnavailable: 'MERCHANT_CALL_CONTEXT_UNAVAILABLE',
 } as const
 
 export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typeof AgentPaymentFailureCode]
@@ -872,6 +929,8 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
     'The x402 funding/quote window expired. Re-quote with the same idempotency key before asking the signer to build a merchant payment header again.',
   [AgentPaymentNextAction.FundSafeOrRaiseAllowance]:
     'Stop and tell the user that the originating Safe needs to be funded or the agent allowance raised before the payment can succeed.',
+  [AgentPaymentNextAction.RetryWithExplicitContext]:
+    'Retry the same tool call, this time passing merchant_url, tool_name, arguments, and mcp_transport explicitly — the server had no stored context to rehydrate for this payment id.',
   [AgentPaymentNextAction.SweepStrandedFunds]:
     'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating Safe.',
 }
@@ -885,6 +944,8 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
     'The Haven funding leg succeeded, but the merchant rejected the paid retry. Stop retrying the merchant and reconcile stranded delegate funds with haven_sweep_delegate.',
   [AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding]:
     'The Haven funding leg succeeded, but the merchant did not answer the paid retry before the timeout. The merchant may still settle late — check haven_get_payment_status (and retry haven_complete_mcp_tool once) BEFORE sweeping; sweep only if no settlement appears.',
+  [AgentPaymentFailureCode.MerchantCallContextUnavailable]:
+    'merchant_url/tool_name were omitted and no stored merchant call context is available for this payment_id. Re-send merchant_url, tool_name, arguments, and mcp_transport explicitly.',
 }
 
 /**

@@ -19,7 +19,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # #1308-kontraktet inkl. review-fynd (pending-tvilling + settle-gren) + #1301 delad discovery + #1300-kalibrering
+last-verified: "2026-08-11" # #1307 settle-by-payment_id: merchant-call-context rehydration + #1308-kontraktet + #1301 delad discovery + #1300-kalibrering
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -292,6 +292,30 @@ The recommended three-call fast path for an x402-protected MCP tool is:
 3. `haven_settle_mcp_tool` — hosted MCP relays the funding signature, waits for
    confirmation, performs a fresh merchant MCP handshake, delivers the signed
    header, and returns the tool result.
+
+**Settle by `payment_id` (#1307).** `haven_settle_mcp_tool` and
+`haven_complete_mcp_tool` accept `merchant_url` / `tool_name` / `arguments` /
+`mcp_transport` as OPTIONAL. `haven_pay_mcp_tool` (step 1) persists the merchant
+call context it was invoked with on the funding intent's existing
+`machine_metadata` column (no migration — the same JSONB blob
+`settlement_scheme` already lives in). Omitting those fields at settle time
+makes Haven rehydrate them by `payment_id` via
+`GET /x402/:id/merchant-call-context` — the settle-leg twin of the #1263
+sign-context handoff, and the same rehydration precedent
+(`rebuildDelegationSignContext`) extended to a second stored-state read. This
+is convenience metadata for retrying the MERCHANT's own JSON-RPC call, never
+payment authority: rehydration constructs nothing and cannot redirect funds,
+only the outbound merchant HTTP call. Passing the fields explicitly remains
+supported as the version-skew fallback (older signer/backend, or an intent
+Haven never stored a call context for — e.g. a plain non-MCP-tool x402
+resource, or the pre-#1307 shape). The endpoint refuses with the same
+discipline as sign-context: unknown/foreign `payment_id` → 404 (never a
+403-leak); no stored context, or an incomplete one → 409 naming the fallback;
+the funding/quote window expired → 410 (lazy-expiring a still-pending row past
+its window, exactly like #1263 — a row that already moved past
+`pending_signature` stays servable for however long merchant delivery takes,
+so a retry after a `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` timeout is never
+forced into a fresh, re-funding quote).
 
 The decomposed alternative is:
 

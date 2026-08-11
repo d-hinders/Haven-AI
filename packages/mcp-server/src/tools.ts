@@ -137,8 +137,12 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   },
   haven_complete_mcp_tool: {
     payment_id: z.string().min(1),
-    merchant_url: z.string().url(),
-    tool_name: z.string().min(1),
+    // #1307: OPTIONAL — omit merchant_url/tool_name and Haven rehydrates the
+    // stored MCP call context (recorded by haven_pay_mcp_tool) from
+    // payment_id. Pass all four explicitly only as the version-skew fallback
+    // (older signer/backend, or a context Haven never stored).
+    merchant_url: z.string().url().optional(),
+    tool_name: z.string().min(1).optional(),
     arguments: z.record(z.string(), z.unknown()).optional(),
     mcp_transport: z.object({
       handshake_required: z.boolean(),
@@ -154,8 +158,10 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     signature: z
       .string()
       .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
-    merchant_url: z.string().url(),
-    tool_name: z.string().min(1),
+    // #1307: OPTIONAL — same rehydration-by-payment_id contract as
+    // haven_complete_mcp_tool above.
+    merchant_url: z.string().url().optional(),
+    tool_name: z.string().min(1).optional(),
     arguments: z.record(z.string(), z.unknown()).optional(),
     mcp_transport: z.object({
       handshake_required: z.boolean(),
@@ -303,7 +309,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has been spent at that point. ' +
     'Finish with two follow-up calls (fast path, recommended): ' +
     '(1) mcp__haven-signer__haven_sign_x402 on the local signer. PREFERRED (#1263): pass just payment_id and payment_required — the signer fetches the exact signing payload and expected context from Haven itself, so you never copy bulky bytes; the response is COMPACT by default (#1272: no typed_data/typed_data_b64). Fallback (older signers/backends): re-run THIS tool with the SAME idempotency_key plus include_signing_payload=true — the replay returns the ORIGINAL sign_data with typed_data_b64 — then pass payload_hash, x402_expected (the nested x402.expected context, including expires_at), payment_required, and typed_data_b64 through UNCHANGED, one opaque string, never re-typed (#1255). Returns { signature, payment_header }; ' +
-    '(2) mcp__haven__haven_settle_mcp_tool with payment_id, signature, payment_header, merchant_url, tool_name, arguments, and mcp_transport to fund the delegate and settle with the merchant in one call, returning the tool result. ' +
+    '(2) mcp__haven__haven_settle_mcp_tool with payment_id, signature, and payment_header to fund the delegate and settle with the merchant in one call — merchant_url/tool_name/arguments/mcp_transport are OPTIONAL (#1307): Haven rehydrates them from this quote by payment_id; pass them explicitly only as a version-skew fallback. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response. ' +
     'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. ' +
@@ -319,8 +325,8 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
   behavior:
     'Final step after haven_x402_sign_header. Re-issues the MCP tools/call to the merchant with the X-PAYMENT header ' +
     '(running a fresh MCP initialize/session handshake server-side) and returns the merchant tool result. ' +
-    'Pass payment_id, merchant_url, tool_name, arguments, and mcp_transport exactly as returned by haven_pay_mcp_tool, plus the payment_header from ' +
-    'haven_x402_sign_header. The payment_header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key; ' +
+    'Pass payment_id and the payment_header from haven_x402_sign_header; merchant_url/tool_name/arguments/mcp_transport are OPTIONAL (#1307) — Haven rehydrates them from the original haven_pay_mcp_tool quote by payment_id, so pass them only as a version-skew fallback. ' +
+    'The payment_header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key; ' +
     'Haven relays it but never holds signing authority. Call only after haven_submit has confirmed the funding transfer. ' +
     'The payment_id is used to attach merchant evidence or reconciliation context to the already-funded payment. ' +
     'If the funding window expired first, this returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true. ' +
@@ -333,7 +339,7 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
     'Fund and settle an x402 MCP tool payment in one call: relay the funding signature, then deliver the signed X-PAYMENT header to the merchant and return the tool result.',
   behavior:
-    'The fast-path final step, combining haven_submit + haven_complete_mcp_tool. Pass payment_id, signature, and payment_header from haven_sign_x402, plus merchant_url, tool_name, arguments, and mcp_transport from haven_pay_mcp_tool. ' +
+    'The fast-path final step, combining haven_submit + haven_complete_mcp_tool. Pass payment_id, signature, and payment_header from haven_sign_x402 — merchant_url/tool_name/arguments/mcp_transport are OPTIONAL (#1307): Haven rehydrates them from the haven_pay_mcp_tool quote by payment_id; pass them explicitly only as a version-skew fallback. ' +
     'Relays the funding signature to fund the delegate, then (only once funding confirms) re-issues the MCP tools/call to the merchant with the X-PAYMENT header (fresh MCP handshake server-side) and returns the merchant tool result. ' +
     'Both the signature and the payment_header are signed locally by the edge signer — Haven relays them but never holds the key. ' +
     'If funding does not confirm (e.g. pending_approval) it returns { payment_id, settled: false, funding_status } and does not contact the merchant. ' +
@@ -744,7 +750,18 @@ export function createToolHandlers(
           assertWithinMaxAmount(quote.amountAtomic, args.max_amount as string | undefined, quote.token)
           const intent = await haven.createX402Intent(
             quote.paymentRequired as X402PaymentRequired,
-            { idempotencyKey: args.idempotency_key ?? quote.idempotencyKey },
+            {
+              idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
+              // #1307: persist the merchant call context so haven_settle_mcp_tool /
+              // haven_complete_mcp_tool can rehydrate it by payment_id instead of
+              // the agent re-threading merchant_url/tool_name/arguments/mcp_transport.
+              mcpCallContext: {
+                merchantUrl,
+                toolName: args.tool_name as string,
+                arguments: (args.arguments as Record<string, unknown> | undefined) ?? {},
+                ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
+              },
+            },
           )
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
@@ -1581,6 +1598,85 @@ class HostedToolError extends Error {
 }
 
 /**
+ * #1307: resolve merchant_url/tool_name/arguments/mcp_transport for
+ * haven_complete_mcp_tool / haven_settle_mcp_tool. Explicit args are the
+ * version-skew fallback and win OUTRIGHT when BOTH merchant_url and
+ * tool_name are present — never merged with a rehydrated value, so a partial
+ * caller-supplied context can't silently combine with stored state for the
+ * same call. Omitting either one rehydrates the FULL stored context by
+ * payment_id (the #1263 sign-context precedent, applied to the settle leg).
+ */
+async function resolveMerchantCallContext(
+  haven: HavenClient,
+  args: Record<string, any>,
+): Promise<{ merchantUrl: string; toolName: string; toolArguments: Record<string, unknown>; mcpTransportRaw: unknown }> {
+  const hasUrl = typeof args.merchant_url === 'string'
+  const hasTool = typeof args.tool_name === 'string'
+  if (hasUrl && hasTool) {
+    return {
+      merchantUrl: args.merchant_url,
+      toolName: args.tool_name,
+      toolArguments: (args.arguments as Record<string, unknown> | undefined) ?? {},
+      mcpTransportRaw: args.mcp_transport,
+    }
+  }
+  // #1307 review: exactly ONE of the pair present is refused, not silently
+  // overridden — an agent that supplied merchant_url expects it to be used,
+  // and half-explicit input must never be combined with stored state.
+  if (hasUrl !== hasTool) {
+    throw new HostedToolError({
+      code: 'INVALID_INPUT',
+      message:
+        'merchant_url and tool_name must be supplied TOGETHER (explicit context) or both ' +
+        'omitted (rehydrated from payment_id). Passing only one is refused rather than ' +
+        'silently overridden by stored state.',
+      statusCode: 400,
+      paymentId: args.payment_id,
+      status: 'invalid_input',
+      phase: 'not_started',
+      nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+      rail: 'x402',
+    })
+  }
+  try {
+    const ctx = await haven.getX402MerchantCallContext(args.payment_id)
+    return {
+      merchantUrl: ctx.merchantUrl,
+      toolName: ctx.toolName,
+      toolArguments: ctx.arguments,
+      mcpTransportRaw: ctx.mcpTransport ? serializeMcpTransport(ctx.mcpTransport) : undefined,
+    }
+  } catch (err) {
+    if (err instanceof HavenApiError) {
+      if (err.statusCode === 410) {
+        throw paymentWindowExpiredError({
+          paymentId: args.payment_id,
+          status: 'expired',
+          phase: 'expired',
+          nextAction: AgentPaymentNextAction.PaymentWindowExpired,
+          rail: 'x402',
+        })
+      }
+      // 404 (unknown/foreign payment_id) and 409 (no stored context, or not
+      // an x402 intent) both land here: the fix is the same either way —
+      // re-send the fields explicitly.
+      throw new HostedToolError({
+        code: AgentPaymentFailureCode.MerchantCallContextUnavailable,
+        message:
+          `merchant_url/tool_name were omitted and Haven could not rehydrate a stored merchant ` +
+          `call context for payment ${args.payment_id} (${err.message}). Re-send merchant_url, ` +
+          'tool_name, arguments, and mcp_transport explicitly.',
+        statusCode: err.statusCode,
+        nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+        paymentId: args.payment_id,
+        rail: 'x402',
+      })
+    }
+    throw err
+  }
+}
+
+/**
  * Deliver the signed X-PAYMENT header to the merchant and shape the result.
  * Shared by haven_complete_mcp_tool (decomposed flow) and haven_settle_mcp_tool
  * (fast flow). Funding has already confirmed before this runs, so a non-2xx
@@ -1597,6 +1693,11 @@ async function deliverMerchantPayment(
   // back to the payment status when omitted (complete path).
   fundingTxHash?: string,
 ): Promise<{ status: number; ok: boolean; result: unknown; settlement_tx_hash: string | null }> {
+  // #1307: resolve merchant_url/tool_name/arguments/mcp_transport BEFORE
+  // waiting on funding confirmation — a version-skew refusal (no stored
+  // context) should surface immediately, not after a pointless wait.
+  const context = await resolveMerchantCallContext(haven, args)
+
   // Wait for ≥1 on-chain confirmation of the funding tx BEFORE the merchant
   // verifies the X-PAYMENT header — otherwise its balanceOf(delegate) check
   // races the not-yet-mined funding tx and returns "Payment verification
@@ -1607,12 +1708,12 @@ async function deliverMerchantPayment(
     jsonrpc: '2.0',
     id: `haven-mcp-${randomUUID()}`,
     method: 'tools/call',
-    params: { name: args.tool_name, arguments: args.arguments ?? {} },
+    params: { name: context.toolName, arguments: context.toolArguments },
   }
   let result: Awaited<ReturnType<HavenClient['completeX402MerchantCall']>>
   try {
     result = await haven.completeX402MerchantCall({
-      url: args.merchant_url,
+      url: context.merchantUrl,
       init: {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1620,7 +1721,7 @@ async function deliverMerchantPayment(
       },
       paymentId: args.payment_id,
       paymentHeader: args.payment_header,
-      mcpTransport: parseMcpTransport(args.mcp_transport),
+      mcpTransport: parseMcpTransport(context.mcpTransportRaw),
     })
   } catch (err) {
     // #1300 review finding: at this point funding is CONFIRMED on-chain, so a

@@ -1293,6 +1293,336 @@ describe('haven_pay_mcp_tool', () => {
   })
 })
 
+// ── haven_prepare_catalog_purchase (#1306) ────────────────────────────────────
+
+describe('haven_prepare_catalog_purchase', () => {
+  const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+
+  // Catalog's price_atomic matches the fixture's authoritative maxAmountRequired
+  // (1500000) so the baseline tests do not incidentally trip CATALOG_PRICE_DIFFERS.
+  const CATALOG_ENTRY_RESPONSE = {
+    id: 'cat_1',
+    name: 'CloudNest 50GB',
+    description: 'Cloud storage tier',
+    category: 'compute',
+    resource_url: 'http://merchant.test/mcp',
+    rail: 'x402',
+    protocol: 'mcp',
+    tool_name: 'create_text',
+    tool_arguments: { prompt: 'Hello' },
+    price_display: '$1.50 USDC',
+    price_atomic: '1500000',
+    asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+    network: 'eip155:8453',
+    status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+
+  const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+
+  function allowancesFixture(remaining: string, rail: 'legacy' | 'delegation' = 'legacy') {
+    return {
+      agent_id: 'agt_1',
+      safe_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [{
+        id: rail === 'delegation' ? 'delegation-1' : 'allowance-1',
+        token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        token_symbol: 'USDC',
+        configured_amount: rail === 'delegation' ? '5.00' : '5000000',
+        reset_period_min: rail === 'delegation' ? 1440 : 60,
+        onchain: {
+          amount: remaining, spent: '0', remaining, effective_spent: '0',
+          reset_time_min: rail === 'delegation' ? 1440 : 60,
+          last_reset_min: rail === 'delegation' ? 0 : 100,
+          nonce: rail === 'delegation' ? 0 : 7,
+          is_reset_pending: false,
+        },
+      }],
+    }
+  }
+
+  const baseRoutes = {
+    'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+    'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+    'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+  }
+
+  it('success (legacy rail, sufficient allowance): loads catalog, quotes live, creates the intent, returns the compact ready-to-sign shape + catalog fields + allowance block', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+    })
+
+    const result = ok<{
+      payment_id: string
+      rail: string
+      network: string
+      asset: string
+      amount_atomic: string
+      amount: string
+      token: string
+      merchant_url: string
+      tool_name: string
+      arguments: Record<string, unknown>
+      catalog_id: string
+      catalog_name: string
+      catalog_price_atomic: string
+      catalog_price_display: string
+      catalog_price_is_indicative: boolean
+      allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string }
+      next_action: string
+      next_tool: string
+      next_arguments: Record<string, unknown>
+      warnings: Array<{ code: string }>
+    }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    // The exact compact quote shape (#1272) — payment_id from the created intent.
+    expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
+    expect(result.data.rail).toBe('x402')
+    expect(result.data.network).toBe('base')
+    expect(result.data.asset).toBe(PAYMENT_REQUIRED.accepts[0].asset)
+    expect(result.data.amount_atomic).toBe('1500000')
+    expect(result.data.token).toBe('USDC')
+    expect(result.data.merchant_url).toBe('http://merchant.test/mcp')
+    expect(result.data.tool_name).toBe('create_text')
+    expect(result.data.arguments).toEqual({ prompt: 'Hello' })
+    // Catalog fields, marked indicative — never authoritative.
+    expect(result.data.catalog_id).toBe('cat_1')
+    expect(result.data.catalog_name).toBe('CloudNest 50GB')
+    expect(result.data.catalog_price_atomic).toBe('1500000')
+    expect(result.data.catalog_price_is_indicative).toBe(true)
+    // Rail-aware allowance block.
+    expect(result.data.allowance).toEqual({
+      rail: 'legacy',
+      sufficient: true,
+      remaining_atomic: '5000000',
+      source: 'allowance_module',
+    })
+    // #1308 guidance — next step is the SAME signer call as haven_pay_mcp_tool.
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+    expect(result.data.next_arguments).toEqual({ payment_id: X402_INTENT_RESPONSE.payment_id })
+    // Catalog price matched the live quote — no CATALOG_PRICE_DIFFERS warning.
+    expect(result.data.warnings.some((w) => w.code === 'CATALOG_PRICE_DIFFERS')).toBe(false)
+
+    // The catalog entry's OWN tool_arguments were what got quoted and funded.
+    const intentCall = calls.find((c) => c.url.endsWith('/x402'))
+    expect(intentCall?.body?.mcpCallContext).toMatchObject({
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'create_text',
+      arguments: { prompt: 'Hello' },
+    })
+  })
+
+  it('success (delegation rail, sufficient budget): reports rail: delegation, source: active_delegations, derived from #1090', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000', 'delegation') },
+    })
+
+    const result = ok<{ allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string } }>(
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+    )
+
+    expect(result.data.allowance).toEqual({
+      rail: 'delegation',
+      sufficient: true,
+      remaining_atomic: '5000000',
+      source: 'active_delegations',
+    })
+    // The intent was still created — sufficient budget does not refuse.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('refuses an unknown or wrong-chain catalog_id with 404 — chain-scoping is free from #1299 SQL', async () => {
+    stubFetch({
+      'GET /catalog/cat_missing': { status: 404, body: { error: 'Catalog entry not found' } },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_missing',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('CATALOG_ENTRY_NOT_FOUND')
+    expect(payload.statusCode).toBe(404)
+    expect(payload.suggested_tool).toBe('haven_discover_tools')
+    // No merchant probe, no agent lookup, no intent — the refusal fires immediately.
+    expect(calls).toHaveLength(1)
+  })
+
+  it('rejects with PRICE_EXCEEDS_MAX before any funding intent when the live price exceeds max_amount', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+    })
+
+    // Fixture's authoritative price is maxAmountRequired = 1500000.
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '1000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+    expect(payload.message).toContain('1500000')
+    expect(payload.message).toContain('1000000')
+    // Mutation-tested ordering: the cap guard fires BEFORE any agent lookup or
+    // funding intent — if assertWithinMaxAmount ran after createX402Intent,
+    // these would be defined.
+    expect(calls.find((c) => c.url.includes('/machine-payments/agent'))).toBeUndefined()
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+  })
+
+  it('refuses without max_amount — no cap_warning softness on the guided path', async () => {
+    stubFetch({})
+    const payload = await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1' })
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('INVALID_INPUT')
+    // Schema validation runs before any network call.
+    expect(calls).toHaveLength(0)
+  })
+
+  it('legacy rail: insufficient allowance still proceeds — the resulting funding intent queues for approval, like haven_pay_mcp_tool', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('7500') },
+      'POST /x402': { status: 202, body: { payment_id: 'over_1', status: 'pending_approval' } },
+    })
+
+    const result = ok<{ status: string; payload_hash: unknown }>(
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+    )
+
+    expect(result.data.status).toBe('pending_approval')
+    expect(result.data.payload_hash).toBeNull()
+    // The intent WAS attempted — legacy over-allowance queues, it does not refuse here.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('delegation rail: over-budget REFUSES at prepare — no approval queue exists on this rail', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('100', 'delegation') },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('DELEGATION_BUDGET_EXCEEDED')
+    expect(payload.next_action).toBe(AgentPaymentNextAction.FundSafeOrRaiseAllowance)
+    // Mutation-tested ordering: no funding intent was created — the refusal
+    // fires before createX402Intent, unlike the legacy queue-and-proceed path.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+  })
+
+  it('refuses a degraded catalog entry, naming haven_pay_mcp_tool as the manual fallback', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': { status: 200, body: { ...CATALOG_ENTRY_RESPONSE, status: 'degraded' } },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('CATALOG_ENTRY_UNUSABLE')
+    expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
+    expect(payload.message).toMatch(/degraded/)
+    // No merchant probe was attempted against a row Haven cannot trust.
+    expect(calls).toHaveLength(1)
+  })
+
+  it('refuses a catalog entry missing MCP tool metadata, naming haven_pay_mcp_tool as the manual fallback', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': { status: 200, body: { ...CATALOG_ENTRY_RESPONSE, tool_name: null } },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('CATALOG_ENTRY_UNUSABLE')
+    expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
+    expect(payload.message).toMatch(/tool metadata/)
+  })
+
+  it('warns CATALOG_PRICE_DIFFERS when the catalog price is stale relative to the live quote', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /catalog/cat_1': { status: 200, body: { ...CATALOG_ENTRY_RESPONSE, price_atomic: '999999' } },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+    })
+
+    const result = ok<{ warnings: Array<{ code: string; message: string }> }>(
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+    )
+
+    const warning = result.data.warnings.find((w) => w.code === 'CATALOG_PRICE_DIFFERS')
+    expect(warning).toBeDefined()
+    expect(warning?.message).toContain('999999')
+    expect(warning?.message).toContain('1500000')
+  })
+
+  it('reports sufficient: null (never a fabricated guess) when the allowance/budget read fails — the preflight still succeeds', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
+    })
+
+    const result = ok<{
+      allowance: { rail: string; sufficient: boolean | null; source: string }
+      warnings: Array<{ code: string }>
+    }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    expect(result.data.allowance).toEqual({ rail: 'legacy', sufficient: null, source: 'allowance_module' })
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+    // A failed read never fails the preflight — the intent was still created.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('passes idempotency_key through to the merchant quote and the funding intent (#1207 replay semantics apply unchanged)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+    })
+
+    ok(
+      await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount: '2000000',
+        idempotency_key: 'catalog-purchase-key-1',
+      }),
+    )
+
+    const intentCall = calls.find((c) => c.url.endsWith('/x402'))
+    expect(intentCall?.body?.idempotencyKey).toBe('catalog-purchase-key-1')
+  })
+})
+
 // ── haven_settle_mcp_tool (fast-path: fund + settle in one call) ──────────────
 
 describe('haven_settle_mcp_tool', () => {

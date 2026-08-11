@@ -10,6 +10,8 @@ covers:
   - packages/backend/src/domain/payment-coverage.ts
   - packages/backend/src/modules/x402/x402-delegation.ts
   - packages/backend/src/rails/delegation-rail.ts
+  - packages/backend/src/routes/catalog.ts
+  - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402.ts
   - packages/sdk/src/merchant-discovery.ts
@@ -19,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # #1307 settle-by-payment_id: merchant-call-context rehydration + #1308-kontraktet + #1301 delad discovery + #1300-kalibrering
+last-verified: "2026-08-11" # #1306 guided catalog-purchase preflight (haven_prepare_catalog_purchase): composes GET /catalog/:id + GET /machine-payments/agent (+execution_rail) + GET /machine-payments/allowances + POST /x402, shared quoteMcpToolCall helper with haven_pay_mcp_tool
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -331,6 +333,74 @@ If the merchant rejects after funding, hosted MCP returns
 `MERCHANT_REJECTED_AFTER_FUNDING`. The delegate may hold stranded funds; retain
 the payment id and inspect and reconcile the attempt before using
 `haven_sweep_delegate`. Do not silently retry or abandon a confirmed balance.
+
+## Guided Catalog Purchase Preflight (#1306)
+
+`haven_prepare_catalog_purchase({ catalog_id, max_amount, idempotency_key? })`
+starts a paid-MCP-tool purchase from a curated `merchant_catalog` row instead
+of a hand-copied `merchant_url` / `tool_name` / `tool_arguments`. It is a
+convenience and verification layer built entirely from EXISTING primitives —
+it composes, rather than duplicates, the `haven_pay_mcp_tool` internals (the
+quote probe with the #1271 discovery fallback is shared via one
+`quoteMcpToolCall` helper) and the same `createX402Intent` call, with the
+`mcpCallContext` persisted per #1307. The response after step 1 is therefore
+the SAME compact ready-to-sign shape `haven_pay_mcp_tool` returns (#1272:
+`payment_id`, `payload_hash`, `expires_at`, `signer_compatibility`, `x402`)
+plus catalog fields — never a third signing surface. The signer flow after
+this tool is IDENTICAL to today's: `haven_sign_x402` with `payment_id` +
+`payment_required`, then `haven_settle_mcp_tool`.
+
+Sequence:
+
+1. Load the catalog entry by `catalog_id` via `GET /catalog/:id`. Chain
+   scoping comes free from the #1299 SQL (agent-authenticated reads add a
+   `network = eip155:<agent.chain_id>` predicate) — an id that does not exist
+   and an id curated for a DIFFERENT chain both 404 identically; nothing is
+   re-filtered in JS.
+2. Refuse a `degraded` row or one missing MCP tool metadata
+   (`protocol`/`tool_name`) before any merchant probe, naming
+   `haven_pay_mcp_tool` (with an explicit `merchant_url`/`tool_name`) as the
+   manual fallback.
+3. Run the LIVE quote against the entry's own `resource_url` / `tool_name` /
+   `tool_arguments` — the shared probe, including the #1271 same-origin
+   discovery fallback.
+4. `max_amount` is **required** on this tool (unlike `haven_pay_mcp_tool`'s
+   optional cap) — this IS the guided path, so there is no `cap_warning`
+   softness. Enforced against the LIVE quote via the SAME
+   `assertWithinMaxAmount` guard, before any funding intent exists
+   (`PRICE_EXCEEDS_MAX`).
+5. Read a rail-aware allowance/budget report via the EXISTING, already
+   rail-aware `GET /machine-payments/allowances` (#1135) and the account's
+   `execution_rail` (now also carried on `GET /machine-payments/agent`,
+   #1306) — no new derivation logic. The response carries an `allowance`
+   block: `{ rail: 'legacy' | 'delegation', sufficient: boolean | null,
+   remaining_atomic?: string, source: 'allowance_module' | 'active_delegations'
+   }`. A failed read degrades to `sufficient: null` plus a warning
+   (`ALLOWANCE_CHECK_UNAVAILABLE`) — it never fails the preflight, since the
+   on-chain policy remains the actual gate either way.
+6. Rail behavior differs deliberately: on the **legacy** rail, an
+   insufficient allowance does NOT refuse here — the flow proceeds exactly
+   like `haven_pay_mcp_tool`, and the resulting funding intent queues for
+   wallet-owner approval (`pending_approval`). On the **delegation** rail,
+   there is no approval queue (#1090) — an over-budget quote REFUSES right
+   here, before any funding intent is created
+   (`DELEGATION_BUDGET_EXCEEDED`, `next_action: fund_safe_or_raise_allowance`),
+   rather than letting a later on-chain redemption revert.
+7. `createX402Intent` runs identically to `haven_pay_mcp_tool`, persisting
+   the same `mcpCallContext` (#1307) for settle-leg rehydration by
+   `payment_id`.
+8. The catalog's `price_atomic`/`price_display` are surfaced as
+   `catalog_price_atomic`/`catalog_price_display` with
+   `catalog_price_is_indicative: true` — NEVER authoritative. The live quote
+   (`amount`/`amount_atomic`/`token`) is authoritative; a
+   `CATALOG_PRICE_DIFFERS` warning fires when the two disagree.
+
+No new backend endpoint was needed: `GET /catalog/:id`, `GET
+/machine-payments/agent`, `GET /machine-payments/allowances`, and `POST
+/x402` are all existing, composed reads/writes. `GET /machine-payments/agent`
+gained one additive field (`execution_rail: 'legacy' | 'delegation'`) so the
+hosted tool can label the allowance block correctly without a second
+derivation.
 
 ## Approval Resume
 

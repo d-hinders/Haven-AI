@@ -600,6 +600,14 @@ export interface HavenAgent {
   safeAddress: string
   delegateAddress: string
   chainId: number
+  /**
+   * Which on-chain policy primitive gates this agent's spend (#1306): the
+   * legacy Safe AllowanceModule (import-only accounts) or the delegation
+   * rail's active budget delegations (#1090). Read-only reporting — the
+   * on-chain state is the actual gate either way, this only says which
+   * mechanism a caller should read/derive from.
+   */
+  executionRail: 'legacy' | 'delegation'
 }
 
 export interface HavenAllowance {
@@ -962,6 +970,18 @@ export const AgentPaymentWarningCode = {
   QuoteExpiresSoon: 'QUOTE_EXPIRES_SOON',
   /** The merchant URL was resolved via discovery — pass the RESOLVED url forward. */
   MerchantUrlDiscovered: 'MERCHANT_URL_DISCOVERED',
+  /**
+   * #1306: the catalog's last-verified price_atomic differs from the LIVE
+   * merchant quote for a guided catalog purchase. The catalog price is only
+   * ever indicative; the live quote in the same response is authoritative.
+   */
+  CatalogPriceDiffers: 'CATALOG_PRICE_DIFFERS',
+  /**
+   * #1306: the rail-aware allowance/budget pre-check could not be read (RPC
+   * failure, etc). `sufficient` is reported as null rather than a fabricated
+   * true/false — the on-chain policy remains the actual gate either way.
+   */
+  AllowanceCheckUnavailable: 'ALLOWANCE_CHECK_UNAVAILABLE',
 } as const
 
 export type AgentPaymentWarningCode =
@@ -1283,6 +1303,7 @@ export interface RawHavenAgent {
   safe_address: string
   delegate_address: string
   chain_id: number
+  execution_rail: string
 }
 
 /** @internal */

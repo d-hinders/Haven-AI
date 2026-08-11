@@ -382,6 +382,27 @@ function x402TypedDataDigest(typedData: unknown): string | undefined {
   }
 }
 
+/** Shared by {@link HavenClient.discoverTools} and {@link HavenClient.getCatalogEntry} (#1306). */
+function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
+  return {
+    id: entry.id,
+    name: entry.name,
+    description: entry.description,
+    category: entry.category,
+    resourceUrl: entry.resource_url,
+    rail: entry.rail,
+    protocol: entry.protocol,
+    toolName: entry.tool_name,
+    toolArguments: entry.tool_arguments ?? null,
+    priceDisplay: entry.price_display,
+    priceAtomic: entry.price_atomic,
+    asset: entry.asset,
+    network: entry.network,
+    status: entry.status,
+    verifiedAt: entry.verified_at,
+  }
+}
+
 export class HavenClient {
   private readonly apiKey: string
   private readonly delegateKey: string | undefined
@@ -734,6 +755,11 @@ export class HavenClient {
       safeAddress: raw.safe_address,
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
+      // Defensive normalization, not trust: the backend contract is exactly
+      // 'legacy' | 'delegation' (#1306), but an older/mismatched backend
+      // during a rollout window should degrade to the wider legacy bucket
+      // rather than propagate an unrecognized string.
+      executionRail: raw.execution_rail === 'delegation' ? 'delegation' : 'legacy',
     }
   }
 
@@ -935,23 +961,21 @@ export class HavenClient {
     if (options.rail) params.set('rail', options.rail)
     const query = params.size > 0 ? `?${params.toString()}` : ''
     const raw = await this.get<{ entries: RawCatalogEntry[] }>(`/catalog${query}`)
-    return raw.entries.map((entry) => ({
-      id: entry.id,
-      name: entry.name,
-      description: entry.description,
-      category: entry.category,
-      resourceUrl: entry.resource_url,
-      rail: entry.rail,
-      protocol: entry.protocol,
-      toolName: entry.tool_name,
-      toolArguments: entry.tool_arguments ?? null,
-      priceDisplay: entry.price_display,
-      priceAtomic: entry.price_atomic,
-      asset: entry.asset,
-      network: entry.network,
-      status: entry.status,
-      verifiedAt: entry.verified_at,
-    }))
+    return raw.entries.map(mapCatalogEntry)
+  }
+
+  /**
+   * Fetch one curated catalog entry by id (#1306).
+   *
+   * Chain-scoped for free by the backend's SQL when the client is
+   * agent-authenticated (#1299): an unknown id and an id curated for a
+   * DIFFERENT chain than this agent's both 404 identically — this method does
+   * not (and must not) re-filter by chain in JS. Read-only, like
+   * {@link discoverTools}.
+   */
+  async getCatalogEntry(id: string): Promise<HavenCatalogEntry> {
+    const raw = await this.get<RawCatalogEntry>(`/catalog/${encodeURIComponent(id)}`)
+    return mapCatalogEntry(raw)
   }
 
   /**

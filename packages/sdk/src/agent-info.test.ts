@@ -17,6 +17,7 @@ describe('agent info helpers', () => {
         safe_address: '0xSafe',
         delegate_address: '0xDelegate',
         chain_id: 8453,
+        execution_rail: 'legacy',
       })),
     )
 
@@ -29,6 +30,7 @@ describe('agent info helpers', () => {
       safeAddress: '0xSafe',
       delegateAddress: '0xDelegate',
       chainId: 8453,
+      executionRail: 'legacy',
     })
     expect(fetchMock).toHaveBeenCalledWith(
       `${baseUrl}/machine-payments/agent`,
@@ -74,6 +76,7 @@ describe('agent info helpers', () => {
       safeAddress: '0xSafe',
       delegateAddress: '0xDelegate',
       chainId: 8453,
+      executionRail: 'legacy',
       readiness: 'ready',
       allowances: [{
         tokenSymbol: 'USDC',
@@ -108,7 +111,7 @@ describe('agent info helpers', () => {
     // rail-specific SDK logic.
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       const u = String(url)
-      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active', 'delegation')
       if (u.endsWith('/machine-payments/allowances')) {
         return delegationAllowancesResponse([{ tokenAddress: USDC_BASE, tokenSymbol: 'USDC', budgetAtomic: '10000000' }])
       }
@@ -118,6 +121,7 @@ describe('agent info helpers', () => {
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
     const summary = await haven.getAgentSummary()
 
+    expect(summary.executionRail).toBe('delegation')
     expect(summary.readiness).toBe('ready')
     expect(summary.allowances[0]).toMatchObject({
       tokenSymbol: 'USDC',
@@ -285,7 +289,7 @@ const mappedAllowances = {
   }],
 }
 
-function agentResponse(status: string): Response {
+function agentResponse(status: string, executionRail: 'legacy' | 'delegation' = 'legacy'): Response {
   return new Response(JSON.stringify({
     id: 'agent-1',
     name: 'Research agent',
@@ -293,6 +297,7 @@ function agentResponse(status: string): Response {
     safe_address: '0xSafe',
     delegate_address: '0xDelegate',
     chain_id: 8453,
+    execution_rail: executionRail,
   }))
 }
 

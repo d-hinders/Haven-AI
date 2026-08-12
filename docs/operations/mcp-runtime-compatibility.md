@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-12" # re-verified for #1351 (hosted tools gained an OPTIONAL `max_amount_human` argument; additive and signer-independent — the signer never sees a cap, so no skew row applies, and grep-checked that no claim here names the cap arguments. One nuance recorded deliberately: `haven_prepare_catalog_purchase`'s cap requirement moved from the zod schema into the handler so it can accept either spelling — an older client that always sends `max_amount` is unaffected and omitting it still fails INVALID_INPUT before any network call). Prior same-day: #1349 hosted settled-reporting extension re-verified: no signing/runtime compatibility change; #1348 (round-trip orchestration; no claim here describes call ordering), #1355 (payment_id-only signing: sign-context carries payment_required; grep-checked: no claim here names the sign-call argument shape), and #1350 (haven_discover_tools gained an additive read-only `search` argument and documented case-insensitive category matching; older runtimes remain compatible because the existing omit-category/omit-rail calls are unchanged). Same day: release 0.1.22-alpha.0 pins
+last-verified: "2026-08-12" # release 0.1.23-alpha.0: manifest table follows the bump (ships the Node-22 engines floor to npm); prior same-day: #1349/#1348/#1355/#1350 re-verifications
 ---
 
 # MCP Runtime Compatibility
@@ -57,10 +57,10 @@ Keep this table in sync with that file.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.1.22-alpha.0` |
-| `@haven_ai/mcp` | `0.1.22-alpha.0` |
-| `@haven_ai/sdk` | `0.1.22-alpha.0` |
-| `@haven_ai/signer` | `0.1.22-alpha.0` |
+| `@haven_ai/connect` | `0.1.23-alpha.0` |
+| `@haven_ai/mcp` | `0.1.23-alpha.0` |
+| `@haven_ai/sdk` | `0.1.23-alpha.0` |
+| `@haven_ai/signer` | `0.1.23-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

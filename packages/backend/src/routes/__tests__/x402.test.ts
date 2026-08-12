@@ -325,6 +325,10 @@ describe('x402 routes', () => {
         asset: USDC,
         network: 'base',
         idempotencyKey: 'x402:test',
+        // #1360: the SDK now always declares the funding-leg scheme. On the
+        // legacy rail the field is accepted and ignored — this test carrying
+        // it pins that new-SDK-vs-legacy-account compatibility.
+        settlementScheme: 'eip3009',
       },
     })
 

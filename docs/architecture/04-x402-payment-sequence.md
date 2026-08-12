@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-12" # #1351: the guided path's required cap accepts either spelling — max_amount_human (whole tokens, converted with the LIVE quote's decimals) or the unchanged atomic max_amount; both-sent, neither-sent and unconvertible are pre-funding refusals. Prior same-day: #1349: settled reporting contract sourced from Haven state, merchant raw result evidence-only. #1348: preflight round-trip budget (reads overlap the probe, getAgent in-flight coalescing, delegateAddress option; failure semantics + refusal order unchanged) + prior same-day: #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Same day #1350: catalog discovery now documents case-insensitive category matching plus read-only search over name/description/category; results remain deterministic and indicative only. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
+last-verified: "2026-08-12" # #1360: SDK 3009-shape writers always declare settlementScheme (stale-delegate payTo now fails the shape check loudly; old-SDK shape-only selection characterization-tested) + prior same-day: #1351: the guided path's required cap accepts either spelling — max_amount_human (whole tokens, converted with the LIVE quote's decimals) or the unchanged atomic max_amount; both-sent, neither-sent and unconvertible are pre-funding refusals. Prior same-day: #1349: settled reporting contract sourced from Haven state, merchant raw result evidence-only. #1348: preflight round-trip budget (reads overlap the probe, getAgent in-flight coalescing, delegateAddress option; failure semantics + refusal order unchanged) + prior same-day: #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Same day #1350: catalog discovery now documents case-insensitive category matching plus read-only search over name/description/category; results remain deterministic and indicative only. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -700,7 +700,14 @@ shape made every v2 merchant reject with a generic failure — caught by the
 
 An explicit `settlementScheme` field is validated against that shape on every
 rail, so a confused client fails loudly instead of silently getting the wrong
-flow. Native-token x402 is still rejected on this rail (no ERC20 transfer to
+flow. Since #1360 the SDK's two 3009-shape writers (`createX402Intent`, the
+local-key `authorizeX402`) ALWAYS declare `settlementScheme: 'eip3009'` —
+closing the #1358-review gap where a delegate address made stale by a rotation
+mid-flow was indistinguishable from a merchant `payTo` and silently routed an
+open-budget agent to the erc7710 settlement branch; with the declaration it is
+the loud shape-mismatch 400. Old SDKs that omit the field keep shape-only
+selection (characterization-tested), and legacy-rail backends accept and
+ignore the declaration. Native-token x402 is still rejected on this rail (no ERC20 transfer to
 pin or meter). The chosen scheme is recorded on the intent
 (`machine_metadata.settlement_scheme`, alongside `network`) so 3009-mode usage
 is auditable and its eventual retirement measurable — as of #1061 the

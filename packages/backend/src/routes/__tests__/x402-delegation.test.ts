@@ -451,6 +451,50 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 
+  // ── #1360: the stale-delegate hardening (the #1358 review's open-budget
+  // misroute). The SDK's 3009-shape writers now ALWAYS declare
+  // settlementScheme: 'eip3009', so a payTo made stale by a delegate rotation
+  // fails the shape cross-check loudly instead of silently selecting erc7710.
+  it('#1360: a STALE delegate payTo with the explicit eip3009 declaration fails LOUD — no funding, no intent, no erc7710 fallback', async () => {
+    const staleDelegate = '0x' + '99'.repeat(20) // rotated away; not the agent delegate
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({
+        payTo: staleDelegate,
+        merchantPayTo: MERCHANT,
+        settlementScheme: 'eip3009',
+      }),
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/payTo = the agent delegate EOA/)
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
+    expect(mockSelect).not.toHaveBeenCalled() // the erc7710 selector never consulted
+    expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
+  it('#1360 CHARACTERIZATION: WITHOUT the explicit scheme, a stale payTo routes to the erc7710 selector — why the SDK now always declares', async () => {
+    // This pins the pre-#1360 behavior the review derived from SQL: an
+    // omitted scheme means the shape alone decides, and a stale delegate
+    // address is indistinguishable from a merchant. The open-budget SQL
+    // (`recipient_address IS NULL` matches any toAddress) would then build a
+    // REAL settlement child to the stale address. Old SDKs still hit this
+    // path; if this test starts failing because the backend grew its own
+    // stale-address guard, that is an improvement — update it, don't delete.
+    const staleDelegate = '0x' + '99'.repeat(20)
+    mockSelect.mockResolvedValue(null) // no delegation authorizes → 403, but the SELECTOR ran
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: staleDelegate, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(mockSelect).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), staleDelegate.toLowerCase(),
+    )
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
+  })
+
   it('an explicit settlementScheme must agree with the payTo shape', async () => {
     const wrong3009 = await app.inject({
       method: 'POST', url: '/x402/authorize',

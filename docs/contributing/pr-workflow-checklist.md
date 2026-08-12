@@ -89,6 +89,15 @@ Good split examples:
 ## Before Merging
 
 - Re-check that the PR has no conflicts with `dev`.
+- **Diagnosis rule (#1366): "only the labeler ran" on a push means the PR is
+  CONFLICTING** — GitHub silently creates NO `pull_request`-triggered check
+  runs when the merge commit cannot be built, while `pull_request_target`
+  workflows (the labeler) still run on the base ref. It looks exactly like
+  stalled checks or a GitHub outage. Check
+  `gh pr view <n> --json mergeStateStatus` FIRST, never the GitHub status
+  page; an empty retrigger commit will not help — resolve the conflict.
+  Corollary: check `mergeStateStatus` BEFORE arming auto-merge; on `DIRTY`,
+  merge `dev` into the branch first.
 - Re-check that the branch still builds after the latest `dev` sync.
 - Re-run the relevant local checks if the branch changed after review.
 - If the PR started stacked, re-open or retarget it so the final merge path is into `dev`.

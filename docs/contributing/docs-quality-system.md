@@ -54,6 +54,13 @@ contract: true             # OPTIONAL (Phase 4): promotes the coupling gate
                            # from advisory to BLOCKING for this doc
 covers:                    # repo globs of the code this doc describes
   - packages/backend/src/routes/payments.ts
+satisfied-by:              # OPTIONAL (#1366): globs whose touch counts as
+  - docs/some-dir/**       # touching THIS doc in the coupling gate — built
+                           # for per-PR changelog shards, so concurrent PRs
+                           # write separate files instead of colliding on one
+                           # doc's lines. Declare it only when the doc has a
+                           # real shard convention (see
+                           # docs/regulatory/casp-changelog/README.md).
 last-verified: "2026-06-28" # YYYY-MM-DD a human last confirmed accuracy
 ---
 ```

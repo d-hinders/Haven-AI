@@ -234,7 +234,7 @@ export async function installRuntime(
     localProbePromise,
   ])
 
-  const hostedOk = configResult.hostedConfigured && hostedProbe.status !== 'unauthorized'
+  const hostedOk = configResult.hostedConfigured && hostedProbe.status === 'ok'
   const localMcpOk = configResult.runtimeMcpMode === 'local_stdio' &&
     configResult.localMcpConfigured &&
     signerCredentialReady &&
@@ -247,7 +247,12 @@ export async function installRuntime(
   const errorCode = configResult.errorCode ??
     (configResult.runtimeMcpMode === 'local_stdio'
       ? localMcpErrorCode(signerCredentialReady, localMcpConsent, localMcpProbe?.status)
-      : signerConsentErrorCode(signerCredentialReady, signerConsent))
+      : hostedMcpErrorCode(configResult.hostedConfigured, hostedProbe.status) ?? signerConsentErrorCode(signerCredentialReady, signerConsent))
+  const hostedProbeMessages = configResult.hostedConfigured && hostedProbe.status !== 'ok'
+    ? [`Hosted Haven MCP probe failed: ${hostedProbe.status}.`]
+    : configResult.hostedConfigured
+      ? ['Verified hosted Haven MCP tools with a read-only handshake.']
+      : []
   const localProbeMessages = localMcpProbe && localMcpProbe.status !== 'ok'
     ? [`Local Haven MCP handshake failed: ${localMcpProbe.status}.`]
     : localMcpProbe?.status === 'ok'
@@ -276,7 +281,7 @@ export async function installRuntime(
     activationCommand: configResult.activationCommand,
     skillInstalled: skillInstall?.installed,
     signerRuntimePrepared,
-    messages: [...consentMessages, ...(localRuntimeInstall?.messages ?? []), ...configResult.messages, ...localProbeMessages, ...(skillInstall?.messages ?? [])],
+    messages: [...consentMessages, ...(localRuntimeInstall?.messages ?? []), ...configResult.messages, ...hostedProbeMessages, ...localProbeMessages, ...(skillInstall?.messages ?? [])],
   }
 }
 
@@ -500,6 +505,14 @@ function signerConsentErrorCode(
   if (!signerCredentialReady) return 'local_signer_credential_unavailable'
   if (!signerConsent?.acknowledged) return 'local_signer_ack_required'
   return undefined
+}
+
+function hostedMcpErrorCode(
+  hostedConfigured: boolean,
+  hostedProbeStatus: string,
+): string | undefined {
+  if (!hostedConfigured || hostedProbeStatus === 'ok') return undefined
+  return `hosted_mcp_probe_${hostedProbeStatus}`
 }
 
 function localMcpErrorCode(

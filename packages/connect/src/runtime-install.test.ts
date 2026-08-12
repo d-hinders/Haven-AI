@@ -359,6 +359,28 @@ describe('installRuntime hosted default topology', () => {
     expect(codexConfig).not.toContain(PRIVATE_KEY)
   })
 
+  it.each(['unauthorized', 'network_error', 'bad_response'] as const)(
+    'does not report hosted MCP setup complete when its probe returns %s',
+    async (status) => {
+      const dir = await mkdtemp(join(tmpdir(), `haven-connect-hosted-probe-${status}-`))
+      const credentialDirectory = join(dir, 'agent-1')
+      const identityPath = await writeIdentityCredential(credentialDirectory)
+      const signerPath = await writeSignerCredential(credentialDirectory)
+      const fetch = status === 'network_error'
+        ? vi.fn(async () => { throw new Error('offline') }) as unknown as typeof globalThis.fetch
+        : vi.fn(async () => new Response(status === 'unauthorized' ? '' : 'not MCP', { status: status === 'unauthorized' ? 401 : 502 })) as unknown as typeof globalThis.fetch
+
+      const result = await installRuntime({
+        runtime: 'codex-cli', hostedMcpUrl: HOSTED_URL, apiKey: API_KEY,
+        signerPath, identityPath, credentialDirectory, ackLocalTools: true,
+      }, { homeDir: dir, fetch, prepareSignerRuntime: fakePrepareSignerRuntime() })
+
+      expect(result.hostedMcpConfigured).toBe(false)
+      expect(result.errorCode).toBe(`hosted_mcp_probe_${status}`)
+      expect(result.messages.join('\n')).toContain(`Hosted Haven MCP probe failed: ${status}.`)
+    },
+  )
+
   it('falls back to npx (non-fatal) and flags signerRuntimePrepared=false when signer prep fails', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-prepfail-'))
     const credentialDirectory = join(dir, 'agent-1')

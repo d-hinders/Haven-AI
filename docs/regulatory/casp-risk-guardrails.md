@@ -49,7 +49,9 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-12" # #1328 mpp_demo retirement incl. #1339-review hardening (historical records non-executable; 410-tombstone documented exception — see EOF entry) + same-day dev: release 0.1.23-alpha.0: version constants/pins re-verified, no perimeter change (ships the Node-22 engines floor to npm); prior same-day: docs-staleness sweep + #1346..#1362 entries
+satisfied-by:
+  - docs/regulatory/casp-changelog/**
+last-verified: "2026-08-12" # #1366: verification entries move to docs/regulatory/casp-changelog/ shards (satisfied-by); this date now tracks re-verification of the BODY claims only. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -757,9 +759,19 @@ prevent. Separate lines merge cleanly. The tooling never read the comment
 anyway: `validate-frontmatter.mjs` strips it and `audit-staleness.mjs` reads
 only the date.
 
-**Adding an entry:** append a bullet, bump `last-verified` to the date you
-actually re-read this document. A rubber-stamped date is worse than a stale
-one — the staleness audit ranks on it.
+**Adding an entry (#1366):** create a SHARD —
+`docs/regulatory/casp-changelog/YYYY-MM-DD-<issue>.md` — with the same
+one-paragraph analysis these bullets carry (convention:
+[casp-changelog/README.md](casp-changelog/README.md)). The docs coupling gate
+accepts the shard via this document's `satisfied-by:` declaration, so
+money-path PRs no longer append here. This is the SECOND iteration of the
+same lesson: #1194 moved entries out of the one ever-growing `last-verified`
+comment line because concurrent PRs conflicted there by construction — and
+appending bullets to one shared EOF inherited exactly that collision (four
+PRs in one day, 2026-08-12, #1366). Separate FILES merge cleanly the way
+separate lines never quite did. The bullet list below is the frozen
+historical log up to 2026-08-12; `last-verified` above now means a genuine
+re-read of the BODY claims (the weekly #1248 audit), never a per-PR bump.
 
 - **#997** — covers updated (lib/machine-payments.ts moved into modules/mpp/**; the shared token-resolution primitive lives in domain/payment-token.ts) — no perimeter change, the same routes/repositories still enforce it.
 - **#998** — covers + body re-read after the lib/ fold (execution-rail.ts -> rails/, fortnox-connector.ts already under modules/reporting/, accounting-entry.ts/catalog-discovery.ts/merchant-catalog.ts/safe-deployer.ts relocated) — pure path move, the perimeter and the non-asserting Fortnox invariant are unchanged.

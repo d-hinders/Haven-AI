@@ -152,8 +152,23 @@ export function implicatedDocs(
 ) {
   const changedSet = new Set(changed)
   const findings = []
-  for (const { doc, covers, lastVerified, contract } of docs) {
+  for (const { doc, covers, lastVerified, contract, satisfiedBy } of docs) {
     if (changedSet.has(doc)) continue
+    // #1366: a doc may declare `satisfied-by:` globs — touching a matching
+    // file counts as touching the doc itself. Built for the CASP changelog
+    // shards: every money-path PR must still write its verification entry,
+    // but as `docs/regulatory/casp-changelog/<date>-<issue>.md` (a file no
+    // parallel PR also edits) instead of appending to one monolithic EOF —
+    // the line-collision class that made four PRs conflict in one day.
+    if (
+      satisfiedBy &&
+      satisfiedBy.some((glob) => {
+        const re = globToRegExp(glob)
+        return changed.some((f) => re.test(f))
+      })
+    ) {
+      continue
+    }
     if (!covers || covers.length === 0) continue
     if (lastVerified && lastVerified === today && !(strict && contract)) continue
     // Noise-reduction never weakens the BLOCKING half. Under strict, a contract
@@ -229,6 +244,8 @@ async function main() {
       // Phase 4 (#646): `contract: true` front-matter promotes a doc from
       // advisory to BLOCKING in --strict mode.
       contract: parsed.data.contract === 'true',
+      // #1366: alternative satisfaction paths (changelog shards).
+      satisfiedBy: parsed.data['satisfied-by'] || [],
     })
   }
 

@@ -517,6 +517,10 @@ describe('x402 helpers', () => {
       asset: accepted.asset,
       network: accepted.network,
       idempotencyKey: expect.stringMatching(/^x402:[0-9a-f]{16}$/),
+      // #1360: the 3009-shape is DECLARED, not inferred — a stale payTo then
+      // fails the backend's shape cross-check loudly instead of silently
+      // routing to the erc7710 settlement branch.
+      settlementScheme: 'eip3009',
     })
 
     const retryInit = fetchMock.mock.calls[3][1] as RequestInit

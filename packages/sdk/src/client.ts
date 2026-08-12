@@ -581,6 +581,12 @@ export class HavenClient {
       url: paymentRequired.resource.url,
       payTo: fundingTo,
       merchantPayTo: option.payTo,
+      // #1360: this path ALWAYS means the EIP-3009 funding leg (payTo is the
+      // agent's own delegate EOA). Saying so explicitly turns a stale/rotated
+      // delegate address into the backend's LOUD shape-mismatch 400 instead
+      // of a silent reroute to the erc7710 settlement branch (the #1358
+      // review's open-budget misroute). Legacy-rail backends ignore the field.
+      settlementScheme: 'eip3009',
       amount: x402AuthorizationAmount(option),
       asset: option.asset,
       network: option.network,
@@ -1384,6 +1390,10 @@ export class HavenClient {
       network: option.network,
       description: paymentRequired.resource.description,
       idempotencyKey,
+      // #1360: same explicit funding-leg declaration as createX402Intent —
+      // this local-key path derives payTo from the key (never stale), but the
+      // declaration keeps both writers of the 3009 shape loud-by-default.
+      settlementScheme: 'eip3009',
     })
 
     // If the backend already executed (shouldn't happen without sig), return

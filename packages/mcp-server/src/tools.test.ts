@@ -1810,6 +1810,10 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(byPath('/machine-payments/agent')).toBe(1)
     expect(byPath('/machine-payments/allowances')).toBe(1)
     expect(byPath('/x402')).toBe(1)
+    // #1360: the funding-leg intent DECLARES its scheme, so a stale delegate
+    // address fails the backend's shape cross-check loudly.
+    const intentPost = calls.find((c) => new URL(c.url).pathname.endsWith('/x402'))!
+    expect(intentPost.body).toMatchObject({ settlementScheme: 'eip3009' })
   })
 
   it('ROUND-TRIP OVERLAP: the agent/allowance reads are dispatched BEFORE the merchant probe resolves (#1348)', async () => {

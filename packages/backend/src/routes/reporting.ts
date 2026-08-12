@@ -84,7 +84,11 @@ export default async function reportingRoutes(app: FastifyInstance): Promise<voi
         sub,
         'fortnox',
         paymentId,
-        `reopened ${result.verification.checked_at}: Fortnox invoice ${result.verification.invoice_number} no longer exists`,
+        // #1376 review: the audit string must not say "no longer exists"
+        // about a foreign invoice that exists — distinguish the two verdicts.
+        result.verification.missing === 'foreign_invoice'
+          ? `reopened ${result.verification.checked_at}: Fortnox invoice ${result.verification.invoice_number} belongs to a different external invoice number (company-switch collision) — our record was never delivered under it`
+          : `reopened ${result.verification.checked_at}: Fortnox invoice ${result.verification.invoice_number} no longer exists`,
       )
       if (!reopened) {
         // The row moved between the verification and the flip (raced by a

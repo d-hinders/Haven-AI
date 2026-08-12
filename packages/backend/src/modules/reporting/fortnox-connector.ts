@@ -407,6 +407,15 @@ async function attachMerchantReceiptFiles(
 export interface FortnoxInvoiceVerification {
   /** The invoice exists in Fortnox under our external_ref. */
   registered: boolean
+  /**
+   * Why registered is false (#1376 review): 'deleted' = Fortnox 404s the
+   * number; 'foreign_invoice' = an invoice EXISTS at that number but carries
+   * someone else's ExternalInvoiceNumber (company-switch collision). Null
+   * when registered. Both cases mean OUR record was never delivered under
+   * our ref — but an audit trail must not say "no longer exists" about an
+   * invoice that exists.
+   */
+  missing: 'deleted' | 'foreign_invoice' | null
   /** A human has booked it (Fortnox `Booked`). Null when not registered. */
   booked: boolean | null
   /** Cancelled in Fortnox — registered but struck. Null when not registered. */
@@ -465,7 +474,7 @@ export async function verifyFortnoxInvoice(
       return {
         ok: true,
         verification: {
-          registered: false, booked: null, cancelled: null,
+          registered: false, missing: 'deleted', booked: null, cancelled: null,
           invoice_number: givenNumber, voucher: null, invoice_date: null,
           total: null, checked_at: checkedAt,
         },
@@ -481,7 +490,7 @@ export async function verifyFortnoxInvoice(
     return {
       ok: true,
       verification: {
-        registered: false, booked: null, cancelled: null,
+        registered: false, missing: 'foreign_invoice', booked: null, cancelled: null,
         invoice_number: givenNumber, voucher: null, invoice_date: null,
         total: null, checked_at: checkedAt,
       },
@@ -496,6 +505,7 @@ export async function verifyFortnoxInvoice(
     ok: true,
     verification: {
       registered: true,
+      missing: null,
       booked: Boolean(invoice.Booked),
       cancelled: Boolean(invoice.Cancelled),
       invoice_number: givenNumber,

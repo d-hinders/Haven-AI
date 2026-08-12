@@ -186,7 +186,7 @@ describe('reporting routes', () => {
     const GONE = {
       ok: true as const,
       verification: {
-        registered: false, booked: null, cancelled: null,
+        registered: false, missing: 'deleted' as const, booked: null, cancelled: null,
         invoice_number: 11, voucher: null, invoice_date: null,
         total: null, checked_at: '2026-08-13T08:00:00.000Z',
       },
@@ -211,13 +211,26 @@ describe('reporting routes', () => {
       )
     })
 
+    it('a company-switch collision reopens with an HONEST reason — never "no longer exists" (#1376 review)', async () => {
+      fortnoxMocks.verifyFortnoxInvoice.mockResolvedValue({
+        ok: true,
+        verification: { ...GONE.verification, missing: 'foreign_invoice' as const },
+      })
+      fortnoxMocks.reopenMissingPushed.mockResolvedValue(true)
+      const res = await authed('POST', '/accounting/reporting/reopen/pay-1')
+      expect(res.statusCode).toBe(200)
+      const reason = String(fortnoxMocks.reopenMissingPushed.mock.calls[0][3])
+      expect(reason).toMatch(/different external invoice number/)
+      expect(reason).not.toMatch(/no longer exists/)
+    })
+
     it('MUTATION PROOF: an invoice that still EXISTS refuses — 409, nothing written', async () => {
       // Removing the registered-check in the route (reopening regardless of
       // the verification verdict) flips this to a 200 — the double-post the
       // gate exists to prevent.
       fortnoxMocks.verifyFortnoxInvoice.mockResolvedValue({
         ok: true,
-        verification: { ...GONE.verification, registered: true, booked: false },
+        verification: { ...GONE.verification, registered: true, missing: null, booked: false },
       })
       const res = await authed('POST', '/accounting/reporting/reopen/pay-1')
       expect(res.statusCode).toBe(409)

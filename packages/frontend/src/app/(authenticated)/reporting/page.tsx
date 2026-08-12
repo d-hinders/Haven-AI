@@ -92,6 +92,29 @@ export default function ReportingPage() {
     try { await fn() } finally { setBusy(null) }
   }
 
+  // #1376 review: reopen refusals (e.g. the invoice actually still exists,
+  // or the row raced) must SURFACE, not vanish as an unhandled rejection —
+  // same error-into-the-verdict-slot pattern as runVerify.
+  const runReopen = async (paymentId: string) => {
+    setBusy('sync')
+    try {
+      await reopen(paymentId)
+      setVerifications((prev) => {
+        const next = { ...prev }
+        delete next[paymentId] // the row left pushed — the old verdict is void
+        return next
+      })
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Could not re-open right now. Try again in a moment.'
+      setVerifications((prev) => ({ ...prev, [paymentId]: { error: message } }))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   if (loading) {
     return (
       <div className="max-w-3xl">
@@ -235,7 +258,7 @@ export default function ReportingPage() {
                             {!('error' in v) && !v.registered && (
                               <Button
                                 variant="ghost"
-                                onClick={() => run('sync', () => reopen(s.payment_id))}
+                                onClick={() => void runReopen(s.payment_id)}
                                 disabled={busy !== null}
                               >
                                 Re-open for sync

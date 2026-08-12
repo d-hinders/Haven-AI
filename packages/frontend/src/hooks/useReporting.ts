@@ -76,6 +76,7 @@ export function useReporting() {
 
 export interface ReportingVerification {
   registered: boolean
+  missing: 'deleted' | 'foreign_invoice' | null
   booked: boolean | null
   cancelled: boolean | null
   invoice_number: number

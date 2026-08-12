@@ -23,7 +23,7 @@ covers:
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-08-11" # #1330 Hermes .env credential-reference verification added; prior #1326 hosted-MCP setup and restart checklist, #1227 db-mock ratchet — no claim affected
+last-verified: "2026-08-12" # #1346 runtime-specific activation + read-only Connect verification re-checked; #1330 Hermes .env credential-reference verification
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
@@ -78,15 +78,17 @@ Agent, custom SDK runtime**, plus any others available.
    dashboard advancing to the approval screen. For Hermes, verify its
    `config.yaml` references `MCP_HAVEN_API_KEY` while the matching owner-only
    `.env` holds the value; do not copy secrets into the run report.
-3. **Confirm MCP wiring** — the Haven tools appear in the runtime (restart only
-   if the runtime needs it; CLI runtimes pick them up in-session). For Hermes,
-   start a new session or run `/restart` in a gateway, then check `hermes mcp
-   list` shows both `haven` and `haven-signer`, and run `hermes mcp test haven`.
-   After restart, confirm `mcp_haven_*` and `mcp_haven_signer_*` tools are
-   available. Install its MCP SDK with `pip install mcp` if tools are absent.
-   `haven_get_agent` returns identity + readiness.
-4. **Confirm allowances are visible** — `haven_get_allowances` (or `haven_get_agent`)
-   shows the configured budget and live remaining.
+3. **Approve, then activate MCP wiring** — approval, not activation, unlocks
+   Haven tools. Start a new Claude Code session or fresh Codex CLI session
+   (`codex resume --last` is one option); restart Codex Desktop or Claude
+   Desktop; let Cursor/VS Code hot-reload; and for Hermes start a new session
+   or run `/restart` in Gateway. For Hermes, check `hermes mcp list` shows both
+   `haven` and `haven-signer`, then run `hermes mcp test haven`. Install its MCP
+   SDK with `pip install mcp` if tools are absent.
+4. **Confirm read-only state** — `haven_get_agent` and
+   `haven_get_allowances` show identity, readiness, the Haven wallet, and the
+   configured budget/live remaining. Do not sign, fund, or create a payment to
+   verify setup.
 5. **Confirm a basic action** — approve the budget on-chain (wallet/passkey), then
    have the agent do a small allowed action (e.g. a direct `haven_pay` within budget
    or an x402 call). Expect it to settle, or to queue for approval if over budget.

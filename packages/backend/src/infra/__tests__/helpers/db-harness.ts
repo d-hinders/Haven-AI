@@ -27,7 +27,10 @@
  *   runner's own `schema_migrations` table (created inside the worker
  *   schema) records applied versions. Vitest isolates module state per test
  *   FILE, so this init runs once per file — idempotency, not module state,
- *   is what keeps it from re-applying 56 migrations every time.
+ *   is what keeps it from re-applying the full migration set every time
+ *   (dozens and growing — never a fixed number here, it goes stale; the
+ *   first file per worker DOES pay the full run, which is why
+ *   vitest.config.ts sets an explicit hookTimeout, #1372).
  * - `resetDb()` (call in `beforeEach`): truncates every table in the worker
  *   schema except `schema_migrations`, `RESTART IDENTITY CASCADE`.
  *

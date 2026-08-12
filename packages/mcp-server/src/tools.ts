@@ -7,6 +7,7 @@ import {
   X402UnexpectedStatusError,
   AgentPaymentWarningCode,
   type AgentNextStep,
+  type AgentPurchaseSummary,
   type AgentPaymentWarning,
   type AgentPaymentSummary,
   HavenClient,
@@ -15,6 +16,7 @@ import {
   SIGNER_UPDATE_FALLBACK,
   composeDescription,
   discoverMerchantMcpUrl,
+  resolveTokenFromAddress,
   sameUrl,
   selectStandardPaymentOption,
   toolDescriptions as sharedDescriptions,
@@ -92,6 +94,7 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   },
   haven_discover_tools: {
     category: z.string().optional(),
+    search: z.string().optional(),
     rail: z.enum(['x402', 'mpp']).optional(),
   },
   haven_send: {
@@ -123,7 +126,21 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     // Optional pre-funding price cap, atomic units of the merchant's asset
     // (same unit as payment_required.accepts[].amount). If the live merchant
     // price exceeds this, the call is rejected before any funding transfer.
-    max_amount: z.string().regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount').optional(),
+    max_amount: z
+      .string()
+      .regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount')
+      .optional(),
+    // #1351: the SAME cap written in whole tokens — "1" means 1 USDC, not one
+    // atomic unit. Preferred when the user stated a cap in tokens (they always
+    // do); decimals come from the live quote's asset. Mutually exclusive with
+    // max_amount: sending both is rejected before the merchant probe.
+    max_amount_human: z
+      .string()
+      .regex(
+        /^[0-9]+(\.[0-9]+)?$/,
+        'max_amount_human must be a plain decimal amount in whole tokens, e.g. "1" or "0.25"',
+      )
+      .optional(),
     idempotency_key: z.string().optional(),
     // #1272: the bulky delegation-rail signing payload (typed_data /
     // typed_data_b64) is omitted by default — the signer fetches the exact
@@ -137,11 +154,26 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     // hand-copied merchant_url/tool_name/tool_arguments. Chain-scoped to this
     // agent for free by the backend's /catalog/:id SQL (#1299).
     catalog_id: z.string().min(1),
-    // REQUIRED on this tool (unlike haven_pay_mcp_tool's optional cap) — this
-    // IS the guided path, so there is no cap_warning softness here. Atomic
-    // units of the merchant's asset, enforced against the LIVE quote before
-    // any funding intent is created.
-    max_amount: z.string().regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount'),
+    // A cap is REQUIRED on this tool (unlike haven_pay_mcp_tool's optional
+    // one) — this IS the guided path, so there is no cap_warning softness
+    // here. Give it in EITHER spelling; both are enforced against the LIVE
+    // quote before any funding intent is created. #1351: the requirement moved
+    // out of the schema into readMaxAmountCap (which accepts either field and
+    // still refuses, INVALID_INPUT, before any network call) because zod's raw
+    // shape cannot express "exactly one of these two".
+    max_amount: z
+      .string()
+      .regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount')
+      .optional(),
+    // #1351: preferred spelling — whole tokens, so "1" is 1 USDC. Mutually
+    // exclusive with max_amount.
+    max_amount_human: z
+      .string()
+      .regex(
+        /^[0-9]+(\.[0-9]+)?$/,
+        'max_amount_human must be a plain decimal amount in whole tokens, e.g. "1" or "0.25"',
+      )
+      .optional(),
     idempotency_key: z.string().optional(),
     // #1272: same contract as haven_pay_mcp_tool — see there.
     include_signing_payload: z.boolean().optional(),
@@ -194,7 +226,20 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     payment_required: z.record(z.string(), z.unknown()),
     // Optional pre-funding price cap, atomic units (same unit as
     // payment_required.accepts[].amount). Rejected before funding if exceeded.
-    max_amount: z.string().regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount').optional(),
+    max_amount: z
+      .string()
+      .regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount')
+      .optional(),
+    // #1351: the same cap in whole tokens ("1" = 1 USDC), converted with the
+    // decimals of the asset in the selected payment option. Mutually exclusive
+    // with max_amount.
+    max_amount_human: z
+      .string()
+      .regex(
+        /^[0-9]+(\.[0-9]+)?$/,
+        'max_amount_human must be a plain decimal amount in whole tokens, e.g. "1" or "0.25"',
+      )
+      .optional(),
     idempotency_key: z.string().optional(),
     // #1272: same contract as haven_pay_mcp_tool — see there.
     include_signing_payload: z.boolean().optional(),
@@ -306,9 +351,12 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Step 1 of the x402 MCP purchase flow: call a named tool on an MCP merchant that requires payment, probe the live price, and create the funding intent for the local signer to sign.',
   behavior:
     'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): the response carries next_action, next_tool, next_arguments, agent_summary and warnings — act on those; the prose below is fallback and debugging detail. ' +
-    'Sign with next_tool — mcp__haven-signer__haven_sign_x402, PREFERRED payment_id-first (#1263): pass just payment_id and payment_required and the signer fetches the exact signing bytes itself, so you never copy bulky bytes; the response is COMPACT by default (#1272: no typed_data/typed_data_b64). ' +
+    'Sign with next_tool — mcp__haven-signer__haven_sign_x402, PREFERRED payment_id-only (#1263, #1355): pass JUST payment_id and the signer fetches the exact signing bytes AND payment_required itself, so you never copy bulky bytes (older signer/backend: add payment_required verbatim if the signer asks); the response is COMPACT by default (#1272: no typed_data/typed_data_b64). ' +
     'Then settle with mcp__haven__haven_settle_mcp_tool using the returned signature + payment_header — merchant_url/tool_name/arguments/mcp_transport are OPTIONAL there (#1307): Haven rehydrates them from this quote by payment_id; pass them explicitly only as a version-skew fallback. Next: call mcp__haven-signer__haven_sign_x402. ' +
-    'ALWAYS pass max_amount on paid merchant calls (#1275) — it is the user-intent cap for THIS purchase: atomic units of the merchant\'s asset, compared against the LIVE quote before any funding moves, separate from and additional to the agent\'s on-chain budget. Example: buy_cloud_storage { tier: "50gb" } with max_amount "500" caps at 0.0005 USDC. Without it the quoted price is accepted as-is (the response carries cap_warning) and a changed merchant quote can exceed what the user meant to spend. ' +
+    'ALWAYS cap paid merchant calls (#1275) — the cap is the user-intent ceiling for THIS purchase, compared against the LIVE quote before any funding moves, separate from and additional to the agent\'s on-chain budget. ' +
+    'PREFER max_amount_human (#1351): whole tokens, exactly as the user says it — "no more than 1 USDC" is max_amount_human: "1". Decimals come from the live quote\'s own asset, so you never convert. ' +
+    'max_amount is the ATOMIC-unit form and stays supported for callers that already hold an exact atomic figure: max_amount "500" is 0.0005 USDC, NOT 500 USDC. Passing BOTH is refused (AMBIGUOUS_MAX_AMOUNT) before the merchant is contacted. ' +
+    'Without either, the quoted price is accepted as-is (the response carries cap_warning) and a changed merchant quote can exceed what the user meant to spend. ' +
     'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. Haven never receives the signing key. ' +
     'Protocol notes: builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. merchant_url may be the exact MCP endpoint or a BASE merchant URL (#1271): a non-402 miss triggers one bounded same-origin discovery pass of the merchant discovery document and one retry; the returned merchant_url is the resolved endpoint — pass THAT to settle/complete. ' +
     'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, signer_compatibility, merchant_url, tool_name, arguments, mcp_transport }. ' +
@@ -333,7 +381,8 @@ const PREPARE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
     'Use this instead of haven_pay_mcp_tool when you already have a catalog_id from haven_discover_tools and a spending cap in mind. Do NOT use for read-only allowance or budget questions — use haven_get_allowances. If the catalog row is degraded or missing tool metadata, this refuses and names haven_pay_mcp_tool as the manual fallback.',
   behavior:
     'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): the response carries next_action, next_tool, next_arguments, agent_summary and warnings — act on those; the prose below is fallback and debugging detail. ' +
-    'max_amount is REQUIRED on this tool (unlike haven_pay_mcp_tool\'s optional cap) and is enforced against the LIVE quote BEFORE any funding intent is created — this IS the guided path, so there is no cap_warning fallback. ' +
+    'A spending cap is REQUIRED on this tool (unlike haven_pay_mcp_tool\'s optional cap) and is enforced against the LIVE quote BEFORE any funding intent is created — this IS the guided path, so there is no cap_warning fallback. ' +
+    'Give it as max_amount_human (#1351, PREFERRED): whole tokens, so "no more than 1 USDC" is max_amount_human: "1", with decimals taken from the live quote\'s asset. max_amount is the atomic-unit alternative ("1" there means 0.000001 USDC). Send exactly one — both together is refused with AMBIGUOUS_MAX_AMOUNT, neither is refused with INVALID_INPUT, and both refusals happen before any network call. ' +
     'Returns a rail-aware allowance block { rail, sufficient, remaining_atomic, source }: on the legacy AllowanceModule rail an insufficient amount still proceeds and the resulting funding intent queues for wallet-owner approval, same as haven_pay_mcp_tool; on the delegation rail an over-budget quote REFUSES right here, before any funding intent exists, because that rail has no approval queue — an over-budget redemption would simply revert on-chain later. ' +
     'The ready-to-sign object returned on success is the SAME compact quote shape as haven_pay_mcp_tool/haven_pay_x402_quote (#1272: payment_id, payload_hash, expires_at, signer_compatibility, x402) plus catalog_id/catalog_name/catalog_price_* and the allowance block — never a separate signing surface. COMPACT by default; pass include_signing_payload=true only for diagnostics or an older signer. ' +
     'Protocol notes: loads the catalog entry by catalog_id — chain-scoped to this agent automatically (#1299): an unknown id or one curated for a DIFFERENT chain both refuse with a 404, no separate check needed. ' +
@@ -400,7 +449,8 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'For read-only allowance, budget, spend-limit, remaining-amount, or',
   'reset-period questions, call haven_get_allowances instead of calling this tool.',
   'Pass the payment_required from haven_quote_x402 or directly from the merchant 402 response.',
-  'ALWAYS pass max_amount on paid merchant calls (#1275): atomic units of the merchant\'s asset, the user-intent cap for THIS purchase, enforced against the live quote before any funding moves — separate from the agent\'s on-chain budget. Omitting it accepts the quoted price as-is (the response carries cap_warning).',
+  'ALWAYS cap paid merchant calls (#1275): the user-intent ceiling for THIS purchase, enforced against the live quote before any funding moves — separate from the agent\'s on-chain budget.',
+  'PREFER max_amount_human (#1351): whole tokens as the user states them ("no more than 1 USDC" → max_amount_human: "1"), converted with the decimals of the asset in the selected payment option. max_amount is the atomic-unit form ("1" = 0.000001 USDC); passing both is refused with AMBIGUOUS_MAX_AMOUNT before any funding intent. Omitting both accepts the quoted price as-is (the response carries cap_warning).',
   'Sign payload_hash via mcp__haven-signer__haven_sign (passing x402.expected) on the local signer, then relay',
   'with mcp__haven__haven_submit to fund the delegate wallet. After submission confirms, call',
   'mcp__haven-signer__haven_x402_sign_header on the local signer to build the EIP-3009 X-PAYMENT header, then',
@@ -410,7 +460,8 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'Protocol notes: returns { payment_id, payload_hash, expires_at, x402 } where x402 carries the accepted option,',
   'resource_url, merchant_to, funding_to, and x402.expected signing context including expires_at.',
   'COMPACT by default (#1272): typed_data/typed_data_b64 are omitted — the preferred signing call',
-  'is mcp__haven-signer__haven_sign_x402 with just payment_id and payment_required (#1263).',
+  'is mcp__haven-signer__haven_sign_x402 with just payment_id (#1263, #1355 — the signer also',
+  'fetches payment_required; add it verbatim only if the signer asks).',
   'For diagnostics or an older signer, re-run this tool with the SAME idempotency_key plus',
   'include_signing_payload=true: the replay returns the ORIGINAL sign_data with typed_data_b64,',
   'to pass through UNCHANGED, one opaque string, never re-typed (#1255).',
@@ -610,6 +661,7 @@ export function createToolHandlers(
         const args = parse('haven_discover_tools', input)
         const entries = await haven.discoverTools({
           category: args.category,
+          search: args.search,
           rail: args.rail,
         })
         return entries.map((entry) => ({
@@ -728,11 +780,23 @@ export function createToolHandlers(
     haven_pay_mcp_tool: async (input) =>
       runTool(async () => {
         const args = parse('haven_pay_mcp_tool', input)
+        // #1351: shape-check the cap FIRST — a contradictory cap is refused
+        // here, before the merchant is even contacted.
+        const cap = readMaxAmountCap(args, { required: false })
         try {
           // #1271: a base merchant URL is accepted. The probe runs against the
           // URL as given first; only a non-402 miss triggers one bounded
           // same-origin discovery pass and ONE retry at the discovered endpoint.
           // #1306: shared with haven_prepare_catalog_purchase — see there.
+          // #1348: prefetch the agent in parallel with the (slow) merchant
+          // probe purely as a delegateAddress hint for createX402Intent. A
+          // prefetch failure is IGNORED here — createX402Intent then runs its
+          // own internal fetch and fails exactly as it always did, so error
+          // shape and ordering are unchanged.
+          const agentPrefetch = haven.getAgent().then(
+            (a) => a.delegateAddress,
+            () => undefined,
+          )
           const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
             merchantUrl: args.merchant_url as string,
             toolName: args.tool_name as string,
@@ -741,11 +805,15 @@ export function createToolHandlers(
           })
           // Enforce the optional price cap against the LIVE merchant price,
           // before creating the funding intent. The catalog price is only a hint.
-          assertWithinMaxAmount(quote.amountAtomic, args.max_amount as string | undefined, quote.token)
+          // #1351: a human cap binds to the LIVE quote's own asset/decimals here.
+          const capAtomic = resolveCapAtomic(cap, quote)
+          assertWithinMaxAmount(quote.amountAtomic, capAtomic.atomic, quote.token, capAtomic.label)
+          const prefetchedDelegate = await agentPrefetch
           const intent = await haven.createX402Intent(
             quote.paymentRequired as X402PaymentRequired,
             {
               idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
+              ...(prefetchedDelegate ? { delegateAddress: prefetchedDelegate } : {}),
               // #1307: persist the merchant call context so haven_settle_mcp_tool /
               // haven_complete_mcp_tool can rehydrate it by payment_id instead of
               // the agent re-threading merchant_url/tool_name/arguments/mcp_transport.
@@ -761,14 +829,9 @@ export function createToolHandlers(
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
             // #1275: the cap is the normal path; its absence is worth a word,
             // not a refusal (compatibility) — a soft field the agent can relay.
-            ...(args.max_amount === undefined
-              ? {
-                  cap_warning:
-                    'No max_amount was set — the live quoted price was accepted as-is. Pass ' +
-                    'max_amount (atomic units) on paid merchant calls so a changed quote ' +
-                    'cannot exceed what the user intended to spend.',
-                }
-              : {}),
+            // #1351: EITHER spelling clears it — the warning is about being
+            // uncapped, not about which field was used.
+            ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
             // The raw merchant 402 PaymentRequired — the local signer needs this
             // verbatim in haven_x402_sign_header to build the EIP-3009 header.
             payment_required: quote.paymentRequired,
@@ -796,8 +859,10 @@ export function createToolHandlers(
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
-                'Sign locally: call next_tool with next_arguments plus payment_required taken ' +
-                'VERBATIM from this response, then haven_settle_mcp_tool with the returned ' +
+                'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
+                'signer fetches payment_required itself; only if it reports the context carried ' +
+                'none, re-call with payment_required added VERBATIM from this response), then ' +
+                'haven_settle_mcp_tool with the returned ' +
                 'signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport ' +
                 'from this response.',
               summary: {
@@ -811,7 +876,7 @@ export function createToolHandlers(
                 product: args.tool_name,
               },
               warnings: quoteWarnings({
-                maxAmount: args.max_amount as string | undefined,
+                capped: cap.kind !== 'none',
                 expiresAt: intent.expiresAt,
                 ...(merchantUrl !== args.merchant_url ? { discoveredFrom: args.merchant_url } : {}),
               }),
@@ -844,6 +909,10 @@ export function createToolHandlers(
     haven_prepare_catalog_purchase: async (input) =>
       runTool(async () => {
         const args = parse('haven_prepare_catalog_purchase', input)
+        // #1351: the cap is REQUIRED here and its shape is checked before the
+        // catalog is even read — an uncapped or contradictory guided purchase
+        // makes zero network calls.
+        const cap = readMaxAmountCap(args, { required: true })
         try {
           // 1. Load the catalog entry. Chain-scoped to this agent for FREE by
           // the backend's /catalog/:id SQL (#1299) — an id that does not
@@ -889,7 +958,23 @@ export function createToolHandlers(
 
           // 3. Run the LIVE quote against the catalog entry's own merchant —
           // the SAME probe haven_pay_mcp_tool uses, shared rather than
-          // duplicated (#1306 review requirement).
+          // duplicated (#1306 review requirement). #1348: the two Haven reads
+          // steps 5-6 need (agent, allowances) are independent of the merchant
+          // probe, so they START here and overlap its latency — the slowest
+          // leg of this preflight. Failure semantics are unchanged by design:
+          // the quote is AWAITED first, so its error still wins when several
+          // legs fail; the agent read stays a hard pre-intent refusal (#1319);
+          // the allowance read is settled to a result object the moment it
+          // starts (never an unhandled rejection) and is consumed by the same
+          // degrade-to-warning logic as before.
+          const agentPromise = haven.getAgent()
+          agentPromise.catch(() => {}) // awaited at step 5; guard the gap
+          const allowancesPromise = haven
+            .getAllowances()
+            .then(
+              (value) => ({ ok: true as const, value }),
+              (error) => ({ ok: false as const, error }),
+            )
           const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
             merchantUrl: entry.resourceUrl,
             toolName: entry.toolName,
@@ -897,16 +982,19 @@ export function createToolHandlers(
             idempotencyKey: args.idempotency_key as string | undefined,
           })
 
-          // 4. max_amount is REQUIRED on this guided path (schema-enforced) —
-          // no cap_warning softness. Enforced against the LIVE quote BEFORE
-          // any funding intent is created (mutation-tested: reordering this
-          // after createX402Intent below must fail a test).
-          assertWithinMaxAmount(quote.amountAtomic, args.max_amount as string, quote.token)
+          // 4. A cap is REQUIRED on this guided path (readMaxAmountCap above,
+          // before any network call) — no cap_warning softness. Enforced
+          // against the LIVE quote BEFORE any funding intent is created
+          // (mutation-tested: reordering this after createX402Intent below
+          // must fail a test). #1351: a human cap resolves against the LIVE
+          // quote's asset/decimals here, never the catalog's indicative price.
+          const capAtomic = resolveCapAtomic(cap, quote)
+          assertWithinMaxAmount(quote.amountAtomic, capAtomic.atomic, quote.token, capAtomic.label)
 
           // 5. Rail-aware allowance/budget report. A failed read NEVER fails
           // this preflight — sufficient degrades to null with a warning, and
           // the on-chain policy remains the actual gate either way.
-          const agent = await haven.getAgent()
+          const agent = await agentPromise
           const rail = agent.executionRail
           const source = rail === 'delegation' ? 'active_delegations' : 'allowance_module'
           const warnings: AgentPaymentWarning[] = []
@@ -920,8 +1008,13 @@ export function createToolHandlers(
             // #1090 machinery, reused via the SAME derivation the /agents/:id
             // allowances view and GET /machine-payments/allowances use — this
             // NEVER reads agent_allowances on the delegation rail, which is a
-            // frozen onboarding mirror there (mutation-tested).
-            const allowances = await haven.getAllowances()
+            // frozen onboarding mirror there (mutation-tested). #1348: the
+            // read itself started back at step 3 (overlapping the merchant
+            // probe); a rejection was captured there and is re-thrown here so
+            // this catch block degrades it exactly as before.
+            const allowancesResult = await allowancesPromise
+            if (!allowancesResult.ok) throw allowancesResult.error
+            const allowances = allowancesResult.value
             const match = allowances.allowances.find(
               (a) => a.tokenAddress.toLowerCase() === quote.asset.toLowerCase(),
             )
@@ -995,6 +1088,9 @@ export function createToolHandlers(
               arguments: entry.toolArguments ?? {},
               ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
             },
+            // #1348: the agent was already fetched at step 5 — skip the
+            // intent call's internal duplicate fetch.
+            delegateAddress: agent.delegateAddress,
           })
 
           // 8. Catalog price is indicative; the live quote above is
@@ -1042,8 +1138,10 @@ export function createToolHandlers(
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
-                'Sign locally: call next_tool with next_arguments plus payment_required taken ' +
-                'VERBATIM from this response, then haven_settle_mcp_tool with the returned ' +
+                'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
+                'signer fetches payment_required itself; only if it reports the context carried ' +
+                'none, re-call with payment_required added VERBATIM from this response), then ' +
+                'haven_settle_mcp_tool with the returned ' +
                 'signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport ' +
                 'from this response.',
               summary: {
@@ -1059,7 +1157,9 @@ export function createToolHandlers(
               warnings: [
                 ...warnings,
                 ...quoteWarnings({
-                  maxAmount: args.max_amount as string,
+                  // Always true on this path — a cap is required — but derived
+                  // rather than hardcoded so it stays honest if that changes.
+                  capped: cap.kind !== 'none',
                   expiresAt: intent.expiresAt,
                 }),
               ],
@@ -1138,7 +1238,16 @@ export function createToolHandlers(
         // trip. A failed read NEVER converts this settled success into a
         // failure — it degrades to a null block plus a warning, folded into
         // the SAME warnings[] buildAgentGuidance already emits.
-        const { allowance, warnings } = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
+        // Reuse the payment-status read the allowance helper already performs;
+        // reporting must not add a second status round trip or race it.
+        const { allowance, warnings, payment } = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
+        const purchaseSummary = buildPurchaseSummary({
+          payment,
+          merchantResult: merchant.result,
+          fundingTxHash: funding.txHash ?? null,
+          settlementTxHash: merchant.settlement_tx_hash,
+          allowance,
+        })
         // Pick explicit fields — don't spread the raw HTTP status/ok, which would
         // collide with the funding/payment-status meaning an agent expects here.
         // Echo payment_id so the agent can reconcile this settled payment against
@@ -1157,11 +1266,12 @@ export function createToolHandlers(
             safeToContinue: true,
             reason:
               'Funding and merchant settlement both succeeded. Report the result to the user ' +
-              '(amounts, settlement_tx_hash, and the merchant result/summary, plus remaining ' +
-              'allowance/budget from `allowance` when not null).',
+              'from agent_summary.purchase_summary; `result` is optional raw merchant evidence, ' +
+              'not Haven payment truth. The summary includes remaining allowance/budget when available.',
             summary: {
               payment_id: args.payment_id,
               status: 'settled',
+              purchase_summary: purchaseSummary,
             },
             warnings,
           }),
@@ -1217,6 +1327,9 @@ export function createToolHandlers(
         )
       }
       return runTool(async () => {
+        // #1351: shape-check the cap before the funding intent — this tool has
+        // no merchant probe of its own, so this is the first thing that runs.
+        const cap = readMaxAmountCap(args, { required: false })
         try {
           // Enforce the optional price cap against the merchant-authoritative
           // selected option, before creating the funding intent.
@@ -1224,7 +1337,45 @@ export function createToolHandlers(
             (args.payment_required as X402PaymentRequired).accepts,
           )
           if (option) {
-            assertWithinMaxAmount(x402AuthorizationAmount(option), args.max_amount as string | undefined, undefined)
+            // #1351: this path holds a payment OPTION rather than a built
+            // quote, so decimals come from the same address→token binding
+            // X402Quote.decimals is built from — the merchant's own
+            // asset/network, never an assumed 6.
+            const optionToken = resolveTokenFromAddress(option.asset, option.network)
+            const capAtomic = resolveCapAtomic(cap, {
+              decimals: optionToken?.decimals ?? null,
+              token: optionToken?.symbol ?? 'the merchant asset',
+              asset: option.asset,
+              network: option.network,
+            })
+            assertWithinMaxAmount(
+              x402AuthorizationAmount(option),
+              capAtomic.atomic,
+              optionToken?.symbol,
+              capAtomic.label,
+            )
+          } else if (cap.kind !== 'none') {
+            // No selectable option means there is no merchant-authoritative
+            // amount to compare a cap against — for EITHER spelling. Before
+            // #1351 the cap was simply skipped here, which left the agent
+            // believing the purchase was capped when nothing had been checked;
+            // the honest answer is to refuse. This only ever narrows: the
+            // uncapped call behaves exactly as it always did, and a
+            // payment_required with no settleable option was never going to
+            // produce a valid purchase anyway.
+            const capField = cap.kind === 'human' ? 'max_amount_human' : 'max_amount'
+            throw new HostedToolError({
+              code: AgentPaymentFailureCode.MaxAmountUnconvertible,
+              message:
+                `${capField} ("${cap.value}") could not be enforced: this payment_required ` +
+                'carries no payment option Haven can settle, so there is no merchant-authoritative ' +
+                'amount to compare it against. Haven refuses rather than proceed on an unchecked ' +
+                'cap. No funding intent was created and no funds were moved. Re-quote the ' +
+                'merchant with haven_quote_x402.',
+              statusCode: 400,
+              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              suggestedTool: 'haven_quote_x402',
+            })
           }
           const intent = await haven.createX402Intent(
             args.payment_required as X402PaymentRequired,
@@ -1233,14 +1384,8 @@ export function createToolHandlers(
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
             // #1275: same soft nudge as haven_pay_mcp_tool — see there.
-            ...(args.max_amount === undefined
-              ? {
-                  cap_warning:
-                    'No max_amount was set — the live quoted price was accepted as-is. Pass ' +
-                    'max_amount (atomic units) on paid merchant calls so a changed quote ' +
-                    'cannot exceed what the user intended to spend.',
-                }
-              : {}),
+            // #1351: either spelling of the cap clears it.
+            ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
             // #1308: decomposed-path next step.
             ...buildAgentGuidance({
               nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
@@ -1248,8 +1393,10 @@ export function createToolHandlers(
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
-                'Sign locally: call next_tool with next_arguments plus payment_required taken ' +
-                'VERBATIM from this response. Then relay via haven_submit and finish with ' +
+                'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
+                'signer fetches payment_required itself; only if it reports the context carried ' +
+                'none, re-call with payment_required added VERBATIM from this response). Then ' +
+                'relay via haven_submit and finish with ' +
                 'haven_x402_sign_header + the original merchant retry.',
               summary: {
                 payment_id: intent.paymentId,
@@ -1259,7 +1406,7 @@ export function createToolHandlers(
                 expires_at: intent.expiresAt,
               },
               warnings: quoteWarnings({
-                maxAmount: args.max_amount as string | undefined,
+                capped: cap.kind !== 'none',
                 expiresAt: intent.expiresAt,
               }),
             }),
@@ -1408,19 +1555,77 @@ function buildAgentGuidance(input: {
   }
 }
 
+/**
+ * #1349: normalize only the small merchant display fields agents need to
+ * report a purchase. Merchant content is deliberately never allowed to set
+ * status, money, network, merchant identity, or transaction hashes.
+ */
+function buildPurchaseSummary(input: {
+  payment: Awaited<ReturnType<HavenClient['getPaymentStatus']>> | null
+  merchantResult: unknown
+  fundingTxHash: string | null
+  settlementTxHash: string | null
+  allowance: AgentPurchaseSummary['allowance']
+}): AgentPurchaseSummary {
+  const merchantSummary = merchantPurchaseMetadata(input.merchantResult)
+  return {
+    status: 'settled',
+    product: merchantSummary.product,
+    amount: input.payment?.amount ?? null,
+    amount_atomic: input.payment?.amountAtomic ?? null,
+    asset: input.payment?.asset ?? null,
+    network: input.payment?.network ?? (input.payment ? `eip155:${input.payment.chainId}` : null),
+    merchant: {
+      address: input.payment?.merchantAddress ?? null,
+      resource_url: input.payment?.resourceUrl ?? null,
+    },
+    invoice_id: merchantSummary.invoiceId,
+    funding_tx_hash: input.fundingTxHash ?? input.payment?.txHash ?? null,
+    // The merchant's optional PAYMENT-RESPONSE receipt can name its own tx.
+    // Preserve it as evidence, never as the source of the settled status.
+    settlement_tx_hash: input.settlementTxHash,
+    allowance: input.allowance,
+  }
+}
+
+function merchantPurchaseMetadata(result: unknown): { product: string | null; invoiceId: string | null } {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return { product: null, invoiceId: null }
+  const structuredContent = (result as { structuredContent?: unknown }).structuredContent
+  if (!structuredContent || typeof structuredContent !== 'object' || Array.isArray(structuredContent)) {
+    return { product: null, invoiceId: null }
+  }
+  const summary = (structuredContent as { summary?: unknown }).summary
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return { product: null, invoiceId: null }
+  const value = summary as { product_name?: unknown; product?: unknown; invoice_id?: unknown }
+  return {
+    product: typeof value.product_name === 'string' ? value.product_name : typeof value.product === 'string' ? value.product : null,
+    invoiceId: typeof value.invoice_id === 'string' ? value.invoice_id : null,
+  }
+}
+
+/**
+ * The legacy `cap_warning` string and the structured MissingMaxAmount warning
+ * say the same thing; #1351 keeps them on one constant so the two spellings of
+ * the cap stay described identically in both.
+ */
+const CAP_WARNING_TEXT =
+  'No spending cap was set — the live quoted price was accepted as-is. Pass ' +
+  'max_amount_human (whole tokens, e.g. "1" for 1 USDC) or max_amount (atomic units) ' +
+  'on paid merchant calls so a changed quote cannot exceed what the user intended to spend.'
+
 function quoteWarnings(args: {
-  maxAmount: string | undefined
+  // #1351: whether this purchase carried a cap AT ALL, in either spelling —
+  // not which field expressed it.
+  capped: boolean
   expiresAt: string | undefined
   discoveredFrom?: string
 }): AgentPaymentWarning[] {
   const warnings: AgentPaymentWarning[] = []
-  if (args.maxAmount === undefined) {
+  if (!args.capped) {
     warnings.push({
       code: AgentPaymentWarningCode.MissingMaxAmount,
       // Same substance as the legacy cap_warning field, which stays for compat.
-      message:
-        'No max_amount was set — the live quoted price was accepted as-is. Pass max_amount ' +
-        '(atomic units) on paid merchant calls so a changed quote cannot exceed intent.',
+      message: CAP_WARNING_TEXT,
     })
   }
   if (args.expiresAt) {
@@ -1743,6 +1948,10 @@ function assertWithinMaxAmount(
   authorizedAtomic: string,
   maxAmount: string | undefined,
   token: string | undefined,
+  // #1351: how the CALLER expressed the cap, for the message only. The
+  // comparison is always atomic-vs-atomic; echoing "1 USDC" back at an agent
+  // that wrote `max_amount_human: "1"` beats echoing 1000000 it never typed.
+  capLabel?: string,
 ): void {
   if (maxAmount === undefined) return
   let authorized: bigint
@@ -1759,14 +1968,143 @@ function assertWithinMaxAmount(
   }
   if (authorized > cap) {
     const unit = token ? `${token}, atomic units` : 'atomic units'
+    const capText = capLabel ? `${capLabel} (= ${maxAmount} atomic)` : `max_amount ${maxAmount}`
     throw new HavenError(
-      `Authorized amount ${authorizedAtomic} exceeds max_amount ${maxAmount} (${unit}); ` +
+      `Authorized amount ${authorizedAtomic} exceeds ${capText} (${unit}); ` +
         `this is the ceiling the merchant can settle at. No funds were moved. ` +
-        `Confirm the higher amount with the user before retrying with a larger max_amount.`,
+        `Confirm the higher amount with the user before retrying with a larger cap.`,
       AgentPaymentFailureCode.PriceExceedsMax,
       400,
     )
   }
+}
+
+/**
+ * #1351: how the caller expressed this purchase's pre-funding cap.
+ *
+ * `max_amount` is atomic units of the merchant's asset; `max_amount_human` is
+ * the same cap written the way a user says it ("1" = 1 USDC). They differ by
+ * 10^decimals, so an agent that means "no more than 1 USDC" and writes
+ * `max_amount: "1"` has asked for a cap of 0.000001 USDC — the schema accepted
+ * it, and #1275's guard compared it faithfully. Nothing overspends from that
+ * mistake (it fails closed, too tight), but the agent cannot buy anything and
+ * has no signal why. The fix is a field whose NAME carries the unit.
+ */
+type MaxAmountCap =
+  | { kind: 'none' }
+  | { kind: 'atomic'; value: string }
+  | { kind: 'human'; value: string }
+
+/**
+ * Phase 1 of the cap contract: validate the SHAPE of the caller's cap fields
+ * with no network access at all, so a contradictory request is refused before
+ * the merchant probe — let alone before a funding intent, a signature, or any
+ * money movement. Phase 2 (`resolveCapAtomic`) needs the live quote and runs
+ * after it.
+ */
+function readMaxAmountCap(
+  args: Record<string, unknown>,
+  opts: { required: boolean },
+): MaxAmountCap {
+  const atomic = args.max_amount as string | undefined
+  const human = args.max_amount_human as string | undefined
+
+  if (atomic !== undefined && human !== undefined) {
+    throw new HostedToolError({
+      code: AgentPaymentFailureCode.AmbiguousMaxAmount,
+      message:
+        `Both max_amount ("${atomic}", atomic units) and max_amount_human ("${human}", ` +
+        `whole tokens) were supplied for one purchase. These are different caps — they ` +
+        `differ by a factor of 10^decimals — and Haven will not guess which one the user ` +
+        `meant. No merchant was contacted and no funds were moved. Send exactly ONE: ` +
+        `max_amount_human for a cap the user stated in tokens ("no more than 1 USDC" → ` +
+        `max_amount_human: "1"), or max_amount when you already hold an exact atomic figure.`,
+      statusCode: 400,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+    })
+  }
+  if (atomic !== undefined) return { kind: 'atomic', value: atomic }
+  if (human !== undefined) return { kind: 'human', value: human }
+  if (opts.required) {
+    // Same INVALID_INPUT code the schema itself would have produced when
+    // max_amount was unconditionally required on this tool — the guided path
+    // still refuses to run uncapped, it now accepts either spelling.
+    throw new HostedToolError({
+      code: 'INVALID_INPUT',
+      message:
+        'A spending cap is REQUIRED on the guided purchase path. Pass max_amount_human ' +
+        '(whole tokens, e.g. "1" for 1 USDC — recommended) or max_amount (atomic units). ' +
+        'No merchant was contacted and no funds were moved.',
+      statusCode: 400,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+    })
+  }
+  return { kind: 'none' }
+}
+
+/**
+ * Exact decimal-string → atomic conversion. No floats anywhere: `Number("0.1")`
+ * cannot represent a tenth, and this figure is a spending limit. Returns null
+ * when the value carries more fraction digits than the asset can hold, because
+ * the only alternatives there are rounding the user's cap up (unsafe) or down
+ * (silently different) — the caller turns null into a refusal.
+ */
+function humanToAtomic(human: string, decimals: number): bigint | null {
+  const match = /^([0-9]+)(?:\.([0-9]+))?$/.exec(human)
+  if (!match) return null
+  const whole = match[1]
+  const fraction = match[2] ?? ''
+  if (fraction.length > decimals) return null
+  return BigInt(whole + fraction.padEnd(decimals, '0'))
+}
+
+/**
+ * Phase 2 of the cap contract: bind the cap to THIS quote. The quote's asset,
+ * decimals and network stay authoritative — a human cap is only ever
+ * interpreted through the decimals the live quote resolved for the asset the
+ * merchant actually asked to be paid in, never through a caller-supplied token
+ * name or an assumed 6. Returns the atomic cap to compare, plus the label to
+ * quote back at the agent if it is exceeded.
+ *
+ * This NARROWS spend and can never widen it: the result feeds
+ * `assertWithinMaxAmount`, which only ever throws. The on-chain allowance (or
+ * delegation budget) remains the hard gate regardless of what is passed here.
+ */
+function resolveCapAtomic(
+  cap: MaxAmountCap,
+  quote: { decimals: number | null; token: string; asset: string; network: string },
+): { atomic: string | undefined; label?: string } {
+  if (cap.kind === 'none') return { atomic: undefined }
+  if (cap.kind === 'atomic') return { atomic: cap.value }
+
+  if (quote.decimals === null) {
+    throw new HostedToolError({
+      code: AgentPaymentFailureCode.MaxAmountUnconvertible,
+      message:
+        `max_amount_human ("${cap.value}") cannot be applied to this quote: Haven does not ` +
+        `recognise the merchant's asset ${quote.asset} on ${quote.network}, so the number of ` +
+        `atomic units in one token is unknown and any conversion would be a guess. No funding ` +
+        `intent was created and no funds were moved. Re-send the cap as max_amount in atomic ` +
+        `units of that asset, or ask the user to confirm this merchant is expected.`,
+      statusCode: 400,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+    })
+  }
+
+  const atomic = humanToAtomic(cap.value, quote.decimals)
+  if (atomic === null) {
+    throw new HostedToolError({
+      code: AgentPaymentFailureCode.MaxAmountUnconvertible,
+      message:
+        `max_amount_human ("${cap.value}") carries more decimal places than ${quote.token} ` +
+        `supports (${quote.decimals}). Truncating it would silently change the user's cap, so ` +
+        `Haven refuses instead. No funding intent was created and no funds were moved. Round ` +
+        `the cap to ${quote.decimals} decimal places, or send an exact max_amount in atomic units.`,
+      statusCode: 400,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+    })
+  }
+  return { atomic: atomic.toString(), label: `max_amount_human ${cap.value} ${quote.token}` }
 }
 
 function parse<TName extends HostedToolName>(name: TName, input: unknown): Record<string, any> {

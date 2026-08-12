@@ -33,14 +33,54 @@ identity) plus a separate local signer. The API key identifies the agent; the
 locally held signer key and the user's approved Haven wallet rules remain the
 spending authority.
 
-| Runtime | Configuration written by setup | Reload behaviour |
+| Runtime | Configuration written by setup | Activate the new entry |
 | --- | --- | --- |
-| Claude Code | User MCP registry | Start a new session |
-| Codex CLI / Codex Desktop | `~/.codex/config.toml` | Start a new session / restart the app |
-| Cursor | Cursor MCP configuration | Reloads automatically |
-| VS Code / VS Code Insiders | VS Code MCP configuration | Reloads automatically |
-| Claude Desktop | Claude Desktop MCP configuration | Restart the app |
-| Hermes Agent | `$HERMES_HOME/config.yaml` + `.env`, or `~/.hermes/config.yaml` + `.env` | Start a new session; gateway users run `/restart` |
+| Claude Code | User MCP registry | Start a new Claude Code session. |
+| Codex CLI | `~/.codex/config.toml` | Start a fresh session, for example `codex resume --last`. |
+| Codex Desktop | `~/.codex/config.toml` | Quit and reopen the app. |
+| Cursor | Cursor MCP configuration | Wait for hot reload; no app restart is required. |
+| VS Code / VS Code Insiders | VS Code MCP configuration | Wait for hot reload; no app restart is required. |
+| Claude Desktop | Claude Desktop MCP configuration | Quit and reopen the app. |
+| Hermes Agent | `$HERMES_HOME/config.yaml` + `.env`, or `~/.hermes/config.yaml` + `.env` | Start a new session; gateway users run `/restart`. |
+
+## After setup
+
+1. Return to Haven and approve the agent rules. Approval — not restarting —
+   unlocks the Haven tools.
+2. Activate the runtime using the table above.
+3. In the activated runtime, run the read-only `haven_get_agent` and
+   `haven_get_allowances` tools to confirm the Haven wallet and live budget.
+   Do not sign, fund, or create a payment to verify setup.
+
+### Structured output for automation
+
+Pass `--json` when a launcher needs a machine-readable completion record. Connect
+writes progress and human recovery notes to stderr and exactly one JSON object
+to stdout, with `schema_version: 1` and `outcome` set to `complete`,
+`action_required`, or `failed`. The object includes runtime/topology status,
+probe result, activation and next-action guidance, approval state/expiry (null
+when the backend does not provide an approval expiry), and the two
+read-only verification tools. It contains no API key, private key, credential
+contents, full credential paths, or full delegate address. The same redacted
+object is available to library callers as `runConnect(...).outcome`; the older
+fields remain for additive compatibility.
+
+For a recoverable install, configuration, probe, consent, or manual-runtime
+condition, inspect `error.code` and `error.next_action`, then follow the safe
+next action. A failed setup emits `outcome: "failed"` with a stable error code;
+it never presents credential material as a recovery diagnostic.
+
+If the setup challenge expires, return to Haven to start a fresh connection and
+rerun Connect. If a runtime write, installation, or probe fails, follow the
+structured `error.next_action` (or its human equivalent). The `other` runtime
+is the manual exception: finish the secret-free file-reference setup it prints,
+then start a fresh runtime session. Do not manually edit managed runtime
+configuration or paste credentials into prompts, logs, or configuration files.
+
+Connect abbreviates the public delegate address in normal output. Operators who
+need its full public identifier can inspect the owner-only, non-secret
+`agent.json` orientation file that Connect reports; do not inspect or share
+`identity.json` or `signer.json` for diagnostics because they contain secrets.
 
 For Hermes, Connect stores the hosted-MCP API key in the matching owner-only
 `.env` file and keeps only `Bearer ${MCP_HAVEN_API_KEY}` in `config.yaml`.

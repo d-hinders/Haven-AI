@@ -58,5 +58,22 @@ export function useReporting() {
     await load()
   }, [load])
 
-  return { status, loading, error, refetch: () => load(), sync }
+  // #1362: read-back verification against Fortnox's own records — does the
+  // pushed invoice exist, and has a human booked it (voucher assigned)?
+  const verify = useCallback(async (paymentId: string) => {
+    return api.get<ReportingVerification>(`/accounting/reporting/verify/${encodeURIComponent(paymentId)}`)
+  }, [])
+
+  return { status, loading, error, refetch: () => load(), sync, verify }
+}
+
+export interface ReportingVerification {
+  registered: boolean
+  booked: boolean | null
+  cancelled: boolean | null
+  invoice_number: number
+  voucher: string | null
+  invoice_date: string | null
+  total: number | null
+  checked_at: string
 }

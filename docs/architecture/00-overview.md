@@ -59,7 +59,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-12" # #1328 mpp_demo retirement — routes/demo-mpp.ts glob removed (file deleted); prior #1330 Hermes stores its hosted-MCP identity in owner-only .env with a config reference; #1326 Hermes runtime profile, #1251 (MPP seam refusal) + #1266 demo merchant x402 settlement selection
+last-verified: "2026-08-12" # #1328 mpp_demo retirement — routes/demo-mpp.ts glob removed (file deleted); prior #1330 Hermes stores its hosted-MCP identity in owner-only .env with a config reference; #1326 Hermes runtime profile, #1251 (MPP seam refusal) + #1266 demo merchant x402 settlement selection + same-day dev: #1346 re-verified Connect's runtime-owned activation and read-only post-setup check + #1352 Node floor 24->22 (engines/constant only; no numeric floor claim in this doc); #1330 Hermes identity handoff
 ---
 
 # Haven — Architecture Overview
@@ -124,7 +124,9 @@ connector generates both credentials locally, registers proof and public
 metadata, stores credentials, and configures the runtime → user approves in
 the Haven modal (a wallet approval on the legacy Safe rail; on the delegation
 rail the budget-delegation signature itself, which also activates the agent —
-#1069/#1076) → the agent can pay. Current contracts:
+#1069/#1076) → the runtime activates its new MCP entry → the agent makes the
+read-only `haven_get_agent` and `haven_get_allowances` checks before any
+payment. Current contracts:
 [hosted MCP connect](06-hosted-mcp-connect-flow.md) and
 [edge signer](07-edge-signer.md).
 

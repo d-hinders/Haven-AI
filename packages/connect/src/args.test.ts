@@ -16,6 +16,7 @@ describe('parseArgs', () => {
     ], {})
 
     expect(parsed.help).toBe(false)
+    expect(parsed.json).toBe(false)
     expect(parsed.options).toMatchObject({
       setupToken: 'hv_setup_test',
       apiBaseUrl: 'https://api.haven.example',
@@ -28,6 +29,12 @@ describe('parseArgs', () => {
   it('parses --local as the advanced local MCP opt-in', () => {
     const parsed = parseArgs(['--setup', 'hv_setup_test', '--local'], {})
     expect(parsed.options.localMcp).toBe(true)
+  })
+
+  it('parses --json as a structured-output request', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test', '--json'], {})
+    expect(parsed.json).toBe(true)
+    expect(helpText()).toContain('--json')
   })
 
   it('does not enable local MCP by default', () => {

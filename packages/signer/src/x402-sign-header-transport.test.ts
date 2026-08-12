@@ -170,3 +170,115 @@ describe('haven_sign_x402 (one-shot funding + header signing)', () => {
     expect((result.data as { payment_header: string }).payment_header.length).toBeGreaterThan(0)
   })
 })
+
+describe('haven_sign_x402 payment_id-only (#1355: payment_required from the fetched context)', () => {
+  const IDENTITY = { apiKey: 'sk_agent_test_1355', apiUrl: 'https://haven.test' }
+
+  function handlersWithContext(contextBody: Record<string, unknown>) {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    return createToolHandlers(signer, {
+      signContext: {
+        loadIdentity: async () => IDENTITY,
+        fetchImpl: (async () =>
+          new Response(JSON.stringify(contextBody), { status: 200 })) as typeof fetch,
+      },
+    })
+  }
+
+  async function contextBody(overrides: Record<string, unknown> = {}) {
+    const expected = await expectedX402()
+    return {
+      payment_id: 'pay_x402',
+      sign_data: { hash: FUNDING_HASH, typed_data: { primaryType: 'X' } },
+      x402_expected: {
+        payment_id: 'pay_x402',
+        payload_hash: FUNDING_HASH,
+        resource_url: PAYMENT_REQUIRED.resource.url,
+        merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
+        amount: PAYMENT_REQUIRED.accepts[0].amount,
+        asset: PAYMENT_REQUIRED.accepts[0].asset,
+        network: PAYMENT_REQUIRED.accepts[0].network,
+        expires_at: EXPIRES_AT,
+        auth: expected.auth,
+      },
+      payment_required: PAYMENT_REQUIRED,
+      ...overrides,
+    }
+  }
+
+  it('signs and builds the header from { payment_id } ALONE', async () => {
+    const handlers = handlersWithContext(await contextBody())
+
+    const result = ok(await handlers.haven_sign_x402({ payment_id: 'pay_x402' }))
+    const data = result.data as { signature: string; payment_header: string }
+    expect(data.signature).toMatch(/^0x[0-9a-f]+$/i)
+    expect(data.payment_header.length).toBeGreaterThan(0)
+  })
+
+  it('a context WITHOUT payment_required (pre-#1355 backend) fails actionably and the explicit copy recovers', async () => {
+    const { payment_required: _omitted, ...body } = await contextBody()
+    const handlers = handlersWithContext(body)
+
+    const failure = await handlers.haven_sign_x402({ payment_id: 'pay_x402' })
+    expect(failure.success).toBe(false)
+    if (!failure.success) {
+      expect(failure.message).toMatch(/carried no payment_required/)
+      expect(failure.message).toMatch(/pay result/)
+    }
+
+    const recovered = ok(
+      await handlers.haven_sign_x402({ payment_id: 'pay_x402', payment_required: PAYMENT_REQUIRED }),
+    )
+    expect((recovered.data as { payment_header: string }).payment_header.length).toBeGreaterThan(0)
+  })
+
+  it('quote-based path (no payment_id) still requires payment_required, with its own message', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const handlers = createToolHandlers(signer)
+
+    const failure = await handlers.haven_sign_x402({
+      payload_hash: FUNDING_HASH,
+      x402_expected: (await contextBody()).x402_expected,
+    })
+    expect(failure.success).toBe(false)
+    if (!failure.success) expect(failure.message).toMatch(/quote-based path/)
+  })
+
+  it('the FETCHED copy takes precedence when both are present (review nit on #1357)', async () => {
+    // Observable because the two copies disagree: the caller-supplied blob
+    // pays the wrong merchant (would refuse), the fetched one matches (signs).
+    // Success therefore proves the fetched copy was used; a silent precedence
+    // swap to caller-first flips this test to a refusal.
+    const tamperedArgs = {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        { ...PAYMENT_REQUIRED.accepts[0], payTo: '0x000000000000000000000000000000000000bAd2' },
+      ],
+    }
+    const handlers = handlersWithContext(await contextBody())
+
+    const result = ok(
+      await handlers.haven_sign_x402({ payment_id: 'pay_x402', payment_required: tamperedArgs }),
+    )
+    expect((result.data as { payment_header: string }).payment_header.length).toBeGreaterThan(0)
+  })
+
+  it('MUTATION PROOF: a fetched payment_required that mismatches the funded intent refuses', async () => {
+    // The context copy goes through the SAME expected-context verification as
+    // a caller-supplied copy — this is the assertion that catches a future
+    // "trust the fetch, skip the check" shortcut. The stored blob pays a
+    // different merchant than the Haven-signed expected context; the header
+    // build must refuse.
+    const tampered = {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        { ...PAYMENT_REQUIRED.accepts[0], payTo: '0x000000000000000000000000000000000000bAd1' },
+      ],
+    }
+    const handlers = handlersWithContext(await contextBody({ payment_required: tampered }))
+
+    const failure = await handlers.haven_sign_x402({ payment_id: 'pay_x402' })
+    expect(failure.success).toBe(false)
+    if (!failure.success) expect(failure.message).toMatch(/merchant recipient does not match/)
+  })
+})

@@ -103,5 +103,27 @@ export async function getX402SignContext(
   // `idempotent_replay: true`; this surface is a read, not a replay.
   const body = { ...(rebuilt.body as Record<string, unknown>) }
   delete body.idempotent_replay
+  // #1355: re-serve the 402 PaymentRequired persisted at authorize time, so a
+  // signer fetching by payment_id can build the merchant header without the
+  // agent relaying the blob. Absent on pre-#1355 rows (the signer then
+  // requires the caller-supplied copy). Not authority: whichever copy the
+  // signer uses is verified against the Haven-signed expected context.
+  const storedPaymentRequired = storedPaymentRequiredFromMetadata(existing.machine_metadata)
+  if (storedPaymentRequired) body.payment_required = storedPaymentRequired
   return { code: 200, body }
+}
+
+function storedPaymentRequiredFromMetadata(metadata: unknown): Record<string, unknown> | null {
+  let parsed: unknown = metadata
+  if (typeof metadata === 'string') {
+    try {
+      parsed = JSON.parse(metadata)
+    } catch {
+      return null
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+  const stored = (parsed as Record<string, unknown>).payment_required
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return null
+  return stored as Record<string, unknown>
 }

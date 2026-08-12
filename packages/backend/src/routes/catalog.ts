@@ -69,25 +69,52 @@ function serialize(row: CatalogRow) {
 export default async function catalogRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', eitherAuth)
 
-  // GET /catalog — list entries, optionally filtered by category/rail.
-  app.get<{ Querystring: { category?: string; rail?: string } }>(
+  // GET /catalog — list entries, optionally filtered by category/rail/search.
+  app.get<{ Querystring: { category?: string; rail?: string; search?: string } }>(
     '/',
     async (request, reply) => {
-      const { category, rail } = request.query
+      const { category, rail, search } = request.query
 
       if (rail !== undefined && !VALID_RAILS.has(rail)) {
         return reply.code(400).send({ error: `Invalid rail: ${rail}` })
       }
 
+      // Search is deliberately bounded and normalized at the route boundary.
+      // This keeps the read-only discovery contract predictable for both the
+      // dashboard and agent clients, while the SQL below remains parameterized.
+      if (search !== undefined && typeof search !== 'string') {
+        return reply.code(400).send({ error: 'Search must be a single string' })
+      }
+      const normalizedSearch =
+        typeof search === 'string' ? search.trim().replace(/\s+/g, ' ') : undefined
+      if (search !== undefined && !normalizedSearch) {
+        return reply.code(400).send({ error: 'Search must not be empty' })
+      }
+      if (normalizedSearch && normalizedSearch.length > 120) {
+        return reply.code(400).send({ error: 'Search must be 120 characters or fewer' })
+      }
+
       const conditions = [`status != 'delisted'`]
       const values: string[] = []
-      if (category) {
-        values.push(category)
-        conditions.push(`category = $${values.length}`)
+      if (category !== undefined && typeof category !== 'string') {
+        return reply.code(400).send({ error: 'Category must be a single string' })
+      }
+      const normalizedCategory = typeof category === 'string' ? category.trim() : undefined
+      if (normalizedCategory) {
+        values.push(normalizedCategory)
+        conditions.push(`LOWER(TRIM(category)) = LOWER(TRIM($${values.length}))`)
       }
       if (rail) {
         values.push(rail)
         conditions.push(`rail = $${values.length}`)
+      }
+      if (normalizedSearch) {
+        values.push(normalizedSearch)
+        conditions.push(
+          `(name ILIKE '%' || $${values.length} || '%' OR ` +
+            `description ILIKE '%' || $${values.length} || '%' OR ` +
+            `category ILIKE '%' || $${values.length} || '%')`,
+        )
       }
       if (request.agent) {
         values.push(`eip155:${request.agent.chain_id}`)
@@ -97,7 +124,7 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
       const result = await pool.query<CatalogRow>(
         `SELECT * FROM merchant_catalog
          WHERE ${conditions.join(' AND ')}
-         ORDER BY status = 'active' DESC, category ASC, name ASC`,
+         ORDER BY status = 'active' DESC, category ASC, name ASC, id ASC`,
         values,
       )
 

@@ -393,6 +393,121 @@ async function attachMerchantReceiptFiles(
 }
 
 /**
+ * Read-back verification (#1362) — the first READ in an otherwise write-only
+ * integration. Answers, from Fortnox's own records: (1) does the supplier
+ * invoice we pushed still EXIST (= registered), and (2) has a human BOOKED it
+ * (= accounted, with the voucher reference Fortnox assigned)? Strictly
+ * read-only — the non-asserting principle is untouched; this asserts nothing,
+ * writes nothing, and cannot book, cancel, or modify the invoice.
+ *
+ * The #494 spike proved the fields live: an API-created supplier invoice
+ * carries `Booked: false` and no voucher until a human attests it; booking
+ * fills `VoucherNumber`/`VoucherSeries`/`VoucherYear`.
+ */
+export interface FortnoxInvoiceVerification {
+  /** The invoice exists in Fortnox under our external_ref. */
+  registered: boolean
+  /** A human has booked it (Fortnox `Booked`). Null when not registered. */
+  booked: boolean | null
+  /** Cancelled in Fortnox — registered but struck. Null when not registered. */
+  cancelled: boolean | null
+  invoice_number: number
+  /** `<series><number> <year>` when booked, e.g. "A123 2026". Null until booked. */
+  voucher: string | null
+  invoice_date: string | null
+  total: number | null
+  checked_at: string
+}
+
+export async function verifyFortnoxInvoice(
+  userId: string,
+  paymentId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<
+  | { ok: true; verification: FortnoxInvoiceVerification }
+  | { ok: false; error_code: 'not_pushed' | 'not_connected' | 'no_invoice_ref'; status: string | null }
+> {
+  const sync = await getSyncState(userId, 'fortnox', paymentId)
+  if (!sync || sync.status !== 'pushed') {
+    return { ok: false, error_code: 'not_pushed', status: sync?.status ?? null }
+  }
+  const match = sync.external_ref?.match(/^fortnox:supplierinvoice:(\d+)$/)
+  if (!match) return { ok: false, error_code: 'no_invoice_ref', status: sync.status }
+  const givenNumber = Number(match[1])
+
+  const accessToken = await getValidFortnoxAccessToken(userId, fetchImpl)
+  if (!accessToken) return { ok: false, error_code: 'not_connected', status: sync.status }
+
+  const checkedAt = new Date().toISOString()
+  let invoice: {
+    GivenNumber?: number
+    ExternalInvoiceNumber?: string
+    Booked?: boolean
+    Cancelled?: boolean
+    VoucherNumber?: number | null
+    VoucherSeries?: string | null
+    VoucherYear?: number | null
+    InvoiceDate?: string
+    Total?: number
+  }
+  try {
+    const body = await fortnoxGet<{ SupplierInvoice?: typeof invoice }>(
+      accessToken,
+      `/supplierinvoices/${givenNumber}`,
+      fetchImpl,
+    )
+    if (!body.SupplierInvoice) throw new FortnoxError('Fortnox returned no SupplierInvoice body.', 0)
+    invoice = body.SupplierInvoice
+  } catch (err) {
+    if (err instanceof FortnoxError && err.status === 404) {
+      // The invoice we pushed is GONE in Fortnox (deleted). Honest answer,
+      // not an error — this is exactly what verification exists to surface.
+      return {
+        ok: true,
+        verification: {
+          registered: false, booked: null, cancelled: null,
+          invoice_number: givenNumber, voucher: null, invoice_date: null,
+          total: null, checked_at: checkedAt,
+        },
+      }
+    }
+    throw err
+  }
+
+  // Belt to the ledger's braces: the invoice number must carry OUR external
+  // invoice number for this payment — a number collision (e.g. after a Fortnox
+  // company switch) must not read as "your payment is registered".
+  if (invoice.ExternalInvoiceNumber !== externalInvoiceNumber(paymentId)) {
+    return {
+      ok: true,
+      verification: {
+        registered: false, booked: null, cancelled: null,
+        invoice_number: givenNumber, voucher: null, invoice_date: null,
+        total: null, checked_at: checkedAt,
+      },
+    }
+  }
+
+  const voucher =
+    invoice.Booked && invoice.VoucherNumber != null
+      ? `${invoice.VoucherSeries ?? ''}${invoice.VoucherNumber}${invoice.VoucherYear ? ` ${invoice.VoucherYear}` : ''}`
+      : null
+  return {
+    ok: true,
+    verification: {
+      registered: true,
+      booked: Boolean(invoice.Booked),
+      cancelled: Boolean(invoice.Cancelled),
+      invoice_number: givenNumber,
+      voucher,
+      invoice_date: invoice.InvoiceDate ?? null,
+      total: invoice.Total ?? null,
+      checked_at: checkedAt,
+    },
+  }
+}
+
+/**
  * Late attach (#956, found live): for x402 the feed pushes at the FUNDING
  * confirmation, but the merchant hands its receipt to the agent only at the
  * merchant retry seconds later — so the invoice is already pushed when the

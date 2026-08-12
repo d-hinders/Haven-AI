@@ -797,7 +797,7 @@ export type paths = {
         };
         /**
          * List curated payable services agents can discover and pay.
-         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; nothing here creates payments or signatures.
+         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures.
          */
         get: operations["listCatalog"];
         put?: never;
@@ -1379,6 +1379,10 @@ export type components = {
                     source: "path" | "bazaar";
                 };
             };
+            /** @description #1355: the merchant's full parsed 402 PaymentRequired (max 64KB serialized). Persisted so GET /x402/{id}/sign-context can re-serve it and a local signer needs only payment_id. Reporting material, not payment authority — the signer verifies whichever copy it uses against the Haven-signed expected context. */
+            paymentRequired?: {
+                [key: string]: unknown;
+            };
         };
         X402MerchantCallContext: {
             /** Format: uuid */
@@ -1416,6 +1420,10 @@ export type components = {
                 signature: string;
                 /** @example 0x1111111111111111111111111111111111111111 */
                 signer: string;
+            };
+            /** @description #1355: the stored 402 PaymentRequired, present on GET /x402/{id}/sign-context responses when it was persisted at authorize time. Lets the local signer build the merchant header from the context fetch alone. */
+            payment_required?: {
+                [key: string]: unknown;
             };
         };
         X402ConfirmedPayment: {
@@ -5206,6 +5214,8 @@ export interface operations {
         parameters: {
             query?: {
                 category?: string;
+                /** @description Whitespace is trimmed/collapsed. Blank search after trimming returns 400. */
+                search?: string;
                 rail?: "x402" | "mpp";
             };
             header?: never;

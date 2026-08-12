@@ -1079,9 +1079,7 @@ function buildSetupPrompt(command: string, runtime: string | null, apiUrl: strin
     `download and execute the published npm package ${CONNECTOR_PACKAGE}`,
     `connect to Haven at ${apiUrl}`,
     'write local Haven credential files under ~/.haven',
-    runtime === 'codex-cli' || runtime === 'codex-desktop'
-      ? 'update Codex MCP config under ~/.codex/config.toml'
-      : 'update the local agent MCP config when supported',
+    runtimeConfigAction(runtime),
   ]
 
   return [
@@ -1097,8 +1095,30 @@ function buildSetupPrompt(command: string, runtime: string | null, apiUrl: strin
     '',
     'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
     '',
+    ...runtimeSetupGuidance(runtime),
     'When the connector finishes, tell me to return to Haven to approve the agent rules.',
   ].join('\n')
+}
+
+function runtimeConfigAction(runtime: string | null): string {
+  if (runtime === 'codex-cli' || runtime === 'codex-desktop') {
+    return 'update Codex MCP config under ~/.codex/config.toml'
+  }
+  if (runtime === 'hermes') {
+    return 'update Hermes Agent MCP config and its matching owner-only .env file, using MCP_HAVEN_API_KEY only as a config reference'
+  }
+  return 'update the local agent MCP config when supported'
+}
+
+function runtimeSetupGuidance(runtime: string | null): string[] {
+  if (runtime !== 'hermes') return []
+  return [
+    'For Hermes, the connector performs this configuration non-interactively. Do not run `hermes mcp add` or a Hermes-internal Python script.',
+    '',
+    'After it exits successfully, start a new Hermes session (Gateway users: `/restart`), then run `hermes mcp list`, `hermes mcp test haven`, and `hermes mcp test haven-signer`.',
+    'If Haven tools do not appear after restart, install the MCP SDK in the Hermes environment with `pip install mcp`, then restart Hermes.',
+    '',
+  ]
 }
 
 function joinApprovedActions(actions: string[]): string {
@@ -1243,4 +1263,3 @@ function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:@-]+$/.test(value)) return value
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
-

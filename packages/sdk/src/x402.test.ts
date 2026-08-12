@@ -315,6 +315,59 @@ describe('x402 helpers', () => {
     expect(quote.paymentRequired.extensions?.bazaar).toBeDefined()
   })
 
+  it('carries the asset decimals alongside the token symbol (#1351)', async () => {
+    // The quote is the authority a human-denominated spending cap is
+    // converted against, so decimals must come from the SAME address→token
+    // resolution that produced `token` — never assumed from the symbol.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {
+      status: 402,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const quote = await haven.quoteX402(paymentRequired.resource.url)
+
+    expect(quote.token).toBe('USDC')
+    expect(quote.decimals).toBe(6)
+  })
+
+  it('reports NULL decimals when the asset does not belong to the advertised network (#1351)', async () => {
+    // selectStandardPaymentOption checks the network and the asset against
+    // separate sets, so a merchant advertising the Base-SEPOLIA USDC address
+    // on mainnet Base is selectable. The token then resolves against the
+    // mainnet map and misses. `token` still falls back to the string "USDC" —
+    // a label, not evidence — so reporting 6 here would convert a human cap
+    // against a guess about an asset Haven could not actually identify. Null
+    // forces the consumer to fail closed instead.
+    const mismatchedNetwork: X402PaymentRequired = {
+      ...paymentRequired,
+      accepts: [{
+        ...accepted,
+        network: 'eip155:8453',
+        asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      }],
+    }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(mismatchedNetwork), {
+      status: 402,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const quote = await haven.quoteX402(paymentRequired.resource.url)
+
+    expect(quote.decimals).toBeNull()
+  })
+
   it('attaches a serializable resume state when quote payment needs approval', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -464,6 +517,10 @@ describe('x402 helpers', () => {
       asset: accepted.asset,
       network: accepted.network,
       idempotencyKey: expect.stringMatching(/^x402:[0-9a-f]{16}$/),
+      // #1360: the 3009-shape is DECLARED, not inferred — a stale payTo then
+      // fails the backend's shape cross-check loudly instead of silently
+      // routing to the erc7710 settlement branch.
+      settlementScheme: 'eip3009',
     })
 
     const retryInit = fetchMock.mock.calls[3][1] as RequestInit

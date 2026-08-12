@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-11" # agent-prompt refresh (audit A/B/E): signerInstructions() names the #1309 refusal fields explicitly; hosted/local MCP `instructions` now carry the critical path (see mcp-runtime-compatibility.md)
+last-verified: "2026-08-12" # #1355: the #1263 fetch also carries payment_required (persisted at authorize); haven_sign_x402 is { payment_id }-only with verbatim fallback for older backends; verification unchanged. Prior: #1352 Node floor, agent-prompt refresh
 ---
 
 # Haven — Edge Signer
@@ -133,7 +133,7 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    and settling, both `buildHostedMcpServer` (`packages/mcp-server/src/server.ts`)
    and `buildMcpServer` (`packages/mcp/src/server.ts`) also set MCP
    `instructions` — a compact, version-literal-free critical path (identity
-   first, catalog purchase with `max_amount`, follow the response's guidance
+   first, catalog purchase with a spending cap (`max_amount_human`), follow the response's guidance
    fields, sign/settle by `payment_id`, pending approval means stop) for
    clients that surface `instructions` even when they never render individual
    tool descriptions. The local server's instructions omit the signer
@@ -203,10 +203,13 @@ document (bounded, no redirects, off-origin refused) and returns the RESOLVED
 `merchant_url` — the agent passes that to settle/complete. Discovery carries
 no payment authority; the signer's verification is unaffected.
 
-**Preferred x402 form (#1263):** pass `payment_id` alone (plus
-`payment_required` on the one-call tool) — the signer fetches `payload_hash`,
-`typed_data` and the complete expected context from Haven itself, so nothing
-bulky ever crosses the agent's context. For older signers and diagnostics,
+**Preferred x402 form (#1263, #1355):** pass `payment_id` alone — the signer
+fetches `payload_hash`, `typed_data`, the complete expected context, AND (since
+#1355) the merchant's 402 `payment_required` from Haven itself, so nothing
+bulky ever crosses the agent's context. On a pre-#1355 backend whose
+sign-context carries no `payment_required`, the one-call tool asks the agent to
+re-call with it added verbatim; whichever copy is used passes the same
+expected-context verification. For older signers and diagnostics,
 re-run the quote tool with the SAME `idempotency_key` plus
 `include_signing_payload=true`: the replay returns the ORIGINAL sign_data
 (#1207 semantics), and `typed_data_b64` / `typed_data` remain the fallback

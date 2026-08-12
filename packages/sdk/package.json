@@ -1,9 +1,9 @@
 {
   "name": "@haven_ai/sdk",
-  "version": "0.1.21-alpha.0",
+  "version": "0.1.23-alpha.0",
   "description": "TypeScript SDK for Haven — agent wallet infrastructure",
   "engines": {
-    "node": ">=24"
+    "node": ">=22"
   },
   "type": "module",
   "main": "./dist/index.cjs",

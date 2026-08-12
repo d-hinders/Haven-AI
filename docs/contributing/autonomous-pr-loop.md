@@ -10,7 +10,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-08-05"
+last-verified: "2026-08-12" # #1341: re-verified loop stop and issue-readiness conditions after ship-next gained #1289 active-claim coordination
 ---
 
 # Autonomous PR loop
@@ -18,7 +18,7 @@ last-verified: "2026-08-05"
 **In one line:** hand the loop a list of PRs — as **GitHub issues** (a labeled
 standalone task, or an epic's sub-issues) — and it implements, tests, reviews,
 opens, and auto-merges them, stopping for a human only on a migration, a real
-decision, or stuck CI.
+decision, a live work overlap, or stuck CI.
 
 > **The backlog is GitHub Issues, not a repo file.** Backlogs used to live in
 > `docs/backlogs/*.yml`, but with the `dev`/`main` split a committed status file
@@ -28,8 +28,8 @@ decision, or stuck CI.
 
 Ship a defined set of PRs with minimal human input. You define the work; the
 loop implements, tests, reviews, opens, and (for safe PRs) merges each one —
-and only comes back to you for a real decision, a blocking review finding, or
-stuck CI.
+and only comes back to you for a real decision, a blocking review finding, a
+live work overlap, or stuck CI.
 
 Pieces:
 - **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default.
@@ -84,15 +84,16 @@ issue and stops.
 ```
 
 Then leave it running: it opens PRs, auto-merges the safe ones on green CI, and
-pings you only for a real decision, a blocking review finding, or stuck CI.
+pings you only for a real decision, a blocking review finding, a live work
+overlap, or stuck CI.
 
 
 ## Feeding work in
 
 The queue is always **GitHub issues** — nothing is tracked in the repo. Issue
-state *is* the backlog state: an open issue with no PR is ready, an open issue
-with an open Haven PR is in flight, and a closed issue is done (its PR closed it
-via `Closes #`).
+state *is* the backlog state: an open issue with no PR and no live claim or work
+overlap is ready, an open issue with an open Haven PR is in flight, and a closed
+issue is done (its PR closed it via `Closes #`).
 
 You don't have to hand-write those issues. **Capture is its own step:**
 [`new-task "<description>"`](../../.agents/skills/new-task/SKILL.md) turns a one-line

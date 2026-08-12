@@ -325,7 +325,9 @@ Hosted MCP and signer tools also return stable `code` values on recoverable x402
 
 | `code` | Meaning | Agent recovery |
 |--------|---------|----------------|
-| `PRICE_EXCEEDS_MAX` | The merchant-authoritative x402 price is above the caller's `max_amount` cap. No funding transfer was created. | Tell the user the live price exceeded the cap and retry only after they confirm a higher `max_amount`. |
+| `PRICE_EXCEEDS_MAX` | The merchant-authoritative x402 price is above the caller's spending cap. No funding transfer was created. | Tell the user the live price exceeded the cap and retry only after they confirm a higher one. |
+| `AMBIGUOUS_MAX_AMOUNT` | Both `max_amount` (atomic units) and `max_amount_human` (whole tokens) were sent for one purchase. Nothing was contacted and nothing was spent. | Re-send with exactly one — `max_amount_human` for a cap the user stated in tokens, `max_amount` for an exact atomic figure. |
+| `MAX_AMOUNT_UNCONVERTIBLE` | `max_amount_human` could not be converted against this quote's asset — its decimals are unknown to Haven, or the cap has more decimal places than the asset supports. Nothing was spent. | Round the cap to the asset's decimals, or re-send it as an exact atomic `max_amount`. |
 | `PAYMENT_WINDOW_EXPIRED` | The funding/quote window closed before `haven_x402_sign_header`, `haven_submit`, or `haven_complete_mcp_tool` could finish. | Re-run `haven_pay_mcp_tool` with the same `idempotency_key`, then sign and complete the fresh quote. Payloads include `retry_with_new_quote: true`. |
 | `MERCHANT_REJECTED_AFTER_FUNDING` | Haven's funding leg succeeded, but the merchant rejected the paid retry. | Stop retrying the merchant and call `haven_sweep_delegate` so the user can recover stranded delegate USDC. |
 

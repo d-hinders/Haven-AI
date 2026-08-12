@@ -131,4 +131,13 @@ describe('shared Haven tool descriptions', () => {
     expect(x402QuoteDesc).toContain('haven_pay_x402_quote')
     expect(x402QuoteDesc.toLowerCase()).toContain('do not call the merchant again')
   })
+
+  it('describes category-normalized catalog discovery as read-only and indicative', () => {
+    const desc = composeDescription(toolDescriptions.discoverTools)
+
+    expect(desc).toContain('case-insensitive category filter')
+    expect(desc).toContain('product name, category, or description term')
+    expect(desc).toContain('NOT authoritative')
+    expect(desc).toContain('Never creates a payment, signature, or approval')
+  })
 })

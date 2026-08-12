@@ -90,6 +90,7 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   haven_sweep_delegate: {},
   haven_discover_tools: {
     category: z.string().optional(),
+    search: z.string().optional(),
     rail: z.enum(['x402', 'mpp']).optional(),
   },
   haven_list_receipts: {
@@ -316,6 +317,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       return runTool(async () => {
         const entries = await haven.discoverTools({
           category: typeof args.category === 'string' ? args.category : undefined,
+          search: typeof args.search === 'string' ? args.search : undefined,
           rail: args.rail === 'x402' || args.rail === 'mpp' ? args.rail : undefined,
         })
         return entries.map((entry) => ({

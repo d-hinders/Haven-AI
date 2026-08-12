@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/allowance-module.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/modules/mpp/**
-last-verified: "2026-08-10" # re-verified for #1251 (MPP refuses delegation accounts at the seam) — no claim here affected
+last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Research — Smart-account-native x402 settlement (removing the funding leg)

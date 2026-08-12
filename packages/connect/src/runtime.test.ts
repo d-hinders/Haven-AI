@@ -1,14 +1,29 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ConnectApiClient, RegisterSetupInput, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
-import { runConnect } from './runtime.js'
+import { completionHandoffLines, failedConnectOutcome, runConnect } from './runtime.js'
+import type { RuntimeInstallResult } from './runtime-install.js'
 
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
 // These tests assert connect's behavior, not the machine's Node version. Since
 // #1161 runConnect refuses below the floor before doing anything, so every call
 // site pins a supported version explicitly — otherwise the suite would pass or
 // fail depending on what Node the developer happens to be running.
-const SUPPORTED_NODE = '24.0.0'
+const SUPPORTED_NODE = '22.0.0'
+
+function completedInstall(runtime: RuntimeInstallResult['runtime']): RuntimeInstallResult {
+  return {
+    runtime,
+    runtimeMcpMode: 'hosted_plus_signer',
+    hostedMcpConfigured: true,
+    localSignerConfigured: true,
+    localMcpConfigured: false,
+    probeResult: 'hosted_ok_local_signer_ready',
+    restartRequired: runtime !== 'cursor' && runtime !== 'vscode',
+    nextUserAction: 'return_to_haven_for_wallet_approval',
+    messages: [],
+  }
+}
 
 /** Await a promise expected to reject, returning the Error for assertions. */
 async function expectRejection(promise: Promise<unknown>): Promise<Error> {
@@ -21,6 +36,101 @@ async function expectRejection(promise: Promise<unknown>): Promise<Error> {
 }
 
 describe('runConnect', () => {
+  it.each([
+    ['codex-cli', 'codex resume --last'],
+    ['codex-desktop', 'Quit and reopen Codex Desktop'],
+    ['claude-code', 'Start a new Claude Code session'],
+    ['claude-desktop', 'Quit and reopen Claude Desktop'],
+    ['hermes', 'Hermes Gateway, run `/restart`'],
+    ['cursor', 'hot-reload'],
+    ['other', 'manual MCP setup'],
+  ] as const)('prints the approval, activation, and read-only verification handoff for %s', (runtime, activation) => {
+    const output = completionHandoffLines(completedInstall(runtime)).join('\n')
+
+    expect(output).toContain('1. Return to Haven and approve the agent rules.')
+    expect(output).toContain('Approval — not restarting — unlocks Haven tools.')
+    expect(output).toContain(activation)
+    expect(output).toContain('haven_get_agent')
+    expect(output).toContain('haven_get_allowances')
+    expect(output).toMatch(/Do not sign, fund, or create a payment/i)
+    expect(output).not.toContain(PRIVATE_KEY)
+    expect(output).not.toContain('sk_agent_supersecret')
+  })
+
+  it('gives every incomplete runtime installation one safe retry path', () => {
+    const output = completionHandoffLines({
+      ...completedInstall('hermes'),
+      errorCode: 'runtime_config_write_failed',
+    }).join('\n')
+
+    expect(output).toContain('return to Haven for a fresh connection')
+    expect(output).toContain('Do not manually edit runtime config')
+    expect(output).toContain('paste credentials into prompts, logs, or config')
+    expect(output).not.toContain('approve the agent rules')
+  })
+
+  it('keeps the manual runtime path actionable after credential setup', () => {
+    const output = completionHandoffLines({
+      ...completedInstall('other'),
+      runtimeMcpMode: 'manual',
+      hostedMcpConfigured: false,
+      localSignerConfigured: false,
+      errorCode: 'manual_runtime_setup_required',
+    }).join('\n')
+
+    expect(output).toContain('Finish the manual MCP setup using the secret-free file references printed above')
+    expect(output).toContain('haven_get_agent')
+    expect(output).not.toContain('fresh connection')
+  })
+
+  it('stops before writing credentials when the setup challenge is already expired', async () => {
+    const writeCredentials = vi.fn()
+    const error = await expectRejection(runConnect({
+      setupToken: 'hv_setup_test_expired',
+      apiBaseUrl: 'https://api.haven.example',
+    }, {
+      nodeVersion: SUPPORTED_NODE,
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-expired',
+          status: 'awaiting_connection',
+          agent: { name: 'Expired Agent' },
+          haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 100, network: 'Gnosis' },
+          agent_budget: [],
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-expired', message: 'expired', expires_at: '2000-01-01T00:00:00.000Z' },
+        })),
+        registerSetup: vi.fn(),
+        updateInstallStatus: vi.fn(),
+      },
+      writeCredentials,
+    }))
+
+    expect(error.message).toContain('Return to Haven, start a fresh connection, and rerun Connect')
+    expect(writeCredentials).not.toHaveBeenCalled()
+  })
+
+  it('fails closed before registration when the setup challenge expiry is malformed', async () => {
+    const registerSetup = vi.fn()
+    await expect(runConnect({
+      setupToken: 'hv_setup_test_invalid_expiry',
+      apiBaseUrl: 'https://api.haven.example',
+    }, {
+      nodeVersion: SUPPORTED_NODE,
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-invalid', status: 'awaiting_connection', agent: { name: 'Invalid Agent' },
+          haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 100, network: 'Gnosis' },
+          agent_budget: [], hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-invalid', message: 'invalid', expires_at: 'not-a-date' },
+        })),
+        registerSetup,
+        updateInstallStatus: vi.fn(),
+      },
+    })).rejects.toThrow(/expired or invalid/)
+    expect(registerSetup).not.toHaveBeenCalled()
+  })
+
   it('generates a local key, registers only the public address, stores credentials, and redacts output', async () => {
     const logs: string[] = []
     const registerInputs: RegisterSetupInput[] = []
@@ -112,9 +222,22 @@ describe('runConnect', () => {
       }),
       installRuntime,
       log: (message) => logs.push(message),
+      redactPaths: true,
     })
 
     expect(result.agentId).toBe('agent-1')
+    expect(result.outcome).toMatchObject({
+      schema_version: 1,
+      outcome: 'complete',
+      runtime: 'claude-code',
+      topology: 'local_stdio',
+      configuration: { hosted_mcp: false, local_signer: true, local_mcp: true },
+      approval: { required: true },
+      verification: { tools: ['haven_get_agent', 'haven_get_allowances'] },
+    })
+    expect(JSON.stringify(result.outcome)).not.toContain(PRIVATE_KEY)
+    expect(JSON.stringify(result.outcome)).not.toContain('sk_agent_supersecret')
+    expect(JSON.stringify(result.outcome)).not.toContain('/tmp/haven-connect-test')
     expect(registerInputs).toHaveLength(1)
     expect(registerInputs[0].delegateAddress).toMatch(/^0x[0-9a-fA-F]{40}$/)
     expect(registerInputs[0].proofSignature).toMatch(/^0x[0-9a-fA-F]+$/)
@@ -150,16 +273,27 @@ describe('runConnect', () => {
     expect(output).toContain('Registered signing address with Haven')
     expect(output).not.toContain(PRIVATE_KEY)
     expect(output).not.toContain('sk_agent_supersecret')
+    expect(output).not.toContain('/tmp/haven-connect-test/agent-1')
     // The connector affirms completion so the agent knows it finished, then
     // states the approval gate explicitly before any restart instruction.
     expect(output).toContain('Haven setup on this machine is complete')
-    expect(output).toContain('No Haven tools appear until you approve')
-    // CLI / session runtimes (Claude Code here) require a restart — the MCP
-    // config is written after the session starts. The old softened "should
-    // appear in your next message" copy misled an already-approved agent.
-    expect(output).toContain('restart this agent')
-    expect(output).toContain('won\'t load the Haven tools until you do')
+    expect(output).toContain('Approval — not restarting — unlocks Haven tools')
+    expect(output).toContain('Start a new Claude Code session')
     expect(output).not.toContain('should appear in your next message')
+  })
+
+  it('builds a stable, redacted failure outcome for CLI serialization', () => {
+    const result = failedConnectOutcome('codex-cli', new Error(
+      'This Haven setup challenge is expired or invalid. Do not use sk_agent_supersecret at /tmp/secret',
+    ))
+    expect(result).toMatchObject({
+      schema_version: 1,
+      outcome: 'failed',
+      runtime: 'codex-cli',
+      error: { code: 'setup_challenge_expired_or_invalid', next_action: 'return_to_haven_for_fresh_setup' },
+    })
+    expect(JSON.stringify(result)).not.toContain('sk_agent_supersecret')
+    expect(JSON.stringify(result)).not.toContain('/tmp/secret')
   })
 
   describe('unsupported Node.js (#1161)', () => {
@@ -169,7 +303,7 @@ describe('runConnect', () => {
     // a full connect on Node v23.1.0 completed "successfully", installed the
     // signer, and signed a real testnet payment. These tests cover the default
     // path specifically, because that is where the hole was.
-    const OLD_NODE = '23.1.0'
+    const OLD_NODE = '21.1.0'
 
     /** Every dependency that would record a side effect if the guard let go. */
     function sideEffectSpies() {
@@ -194,7 +328,7 @@ describe('runConnect', () => {
         apiBaseUrl: 'https://api.haven.example',
         runtime: 'claude-code',
         // No localMcp — this is the default hosted MCP + local signer topology.
-      }, { ...spies, nodeVersion: OLD_NODE })).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+      }, { ...spies, nodeVersion: OLD_NODE })).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
 
       // Nothing may have happened yet: no setup token resolved or consumed, no
       // agent registered, no key minted, no credential written. A failed
@@ -219,7 +353,7 @@ describe('runConnect', () => {
         apiBaseUrl: 'https://api.haven.example',
         runtime: 'claude-code',
         localMcp: true,
-      }, { ...spies, nodeVersion: OLD_NODE })).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+      }, { ...spies, nodeVersion: OLD_NODE })).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
       expect(spies.api.resolveSetup).not.toHaveBeenCalled()
     })
 
@@ -231,13 +365,13 @@ describe('runConnect', () => {
       }, { ...sideEffectSpies(), nodeVersion: OLD_NODE }))
 
       expect(error.message).toContain(OLD_NODE)
-      expect(error.message).toContain('>=24.0.0')
-      expect(error.message).toContain('nvm install 24')
+      expect(error.message).toContain('>=22.0.0')
+      expect(error.message).toContain('nvm install 22')
       expect(error.message).toMatch(/agent runtime launching Haven/i)
     })
 
     it('does not affect a supported Node', async () => {
-      // The guard must be invisible on >=24 — no behavior change for the
+      // The guard must be invisible on >=22 — no behavior change for the
       // overwhelming majority of runs. The run still fails afterwards (the API
       // stubs return nothing), which is the point: it failed LATER, having got
       // past the guard and started real work.
@@ -246,7 +380,7 @@ describe('runConnect', () => {
         setupToken: 'hv_setup_test',
         apiBaseUrl: 'https://api.haven.example',
         runtime: 'claude-code',
-      }, { ...spies, nodeVersion: '24.0.0' }))
+      }, { ...spies, nodeVersion: '22.0.0' }))
 
       expect(error.message).not.toMatch(/Node\.js/)
       expect(spies.api.resolveSetup).toHaveBeenCalled()
@@ -336,7 +470,7 @@ describe('runConnect', () => {
     })
 
     const output = logs.join('\n')
-    expect(output).toContain('restart this agent so it can load Haven tools')
+    expect(output).toContain('Quit and reopen Claude Desktop')
     expect(output).not.toContain('should appear in your next message')
   })
 
@@ -418,7 +552,7 @@ describe('runConnect', () => {
     const output = logs.join('\n')
     // Completion + next-steps still printed despite the telemetry failure…
     expect(output).toContain('Haven setup on this machine is complete')
-    expect(output).toContain('No Haven tools appear until you approve')
+    expect(output).toContain('Approval — not restarting — unlocks Haven tools')
     // …and the failure is surfaced quietly rather than thrown.
     expect(output).toContain('Could not report install status to Haven')
   })

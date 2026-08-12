@@ -267,6 +267,21 @@ export interface X402AuthorizationOptions {
    * omit for a non-MCP-tool x402 merchant (plain HTTP resource).
    */
   mcpCallContext?: X402McpCallContext
+  /**
+   * #1348: the agent's delegate address, when the caller already resolved it
+   * from `getAgent()` in this same flow — skips `createX402Intent`'s internal
+   * agent fetch (one full round trip on every guided purchase). Staleness
+   * caveat (#1358 review): the backend derives the funding shape by comparing
+   * `payTo` to the CURRENT delegate address, so a value made stale by a
+   * delegate rotation mid-flow is not always a clean failure — a pinned-budget
+   * agent gets a 403, but an open-budget delegation agent would route to the
+   * settlement shape with the stale address. The window is one tool call
+   * (previously sub-millisecond, now the merchant-quote duration), never
+   * externally suppliable; server-truth hardening is tracked in #1360. Only
+   * pass an address fetched in THIS flow; omit to keep the self-contained
+   * fetch.
+   */
+  delegateAddress?: string
 }
 
 /**
@@ -420,6 +435,16 @@ export interface X402Quote {
   amountAtomic: string
   amount: string
   token: string
+  /**
+   * #1351: decimals for `asset` on `network`, resolved from the SAME
+   * address→token binding that produced `token` — the quote's own authority on
+   * how many atomic units one human unit is. `null` when the merchant's asset
+   * is not a token Haven recognises on that network, in which case `token` is
+   * an unverified fallback label and NO human→atomic conversion is safe.
+   * Consumers converting a human-denominated figure (a user-intent spending
+   * cap) MUST fail closed on `null` rather than assume 6.
+   */
+  decimals: number | null
   asset: string
   network: string
   chainId: number | null
@@ -796,6 +821,22 @@ export const AgentPaymentFailureCode = {
    * mcp_transport explicitly (the version-skew path).
    */
   MerchantCallContextUnavailable: 'MERCHANT_CALL_CONTEXT_UNAVAILABLE',
+  /**
+   * #1351: the caller supplied BOTH the atomic `max_amount` and the
+   * human-denominated `max_amount_human` cap for one purchase. Haven refuses
+   * to guess which the user meant — the two differ by a factor of 10^decimals,
+   * so picking wrong is exactly the silent-overspend this cap exists to
+   * prevent. Rejected before any merchant probe, funding intent, or signature.
+   */
+  AmbiguousMaxAmount: 'AMBIGUOUS_MAX_AMOUNT',
+  /**
+   * #1351: a human-denominated cap was supplied, but it cannot be converted to
+   * atomic units against THIS quote — either the quote's asset has no known
+   * decimals on its network, or the cap carries more fraction digits than the
+   * asset can represent (truncating it would silently change the user's cap).
+   * The fallback is the exact atomic `max_amount`.
+   */
+  MaxAmountUnconvertible: 'MAX_AMOUNT_UNCONVERTIBLE',
 } as const
 
 export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typeof AgentPaymentFailureCode]
@@ -898,6 +939,10 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
     'The Haven funding leg succeeded, but the merchant did not answer the paid retry before the timeout. The merchant may still settle late — check haven_get_payment_status (and retry haven_complete_mcp_tool once) BEFORE sweeping; sweep only if no settlement appears.',
   [AgentPaymentFailureCode.MerchantCallContextUnavailable]:
     'merchant_url/tool_name were omitted and no stored merchant call context is available for this payment_id. Re-send merchant_url, tool_name, arguments, and mcp_transport explicitly.',
+  [AgentPaymentFailureCode.AmbiguousMaxAmount]:
+    'Both max_amount (atomic units) and max_amount_human (whole tokens) were supplied for one purchase. Nothing was contacted and nothing was spent. Re-send with exactly ONE: max_amount_human for a cap the user stated in tokens, max_amount for an exact atomic figure.',
+  [AgentPaymentFailureCode.MaxAmountUnconvertible]:
+    "max_amount_human could not be converted to atomic units against this quote's asset — either its decimals are unknown to Haven or the cap has more decimal places than the asset supports. Nothing was spent. Round the cap, or re-send it as an exact atomic max_amount.",
 }
 
 /**
@@ -965,6 +1010,35 @@ export interface AgentNextStep {
   reason: string
 }
 
+/**
+ * #1349: compact, Haven-generated reporting evidence for a completed x402
+ * merchant purchase. `status`, money fields, merchant endpoint/address, and
+ * funding transaction come from Haven payment state; `product` and
+ * `invoice_id` are optional merchant-supplied display metadata. The raw
+ * merchant result remains separate evidence and MUST NOT be used to infer
+ * settlement status.
+ */
+export interface AgentPurchaseSummary {
+  /** Set only after Haven has completed the funding and merchant-settlement flow. */
+  status: 'settled'
+  product: string | null
+  amount: string | null
+  amount_atomic: string | null
+  asset: string | null
+  network: string | null
+  merchant: {
+    address: string | null
+    resource_url: string | null
+  }
+  /** Merchant-supplied identifier, or null when the merchant did not supply one. */
+  invoice_id: string | null
+  funding_tx_hash: string | null
+  /** Optional merchant receipt reference parsed from PAYMENT-RESPONSE; not Haven settlement proof. */
+  settlement_tx_hash: string | null
+  /** Same read-only allowance block returned at the top level, or null when unavailable. */
+  allowance: PostPurchaseAllowanceSummary | null
+}
+
 /** #1308: compact reporting summary — what the agent tells the user. */
 export interface AgentPaymentSummary {
   payment_id: string
@@ -975,6 +1049,12 @@ export interface AgentPaymentSummary {
   network?: string
   expires_at?: string
   product?: string
+  /**
+   * Default reporting contract for a successful `haven_settle_mcp_tool` call.
+   * The merchant's raw `result` remains available separately as advanced
+   * evidence; do not parse it to determine whether a payment settled.
+   */
+  purchase_summary?: AgentPurchaseSummary
 }
 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {

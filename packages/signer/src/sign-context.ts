@@ -51,6 +51,15 @@ export interface FetchedSignContext {
   typedData: Record<string, unknown>
   /** The COMPLETE snake_case expected context, verbatim from Haven. */
   x402Expected: Record<string, unknown>
+  /**
+   * #1355: the 402 PaymentRequired persisted at authorize time, when the
+   * backend carries it — lets haven_sign_x402 build the merchant header from
+   * `{ payment_id }` alone. Null on pre-#1355 backends/rows; the caller then
+   * requires the agent-supplied copy. Untrusted like every other fetched
+   * field: header building verifies it against the Haven-signed expected
+   * context either way.
+   */
+  paymentRequired: Record<string, unknown> | null
 }
 
 /**
@@ -105,10 +114,15 @@ export async function fetchX402SignContext(
         'the backend may predate #1263. Pass typed_data_b64 from the quote result instead.',
     )
   }
+  const paymentRequired = body.payment_required
   return {
     paymentId: String(body.payment_id ?? paymentId),
     payloadHash: signData.hash,
     typedData: signData.typed_data as Record<string, unknown>,
     x402Expected,
+    paymentRequired:
+      paymentRequired && typeof paymentRequired === 'object' && !Array.isArray(paymentRequired)
+        ? (paymentRequired as Record<string, unknown>)
+        : null,
   }
 }

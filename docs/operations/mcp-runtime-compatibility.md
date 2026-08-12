@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-12" # release 0.1.23-alpha.0: manifest table follows the bump (ships the Node-22 engines floor to npm); prior same-day: #1349/#1348/#1355/#1350 re-verifications
+last-verified: "2026-08-12" # #1328 mpp_demo retirement re-verified: 3 mpp tools removed from BOTH MCP surfaces -> local consent hash changes, ONE re-ack expected on next signer start (by design); no runtime/version claim here affected; prior same-day: release 0.1.23-alpha.0: manifest table follows the bump (ships the Node-22 engines floor to npm); prior same-day: #1349/#1348/#1355/#1350 re-verifications
 ---
 
 # MCP Runtime Compatibility

@@ -1,7 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { useReporting, type ReportingSyncStatus } from '@/hooks/useReporting'
+import {
+  useReporting,
+  type ReportingSyncStatus,
+  type ReportingVerification,
+} from '@/hooks/useReporting'
 import { useFortnox } from '@/hooks/useAccounting'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -17,15 +21,71 @@ const STATUS: Record<ReportingSyncStatus, { label: string; cls: string }> = {
   skipped: { label: 'Skipped', cls: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]' },
 }
 
+/** Same tone convention as Row's leadingTone — text-color variant (#1364 review). */
+const TONE_TEXT: Record<'success' | 'warning' | 'danger', string> = {
+  success: 'text-[var(--v2-success)]',
+  warning: 'text-[var(--v2-warning)]',
+  danger: 'text-[var(--v2-danger)]',
+}
+
 function StatusChip({ status }: { status: ReportingSyncStatus }) {
   const s = STATUS[status]
   return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}>{s.label}</span>
 }
 
+/** "fortnox:supplierinvoice:123" → 123 (the number shown in Fortnox's UI). */
+function fortnoxInvoiceNumber(externalRef: string | null): string | null {
+  const match = externalRef?.match(/^fortnox:supplierinvoice:(\d+)$/)
+  return match ? match[1] : null
+}
+
+/** Plain-language verdict from a read-back verification (#1362). */
+function verificationSummary(v: ReportingVerification): { text: string; tone: 'success' | 'warning' | 'danger' } {
+  if (!v.registered) {
+    return {
+      text: `Not found in Fortnox — invoice ${v.invoice_number} no longer exists there. Re-sync to push it again.`,
+      tone: 'danger',
+    }
+  }
+  if (v.cancelled) {
+    return { text: `Registered in Fortnox as invoice ${v.invoice_number}, but cancelled there.`, tone: 'warning' }
+  }
+  if (v.booked) {
+    return {
+      text: `Booked in Fortnox — invoice ${v.invoice_number}${v.voucher ? `, voucher ${v.voucher}` : ''}. Your accountant has accounted for it.`,
+      tone: 'success',
+    }
+  }
+  return {
+    text: `Registered in Fortnox as invoice ${v.invoice_number} — awaiting booking by your accountant.`,
+    tone: 'success',
+  }
+}
+
 export default function ReportingPage() {
-  const { status, loading, error, sync } = useReporting()
+  const { status, loading, error, sync, verify } = useReporting()
   const { connect, disconnect } = useFortnox()
   const [busy, setBusy] = useState<'sync' | 'connect' | 'disconnect' | null>(null)
+  const [verifying, setVerifying] = useState<string | null>(null)
+  const [verifications, setVerifications] = useState<Record<string, ReportingVerification | { error: string }>>({})
+
+  const runVerify = async (paymentId: string) => {
+    setVerifying(paymentId)
+    try {
+      const v = await verify(paymentId)
+      setVerifications((prev) => ({ ...prev, [paymentId]: v }))
+    } catch (err) {
+      // Surface the backend's actionable copy (e.g. "reconnect and try again")
+      // instead of flattening every failure to one generic line (#1364 review).
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Could not check Fortnox right now. Try again in a moment.'
+      setVerifications((prev) => ({ ...prev, [paymentId]: { error: message } }))
+    } finally {
+      setVerifying(null)
+    }
+  }
 
   const run = async (kind: 'sync' | 'connect' | 'disconnect', fn: () => Promise<void>) => {
     setBusy(kind)
@@ -121,15 +181,61 @@ export default function ReportingPage() {
               </div>
             ) : (
               <Card.Section divided>
-                {status.syncs.map((s) => (
-                  <Row
-                    key={`${s.provider}-${s.payment_id}`}
-                    className="px-5"
-                    title={truncate(s.payment_id)}
-                    subtitle={s.error ?? (s.attempts > 1 ? `${s.attempts} attempts` : s.provider)}
-                    trailing={<StatusChip status={s.status} />}
-                  />
-                ))}
+                {status.syncs.map((s) => {
+                  const invoiceNo = s.status === 'pushed' ? fortnoxInvoiceNumber(s.external_ref) : null
+                  // Self-invalidating (#1364 review): a stored verification is
+                  // only rendered while the row still points at the SAME
+                  // invoice — a re-sync that changes the row's shape drops the
+                  // stale verdict instead of showing it under a changed row.
+                  const stored = verifications[s.payment_id]
+                  const v =
+                    stored && ('error' in stored || String(stored.invoice_number) === invoiceNo)
+                      ? stored
+                      : undefined
+                  return (
+                    <div key={`${s.provider}-${s.payment_id}`}>
+                      <Row
+                        className="px-5"
+                        title={truncate(s.payment_id)}
+                        subtitle={
+                          s.error ??
+                          (invoiceNo
+                            ? `Fortnox invoice ${invoiceNo}`
+                            : s.attempts > 1
+                              ? `${s.attempts} attempts`
+                              : s.provider)
+                        }
+                        trailing={
+                          <span className="flex items-center gap-2">
+                            {invoiceNo && (
+                              <Button
+                                variant="ghost"
+                                onClick={() => void runVerify(s.payment_id)}
+                                disabled={verifying !== null}
+                              >
+                                {verifying === s.payment_id ? 'Checking…' : 'Check in Fortnox'}
+                              </Button>
+                            )}
+                            <StatusChip status={s.status} />
+                          </span>
+                        }
+                      />
+                      <div aria-live="polite">
+                        {v && (
+                          <p
+                            className={`px-5 pb-3 text-xs ${
+                              'error' in v ? TONE_TEXT.danger : TONE_TEXT[verificationSummary(v).tone]
+                            }`}
+                          >
+                            {'error' in v
+                              ? v.error
+                              : `${verificationSummary(v).text} Checked ${new Date(v.checked_at).toLocaleTimeString()}.`}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
               </Card.Section>
             )}
           </Card>

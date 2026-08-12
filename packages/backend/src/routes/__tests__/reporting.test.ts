@@ -31,7 +31,7 @@ const orchestratorMocks = vi.hoisted(() => ({
   syncUser: vi.fn(),
 }))
 const connectorMocks = vi.hoisted(() => ({ hasLiveConnector: vi.fn() }))
-const fortnoxMocks = vi.hoisted(() => ({ getFortnoxConnection: vi.fn() }))
+const fortnoxMocks = vi.hoisted(() => ({ getFortnoxConnection: vi.fn(), verifyFortnoxInvoice: vi.fn() }))
 // feed-orchestrator.ts, connector.ts and fortnox-connection.ts all fold into
 // one public entry point post-#998 (modules/reporting/index.ts) — a single
 // mock factory merging all three, not three vi.mock calls to the same
@@ -69,6 +69,7 @@ describe('reporting routes', () => {
     orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
     connectorMocks.hasLiveConnector.mockReset().mockReturnValue(false)
     fortnoxMocks.getFortnoxConnection.mockReset().mockResolvedValue(null)
+    fortnoxMocks.verifyFortnoxInvoice.mockReset()
   })
 
   function authed(method: 'GET' | 'POST', url: string) {
@@ -143,6 +144,40 @@ describe('reporting routes', () => {
 
       expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ available: true, connected: false })
+    })
+  })
+
+  describe('GET /verify/:paymentId (#1362)', () => {
+    it('is hard-gated like /sync: 404 when unavailable, no Fortnox read', async () => {
+      entitlementMocks.reportingFeedAvailable.mockResolvedValue(false)
+      const res = await authed('GET', '/accounting/reporting/verify/pay-1')
+      expect(res.statusCode).toBe(404)
+      expect(fortnoxMocks.verifyFortnoxInvoice).not.toHaveBeenCalled()
+    })
+
+    it('returns the verification for the AUTHENTICATED user (never a caller-chosen one)', async () => {
+      fortnoxMocks.verifyFortnoxInvoice.mockResolvedValue({
+        ok: true,
+        verification: {
+          registered: true, booked: false, cancelled: false,
+          invoice_number: 11, voucher: null, invoice_date: '2026-08-12',
+          total: 10.42, checked_at: '2026-08-12T14:00:00.000Z',
+        },
+      })
+      const res = await authed('GET', '/accounting/reporting/verify/pay-1')
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ registered: true, booked: false, invoice_number: 11 })
+      expect(fortnoxMocks.verifyFortnoxInvoice).toHaveBeenCalledWith(USER, 'pay-1')
+    })
+
+    it('maps refusals to an actionable 409 with the error code', async () => {
+      fortnoxMocks.verifyFortnoxInvoice.mockResolvedValue({
+        ok: false, error_code: 'not_pushed', status: 'failed',
+      })
+      const res = await authed('GET', '/accounting/reporting/verify/pay-1')
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error_code: 'not_pushed', status: 'failed' })
+      expect(res.json().error).toMatch(/not been pushed/)
     })
   })
 

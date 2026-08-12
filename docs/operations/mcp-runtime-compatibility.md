@@ -70,6 +70,32 @@ Hermes discovers MCP servers at process startup, so start a new session (or run
 `/restart` for a gateway). Hermes also needs its Python MCP SDK installed (`pip
 install mcp`) to load MCP tools.
 
+## Completion handoff after Connect
+
+The connector's final output is deliberately short and ordered: return to Haven
+to approve the agent rules first, activate the current runtime second, then run
+the read-only `haven_get_agent` and `haven_get_allowances` tools to confirm the
+Haven wallet and live budget. Approval — not a restart — unlocks Haven tools.
+The verification must not sign, fund, or create a payment.
+
+Activation is owned by the Connect runtime registry. Claude Code needs a new
+session; Codex CLI can start a fresh session with `codex resume --last`; Codex
+Desktop and Claude Desktop need a full app restart; Cursor and VS Code hot
+reload; and Hermes needs a new session or `/restart` in Gateway. An unknown
+runtime is the only manual case: Connect cannot write its configuration, so use
+the secret-free file references it prints and then start a fresh session.
+
+If a setup challenge has expired, return to Haven for a fresh connection and
+rerun Connect. If a package install, runtime configuration, or MCP probe fails,
+resolve the named error, return to Haven for a fresh connection, and run its new
+Connect command. Never manually edit runtime configuration or paste credentials
+into prompts, logs, or configuration.
+
+Normal Connect output abbreviates the public delegate address. For an operator
+diagnostic that needs the full public identifier, use the owner-only, non-secret
+`agent.json` orientation file Connect reports. Never inspect or share
+`identity.json` or `signer.json` for that purpose: they contain credentials.
+
 ## Where the Node floor is enforced
 
 `>=24.0.0` is declared in four places that must agree: the `engines.node` of the

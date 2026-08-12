@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-12" # #1346 runtime-aware Connect completion handoff re-verified; #1251 MPP seam refusal
 ---
 
 # Haven Screen Recipes
@@ -135,7 +135,10 @@ Structure:
 4. Ask the user to approve the agent's authority: a wallet approval from the selected Haven wallet on legacy Safe accounts, or a single in-modal budget signature on delegation accounts — which activates the agent.
 5. On legacy multisig accounts, if more approvals are required, show a
    submitted/waiting state rather than implying the agent is active.
-6. Finish with `Done` plus runtime-specific restart or next-message guidance.
+6. Finish with `Done` plus a compact runtime-specific activation step and a
+   read-only `haven_get_agent` / `haven_get_allowances` confirmation. Make clear
+   that approval, not restarting, unlocks Haven tools; never require a payment
+   to confirm setup.
 
 Money and risk clarity:
 - Repeat the budget and approval boundary.

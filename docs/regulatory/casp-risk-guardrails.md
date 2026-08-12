@@ -49,7 +49,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-12" # #1330 Hermes identity handoff + release 0.1.22-alpha.0 runtime constants re-verified; no custody or authority change
+last-verified: "2026-08-12" # #1346 Connect completion handoff re-verified: local-signing, API-identity, approval, and no-secret boundaries unchanged; #1330 Hermes identity handoff
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails

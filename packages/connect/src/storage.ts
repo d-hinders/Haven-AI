@@ -112,11 +112,12 @@ export async function writeCredentialFiles(input: WriteCredentialInput): Promise
       agentPath,
       {
         agent_id: input.agentId,
+        delegate_address: input.delegateAddress,
         safe_address: input.safeAddress,
         chain_id: input.chainId,
         network: input.network,
         agent_budget: input.agentBudget,
-        note: 'Non-secret orientation for the agent: identity + configured budget. Contains no API key or signing key. For the live remaining budget, call haven_get_allowances.',
+        note: 'Non-secret orientation for the agent: public delegate/Haven wallet identity + configured budget. Contains no API key or signing key. For the live remaining budget, call haven_get_allowances.',
       },
       input.warn,
     )

@@ -50,7 +50,7 @@ export function runtimeStatusHelper(install: AgentConnectionSetupStatusResponse[
   if (!install) return 'Haven is waiting for the connector to report setup status.'
   if (install.error_code === 'local_mcp_ack_required') return 'Haven tools need one-time acknowledgement before this agent can load them.'
   if (install.error_code === 'local_signer_ack_required') return 'Local signing needs one-time acknowledgement before this agent can load Haven tools.'
-  if (install.error_code === 'local_mcp_unsupported_node_version') return 'Update Node.js to version 20 or newer, then run the setup command again.'
+  if (install.error_code === 'local_mcp_unsupported_node_version') return 'Update Node.js to version 22 or newer, then run the setup command again.'
   if (install.error_code === 'local_mcp_runtime_install_failed') return 'The connector could not install Haven tools locally. Run the setup command again; it uses Haven-owned local storage.'
   if (install.error_code === 'codex_config_invalid') return 'Codex config needs a manual fix before Haven tools can be added.'
   if (install.error_code === 'claude_code_config_failed') return 'Claude Code did not accept the Haven tools entry. Run the setup command inside Claude Code again.'

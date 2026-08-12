@@ -32,3 +32,4 @@ haven-*.pdf
 * 2.mts
 * 2.js
 *.tgz
+.~lock.*#

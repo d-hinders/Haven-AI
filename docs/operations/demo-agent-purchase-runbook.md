@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # presentation runbook — narrative, no direct code mirror
-last-verified: "2026-08-11"
+last-verified: "2026-08-12" # #1350: discovery narration now mentions category/search instead of implying exact-category lookup only
 ---
 
 # Demo Runbook — Agent Purchase, End to End (incl. Fortnox/SIE)
@@ -45,9 +45,13 @@ In the agent (Claude with Haven connected), say:
 What the audience sees the agent do (worth narrating):
 
 - `haven_discover_tools` — the chain-scoped catalog: products with stable
-  machine-readable metadata, price marked **indicative**.
-- `haven_pay_mcp_tool` with **max_amount** — the per-purchase user-intent cap,
-  checked against the LIVE merchant quote before any money moves.
+  machine-readable metadata, price marked **indicative**. The agent can filter
+  it with `category: "VPN"` or `search: "NordShield VPN Basic"` without
+  changing anything about payment authority.
+- `haven_pay_mcp_tool` with **max_amount_human** — the per-purchase user-intent
+  cap, written in whole tokens as the user says it ("no more than 1 USDC" →
+  `max_amount_human: "1"`), checked against the LIVE merchant quote before any
+  money moves.
 - The local signer signs via **payment_id only** — no multi-KB blobs cross the
   agent (talking point: the key never leaves the laptop; Haven never signs).
 - Settle → the structured purchase **summary**: product, amount, invoice id,

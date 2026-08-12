@@ -5,7 +5,7 @@ import { requireReportingFeed } from '../middleware/reportingFeed.js'
 import { reportingFeedAvailable } from '../modules/agents/index.js'
 import { getReportingStatus, syncUser } from '../modules/reporting/index.js'
 import { hasLiveConnector } from '../modules/reporting/index.js'
-import { getFortnoxConnection } from '../modules/reporting/index.js'
+import { getFortnoxConnection, verifyFortnoxInvoice } from '../modules/reporting/index.js'
 
 /**
  * Reporting feed surface for the dashboard (epic #491, P2 #500).
@@ -41,4 +41,31 @@ export default async function reportingRoutes(app: FastifyInstance): Promise<voi
     const { sub } = request.user as { sub: string }
     return syncUser(sub)
   })
+
+  // GET /accounting/reporting/verify/:paymentId — read-back verification
+  // (#1362): confirm against Fortnox's own records that the pushed supplier
+  // invoice exists (registered) and whether a human has booked it (accounted,
+  // with the voucher reference). Strictly read-only — asserts nothing, cannot
+  // modify the invoice; the non-asserting principle (#491) is untouched.
+  app.get<{ Params: { paymentId: string } }>(
+    '/verify/:paymentId',
+    { onRequest: requireReportingFeed },
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const result = await verifyFortnoxInvoice(sub, request.params.paymentId)
+      if (!result.ok) {
+        return reply.code(409).send({
+          error:
+            result.error_code === 'not_pushed'
+              ? `This payment has not been pushed to Fortnox (sync status: ${result.status ?? 'none'}).`
+              : result.error_code === 'not_connected'
+                ? 'Fortnox is not connected — reconnect and try again.'
+                : 'The sync row carries no Fortnox invoice reference.',
+          error_code: result.error_code,
+          status: result.status,
+        })
+      }
+      return result.verification
+    },
+  )
 }

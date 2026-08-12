@@ -36,6 +36,7 @@ const {
   supplierNameFor,
   feedDescription,
   lateAttachMerchantReceipt,
+  verifyFortnoxInvoice,
 } = await import('../fortnox-connector.js')
 
 const TX = {
@@ -402,5 +403,111 @@ describe('late attach — the x402 timing gap (#956, found live)', () => {
       'u1', 'fortnox', 'pay-late', 'fortnox:supplierinvoice:11',
       expect.stringMatching(/late-attach failed/),
     )
+  })
+})
+
+// ── #1362: read-back verification — the first READ in a write-only feed ──────
+
+describe('verifyFortnoxInvoice (#1362)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGetToken.mockResolvedValue('tok')
+  })
+
+  function invoiceStub(invoice: Record<string, unknown> | null, status = 200) {
+    return fetchStub({
+      '/supplierinvoices/11': () =>
+        invoice ? { body: { SupplierInvoice: invoice } } : { status, body: {} },
+    })
+  }
+
+  const PUSHED = { status: 'pushed', external_ref: 'fortnox:supplierinvoice:11' }
+
+  it('reports registered + not booked for an unattested invoice (the steady state)', async () => {
+    mockGetSyncState.mockResolvedValue(PUSHED)
+    const { impl } = invoiceStub({
+      GivenNumber: 11,
+      ExternalInvoiceNumber: externalInvoiceNumber('pay-1'),
+      Booked: false,
+      Cancelled: false,
+      InvoiceDate: '2026-08-12',
+      Total: 10.42,
+    })
+    const result = await verifyFortnoxInvoice('u1', 'pay-1', impl)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.verification).toMatchObject({
+        registered: true, booked: false, cancelled: false,
+        invoice_number: 11, voucher: null, total: 10.42,
+      })
+    }
+  })
+
+  it('reports booked WITH the voucher reference once a human has accounted for it', async () => {
+    mockGetSyncState.mockResolvedValue(PUSHED)
+    const { impl } = invoiceStub({
+      GivenNumber: 11,
+      ExternalInvoiceNumber: externalInvoiceNumber('pay-1'),
+      Booked: true,
+      VoucherSeries: 'A',
+      VoucherNumber: 123,
+      VoucherYear: 2026,
+    })
+    const result = await verifyFortnoxInvoice('u1', 'pay-1', impl)
+    expect(result.ok && result.verification.booked).toBe(true)
+    if (result.ok) expect(result.verification.voucher).toBe('A123 2026')
+  })
+
+  it('a Fortnox 404 is the honest answer registered:false — never an error', async () => {
+    mockGetSyncState.mockResolvedValue(PUSHED)
+    const { impl } = invoiceStub(null, 404)
+    const result = await verifyFortnoxInvoice('u1', 'pay-1', impl)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.verification.registered).toBe(false)
+  })
+
+  it('MUTATION PROOF: an invoice number collision (wrong ExternalInvoiceNumber) must NOT read as registered', async () => {
+    // The scenario: the user switched Fortnox company, invoice 11 there is
+    // someone else's. Removing the ExternalInvoiceNumber cross-check makes
+    // this test fail — the belt to the ledger's braces.
+    mockGetSyncState.mockResolvedValue(PUSHED)
+    const { impl } = invoiceStub({
+      GivenNumber: 11,
+      ExternalInvoiceNumber: 'HAVEN-someone-elses-payment',
+      Booked: true,
+    })
+    const result = await verifyFortnoxInvoice('u1', 'pay-1', impl)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.verification.registered).toBe(false)
+      expect(result.verification.booked).toBeNull()
+    }
+  })
+
+  it('refuses actionably when the payment is not pushed, has no ref, or Fortnox is disconnected', async () => {
+    mockGetSyncState.mockResolvedValue({ status: 'failed', external_ref: null })
+    let result = await verifyFortnoxInvoice('u1', 'pay-1')
+    expect(result).toMatchObject({ ok: false, error_code: 'not_pushed', status: 'failed' })
+
+    mockGetSyncState.mockResolvedValue({ status: 'pushed', external_ref: 'weird:ref' })
+    result = await verifyFortnoxInvoice('u1', 'pay-1')
+    expect(result).toMatchObject({ ok: false, error_code: 'no_invoice_ref' })
+
+    mockGetSyncState.mockResolvedValue(PUSHED)
+    mockGetToken.mockResolvedValue(null)
+    result = await verifyFortnoxInvoice('u1', 'pay-1')
+    expect(result).toMatchObject({ ok: false, error_code: 'not_connected' })
+  })
+
+  it('is strictly READ-ONLY: a full verification makes no POST and writes nothing', async () => {
+    mockGetSyncState.mockResolvedValue(PUSHED)
+    const { impl, calls } = invoiceStub({
+      GivenNumber: 11,
+      ExternalInvoiceNumber: externalInvoiceNumber('pay-1'),
+      Booked: false,
+    })
+    await verifyFortnoxInvoice('u1', 'pay-1', impl)
+    expect(calls.every((c) => (c.init?.method ?? 'GET') === 'GET')).toBe(true)
+    expect(mockMarkPushed).not.toHaveBeenCalled()
   })
 })

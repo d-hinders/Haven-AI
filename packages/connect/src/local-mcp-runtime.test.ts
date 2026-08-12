@@ -17,18 +17,18 @@ const PINNED_SDK_VERSION = MCP_RUNTIME_MANIFEST.sdkVersion
 
 const API_KEY = 'sk_agent_secret_for_local_runtime_test'
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
-const SUPPORTED_NODE = '24.0.0'
+const SUPPORTED_NODE = '22.0.0'
 
 describe('prepareLocalMcpRuntime', () => {
   it('requires the manifest minimum Node version before installing', () => {
-    expect(() => assertSupportedNodeVersion('24.0.0')).not.toThrow()
-    expect(() => assertSupportedNodeVersion('24.5.1')).not.toThrow()
+    expect(() => assertSupportedNodeVersion('22.0.0')).not.toThrow()
+    expect(() => assertSupportedNodeVersion('22.5.1')).not.toThrow()
     // 23.1.0 is the version from the #1161 report. It used to PASS this guard —
     // the manifest floor read '20.0.0' while every package's `engines` said
     // `>=24` — which is why the report's connect run reached the signer even
     // though a guard nominally existed.
-    expect(() => assertSupportedNodeVersion('23.1.0')).toThrow(/requires Node\.js >=24\.0\.0/)
-    expect(() => assertSupportedNodeVersion('20.0.0')).toThrow(/requires Node\.js >=24\.0\.0/)
+    expect(() => assertSupportedNodeVersion('21.1.0')).toThrow(/requires Node\.js >=22\.0\.0/)
+    expect(() => assertSupportedNodeVersion('20.0.0')).toThrow(/requires Node\.js >=22\.0\.0/)
   })
 
   it("pins the manifest floor to the package's declared engines.node", () => {

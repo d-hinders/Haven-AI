@@ -19,7 +19,7 @@ import { computeSignerConsentHash, type SignerConsentInput } from './consent.js'
 
 // Pinned so the #1161 Node floor cannot make these host-dependent: the
 // guard lives at the credential/client choke point, which these exercise.
-const SUPPORTED_NODE = '24.0.0'
+const SUPPORTED_NODE = '22.0.0'
 
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'

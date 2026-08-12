@@ -1609,10 +1609,16 @@ export const openapiSpec = {
         summary: 'List curated payable services agents can discover and pay.',
         description:
           'Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. ' +
-          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; nothing here creates payments or signatures.',
+          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures.',
         security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
         parameters: [
           { name: 'category', in: 'query', schema: { type: 'string' } },
+          {
+            name: 'search',
+            in: 'query',
+            schema: { type: 'string', minLength: 1, maxLength: 120 },
+            description: 'Whitespace is trimmed/collapsed. Blank search after trimming returns 400.',
+          },
           { name: 'rail', in: 'query', schema: { type: 'string', enum: ['x402', 'mpp'] } },
         ],
         responses: {
@@ -2404,6 +2410,12 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
+          paymentRequired: {
+            type: 'object',
+            description:
+              '#1355: the merchant\'s full parsed 402 PaymentRequired (max 64KB serialized). Persisted so GET /x402/{id}/sign-context can re-serve it and a local signer needs only payment_id. Reporting material, not payment authority — the signer verifies whichever copy it uses against the Haven-signed expected context.',
+            additionalProperties: true,
+          },
         },
         additionalProperties: false,
       },
@@ -2454,6 +2466,12 @@ export const openapiSpec = {
                   signer: address,
                 },
                 additionalProperties: false,
+              },
+              payment_required: {
+                type: 'object',
+                description:
+                  '#1355: the stored 402 PaymentRequired, present on GET /x402/{id}/sign-context responses when it was persisted at authorize time. Lets the local signer build the merchant header from the context fetch alone.',
+                additionalProperties: true,
               },
             },
           },

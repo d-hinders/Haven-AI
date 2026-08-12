@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-12" # release 0.1.22-alpha.0: runtime manifest and published package pins re-verified
+last-verified: "2026-08-12" # release 0.1.23-alpha.0: manifest table follows the bump (ships the Node-22 engines floor to npm); prior same-day: #1349/#1348/#1355/#1350 re-verifications
 ---
 
 # MCP Runtime Compatibility
@@ -36,6 +36,14 @@ Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent
 startup; setup preinstalls a tested runtime and writes a stable wrapper:
 
+`haven_discover_tools` remains skew-flat across the local and hosted MCP
+topologies: since #1350 it accepts the same optional `search` argument on both
+surfaces, alongside the existing `category` and `rail` filters. `category`
+matching is case-insensitive after trim, `search` matches catalog `name`,
+`description`, or `category`, and omitting the new field preserves the older
+request shape exactly. The result is still read-only discovery metadata:
+catalog prices are indicative hints, never payment authority.
+
 ```text
 ~/.haven/agents/<agent-id>/bin/haven-mcp
 ```
@@ -48,11 +56,11 @@ Keep this table in sync with that file.
 
 | Component | Supported version |
 | --- | --- |
-| Node.js | >= 24.0.0 (pinned to LTS 24 in `.nvmrc` / package `engines`) |
-| `@haven_ai/connect` | `0.1.22-alpha.0` |
-| `@haven_ai/mcp` | `0.1.22-alpha.0` |
-| `@haven_ai/sdk` | `0.1.22-alpha.0` |
-| `@haven_ai/signer` | `0.1.22-alpha.0` |
+| Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
+| `@haven_ai/connect` | `0.1.23-alpha.0` |
+| `@haven_ai/mcp` | `0.1.23-alpha.0` |
+| `@haven_ai/sdk` | `0.1.23-alpha.0` |
+| `@haven_ai/signer` | `0.1.23-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -70,14 +78,61 @@ Hermes discovers MCP servers at process startup, so start a new session (or run
 `/restart` for a gateway). Hermes also needs its Python MCP SDK installed (`pip
 install mcp`) to load MCP tools.
 
+## Completion handoff after Connect
+
+The connector's final output is deliberately short and ordered: return to Haven
+to approve the agent rules first, activate the current runtime second, then run
+the read-only `haven_get_agent` and `haven_get_allowances` tools to confirm the
+Haven wallet and live budget. Approval — not a restart — unlocks Haven tools.
+The verification must not sign, fund, or create a payment.
+
+Automation can pass `--json`: Connect keeps progress and recovery prose on
+stderr and emits one parseable, versioned object on stdout. `schema_version: 1`
+is the stable contract; `outcome` is `complete`, `action_required`, or
+`failed`. The record carries runtime/topology, configuration and probe state,
+activation, next action, approval and any approval expiry, and read-only
+verification guidance. It is
+redacted by construction: no API/private keys, credential contents, full
+credential paths, or full delegate address are serialized. Library callers use
+the same object at `runConnect(...).outcome`.
+
+Activation is owned by the Connect runtime registry. Claude Code needs a new
+session; Codex CLI can start a fresh session with `codex resume --last`; Codex
+Desktop and Claude Desktop need a full app restart; Cursor and VS Code hot
+reload; and Hermes needs a new session or `/restart` in Gateway. An unknown
+runtime is the only manual case: Connect cannot write its configuration, so use
+the secret-free file references it prints and then start a fresh session.
+
+If a setup challenge has expired, return to Haven for a fresh connection and
+rerun Connect. If a package install, runtime configuration, or MCP probe fails,
+use the structured `error.code` and `error.next_action` (or the matching human
+recovery note). Never manually edit runtime configuration or paste credentials
+into prompts, logs, or configuration. The `other` runtime is intentionally
+`action_required`: finish the secret-free manual setup references, then start a
+fresh runtime session; do not request another one-shot setup solely because the
+runtime is unrecognized.
+
+Normal Connect output abbreviates the public delegate address. For an operator
+diagnostic that needs the full public identifier, use the owner-only, non-secret
+`agent.json` orientation file Connect reports. Never inspect or share
+`identity.json` or `signer.json` for that purpose: they contain credentials.
+
 ## Where the Node floor is enforced
 
-`>=24.0.0` is declared in four places that must agree: the `engines.node` of the
-four packages this floor governs (`sdk`, `connect`, `signer`, `mcp`), `.nvmrc`,
+`>=22.0.0` is declared in three places that must agree: the `engines.node` of the
+four packages this floor governs (`sdk`, `connect`, `signer`, `mcp`),
 `HAVEN_MINIMUM_NODE_VERSION` in `@haven_ai/sdk`, and
 `MCP_RUNTIME_MANIFEST.minimumNodeVersion`. The manifest field is **derived** from
 the SDK constant, and a guard test in each of those four packages pins its own
-`engines.node` to it. They cannot drift silently.
+`engines.node` to it. They cannot drift silently. `.nvmrc` is separate: it pins
+the version the repo itself develops and runs CI on (LTS 24), which may sit
+*above* the user-facing floor but never below it. The floor is what an agent's
+machine must satisfy; `.nvmrc` is what ours does.
+
+The floor is 22 (maintenance LTS until April 2027) rather than 24 because the
+runtime uses nothing newer than `AbortSignal.any` (Node 20.3), and Node 20 is
+past end-of-life — 22 is the oldest still-supported LTS
+([#1352](https://github.com/d-hinders/Haven-AI/issues/1352)).
 
 They did drift once, which is why the constant exists. `engines` said `>=24`
 everywhere while the manifest enforced `20.0.0`, so the guard meant to hold the
@@ -233,6 +288,14 @@ values `haven_pay_mcp_tool` returned at quote time). Same shape as the
 `include_signing_payload=true` fallback above: no signature verification
 changes, only which call carries the bulk bytes.
 
+On a successful hosted settle (#1349), agents report from the compact
+`agent_summary.purchase_summary` rather than parsing the merchant's raw
+`result`. This is a backward-compatible reporting extension only: Haven state
+sets status and payment fields, while product/invoice metadata comes from the
+merchant and `settlement_tx_hash` is only an optional merchant PAYMENT-RESPONSE
+receipt reference. Missing values are explicit; it changes neither signing nor
+runtime compatibility.
+
 `haven_prepare_catalog_purchase` (#1306) — the guided catalog-id preflight —
 persists the SAME `mcpCallContext` at quote time (it composes the identical
 `createX402Intent` call `haven_pay_mcp_tool` uses, just sourced from a
@@ -343,7 +406,7 @@ what each server's instructions say and why they differ in length.
   serializer and validates the generated Haven block before writing. The
   expected shape is `command = ".../bin/haven-mcp"` and `args = []`.
 - **Unsupported Node.js:** the connector, signer, and MCP packages require
-  Node.js `>=24.0.0`, and
+  Node.js `>=22.0.0`, and
   since [#1161](https://github.com/d-hinders/Haven-AI/issues/1161) setup
   **refuses** below it rather than proceeding — see
   [Where the Node floor is enforced](#where-the-node-floor-is-enforced). The

@@ -43,12 +43,145 @@ describe('agent info helpers', () => {
     )
   })
 
+  it('coalesces CONCURRENT getAgent calls into one HTTP GET, but sequential calls stay fresh reads (#1348)', async () => {
+    const agentBody = () =>
+      new Response(JSON.stringify({
+        id: 'agent-1', name: 'A', status: 'active', safe_address: '0xSafe',
+        delegate_address: '0xDelegate', chain_id: 8453, execution_rail: 'legacy',
+      }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => agentBody())
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+
+    // Two overlapping callers (the guided flow's preflight + the quote leg's
+    // x402-wallet resolution) share ONE request…
+    const [a, b] = await Promise.all([haven.getAgent(), haven.getAgent()])
+    expect(a.delegateAddress).toBe('0xDelegate')
+    expect(b.delegateAddress).toBe('0xDelegate')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    // …but this is in-flight dedupe, NOT a cache: a later call fetches again,
+    // so a rotated delegate is picked up exactly as before.
+    await haven.getAgent()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('a coalesced getAgent failure rejects all waiters and does NOT poison the next call (#1348)', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'boom' }), { status: 500 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: 'agent-1', name: 'A', status: 'active', safe_address: '0xSafe',
+          delegate_address: '0xDelegate', chain_id: 8453, execution_rail: 'legacy',
+        })),
+      )
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+
+    const [r1, r2] = await Promise.allSettled([haven.getAgent(), haven.getAgent()])
+    expect(r1.status).toBe('rejected')
+    expect(r2.status).toBe('rejected')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    // The in-flight slot was cleared on rejection — the retry is a real fetch.
+    await expect(haven.getAgent()).resolves.toMatchObject({ delegateAddress: '0xDelegate' })
+  })
+
   it('maps allowance summaries', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(allowancesResponse())
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
 
     await expect(haven.getAllowances()).resolves.toEqual(mappedAllowances)
+  })
+
+  it('serializes category, search, and rail for catalog discovery', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        entries: [{
+          id: 'cat-vpn-basic',
+          name: 'NordShield VPN Basic',
+          description: 'Private VPN access for one device.',
+          category: 'vpn',
+          resource_url: 'https://merchant.example/vpn',
+          rail: 'x402',
+          protocol: 'mcp',
+          tool_name: 'buy_vpn',
+          tool_arguments: { plan: 'basic' },
+          price_display: '$4.99',
+          price_atomic: '4990000',
+          asset: 'USDC',
+          network: 'eip155:8453',
+          status: 'active',
+          verified_at: '2026-08-12T00:00:00.000Z',
+        }],
+      })),
+    )
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+
+    await expect(
+      haven.discoverTools({ category: 'VPN', search: 'NordShield VPN Basic', rail: 'x402' }),
+    ).resolves.toEqual([{
+      id: 'cat-vpn-basic',
+      name: 'NordShield VPN Basic',
+      description: 'Private VPN access for one device.',
+      category: 'vpn',
+      resourceUrl: 'https://merchant.example/vpn',
+      rail: 'x402',
+      protocol: 'mcp',
+      toolName: 'buy_vpn',
+      toolArguments: { plan: 'basic' },
+      priceDisplay: '$4.99',
+      priceAtomic: '4990000',
+      asset: 'USDC',
+      network: 'eip155:8453',
+      status: 'active',
+      verifiedAt: '2026-08-12T00:00:00.000Z',
+    }])
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${baseUrl}/catalog?category=VPN&search=NordShield+VPN+Basic&rail=x402`,
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer sk_agent_test',
+        }),
+      }),
+    )
+  })
+
+  it('forwards blank and whitespace-only search terms to the catalog contract', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [] })))
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+
+    await haven.discoverTools({ search: '' })
+    await haven.discoverTools({ search: '  ' })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `${baseUrl}/catalog?search=`,
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer sk_agent_test',
+        }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `${baseUrl}/catalog?search=++`,
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer sk_agent_test',
+        }),
+      }),
+    )
   })
 
   it('executes the get_allowances tool with the same allowance summary mapping', async () => {
@@ -286,6 +419,7 @@ describe('getPostPurchaseAllowanceSummary (#1310)', () => {
     ])
 
     expect(summary).toEqual({
+      payment: expect.objectContaining({ paymentId: 'pay_1' }),
       allowance: {
         rail: 'legacy',
         remaining_atomic: '3500000',
@@ -369,6 +503,7 @@ describe('getPostPurchaseAllowanceSummary (#1310)', () => {
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
     await expect(haven.getPostPurchaseAllowanceSummary('pay_1')).resolves.toEqual({
+      payment: expect.objectContaining({ paymentId: 'pay_1' }),
       allowance: null,
       warnings: [expect.objectContaining({ code: 'ALLOWANCE_CHECK_UNAVAILABLE' })],
     })

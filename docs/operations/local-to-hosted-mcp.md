@@ -7,7 +7,7 @@ covers:
   - packages/signer/**
   - packages/frontend/src/lib/hosted-connect.ts
   - packages/frontend/src/lib/agent-runtime-snippets.ts
-last-verified: "2026-08-10" # weekly #1248 audit: signer tool table completed (4 tools), the false "makes no network calls" claim replaced with the #1263 read-only fetch, delegation-rail signing added to the walkthrough, spend-gate claims rail-qualified
+last-verified: "2026-08-12" # re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Migration - Local MCP To Hosted MCP
@@ -194,7 +194,7 @@ The signer exposes local stdio MCP tools:
 | Tool | Purpose |
 |---|---|
 | `haven_sign` | Sign a payment: `payload_hash` (legacy rail), the delegation-rail EIP-712 `typed_data`/`typed_data_b64`, or just `payment_id` (#1263 — the signer fetches the exact payload itself) |
-| `haven_sign_x402` | One-call x402 fast path: funding signature + merchant `X-PAYMENT` header; prefers `payment_id + payment_required` |
+| `haven_sign_x402` | One-call x402 fast path: funding signature + merchant `X-PAYMENT` header; signs by `payment_id` ALONE (#1355 — Haven's sign-context re-serves `payment_required`); a caller-supplied `payment_required` is the fallback for pre-#1355 backends |
 | `haven_x402_sign_header` | Build and sign the x402 `X-PAYMENT` header after the Haven funding leg succeeds (decomposed flow) |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless Base-USDC recovery sweep (delegate → own Safe only) |
 

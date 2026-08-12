@@ -569,9 +569,9 @@ export class HavenClient {
 
     // The funding transfer tops up the agent's delegate EOA. With no local key
     // we resolve that address from the authenticated agent record rather than
-    // deriving it from a private key.
-    const agent = await this.getAgent()
-    const fundingTo = agent.delegateAddress
+    // deriving it from a private key. #1348: a caller that already fetched the
+    // agent in this flow passes delegateAddress and skips the duplicate fetch.
+    const fundingTo = options.delegateAddress ?? (await this.getAgent()).delegateAddress
     if (!fundingTo) {
       throw new HavenApiError('Authenticated agent has no delegate address registered.', 502)
     }
@@ -581,6 +581,12 @@ export class HavenClient {
       url: paymentRequired.resource.url,
       payTo: fundingTo,
       merchantPayTo: option.payTo,
+      // #1360: this path ALWAYS means the EIP-3009 funding leg (payTo is the
+      // agent's own delegate EOA). Saying so explicitly turns a stale/rotated
+      // delegate address into the backend's LOUD shape-mismatch 400 instead
+      // of a silent reroute to the erc7710 settlement branch (the #1358
+      // review's open-budget misroute). Legacy-rail backends ignore the field.
+      settlementScheme: 'eip3009',
       amount: x402AuthorizationAmount(option),
       asset: option.asset,
       network: option.network,
@@ -588,6 +594,14 @@ export class HavenClient {
       idempotencyKey,
       // #1307: persisted so the settle leg can rehydrate it by payment_id.
       ...(options.mcpCallContext ? { mcpCallContext: options.mcpCallContext } : {}),
+      // #1355: persisted so the SIGN leg can rehydrate it by payment_id — the
+      // local signer's context fetch then carries the 402 PaymentRequired and
+      // the agent passes only payment_id. Bounded: the backend rejects >64KB,
+      // so an oversized blob is omitted here (signer falls back to the
+      // caller-supplied copy) rather than failing the intent.
+      ...(new TextEncoder().encode(JSON.stringify(paymentRequired)).length <= 65536
+        ? { paymentRequired }
+        : {}),
     })
 
     // Anything other than a signable funding intent (pending_approval,
@@ -751,6 +765,24 @@ export class HavenClient {
    * Get the agent identity tied to this API key.
    */
   async getAgent(): Promise<HavenAgent> {
+    // #1348: coalesce CONCURRENT reads into one HTTP GET — the guided
+    // purchase flow legitimately wants the agent in two overlapping places
+    // (the caller's preflight and the quote leg's x402-wallet resolution).
+    // This is in-flight dedupe only, never a cache: the promise is cleared
+    // the moment it settles, so sequential calls stay fresh reads and a
+    // delegate rotation is picked up exactly as before.
+    if (this.agentInFlight) return this.agentInFlight
+    const request = this.fetchAgent()
+    this.agentInFlight = request
+    request.finally(() => {
+      this.agentInFlight = null
+    }).catch(() => {})
+    return request
+  }
+
+  private agentInFlight: Promise<HavenAgent> | null = null
+
+  private async fetchAgent(): Promise<HavenAgent> {
     const raw = await this.get<RawHavenAgent>('/machine-payments/agent')
     return {
       id: raw.id,
@@ -981,8 +1013,18 @@ export class HavenClient {
    */
   async getPostPurchaseAllowanceSummary(
     paymentId: string,
-  ): Promise<{ allowance: PostPurchaseAllowanceSummary | null; warnings: AgentPaymentWarning[] }> {
-    const unavailable = (detail: string): { allowance: null; warnings: AgentPaymentWarning[] } => ({
+  ): Promise<{
+    allowance: PostPurchaseAllowanceSummary | null
+    warnings: AgentPaymentWarning[]
+    /** Same authenticated payment-state read used to resolve the settled token. */
+    payment: PaymentStatusResult | null
+  }> {
+    const unavailable = (detail: string): {
+      allowance: null
+      warnings: AgentPaymentWarning[]
+      payment: null
+    } => ({
+      payment: null,
       allowance: null,
       warnings: [
         {
@@ -994,29 +1036,39 @@ export class HavenClient {
         },
       ],
     })
-    try {
-      // #1320 review: all three reads in ONE parallel leg — the status result
-      // only gates the token MATCH below, so sequencing it first doubled the
-      // worst-case bound (2 × requestTimeout) for a best-effort report.
-      const [status, agent, allowanceSummary] = await Promise.all([
+    // #1320 review: all three reads in ONE parallel leg. Keep a successfully
+    // read payment state even when a best-effort allowance read fails: it is
+    // authoritative reporting data in its own right.
+    const [statusResult, agentResult, allowanceResult] = await Promise.allSettled([
         this.getPaymentStatus(paymentId),
         this.getAgent(),
         this.getAllowances(),
-      ])
+    ])
+    if (statusResult.status === 'rejected') {
+      return unavailable(statusResult.reason instanceof Error ? statusResult.reason.message : String(statusResult.reason))
+    }
+    const status = statusResult.value
+    if (agentResult.status === 'rejected') {
+      return { ...unavailable(agentResult.reason instanceof Error ? agentResult.reason.message : String(agentResult.reason)), payment: status }
+    }
+    if (allowanceResult.status === 'rejected') {
+      return { ...unavailable(allowanceResult.reason instanceof Error ? allowanceResult.reason.message : String(allowanceResult.reason)), payment: status }
+    }
+    try {
       const tokenAddress = status.asset ?? status.x402?.asset ?? null
       if (!tokenAddress) {
-        return unavailable('the settled payment does not carry a resolvable token address')
+        return { ...unavailable('the settled payment does not carry a resolvable token address'), payment: status }
       }
-      const rail = agent.executionRail
+      const rail = agentResult.value.executionRail
       const source = rail === 'delegation' ? 'active_delegations' : 'allowance_module'
-      const match = allowanceSummary.allowances.find(
+      const match = allowanceResult.value.allowances.find(
         (a) => a.tokenAddress.toLowerCase() === tokenAddress.toLowerCase(),
       )
       if (!match) {
         // #1320 review: a missing row is UNKNOWN, not zero — an unexpected
         // address, rail mismatch, or read race must not report a confident
         // "$0 remaining" to the user.
-        return unavailable('no allowance/budget row matches the settled token')
+        return { ...unavailable('no allowance/budget row matches the settled token'), payment: status }
       }
       // Same "only format when decimals are known" discipline as
       // getAgentSummary() above — an unregistered token surfaces the exact
@@ -1026,6 +1078,7 @@ export class HavenClient {
         ? `${formatAtomicAmount(safeBigInt(match.onchain.remaining), token.decimals)} ${match.tokenSymbol}`
         : undefined
       return {
+        payment: status,
         allowance: {
           rail,
           remaining_atomic: match.onchain.remaining,
@@ -1078,10 +1131,11 @@ export class HavenClient {
    * same session. Never creates payments or signatures.
    */
   async discoverTools(
-    options: { category?: string; rail?: 'x402' | 'mpp' } = {},
+    options: { category?: string; search?: string; rail?: 'x402' | 'mpp' } = {},
   ): Promise<HavenCatalogEntry[]> {
     const params = new URLSearchParams()
     if (options.category) params.set('category', options.category)
+    if (options.search !== undefined) params.set('search', options.search)
     if (options.rail) params.set('rail', options.rail)
     const query = params.size > 0 ? `?${params.toString()}` : ''
     const raw = await this.get<{ entries: RawCatalogEntry[] }>(`/catalog${query}`)
@@ -1336,6 +1390,10 @@ export class HavenClient {
       network: option.network,
       description: paymentRequired.resource.description,
       idempotencyKey,
+      // #1360: same explicit funding-leg declaration as createX402Intent —
+      // this local-key path derives payTo from the key (never stale), but the
+      // declaration keeps both writers of the 3009 shape loud-by-default.
+      settlementScheme: 'eip3009',
     })
 
     // If the backend already executed (shouldn't happen without sig), return
@@ -2909,6 +2967,11 @@ export class HavenClient {
       amountAtomic: x402AuthorizationAmount(option),
       amount: decimalFromUsdcAtomic(x402AuthorizationAmount(option)),
       token: token?.symbol ?? 'USDC',
+      // #1351: null when the asset is unrecognised on this network — the
+      // `token` fallback above is a LABEL, not evidence of 6 decimals, and a
+      // human-denominated cap must fail closed rather than convert against a
+      // guess. Same resolution as `token`, so the two never disagree.
+      decimals: token?.decimals ?? null,
       asset: option.asset,
       network: option.network,
       chainId: chainIdOrNull(option.network),

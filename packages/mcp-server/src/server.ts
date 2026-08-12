@@ -9,7 +9,7 @@ import {
 } from './tools.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.1.22-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.1.23-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -26,8 +26,11 @@ export const HOSTED_INSTRUCTIONS = [
   'readiness, and live remaining budget in one call.',
   '',
   'To buy from a catalogued MCP merchant: haven_discover_tools for a catalog_id,',
-  'then haven_prepare_catalog_purchase with { catalog_id, max_amount } —',
-  'max_amount is required. Every payment tool response carries next_action,',
+  'then haven_prepare_catalog_purchase with { catalog_id, max_amount_human } —',
+  'a spending cap is required. Give it in whole tokens as the user said it:',
+  'max_amount_human "1" is 1 USDC. (max_amount is the atomic-unit form, where',
+  '"1" is 0.000001 USDC; send one or the other, never both.)',
+  'Every payment tool response carries next_action,',
   'next_tool, and next_arguments — follow those fields first; description prose',
   'is fallback, not the source of truth.',
   '',

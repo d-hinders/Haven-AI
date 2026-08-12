@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # #1319: the #1306 preflight's allowance block gained ALLOWANCE_READ_OPTIMISTIC (the #1145 fallback's provenance, remaining_is_from_chain, is now on the GET /machine-payments/allowances wire, delegation-rail only); the post-purchase summary's freshness caveat updated to say the provenance exists but is not yet surfaced there. Prior #1321: hosted paid-MCP quote now establishes its MCP session before the unpaid tools/call; signing, quote binding, and settle authority unchanged. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
+last-verified: "2026-08-12" # #1360: SDK 3009-shape writers always declare settlementScheme (stale-delegate payTo now fails the shape check loudly; old-SDK shape-only selection characterization-tested) + prior same-day: #1351: the guided path's required cap accepts either spelling — max_amount_human (whole tokens, converted with the LIVE quote's decimals) or the unchanged atomic max_amount; both-sent, neither-sent and unconvertible are pre-funding refusals. Prior same-day: #1349: settled reporting contract sourced from Haven state, merchant raw result evidence-only. #1348: preflight round-trip budget (reads overlap the probe, getAgent in-flight coalescing, delegateAddress option; failure semantics + refusal order unchanged) + prior same-day: #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Same day #1350: catalog discovery now documents case-insensitive category matching plus read-only search over name/description/category; results remain deterministic and indicative only. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -100,6 +100,16 @@ tools and on the settle tool's queued-funding branch), a compact
 `agent_summary`, and an advisory `warnings[]` (MISSING_MAX_AMOUNT absorbs the
 #1275 cap nudge; QUOTE_EXPIRES_SOON; MERCHANT_URL_DISCOVERED). Warnings never
 replace refusals; failure codes stay authoritative.
+
+Since #1349, a successful hosted `haven_settle_mcp_tool` also places the default
+reporting contract at `agent_summary.purchase_summary`: `{ status: 'settled',
+product, amount, amount_atomic, asset, network, merchant, invoice_id,
+funding_tx_hash, settlement_tx_hash, allowance }`. Haven payment state supplies
+settlement status, money, merchant identity, and funding fields. `product` and
+`invoice_id` are narrow merchant display metadata; `settlement_tx_hash` is an
+optional merchant `PAYMENT-RESPONSE` receipt reference, not Haven settlement
+proof. Missing values are explicit `null`. The top-level raw `result` remains
+advanced merchant evidence and never decides whether Haven reports settlement.
 
 Hosted `haven_pay_mcp_tool` additionally accepts a **base merchant URL**
 (#1271): when the probe misses (non-402), it makes one bounded same-origin
@@ -294,7 +304,8 @@ The recommended three-call fast path for an x402-protected MCP tool is:
    merchant-bound payment header.
 3. `haven_settle_mcp_tool` — hosted MCP relays the funding signature, waits for
    confirmation, performs a fresh merchant MCP handshake, delivers the signed
-   header, and returns the tool result.
+   header, and returns `agent_summary.purchase_summary` as the default report;
+   raw `result` remains optional merchant evidence.
 
 **Settle by `payment_id` (#1307).** `haven_settle_mcp_tool` and
 `haven_complete_mcp_tool` accept `merchant_url` / `tool_name` / `arguments` /
@@ -337,7 +348,15 @@ the payment id and inspect and reconcile the attempt before using
 
 ## Guided Catalog Purchase Preflight (#1306)
 
-`haven_prepare_catalog_purchase({ catalog_id, max_amount, idempotency_key? })`
+Before this guided path, the agent can read the curated catalog through
+`GET /catalog` or `haven_discover_tools`. That discovery surface is still
+strictly read-only: `category` is matched case-insensitively after trim, the
+optional `search` term matches `name`, `description`, or `category`, and the
+existing `rail` plus agent-chain scoping still apply. Results stay
+deterministically ordered and may be empty or multi-row; they never authorize
+payment, and any catalog price remains indicative until the live quote below.
+
+`haven_prepare_catalog_purchase({ catalog_id, max_amount_human | max_amount, idempotency_key? })`
 starts a paid-MCP-tool purchase from a curated `merchant_catalog` row instead
 of a hand-copied `merchant_url` / `tool_name` / `tool_arguments`. It is a
 convenience and verification layer built entirely from EXISTING primitives —
@@ -348,8 +367,11 @@ quote probe with the #1271 discovery fallback is shared via one
 the SAME compact ready-to-sign shape `haven_pay_mcp_tool` returns (#1272:
 `payment_id`, `payload_hash`, `expires_at`, `signer_compatibility`, `x402`)
 plus catalog fields — never a third signing surface. The signer flow after
-this tool is IDENTICAL to today's: `haven_sign_x402` with `payment_id` +
-`payment_required`, then `haven_settle_mcp_tool`.
+this tool is IDENTICAL to today's: `haven_sign_x402` with `payment_id` alone
+(#1355: the signer's authenticated sign-context fetch also carries the
+`payment_required` persisted on the intent's `machine_metadata` at authorize
+time — the #1307 pattern applied to the sign leg; on a pre-#1355 backend the
+signer asks for `payment_required` explicitly), then `haven_settle_mcp_tool`.
 
 Sequence:
 
@@ -364,12 +386,48 @@ Sequence:
    manual fallback.
 3. Run the LIVE quote against the entry's own `resource_url` / `tool_name` /
    `tool_arguments` — the shared probe, including the #1271 same-origin
-   discovery fallback.
-4. `max_amount` is **required** on this tool (unlike `haven_pay_mcp_tool`'s
+   discovery fallback. **Round-trip budget (#1348):** the two Haven reads
+   steps 5–6 need (agent, allowances) are independent of this probe, so they
+   are DISPATCHED here and overlap the merchant leg — the slowest part of the
+   preflight — instead of following it. Failure semantics are unchanged: the
+   quote is awaited first (its error wins deterministically when several legs
+   fail), the agent read remains a hard pre-intent refusal, and the allowance
+   read still degrades to a warning. Additionally, `getAgent` coalesces
+   CONCURRENT calls into one HTTP GET (in-flight dedupe only, never a cache —
+   sequential calls stay fresh reads), and `createX402Intent` accepts the
+   already-fetched `delegateAddress` instead of re-fetching the agent. Net: a
+   successful preflight makes exactly ONE call per Haven surface — catalog,
+   agent, allowances, `POST /x402` — enforced by round-trip-count unit tests
+   (deterministic, unlike wall-clock); per-step wall-clock telemetry rides the
+   promotion-gating QA scenario's pass detail.
+4. A spending cap is **required** on this tool (unlike `haven_pay_mcp_tool`'s
    optional cap) — this IS the guided path, so there is no `cap_warning`
    softness. Enforced against the LIVE quote via the SAME
    `assertWithinMaxAmount` guard, before any funding intent exists
    (`PRICE_EXCEEDS_MAX`).
+
+   **Two spellings, one cap (#1351).** `max_amount` is atomic units;
+   `max_amount_human` is the same cap in whole tokens, so `"1"` means 1 USDC
+   rather than 0.000001 USDC. Exactly one may be sent. The human form is
+   converted using the decimals of the **live quote's** asset (`X402Quote.decimals`,
+   resolved from the same address→token binding that produces `token`) — never a
+   caller-supplied token name, never an assumed 6. Three refusals, all before any
+   merchant probe, funding intent, or signature, and none of which can widen the
+   on-chain budget:
+
+   | Condition | Code | When it fires |
+   |---|---|---|
+   | Both fields sent | `AMBIGUOUS_MAX_AMOUNT` | Before any network call — even when the two agree |
+   | Neither field sent | `INVALID_INPUT` | Before any network call (this tool only) |
+   | Human cap unconvertible — unknown asset decimals, or more fraction digits than the asset holds | `MAX_AMOUNT_UNCONVERTIBLE` | After the live quote, before the funding intent |
+   | A cap of **either** spelling was sent but no payment option is settleable, so there is no merchant-authoritative amount to compare it against (`haven_pay_x402_quote`) | `MAX_AMOUNT_UNCONVERTIBLE` | Before the funding intent |
+
+   The unknown-decimals case is reachable rather than theoretical:
+   `selectStandardPaymentOption` checks network and asset against separate sets,
+   so Base-Sepolia USDC advertised on mainnet Base is selectable but resolves to
+   no known token. `X402Quote.decimals` is `null` there and the human cap is
+   refused; an exact atomic `max_amount` still works, since comparing it needs no
+   decimals. `max_amount`'s meaning is unchanged for existing callers.
 5. Read a rail-aware allowance/budget report via the EXISTING, already
    rail-aware `GET /machine-payments/allowances` (#1135) and the account's
    `execution_rail` (now also carried on `GET /machine-payments/agent`,
@@ -642,7 +700,14 @@ shape made every v2 merchant reject with a generic failure — caught by the
 
 An explicit `settlementScheme` field is validated against that shape on every
 rail, so a confused client fails loudly instead of silently getting the wrong
-flow. Native-token x402 is still rejected on this rail (no ERC20 transfer to
+flow. Since #1360 the SDK's two 3009-shape writers (`createX402Intent`, the
+local-key `authorizeX402`) ALWAYS declare `settlementScheme: 'eip3009'` —
+closing the #1358-review gap where a delegate address made stale by a rotation
+mid-flow was indistinguishable from a merchant `payTo` and silently routed an
+open-budget agent to the erc7710 settlement branch; with the declaration it is
+the loud shape-mismatch 400. Old SDKs that omit the field keep shape-only
+selection (characterization-tested), and legacy-rail backends accept and
+ignore the declaration. Native-token x402 is still rejected on this rail (no ERC20 transfer to
 pin or meter). The chosen scheme is recorded on the intent
 (`machine_metadata.settlement_scheme`, alongside `network`) so 3009-mode usage
 is auditable and its eventual retirement measurable — as of #1061 the

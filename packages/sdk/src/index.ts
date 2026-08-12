@@ -67,6 +67,7 @@ export type {
   X402RequestSnapshot,
   X402Quote,
   AgentNextStep,
+  AgentPurchaseSummary,
   AgentPaymentSummary,
   AgentPaymentWarning,
   X402ResumeState,
@@ -121,6 +122,10 @@ export {
   X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
   buildX402ExpectedMessage,
   encodePaymentProof,
+  // #1351: the address→{symbol,decimals} binding behind X402Quote.decimals.
+  // Exported so a consumer holding only a payment OPTION (not a built quote)
+  // resolves decimals through exactly the same table the quote used.
+  resolveTokenFromAddress,
 } from './x402.js'
 
 export {

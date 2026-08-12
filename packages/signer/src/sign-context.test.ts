@@ -64,6 +64,30 @@ describe('fetchX402SignContext (#1263)', () => {
     )
   })
 
+  it('carries payment_required when present, null when absent or malformed (#1355)', async () => {
+    const base = {
+      payment_id: 'pay_1355',
+      sign_data: { hash: '0x' + 'ab'.repeat(32), typed_data: { primaryType: 'X' } },
+      x402_expected: { payment_id: 'pay_1355' },
+    }
+    const withBlob = (async () =>
+      new Response(
+        JSON.stringify({ ...base, payment_required: { accepts: [{ scheme: 'exact' }] } }),
+        { status: 200 },
+      )) as typeof fetch
+    expect((await fetchX402SignContext(identity, 'pay_1355', withBlob)).paymentRequired).toEqual({
+      accepts: [{ scheme: 'exact' }],
+    })
+
+    const without = (async () => new Response(JSON.stringify(base), { status: 200 })) as typeof fetch
+    expect((await fetchX402SignContext(identity, 'pay_1355', without)).paymentRequired).toBeNull()
+
+    // An array or scalar is not a PaymentRequired — null, never a crash.
+    const malformed = (async () =>
+      new Response(JSON.stringify({ ...base, payment_required: [1, 2] }), { status: 200 })) as typeof fetch
+    expect((await fetchX402SignContext(identity, 'pay_1355', malformed)).paymentRequired).toBeNull()
+  })
+
   it('refuses a response missing the signing payload, naming the fallback', async () => {
     const fetchImpl = (async () =>
       new Response(JSON.stringify({ payment_id: 'pay_x' }), { status: 200 })) as typeof fetch

@@ -33,6 +33,8 @@ export interface AuthorizeX402Input {
   facilitatorAddresses?: string[]
   /** #1307: optional MCP merchant-call context, persisted for settle-leg rehydration. */
   mcpCallContext?: X402McpCallContextInput
+  /** #1355: optional full 402 PaymentRequired, persisted for sign-leg rehydration. */
+  paymentRequired?: Record<string, unknown>
   log?: FastifyBaseLogger
 }
 
@@ -40,7 +42,7 @@ export async function authorizeX402(input: AuthorizeX402Input): Promise<X402Hand
   const {
     agent, url, payTo, merchantPayTo, amount, asset, network, description, category,
     idempotencyKey, maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses,
-    mcpCallContext, log,
+    mcpCallContext, paymentRequired, log,
   } = input
 
   const genericSchemeError = validateGenericSchemeRail(agent, settlementScheme, facilitatorAddresses)
@@ -82,7 +84,7 @@ export async function authorizeX402(input: AuthorizeX402Input): Promise<X402Hand
     return runDelegationAuthorize({
       agent, url, payTo, merchantPayTo, amountRaw, amountHuman, category, idempotencyKey,
       maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses, network, tokenConfig, tokenAddress,
-      mcpCallContext,
+      mcpCallContext, paymentRequired,
     })
   }
 

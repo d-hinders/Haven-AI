@@ -3,6 +3,7 @@ import { CONNECTOR_VERSION, type ConnectOptions } from './runtime.js'
 export interface ParsedCli {
   options: ConnectOptions
   help: boolean
+  json: boolean
 }
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ParsedCli {
@@ -11,11 +12,14 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     connectorVersion: CONNECTOR_VERSION,
   }
   let help = false
+  let json = false
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--help' || arg === '-h') {
       help = true
+    } else if (arg === '--json') {
+      json = true
     } else if (arg === '--setup' || arg === '--setup-token') {
       options.setupToken = requireValue(argv, ++i, arg)
     } else if (arg === '--api' || arg === '--api-url') {
@@ -42,7 +46,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   }
 
   if (help) {
-    return { options: options as ConnectOptions, help }
+    return { options: options as ConnectOptions, help, json }
   }
 
   if (!options.setupToken) {
@@ -53,7 +57,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   }
 
   options.apiBaseUrl = options.apiBaseUrl.replace(/\/+$/, '')
-  return { options: options as ConnectOptions, help }
+  return { options: options as ConnectOptions, help, json }
 }
 
 export function helpText(): string {
@@ -76,9 +80,10 @@ export function helpText(): string {
     '  --ack-signer               Backward-compatible alias for --ack-local-tools.',
     '  --local                    Advanced: install the fully-local Haven MCP (no hosted dependency).',
     '                             Only available for Claude Code and Codex. Default is hosted MCP + local signer.',
+    '  --json                     Emit one versioned, secret-free result object on stdout; progress stays on stderr.',
     '  --help                     Show this help.',
     '',
-    'The connector never prints the private key and never sends it to Haven.',
+    'The connector never prints the private key and never sends it to Haven. JSON output never includes credential contents or full credential paths.',
   ].join('\n')
 }
 

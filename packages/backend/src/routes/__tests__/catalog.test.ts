@@ -45,6 +45,16 @@ const ENTRY = {
   updated_at: '2026-06-10T00:00:00.000Z',
 }
 
+const VPN_ENTRY = {
+  ...ENTRY,
+  id: 'cat-vpn-basic',
+  name: 'NordShield VPN Basic',
+  description: 'Private VPN access for one device.',
+  category: 'vpn',
+  tool_name: 'buy_vpn',
+  tool_arguments: { plan: 'basic' },
+}
+
 /**
  * The agent-auth middleware issues its own SELECT before the route handler
  * runs. Route mocks therefore answer the agent lookup first when an agent
@@ -142,7 +152,7 @@ describe('catalog routes', () => {
       .slice()
       .reverse()
       .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
-    expect(String(catalogCall?.[0])).toContain('category = $1')
+    expect(String(catalogCall?.[0])).toContain('LOWER(TRIM(category)) = LOWER(TRIM($1))')
     expect(String(catalogCall?.[0])).toContain('rail = $2')
     expect(String(catalogCall?.[0])).toContain('network = $3')
     expect(catalogCall?.[1]).toEqual(['storage', 'x402', 'eip155:8453'])
@@ -160,10 +170,135 @@ describe('catalog routes', () => {
 
     expect(res.statusCode).toBe(200)
     const [sql, values] = mockQuery.mock.calls[0]
-    expect(String(sql)).toContain('category = $1')
+    expect(String(sql)).toContain('LOWER(TRIM(category)) = LOWER(TRIM($1))')
     expect(String(sql)).toContain('rail = $2')
     expect(String(sql)).not.toContain('network = $3')
     expect(values).toEqual(['media', 'x402'])
+  })
+
+  it('matches categories case-insensitively and trims user input', async () => {
+    mockQuery.mockResolvedValue({ rows: [VPN_ENTRY] })
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/catalog?category=%20VPN%20',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries[0]).toMatchObject({
+      id: 'cat-vpn-basic',
+      name: 'NordShield VPN Basic',
+      category: 'vpn',
+    })
+    const [sql, values] = mockQuery.mock.calls[0]
+    expect(String(sql)).toContain('LOWER(TRIM(category)) = LOWER(TRIM($1))')
+    expect(values).toEqual(['VPN'])
+  })
+
+  it('searches names, descriptions, and categories without changing read-only scoping', async () => {
+    mockAgentLookupThen({ rows: [VPN_ENTRY] })
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/catalog?search=NordShield%20VPN%20Basic&rail=x402',
+      headers: { authorization: `Bearer ${AGENT_KEY}` },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries[0]).toMatchObject({ id: 'cat-vpn-basic', category: 'vpn' })
+    const catalogCall = mockQuery.mock.calls
+      .slice()
+      .reverse()
+      .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
+    expect(String(catalogCall?.[0])).toContain(
+      `(name ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%' OR category ILIKE '%' || $2 || '%')`,
+    )
+    expect(String(catalogCall?.[0])).toContain(`rail = $1`)
+    expect(String(catalogCall?.[0])).toContain(`network = $3`)
+    expect(String(catalogCall?.[0])).toContain(`status != 'delisted'`)
+    expect(String(catalogCall?.[0])).toContain('ORDER BY status = \'active\' DESC, category ASC, name ASC, id ASC')
+    expect(catalogCall?.[1]).toEqual(['x402', 'NordShield VPN Basic', 'eip155:8453'])
+  })
+
+  it('finds a product from a category term search', async () => {
+    mockQuery.mockResolvedValue({ rows: [VPN_ENTRY] })
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/catalog?search=VPN',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries).toEqual([
+      expect.objectContaining({
+        id: 'cat-vpn-basic',
+        name: 'NordShield VPN Basic',
+        category: 'vpn',
+      }),
+    ])
+    const [sql, values] = mockQuery.mock.calls[0]
+    expect(String(sql)).toContain(
+      `(name ILIKE '%' || $1 || '%' OR description ILIKE '%' || $1 || '%' OR category ILIKE '%' || $1 || '%')`,
+    )
+    expect(values).toEqual(['VPN'])
+  })
+
+  it('returns an empty result for an unmatched search', async () => {
+    mockQuery.mockResolvedValue({ rows: [] })
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/catalog?search=does-not-exist',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ entries: [] })
+  })
+
+  it('rejects malformed category and malformed search filters before querying the catalog', async () => {
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const repeatedCategory = await app.inject({
+      method: 'GET',
+      url: '/catalog?category=vpn&category=storage',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(repeatedCategory.statusCode).toBe(400)
+    expect(repeatedCategory.json()).toEqual({ error: 'Category must be a single string' })
+
+    mockQuery.mockClear()
+    const empty = await app.inject({
+      method: 'GET',
+      url: '/catalog?search=%20%20',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(empty.statusCode).toBe(400)
+    expect(empty.json()).toEqual({ error: 'Search must not be empty' })
+
+    mockQuery.mockClear()
+    const repeated = await app.inject({
+      method: 'GET',
+      url: '/catalog?search=one&search=two',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(repeated.statusCode).toBe(400)
+    expect(repeated.json()).toEqual({ error: 'Search must be a single string' })
+
+    mockQuery.mockClear()
+    const long = await app.inject({
+      method: 'GET',
+      url: `/catalog?search=${'x'.repeat(121)}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(long.statusCode).toBe(400)
+    expect(long.json()).toEqual({ error: 'Search must be 120 characters or fewer' })
+    expect(mockQuery).not.toHaveBeenCalled()
   })
 
   it('rejects an unknown rail filter', async () => {

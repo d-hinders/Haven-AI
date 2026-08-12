@@ -133,7 +133,7 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    and settling, both `buildHostedMcpServer` (`packages/mcp-server/src/server.ts`)
    and `buildMcpServer` (`packages/mcp/src/server.ts`) also set MCP
    `instructions` — a compact, version-literal-free critical path (identity
-   first, catalog purchase with `max_amount`, follow the response's guidance
+   first, catalog purchase with a spending cap (`max_amount_human`), follow the response's guidance
    fields, sign/settle by `payment_id`, pending approval means stop) for
    clients that surface `instructions` even when they never render individual
    tool descriptions. The local server's instructions omit the signer

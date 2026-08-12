@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-12" # #1349: settled reporting contract sourced from Haven state, merchant raw result evidence-only. #1348: preflight round-trip budget (reads overlap the probe, getAgent in-flight coalescing, delegateAddress option; failure semantics + refusal order unchanged) + prior same-day: #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Same day #1350: catalog discovery now documents case-insensitive category matching plus read-only search over name/description/category; results remain deterministic and indicative only. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
+last-verified: "2026-08-12" # #1351: the guided path's required cap accepts either spelling — max_amount_human (whole tokens, converted with the LIVE quote's decimals) or the unchanged atomic max_amount; both-sent, neither-sent and unconvertible are pre-funding refusals. Prior same-day: #1349: settled reporting contract sourced from Haven state, merchant raw result evidence-only. #1348: preflight round-trip budget (reads overlap the probe, getAgent in-flight coalescing, delegateAddress option; failure semantics + refusal order unchanged) + prior same-day: #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Same day #1350: catalog discovery now documents case-insensitive category matching plus read-only search over name/description/category; results remain deterministic and indicative only. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -356,7 +356,7 @@ existing `rail` plus agent-chain scoping still apply. Results stay
 deterministically ordered and may be empty or multi-row; they never authorize
 payment, and any catalog price remains indicative until the live quote below.
 
-`haven_prepare_catalog_purchase({ catalog_id, max_amount, idempotency_key? })`
+`haven_prepare_catalog_purchase({ catalog_id, max_amount_human | max_amount, idempotency_key? })`
 starts a paid-MCP-tool purchase from a curated `merchant_catalog` row instead
 of a hand-copied `merchant_url` / `tool_name` / `tool_arguments`. It is a
 convenience and verification layer built entirely from EXISTING primitives —
@@ -400,11 +400,34 @@ Sequence:
    agent, allowances, `POST /x402` — enforced by round-trip-count unit tests
    (deterministic, unlike wall-clock); per-step wall-clock telemetry rides the
    promotion-gating QA scenario's pass detail.
-4. `max_amount` is **required** on this tool (unlike `haven_pay_mcp_tool`'s
+4. A spending cap is **required** on this tool (unlike `haven_pay_mcp_tool`'s
    optional cap) — this IS the guided path, so there is no `cap_warning`
    softness. Enforced against the LIVE quote via the SAME
    `assertWithinMaxAmount` guard, before any funding intent exists
    (`PRICE_EXCEEDS_MAX`).
+
+   **Two spellings, one cap (#1351).** `max_amount` is atomic units;
+   `max_amount_human` is the same cap in whole tokens, so `"1"` means 1 USDC
+   rather than 0.000001 USDC. Exactly one may be sent. The human form is
+   converted using the decimals of the **live quote's** asset (`X402Quote.decimals`,
+   resolved from the same address→token binding that produces `token`) — never a
+   caller-supplied token name, never an assumed 6. Three refusals, all before any
+   merchant probe, funding intent, or signature, and none of which can widen the
+   on-chain budget:
+
+   | Condition | Code | When it fires |
+   |---|---|---|
+   | Both fields sent | `AMBIGUOUS_MAX_AMOUNT` | Before any network call — even when the two agree |
+   | Neither field sent | `INVALID_INPUT` | Before any network call (this tool only) |
+   | Human cap unconvertible — unknown asset decimals, or more fraction digits than the asset holds | `MAX_AMOUNT_UNCONVERTIBLE` | After the live quote, before the funding intent |
+   | A cap of **either** spelling was sent but no payment option is settleable, so there is no merchant-authoritative amount to compare it against (`haven_pay_x402_quote`) | `MAX_AMOUNT_UNCONVERTIBLE` | Before the funding intent |
+
+   The unknown-decimals case is reachable rather than theoretical:
+   `selectStandardPaymentOption` checks network and asset against separate sets,
+   so Base-Sepolia USDC advertised on mainnet Base is selectable but resolves to
+   no known token. `X402Quote.decimals` is `null` there and the human cap is
+   refused; an exact atomic `max_amount` still works, since comparing it needs no
+   decimals. `max_amount`'s meaning is unchanged for existing callers.
 5. Read a rail-aware allowance/budget report via the EXISTING, already
    rail-aware `GET /machine-payments/allowances` (#1135) and the account's
    `execution_rail` (now also carried on `GET /machine-payments/agent`,

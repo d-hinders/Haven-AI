@@ -186,7 +186,7 @@ export const toolDescriptions = {
       'The catalog price (price_display/price_atomic, marked price_is_indicative) is a last-verified hint, NOT authoritative — the real price comes from the merchant\'s live 402 at pay time. ' +
       'Never creates a payment, signature, or approval.',
     nextActionGuidance:
-      'Pick an entry and pay it with the tool named in suggested_tool, passing the entry\'s resource_url, tool_name, and tool_arguments for MCP merchants. Confirm the price from the live pay-tool result (not the catalog), and pass max_amount when the user has a cap.',
+      'Pick an entry and pay it with the tool named in suggested_tool, passing the entry\'s resource_url, tool_name, and tool_arguments for MCP merchants. Confirm the price from the live pay-tool result (not the catalog), and pass the user\'s cap as max_amount_human in whole tokens ("no more than 1 USDC" → max_amount_human: "1") — never convert it to atomic units by hand (#1351).',
   },
   sweep_delegate: {
     summary:

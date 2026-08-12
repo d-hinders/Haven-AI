@@ -435,6 +435,16 @@ export interface X402Quote {
   amountAtomic: string
   amount: string
   token: string
+  /**
+   * #1351: decimals for `asset` on `network`, resolved from the SAME
+   * address→token binding that produced `token` — the quote's own authority on
+   * how many atomic units one human unit is. `null` when the merchant's asset
+   * is not a token Haven recognises on that network, in which case `token` is
+   * an unverified fallback label and NO human→atomic conversion is safe.
+   * Consumers converting a human-denominated figure (a user-intent spending
+   * cap) MUST fail closed on `null` rather than assume 6.
+   */
+  decimals: number | null
   asset: string
   network: string
   chainId: number | null
@@ -907,6 +917,22 @@ export const AgentPaymentFailureCode = {
    * mcp_transport explicitly (the version-skew path).
    */
   MerchantCallContextUnavailable: 'MERCHANT_CALL_CONTEXT_UNAVAILABLE',
+  /**
+   * #1351: the caller supplied BOTH the atomic `max_amount` and the
+   * human-denominated `max_amount_human` cap for one purchase. Haven refuses
+   * to guess which the user meant — the two differ by a factor of 10^decimals,
+   * so picking wrong is exactly the silent-overspend this cap exists to
+   * prevent. Rejected before any merchant probe, funding intent, or signature.
+   */
+  AmbiguousMaxAmount: 'AMBIGUOUS_MAX_AMOUNT',
+  /**
+   * #1351: a human-denominated cap was supplied, but it cannot be converted to
+   * atomic units against THIS quote — either the quote's asset has no known
+   * decimals on its network, or the cap carries more fraction digits than the
+   * asset can represent (truncating it would silently change the user's cap).
+   * The fallback is the exact atomic `max_amount`.
+   */
+  MaxAmountUnconvertible: 'MAX_AMOUNT_UNCONVERTIBLE',
 } as const
 
 export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typeof AgentPaymentFailureCode]
@@ -1007,6 +1033,10 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
     'The Haven funding leg succeeded, but the merchant did not answer the paid retry before the timeout. The merchant may still settle late — check haven_get_payment_status (and retry haven_complete_mcp_tool once) BEFORE sweeping; sweep only if no settlement appears.',
   [AgentPaymentFailureCode.MerchantCallContextUnavailable]:
     'merchant_url/tool_name were omitted and no stored merchant call context is available for this payment_id. Re-send merchant_url, tool_name, arguments, and mcp_transport explicitly.',
+  [AgentPaymentFailureCode.AmbiguousMaxAmount]:
+    'Both max_amount (atomic units) and max_amount_human (whole tokens) were supplied for one purchase. Nothing was contacted and nothing was spent. Re-send with exactly ONE: max_amount_human for a cap the user stated in tokens, max_amount for an exact atomic figure.',
+  [AgentPaymentFailureCode.MaxAmountUnconvertible]:
+    "max_amount_human could not be converted to atomic units against this quote's asset — either its decimals are unknown to Haven or the cap has more decimal places than the asset supports. Nothing was spent. Round the cap, or re-send it as an exact atomic max_amount.",
 }
 
 /**

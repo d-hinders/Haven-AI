@@ -36,6 +36,37 @@ export interface ConnectOptions {
   localMcp?: boolean
 }
 
+/** The stable machine-readable result emitted by `haven-connect --json`. */
+export const CONNECT_OUTCOME_SCHEMA_VERSION = 1 as const
+
+export type ConnectOutcomeStatus = 'complete' | 'action_required' | 'failed'
+
+export interface ConnectOutcome {
+  schema_version: typeof CONNECT_OUTCOME_SCHEMA_VERSION
+  outcome: ConnectOutcomeStatus
+  runtime: string
+  topology: string
+  configuration: {
+    hosted_mcp: boolean
+    local_signer: boolean
+    local_mcp: boolean
+  }
+  probe: { result: string }
+  activation: {
+    restart_required: boolean
+    instruction: string
+  }
+  next_action: string
+  approval: { required: boolean; expires_at: string | null }
+  verification: {
+    tools: readonly ['haven_get_agent', 'haven_get_allowances']
+    instruction: string
+  }
+  delegate_address?: string
+  setup_challenge_expires_at?: string
+  error?: { code: string; next_action: string }
+}
+
 export interface ConnectDeps {
   api?: ConnectApiClient
   generateKey?: () => LocalDelegateKey
@@ -44,6 +75,8 @@ export interface ConnectDeps {
   writeCredentials?: typeof writeCredentialFiles
   installRuntime?: typeof installRuntime
   log?: (message: string) => void
+  /** JSON CLI mode must not expose owner-only credential file locations. */
+  redactPaths?: boolean
   /** Overridable so the Node-floor refusal is testable without spawning a Node. */
   nodeVersion?: string
 }
@@ -53,6 +86,8 @@ export interface ConnectResult {
   agentId: string
   delegateAddress: string
   credentialPaths: StoredCredentialPaths
+  /** Additive, secret-free completion contract shared by library callers and --json. */
+  outcome: ConnectOutcome
 }
 
 export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}): Promise<ConnectResult> {
@@ -77,7 +112,10 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
 
   const connectorVersion = options.connectorVersion ?? CONNECTOR_VERSION
   const api = deps.api ?? createConnectApiClient(options.apiBaseUrl)
-  const log = secureLogger(deps.log ?? ((message) => process.stdout.write(`${message}\n`)))
+  const log = secureLogger(
+    deps.log ?? ((message) => process.stdout.write(`${message}\n`)),
+    deps.redactPaths === true,
+  )
   const writeCredentials = deps.writeCredentials ?? writeCredentialFiles
   const preflightStorage = deps.preflightStorage ?? preflightCredentialStorage
   const runRuntimeInstall = deps.installRuntime ?? installRuntime
@@ -233,6 +271,97 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     agentId: registration.agent_id,
     delegateAddress: registration.delegate_address,
     credentialPaths,
+    outcome: completionOutcome({
+      runtimeInstall,
+      delegateAddress: registration.delegate_address,
+      setupChallengeExpiresAt: setup.challenge.expires_at,
+      approvalRequired: registration.agent_status === 'pending_approval',
+    }),
+  }
+}
+
+export function completionOutcome(input: {
+  runtimeInstall: RuntimeInstallResult
+  delegateAddress: string
+  setupChallengeExpiresAt?: string
+  approvalRequired: boolean
+}): ConnectOutcome {
+  const { runtimeInstall } = input
+  const manualSetup = runtimeInstall.errorCode === 'manual_runtime_setup_required'
+  const nextAction = runtimeInstall.nextUserAction
+  const outcome: ConnectOutcome = {
+    schema_version: CONNECT_OUTCOME_SCHEMA_VERSION,
+    outcome: runtimeInstall.errorCode ? 'action_required' : 'complete',
+    runtime: runtimeInstall.runtime,
+    topology: runtimeInstall.runtimeMcpMode,
+    configuration: {
+      hosted_mcp: runtimeInstall.hostedMcpConfigured,
+      local_signer: runtimeInstall.localSignerConfigured,
+      local_mcp: runtimeInstall.localMcpConfigured,
+    },
+    probe: { result: runtimeInstall.probeResult },
+    activation: {
+      restart_required: runtimeInstall.restartRequired,
+      instruction: manualSetup
+        ? 'Finish the manual MCP setup using the secret-free references shown in normal Connect output, then start a fresh session.'
+        : runtimeProfile(runtimeInstall.runtime).activationInstruction,
+    },
+    next_action: nextAction,
+    approval: { required: input.approvalRequired, expires_at: null },
+    verification: {
+      tools: ['haven_get_agent', 'haven_get_allowances'] as const,
+      instruction: runtimeVerificationInstruction(runtimeInstall.runtime),
+    },
+    // The backend contract supplies a 20-byte address. If an unexpected
+    // malformed value arrives, do not echo it into an automation-facing
+    // record; the human log has already been redacted separately.
+    delegate_address: /^0x[0-9a-fA-F]{40}$/.test(input.delegateAddress)
+      ? shortAddress(input.delegateAddress)
+      : '[delegate-address-redacted]',
+    ...(input.setupChallengeExpiresAt ? { setup_challenge_expires_at: input.setupChallengeExpiresAt } : {}),
+    ...(runtimeInstall.errorCode
+      ? { error: { code: runtimeInstall.errorCode, next_action: nextAction } }
+      : {}),
+  }
+  return outcome
+}
+
+/**
+ * A deliberately terse failure record: error messages can contain server or
+ * filesystem detail, while this public contract must remain safe to serialize.
+ */
+export function failedConnectOutcome(runtimeHint: string | undefined, error: unknown): ConnectOutcome {
+  const message = error instanceof Error ? error.message : ''
+  const code = /Node\.js >=/i.test(message)
+    ? 'unsupported_node_version'
+    : /setup challenge.*expired|expired or invalid/i.test(message)
+      ? 'setup_challenge_expired_or_invalid'
+      : /only available for Claude Code and Codex/i.test(message)
+        ? 'local_mcp_unsupported_runtime'
+        : 'connect_failed'
+  const runtime = normalizeRuntime(runtimeHint)
+  const nextAction = code === 'setup_challenge_expired_or_invalid'
+    ? 'return_to_haven_for_fresh_setup'
+    : code === 'unsupported_node_version'
+      ? 'install_supported_node_and_rerun_connect'
+      : code === 'local_mcp_unsupported_runtime'
+        ? 'rerun_without_local_mcp'
+        : 'review_the_safe_error_output_and_start_a_fresh_haven_setup_if_needed'
+  return {
+    schema_version: CONNECT_OUTCOME_SCHEMA_VERSION,
+    outcome: 'failed',
+    runtime,
+    topology: 'unknown',
+    configuration: { hosted_mcp: false, local_signer: false, local_mcp: false },
+    probe: { result: 'not_run' },
+    activation: { restart_required: false, instruction: 'Resolve the reported problem before activating Haven tools.' },
+    next_action: nextAction,
+    approval: { required: false, expires_at: null },
+    verification: {
+      tools: ['haven_get_agent', 'haven_get_allowances'] as const,
+      instruction: 'After a successful setup and activation, verify only with haven_get_agent and haven_get_allowances.',
+    },
+    error: { code, next_action: nextAction },
   }
 }
 
@@ -261,8 +390,16 @@ function isExpiredSetupChallenge(err: unknown): boolean {
   return err instanceof Error && /(?:setup )?challenge.*expir|expir.*(?:setup )?challenge/i.test(err.message)
 }
 
-function secureLogger(log: (message: string) => void): (message: string) => void {
-  return (message) => log(redactSecrets(message))
+function secureLogger(log: (message: string) => void, redactPaths = false): (message: string) => void {
+  return (message) => {
+    let safe = redactSecrets(message)
+    if (redactPaths) {
+      safe = safe
+        .replace(/(?:~|\/)[^\s`"']*\/(?:identity|signer|agent)\.json\b/g, '[credential-file-redacted]')
+        .replace(/(?:~|\/)[^\s`"']*\/\.env\b/g, '[credential-env-redacted]')
+    }
+    log(safe)
+  }
 }
 
 function printRuntimeInstall(result: RuntimeInstallResult, log: (message: string) => void): void {

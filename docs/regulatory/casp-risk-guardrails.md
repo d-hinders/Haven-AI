@@ -49,7 +49,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-12" # #1346 Connect completion handoff re-verified (local-signing, API-identity, approval, no-secret boundaries unchanged) + #1352 Node floor 24->22 (engines/constant only, no perimeter claim touched); earlier: #1330 Hermes identity handoff
+last-verified: "2026-08-12" # #1347 structured Connect outcome re-verified: local-signing, API-identity, approval, and no-secret boundaries unchanged; #1352 Node floor 24->22 (engines/constant only, no perimeter claim touched); #1346 completion handoff; #1330 Hermes identity handoff
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails

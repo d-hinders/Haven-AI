@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-08-11" # #1319: GET /machine-payments/allowances gained an additive optional remaining_is_from_chain (delegation-rail onchain rows only) — provenance for #1145's fallback, reporting only, no authority change
+last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Haven Agent API OpenAPI Contract

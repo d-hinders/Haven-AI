@@ -4,7 +4,7 @@ status: current
 covers:
   - packages/mcp-server/**
   - docker-compose.yml
-last-verified: "2026-08-10" # weekly #1248 audit: clean pass — transport/deploy/observability claims all re-verified verbatim (boot key-refusal, healthz, access-log shape, tool-audit header, CI job names, Node floor); the #1138→#1263 payment-flow changes live in surfaces this doc does not cover
+last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Deploy — Hosted MCP server (`@haven_ai/mcp-server`)

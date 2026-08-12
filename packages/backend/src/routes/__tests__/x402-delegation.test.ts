@@ -240,6 +240,70 @@ describe('x402 delegation-rail settlement (#830)', () => {
     }))
   })
 
+  it('persists paymentRequired into machine_metadata on BOTH delegation branches (#1355 write path)', async () => {
+    // Same discipline as the #1307 write-path test above: prove the quote
+    // STORES the blob, or dropping the metadata line regresses silently and
+    // every signer falls back to demanding the agent-relayed copy.
+    const paymentRequired = {
+      x402Version: 2,
+      resource: { url: 'https://merchant.example/resource' },
+      accepts: [{ scheme: 'exact', network: 'base', amount: '100000', asset: USDC, payTo: MERCHANT }],
+    }
+
+    mockSelect.mockResolvedValue({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    let res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ paymentRequired }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        payment_required: expect.objectContaining({ x402Version: 2 }),
+      }),
+    }))
+
+    mockCreateIntent.mockClear()
+    mockSelect.mockResolvedValue({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({
+        settlementScheme: 'erc7710',
+        facilitatorAddresses: ['0x' + 'fa'.repeat(20)],
+        paymentRequired,
+      }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        payment_required: expect.objectContaining({ x402Version: 2 }),
+      }),
+    }))
+  })
+
+  it('authorize 400s a malformed or oversized paymentRequired instead of silently dropping it', async () => {
+    for (const bad of ['a-string', [1, 2], { blob: 'x'.repeat(70000) }]) {
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ paymentRequired: bad }),
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/paymentRequired/)
+    }
+  })
+
   it('authorize 400s malformed facilitatorAddresses — garbage cannot half-pin a child', async () => {
     for (const bad of [[], ['not-an-address'], 'x', new Array(17).fill('0x' + 'aa'.repeat(20))]) {
       const res = await app.inject({
@@ -1094,6 +1158,45 @@ describe('x402 sign-context by payment_id (#1263)', () => {
       headers: { authorization: 'Bearer sk_agent_test' },
     })
     expect(res.statusCode).toBe(404)
+  })
+
+  it('re-serves the stored payment_required when persisted, and omits the key on pre-#1355 rows', async () => {
+    const paymentRequired = {
+      x402Version: 2,
+      resource: { url: 'https://merchant.example/resource' },
+      accepts: [{ scheme: 'exact', payTo: MERCHANT }],
+    }
+    serveIntentRow([{
+      ...PENDING_ROW,
+      machine_metadata: { ...PENDING_ROW.machine_metadata, payment_required: paymentRequired },
+    }])
+    let res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().payment_required).toEqual(paymentRequired)
+
+    // Stringified JSONB (some drivers) parses the same way.
+    serveIntentRow([{
+      ...PENDING_ROW,
+      machine_metadata: JSON.stringify({ ...PENDING_ROW.machine_metadata, payment_required: paymentRequired }),
+    }])
+    res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.json().payment_required).toEqual(paymentRequired)
+
+    // Pre-#1355 row: the key is ABSENT (not null) so the signer's "carried no
+    // payment_required" fallback triggers cleanly.
+    serveIntentRow([PENDING_ROW])
+    res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/sign-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect('payment_required' in res.json()).toBe(false)
   })
 
   it('409s an already-executed intent with its tx hash', async () => {

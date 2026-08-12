@@ -18,7 +18,7 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/frontend/src/hooks/useSendTransaction.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-10" # #1207 re-verify: POST /payments now carries the send-key idempotency contract (replay/409/lazy-expire per the #961 discipline this doc records); flow claims otherwise unchanged
+last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Haven — Payment Execution Sequence

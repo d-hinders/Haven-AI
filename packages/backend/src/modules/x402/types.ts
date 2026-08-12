@@ -44,6 +44,14 @@ export interface X402AuthorizeBody {
    * echoed in the v2 X-PAYMENT header's accepted entry.
    */
   facilitatorAddresses?: string[]
+  /**
+   * #1355: the merchant's full parsed 402 PaymentRequired, persisted on the
+   * intent row so GET /x402/:id/sign-context can re-serve it — the local
+   * signer then needs only payment_id to build the merchant header. Reporting
+   * material, not payment authority: the signer still verifies whichever copy
+   * it uses against the Haven-signed expected context.
+   */
+  paymentRequired?: Record<string, unknown>
   /** #1307: optional MCP merchant-call context, stored for settle-leg rehydration. */
   mcpCallContext?: X402McpCallContextInput
 }

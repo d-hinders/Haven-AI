@@ -13,7 +13,7 @@ covers:
   - packages/backend/src/routes/__tests__/x402.test.ts
   - packages/backend/src/routes/__tests__/machine-payments.test.ts
   - docs/contributing/ai-agent-workflow.md
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # x402 / Machine-Payment Consolidation (PT-1)

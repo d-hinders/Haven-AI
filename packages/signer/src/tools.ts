@@ -164,7 +164,11 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
       .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string')
       .optional(),
     x402_expected: x402ExpectedSchema.optional(),
-    payment_required: z.record(z.string(), z.unknown()),
+    // #1355: optional when payment_id is supplied — the signer's context fetch
+    // carries the stored 402 PaymentRequired, so `{ payment_id }` alone is the
+    // preferred call. Still required (via the runtime check in the handler)
+    // for the quote-based fallback path without a payment_id.
+    payment_required: z.record(z.string(), z.unknown()).optional(),
     // #1138: delegation-rail intents sign THIS, not payload_hash. Object-typed
     // (not z.unknown()) so MCP clients embed it as JSON rather than a string.
     typed_data: z.record(z.string(), z.unknown()).optional(),
@@ -203,8 +207,10 @@ const SIGN_X402_DESCRIPTION = [
   'One-shot x402 signing for the fast 3-call flow: sign the funding hash AND build the EIP-3009',
   'X-PAYMENT header in a single local call (equivalent to haven_sign followed by',
   'haven_x402_sign_header). The delegate key never leaves this process. From the haven_pay_mcp_tool',
-  'result pass payment_id and payment_required — PREFERRED (#1263): this signer fetches the exact',
-  'signing payload and expected context from Haven itself, so nothing bulky crosses your context.',
+  'result pass JUST payment_id — PREFERRED (#1263, #1355): this signer fetches the exact signing',
+  'payload, expected context, and merchant payment_required from Haven itself, so nothing bulky',
+  'crosses your context. If the signer reports the context carried no payment_required (older',
+  'backend), re-call with payment_id plus payment_required verbatim from the pay result.',
   'Fallback for older backends: pass payload_hash, x402_expected (the nested x402.expected object —',
   'passing the whole x402 object is also accepted and unwrapped for you), and typed_data_b64',
   'through UNCHANGED; the signer',
@@ -517,15 +523,34 @@ export function createToolHandlers(
           fetched?.typedData ?? resolveTypedData(args),
         )
         // 2. Build the merchant EIP-3009 header against that binding — local, no network.
+        //    #1355: prefer the PaymentRequired the context fetch carried (same
+        //    Haven read the signing bytes came from — one less blob an agent
+        //    relays); the caller-supplied copy is the fallback for pre-#1355
+        //    backends. Either copy passes the SAME expected-context
+        //    verification inside buildX402PaymentHeader — provenance is not
+        //    what makes it safe (#1263 discipline).
+        const paymentRequired = (fetched?.paymentRequired ?? args.payment_required) as
+          | X402PaymentRequired
+          | undefined
+        if (!paymentRequired) {
+          throw new HavenSigningError(
+            fetched
+              ? 'The Haven sign-context for this payment_id carried no payment_required ' +
+                '(backend predates #1355). Pass payment_required from the pay result ' +
+                'explicitly, verbatim.'
+              : 'payment_required is required on the quote-based path (no payment_id to fetch ' +
+                'it by). Pass it verbatim from the quote result.',
+          )
+        }
         const header = await signer.buildX402PaymentHeader(
-          args.payment_required as X402PaymentRequired,
+          paymentRequired,
           funding.x402Binding,
         )
         // Two audit entries — one per signing operation — matching the
         // decomposed haven_sign + haven_x402_sign_header trail, so the funding
         // signature and the merchant header remain distinguishable in the log.
         await auditSigning('haven_sign_x402', payloadHash)
-        await auditSigning('haven_sign_x402', hashPayloadForAudit(args.payment_required))
+        await auditSigning('haven_sign_x402', hashPayloadForAudit(paymentRequired))
         return {
           signature: funding.signature,
           x402_binding: funding.x402Binding,

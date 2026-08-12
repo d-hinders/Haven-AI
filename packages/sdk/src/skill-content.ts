@@ -86,9 +86,11 @@ normal, not an error.
    \`mcp__haven__haven_pay_mcp_tool\` (merchant URL, tool name, arguments) as
    the manual fallback.
 
-**Signing:** \`mcp__haven-signer__haven_sign_x402\` with \`payment_id\` and
-\`payment_required\` ONLY — the local signer fetches the exact signing bytes
-itself, so never relay \`typed_data\` yourself. Fallback for an older signer
+**Signing:** \`mcp__haven-signer__haven_sign_x402\` with \`payment_id\` ONLY —
+the local signer fetches the exact signing bytes AND \`payment_required\`
+itself, so never relay \`typed_data\` or the 402 blob yourself. If the signer
+reports its fetched context carried no \`payment_required\` (older backend),
+re-call with \`payment_required\` added verbatim. Fallback for an older signer
 or backend: re-run the quote/prepare tool with the SAME \`idempotency_key\`
 plus \`include_signing_payload=true\`, then pass \`payload_hash\`,
 \`x402_expected\` (the nested \`x402.expected\` object), and

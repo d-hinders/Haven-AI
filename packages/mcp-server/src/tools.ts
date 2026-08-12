@@ -326,7 +326,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Step 1 of the x402 MCP purchase flow: call a named tool on an MCP merchant that requires payment, probe the live price, and create the funding intent for the local signer to sign.',
   behavior:
     'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): the response carries next_action, next_tool, next_arguments, agent_summary and warnings — act on those; the prose below is fallback and debugging detail. ' +
-    'Sign with next_tool — mcp__haven-signer__haven_sign_x402, PREFERRED payment_id-first (#1263): pass just payment_id and payment_required and the signer fetches the exact signing bytes itself, so you never copy bulky bytes; the response is COMPACT by default (#1272: no typed_data/typed_data_b64). ' +
+    'Sign with next_tool — mcp__haven-signer__haven_sign_x402, PREFERRED payment_id-only (#1263, #1355): pass JUST payment_id and the signer fetches the exact signing bytes AND payment_required itself, so you never copy bulky bytes (older signer/backend: add payment_required verbatim if the signer asks); the response is COMPACT by default (#1272: no typed_data/typed_data_b64). ' +
     'Then settle with mcp__haven__haven_settle_mcp_tool using the returned signature + payment_header — merchant_url/tool_name/arguments/mcp_transport are OPTIONAL there (#1307): Haven rehydrates them from this quote by payment_id; pass them explicitly only as a version-skew fallback. Next: call mcp__haven-signer__haven_sign_x402. ' +
     'ALWAYS pass max_amount on paid merchant calls (#1275) — it is the user-intent cap for THIS purchase: atomic units of the merchant\'s asset, compared against the LIVE quote before any funding moves, separate from and additional to the agent\'s on-chain budget. Example: buy_cloud_storage { tier: "50gb" } with max_amount "500" caps at 0.0005 USDC. Without it the quoted price is accepted as-is (the response carries cap_warning) and a changed merchant quote can exceed what the user meant to spend. ' +
     'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. Haven never receives the signing key. ' +
@@ -430,7 +430,8 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'Protocol notes: returns { payment_id, payload_hash, expires_at, x402 } where x402 carries the accepted option,',
   'resource_url, merchant_to, funding_to, and x402.expected signing context including expires_at.',
   'COMPACT by default (#1272): typed_data/typed_data_b64 are omitted — the preferred signing call',
-  'is mcp__haven-signer__haven_sign_x402 with just payment_id and payment_required (#1263).',
+  'is mcp__haven-signer__haven_sign_x402 with just payment_id (#1263, #1355 — the signer also',
+  'fetches payment_required; add it verbatim only if the signer asks).',
   'For diagnostics or an older signer, re-run this tool with the SAME idempotency_key plus',
   'include_signing_payload=true: the replay returns the ORIGINAL sign_data with typed_data_b64,',
   'to pass through UNCHANGED, one opaque string, never re-typed (#1255).',
@@ -834,8 +835,10 @@ export function createToolHandlers(
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
-                'Sign locally: call next_tool with next_arguments plus payment_required taken ' +
-                'VERBATIM from this response, then haven_settle_mcp_tool with the returned ' +
+                'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
+                'signer fetches payment_required itself; only if it reports the context carried ' +
+                'none, re-call with payment_required added VERBATIM from this response), then ' +
+                'haven_settle_mcp_tool with the returned ' +
                 'signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport ' +
                 'from this response.',
               summary: {
@@ -1080,8 +1083,10 @@ export function createToolHandlers(
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
-                'Sign locally: call next_tool with next_arguments plus payment_required taken ' +
-                'VERBATIM from this response, then haven_settle_mcp_tool with the returned ' +
+                'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
+                'signer fetches payment_required itself; only if it reports the context carried ' +
+                'none, re-call with payment_required added VERBATIM from this response), then ' +
+                'haven_settle_mcp_tool with the returned ' +
                 'signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport ' +
                 'from this response.',
               summary: {
@@ -1289,8 +1294,10 @@ export function createToolHandlers(
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
-                'Sign locally: call next_tool with next_arguments plus payment_required taken ' +
-                'VERBATIM from this response. Then relay via haven_submit and finish with ' +
+                'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
+                'signer fetches payment_required itself; only if it reports the context carried ' +
+                'none, re-call with payment_required added VERBATIM from this response). Then ' +
+                'relay via haven_submit and finish with ' +
                 'haven_x402_sign_header + the original merchant retry.',
               summary: {
                 payment_id: intent.paymentId,

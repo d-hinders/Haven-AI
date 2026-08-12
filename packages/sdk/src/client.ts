@@ -588,6 +588,14 @@ export class HavenClient {
       idempotencyKey,
       // #1307: persisted so the settle leg can rehydrate it by payment_id.
       ...(options.mcpCallContext ? { mcpCallContext: options.mcpCallContext } : {}),
+      // #1355: persisted so the SIGN leg can rehydrate it by payment_id — the
+      // local signer's context fetch then carries the 402 PaymentRequired and
+      // the agent passes only payment_id. Bounded: the backend rejects >64KB,
+      // so an oversized blob is omitted here (signer falls back to the
+      // caller-supplied copy) rather than failing the intent.
+      ...(new TextEncoder().encode(JSON.stringify(paymentRequired)).length <= 65536
+        ? { paymentRequired }
+        : {}),
     })
 
     // Anything other than a signable funding intent (pending_approval,

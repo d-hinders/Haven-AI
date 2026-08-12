@@ -267,6 +267,15 @@ export interface X402AuthorizationOptions {
    * omit for a non-MCP-tool x402 merchant (plain HTTP resource).
    */
   mcpCallContext?: X402McpCallContext
+  /**
+   * #1348: the agent's delegate address, when the caller already resolved it
+   * from `getAgent()` in this same flow — skips `createX402Intent`'s internal
+   * agent fetch (one full round trip on every guided purchase). Optional and
+   * advisory-shaped only: the backend validates the address like any other
+   * `payTo`, and a wrong value fails the intent exactly as it would have if
+   * fetched. Omit to keep the self-contained fetch.
+   */
+  delegateAddress?: string
 }
 
 /**

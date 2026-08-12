@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-12" # #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
+last-verified: "2026-08-12" # #1348: preflight round-trip budget — agent/allowance reads overlap the merchant probe, getAgent coalesces concurrent calls (in-flight only), createX402Intent takes delegateAddress; failure semantics + refusal order unchanged. Prior: #1355 payment_id-only signing
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -367,7 +367,20 @@ Sequence:
    manual fallback.
 3. Run the LIVE quote against the entry's own `resource_url` / `tool_name` /
    `tool_arguments` — the shared probe, including the #1271 same-origin
-   discovery fallback.
+   discovery fallback. **Round-trip budget (#1348):** the two Haven reads
+   steps 5–6 need (agent, allowances) are independent of this probe, so they
+   are DISPATCHED here and overlap the merchant leg — the slowest part of the
+   preflight — instead of following it. Failure semantics are unchanged: the
+   quote is awaited first (its error wins deterministically when several legs
+   fail), the agent read remains a hard pre-intent refusal, and the allowance
+   read still degrades to a warning. Additionally, `getAgent` coalesces
+   CONCURRENT calls into one HTTP GET (in-flight dedupe only, never a cache —
+   sequential calls stay fresh reads), and `createX402Intent` accepts the
+   already-fetched `delegateAddress` instead of re-fetching the agent. Net: a
+   successful preflight makes exactly ONE call per Haven surface — catalog,
+   agent, allowances, `POST /x402` — enforced by round-trip-count unit tests
+   (deterministic, unlike wall-clock); per-step wall-clock telemetry rides the
+   promotion-gating QA scenario's pass detail.
 4. `max_amount` is **required** on this tool (unlike `haven_pay_mcp_tool`'s
    optional cap) — this IS the guided path, so there is no `cap_warning`
    softness. Enforced against the LIVE quote via the SAME

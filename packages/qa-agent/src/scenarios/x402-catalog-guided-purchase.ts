@@ -249,6 +249,22 @@ export const x402CatalogGuidedPurchase: Scenario = {
 
     const api = new HavenApi(ctx.cfg, ctx.cfg.delegationAgentApiKey)
 
+    // #1348: per-step wall-clock telemetry, folded into the pass detail. This
+    // is REPORTING, not a gate — CI wall-clock is machine-dependent, so the
+    // hard regression gate on round-trip COUNTS lives in the mcp-server unit
+    // tests; these numbers exist so a latency regression is visible in every
+    // QA run without anyone re-instrumenting.
+    const scenarioStart = Date.now()
+    const stepMs: Record<string, number> = {}
+    const timed = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
+      const start = Date.now()
+      try {
+        return await run()
+      } finally {
+        stepMs[name] = Date.now() - start
+      }
+    }
+
     // ── 0. Resolve the catalog entry via the agent's own chain-scoped ────────
     //      GET /catalog — never a hardcoded id (discriminator #1).
     const catalogRes = await api.getCatalog()
@@ -307,13 +323,15 @@ export const x402CatalogGuidedPurchase: Scenario = {
     // ── 1. Guided preflight: catalog_id + max_amount, nothing else ───────────
     let prep: HostedPrepareCatalogPurchaseResult
     try {
-      prep = await hosted.callTool<HostedPrepareCatalogPurchaseResult>('haven_prepare_catalog_purchase', {
-        catalog_id: entry.id,
-        max_amount: MAX_AMOUNT,
-        // Fresh per attempt: a reused key would resume the previous run's
-        // intent, and a resumed intent proves nothing about this run.
-        idempotency_key: `qa-catalog-${Date.now()}`,
-      })
+      prep = await timed('prepare', () =>
+        hosted.callTool<HostedPrepareCatalogPurchaseResult>('haven_prepare_catalog_purchase', {
+          catalog_id: entry.id,
+          max_amount: MAX_AMOUNT,
+          // Fresh per attempt: a reused key would resume the previous run's
+          // intent, and a resumed intent proves nothing about this run.
+          idempotency_key: `qa-catalog-${Date.now()}`,
+        }),
+      )
     } catch (err) {
       if (err instanceof HostedMcpTransportError && isToolNotFound(err, 'haven_prepare_catalog_purchase')) {
         return skip(
@@ -408,10 +426,12 @@ export const x402CatalogGuidedPurchase: Scenario = {
     }
 
     // ── 6. Local signing — payment_id + payment_required ONLY (#1305's thesis) ─
-    const signed = await signerTools.haven_sign_x402({
-      payment_id: prep.payment_id,
-      payment_required: prep.payment_required,
-    })
+    const signed = await timed('sign', () =>
+      signerTools.haven_sign_x402({
+        payment_id: prep.payment_id,
+        payment_required: prep.payment_required,
+      }),
+    )
     if (!signed.success) {
       return fail(
         `local edge signer REFUSED the guided quote: ${signed.code} — ${signed.message.slice(0, 220)}`,
@@ -425,11 +445,13 @@ export const x402CatalogGuidedPurchase: Scenario = {
     //      needs them re-threaded, the guided path failed.
     let settle: HostedSettleMcpToolResult
     try {
-      settle = await hosted.callTool<HostedSettleMcpToolResult>('haven_settle_mcp_tool', {
-        payment_id: prep.payment_id,
-        signature,
-        payment_header: paymentHeader,
-      })
+      settle = await timed('settle', () =>
+        hosted.callTool<HostedSettleMcpToolResult>('haven_settle_mcp_tool', {
+          payment_id: prep.payment_id,
+          signature,
+          payment_header: paymentHeader,
+        }),
+      )
     } catch (err) {
       if (err instanceof HostedMcpToolError) {
         return fail(`hosted haven_settle_mcp_tool refused: ${err.code} — ${err.message.slice(0, 220)}`)
@@ -536,7 +558,9 @@ export const x402CatalogGuidedPurchase: Scenario = {
       `guided catalog purchase (${entry.name}, catalog_id ${entry.id}) settled via payment_id-only ` +
         `continuation: funding ${fundingHash} (block ${fundingReceipt.blockNumber}), merchant ${merchantHash} ` +
         `(block ${merchantReceipt.blockNumber}); treasury ${fmt(treasuryBefore)} → ${fmt(treasuryAfter)}, zero ` +
-        `delegate residual${carried}; ${allowanceNote}; intent ${prep.payment_id}`,
+        `delegate residual${carried}; ${allowanceNote}; intent ${prep.payment_id}; ` +
+        `timings ms (#1348 telemetry): prepare=${stepMs.prepare ?? '?'} sign=${stepMs.sign ?? '?'} ` +
+        `settle=${stepMs.settle ?? '?'} total=${Date.now() - scenarioStart}`,
     )
   },
 }

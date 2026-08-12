@@ -569,9 +569,9 @@ export class HavenClient {
 
     // The funding transfer tops up the agent's delegate EOA. With no local key
     // we resolve that address from the authenticated agent record rather than
-    // deriving it from a private key.
-    const agent = await this.getAgent()
-    const fundingTo = agent.delegateAddress
+    // deriving it from a private key. #1348: a caller that already fetched the
+    // agent in this flow passes delegateAddress and skips the duplicate fetch.
+    const fundingTo = options.delegateAddress ?? (await this.getAgent()).delegateAddress
     if (!fundingTo) {
       throw new HavenApiError('Authenticated agent has no delegate address registered.', 502)
     }
@@ -759,6 +759,24 @@ export class HavenClient {
    * Get the agent identity tied to this API key.
    */
   async getAgent(): Promise<HavenAgent> {
+    // #1348: coalesce CONCURRENT reads into one HTTP GET — the guided
+    // purchase flow legitimately wants the agent in two overlapping places
+    // (the caller's preflight and the quote leg's x402-wallet resolution).
+    // This is in-flight dedupe only, never a cache: the promise is cleared
+    // the moment it settles, so sequential calls stay fresh reads and a
+    // delegate rotation is picked up exactly as before.
+    if (this.agentInFlight) return this.agentInFlight
+    const request = this.fetchAgent()
+    this.agentInFlight = request
+    request.finally(() => {
+      this.agentInFlight = null
+    }).catch(() => {})
+    return request
+  }
+
+  private agentInFlight: Promise<HavenAgent> | null = null
+
+  private async fetchAgent(): Promise<HavenAgent> {
     const raw = await this.get<RawHavenAgent>('/machine-payments/agent')
     return {
       id: raw.id,

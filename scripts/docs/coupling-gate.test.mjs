@@ -187,3 +187,36 @@ test('an EXACT covers entry still implicates via a test file', () => {
   const f = implicatedDocs(['packages/mcp-server/src/hosted-signer-integration.test.ts'], docs, '2026-06-02')
   assert.deepEqual(f.map((x) => x.doc), ['docs/architecture/07-edge-signer.md'])
 })
+
+// ── #1337: computed-empty vs uncomputable change-sets ────────────────────────
+import { changedFilesWithProvenance } from './coupling-gate.mjs'
+import { execFileSync as _exec } from 'node:child_process'
+import { test as test1337 } from 'node:test'
+import assert1337 from 'node:assert'
+
+test1337('a CI three-dot range that computes to empty is provably computed (pure merge/sync PR passes strict)', () => {
+  const head = _exec('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+  process.env.BASE_SHA = head
+  process.env.HEAD_SHA = head
+  try {
+    const r = changedFilesWithProvenance()
+    assert1337.deepStrictEqual(r.files, [])
+    assert1337.strictEqual(r.computed, true)
+  } finally {
+    delete process.env.BASE_SHA
+    delete process.env.HEAD_SHA
+  }
+})
+
+test1337('a BROKEN range stays fail-closed: empty but not computed (#1076 protection intact)', () => {
+  process.env.BASE_SHA = '0000000000000000000000000000000000000000'
+  process.env.HEAD_SHA = 'HEAD'
+  try {
+    const r = changedFilesWithProvenance()
+    assert1337.deepStrictEqual(r.files, [])
+    assert1337.strictEqual(r.computed, false)
+  } finally {
+    delete process.env.BASE_SHA
+    delete process.env.HEAD_SHA
+  }
+})

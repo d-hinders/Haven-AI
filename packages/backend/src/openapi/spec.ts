@@ -2404,6 +2404,12 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
+          paymentRequired: {
+            type: 'object',
+            description:
+              '#1355: the merchant\'s full parsed 402 PaymentRequired (max 64KB serialized). Persisted so GET /x402/{id}/sign-context can re-serve it and a local signer needs only payment_id. Reporting material, not payment authority — the signer verifies whichever copy it uses against the Haven-signed expected context.',
+            additionalProperties: true,
+          },
         },
         additionalProperties: false,
       },
@@ -2454,6 +2460,12 @@ export const openapiSpec = {
                   signer: address,
                 },
                 additionalProperties: false,
+              },
+              payment_required: {
+                type: 'object',
+                description:
+                  '#1355: the stored 402 PaymentRequired, present on GET /x402/{id}/sign-context responses when it was persisted at authorize time. Lets the local signer build the merchant header from the context fetch alone.',
+                additionalProperties: true,
               },
             },
           },

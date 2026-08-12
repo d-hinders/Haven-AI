@@ -44,13 +44,15 @@ export interface DelegationAuthorizeInput {
   tokenAddress: string
   /** #1307: optional MCP merchant-call context, persisted for settle-leg rehydration. */
   mcpCallContext?: X402McpCallContextInput
+  /** #1355: optional full 402 PaymentRequired, persisted for sign-leg rehydration. */
+  paymentRequired?: Record<string, unknown>
 }
 
 export async function runDelegationAuthorize(input: DelegationAuthorizeInput): Promise<X402HandlerResult> {
   const {
     agent, url, payTo, merchantPayTo, amountRaw, amountHuman, category, idempotencyKey,
     maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses, network, tokenConfig, tokenAddress,
-    mcpCallContext,
+    mcpCallContext, paymentRequired,
   } = input
 
   if (tokenAddress === ZERO_ADDRESS) {
@@ -173,7 +175,9 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // #1307: persist the MCP merchant-call context (when the quote came
       // through haven_pay_mcp_tool) so the settle leg can rehydrate it by
       // payment_id instead of the agent re-threading it.
-      metadata: { network, settlement_scheme: 'eip3009', mcp_call_context: mcpCallContext ?? null },
+      // #1355: same persistence for the full 402 PaymentRequired, so
+      // sign-context can re-serve it and the signer needs only payment_id.
+      metadata: { network, settlement_scheme: 'eip3009', mcp_call_context: mcpCallContext ?? null, payment_required: paymentRequired ?? null },
       executionRail: 'delegation',
       delegationHash: fundingAuth.delegationHash,
       // #1059: on the funding leg the budget IS the signed instrument.
@@ -301,7 +305,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     // 3009 path does, so the accounting feed can tell schemes apart without
     // parsing prepared_user_op. The hash-semantics column is the follow-up.
     // #1307: same merchant-call-context persistence as the 3009 branch above.
-    metadata: { network, settlement_scheme: 'erc7710', mcp_call_context: mcpCallContext ?? null },
+    // #1355: same payment_required persistence as the 3009 branch above.
+    metadata: { network, settlement_scheme: 'erc7710', mcp_call_context: mcpCallContext ?? null, payment_required: paymentRequired ?? null },
     executionRail: 'delegation',
     delegationHash: built.childHash,
     // #1059: the CHILD is signed, but the parent budget does the metering —

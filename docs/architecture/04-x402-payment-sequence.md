@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-11" # #1319: the #1306 preflight's allowance block gained ALLOWANCE_READ_OPTIMISTIC (the #1145 fallback's provenance, remaining_is_from_chain, is now on the GET /machine-payments/allowances wire, delegation-rail only); the post-purchase summary's freshness caveat updated to say the provenance exists but is not yet surfaced there. Prior #1321: hosted paid-MCP quote now establishes its MCP session before the unpaid tools/call; signing, quote binding, and settle authority unchanged. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
+last-verified: "2026-08-12" # #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -348,8 +348,11 @@ quote probe with the #1271 discovery fallback is shared via one
 the SAME compact ready-to-sign shape `haven_pay_mcp_tool` returns (#1272:
 `payment_id`, `payload_hash`, `expires_at`, `signer_compatibility`, `x402`)
 plus catalog fields — never a third signing surface. The signer flow after
-this tool is IDENTICAL to today's: `haven_sign_x402` with `payment_id` +
-`payment_required`, then `haven_settle_mcp_tool`.
+this tool is IDENTICAL to today's: `haven_sign_x402` with `payment_id` alone
+(#1355: the signer's authenticated sign-context fetch also carries the
+`payment_required` persisted on the intent's `machine_metadata` at authorize
+time — the #1307 pattern applied to the sign leg; on a pre-#1355 backend the
+signer asks for `payment_required` explicitly), then `haven_settle_mcp_tool`.
 
 Sequence:
 

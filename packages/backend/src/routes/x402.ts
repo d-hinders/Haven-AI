@@ -155,6 +155,23 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       }
     }
 
+    // #1355: optional full 402 PaymentRequired — persisted so sign-context can
+    // re-serve it and the signer needs only payment_id. Structural + size
+    // bound only: it is verified against the Haven-signed expected context at
+    // the signer, never trusted as authority here. Oversized input is a 400
+    // (not a silent drop) so a client learns immediately, mirroring #1307.
+    const { paymentRequired } = request.body
+    if (paymentRequired !== undefined) {
+      if (typeof paymentRequired !== 'object' || paymentRequired === null || Array.isArray(paymentRequired)) {
+        return reply.code(400).send({ error: 'paymentRequired must be the parsed 402 PaymentRequired object' })
+      }
+      if (JSON.stringify(paymentRequired).length > 65536) {
+        return reply.code(400).send({
+          error: 'paymentRequired exceeds 64KB — omit it; the signer falls back to the caller-supplied copy',
+        })
+      }
+    }
+
     const result = await authorizeX402({
       agent,
       url,
@@ -171,6 +188,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       settlementScheme,
       facilitatorAddresses,
       mcpCallContext: mcpCallContext as X402McpCallContextInput | undefined,
+      paymentRequired,
       log: request.log,
     })
     return reply.code(result.code).send(result.body)

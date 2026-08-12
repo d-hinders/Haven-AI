@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-12" # release 0.1.22-alpha.0: runtime manifest and published package pins re-verified
+last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: sign-context carries payment_required; grep-checked: no claim here names the sign-call argument shape). Same day: release 0.1.22-alpha.0 pins
 ---
 
 # MCP Runtime Compatibility

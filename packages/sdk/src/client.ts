@@ -1104,10 +1104,11 @@ export class HavenClient {
    * same session. Never creates payments or signatures.
    */
   async discoverTools(
-    options: { category?: string; rail?: 'x402' | 'mpp' } = {},
+    options: { category?: string; search?: string; rail?: 'x402' | 'mpp' } = {},
   ): Promise<HavenCatalogEntry[]> {
     const params = new URLSearchParams()
     if (options.category) params.set('category', options.category)
+    if (options.search !== undefined) params.set('search', options.search)
     if (options.rail) params.set('rail', options.rail)
     const query = params.size > 0 ? `?${params.toString()}` : ''
     const raw = await this.get<{ entries: RawCatalogEntry[] }>(`/catalog${query}`)

@@ -267,6 +267,29 @@ describe('openapiSpec', () => {
     })
   })
 
+  it('documents catalog discovery filters as read-only query parameters', () => {
+    const catalogGet = openapiSpec.paths['/catalog'].get
+    const searchParam = catalogGet.parameters?.find((param) => param.name === 'search')
+
+    expect(catalogGet.description).toMatch(/case-insensitive/i)
+    expect(catalogGet.description).toMatch(/search matches product name, description, or category/i)
+    expect(catalogGet.description).toMatch(/blank search is rejected after trimming/i)
+    expect(catalogGet.description).toMatch(/nothing here creates payments or signatures/i)
+    expect(catalogGet.parameters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'category', in: 'query', schema: { type: 'string' } }),
+      expect.objectContaining({
+        name: 'rail',
+        in: 'query',
+        schema: { type: 'string', enum: ['x402', 'mpp'] },
+      }),
+    ]))
+    expect(searchParam).toMatchObject({
+      in: 'query',
+      description: expect.stringMatching(/Blank search after trimming returns 400/i),
+      schema: expect.objectContaining({ type: 'string', minLength: 1, maxLength: 120 }),
+    })
+  })
+
   it('documents machine payment evidence proof statuses', () => {
     const receiptSchema = openapiSpec.components.schemas.MachinePaymentReceipt
 

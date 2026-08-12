@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-12" # re-verified for #1348 (round-trip orchestration; grep-checked: no claim here describes call ordering) and #1355; same day: 0.1.22-alpha.0 pins
+last-verified: "2026-08-12" # re-verified for #1348 (round-trip orchestration; no claim here describes call ordering) + prior same-day: re-verified for #1355 (payment_id-only signing: sign-context carries payment_required; grep-checked: no claim here names the sign-call argument shape) and #1350 (haven_discover_tools gained an additive read-only `search` argument and documented case-insensitive category matching; older runtimes remain compatible because the existing omit-category/omit-rail calls are unchanged). Same day: release 0.1.22-alpha.0 pins
 ---
 
 # MCP Runtime Compatibility
@@ -35,6 +35,14 @@ last-verified: "2026-08-12" # re-verified for #1348 (round-trip orchestration; g
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent
 startup; setup preinstalls a tested runtime and writes a stable wrapper:
+
+`haven_discover_tools` remains skew-flat across the local and hosted MCP
+topologies: since #1350 it accepts the same optional `search` argument on both
+surfaces, alongside the existing `category` and `rail` filters. `category`
+matching is case-insensitive after trim, `search` matches catalog `name`,
+`description`, or `category`, and omitting the new field preserves the older
+request shape exactly. The result is still read-only discovery metadata:
+catalog prices are indicative hints, never payment authority.
 
 ```text
 ~/.haven/agents/<agent-id>/bin/haven-mcp

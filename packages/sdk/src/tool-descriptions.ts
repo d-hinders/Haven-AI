@@ -181,6 +181,7 @@ export const toolDescriptions = {
     behavior:
       'Use each entry\'s suggested_tool field first — it names the exact next call. ' +
       'Read-only lookup against Haven\'s curated catalog; entries are periodically re-verified against the live merchant and degraded entries are flagged. ' +
+      'Use category for a case-insensitive category filter (for example, VPN or vpn), or search for a product name, category, or description term. ' +
       'Returns name, description, price, rail, resource URL, tool_name, tool_arguments, and suggested_tool. ' +
       'The catalog price (price_display/price_atomic, marked price_is_indicative) is a last-verified hint, NOT authoritative — the real price comes from the merchant\'s live 402 at pay time. ' +
       'Never creates a payment, signature, or approval.',

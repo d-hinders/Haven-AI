@@ -267,6 +267,21 @@ export interface X402AuthorizationOptions {
    * omit for a non-MCP-tool x402 merchant (plain HTTP resource).
    */
   mcpCallContext?: X402McpCallContext
+  /**
+   * #1348: the agent's delegate address, when the caller already resolved it
+   * from `getAgent()` in this same flow — skips `createX402Intent`'s internal
+   * agent fetch (one full round trip on every guided purchase). Staleness
+   * caveat (#1358 review): the backend derives the funding shape by comparing
+   * `payTo` to the CURRENT delegate address, so a value made stale by a
+   * delegate rotation mid-flow is not always a clean failure — a pinned-budget
+   * agent gets a 403, but an open-budget delegation agent would route to the
+   * settlement shape with the stale address. The window is one tool call
+   * (previously sub-millisecond, now the merchant-quote duration), never
+   * externally suppliable; server-truth hardening is tracked in #1360. Only
+   * pass an address fetched in THIS flow; omit to keep the self-contained
+   * fetch.
+   */
+  delegateAddress?: string
 }
 
 /**

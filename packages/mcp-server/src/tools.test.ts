@@ -916,6 +916,45 @@ describe('haven_send', () => {
 describe('haven_pay_mcp_tool', () => {
   const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
 
+  it('ROUND-TRIP BUDGET: exactly ONE agent fetch on the happy path — the #1348 prefetch feeds createX402Intent', async () => {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    ok(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
+      }),
+    )
+
+    expect(calls.filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent')).length).toBe(1)
+  })
+
+  it('#1348 prefetch failure is invisible: createX402Intent falls back to its own fetch and the error shape is unchanged', async () => {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+      'GET /machine-payments/agent': { status: 500, body: { error: 'agent boom' } },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const payload = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      max_amount: '2000000',
+    })
+
+    // Both the ignored prefetch and createX402Intent's own fetch failed —
+    // the surfaced error is createX402Intent's, exactly as before #1348.
+    expect(payload.success).toBe(false)
+    expect(calls.find((c) => new URL(c.url).pathname.endsWith('/x402'))).toBeUndefined()
+  })
+
   it('probes merchant, creates x402 intent, returns signing context with merchant context', async () => {
     stubFetch({
       // tools/call probe → 402 with PAYMENT-REQUIRED header
@@ -1740,10 +1779,83 @@ describe('haven_prepare_catalog_purchase', () => {
     })
 
     expect(payload.success).toBe(false)
-    // No funding intent, and no allowance read either — the agent lookup is
-    // a hard stop, before step 5 (the allowance/budget report) ever runs.
+    // No funding intent — the agent lookup is a hard stop before the intent
+    // is ever created. (#1348 changed one incidental detail: the allowance
+    // READ now starts in parallel with the merchant probe, so it may have
+    // fired — a harmless read. The load-bearing invariant is intent-creation,
+    // asserted here, plus the refusal itself.)
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
-    expect(calls.find((c) => c.url.endsWith('/machine-payments/allowances'))).toBeUndefined()
+  })
+
+  // ── #1348: round-trip budget — the characterization the issue asked for ────
+  // These counts ARE the regression gate: wall-clock is machine-dependent, but
+  // the number of sequential Haven round trips is deterministic. Before #1348
+  // a successful preflight made FIVE Haven calls (catalog, agent, allowances,
+  // agent AGAIN inside createX402Intent, POST /x402); now it makes four, and
+  // the agent/allowance reads overlap the merchant probe instead of following
+  // it.
+  it('ROUND-TRIP BUDGET: a successful preflight makes exactly one call per Haven surface — no duplicate agent fetch (#1348)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+    })
+
+    ok(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    const byPath = (suffix: string) => calls.filter((c) => new URL(c.url).pathname.endsWith(suffix)).length
+    expect(byPath('/catalog/cat_1')).toBe(1)
+    // The mutation this guards: dropping the delegateAddress pass-through to
+    // createX402Intent silently re-adds its internal agent fetch → 2.
+    expect(byPath('/machine-payments/agent')).toBe(1)
+    expect(byPath('/machine-payments/allowances')).toBe(1)
+    expect(byPath('/x402')).toBe(1)
+  })
+
+  it('ROUND-TRIP OVERLAP: the agent/allowance reads are dispatched BEFORE the merchant probe resolves (#1348)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+    })
+
+    ok(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    // Call order in the recorded log: both Haven reads must appear before the
+    // merchant's tools/call 402 probe response could have been consumed — i.e.
+    // they were dispatched during the probe, not after it. The merchant POSTs
+    // (initialize/notify/tools-call) and the Haven GETs interleave; asserting
+    // the GETs precede the LAST merchant POST proves the overlap without
+    // depending on scheduler timing.
+    const lastMerchantPost = calls.map((c, i) => ({ c, i })).filter(({ c }) => c.method === 'POST' && new URL(c.url).pathname === '/mcp').at(-1)!.i
+    const agentIdx = calls.findIndex((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent'))
+    const allowancesIdx = calls.findIndex((c) => new URL(c.url).pathname.endsWith('/machine-payments/allowances'))
+    expect(agentIdx).toBeGreaterThan(-1)
+    expect(agentIdx).toBeLessThan(lastMerchantPost)
+    expect(allowancesIdx).toBeLessThan(lastMerchantPost)
+  })
+
+  it('FAILURE PRECEDENCE: when the merchant probe AND the agent read both fail, the quote error wins deterministically (#1348)', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+      'POST /mcp': { status: 500, body: {} },
+      'GET /machine-payments/agent': { status: 500, body: { error: 'agent boom' } },
+      'GET /machine-payments/allowances': { status: 500, body: { error: 'allowance boom' } },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (!payload.success) {
+      // The quote leg's error — never 'agent boom', regardless of which
+      // parallel read settles first.
+      expect(payload.message).not.toContain('agent boom')
+      expect(payload.message).not.toContain('allowance boom')
+    }
+    expect(calls.find((c) => new URL(c.url).pathname.endsWith('/x402'))).toBeUndefined()
   })
 
   // #1319: surfaces the #1145 provenance nuance — the delegation rail's

@@ -774,6 +774,15 @@ export function createToolHandlers(
           // URL as given first; only a non-402 miss triggers one bounded
           // same-origin discovery pass and ONE retry at the discovered endpoint.
           // #1306: shared with haven_prepare_catalog_purchase — see there.
+          // #1348: prefetch the agent in parallel with the (slow) merchant
+          // probe purely as a delegateAddress hint for createX402Intent. A
+          // prefetch failure is IGNORED here — createX402Intent then runs its
+          // own internal fetch and fails exactly as it always did, so error
+          // shape and ordering are unchanged.
+          const agentPrefetch = haven.getAgent().then(
+            (a) => a.delegateAddress,
+            () => undefined,
+          )
           const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
             merchantUrl: args.merchant_url as string,
             toolName: args.tool_name as string,
@@ -783,10 +792,12 @@ export function createToolHandlers(
           // Enforce the optional price cap against the LIVE merchant price,
           // before creating the funding intent. The catalog price is only a hint.
           assertWithinMaxAmount(quote.amountAtomic, args.max_amount as string | undefined, quote.token)
+          const prefetchedDelegate = await agentPrefetch
           const intent = await haven.createX402Intent(
             quote.paymentRequired as X402PaymentRequired,
             {
               idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
+              ...(prefetchedDelegate ? { delegateAddress: prefetchedDelegate } : {}),
               // #1307: persist the merchant call context so haven_settle_mcp_tool /
               // haven_complete_mcp_tool can rehydrate it by payment_id instead of
               // the agent re-threading merchant_url/tool_name/arguments/mcp_transport.
@@ -932,7 +943,23 @@ export function createToolHandlers(
 
           // 3. Run the LIVE quote against the catalog entry's own merchant —
           // the SAME probe haven_pay_mcp_tool uses, shared rather than
-          // duplicated (#1306 review requirement).
+          // duplicated (#1306 review requirement). #1348: the two Haven reads
+          // steps 5-6 need (agent, allowances) are independent of the merchant
+          // probe, so they START here and overlap its latency — the slowest
+          // leg of this preflight. Failure semantics are unchanged by design:
+          // the quote is AWAITED first, so its error still wins when several
+          // legs fail; the agent read stays a hard pre-intent refusal (#1319);
+          // the allowance read is settled to a result object the moment it
+          // starts (never an unhandled rejection) and is consumed by the same
+          // degrade-to-warning logic as before.
+          const agentPromise = haven.getAgent()
+          agentPromise.catch(() => {}) // awaited at step 5; guard the gap
+          const allowancesPromise = haven
+            .getAllowances()
+            .then(
+              (value) => ({ ok: true as const, value }),
+              (error) => ({ ok: false as const, error }),
+            )
           const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
             merchantUrl: entry.resourceUrl,
             toolName: entry.toolName,
@@ -949,7 +976,7 @@ export function createToolHandlers(
           // 5. Rail-aware allowance/budget report. A failed read NEVER fails
           // this preflight — sufficient degrades to null with a warning, and
           // the on-chain policy remains the actual gate either way.
-          const agent = await haven.getAgent()
+          const agent = await agentPromise
           const rail = agent.executionRail
           const source = rail === 'delegation' ? 'active_delegations' : 'allowance_module'
           const warnings: AgentPaymentWarning[] = []
@@ -963,8 +990,13 @@ export function createToolHandlers(
             // #1090 machinery, reused via the SAME derivation the /agents/:id
             // allowances view and GET /machine-payments/allowances use — this
             // NEVER reads agent_allowances on the delegation rail, which is a
-            // frozen onboarding mirror there (mutation-tested).
-            const allowances = await haven.getAllowances()
+            // frozen onboarding mirror there (mutation-tested). #1348: the
+            // read itself started back at step 3 (overlapping the merchant
+            // probe); a rejection was captured there and is re-thrown here so
+            // this catch block degrades it exactly as before.
+            const allowancesResult = await allowancesPromise
+            if (!allowancesResult.ok) throw allowancesResult.error
+            const allowances = allowancesResult.value
             const match = allowances.allowances.find(
               (a) => a.tokenAddress.toLowerCase() === quote.asset.toLowerCase(),
             )
@@ -1038,6 +1070,9 @@ export function createToolHandlers(
               arguments: entry.toolArguments ?? {},
               ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
             },
+            // #1348: the agent was already fetched at step 5 — skip the
+            // intent call's internal duplicate fetch.
+            delegateAddress: agent.delegateAddress,
           })
 
           // 8. Catalog price is indicative; the live quote above is

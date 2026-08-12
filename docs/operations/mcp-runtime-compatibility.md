@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: sign-context carries payment_required; grep-checked: no claim here names the sign-call argument shape) and #1350 (haven_discover_tools gained an additive read-only `search` argument and documented case-insensitive category matching; older runtimes remain compatible because the existing omit-category/omit-rail calls are unchanged). Same day: release 0.1.22-alpha.0 pins
+last-verified: "2026-08-12" # re-verified for #1348 (round-trip orchestration; no claim here describes call ordering) + prior same-day: re-verified for #1355 (payment_id-only signing: sign-context carries payment_required; grep-checked: no claim here names the sign-call argument shape) and #1350 (haven_discover_tools gained an additive read-only `search` argument and documented case-insensitive category matching; older runtimes remain compatible because the existing omit-category/omit-rail calls are unchanged). Same day: release 0.1.22-alpha.0 pins
 ---
 
 # MCP Runtime Compatibility

@@ -88,10 +88,13 @@ normal, not an error.
 
 1. \`mcp__haven__haven_discover_tools\` to find a payable service and its
    \`catalog_id\`.
-2. \`mcp__haven__haven_prepare_catalog_purchase\` with \`catalog_id\` and
-   \`max_amount\`. \`max_amount\` (atomic units) is REQUIRED on this tool, and
-   is best practice on every paid call below too — it caps what the LIVE
-   merchant quote may charge, checked before any funding intent is created.
+2. \`mcp__haven__haven_prepare_catalog_purchase\` with \`catalog_id\` and a
+   spending cap. A cap is REQUIRED on this tool and is best practice on every
+   paid call below too — it caps what the LIVE merchant quote may charge,
+   checked before any funding intent is created. Write it the way the user
+   said it: \`max_amount_human\` is whole tokens, so "no more than 1 USDC" is
+   \`max_amount_human: "1"\`. (\`max_amount\` is the atomic-unit form, where
+   "1" means 0.000001 USDC — do not convert by hand, and never send both.)
 3. Then FOLLOW THE RESPONSE'S GUIDANCE FIELDS: \`next_action\`, \`next_tool\`,
    and \`next_arguments\` name the exact next call — act on those first; the
    prose in this section is fallback and debugging detail. If the catalog
@@ -173,8 +176,14 @@ present and surface \`message\` or \`error\` verbatim. Common cases:
 - \`pending_approval\`: queued for the user's approval (see above).
 - \`insufficient_funds\`: the Haven wallet doesn't hold enough of that token.
   Suggest the user add funds in the Haven dashboard.
-- \`PRICE_EXCEEDS_MAX\`: the live merchant price exceeded your \`max_amount\`.
-  No funds moved; ask the user before retrying with a higher cap.
+- \`PRICE_EXCEEDS_MAX\`: the live merchant price exceeded your cap. No funds
+  moved; ask the user before retrying with a higher one.
+- \`AMBIGUOUS_MAX_AMOUNT\`: you sent both \`max_amount\` and
+  \`max_amount_human\`. Nothing was contacted or spent — re-send with exactly
+  one (\`max_amount_human\` for a cap the user stated in tokens).
+- \`MAX_AMOUNT_UNCONVERTIBLE\`: \`max_amount_human\` does not fit this quote's
+  asset — unknown decimals, or more decimal places than the asset supports.
+  Round the cap, or send an exact atomic \`max_amount\`.
 - \`PAYMENT_WINDOW_EXPIRED\`: re-run the quote/prepare tool with the same
   \`idempotency_key\`, then sign the fresh payload.
 - \`MERCHANT_REJECTED_AFTER_FUNDING\`: the merchant refused the paid retry.
@@ -193,10 +202,12 @@ present and surface \`message\` or \`error\` verbatim. Common cases:
 ## Reporting after a purchase
 
 A settled \`mcp__haven__haven_settle_mcp_tool\` response carries
-\`agent_summary\` and the remaining post-purchase allowance in \`allowance\` —
-report the amount paid and what is left from those fields directly. Do not
-call \`haven_get_agent\` or \`haven_get_allowances\` again just to report a
-purchase you already made.
+\`agent_summary.purchase_summary\` and the remaining post-purchase allowance
+in \`allowance\` — report the product, Haven-derived payment/transaction
+fields, and what is left from those fields directly. \`result\` is optional
+raw merchant evidence; never use it to decide whether the purchase was paid.
+Do not call \`haven_get_agent\` or \`haven_get_allowances\` again just to
+report a purchase you already made.
 
 ## Revoke
 

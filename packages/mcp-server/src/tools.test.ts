@@ -3126,3 +3126,484 @@ describe('structured agent guidance (#1308)', () => {
     expect(result.data.safe_to_continue).toBe(false)
   })
 })
+
+// ── #1351: human-unit spending caps ──────────────────────────────────────────
+
+describe('human-unit spending caps (#1351)', () => {
+  const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+
+  // The fixture merchant quotes Base USDC (6 decimals) with an authoritative
+  // maxAmountRequired of 1500000 atomic = 1.50 USDC. Every cap below is read
+  // against THAT, which is the whole point: the human cap is interpreted with
+  // the live quote's own asset/decimals, never a caller-supplied token name.
+  const LIVE_PRICE_ATOMIC = '1500000'
+  const LIVE_PRICE_HUMAN = '1.5'
+
+  const payRoutes = {
+    'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+    'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+    'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+  }
+
+  function payMcpTool(args: Record<string, unknown>) {
+    return handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      ...args,
+    })
+  }
+
+  const fundingCall = () => calls.find((c) => new URL(c.url).pathname.endsWith('/x402'))
+
+  describe('haven_pay_mcp_tool', () => {
+    it('FAILS CLOSED: a cap of "1" USDC refuses a 1.50 USDC quote before any funding intent', async () => {
+      // The #1351 guard, stated as the issue states it. This is the case the
+      // atomic-only contract got wrong in the other direction: an agent that
+      // meant "no more than 1 USDC" and wrote max_amount "1" capped itself at
+      // 0.000001 USDC. Written as max_amount_human it means what it says —
+      // and 1 < 1.50, so this purchase must still be refused.
+      // MUTATION TEST: delete the resolveCapAtomic call in haven_pay_mcp_tool
+      // (or pass `cap` straight through as atomic) and this test fails —
+      // "1" compared as atomic units is 1, still under 1500000, so the
+      // purchase would be refused for the WRONG reason; drop the guard
+      // entirely and it succeeds, which is the real regression.
+      stubFetch(payRoutes)
+
+      const payload = await payMcpTool({ max_amount_human: '1' })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+      // The message quotes the cap back in the units the AGENT wrote, with the
+      // atomic figure it resolved to — not a bare 1000000 it never typed.
+      expect(payload.message).toContain('max_amount_human 1 USDC')
+      expect(payload.message).toContain('1000000')
+      expect(payload.message).toContain(LIVE_PRICE_ATOMIC)
+      // Pre-funding: no intent was ever created.
+      expect(fundingCall()).toBeUndefined()
+    })
+
+    it('a cap of "2" USDC clears the same 1.50 USDC quote, and clears the uncapped warning', async () => {
+      stubFetch(payRoutes)
+
+      const result = ok<{
+        amount_atomic: string
+        cap_warning?: string
+        warnings: Array<{ code: string }>
+      }>(await payMcpTool({ max_amount_human: '2' }))
+
+      expect(result.data.amount_atomic).toBe(LIVE_PRICE_ATOMIC)
+      // Either spelling of the cap satisfies #1275 — the warning is about
+      // being uncapped, not about which field carried the cap.
+      expect(result.data.cap_warning).toBeUndefined()
+      expect(result.data.warnings.map((w) => w.code)).not.toContain('MISSING_MAX_AMOUNT')
+      expect(fundingCall()).toBeDefined()
+    })
+
+    it('the cap is inclusive at the human boundary: "1.5" exactly matches a 1.50 USDC quote', async () => {
+      stubFetch(payRoutes)
+
+      const result = ok<{ amount_atomic: string }>(
+        await payMcpTool({ max_amount_human: LIVE_PRICE_HUMAN }),
+      )
+
+      expect(result.data.amount_atomic).toBe(LIVE_PRICE_ATOMIC)
+    })
+
+    it('rejects BOTH caps together with AMBIGUOUS_MAX_AMOUNT — before the merchant is contacted', async () => {
+      stubFetch(payRoutes)
+
+      const payload = await payMcpTool({ max_amount: '2000000', max_amount_human: '2' })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.AmbiguousMaxAmount)
+      expect(payload.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+      expect(payload.statusCode).toBe(400)
+      // Not just "before funding" — before ANY network call at all. Even a
+      // consistent-looking pair is refused: agreeing here is a coincidence of
+      // this fixture, and honouring one silently would teach the pattern.
+      expect(calls).toHaveLength(0)
+    })
+
+    it('refuses a human cap finer than the asset can represent rather than truncating it', async () => {
+      // 7 decimal places against 6-decimal USDC. Truncating to 1.500000 would
+      // silently widen the user's cap to exactly the quoted price; rounding
+      // down would silently tighten it. Both are the user's decision.
+      stubFetch(payRoutes)
+
+      const payload = await payMcpTool({ max_amount_human: '1.5000001' })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.MaxAmountUnconvertible)
+      expect(payload.message).toContain('USDC')
+      expect(payload.message).toContain('6')
+      expect(fundingCall()).toBeUndefined()
+    })
+
+    it('BACKWARD COMPATIBLE: max_amount stays atomic — "1" is still 0.000001 USDC, not 1 USDC', async () => {
+      // The compatibility characterization. #1351 does NOT reinterpret the
+      // existing field: an atomic caller that passes "1" gets the same
+      // refusal it always got. Changing this silently would be the exact
+      // failure mode the issue exists to prevent, just pointed the other way.
+      stubFetch(payRoutes)
+
+      const payload = await payMcpTool({ max_amount: '1' })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+      // No human-unit framing on the atomic path — the message reads as before.
+      expect(payload.message).toContain('max_amount 1')
+      expect(payload.message).not.toContain('max_amount_human')
+      expect(fundingCall()).toBeUndefined()
+    })
+
+    it('rejects a non-decimal human cap at the schema, before any network call', async () => {
+      for (const bad of ['1e6', '-1', '1.2.3', '1 USDC', '', '.5']) {
+        calls = []
+        stubFetch(payRoutes)
+        const payload = await payMcpTool({ max_amount_human: bad })
+        expect(payload.success, `expected "${bad}" to be rejected`).toBe(false)
+        if (payload.success) throw new Error('expected failure')
+        expect(payload.code).toBe('INVALID_INPUT')
+        expect(calls).toHaveLength(0)
+      }
+    })
+
+    it('an uncapped call still warns in both spellings, naming the human field first', async () => {
+      stubFetch(payRoutes)
+
+      const result = ok<{ cap_warning: string; warnings: Array<{ code: string; message: string }> }>(
+        await payMcpTool({}),
+      )
+
+      expect(result.data.cap_warning).toContain('max_amount_human')
+      // #1275's legacy field kept its substance — still names max_amount too.
+      expect(result.data.cap_warning).toContain('max_amount')
+      const missing = result.data.warnings.find((w) => w.code === 'MISSING_MAX_AMOUNT')
+      expect(missing?.message).toContain('max_amount_human')
+    })
+  })
+
+  describe('haven_pay_x402_quote', () => {
+    it('resolves the human cap against the selected payment option and fails closed under it', async () => {
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+      })
+
+      const payload = await handlers().haven_pay_x402_quote({
+        payment_required: PAYMENT_REQUIRED,
+        max_amount_human: '1',
+      })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+      expect(payload.message).toContain('max_amount_human 1 USDC')
+      expect(fundingCall()).toBeUndefined()
+    })
+
+    it('clears a sufficient human cap and creates the intent', async () => {
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+      })
+
+      const result = ok<{ cap_warning?: string }>(
+        await handlers().haven_pay_x402_quote({
+          payment_required: PAYMENT_REQUIRED,
+          max_amount_human: '2',
+        }),
+      )
+
+      expect(result.data.cap_warning).toBeUndefined()
+      expect(fundingCall()).toBeDefined()
+    })
+
+    it('refuses a human cap when the asset does not belong to the advertised network', async () => {
+      // Reachable, not theoretical: the option selector checks network and
+      // asset against separate sets, so Base-SEPOLIA USDC advertised on
+      // mainnet Base is selectable but resolves to no known token — hence no
+      // known decimals. Converting "1" against an assumed 6 would be a guess
+      // about an asset Haven could not identify, so the cap is refused and
+      // the purchase stops before any funding intent.
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+      })
+
+      const payload = await handlers().haven_pay_x402_quote({
+        payment_required: {
+          ...PAYMENT_REQUIRED,
+          accepts: [{
+            ...PAYMENT_REQUIRED.accepts[0],
+            network: 'eip155:8453',
+            asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          }],
+        },
+        max_amount_human: '1',
+      })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.MaxAmountUnconvertible)
+      expect(payload.message).toContain('max_amount')
+      expect(fundingCall()).toBeUndefined()
+    })
+
+    it('an ATOMIC cap on that same unresolvable asset still works — only the human form needs decimals', async () => {
+      // The fail-closed refusal above is scoped to the conversion, not to the
+      // purchase: an exact atomic figure needs no decimals to compare.
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+      })
+
+      ok(
+        await handlers().haven_pay_x402_quote({
+          payment_required: {
+            ...PAYMENT_REQUIRED,
+            accepts: [{
+              ...PAYMENT_REQUIRED.accepts[0],
+              network: 'eip155:8453',
+              asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            }],
+          },
+          max_amount: '2000000',
+        }),
+      )
+
+      expect(fundingCall()).toBeDefined()
+    })
+
+    it('refuses EITHER cap spelling when no payment option is settleable — never an unchecked cap', async () => {
+      // Review finding (#1351): the human spelling refused here while the
+      // atomic one fell through with the cap silently unenforced, leaving the
+      // agent believing the purchase was capped when nothing had been
+      // compared. Both spellings now refuse. This only narrows — see the
+      // uncapped case below, which is unchanged.
+      const noSettleableOption = {
+        ...PAYMENT_REQUIRED,
+        // Neither the network nor the asset is one Haven settles.
+        accepts: [{ ...PAYMENT_REQUIRED.accepts[0], network: 'eip155:1', asset: '0x' + 'ab'.repeat(20) }],
+      }
+
+      for (const capArgs of [{ max_amount: '2000000' }, { max_amount_human: '2' }]) {
+        calls = []
+        stubFetch({
+          'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+          'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+        })
+
+        const payload = await handlers().haven_pay_x402_quote({
+          payment_required: noSettleableOption,
+          ...capArgs,
+        })
+
+        expect(payload.success, `expected ${JSON.stringify(capArgs)} to refuse`).toBe(false)
+        if (payload.success) throw new Error('expected failure')
+        expect(payload.code).toBe(AgentPaymentFailureCode.MaxAmountUnconvertible)
+        expect(payload.message).toContain(Object.keys(capArgs)[0])
+        expect(fundingCall()).toBeUndefined()
+      }
+    })
+
+    it('an UNCAPPED call with no settleable option still fails the way it always did, at intent creation', async () => {
+      // Blast radius of the fix above, characterized: nothing NEW refuses when
+      // the caller never asked for a cap. This case already failed — one step
+      // later, inside createX402Intent — which is also why the old silent cap
+      // drop could never actually fund an unchecked purchase. The fix makes
+      // the refusal earlier and names the cap instead of the option.
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+      })
+
+      const payload = await handlers().haven_pay_x402_quote({
+        payment_required: {
+          ...PAYMENT_REQUIRED,
+          accepts: [{ ...PAYMENT_REQUIRED.accepts[0], network: 'eip155:1', asset: '0x' + 'ab'.repeat(20) }],
+        },
+      })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      // The pre-existing SDK-side refusal, NOT the #1351 cap refusal.
+      expect(payload.code).not.toBe(AgentPaymentFailureCode.MaxAmountUnconvertible)
+      expect(payload.message).toContain('No compatible payment option')
+      expect(fundingCall()).toBeUndefined()
+    })
+
+    it('rejects both caps together before creating an intent', async () => {
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+      })
+
+      const payload = await handlers().haven_pay_x402_quote({
+        payment_required: PAYMENT_REQUIRED,
+        max_amount: '2000000',
+        max_amount_human: '2',
+      })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.AmbiguousMaxAmount)
+      expect(calls).toHaveLength(0)
+    })
+  })
+
+  describe('haven_prepare_catalog_purchase', () => {
+    const CATALOG_ENTRY_RESPONSE = {
+      id: 'cat_1',
+      name: 'create_text',
+      description: 'Generate text',
+      category: 'ai',
+      resource_url: 'https://mcp.soundside.ai/mcp',
+      rail: 'x402',
+      protocol: 'mcp',
+      tool_name: 'create_text',
+      tool_arguments: { prompt: 'hello' },
+      price_display: '$1.50 USDC',
+      price_atomic: '1500000',
+      asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      network: 'eip155:8453',
+      status: 'active',
+      verified_at: '2026-06-16T08:50:39.772Z',
+    }
+
+    const catalogRoutes = {
+      'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': {
+        status: 200,
+        body: {
+          agent_id: 'agt_1',
+          safe_address: '0xSafe',
+          delegate_address: '0xDelegate',
+          chain_id: 8453,
+          allowances: [{
+            id: 'allowance-1',
+            token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+            token_symbol: 'USDC',
+            configured_amount: '5000000',
+            reset_period_min: 60,
+            onchain: {
+              amount: '5000000', spent: '0', remaining: '5000000', effective_spent: '0',
+              reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false,
+            },
+          }],
+        },
+      },
+    }
+
+    it('accepts the human cap as the REQUIRED cap on the guided path', async () => {
+      stubFetch(catalogRoutes)
+
+      const result = ok<{ amount_atomic: string }>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_1',
+          max_amount_human: '2',
+        }),
+      )
+
+      expect(result.data.amount_atomic).toBe(LIVE_PRICE_ATOMIC)
+      expect(fundingCall()).toBeDefined()
+    })
+
+    it('FAILS CLOSED: "1" USDC refuses the 1.50 USDC live quote before any funding intent', async () => {
+      // The guided path's twin of the haven_pay_mcp_tool mutation test. The
+      // catalog's own price_atomic is never the cap's reference point — the
+      // LIVE quote is (mutation: resolve the cap against entry.price_atomic
+      // and the boundary tests above stop meaning anything).
+      stubFetch(catalogRoutes)
+
+      const payload = await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount_human: '1',
+      })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+      expect(payload.message).toContain('max_amount_human 1 USDC')
+      expect(fundingCall()).toBeUndefined()
+    })
+
+    it('rejects both caps together with zero network calls — not even the catalog is read', async () => {
+      stubFetch(catalogRoutes)
+
+      const payload = await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount: '2000000',
+        max_amount_human: '2',
+      })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe(AgentPaymentFailureCode.AmbiguousMaxAmount)
+      expect(calls).toHaveLength(0)
+    })
+
+    it('still refuses when NEITHER spelling is given — the guided path never runs uncapped', async () => {
+      stubFetch(catalogRoutes)
+
+      const payload = await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1' })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe('INVALID_INPUT')
+      expect(payload.message).toContain('max_amount_human')
+      expect(calls).toHaveLength(0)
+    })
+
+    it('a generous human cap does NOT widen the on-chain budget: the delegation rail still refuses over-budget', async () => {
+      // The cap only ever narrows. An agent cannot buy authority by writing a
+      // big number here — the delegation budget remains the hard gate, and
+      // this refusal fires with the cap satisfied.
+      stubFetch({
+        ...catalogRoutes,
+        'GET /machine-payments/agent': {
+          status: 200,
+          body: { ...AGENT_RESPONSE, execution_rail: 'delegation' },
+        },
+        'GET /machine-payments/allowances': {
+          status: 200,
+          body: {
+            agent_id: 'agt_1',
+            safe_address: '0xSafe',
+            delegate_address: '0xDelegate',
+            chain_id: 8453,
+            allowances: [{
+              id: 'delegation-1',
+              token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+              token_symbol: 'USDC',
+              configured_amount: '0.10',
+              reset_period_min: 1440,
+              onchain: {
+                amount: '100000', spent: '0', remaining: '100000', effective_spent: '0',
+                reset_time_min: 1440, last_reset_min: 0, nonce: 0, is_reset_pending: false,
+              },
+            }],
+          },
+        },
+      })
+
+      const payload = await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount_human: '1000000',
+      })
+
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe('DELEGATION_BUDGET_EXCEEDED')
+      expect(fundingCall()).toBeUndefined()
+    })
+  })
+})

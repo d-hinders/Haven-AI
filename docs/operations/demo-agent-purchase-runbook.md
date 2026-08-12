@@ -48,8 +48,10 @@ What the audience sees the agent do (worth narrating):
   machine-readable metadata, price marked **indicative**. The agent can filter
   it with `category: "VPN"` or `search: "NordShield VPN Basic"` without
   changing anything about payment authority.
-- `haven_pay_mcp_tool` with **max_amount** — the per-purchase user-intent cap,
-  checked against the LIVE merchant quote before any money moves.
+- `haven_pay_mcp_tool` with **max_amount_human** — the per-purchase user-intent
+  cap, written in whole tokens as the user says it ("no more than 1 USDC" →
+  `max_amount_human: "1"`), checked against the LIVE merchant quote before any
+  money moves.
 - The local signer signs via **payment_id only** — no multi-KB blobs cross the
   agent (talking point: the key never leaves the laptop; Haven never signs).
 - Settle → the structured purchase **summary**: product, amount, invoice id,

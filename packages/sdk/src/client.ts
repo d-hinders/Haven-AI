@@ -2957,6 +2957,11 @@ export class HavenClient {
       amountAtomic: x402AuthorizationAmount(option),
       amount: decimalFromUsdcAtomic(x402AuthorizationAmount(option)),
       token: token?.symbol ?? 'USDC',
+      // #1351: null when the asset is unrecognised on this network — the
+      // `token` fallback above is a LABEL, not evidence of 6 decimals, and a
+      // human-denominated cap must fail closed rather than convert against a
+      // guess. Same resolution as `token`, so the two never disagree.
+      decimals: token?.decimals ?? null,
       asset: option.asset,
       network: option.network,
       chainId: chainIdOrNull(option.network),

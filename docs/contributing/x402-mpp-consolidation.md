@@ -13,7 +13,7 @@ covers:
   - packages/backend/src/routes/__tests__/x402.test.ts
   - packages/backend/src/routes/__tests__/machine-payments.test.ts
   - docs/contributing/ai-agent-workflow.md
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-12" # #1328 — mpp_demo route retired, shared primitives unchanged (see new section)
 ---
 
 # x402 / Machine-Payment Consolidation (PT-1)
@@ -73,3 +73,16 @@ The completed sequence added characterization tests, extracted approval and
 intent writers, introduced parameterized coverage, and extracted token
 resolution. Future changes follow [`ai-agent-workflow.md`](ai-agent-workflow.md)
 and its money-path review bar.
+
+## #1328: the mpp_demo route retired, the shared primitives did not
+
+`POST /machine-payments/authorize` now refuses unconditionally (410) — the
+`mpp_demo` demo flow it served (`routes/demo-mpp.ts`) is retired outright. The
+"Allowance-only (MPP/generic)" coverage strategy above, `authorizeMachinePayment`
+(`modules/mpp/authorize.ts`), and the four shared primitives it lists are
+UNCHANGED and still live — the route stopped calling them because its only
+caller is gone, not because they were removed. They remain rail-agnostic
+infrastructure for a possible future non-demo MPP rail (`mpp_crypto`), which
+is out of #1328's scope by its own file-ownership note. Historical `mpp_demo`
+payment/receipt/evidence/status rows stay readable through the generic
+`/machine-payments/*` reads this document does not otherwise cover.

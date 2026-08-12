@@ -123,10 +123,6 @@ const READ_BUT_UNDOCUMENTED: Array<{ name: string; because: string }> = [
     name: 'PUBLIC_API_URL',
     because: 'Legacy fallback alias for HAVEN_API_URL in agent-connection-setups; HAVEN_API_URL is the documented name.',
   },
-  {
-    name: 'MPP_DEMO_RECIPIENT_ADDRESS',
-    because: 'Demo-only override for the MPP demo route (routes/demo-mpp.ts); not part of a normal deployment.',
-  },
 ]
 
 // Documented in `.env.example` but read only outside code the scan sees (or

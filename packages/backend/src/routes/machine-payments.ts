@@ -5,16 +5,15 @@ import { getAgentPaymentStatus } from '../modules/payments/index.js'
 import { agentExecutionRailLabel } from '../rails/execution-rail.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
-  authorizeMachinePayment,
   handleGetAllowances,
   handleReconciliationEvent,
   handleSend,
   attachEvidenceHandler,
   handleMerchantReceiptCapture,
   listReceipts,
+  mppDemoRetired,
   prepareSweep,
   submitSweep,
-  validateMppDemoChallenge,
   RECONCILIATION_EVENT_TYPES,
   SUPPORTED_ASSETS,
   type AuthorizeBody,
@@ -117,44 +116,14 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     return reply.code(result.statusCode).send(result.body)
   })
 
-  app.post<{ Body: AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, async (request, reply) => {
-    const agent = request.agent as AgentContext
-    const { challenge, signature } = request.body
-
-    const validationError = validateMppDemoChallenge(challenge)
-    if (validationError) {
-      return reply.code(400).send({ error: validationError })
-    }
-
-    const idempotencyKey = request.body.idempotencyKey
-    if (!idempotencyKey || typeof idempotencyKey !== 'string') {
-      return reply.code(400).send({ error: 'idempotencyKey is required' })
-    }
-
-    const result = await authorizeMachinePayment({
-      agent,
-      rail: 'mpp_demo',
-      resourceUrl: challenge.resource,
-      payTo: challenge.recipient,
-      merchantPayTo: challenge.recipient,
-      amountAtomic: challenge.amount.atomic,
-      asset: challenge.asset.address,
-      chainId: challenge.network.chainId,
-      description: challenge.description,
-      challengeId: challenge.challengeId,
-      idempotencyKey,
-      metadata: {
-        ...(challenge.metadata ?? {}),
-        protocol: 'mpp',
-        network: challenge.network.name,
-        description: challenge.description,
-      },
-      signature,
-      // Route-level per-credential rate limit added (#794, moneyPathRateLimit).
-      // A finer per-rail budget can layer on top if a rail ever needs its own cap.
-    })
-
-    return reply.code(result.statusCode).send(result.body)
+  // #1328: the legacy internal MPP demo flow is retired outright — fail
+  // closed, nothing read or written beyond the agent-auth lookup the
+  // `onRequest` hook already did. `AuthorizeBody` stays as the route's
+  // request type for OpenAPI/documentation purposes; the body is never
+  // inspected. Agents are directed to the deployed x402 merchant flow.
+  app.post<{ Body: AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, async (_request, reply) => {
+    const refusal = mppDemoRetired()
+    return reply.code(refusal.statusCode).send(refusal.body)
   })
 
   app.post<{ Body: EvidenceBody }>('/evidence', { config: moneyPathRateLimit }, async (request, reply) => {

@@ -1004,12 +1004,12 @@ export const openapiSpec = {
       post: {
         tags: ['Machine payments'],
         operationId: 'authorizeMachinePayment',
-        summary: 'Authorize an MPP demo machine payment.',
+        summary: 'Retired: the legacy MPP demo machine-payment authorize flow (#1328).',
         description:
-          'Authorizes the internal MPP demo rail with the same non-custodial boundary as x402: the delegate key signs locally, Haven validates and relays, and on-chain allowance state enforces spend. The current MPP rail is an internal demo surface; production MPP merchant settlement needs separate product and legal review.',
+          'The internal mpp_demo flow is retired outright — this endpoint now refuses unconditionally with HTTP 410, fail-closed, before the body is inspected (mirrors the #834 session-rail retirement pattern). No new mpp_demo challenge can be authorized. Use the x402 merchant flow instead (POST /x402/authorize). Existing mpp_demo payment/receipt/evidence/status records remain readable through the other /machine-payments/* endpoints.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
-          required: true,
+          required: false,
           content: {
             'application/json': {
               schema: { $ref: '#/components/schemas/MachinePaymentAuthorizeRequest' },
@@ -1017,29 +1017,12 @@ export const openapiSpec = {
           },
         },
         responses: {
-          '200': {
-            description: 'Existing or completed machine-payment state.',
-            content: {
-              'application/json': { schema: { $ref: '#/components/schemas/MachinePaymentAuthorizeResponse' } },
-            },
-          },
-          '201': {
-            description: 'Signable or confirmed machine payment.',
-            content: {
-              'application/json': { schema: { $ref: '#/components/schemas/MachinePaymentAuthorizeResponse' } },
-            },
-          },
-          '202': {
-            description: 'Machine payment is waiting for wallet owner approval.',
-            content: {
-              'application/json': { schema: { $ref: '#/components/schemas/MachinePaymentAuthorizeResponse' } },
-            },
-          },
-          '400': errorResponse,
           '401': errorResponse,
-          '403': errorResponse,
-          '409': errorResponse,
-          '502': errorResponse,
+          '403': agentAuthForbidden,
+          '410': {
+            ...errorResponse,
+            description: 'The mpp_demo flow is retired (#1328) — no new legacy MPP demo challenge can be authorized.',
+          },
         },
       },
     },

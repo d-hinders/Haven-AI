@@ -14,7 +14,6 @@ covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/rails/delegation-rail.ts
-  - packages/backend/src/routes/demo-mpp.ts
   - packages/backend/src/routes/reporting.ts
   - packages/backend/src/routes/catalog.ts
   - packages/connect/src/api.ts
@@ -60,7 +59,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-11" # #1330 Hermes stores its hosted-MCP identity in owner-only .env with a config reference; prior #1326 Hermes runtime profile, #1251 (MPP seam refusal) + #1266 demo merchant x402 settlement selection
+last-verified: "2026-08-12" # #1328 mpp_demo retirement — routes/demo-mpp.ts glob removed (file deleted); prior #1330 Hermes stores its hosted-MCP identity in owner-only .env with a config reference; #1326 Hermes runtime profile, #1251 (MPP seam refusal) + #1266 demo merchant x402 settlement selection
 ---
 
 # Haven — Architecture Overview

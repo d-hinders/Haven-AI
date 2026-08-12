@@ -167,9 +167,6 @@ describe('Haven MCP tool descriptions', () => {
     { tool: 'haven_pay_x402_quote', key: 'payX402' },
     { tool: 'haven_pay_x402', key: 'payX402OneShot' },
     { tool: 'haven_resume_x402_payment', key: 'resumeX402' },
-    { tool: 'haven_quote_mpp', key: 'quoteMpp' },
-    { tool: 'haven_pay_mpp_challenge', key: 'payMpp' },
-    { tool: 'haven_resume_mpp_payment', key: 'resumeMpp' },
     { tool: 'haven_get_payment_status', key: 'getPaymentStatus' },
     { tool: 'haven_get_resume_state', key: 'getResumeState' },
     { tool: 'haven_get_agent', key: 'getAgent' },
@@ -216,7 +213,7 @@ describe('Haven MCP tool descriptions', () => {
   })
 
   it('keeps payment tools routed away from read-only budget questions', () => {
-    for (const tool of ['haven_pay_x402_quote', 'haven_pay_mpp_challenge'] as const) {
+    for (const tool of ['haven_pay_x402_quote'] as const) {
       const desc = toolDescriptions[tool].toLowerCase()
 
       expect(desc).toContain('do not use this for read-only allowance')
@@ -224,67 +221,18 @@ describe('Haven MCP tool descriptions', () => {
       expect(desc).toContain('use the allowance lookup tool instead')
     }
   })
+
+  it('no longer registers the retired mpp_demo MCP tools (#1328)', () => {
+    const names = Object.keys(toolDescriptions)
+    expect(names).not.toContain('haven_quote_mpp')
+    expect(names).not.toContain('haven_pay_mpp_challenge')
+    expect(names).not.toContain('haven_resume_mpp_payment')
+  })
 })
 
 describe('Haven MCP tool handlers', () => {
   afterEach(() => {
     vi.restoreAllMocks()
-  })
-
-  it('pays MPP challenges without leaking the delegate key over HTTP', async () => {
-    const requests: CapturedRequest[] = []
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
-      requests.push({ url: String(url), init })
-
-      if (String(url).endsWith('/machine-payments/authorize')) {
-        return jsonResponse({
-          payment_id: 'payment-1',
-          status: 'pending_signature',
-          rail: 'mpp_demo',
-          chain_id: 8453,
-          safe_address: '0xSafe',
-          sign_data: {
-            hash: `0x${'11'.repeat(32)}`,
-            components: {
-              safe: '0xSafe',
-              token: challenge.asset.address,
-              to: challenge.recipient,
-              amount: challenge.amount.atomic,
-              payment_token: '0x0000000000000000000000000000000000000000',
-              payment: '0',
-              nonce: 1,
-            },
-            instructions: 'Sign locally',
-          },
-        })
-      }
-
-      if (String(url).endsWith('/payments/payment-1/sign')) {
-        return jsonResponse({
-          payment_id: 'payment-1',
-          status: 'confirmed',
-          tx_hash: txHash,
-          token: 'USDC',
-          amount: '0.01',
-          to: challenge.recipient,
-          chain_id: 8453,
-        })
-      }
-
-      return jsonResponse({ delivered: true })
-    })
-
-    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
-    const handlers = createToolHandlers(haven)
-    const quote = await handlers.haven_quote_mpp({ challenge })
-    expect(quote.success).toBe(true)
-    if (!quote.success) throw new Error('quote failed')
-
-    const paid = await handlers.haven_pay_mpp_challenge({ quote: quote.data })
-    expect(paid.success).toBe(true)
-    expect(JSON.stringify(paid)).toContain('delivered')
-
-    assertNoDelegateKeyLeak(requests, delegateKey)
   })
 
   it('pays x402 quotes without leaking the delegate key over HTTP', async () => {
@@ -881,66 +829,6 @@ describe('Haven MCP tool handlers', () => {
     }
   })
 
-  it('[#190] over-budget MPP payment queues for user approval (regression — unchanged)', async () => {
-    // Mirror of the x402 regression but for the MPP rail.
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({
-      payment_id: 'pay-mpp-budget-1',
-      kind: 'approval_request',
-      rail: 'mpp_demo',
-      status: 'pending_approval',
-      phase: 'user_approval_required',
-      next_action: 'wait_for_user_approval',
-      amount: '25.00',
-      token: 'USDC',
-      resource_url: challenge.resource,
-      merchant_address: challenge.recipient,
-      tx_hash: null,
-      expires_at: '2099-01-01T00:00:00.000Z',
-      chain_id: 8453,
-      message: 'Allowance exhausted — awaiting user approval',
-      mpp: {
-        amount_atomic: challenge.amount.atomic,
-        asset: challenge.asset.address,
-        network: 'base',
-        resource_url: challenge.resource,
-        merchant_address: challenge.recipient,
-        description: challenge.description,
-        idempotency_key: 'mpp:budget-test',
-        challenge_id: challenge.challengeId,
-      },
-    }, 202))
-
-    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
-    const handlers = createToolHandlers(haven)
-    const mppQuote = {
-      rail: 'mpp',
-      paymentRail: 'mpp_demo',
-      idempotencyKey: 'mpp:budget-test',
-      challenge,
-      request: { url: challenge.resource, method: 'GET', headers: [] },
-      resourceUrl: challenge.resource,
-      description: challenge.description,
-      amountAtomic: challenge.amount.atomic,
-      amount: '25.00',
-      token: 'USDC',
-      asset: challenge.asset.address,
-      network: 'base',
-      chainId: 8453,
-      merchantAddress: challenge.recipient,
-      expiresAt: challenge.expiresAt,
-    }
-
-    const result = await handlers.haven_pay_mpp_challenge({ quote: mppQuote })
-
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.nextAction).toBe('wait_for_user_approval')
-      expect(result.status).toBe('pending_approval')
-      expect(result.paymentId).toBe('pay-mpp-budget-1')
-      expect(result.resume_state).toBeDefined()
-    }
-  })
-
   it('[#190] read-only tools (get_agent, get_allowances) never transmit the delegate key', async () => {
     // Non-payment tools must also uphold the key-isolation invariant.
     const requests: Array<{ url: string; body: string; headers: string }> = []
@@ -1067,69 +955,6 @@ describe('Haven MCP tool handlers', () => {
     ).toThrow(/does not yet inspect body of type/)
   })
 
-  it('returns structured payment state errors with nextAction and resume_state', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({
-      payment_id: 'approval-1',
-      kind: 'approval_request',
-      rail: 'mpp_demo',
-      status: 'pending_approval',
-      phase: 'user_approval_required',
-      next_action: 'wait_for_user_approval',
-      amount: '0.01',
-      token: 'USDC',
-      resource_url: challenge.resource,
-      merchant_address: challenge.recipient,
-      tx_hash: null,
-      expires_at: '2099-01-01T00:00:00.000Z',
-      chain_id: 8453,
-      message: 'Waiting for user approval',
-      mpp: {
-        amount_atomic: '10000',
-        asset: challenge.asset.address,
-        network: 'base',
-        resource_url: challenge.resource,
-        merchant_address: challenge.recipient,
-        description: challenge.description,
-        idempotency_key: 'mpp:test',
-        challenge_id: challenge.challengeId,
-      },
-    }, 202))
-
-    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
-    const handlers = createToolHandlers(haven)
-    const quote = {
-      rail: 'mpp',
-      paymentRail: 'mpp_demo',
-      idempotencyKey: 'mpp:test',
-      challenge,
-      request: { url: challenge.resource, method: 'GET', headers: [] },
-      resourceUrl: challenge.resource,
-      description: challenge.description,
-      amountAtomic: '10000',
-      amount: '0.01',
-      token: 'USDC',
-      asset: challenge.asset.address,
-      network: 'base',
-      chainId: 8453,
-      merchantAddress: challenge.recipient,
-      expiresAt: challenge.expiresAt,
-    }
-
-    const result = await handlers.haven_pay_mpp_challenge({ quote })
-
-    expect(result).toMatchObject({
-      success: false,
-      code: 'API_ERROR',
-      paymentId: 'approval-1',
-      status: 'pending_approval',
-      phase: 'user_approval_required',
-      nextAction: 'wait_for_user_approval',
-      resume_state: {
-        rail: 'mpp',
-        paymentId: 'approval-1',
-      },
-    })
-  })
 })
 
 describe('haven_send', () => {
@@ -1591,9 +1416,12 @@ describe('Tool selection errors (#318)', () => {
 
   // ── haven_quote_x402 WRONG_RAIL ──────────────────────────────────────────
 
-  it('haven_quote_x402: returns WRONG_RAIL when URL responds with MPP challenge', async () => {
-    // Simulate a merchant that speaks MPP not x402 — the SDK sees a
-    // MACHINE-PAYMENT-CHALLENGE header and throws a HavenApiError.
+  it('haven_quote_x402: a MACHINE-PAYMENT-CHALLENGE response is a plain error, no dead tool suggestion (#1328)', async () => {
+    // #1328: nothing in Haven produces this header anymore (the mpp_demo
+    // route it identified is retired) — quoteX402's defensive guard still
+    // refuses it, but the old WRONG_RAIL redirect to the now-deleted
+    // haven_quote_mpp is gone. Any surviving MACHINE-PAYMENT-CHALLENGE
+    // responder (there should be none) now just produces a generic error.
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response('Payment required', {
         status: 402,
@@ -1605,69 +1433,8 @@ describe('Tool selection errors (#318)', () => {
 
     expect(result.success).toBe(false)
     if (!result.success) {
-      expect(result.code).toBe('WRONG_RAIL')
-      expect(result.suggested_tool).toBe('haven_quote_mpp')
-      expect(result.message).toMatch(/MPP/i)
-    }
-  })
-
-  it('haven_quote_x402: WRONG_RAIL message tells agent which tool to use', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response('Payment required', {
-        status: 402,
-        headers: { 'MACHINE-PAYMENT-CHALLENGE': btoa(JSON.stringify(challenge)) },
-      }),
-    )
-
-    const result = await baseHandlers().haven_quote_x402({ url: 'https://merchant.example/paid' })
-
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.message.toLowerCase()).toContain('haven_quote_mpp')
-    }
-  })
-
-  // ── haven_quote_mpp WRONG_RAIL ───────────────────────────────────────────
-
-  it('haven_quote_mpp: returns WRONG_RAIL when URL responds with x402 payment required', async () => {
-    // Simulate a merchant that speaks x402 not MPP — SDK sees PAYMENT-REQUIRED
-    // but no MACHINE-PAYMENT-CHALLENGE, throws a plain Error.
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify(x402PaymentRequired), {
-        status: 402,
-        headers: {
-          'Content-Type': 'application/json',
-          'PAYMENT-REQUIRED': btoa(JSON.stringify(x402PaymentRequired)),
-        },
-      }),
-    )
-
-    const result = await baseHandlers().haven_quote_mpp({ url: 'https://merchant.example/paid' })
-
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.code).toBe('WRONG_RAIL')
-      expect(result.suggested_tool).toBe('haven_quote_x402')
-      expect(result.message).toMatch(/x402/i)
-    }
-  })
-
-  it('haven_quote_mpp: WRONG_RAIL message points at haven_quote_x402', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify(x402PaymentRequired), {
-        status: 402,
-        headers: {
-          'Content-Type': 'application/json',
-          'PAYMENT-REQUIRED': btoa(JSON.stringify(x402PaymentRequired)),
-        },
-      }),
-    )
-
-    const result = await baseHandlers().haven_quote_mpp({ url: 'https://merchant.example/paid' })
-
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.message.toLowerCase()).toContain('haven_quote_x402')
+      expect(result.code).not.toBe('WRONG_RAIL')
+      expect(result.suggested_tool).not.toBe('haven_quote_mpp')
     }
   })
 
@@ -1697,111 +1464,32 @@ describe('Tool selection errors (#318)', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('haven_pay_x402_quote: returns WRONG_TOOL with MPP suggestion when quote is an MPP quote', async () => {
+  it('haven_pay_x402_quote: an mpp-shaped quote is just "missing paymentRequired" now, no MPP tool suggestion (#1328)', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
-    const mppQuote = { rail: 'mpp', challenge, amountAtomic: '10000' }
-    const result = await baseHandlers().haven_pay_x402_quote({ quote: mppQuote })
+    const mppShapedQuote = { rail: 'mpp', challenge, amountAtomic: '10000' }
+    const result = await baseHandlers().haven_pay_x402_quote({ quote: mppShapedQuote })
 
     expect(result.success).toBe(false)
     if (!result.success) {
       expect(result.code).toBe('WRONG_TOOL')
-      expect(result.suggested_tool).toBe('haven_pay_mpp_challenge')
+      expect(result.suggested_tool).toBe('haven_quote_x402')
+      expect(result.suggested_tool).not.toBe('haven_pay_mpp_challenge')
     }
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  // ── haven_pay_mpp_challenge WRONG_TOOL ───────────────────────────────────
+  // ── haven_resume_x402_payment: mpp resume_state is retired, not a redirect ──
 
-  it('haven_pay_mpp_challenge: returns WRONG_TOOL when quote is null', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-    const result = await baseHandlers().haven_pay_mpp_challenge({ quote: null })
-
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.code).toBe('WRONG_TOOL')
-      expect(result.suggested_tool).toBe('haven_quote_mpp')
-    }
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-
-  it('haven_pay_mpp_challenge: returns WRONG_TOOL when quote is missing challenge field', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-    const result = await baseHandlers().haven_pay_mpp_challenge({ quote: { rail: 'mpp' } })
-
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.code).toBe('WRONG_TOOL')
-      expect(result.suggested_tool).toBe('haven_quote_mpp')
-    }
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-
-  it('haven_pay_mpp_challenge: returns WRONG_TOOL with x402 suggestion when quote is an x402 quote', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-    const x402Quote = { rail: 'x402', paymentRequired: x402PaymentRequired }
-    const result = await baseHandlers().haven_pay_mpp_challenge({ quote: x402Quote })
-
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.code).toBe('WRONG_TOOL')
-      expect(result.suggested_tool).toBe('haven_pay_x402_quote')
-    }
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-
-  // ── haven_resume_x402_payment WRONG_TOOL ────────────────────────────────
-
-  it('haven_resume_x402_payment: returns WRONG_TOOL when resume_state is for MPP rail', async () => {
+  it('haven_resume_x402_payment: an mpp-rail resume_state is a plain state mismatch, no dead tool suggestion (#1328)', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const mppState = { rail: 'mpp', paymentId: 'pay-mpp-1', challenge }
     const result = await baseHandlers().haven_resume_x402_payment({ resume_state: mppState })
 
     expect(result.success).toBe(false)
     if (!result.success) {
-      expect(result.code).toBe('WRONG_TOOL')
-      expect(result.suggested_tool).toBe('haven_resume_mpp_payment')
-      expect(result.message).toContain('mpp')
+      expect(result.suggested_tool).not.toBe('haven_resume_mpp_payment')
     }
     expect(fetchSpy).not.toHaveBeenCalled()
-  })
-
-  it('haven_resume_x402_payment: WRONG_TOOL names the correct rail in message', async () => {
-    vi.spyOn(globalThis, 'fetch')
-    const mppState = { rail: 'mpp', paymentId: 'pay-mpp-2' }
-    const result = await baseHandlers().haven_resume_x402_payment({ resume_state: mppState })
-
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.message).toMatch(/mpp/)
-      expect(result.message.toLowerCase()).toContain('haven_resume_mpp_payment')
-    }
-  })
-
-  // ── haven_resume_mpp_payment WRONG_TOOL ─────────────────────────────────
-
-  it('haven_resume_mpp_payment: returns WRONG_TOOL when resume_state is for x402 rail', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-    const x402State = { rail: 'x402', paymentId: 'pay-x402-1' }
-    const result = await baseHandlers().haven_resume_mpp_payment({ resume_state: x402State })
-
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.code).toBe('WRONG_TOOL')
-      expect(result.suggested_tool).toBe('haven_resume_x402_payment')
-      expect(result.message).toContain('x402')
-    }
-    expect(fetchSpy).not.toHaveBeenCalled()
-  })
-
-  it('haven_resume_mpp_payment: WRONG_TOOL names the correct alternative tool', async () => {
-    vi.spyOn(globalThis, 'fetch')
-    const x402State = { rail: 'x402', paymentId: 'pay-x402-2' }
-    const result = await baseHandlers().haven_resume_mpp_payment({ resume_state: x402State })
-
-    expect(result.success).toBe(false)
-    if (!result.success) {
-      expect(result.message.toLowerCase()).toContain('haven_resume_x402_payment')
-    }
   })
 
   // ── Cross-cutting: structured errors have no network side effects ─────────
@@ -1813,12 +1501,16 @@ describe('Tool selection errors (#318)', () => {
     // All of these should be caught before any HTTP request
     await handlers.haven_pay_x402_quote({ quote: null })
     await handlers.haven_pay_x402_quote({ quote: { rail: 'mpp', challenge } })
-    await handlers.haven_pay_mpp_challenge({ quote: null })
-    await handlers.haven_pay_mpp_challenge({ quote: { rail: 'x402', paymentRequired: x402PaymentRequired } })
     await handlers.haven_resume_x402_payment({ resume_state: { rail: 'mpp' } })
-    await handlers.haven_resume_mpp_payment({ resume_state: { rail: 'x402' } })
 
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('no longer exposes haven_quote_mpp / haven_pay_mpp_challenge / haven_resume_mpp_payment handlers (#1328)', () => {
+    const handlers = baseHandlers()
+    expect((handlers as Record<string, unknown>).haven_quote_mpp).toBeUndefined()
+    expect((handlers as Record<string, unknown>).haven_pay_mpp_challenge).toBeUndefined()
+    expect((handlers as Record<string, unknown>).haven_resume_mpp_payment).toBeUndefined()
   })
 })
 
@@ -1870,7 +1562,10 @@ describe('haven_discover_tools (#349)', () => {
       tool_arguments: { prompt: 'hello' },
     })
     expect(data[1]).toMatchObject({ id: 'cat-http', suggested_tool: 'haven_pay_x402' })
-    expect(data[2]).toMatchObject({ id: 'cat-mpp', suggested_tool: 'haven_quote_mpp', status: 'degraded' })
+    // #1328: the 'mpp' rail's suggested_tool fallback no longer names a
+    // deleted tool — it now matches the plain-HTTP x402 case (unreachable in
+    // practice today; the only-ever 'mpp' catalog row is delisted).
+    expect(data[2]).toMatchObject({ id: 'cat-mpp', suggested_tool: 'haven_pay_x402', status: 'degraded' })
 
     // read-only: exactly one request, a GET to /catalog, nothing else
     expect(fetchMock).toHaveBeenCalledTimes(1)

@@ -505,8 +505,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Authorize an MPP demo machine payment.
-         * @description Authorizes the internal MPP demo rail with the same non-custodial boundary as x402: the delegate key signs locally, Haven validates and relays, and on-chain allowance state enforces spend. The current MPP rail is an internal demo surface; production MPP merchant settlement needs separate product and legal review.
+         * Retired: the legacy MPP demo machine-payment authorize flow (#1328).
+         * @description The internal mpp_demo flow is retired outright — this endpoint now refuses unconditionally with HTTP 410, fail-closed, before the body is inspected (mirrors the #834 session-rail retirement pattern). No new mpp_demo challenge can be authorized. Use the x402 merchant flow instead (POST /x402/authorize). Existing mpp_demo payment/receipt/evidence/status records remain readable through the other /machine-payments/* endpoints.
          */
         post: operations["authorizeMachinePayment"];
         delete?: never;
@@ -3936,54 +3936,12 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": components["schemas"]["MachinePaymentAuthorizeRequest"];
             };
         };
         responses: {
-            /** @description Existing or completed machine-payment state. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MachinePaymentAuthorizeResponse"];
-                };
-            };
-            /** @description Signable or confirmed machine payment. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MachinePaymentAuthorizeResponse"];
-                };
-            };
-            /** @description Machine payment is waiting for wallet owner approval. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MachinePaymentAuthorizeResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description Error response */
             401: {
                 headers: {
@@ -3999,7 +3957,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4007,30 +3965,12 @@ export interface operations {
                 content: {
                     "application/json": {
                         error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
+                        detail?: string;
                     };
                 };
             };
-            /** @description Error response */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            502: {
+            /** @description The mpp_demo flow is retired (#1328) — no new legacy MPP demo challenge can be authorized. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };

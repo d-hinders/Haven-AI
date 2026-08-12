@@ -25,9 +25,9 @@ export const MCP_TOOL_NAMES = [
   'haven_quote_x402',
   'haven_pay_x402_quote',
   'haven_resume_x402_payment',
-  'haven_quote_mpp',
-  'haven_pay_mpp_challenge',
-  'haven_resume_mpp_payment',
+  // #1328: haven_quote_mpp / haven_pay_mpp_challenge / haven_resume_mpp_payment
+  // are retired along with the mpp_demo flow — @haven_ai/mcp no longer
+  // registers them, so they are dropped from this allowlist too.
   'haven_get_payment_status',
   'haven_get_resume_state',
   'haven_get_agent',

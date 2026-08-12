@@ -141,10 +141,6 @@
   "packages/backend/src/routes/__tests__/dashboard.test.ts": {
     "db-mock": 1
   },
-  "packages/backend/src/routes/__tests__/demo-mpp.test.ts": {
-    "db-mock": 1,
-    "positional": 16
-  },
   "packages/backend/src/routes/__tests__/hybrid-accounts.test.ts": {
     "db-mock": 1
   },
@@ -188,7 +184,7 @@
   },
   "packages/backend/src/routes/__tests__/payments.test.ts": {
     "db-mock": 1,
-    "positional": 15
+    "positional": 1
   },
   "packages/backend/src/routes/__tests__/portfolio.test.ts": {
     "db-mock": 1,

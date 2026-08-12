@@ -17,7 +17,8 @@
  *   - safe_address (lowercased)
  *   - delegate_address (lowercased)
  *   - chain_id
- *   - sorted canonical tool name list (all 11 registered tools — static)
+ *   - sorted canonical tool name list (all 8 registered tools — static; #1328
+ *     retired haven_quote_mpp/haven_pay_mpp_challenge/haven_resume_mpp_payment)
  *   - sorted canonical allowance list  (from budget_summary snapshot)
  *
  * The hash invalidates whenever tools, allowances, or credential identity
@@ -34,9 +35,11 @@ const MCP_TOOL_NAMES = [
   'haven_quote_x402',
   'haven_pay_x402_quote',
   'haven_resume_x402_payment',
-  'haven_quote_mpp',
-  'haven_pay_mpp_challenge',
-  'haven_resume_mpp_payment',
+  // #1328: haven_quote_mpp / haven_pay_mpp_challenge / haven_resume_mpp_payment
+  // are retired along with the mpp_demo flow — @haven_ai/mcp no longer
+  // registers them, so the consent hash must not include them either (a
+  // mismatched tool list here breaks the pre-embedded HAVEN_MCP_ACK — the
+  // server computes its half of the hash from the actual registered set).
   'haven_get_payment_status',
   'haven_get_resume_state',
   'haven_get_agent',

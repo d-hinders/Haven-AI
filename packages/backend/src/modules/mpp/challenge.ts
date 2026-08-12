@@ -1,43 +1,28 @@
 /**
- * `mpp_demo` challenge verification (#997). An AUTHORIZATION boundary, not
- * mere shape validation — it pins the demo's exact price, exact USDC address,
- * exact chain and a non-expired window, so a caller cannot pay less than the
- * challenge demanded or replay an expired one. Extracted verbatim from
- * `routes/machine-payments.ts`'s `validateMppDemoChallenge`. See
- * `routes/__tests__/demo-mpp.test.ts` and the `authorize` rejection-path
- * tests in `routes/__tests__/machine-payments.test.ts` for the
- * characterization pins (#997) and the mutation proof this boundary must
- * hold against.
+ * `mpp_demo` retirement refusal (#1328). The legacy internal MPP demo flow —
+ * `POST /demo/mpp/*` and the `POST /machine-payments/authorize` path that
+ * authorized against it — is retired outright: zero external customers,
+ * agents are directed to the deployed x402 merchant flow instead (mirrors
+ * the #834 session-rail retirement's fail-closed pattern). This file used to
+ * hold `validateMppDemoChallenge`, an authorization boundary pinning the
+ * demo's exact price/chain/asset/expiry (#997); that boundary is now moot
+ * because nothing is authorized here anymore — `mppDemoRetired()` is the
+ * single producer of the refusal, called BEFORE any read or write, so a
+ * retired-flow request touches the database only for agent authentication.
+ *
+ * Historical `mpp_demo` payment/receipt/evidence/status rows remain readable
+ * through the generic `/machine-payments/*` reads (status, receipts,
+ * evidence, reconciliation) — this file has no bearing on those; it only
+ * ever gated the authorize-time write path.
  */
-import type { MachinePaymentChallengeBody } from './types.js'
-
-export function validateMppDemoChallenge(challenge: MachinePaymentChallengeBody): string | null {
-  if (!challenge || typeof challenge !== 'object') return 'challenge is required'
-  if (challenge.rail !== 'mpp_demo') return 'Only mpp_demo challenges are supported'
-  if (!challenge.challengeId || typeof challenge.challengeId !== 'string') return 'challengeId is required'
-  if (!challenge.resource || typeof challenge.resource !== 'string') return 'resource is required'
-  if (challenge.network?.chainId !== 8453 || challenge.network?.name !== 'base') {
-    return 'MPP demo payments must use Base'
+export function mppDemoRetired(): { statusCode: 410; body: { error: string } } {
+  return {
+    statusCode: 410,
+    body: {
+      error:
+        'The mpp_demo flow is retired — no new legacy MPP demo challenge can be authorized. ' +
+        'Use the deployed x402 merchant flow instead (haven_quote_x402 / haven_pay_x402_quote, ' +
+        'or POST /x402/authorize).',
+    },
   }
-  if (
-    challenge.asset?.symbol !== 'USDC' ||
-    challenge.asset?.decimals !== 6 ||
-    challenge.asset?.address?.toLowerCase() !== '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
-  ) {
-    return 'MPP demo payments must use Base USDC'
-  }
-  if (challenge.amount?.atomic !== '10000' || challenge.amount?.display !== '0.01') {
-    return 'MPP demo payments are fixed at 0.01 USDC'
-  }
-  if (!challenge.expiresAt || typeof challenge.expiresAt !== 'string') {
-    return 'expiresAt must be a valid ISO timestamp'
-  }
-  const expiresAtMs = new Date(challenge.expiresAt).getTime()
-  if (!Number.isFinite(expiresAtMs)) {
-    return 'expiresAt must be a valid ISO timestamp'
-  }
-  if (expiresAtMs <= Date.now()) {
-    return 'MPP demo challenge has expired'
-  }
-  return null
 }

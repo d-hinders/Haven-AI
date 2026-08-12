@@ -33,15 +33,7 @@ import type {
   X402ResumeState,
   ResumeAuthorizedX402Input,
   ResumeX402PaymentInput,
-  MppAuthorizationOptions,
-  MppQuote,
-  MppResumeState,
-  ResumeAuthorizedMppInput,
-  ResumeMppPaymentInput,
   RawX402AuthorizeResponse,
-  MachinePaymentChallenge,
-  MachinePaymentReceipt,
-  RawMachinePaymentAuthorizeResponse,
   HavenAgent,
   HavenAgentSummary,
   HavenAgentAllowanceSummary,
@@ -77,11 +69,6 @@ import {
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
 } from './x402.js'
-import {
-  buildMachinePaymentIdempotencyKey,
-  encodeMachinePaymentProof,
-  parseMachinePaymentChallengeResponse,
-} from './mpp.js'
 import type {
   SweepAuthorization,
   SweepPrepareResponse,
@@ -258,10 +245,6 @@ function sameAddress(a: string | null | undefined, b: string | null | undefined)
   return Boolean(a && b && a.toLowerCase() === b.toLowerCase())
 }
 
-function isMppRail(rail: string | null | undefined): boolean {
-  return rail === 'mpp' || Boolean(rail?.startsWith('mpp_'))
-}
-
 function decimalFromUsdcAtomic(value: string): string {
   const amount = BigInt(value)
   const whole = amount / 1_000_000n
@@ -419,7 +402,6 @@ export class HavenClient {
   private readonly chainRpcs: Record<number, string>
   private readonly inFlightX402 = new Map<string, Promise<X402Receipt>>()
   private readonly x402ReceiptCache = new Map<string, { expiresAt: number; receipt: X402Receipt }>()
-  private readonly inFlightMachinePayments = new Map<string, Promise<MachinePaymentReceipt>>()
   /**
    * Setup-time headers configured via `HavenClientConfig.defaultHeaders`.
    * Read-only after construction — use `withRequestContext` for per-call
@@ -1127,10 +1109,11 @@ export class HavenClient {
   }
 
   /**
-   * Rehydrate the x402/MPP resume-state bundle for a payment id.
+   * Rehydrate the x402 resume-state bundle for a payment id (#1328: the MPP
+   * resume-state variant retired along with the rest of the mpp_demo surface).
    *
    * The server returns stored protocol context only. The client still signs the
-   * merchant proof locally when resumeX402Payment() or resumeMppPayment() runs.
+   * merchant proof locally when resumeX402Payment() runs.
    */
   async getResumeState(paymentId: string): Promise<PaymentResumeState> {
     return this.get<PaymentResumeState>(`/payments/${paymentId}/resume_state`)
@@ -1490,25 +1473,18 @@ export class HavenClient {
       return mcpSessionId ? this.surfaceMcpResult(response) : response
     }
 
-    const machineChallengeHeader = response.headers.get('MACHINE-PAYMENT-CHALLENGE')
-    if (machineChallengeHeader) {
-      const challenge = await parseMachinePaymentChallengeResponse(response)
-      return this.fetchWithMachinePayment(url, requestInit, challenge)
-    }
+    // #1328: the legacy MACHINE-PAYMENT-CHALLENGE / mpp_demo auto-handling is
+    // retired — a 402 that isn't standard x402 (including a stray
+    // MACHINE-PAYMENT-CHALLENGE header from a pre-retirement caller) is
+    // returned to the agent unmodified rather than auto-paid.
 
     // 3. Parse x402 payment requirements
     let paymentRequired: X402PaymentRequired
     try {
       paymentRequired = await parsePaymentRequiredResponse(response)
     } catch {
-      let challenge: MachinePaymentChallenge
-      try {
-        challenge = await parseMachinePaymentChallengeResponse(response)
-      } catch {
-        // Not a Haven machine-payment 402 — return original response
-        return response
-      }
-      return this.fetchWithMachinePayment(url, requestInit, challenge)
+      // Not a standard x402 402 response — return it unchanged.
+      return response
     }
 
     // Signal B: a Bazaar `extensions.bazaar` block marks an MCP-discoverable
@@ -1694,62 +1670,6 @@ export class HavenClient {
       statusText: response.statusText,
       headers,
     })
-  }
-
-  /**
-   * Probe a paid MPP endpoint or inspect an existing challenge without creating
-   * a Haven payment or approval request.
-   */
-  async quoteMpp(
-    challengeOrUrl: MachinePaymentChallenge | string,
-    init?: RequestInit,
-    options: MppAuthorizationOptions = {},
-  ): Promise<MppQuote> {
-    if (typeof challengeOrUrl !== 'string') {
-      const request = this.snapshotX402Request(challengeOrUrl.resource, init)
-      return this.buildMppQuote(challengeOrUrl, request, options.idempotencyKey)
-    }
-
-    const request = this.snapshotX402Request(challengeOrUrl, init)
-    const response = await this.merchantFetch(challengeOrUrl, init)
-
-    if (response.status !== 402) {
-      throw new HavenApiError(
-        `Expected an MPP quote response with HTTP 402, got HTTP ${response.status}.`,
-        response.status || 400,
-      )
-    }
-
-    const challenge = await parseMachinePaymentChallengeResponse(response)
-    return this.buildMppQuote(challenge, request, options.idempotencyKey)
-  }
-
-  /**
-   * Pay a previously inspected MPP quote and retry the exact captured request.
-   */
-  async payMppChallenge(
-    quote: MppQuote,
-    options: MppAuthorizationOptions = {},
-  ): Promise<Response> {
-    const idempotencyKey = options.idempotencyKey ?? quote.idempotencyKey
-
-    try {
-      const receipt = await this.authorizeMachinePayment(quote.challenge, { idempotencyKey })
-      return this.retryMppRequest(
-        quote.request.url,
-        this.requestInitFromSnapshot(quote.request),
-        quote.challenge,
-        receipt,
-      )
-    } catch (err) {
-      this.attachResumeState(err, {
-        rail: 'mpp',
-        challenge: quote.challenge,
-        idempotencyKey,
-        request: quote.request,
-      })
-      throw err
-    }
   }
 
   private async retryX402Request(
@@ -2082,203 +2002,13 @@ export class HavenClient {
     }
   }
 
-  async authorizeMachinePayment(
-    challenge: MachinePaymentChallenge,
-    options: MppAuthorizationOptions = {},
-  ): Promise<MachinePaymentReceipt> {
-    if (!this.delegateKey) {
-      throw new HavenSigningError(
-        'delegateKey is required for machine payments. Pass it in the HavenClient config.',
-      )
-    }
-
-    if (challenge.rail !== 'mpp_demo') {
-      throw new HavenApiError(`Unsupported machine payment rail: ${challenge.rail}`, 400)
-    }
-
-    const idempotencyKey = options.idempotencyKey ?? buildMachinePaymentIdempotencyKey(challenge)
-    const inFlight = this.inFlightMachinePayments.get(idempotencyKey)
-    if (inFlight) return inFlight
-
-    const promise = this.authorizeMppDemoPayment(challenge, idempotencyKey)
-    this.inFlightMachinePayments.set(idempotencyKey, promise)
-
-    try {
-      return await promise
-    } catch (err) {
-      this.attachResumeState(err, {
-        rail: 'mpp',
-        challenge,
-        idempotencyKey,
-      })
-      throw err
-    } finally {
-      this.inFlightMachinePayments.delete(idempotencyKey)
-    }
-  }
-
-  private async authorizeMppDemoPayment(
-    challenge: MachinePaymentChallenge,
-    idempotencyKey: string,
-  ): Promise<MachinePaymentReceipt> {
-    const raw = await this.post<RawMachinePaymentAuthorizeResponse>(
-      '/machine-payments/authorize',
-      { challenge, idempotencyKey },
-    )
-
-    if (raw.success && raw.tx_hash) {
-      return this.mapMachinePaymentReceipt(challenge, raw, raw.tx_hash)
-    }
-
-    this.throwIfNonSignableAuthorizationState('Machine payment', raw)
-
-    if (!raw.sign_data?.hash) {
-      throw new HavenApiError('No sign_hash returned from machine payment authorization', 500, raw)
-    }
-
-    const sig = await this.signForData(raw.sign_data)
-    const execResult = await this.post<RawSignResponse>(
-      `/payments/${raw.payment_id}/sign`,
-      { signature: sig },
-    )
-
-    if (execResult.status !== 'confirmed' || !execResult.tx_hash) {
-      this.throwPaymentStateError('Machine payment', execResult)
-    }
-
-    return this.mapMachinePaymentReceipt(challenge, raw, execResult.tx_hash, execResult)
-  }
-
-  async resumeAuthorizedMpp(input: ResumeAuthorizedMppInput): Promise<MachinePaymentReceipt> {
-    if (!this.delegateKey) {
-      throw new HavenSigningError(
-        'delegateKey is required for machine payments. Pass it in the HavenClient config.',
-      )
-    }
-
-    const status = await this.getPaymentStatus(input.paymentId)
-    this.assertCanResumeMpp(status, input.challenge)
-
-    return this.mapMachinePaymentReceiptFromStatus(input.challenge, status)
-  }
-
-  async resumeMppPayment(input: ResumeMppPaymentInput | MppResumeState): Promise<Response> {
-    const inputInit = 'init' in input ? input.init : undefined
-    const initialInit = inputInit ?? (input.request ? this.requestInitFromSnapshot(input.request) : undefined)
-    let challenge = input.challenge
-    const url = input.url ?? input.request?.url
-
-    if (!challenge) {
-      if (!url) {
-        throw new HavenApiError('MPP resume requires the original URL or a captured request snapshot.', 400)
-      }
-      const response = await this.merchantFetch(url, initialInit)
-      if (response.status !== 402) {
-        throw new HavenApiError('Expected the original MPP request to return HTTP 402 before resuming.', 400)
-      }
-      challenge = await parseMachinePaymentChallengeResponse(response)
-    }
-
-    const receipt = await this.resumeAuthorizedMpp({
-      paymentId: input.paymentId,
-      challenge,
-      idempotencyKey: input.idempotencyKey,
-    })
-
-    return this.retryMppRequest(url ?? challenge.resource, initialInit, challenge, receipt)
-  }
-
-  private async fetchWithMachinePayment(
-    url: string,
-    initialInit: RequestInit | undefined,
-    challenge: MachinePaymentChallenge,
-  ): Promise<Response> {
-    const request = this.snapshotX402Request(url, initialInit)
-    const idempotencyKey = buildMachinePaymentIdempotencyKey(challenge)
-    let receipt: MachinePaymentReceipt
-    try {
-      receipt = await this.authorizeMachinePayment(challenge, { idempotencyKey })
-    } catch (err) {
-      this.attachResumeState(err, {
-        rail: 'mpp',
-        challenge,
-        idempotencyKey,
-        request,
-      })
-      throw err
-    }
-
-    return this.retryMppRequest(url, initialInit, challenge, receipt)
-  }
-
-  private async retryMppRequest(
-    url: string,
-    initialInit: RequestInit | undefined,
-    challenge: MachinePaymentChallenge,
-    receipt: MachinePaymentReceipt,
-  ): Promise<Response> {
-    const retryHeaders = new Headers(initialInit?.headers)
-    retryHeaders.set('MACHINE-PAYMENT-PROOF', receipt.proofHeader)
-
-    const retryResponse = await this.merchantFetch(url, {
-      ...initialInit,
-      headers: retryHeaders,
-    })
-
-    if (!retryResponse.ok) {
-      const merchant = await captureMerchantResponse(retryResponse)
-      await this.recordMerchantRetryRejected({
-        rail: receipt.rail,
-        paymentId: receipt.paymentId,
-        txHash: receipt.txHash,
-        resourceUrl: receipt.resourceUrl,
-        merchant,
-        details: {
-          challenge_id: receipt.challengeId,
-        },
-      })
-
-      throw new HavenApiError(
-        'Machine payment retry failed after Haven sent the payment.',
-        merchant.merchant_status,
-        {
-          marker: 'machine_payment_retry_rejected_after_payment',
-          payment_id: receipt.paymentId,
-          tx_hash: receipt.txHash,
-          resource_url: receipt.resourceUrl,
-          rail: receipt.rail,
-          ...merchant,
-        },
-      )
-    }
-
-    await this.reportMachinePaymentEvidence({
-      paymentId: receipt.paymentId,
-      rail: receipt.rail,
-      txHash: receipt.txHash,
-      resourceUrl: receipt.resourceUrl,
-      merchantStatus: retryResponse.status,
-      challengePayload: challenge as unknown as Record<string, unknown>,
-      paymentProofHeaderName: 'MACHINE-PAYMENT-PROOF',
-      paymentProofHeader: receipt.proofHeader,
-      protocolReceiptHeaderName:
-        retryResponse.headers.has('Payment-Receipt')
-          ? 'Payment-Receipt'
-          : retryResponse.headers.has('MACHINE-PAYMENT-RESPONSE')
-            ? 'MACHINE-PAYMENT-RESPONSE'
-            : undefined,
-      protocolReceiptHeader:
-        retryResponse.headers.get('Payment-Receipt') ??
-        retryResponse.headers.get('MACHINE-PAYMENT-RESPONSE') ??
-        undefined,
-    })
-
-    // #956: a successful machine-payment retry can carry a merchant receipt
-    // too — same capture contract as the x402 paths.
-    await this.reportMerchantReceipt(receipt.paymentId, retryResponse)
-
-    return retryResponse
-  }
+  // #1328: authorizeMachinePayment / authorizeMppDemoPayment / resumeAuthorizedMpp
+  // / resumeMppPayment / fetchWithMachinePayment / retryMppRequest (the
+  // MACHINE-PAYMENT-CHALLENGE / mpp_demo client surface) are retired — the
+  // backend's POST /machine-payments/authorize refuses unconditionally now,
+  // and MACHINE-PAYMENT-CHALLENGE was never produced by any other Haven
+  // surface. Use the x402 flow (authorizeX402 / fetch / quoteX402 / payX402Quote)
+  // for agent-to-merchant payments.
 
   private assertCanResumeX402(
     status: PaymentStatusResult,
@@ -2355,78 +2085,6 @@ export class HavenClient {
     }
   }
 
-  private assertCanResumeMpp(
-    status: PaymentStatusResult,
-    challenge: MachinePaymentChallenge,
-  ): void {
-    if (!isMppRail(status.rail)) {
-      throw new HavenPaymentStateError(
-        `Payment ${status.paymentId} is ${status.rail}, not MPP.`,
-        409,
-        status,
-      )
-    }
-
-    if (status.nextAction !== AgentPaymentNextAction.RetryOriginalX402Request) {
-      throw new HavenPaymentStateError(status.message, PAYMENT_STATE_STATUS_CODES[status.status] ?? 409, status)
-    }
-
-    if (!status.txHash) {
-      throw new HavenApiError(
-        `MPP payment ${status.paymentId} is ready to retry but has no Haven transaction hash.`,
-        502,
-        status,
-        status.paymentId,
-      )
-    }
-
-    if (status.resourceUrl && status.resourceUrl !== challenge.resource) {
-      throw new HavenApiError(
-        'MPP resume request does not match the approved resource URL.',
-        409,
-        { status, challenge },
-        status.paymentId,
-      )
-    }
-
-    if (status.merchantAddress && !sameAddress(status.merchantAddress, challenge.recipient)) {
-      throw new HavenApiError(
-        'MPP resume request does not match the approved merchant.',
-        409,
-        { status, challenge },
-        status.paymentId,
-      )
-    }
-
-    if (status.chainId && status.chainId !== challenge.network.chainId) {
-      throw new HavenApiError(
-        'MPP resume request does not match the approved network.',
-        409,
-        { status, challenge },
-        status.paymentId,
-      )
-    }
-
-    if (status.token && status.token !== challenge.asset.symbol) {
-      throw new HavenApiError(
-        'MPP resume request does not match the approved token.',
-        409,
-        { status, challenge },
-        status.paymentId,
-      )
-    }
-
-    const approvedAmount = status.amount ? normalizeDecimal(status.amount) : ''
-    const requestedAmount = normalizeDecimal(challenge.amount.display)
-    if (approvedAmount && approvedAmount !== requestedAmount) {
-      throw new HavenApiError(
-        'MPP resume request does not match the approved amount.',
-        409,
-        { status, challenge },
-        status.paymentId,
-      )
-    }
-  }
 
   private mapX402ReceiptFromAuthorization(
     paymentRequired: X402PaymentRequired,
@@ -2576,69 +2234,6 @@ export class HavenClient {
     }
   }
 
-  private mapMachinePaymentReceipt(
-    challenge: MachinePaymentChallenge,
-    raw: RawMachinePaymentAuthorizeResponse,
-    txHash: string,
-    execResult?: RawSignResponse,
-  ): MachinePaymentReceipt {
-    const receiptWithoutHeader = {
-      success: true,
-      rail: challenge.rail,
-      paymentId: raw.payment_id,
-      challengeId: challenge.challengeId,
-      txHash,
-      token: execResult?.token ?? raw.token ?? challenge.asset.symbol,
-      amount: execResult?.amount ?? raw.amount ?? challenge.amount.display,
-      to: execResult?.to ?? raw.to ?? challenge.recipient,
-      resourceUrl: raw.resource_url ?? challenge.resource,
-      explorerUrl:
-        execResult?.explorer_url ??
-        raw.explorer_url ??
-        buildExplorerUrl(execResult?.chain_id ?? raw.chain_id ?? challenge.network.chainId, txHash),
-      payer: raw.payer ?? raw.safe_address,
-      chainId: execResult?.chain_id ?? raw.chain_id ?? challenge.network.chainId,
-    }
-
-    return {
-      ...receiptWithoutHeader,
-      proofHeader: encodeMachinePaymentProof(receiptWithoutHeader),
-    }
-  }
-
-  private mapMachinePaymentReceiptFromStatus(
-    challenge: MachinePaymentChallenge,
-    status: PaymentStatusResult,
-  ): MachinePaymentReceipt {
-    if (!status.txHash) {
-      throw new HavenApiError(
-        `MPP payment ${status.paymentId} is ready to retry but has no Haven transaction hash.`,
-        502,
-        status,
-        status.paymentId,
-      )
-    }
-
-    const receiptWithoutHeader = {
-      success: true,
-      rail: challenge.rail,
-      paymentId: status.paymentId,
-      challengeId: challenge.challengeId,
-      txHash: status.txHash,
-      token: status.token || challenge.asset.symbol,
-      amount: status.amount || challenge.amount.display,
-      to: status.merchantAddress ?? challenge.recipient,
-      resourceUrl: status.resourceUrl ?? challenge.resource,
-      explorerUrl: explorerUrlOrEmpty(status.chainId || challenge.network.chainId, status.txHash),
-      chainId: status.chainId || challenge.network.chainId,
-    }
-
-    return {
-      ...receiptWithoutHeader,
-      proofHeader: encodeMachinePaymentProof(receiptWithoutHeader),
-    }
-  }
-
   private async recordMerchantRetryRejected(input: {
     rail: string
     paymentId: string
@@ -2732,7 +2327,7 @@ export class HavenClient {
 
   private throwIfNonSignableAuthorizationState(
     label: string,
-    raw: RawMachinePaymentAuthorizeResponse | RawX402AuthorizeResponse,
+    raw: RawX402AuthorizeResponse,
   ): void {
     if (raw.status === 'pending_signature') return
     this.throwPaymentStateError(label, raw)
@@ -2740,7 +2335,7 @@ export class HavenClient {
 
   private throwPaymentStateError(
     label: string,
-    raw: RawMachinePaymentAuthorizeResponse | RawX402AuthorizeResponse | RawSignResponse,
+    raw: RawX402AuthorizeResponse | RawSignResponse,
   ): never {
     const statusCode = PAYMENT_STATE_STATUS_CODES[raw.status] ?? 502
     const state = this.paymentStateFromRaw(label, raw)
@@ -2772,7 +2367,7 @@ export class HavenClient {
 
   private paymentStateFromRaw(
     label: string,
-    raw: RawMachinePaymentAuthorizeResponse | RawX402AuthorizeResponse | RawSignResponse,
+    raw: RawX402AuthorizeResponse | RawSignResponse,
   ): PaymentStatusResult | null {
     if (!raw.payment_id || !raw.status) return null
 
@@ -2962,92 +2557,27 @@ export class HavenClient {
     }
   }
 
-  private buildMppQuote(
-    challenge: MachinePaymentChallenge,
-    request: X402RequestSnapshot,
-    idempotencyKey?: string,
-  ): MppQuote {
-    return {
-      rail: 'mpp',
-      paymentRail: challenge.rail,
-      idempotencyKey: idempotencyKey ?? buildMachinePaymentIdempotencyKey(challenge),
-      challenge,
-      request,
-      resourceUrl: challenge.resource,
-      description: challenge.description ?? null,
-      amountAtomic: challenge.amount.atomic,
-      amount: challenge.amount.display,
-      token: challenge.asset.symbol,
-      asset: challenge.asset.address,
-      network: challenge.network.name,
-      chainId: challenge.network.chainId,
-      merchantAddress: challenge.recipient,
-      expiresAt: challenge.expiresAt,
-    }
-  }
-
-  private buildMppResumeState(input: {
-    paymentId: string
-    challenge: MachinePaymentChallenge
-    idempotencyKey: string
-    request?: X402RequestSnapshot
-  }): MppResumeState {
-    const quote = this.buildMppQuote(
-      input.challenge,
-      input.request ?? this.snapshotX402Request(input.challenge.resource),
-      input.idempotencyKey,
-    )
-
-    return {
-      rail: 'mpp',
-      paymentRail: quote.paymentRail,
-      paymentId: input.paymentId,
-      idempotencyKey: quote.idempotencyKey,
-      challenge: input.challenge,
-      url: input.request?.url ?? input.challenge.resource,
-      request: input.request,
-      resourceUrl: quote.resourceUrl,
-      description: quote.description,
-      amountAtomic: quote.amountAtomic,
-      amount: quote.amount,
-      token: quote.token,
-      asset: quote.asset,
-      network: quote.network,
-      chainId: quote.chainId,
-      merchantAddress: quote.merchantAddress,
-      expiresAt: quote.expiresAt,
-    }
-  }
-
+  // #1328: attachResumeState's 'mpp' branch (buildMppQuote / buildMppResumeState
+  // / attachMppResumeState) is retired along with the rest of the MPP-demo
+  // client surface — every remaining caller passes rail: 'x402' only, so this
+  // is now a direct alias for attachX402ResumeState rather than a dispatcher.
   private attachResumeState(
     err: unknown,
-    input:
-      | {
-          rail: 'x402'
-          paymentRequired: X402PaymentRequired
-          accepted: X402PaymentOption
-          idempotencyKey: string
-          request?: X402RequestSnapshot
-        }
-      | {
-          rail: 'mpp'
-          challenge: MachinePaymentChallenge
-          idempotencyKey: string
-          request?: X402RequestSnapshot
-        },
+    input: {
+      rail: 'x402'
+      paymentRequired: X402PaymentRequired
+      accepted: X402PaymentOption
+      idempotencyKey: string
+      request?: X402RequestSnapshot
+    },
   ): void {
-    if (input.rail === 'x402') {
-      this.attachX402ResumeState(
-        err,
-        input.paymentRequired,
-        input.accepted,
-        input.idempotencyKey,
-        input.request,
-      )
-      return
-    }
-
-    this.attachMppResumeState(err, input.challenge, input.idempotencyKey, input.request)
+    this.attachX402ResumeState(
+      err,
+      input.paymentRequired,
+      input.accepted,
+      input.idempotencyKey,
+      input.request,
+    )
   }
 
   private attachX402ResumeState(
@@ -3064,23 +2594,6 @@ export class HavenClient {
       paymentId: err.state.paymentId,
       paymentRequired,
       accepted,
-      idempotencyKey,
-      request,
-    })
-  }
-
-  private attachMppResumeState(
-    err: unknown,
-    challenge: MachinePaymentChallenge,
-    idempotencyKey: string,
-    request?: X402RequestSnapshot,
-  ): void {
-    if (!(err instanceof HavenPaymentStateError)) return
-    if (!isMppRail(err.state.rail)) return
-
-    err.resumeState = this.buildMppResumeState({
-      paymentId: err.state.paymentId,
-      challenge,
       idempotencyKey,
       request,
     })
@@ -3175,33 +2688,9 @@ export class HavenClient {
       }
     }
 
-    if (toolName === 'authorize_machine_payment') {
-      const { challenge, idempotencyKey } = input as {
-        challenge: MachinePaymentChallenge
-        idempotencyKey?: string
-      }
-
-      try {
-        const receipt = await this.authorizeMachinePayment(challenge, { idempotencyKey })
-        return {
-          success: true,
-          payment_id: receipt.paymentId,
-          tx_hash: receipt.txHash,
-          token: receipt.token,
-          amount: receipt.amount,
-          to: receipt.to,
-          resource_url: receipt.resourceUrl,
-          explorer_url: receipt.explorerUrl,
-          proof_header: receipt.proofHeader,
-          rail: receipt.rail,
-          challenge_id: receipt.challengeId,
-          payer: receipt.payer,
-          chain_id: receipt.chainId,
-        }
-      } catch (err) {
-        return this.toolError(err)
-      }
-    }
+    // #1328: the 'authorize_machine_payment' tool (mpp_demo only) is retired
+    // along with the rest of the SDK's MPP-demo client surface — an unknown
+    // toolName falls through to the Error below, same as any other retired name.
 
     if (toolName === 'get_payment_status') {
       const { payment_id } = input as { payment_id: string }

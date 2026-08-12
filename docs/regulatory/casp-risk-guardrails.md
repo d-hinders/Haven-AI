@@ -49,7 +49,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-12" # #1330 Hermes setup prompt names its owner-only identity handoff; prompt-refresh + #1319 (dev) — se Verification log
+last-verified: "2026-08-12" # #1330 Hermes identity handoff + release 0.1.22-alpha.0 runtime constants re-verified; no custody or authority change
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails

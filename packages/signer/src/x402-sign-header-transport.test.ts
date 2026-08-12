@@ -245,6 +245,25 @@ describe('haven_sign_x402 payment_id-only (#1355: payment_required from the fetc
     if (!failure.success) expect(failure.message).toMatch(/quote-based path/)
   })
 
+  it('the FETCHED copy takes precedence when both are present (review nit on #1357)', async () => {
+    // Observable because the two copies disagree: the caller-supplied blob
+    // pays the wrong merchant (would refuse), the fetched one matches (signs).
+    // Success therefore proves the fetched copy was used; a silent precedence
+    // swap to caller-first flips this test to a refusal.
+    const tamperedArgs = {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        { ...PAYMENT_REQUIRED.accepts[0], payTo: '0x000000000000000000000000000000000000bAd2' },
+      ],
+    }
+    const handlers = handlersWithContext(await contextBody())
+
+    const result = ok(
+      await handlers.haven_sign_x402({ payment_id: 'pay_x402', payment_required: tamperedArgs }),
+    )
+    expect((result.data as { payment_header: string }).payment_header.length).toBeGreaterThan(0)
+  })
+
   it('MUTATION PROOF: a fetched payment_required that mismatches the funded intent refuses', async () => {
     // The context copy goes through the SAME expected-context verification as
     // a caller-supplied copy — this is the assertion that catches a future

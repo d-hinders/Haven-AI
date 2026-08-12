@@ -593,7 +593,9 @@ export class HavenClient {
       // the agent passes only payment_id. Bounded: the backend rejects >64KB,
       // so an oversized blob is omitted here (signer falls back to the
       // caller-supplied copy) rather than failing the intent.
-      ...(JSON.stringify(paymentRequired).length <= 65536 ? { paymentRequired } : {}),
+      ...(new TextEncoder().encode(JSON.stringify(paymentRequired)).length <= 65536
+        ? { paymentRequired }
+        : {}),
     })
 
     // Anything other than a signable funding intent (pending_approval,

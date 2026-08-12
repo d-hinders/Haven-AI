@@ -165,7 +165,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       if (typeof paymentRequired !== 'object' || paymentRequired === null || Array.isArray(paymentRequired)) {
         return reply.code(400).send({ error: 'paymentRequired must be the parsed 402 PaymentRequired object' })
       }
-      if (JSON.stringify(paymentRequired).length > 65536) {
+      if (Buffer.byteLength(JSON.stringify(paymentRequired), 'utf8') > 65536) {
         return reply.code(400).send({
           error: 'paymentRequired exceeds 64KB — omit it; the signer falls back to the caller-supplied copy',
         })

@@ -57,6 +57,7 @@ import * as allowanceNonceWatermarks from './055_allowance_nonce_watermarks.js'
 import * as multiPasskeyPerChain from './056_multi_passkey_per_chain.js'
 import * as fixMppDemoCatalogUrl from './057_fix_mpp_demo_catalog_url.js'
 import * as demoMerchantCatalog from './058_demo_merchant_catalog.js'
+import * as retireMppDemoCatalog from './059_retire_mpp_demo_catalog.js'
 
 export interface Migration {
   version: string
@@ -127,4 +128,5 @@ export const migrations: Migration[] = [
   multiPasskeyPerChain,
   fixMppDemoCatalogUrl,
   demoMerchantCatalog,
+  retireMppDemoCatalog,
 ]

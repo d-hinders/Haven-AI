@@ -220,4 +220,70 @@ describe('approval routes', () => {
     expect(response.json()).toEqual({ error: 'Valid tx_hash is required' })
     expect(mockQuery).not.toHaveBeenCalled()
   })
+
+// ── #1328 (review finding on #1339): historical mpp_demo approvals are
+// readable and rejectable, never approvable/proposable ──────────────────────
+
+describe('mpp_demo retirement gates (#1328)', () => {
+  /** SQL-pattern-routed mock (the payments.test.ts style — never positional). */
+  function primeApprovalDb(opts: { railRow: { payment_rail: string | null; source: string | null } | null }) {
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql)
+      if (/^\s*UPDATE approval_requests/.test(text)) return { rows: [] } // guarded UPDATE matches nothing
+      if (/SELECT payment_rail, source/.test(text)) return { rows: opts.railRow ? [opts.railRow] : [] }
+      return { rows: [] }
+    })
+  }
+
+  it('POST /:id/approve refuses an mpp_demo approval — 410, guard lives in the UPDATE WHERE (nothing written)', async () => {
+    // MUTATION PROOF: dropping the WHERE-clause guard makes the UPDATE return
+    // the row → 200 → this test fails.
+    primeApprovalDb({ railRow: { payment_rail: 'mpp_demo', source: 'mpp_demo' } })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/approvals/approval-mpp/approve',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toMatch(/mpp_demo flow is retired/)
+    const updateSql = String(mockQuery.mock.calls.find((c) => /UPDATE approval_requests/.test(String(c[0])))![0])
+    expect(updateSql).toContain("COALESCE(payment_rail, source, 'direct') <> 'mpp_demo'")
+  })
+
+  it('POST /:id/proposed refuses an mpp_demo approval the same way', async () => {
+    primeApprovalDb({ railRow: { payment_rail: 'mpp_demo', source: 'mpp_demo' } })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/approvals/approval-mpp/proposed',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toMatch(/mpp_demo flow is retired/)
+  })
+
+  it('a missing row is still a plain 404, not a retirement message', async () => {
+    primeApprovalDb({ railRow: null })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/approvals/approval-gone/approve',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(404)
+  })
+
+  it('POST /:id/reject still works for mpp_demo — cleanup stays possible', async () => {
+    mockQuery.mockImplementation(async (sql: unknown) =>
+      /UPDATE approval_requests/.test(String(sql)) ? { rows: [{ id: 'approval-mpp' }] } : { rows: [] },
+    )
+    const response = await app.inject({
+      method: 'POST',
+      url: '/approvals/approval-mpp/reject',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(200)
+    // The reject UPDATE carries no mpp_demo exclusion:
+    const rejectSql = String(mockQuery.mock.calls.find((c) => /UPDATE approval_requests/.test(String(c[0])))![0])
+    expect(rejectSql).not.toContain('mpp_demo')
+  })
+})
 })

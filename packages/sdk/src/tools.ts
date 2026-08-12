@@ -142,17 +142,6 @@ const resumeX402Schema = {
   required: ['payment_id', 'url', 'payTo', 'amount', 'asset', 'network'] as const,
 }
 
-const authorizeMachinePaymentSchema = {
-  type: 'object' as const,
-  properties: {
-    challenge: {
-      type: 'object' as const,
-      description: 'Machine payment challenge returned by a Haven demo endpoint',
-    },
-  },
-  required: ['challenge'] as const,
-}
-
 const MAKE_PAYMENT_DESCRIPTION =
   'Request and sign a payment from the user-controlled Safe within approved on-chain limits. ' +
   'For read-only allowance, budget, spend-limit, remaining-amount, or reset-period questions, use get_allowances instead of making a payment. ' +
@@ -182,12 +171,6 @@ const RESUME_X402_DESCRIPTION =
   sharedDescriptions.resumeX402.summary + ' ' +
   'Use this only after get_payment_status returns next_action=retry_original_x402_request. ' +
   'It checks the approved payment, validates the original x402 details, and returns a merchant X-PAYMENT header without creating a new approval request or merchant session.'
-
-const AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION =
-  composeDescription(sharedDescriptions.payMpp) + ' ' +
-  'In this SDK tool set, the allowance lookup tool is get_allowances. ' +
-  'Currently scoped to the internal MPP demo rail. ' +
-  'The agent signs the payment, Haven relays it within the on-chain allowance, and the tool returns a proof header for the retry request.'
 
 const SWEEP_DELEGATE_DESCRIPTION = composeDescription(sharedDescriptions.sweep_delegate)
 
@@ -235,11 +218,6 @@ function claudeTools(): ClaudeTool[] {
       name: 'resume_x402_payment',
       description: RESUME_X402_DESCRIPTION,
       input_schema: resumeX402Schema,
-    },
-    {
-      name: 'authorize_machine_payment',
-      description: AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION,
-      input_schema: authorizeMachinePaymentSchema,
     },
     {
       name: 'haven_sweep_delegate',
@@ -304,14 +282,6 @@ function openaiTools(): OpenAITool[] {
         name: 'resume_x402_payment',
         description: RESUME_X402_DESCRIPTION,
         parameters: resumeX402Schema,
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'authorize_machine_payment',
-        description: AUTHORIZE_MACHINE_PAYMENT_DESCRIPTION,
-        parameters: authorizeMachinePaymentSchema,
       },
     },
     {

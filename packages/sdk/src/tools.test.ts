@@ -38,12 +38,20 @@ describe('pre-built SDK tool definitions', () => {
   it('routes read-only budget questions away from direct payment tools', () => {
     const claudeTools = havenTools.claude()
 
-    for (const name of ['authorize_x402_payment', 'authorize_machine_payment'] as const) {
+    for (const name of ['authorize_x402_payment'] as const) {
       const desc = claudeTools.find((tool) => tool.name === name)?.description.toLowerCase()
 
       expect(desc).toContain('do not use this for read-only allowance')
       expect(desc).toContain('the allowance lookup tool is get_allowances')
       expect(desc).toContain('use the allowance lookup tool instead')
     }
+  })
+
+  it('no longer advertises authorize_machine_payment (#1328: mpp_demo retired)', () => {
+    const claudeNames = havenTools.claude().map((tool) => tool.name)
+    const openaiNames = havenTools.openai().map((tool) => tool.function.name)
+
+    expect(claudeNames).not.toContain('authorize_machine_payment')
+    expect(openaiNames).not.toContain('authorize_machine_payment')
   })
 })

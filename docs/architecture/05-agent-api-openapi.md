@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected) and #1350 (GET /catalog now documents additive read-only `search` plus case-insensitive `category`; generated API types must move with the spec). Prior #1319: GET /machine-payments/allowances gained an additive optional remaining_is_from_chain (delegation-rail onchain rows only) — provenance for #1145's fallback, reporting only, no authority change
+last-verified: "2026-08-12" # #1328: POST /machine-payments/authorize (mpp_demo) retired to an unconditional 410; prior #1319: GET /machine-payments/allowances gained an additive optional remaining_is_from_chain (delegation-rail onchain rows only) — provenance for #1145's fallback, reporting only, no authority change + same-day dev: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected) and #1350 (GET /catalog now documents additive read-only `search` plus case-insensitive `category`; generated API types must move with the spec). Prior #1319: GET /machine-payments/allowances gained an additive optional remaining_is_from_chain (delegation-rail onchain rows only) — provenance for #1145's fallback, reporting only, no authority change
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -54,7 +54,9 @@ servers, connector, and selected dashboard setup flows:
 - `GET /payments/{id}/resume_state` for x402 and MPP resume context
 - x402 funding authorization at `POST /x402/authorize`
 - the deprecated `POST /x402` alias still used by the current SDK
-- MPP demo authorization and status under `/machine-payments/*`
+- machine-payment status/identity/allowance reads under `/machine-payments/*`
+  (`POST /machine-payments/authorize`, the legacy internal `mpp_demo` flow, is
+  retired — it now documents an unconditional HTTP 410, #1328)
 - machine-payment evidence and reconciliation event writes
 - machine-payment allowance, receipt, and payment-receipt reads
 - direct Safe transfers and delegate sweep recovery
@@ -63,10 +65,14 @@ servers, connector, and selected dashboard setup flows:
 - health and OpenAPI discovery
 
 The SDK's quote and resume helpers are partly client-side by design. For
-example, x402 quote probing calls the paid resource, not Haven, and x402/MPP
+example, x402 quote probing calls the paid resource, not Haven, and x402
 resume retries the original merchant request after `resume_state` is
 rehydrated. The OpenAPI contract documents the Haven-hosted endpoints in that
-flow, not merchant endpoints or local SDK methods.
+flow, not merchant endpoints or local SDK methods. `resume_state` can still
+carry the `mpp` shape for a historical `mpp_demo` payment (the read path is
+unchanged), but the SDK no longer exposes a client method that consumes it —
+`quoteMpp`/`payMppChallenge`/`resumeMppPayment` are retired along with the
+`mpp_demo` authorize flow (#1328).
 
 For catalog discovery specifically, the published `GET /catalog` contract now
 includes three read-only query parameters: `category`, `search`, and `rail`.

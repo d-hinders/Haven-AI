@@ -22,7 +22,7 @@
  */
 
 export { authorizeMachinePayment, type AuthorizeMachinePaymentInput } from './authorize.js'
-export { validateMppDemoChallenge } from './challenge.js'
+export { mppDemoRetired } from './challenge.js'
 export { handleSend } from './send.js'
 export { handleGetAllowances } from './allowances.js'
 export {

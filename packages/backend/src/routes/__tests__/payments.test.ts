@@ -386,6 +386,31 @@ describe('payment routes', () => {
     expect(allowanceMocks.executeAllowanceTransfer).toHaveBeenCalledOnce()
   })
 
+  // #1328 (review finding on #1339): a PRE-EXISTING mpp_demo intent must be
+  // readable but never executable after the retirement — this generic sign
+  // path was the remaining execution door. 410-with-nothing-written, same
+  // contract as the session-rail gate. MUTATION PROOF: removing the
+  // payment_rail/source guard in /:id/sign flips this to a live execution.
+  it('refuses to sign a historical mpp_demo intent — 410, no claim, no on-chain call (#1328)', async () => {
+    primeDb(...signRoutes({
+      intent: pendingIntent({ payment_rail: 'mpp_demo', source: 'mpp_demo' }),
+      claimWins: true,
+    }))
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/payments/${PAYMENT_ID}/sign`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: { signature: SIGNATURE },
+    })
+
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toMatch(/mpp_demo flow is retired/)
+    // Nothing written, nothing executed:
+    expect(findCall(/SET signature[\s\S]*status = 'submitted'/)).toBeUndefined()
+    expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+  })
+
   // #717 (review B1 on #1119): this route claims the intent to 'submitted'
   // BEFORE executing — a budget 429 must release that claim or the row is
   // stuck unretryable forever, worse than any failure mode it replaced.

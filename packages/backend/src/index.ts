@@ -49,7 +49,6 @@ import safeDeployRoutes from './routes/safe-deploy.js'
 import safeExecRoutes from './routes/safe-exec.js'
 import x402ResourceRoutes from './routes/x402-resources.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
-import demoMppRoutes from './routes/demo-mpp.js'
 import openapiRoutes from './routes/openapi.js'
 import catalogRoutes from './routes/catalog.js'
 import analyticsRoutes from './routes/analytics.js'
@@ -247,8 +246,8 @@ await app.register(reportingRoutes, { prefix: '/accounting/reporting' })
 if (fortnoxConfigured()) {
   registerConnector(new FortnoxConnector())
 }
-// Public demo — no auth hook, registered separately
-await app.register(demoMppRoutes, { prefix: '/demo/mpp' })
+// #1328: the legacy /demo/mpp/* MPP demo route is retired (see
+// modules/mpp/challenge.ts's mppDemoRetired() for the authorize-side refusal).
 
 // --- Start ---
 const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly

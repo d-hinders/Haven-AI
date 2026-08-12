@@ -472,52 +472,15 @@ export interface X402ResumeState {
   merchantAddress: string
 }
 
-export interface MppAuthorizationOptions {
-  /** Stable caller-supplied key for this user intent. Prevents duplicate approvals across retries. */
-  idempotencyKey?: string
-}
+// #1328: MppAuthorizationOptions / MppQuote / MppResumeState / ResumeAuthorizedMppInput
+// / ResumeMppPaymentInput / MachinePaymentChallenge / MachinePaymentReceipt were
+// the wire types for the retired mpp_demo challenge/quote/resume client surface
+// (`quoteMpp` / `payMppChallenge` / `resumeMppPayment` / `authorizeMachinePayment`,
+// all removed from client.ts). `MachinePaymentRail` stays — it is still the read-path
+// vocabulary for historical payment/evidence/status rows (mpp_demo, mpp_crypto,
+// stripe_deposit, spt all remain valid values there).
 
-/** Quote parsed from an MPP challenge without creating a Haven payment. */
-export interface MppQuote {
-  rail: 'mpp'
-  paymentRail: MachinePaymentRail
-  idempotencyKey: string
-  challenge: MachinePaymentChallenge
-  request: X402RequestSnapshot
-  resourceUrl: string
-  description: string | null
-  amountAtomic: string
-  amount: string
-  token: string
-  asset: string
-  network: string
-  chainId: number
-  merchantAddress: string
-  expiresAt: string
-}
-
-/** State bundle an agent can persist while waiting for manual MPP approval. */
-export interface MppResumeState {
-  rail: 'mpp'
-  paymentRail: MachinePaymentRail
-  paymentId: string
-  idempotencyKey: string
-  challenge: MachinePaymentChallenge
-  url: string
-  request?: X402RequestSnapshot
-  resourceUrl: string
-  description: string | null
-  amountAtomic: string
-  amount: string
-  token: string
-  asset: string
-  network: string
-  chainId: number
-  merchantAddress: string
-  expiresAt: string
-}
-
-export type PaymentResumeState = X402ResumeState | MppResumeState
+export type PaymentResumeState = X402ResumeState
 
 export interface ResumeAuthorizedX402Input extends X402AuthorizationOptions {
   /** Payment or approval request ID returned by authorizeX402 / haven.fetch. */
@@ -544,32 +507,13 @@ export interface ResumeX402PaymentInput extends X402AuthorizationOptions {
   paymentRequired?: X402PaymentRequired
 }
 
-export interface ResumeAuthorizedMppInput extends MppAuthorizationOptions {
-  /** Payment or approval request ID returned by authorizeMachinePayment / haven.fetch. */
-  paymentId: string
-
-  /** Original MPP challenge returned by the paid resource. */
-  challenge: MachinePaymentChallenge
-}
-
-export interface ResumeMppPaymentInput extends MppAuthorizationOptions {
-  /** Payment or approval request ID returned by authorizeMachinePayment / haven.fetch. */
-  paymentId: string
-
-  /** Original paid URL. If challenge is omitted, Haven will call it once to re-read the MPP challenge. */
-  url: string
-
-  /** Original fetch options. Reused for the 402 probe and final merchant retry. */
-  init?: RequestInit
-
-  /** Serializable original request captured by quoteMpp() / pending approval errors. */
-  request?: X402RequestSnapshot
-
-  /** Original MPP challenge. Supplying this avoids an extra paid-resource 402 probe. */
-  challenge?: MachinePaymentChallenge
-}
-
 // ── Machine Payment Types ───────────────────────────────────────
+//
+// The wire-shape TYPES for the retired mpp_demo challenge/quote/resume
+// client surface (MachinePaymentChallenge, MachinePaymentReceipt,
+// MppAuthorizationOptions, ResumeAuthorizedMppInput, ResumeMppPaymentInput)
+// were removed with it (#1328). MachinePaymentRail stays: it is still the
+// read-path vocabulary on historical payment/evidence/status responses.
 
 export type MachinePaymentRail =
   | 'x402'
@@ -577,46 +521,6 @@ export type MachinePaymentRail =
   | 'mpp_crypto'
   | 'stripe_deposit'
   | 'spt'
-
-export interface MachinePaymentChallenge {
-  rail: MachinePaymentRail
-  version: string
-  challengeId: string
-  resource: string
-  description: string
-  network: {
-    chainId: number
-    name: 'base'
-  }
-  asset: {
-    symbol: 'USDC'
-    address: string
-    decimals: 6
-  }
-  amount: {
-    display: string
-    atomic: string
-  }
-  recipient: string
-  expiresAt: string
-  metadata?: Record<string, unknown>
-}
-
-export interface MachinePaymentReceipt {
-  success: boolean
-  rail: MachinePaymentRail
-  paymentId: string
-  challengeId: string
-  txHash: string
-  token: string
-  amount: string
-  to: string
-  resourceUrl: string
-  explorerUrl: string
-  payer?: string
-  chainId?: number
-  proofHeader: string
-}
 
 export interface HavenAgent {
   id: string
@@ -943,17 +847,19 @@ export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typ
  *
  * Two layers of vocabulary share this enum because both reach the wire:
  *
- *   - **Categorical rails** identify the rail family and are used as
- *     discriminators on `PaymentResumeState`: `direct`, `x402`, `mpp`.
+ *   - **Categorical rails** identify the rail family and are used as the
+ *     `PaymentResumeState` discriminator: `direct`, `x402` (`mpp` remains a
+ *     valid categorical VALUE on historical status reads, but #1328 retired
+ *     the `MppResumeState` variant that used to carry it — the mpp_demo
+ *     client resume flow no longer exists).
  *   - **Granular rails** identify the specific protocol the backend persists
  *     and returns on response bodies: `mpp_demo`, `mpp_crypto`,
  *     `stripe_deposit`, `spt`. `x402` doubles as both categorical and
  *     granular.
  *
  * Consumers reading the top-level `rail` field on a payment status response
- * should treat any `mpp*` value as the MPP family; consumers reading the
- * `rail` field on a `MppResumeState` will always see the categorical `mpp`,
- * with the granular value on `paymentRail`.
+ * should treat any `mpp*` value as the MPP family — this still applies to
+ * historical `mpp_demo` rows, which remain readable.
  */
 export const AgentPaymentRail = {
   /** Standard Haven payment from the user's Safe through an approved delegate allowance. */
@@ -1241,41 +1147,6 @@ export interface PendingApproval extends PaymentStatusResult {
   remaining?: string | null
 }
 
-/** @internal */
-export interface RawMachinePaymentAuthorizeResponse {
-  success?: boolean
-  payment_id: string
-  kind?: string
-  status: string
-  phase?: string
-  next_action?: string
-  message?: string
-  remaining?: string | null
-  requested?: string
-  tx_hash?: string
-  chain_id?: number
-  safe_address?: string
-  payer?: string
-  token?: string
-  amount?: string
-  amount_atomic?: string | null
-  asset?: string | null
-  network?: string | null
-  description?: string | null
-  idempotency_key?: string | null
-  to?: string
-  merchant_to?: string | null
-  merchant_address?: string | null
-  resource_url?: string
-  rail?: string
-  x402?: RawX402StateContext
-  mpp?: RawMppStateContext
-  challenge_id?: string
-  explorer_url?: string
-  expires_at?: string
-  sign_data?: SignData
-  error?: string
-}
 
 /** @internal */
 export interface RawX402AuthorizeResponse {
@@ -1617,7 +1488,7 @@ export class X402UnexpectedStatusError extends HavenApiError {
 }
 
 export class HavenPaymentStateError extends HavenApiError {
-  resumeState?: X402ResumeState | MppResumeState
+  resumeState?: X402ResumeState
 
   constructor(
     message: string,

@@ -183,7 +183,6 @@ for (const block of response.content) {
 | `get_allowances` | Read configured and on-chain allowance state, including spent and remaining allowance |
 | `authorize_x402_payment` | Authorize a policy-limited x402 payment and return a payment header for an HTTP 402 resource |
 | `resume_x402_payment` | Resume an approved x402 payment and return a merchant payment header without creating a duplicate approval |
-| `authorize_machine_payment` | Authorize an internal Haven MPP demo challenge and return proof details |
 
 Use `get_allowances` for allowance, budget, spend-limit, remaining amount, reset-period, or "what can I spend?" questions. Payment tools still require the agent-held delegate key and on-chain Safe allowance state; the Haven API key identifies the agent but does not authorize spending by itself.
 
@@ -209,10 +208,13 @@ The backend serves an OpenAPI 3.1 contract at:
 - Local development: `http://localhost:3001/openapi.json`
 
 The spec covers the agent-facing payment surface: agents, direct payments,
-payment status, x402 authorization, MPP demo authorization, resume-state
-rehydration, machine-payment receipts, and transactions. Its security scheme is
-deliberate: the Haven API key identifies the agent, but payment authority still
-requires an agent-held delegate signature and on-chain Safe allowance state.
+payment status, x402 authorization, resume-state rehydration, machine-payment
+receipts, and transactions. `POST /machine-payments/authorize` (the legacy
+internal MPP demo challenge flow) is retired — it now refuses unconditionally
+with HTTP 410; use the x402 flow for agent-to-merchant payments. Its security
+scheme is deliberate: the Haven API key identifies the agent, but payment
+authority still requires an agent-held delegate signature and on-chain Safe
+allowance state.
 
 ## Agent payment state machine
 
@@ -220,7 +222,7 @@ Every payment or approval state returned by Haven includes:
 
 - `phase`: where the Haven-side payment currently is.
 - `nextAction`: the stable action an agent should take next.
-- `rail`: which payment rail produced the state. Categorical values (`direct`, `x402`, `mpp`) appear on resume-state discriminators; granular values (`mpp_demo`, `mpp_crypto`, `stripe_deposit`, `spt`) appear on response bodies.
+- `rail`: which payment rail produced the state. Categorical values (`direct`, `x402`, `mpp`) appear on resume-state discriminators; granular values (`mpp_demo`, `mpp_crypto`, `stripe_deposit`, `spt`) appear on response bodies. The `mpp` resume-state shape is a historical read only — the SDK no longer exposes a client method that acts on it (`mpp_demo` is retired, #1328).
 - `message`: human-readable guidance for the same state.
 
 The enum values and JSON Schema fragments are exported from `@haven_ai/sdk`:

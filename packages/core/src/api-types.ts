@@ -506,7 +506,7 @@ export type paths = {
         put?: never;
         /**
          * Retired: the legacy MPP demo machine-payment authorize flow (#1328).
-         * @description The internal mpp_demo flow is retired outright — this endpoint now refuses unconditionally with HTTP 410, fail-closed, before the body is inspected (mirrors the #834 session-rail retirement pattern). No new mpp_demo challenge can be authorized. Use the x402 merchant flow instead (POST /x402/authorize). Existing mpp_demo payment/receipt/evidence/status records remain readable through the other /machine-payments/* endpoints.
+         * @description The internal mpp_demo flow is retired outright — this endpoint now refuses unconditionally with HTTP 410, fail-closed, before the body is inspected (mirrors the #834 session-rail retirement pattern). DELIBERATE EXCEPTION (review decision on #1339): the route is retained as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries. No new mpp_demo challenge can be authorized. Use the x402 merchant flow instead (POST /x402/authorize). Existing mpp_demo payment/receipt/evidence/status records remain readable through the other /machine-payments/* endpoints.
          */
         post: operations["authorizeMachinePayment"];
         delete?: never;

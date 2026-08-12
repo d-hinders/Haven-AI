@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-11" # prompt-refresh + #1319 re-verify (dev); inga versioner/manifest/skew-rader ändrade
+last-verified: "2026-08-12" # release 0.1.22-alpha.0: runtime manifest and published package pins re-verified
 ---
 
 # MCP Runtime Compatibility
@@ -49,10 +49,10 @@ Keep this table in sync with that file.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 24.0.0 (pinned to LTS 24 in `.nvmrc` / package `engines`) |
-| `@haven_ai/connect` | `0.1.21-alpha.0` |
-| `@haven_ai/mcp` | `0.1.21-alpha.0` |
-| `@haven_ai/sdk` | `0.1.21-alpha.0` |
-| `@haven_ai/signer` | `0.1.21-alpha.0` |
+| `@haven_ai/connect` | `0.1.22-alpha.0` |
+| `@haven_ai/mcp` | `0.1.22-alpha.0` |
+| `@haven_ai/sdk` | `0.1.22-alpha.0` |
+| `@haven_ai/signer` | `0.1.22-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

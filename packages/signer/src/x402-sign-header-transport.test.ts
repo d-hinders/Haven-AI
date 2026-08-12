@@ -216,8 +216,7 @@ describe('haven_sign_x402 payment_id-only (#1355: payment_required from the fetc
   })
 
   it('a context WITHOUT payment_required (pre-#1355 backend) fails actionably and the explicit copy recovers', async () => {
-    const body = await contextBody()
-    delete body.payment_required
+    const { payment_required: _omitted, ...body } = await contextBody()
     const handlers = handlersWithContext(body)
 
     const failure = await handlers.haven_sign_x402({ payment_id: 'pay_x402' })

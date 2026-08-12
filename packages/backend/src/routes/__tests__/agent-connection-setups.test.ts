@@ -544,6 +544,36 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
+  it('gives Hermes a non-interactive config and owner-only dotenv setup prompt', async () => {
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        runtime: 'hermes',
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    const body = response.json()
+    expect(body.connector_command).toContain('--runtime hermes')
+    expect(body.setup_prompt).toContain('update Hermes Agent MCP config and its matching owner-only .env file')
+    expect(body.setup_prompt).toContain('MCP_HAVEN_API_KEY only as a config reference')
+    expect(body.setup_prompt).toContain('Do not print private keys, API keys, credential file contents, or config secrets')
+    expect(body.setup_prompt).toContain('Do not run `hermes mcp add` or a Hermes-internal Python script')
+    expect(body.setup_prompt).toContain('Gateway users: `/restart`')
+    expect(body.setup_prompt).toContain('`hermes mcp list`, `hermes mcp test haven`, and `hermes mcp test haven-signer`')
+    expect(body.setup_prompt).toContain('`pip install mcp`')
+    expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_|hermes_cli\.mcp_config|npm install -g/)
+
+    await app.close()
+  })
+
   it('exercises the Connect Agent 2 setup spine from pending setup through active wallet approval', async () => {
     const app = await buildApp()
     const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')

@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-12" # #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
+last-verified: "2026-08-12" # #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Same day #1350: catalog discovery now documents case-insensitive category matching plus read-only search over name/description/category; results remain deterministic and indicative only. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -336,6 +336,14 @@ the payment id and inspect and reconcile the attempt before using
 `haven_sweep_delegate`. Do not silently retry or abandon a confirmed balance.
 
 ## Guided Catalog Purchase Preflight (#1306)
+
+Before this guided path, the agent can read the curated catalog through
+`GET /catalog` or `haven_discover_tools`. That discovery surface is still
+strictly read-only: `category` is matched case-insensitively after trim, the
+optional `search` term matches `name`, `description`, or `category`, and the
+existing `rail` plus agent-chain scoping still apply. Results stay
+deterministically ordered and may be empty or multi-row; they never authorize
+payment, and any catalog price remains indicative until the live quote below.
 
 `haven_prepare_catalog_purchase({ catalog_id, max_amount, idempotency_key? })`
 starts a paid-MCP-tool purchase from a curated `merchant_catalog` row instead

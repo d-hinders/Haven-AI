@@ -395,6 +395,26 @@ describe('haven_discover_tools', () => {
     expect(result.data[0].suggested_tool).toBe('haven_pay_mcp_tool')
     expect(result.data[0].tool_arguments).toEqual({ prompt: 'hello' })
   })
+
+  it('forwards case-insensitive category/search filters as one read-only GET', async () => {
+    stubFetch({
+      'GET /catalog': { status: 200, body: { entries: [] } },
+    })
+
+    await handlers().haven_discover_tools({ category: 'VPN', search: 'NordShield' })
+    expect(calls[0]?.url).toBe('http://haven.test/catalog?category=VPN&search=NordShield')
+    expect(calls).toHaveLength(1)
+  })
+
+  it('preserves blank search terms so hosted MCP matches the backend contract', async () => {
+    stubFetch({
+      'GET /catalog': { status: 200, body: { entries: [] } },
+    })
+
+    await handlers().haven_discover_tools({ search: '' })
+    expect(calls[0]?.url).toBe('http://haven.test/catalog?search=')
+    expect(calls).toHaveLength(1)
+  })
 })
 
 const X402_INTENT_RESPONSE = {

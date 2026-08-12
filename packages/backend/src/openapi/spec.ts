@@ -1609,10 +1609,16 @@ export const openapiSpec = {
         summary: 'List curated payable services agents can discover and pay.',
         description:
           'Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. ' +
-          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; nothing here creates payments or signatures.',
+          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures.',
         security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
         parameters: [
           { name: 'category', in: 'query', schema: { type: 'string' } },
+          {
+            name: 'search',
+            in: 'query',
+            schema: { type: 'string', minLength: 1, maxLength: 120 },
+            description: 'Whitespace is trimmed/collapsed. Blank search after trimming returns 400.',
+          },
           { name: 'rail', in: 'query', schema: { type: 'string', enum: ['x402', 'mpp'] } },
         ],
         responses: {

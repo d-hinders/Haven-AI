@@ -6,7 +6,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .github/CODEOWNERS
-last-verified: "2026-08-10" # weekly #1248 audit: queue mechanics, money-path-globs source of truth and CODEOWNERS carve-out all re-verified; content (incl. the #1030 qa-freshness edit) accurate as-is
+last-verified: "2026-08-12" # #1341: re-verified queue readiness after ship-next gained #1289 active-claim coordination
 ---
 
 # Backlogs moved to GitHub Issues
@@ -30,9 +30,10 @@ The loop reads **GitHub Issues**. Two sources (see
 | **Standalone labeled issue** | a small, self-contained task | open an issue + add the **`code-quality`** label → run `ship-next` |
 | **Epic + sub-issues** | a multi-PR plan that burns down together | open a parent issue with sub-issues → run `ship-next epic=#<n>` |
 
-Issue state *is* the backlog state: an open issue with no PR is **ready**, an
-open issue with an open Haven PR is **in flight**, and a **closed** issue is
-**done** (its PR closed it via `Closes #`).
+Issue state *is* the backlog state: an open issue with no PR and no live claim
+or work overlap is **ready**, an open issue with an open Haven PR is **in
+flight**, and a **closed** issue is **done** (its PR closed it via
+`Closes #`).
 
 ## Writing a loop-ready issue
 

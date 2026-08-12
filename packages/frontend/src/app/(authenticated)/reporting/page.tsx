@@ -21,6 +21,13 @@ const STATUS: Record<ReportingSyncStatus, { label: string; cls: string }> = {
   skipped: { label: 'Skipped', cls: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]' },
 }
 
+/** Same tone convention as Row's leadingTone — text-color variant (#1364 review). */
+const TONE_TEXT: Record<'success' | 'warning' | 'danger', string> = {
+  success: 'text-[var(--v2-success)]',
+  warning: 'text-[var(--v2-warning)]',
+  danger: 'text-[var(--v2-danger)]',
+}
+
 function StatusChip({ status }: { status: ReportingSyncStatus }) {
   const s = STATUS[status]
   return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}>{s.label}</span>
@@ -67,11 +74,14 @@ export default function ReportingPage() {
     try {
       const v = await verify(paymentId)
       setVerifications((prev) => ({ ...prev, [paymentId]: v }))
-    } catch {
-      setVerifications((prev) => ({
-        ...prev,
-        [paymentId]: { error: 'Could not check Fortnox right now. Try again in a moment.' },
-      }))
+    } catch (err) {
+      // Surface the backend's actionable copy (e.g. "reconnect and try again")
+      // instead of flattening every failure to one generic line (#1364 review).
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Could not check Fortnox right now. Try again in a moment.'
+      setVerifications((prev) => ({ ...prev, [paymentId]: { error: message } }))
     } finally {
       setVerifying(null)
     }
@@ -173,7 +183,15 @@ export default function ReportingPage() {
               <Card.Section divided>
                 {status.syncs.map((s) => {
                   const invoiceNo = s.status === 'pushed' ? fortnoxInvoiceNumber(s.external_ref) : null
-                  const v = verifications[s.payment_id]
+                  // Self-invalidating (#1364 review): a stored verification is
+                  // only rendered while the row still points at the SAME
+                  // invoice — a re-sync that changes the row's shape drops the
+                  // stale verdict instead of showing it under a changed row.
+                  const stored = verifications[s.payment_id]
+                  const v =
+                    stored && ('error' in stored || String(stored.invoice_number) === invoiceNo)
+                      ? stored
+                      : undefined
                   return (
                     <div key={`${s.provider}-${s.payment_id}`}>
                       <Row
@@ -202,21 +220,19 @@ export default function ReportingPage() {
                           </span>
                         }
                       />
-                      {v && (
-                        <p
-                          className={`px-5 pb-3 text-xs ${
-                            'error' in v
-                              ? 'text-[var(--v2-danger)]'
-                              : verificationSummary(v).tone === 'success'
-                                ? 'text-[var(--v2-success)]'
-                                : verificationSummary(v).tone === 'warning'
-                                  ? 'text-[var(--v2-warning)]'
-                                  : 'text-[var(--v2-danger)]'
-                          }`}
-                        >
-                          {'error' in v ? v.error : verificationSummary(v).text}
-                        </p>
-                      )}
+                      <div aria-live="polite">
+                        {v && (
+                          <p
+                            className={`px-5 pb-3 text-xs ${
+                              'error' in v ? TONE_TEXT.danger : TONE_TEXT[verificationSummary(v).tone]
+                            }`}
+                          >
+                            {'error' in v
+                              ? v.error
+                              : `${verificationSummary(v).text} Checked ${new Date(v.checked_at).toLocaleTimeString()}.`}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   )
                 })}

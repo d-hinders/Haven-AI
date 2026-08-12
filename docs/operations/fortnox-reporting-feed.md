@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/infra/repositories/reporting-feed-syncs.ts
   - packages/frontend/src/app/(authenticated)/reporting/page.tsx
   - packages/frontend/src/hooks/useReporting.ts
-last-verified: "2026-08-12" # written for #1362 against the live #491 feed (#496/#498/#956 shipped, read-back verification added)
+last-verified: "2026-08-12" # written for #1362; #1364-review corrections: deleted-invoice recovery is a documented GAP (not "Sync now"), ledger skipped-status unreachability documented; both tracked in #1365
 ---
 
 # Fortnox reporting feed — operations runbook
@@ -66,9 +66,13 @@ Three layers, in order of convenience:
    - *Booked, voucher `<series><number> <year>`*: a human has accounted for
      it. This is "redovisad".
    - *Cancelled*: registered but struck in Fortnox.
-   - *Not found*: the invoice was deleted in Fortnox — re-run "Sync now" to
-     push it again (the ledger's pushed row guards double-posting, so treat
-     this as an operator decision: confirm it is genuinely gone first).
+   - *Not found*: the invoice was deleted in Fortnox. **There is no supported
+     self-service recovery for this case today**: the ledger row is `pushed`,
+     pushed rows are never re-claimed (the double-post guard), and the
+     "Sync now" backfill deliberately excludes them — pressing it will NOT
+     re-push this payment. Do not hand-edit the row either (see the schema
+     section). Escalate: recovering a deleted-in-Fortnox invoice is an
+     operator/engineering decision, tracked as a known gap.
    The read-back cross-checks `ExternalInvoiceNumber == HAVEN-<paymentId>`,
    so a number collision after e.g. a Fortnox company switch reads as *Not
    found*, never as a false "registered".
@@ -95,7 +99,7 @@ Work the sync row's `status` on `/reporting` (or `reporting_feed_syncs`):
 | `pushed` | Delivered. `error` column may carry a non-fatal **note** (e.g. "receipt attachment failed") — invoice exists, attachment degraded | Use *Check in Fortnox* for live state; reconnect Fortnox if the note names a scope error, then re-capture attachments is NOT automatic — the invoice stands |
 | `failed` | Fortnox push failed; `error` carries the Fortnox message verbatim | Fix the named cause (often token/scope), press **Sync now** — failed rows are re-claimed and retried |
 | `pending` | Claimed but in flight (or a crashed in-flight push) | Wait; a stuck pending row is not auto-recovered (deliberate — the claim IS the concurrency guard). If genuinely stuck, escalate rather than editing the row |
-| `skipped` | Deliberately not fed: `not_connected`, `no_sek_amount` (FX not ready at settle time), or `not_outbound` | Connect Fortnox / wait for FX, then **Sync now** — the backfill picks up FX-ready, unpushed payments |
+| `skipped` | Reserved in the type but **not written by any current path**: a connector-level skip (`not_connected`, `no_sek_amount`, `not_outbound`) is recorded as `pushed` with a NULL `external_ref` — the row is final and the backfill will not revisit it. A pushed row WITHOUT an invoice number is therefore the "skipped" signal in practice | If the skip reason was transient (e.g. a disconnect race), the payment will not be re-fed automatically — escalate; do not hand-edit |
 | *(no row)* | The settle-time hook never ran (entitlement off, feature flag off) or the payment predates the feed | Check `GET /accounting/reporting/status` base flags; **Sync now** backfills once entitled |
 
 Common causes, from live experience:

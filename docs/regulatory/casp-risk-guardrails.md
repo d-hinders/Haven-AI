@@ -49,7 +49,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-12" # #1355 payment_id-only signing (payment_required into machine_metadata + sign-context re-serve; expected-context verification unchanged, see EOF entry); same day: #1346 Connect handoff, #1352 Node floor 24->22
+last-verified: "2026-08-12" # #1355 payment_id-only signing (payment_required into machine_metadata + sign-context re-serve; expected-context verification unchanged, see EOF entry) + #1347 structured Connect outcome re-verified (boundaries unchanged); same day: #1352 Node floor, #1346 handoff, #1330 Hermes
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails

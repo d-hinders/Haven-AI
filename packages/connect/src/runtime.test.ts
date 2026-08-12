@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ConnectApiClient, RegisterSetupInput, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
-import { completionHandoffLines, runConnect } from './runtime.js'
+import { completionHandoffLines, failedConnectOutcome, runConnect } from './runtime.js'
 import type { RuntimeInstallResult } from './runtime-install.js'
 
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
@@ -222,9 +222,22 @@ describe('runConnect', () => {
       }),
       installRuntime,
       log: (message) => logs.push(message),
+      redactPaths: true,
     })
 
     expect(result.agentId).toBe('agent-1')
+    expect(result.outcome).toMatchObject({
+      schema_version: 1,
+      outcome: 'complete',
+      runtime: 'claude-code',
+      topology: 'local_stdio',
+      configuration: { hosted_mcp: false, local_signer: true, local_mcp: true },
+      approval: { required: true },
+      verification: { tools: ['haven_get_agent', 'haven_get_allowances'] },
+    })
+    expect(JSON.stringify(result.outcome)).not.toContain(PRIVATE_KEY)
+    expect(JSON.stringify(result.outcome)).not.toContain('sk_agent_supersecret')
+    expect(JSON.stringify(result.outcome)).not.toContain('/tmp/haven-connect-test')
     expect(registerInputs).toHaveLength(1)
     expect(registerInputs[0].delegateAddress).toMatch(/^0x[0-9a-fA-F]{40}$/)
     expect(registerInputs[0].proofSignature).toMatch(/^0x[0-9a-fA-F]+$/)
@@ -260,12 +273,27 @@ describe('runConnect', () => {
     expect(output).toContain('Registered signing address with Haven')
     expect(output).not.toContain(PRIVATE_KEY)
     expect(output).not.toContain('sk_agent_supersecret')
+    expect(output).not.toContain('/tmp/haven-connect-test/agent-1')
     // The connector affirms completion so the agent knows it finished, then
     // states the approval gate explicitly before any restart instruction.
     expect(output).toContain('Haven setup on this machine is complete')
     expect(output).toContain('Approval — not restarting — unlocks Haven tools')
     expect(output).toContain('Start a new Claude Code session')
     expect(output).not.toContain('should appear in your next message')
+  })
+
+  it('builds a stable, redacted failure outcome for CLI serialization', () => {
+    const result = failedConnectOutcome('codex-cli', new Error(
+      'This Haven setup challenge is expired or invalid. Do not use sk_agent_supersecret at /tmp/secret',
+    ))
+    expect(result).toMatchObject({
+      schema_version: 1,
+      outcome: 'failed',
+      runtime: 'codex-cli',
+      error: { code: 'setup_challenge_expired_or_invalid', next_action: 'return_to_haven_for_fresh_setup' },
+    })
+    expect(JSON.stringify(result)).not.toContain('sk_agent_supersecret')
+    expect(JSON.stringify(result)).not.toContain('/tmp/secret')
   })
 
   describe('unsupported Node.js (#1161)', () => {

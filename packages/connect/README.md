@@ -52,11 +52,30 @@ spending authority.
    `haven_get_allowances` tools to confirm the Haven wallet and live budget.
    Do not sign, fund, or create a payment to verify setup.
 
+### Structured output for automation
+
+Pass `--json` when a launcher needs a machine-readable completion record. Connect
+writes progress and human recovery notes to stderr and exactly one JSON object
+to stdout, with `schema_version: 1` and `outcome` set to `complete`,
+`action_required`, or `failed`. The object includes runtime/topology status,
+probe result, activation and next-action guidance, approval state/expiry (null
+when the backend does not provide an approval expiry), and the two
+read-only verification tools. It contains no API key, private key, credential
+contents, full credential paths, or full delegate address. The same redacted
+object is available to library callers as `runConnect(...).outcome`; the older
+fields remain for additive compatibility.
+
+For a recoverable install, configuration, probe, consent, or manual-runtime
+condition, inspect `error.code` and `error.next_action`, then follow the safe
+next action. A failed setup emits `outcome: "failed"` with a stable error code;
+it never presents credential material as a recovery diagnostic.
+
 If the setup challenge expires, return to Haven to start a fresh connection and
-rerun Connect. If a runtime write, installation, or probe fails, resolve the
-reported problem, return to Haven for a fresh connection, and run its new
-Connect command. Do not manually edit runtime configuration or paste credentials
-into prompts, logs, or configuration files.
+rerun Connect. If a runtime write, installation, or probe fails, follow the
+structured `error.next_action` (or its human equivalent). The `other` runtime
+is the manual exception: finish the secret-free file-reference setup it prints,
+then start a fresh runtime session. Do not manually edit managed runtime
+configuration or paste credentials into prompts, logs, or configuration files.
 
 Connect abbreviates the public delegate address in normal output. Operators who
 need its full public identifier can inspect the owner-only, non-secret

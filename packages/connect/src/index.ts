@@ -1,4 +1,4 @@
-export { parseArgs, helpText } from './args.js'
+export { parseArgs, helpText, type ParsedCli } from './args.js'
 export {
   createConnectApiClient,
   type ConnectApiClient,
@@ -10,7 +10,19 @@ export {
 } from './api.js'
 export { delegateKeyFromPrivateKey, generateDelegateKey, type LocalDelegateKey } from './key.js'
 export { redactSecrets, shortAddress } from './redact.js'
-export { runConnect, CONNECTOR_VERSION, type ConnectDeps, type ConnectOptions, type ConnectResult } from './runtime.js'
+export {
+  runConnect,
+  completionOutcome,
+  failedConnectOutcome,
+  CONNECTOR_VERSION,
+  CONNECT_OUTCOME_SCHEMA_VERSION,
+  type ConnectDeps,
+  type ConnectOptions,
+  type ConnectOutcome,
+  type ConnectOutcomeStatus,
+  type ConnectResult,
+} from './runtime.js'
+export { runCli, type CliIo } from './cli.js'
 export {
   installRuntime,
   runtimeInstallCapabilities,

@@ -78,6 +78,16 @@ the read-only `haven_get_agent` and `haven_get_allowances` tools to confirm the
 Haven wallet and live budget. Approval — not a restart — unlocks Haven tools.
 The verification must not sign, fund, or create a payment.
 
+Automation can pass `--json`: Connect keeps progress and recovery prose on
+stderr and emits one parseable, versioned object on stdout. `schema_version: 1`
+is the stable contract; `outcome` is `complete`, `action_required`, or
+`failed`. The record carries runtime/topology, configuration and probe state,
+activation, next action, approval and any approval expiry, and read-only
+verification guidance. It is
+redacted by construction: no API/private keys, credential contents, full
+credential paths, or full delegate address are serialized. Library callers use
+the same object at `runConnect(...).outcome`.
+
 Activation is owned by the Connect runtime registry. Claude Code needs a new
 session; Codex CLI can start a fresh session with `codex resume --last`; Codex
 Desktop and Claude Desktop need a full app restart; Cursor and VS Code hot
@@ -87,9 +97,12 @@ the secret-free file references it prints and then start a fresh session.
 
 If a setup challenge has expired, return to Haven for a fresh connection and
 rerun Connect. If a package install, runtime configuration, or MCP probe fails,
-resolve the named error, return to Haven for a fresh connection, and run its new
-Connect command. Never manually edit runtime configuration or paste credentials
-into prompts, logs, or configuration.
+use the structured `error.code` and `error.next_action` (or the matching human
+recovery note). Never manually edit runtime configuration or paste credentials
+into prompts, logs, or configuration. The `other` runtime is intentionally
+`action_required`: finish the secret-free manual setup references, then start a
+fresh runtime session; do not request another one-shot setup solely because the
+runtime is unrecognized.
 
 Normal Connect output abbreviates the public delegate address. For an operator
 diagnostic that needs the full public identifier, use the owner-only, non-secret

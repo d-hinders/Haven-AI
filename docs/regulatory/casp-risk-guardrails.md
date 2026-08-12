@@ -49,7 +49,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
-last-verified: "2026-08-12" # docs-staleness sweep: EOF entries reordered to dev-merge chronology, retroactive #1346/#1347 entries added (their PRs bumped only this header) + #1360 declared funding-shape (see EOF entry); all same-day entries #1352..#1362 present
+last-verified: "2026-08-12" # release 0.1.23-alpha.0: version constants/pins re-verified, no perimeter change (ships the Node-22 engines floor to npm); prior same-day: docs-staleness sweep + #1346..#1362 entries
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails

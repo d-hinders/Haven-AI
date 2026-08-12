@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { AgentPaymentFailureCode, AgentPaymentNextAction, HavenClient } from '@haven_ai/sdk'
+import {
+  AgentPaymentFailureCode,
+  AgentPaymentNextAction,
+  HavenApiError,
+  HavenClient,
+  MerchantTimeoutError,
+  SIGNER_UPDATE_FALLBACK,
+} from '@haven_ai/sdk'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
@@ -31,13 +38,48 @@ function stubFetch(routes: Record<string, RouteDefinition>) {
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const method = (init.method ?? 'GET').toUpperCase()
     const path = new URL(url).pathname
+    const body = init.body ? JSON.parse(init.body as string) : undefined
     calls.push({
       url,
       method,
-      body: init.body ? JSON.parse(init.body as string) : undefined,
+      body,
       headers: (init.headers ?? {}) as Record<string, string>,
     })
     const route = routes[`${method} ${path}`]
+    // Paid MCP-tool tests model a strict streamable-HTTP merchant: before its
+    // configured 402 tool response, it establishes an MCP session and expects
+    // the lifecycle notification. This keeps existing route fixtures focused
+    // on the payment state they exercise while asserting the hosted flow uses
+    // the real transport sequence.
+    if (route && route.status !== 404 && method === 'POST' && body?.method === 'initialize') {
+      const responseHeaders = new Headers({ 'mcp-session-id': 'sess-tools-test' })
+      const bodySnapshot = { jsonrpc: '2.0', id: body.id, result: { protocolVersion: '2025-06-18' } }
+      return {
+        ok: true,
+        status: 200,
+        headers: responseHeaders,
+        json: async () => bodySnapshot,
+        text: async () => JSON.stringify(bodySnapshot),
+        clone: () => ({
+          ok: true,
+          status: 200,
+          headers: responseHeaders,
+          json: async () => bodySnapshot,
+          text: async () => JSON.stringify(bodySnapshot),
+        }),
+      }
+    }
+    if (route && route.status !== 404 && method === 'POST' && body?.method === 'notifications/initialized') {
+      const responseHeaders = new Headers()
+      return {
+        ok: true,
+        status: 202,
+        headers: responseHeaders,
+        json: async () => ({}),
+        text: async () => '',
+        clone: () => ({ ok: true, status: 202, headers: responseHeaders, json: async () => ({}), text: async () => '' }),
+      }
+    }
     const status = route?.status ?? 200
     const responseHeaders = new Headers(route?.responseHeaders ?? {})
     const bodySnapshot = route?.body
@@ -326,6 +368,7 @@ describe('haven_discover_tools', () => {
               rail: 'x402',
               protocol: 'mcp',
               tool_name: 'create_text',
+              tool_arguments: { prompt: 'hello' },
               price_display: '$0.01 USDC',
               price_atomic: '10000',
               asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
@@ -338,13 +381,19 @@ describe('haven_discover_tools', () => {
       },
     })
 
-    const result = ok<Array<{ price_is_indicative: boolean; price_atomic: string; suggested_tool: string }>>(
+    const result = ok<Array<{
+      price_is_indicative: boolean
+      price_atomic: string
+      suggested_tool: string
+      tool_arguments: Record<string, unknown>
+    }>>(
       await handlers().haven_discover_tools({}),
     )
 
     expect(result.data[0].price_is_indicative).toBe(true)
     expect(result.data[0].price_atomic).toBe('10000')
     expect(result.data[0].suggested_tool).toBe('haven_pay_mcp_tool')
+    expect(result.data[0].tool_arguments).toEqual({ prompt: 'hello' })
   })
 })
 
@@ -544,6 +593,24 @@ describe('haven_pay_x402_quote', () => {
     expect(check).toMatch(/STOP before signing/)
     // Same standing instruction as the signing-time error (#1143).
     expect(check).toMatch(/invalidates the signature/)
+  })
+
+  it('carries the recovery guidance as STRUCTURED data too, not only inside check (#1309)', async () => {
+    // #1309: signer_compatibility is the stable machine-readable compatibility
+    // contract. `fallback` is the same fix `check` states in prose, as a field
+    // an agent can read without parsing a sentence — and it is the SAME string
+    // (SIGNER_UPDATE_FALLBACK) the local signer's own structured refusal uses,
+    // so an agent that meets either surface gets identical guidance.
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{ signer_compatibility: { fallback: string } }>(
+      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+
+    expect(result.data.signer_compatibility.fallback).toBe(SIGNER_UPDATE_FALLBACK)
   })
 
   it('does not refuse a quote whose emitted version the signer may not know (#1155)', async () => {
@@ -878,8 +945,43 @@ describe('haven_pay_mcp_tool', () => {
     expect(result.data.payment_required).toBeDefined()
     expect(Array.isArray(result.data.payment_required.accepts)).toBe(true)
     expect(result.data.x402).toBeDefined()
+    const initialize = calls.find((call) => call.body?.method === 'initialize')
+    const initialized = calls.find((call) => call.body?.method === 'notifications/initialized')
+    const quoteProbe = calls.find((call) => call.body?.method === 'tools/call')
+    expect(initialize).toBeDefined()
+    expect(new Headers(initialized?.headers).get('mcp-session-id')).toBe('sess-tools-test')
+    expect(new Headers(quoteProbe?.headers).get('Accept')).toBe('application/json, text/event-stream')
+    expect(new Headers(quoteProbe?.headers).get('mcp-session-id')).toBe('sess-tools-test')
+    expect(new Headers(quoteProbe?.headers).get('x402-wallet')).toBe(AGENT_RESPONSE.delegate_address)
     // createX402Intent was called (POST /x402 route was hit)
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('persists the merchant call context on the funding request (#1307 settle-leg rehydration)', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader },
+      },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    ok(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+
+    const intentCall = calls.find((c) => c.url.endsWith('/x402'))
+    expect(intentCall?.body?.mcpCallContext).toEqual({
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'create_text',
+      arguments: { prompt: 'Hello' },
+      mcpTransport: { handshakeRequired: true, source: 'path' },
+    })
   })
 
   it('rejects with PRICE_EXCEEDS_MAX before funding when the live price is above max_amount', async () => {
@@ -902,10 +1004,9 @@ describe('haven_pay_mcp_tool', () => {
     expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
     expect(payload.message).toContain('1500000')
     expect(payload.message).toContain('1000000')
-    // No funding intent was created — the guard fired before createX402Intent
-    // (which would have hit GET /agent then POST /x402). The quote probe to the
-    // merchant (POST /mcp) is expected; only the funding path must be absent.
-    expect(calls.find((c) => c.url.includes('/agent'))).toBeUndefined()
+    // No funding intent was created — the guard fired before createX402Intent.
+    // The MCP-aware quote resolves the public delegate address through /agent,
+    // but it cannot sign, fund, or construct an x402 intent.
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 
@@ -1049,6 +1150,33 @@ describe('haven_pay_mcp_tool', () => {
     expect(payload.code).toBe('INVALID_INPUT')
     expect(payload.message).toContain('payment_id')
     expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('routes a merchant TIMEOUT after funding to verify-then-sweep guidance, never a bare 504 (#1300)', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockRejectedValue(
+      new MerchantTimeoutError('Merchant request timed out after 300000ms: http://merchant.test/mcp'),
+    )
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: {},
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    // Funding is on-chain; an unanswered retry is the SAME money-at-risk state
+    // as a rejection — but a timeout is not proof of rejection, so the
+    // guidance is verify-then-sweep, and the code is distinct.
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding)
+    expect(payload.statusCode).toBe(504)
+    expect(payload.paymentId).toBe('pay_x402')
+    expect(payload.message).toMatch(/may still settle late/)
+    expect(payload.message).toMatch(/haven_get_payment_status/)
+    expect(payload.suggested_tool).toBe('haven_get_payment_status')
   })
 
   it('haven_complete_mcp_tool fails with a typed sweep hint when the merchant rejects after funding', async () => {
@@ -1232,6 +1360,459 @@ describe('haven_pay_mcp_tool', () => {
   })
 })
 
+// ── haven_prepare_catalog_purchase (#1306) ────────────────────────────────────
+
+describe('haven_prepare_catalog_purchase', () => {
+  const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+
+  // Catalog's price_atomic matches the fixture's authoritative maxAmountRequired
+  // (1500000) so the baseline tests do not incidentally trip CATALOG_PRICE_DIFFERS.
+  const CATALOG_ENTRY_RESPONSE = {
+    id: 'cat_1',
+    name: 'CloudNest 50GB',
+    description: 'Cloud storage tier',
+    category: 'compute',
+    resource_url: 'http://merchant.test/mcp',
+    rail: 'x402',
+    protocol: 'mcp',
+    tool_name: 'create_text',
+    tool_arguments: { prompt: 'Hello' },
+    price_display: '$1.50 USDC',
+    price_atomic: '1500000',
+    asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+    network: 'eip155:8453',
+    status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+
+  const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+
+  // #1319: `remainingIsFromChain` mirrors the wire's `remaining_is_from_chain`
+  // — omitted by default (matches a legacy-rail row, and most delegation
+  // fixtures don't care), set explicitly where a test exercises the
+  // provenance warning.
+  function allowancesFixture(
+    remaining: string,
+    rail: 'legacy' | 'delegation' = 'legacy',
+    options: { remainingIsFromChain?: boolean } = {},
+  ) {
+    return {
+      agent_id: 'agt_1',
+      safe_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [{
+        id: rail === 'delegation' ? 'delegation-1' : 'allowance-1',
+        token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        token_symbol: 'USDC',
+        configured_amount: rail === 'delegation' ? '5.00' : '5000000',
+        reset_period_min: rail === 'delegation' ? 1440 : 60,
+        onchain: {
+          amount: remaining, spent: '0', remaining, effective_spent: '0',
+          reset_time_min: rail === 'delegation' ? 1440 : 60,
+          last_reset_min: rail === 'delegation' ? 0 : 100,
+          nonce: rail === 'delegation' ? 0 : 7,
+          is_reset_pending: false,
+          ...(options.remainingIsFromChain !== undefined
+            ? { remaining_is_from_chain: options.remainingIsFromChain }
+            : {}),
+        },
+      }],
+    }
+  }
+
+  const baseRoutes = {
+    'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+    'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+    'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+  }
+
+  it('success (legacy rail, sufficient allowance): loads catalog, quotes live, creates the intent, returns the compact ready-to-sign shape + catalog fields + allowance block', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+    })
+
+    const result = ok<{
+      payment_id: string
+      rail: string
+      network: string
+      asset: string
+      amount_atomic: string
+      amount: string
+      token: string
+      merchant_url: string
+      tool_name: string
+      arguments: Record<string, unknown>
+      catalog_id: string
+      catalog_name: string
+      catalog_price_atomic: string
+      catalog_price_display: string
+      catalog_price_is_indicative: boolean
+      allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string }
+      next_action: string
+      next_tool: string
+      next_arguments: Record<string, unknown>
+      warnings: Array<{ code: string }>
+    }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    // The exact compact quote shape (#1272) — payment_id from the created intent.
+    expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
+    // #1318 review: no top-level rail key — allowance.rail is the policy rail.
+    expect('rail' in result.data).toBe(false)
+    expect(result.data.network).toBe('base')
+    expect(result.data.asset).toBe(PAYMENT_REQUIRED.accepts[0].asset)
+    expect(result.data.amount_atomic).toBe('1500000')
+    expect(result.data.token).toBe('USDC')
+    expect(result.data.merchant_url).toBe('http://merchant.test/mcp')
+    expect(result.data.tool_name).toBe('create_text')
+    expect(result.data.arguments).toEqual({ prompt: 'Hello' })
+    // Catalog fields, marked indicative — never authoritative.
+    expect(result.data.catalog_id).toBe('cat_1')
+    expect(result.data.catalog_name).toBe('CloudNest 50GB')
+    expect(result.data.catalog_price_atomic).toBe('1500000')
+    expect(result.data.catalog_price_is_indicative).toBe(true)
+    // Rail-aware allowance block.
+    expect(result.data.allowance).toEqual({
+      rail: 'legacy',
+      sufficient: true,
+      remaining_atomic: '5000000',
+      source: 'allowance_module',
+    })
+    // #1308 guidance — next step is the SAME signer call as haven_pay_mcp_tool.
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+    expect(result.data.next_arguments).toEqual({ payment_id: X402_INTENT_RESPONSE.payment_id })
+    // Catalog price matched the live quote — no CATALOG_PRICE_DIFFERS warning.
+    expect(result.data.warnings.some((w) => w.code === 'CATALOG_PRICE_DIFFERS')).toBe(false)
+
+    // The catalog entry's OWN tool_arguments were what got quoted and funded.
+    const intentCall = calls.find((c) => c.url.endsWith('/x402'))
+    expect(intentCall?.body?.mcpCallContext).toMatchObject({
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'create_text',
+      arguments: { prompt: 'Hello' },
+    })
+  })
+
+  it('success (delegation rail, sufficient budget): reports rail: delegation, source: active_delegations, derived from #1090', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000', 'delegation') },
+    })
+
+    const result = ok<{ allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string } }>(
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+    )
+
+    expect(result.data.allowance).toEqual({
+      rail: 'delegation',
+      sufficient: true,
+      remaining_atomic: '5000000',
+      source: 'active_delegations',
+    })
+    // The intent was still created — sufficient budget does not refuse.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('refuses an unknown or wrong-chain catalog_id with 404 — chain-scoping is free from #1299 SQL', async () => {
+    stubFetch({
+      'GET /catalog/cat_missing': { status: 404, body: { error: 'Catalog entry not found' } },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_missing',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('CATALOG_ENTRY_NOT_FOUND')
+    expect(payload.statusCode).toBe(404)
+    expect(payload.suggested_tool).toBe('haven_discover_tools')
+    // No merchant probe, no agent lookup, no intent — the refusal fires immediately.
+    expect(calls).toHaveLength(1)
+  })
+
+  it('rejects with PRICE_EXCEEDS_MAX before any funding intent when the live price exceeds max_amount', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+    })
+
+    // Fixture's authoritative price is maxAmountRequired = 1500000.
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '1000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+    expect(payload.message).toContain('1500000')
+    expect(payload.message).toContain('1000000')
+    // The MCP lifecycle reads the public delegate address before quoting, but
+    // the cap guard still fires before any funding intent is constructed.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+  })
+
+  it('refuses without max_amount — no cap_warning softness on the guided path', async () => {
+    stubFetch({})
+    const payload = await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1' })
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('INVALID_INPUT')
+    // Schema validation runs before any network call.
+    expect(calls).toHaveLength(0)
+  })
+
+  it('legacy rail: insufficient allowance still proceeds — the resulting funding intent queues for approval, like haven_pay_mcp_tool', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('7500') },
+      'POST /x402': { status: 202, body: { payment_id: 'over_1', status: 'pending_approval' } },
+    })
+
+    const result = ok<{ status: string; payload_hash: unknown }>(
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+    )
+
+    expect(result.data.status).toBe('pending_approval')
+    expect(result.data.payload_hash).toBeNull()
+    // The intent WAS attempted — legacy over-allowance queues, it does not refuse here.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('delegation rail: over-budget REFUSES at prepare — no approval queue exists on this rail', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('100', 'delegation') },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('DELEGATION_BUDGET_EXCEEDED')
+    expect(payload.next_action).toBe(AgentPaymentNextAction.FundSafeOrRaiseAllowance)
+    // Mutation-tested ordering: no funding intent was created — the refusal
+    // fires before createX402Intent, unlike the legacy queue-and-proceed path.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+  })
+
+  it('refuses a degraded catalog entry, naming haven_pay_mcp_tool as the manual fallback', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': { status: 200, body: { ...CATALOG_ENTRY_RESPONSE, status: 'degraded' } },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('CATALOG_ENTRY_UNUSABLE')
+    expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
+    expect(payload.message).toMatch(/degraded/)
+    // No merchant probe was attempted against a row Haven cannot trust.
+    expect(calls).toHaveLength(1)
+  })
+
+  it('refuses a catalog entry missing MCP tool metadata, naming haven_pay_mcp_tool as the manual fallback', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': { status: 200, body: { ...CATALOG_ENTRY_RESPONSE, tool_name: null } },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('CATALOG_ENTRY_UNUSABLE')
+    expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
+    expect(payload.message).toMatch(/tool metadata/)
+  })
+
+  it('warns CATALOG_PRICE_DIFFERS when the catalog price is stale relative to the live quote', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /catalog/cat_1': { status: 200, body: { ...CATALOG_ENTRY_RESPONSE, price_atomic: '999999' } },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+    })
+
+    const result = ok<{ warnings: Array<{ code: string; message: string }> }>(
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+    )
+
+    const warning = result.data.warnings.find((w) => w.code === 'CATALOG_PRICE_DIFFERS')
+    expect(warning).toBeDefined()
+    expect(warning?.message).toContain('999999')
+    expect(warning?.message).toContain('1500000')
+  })
+
+  it('reports sufficient: null (never a fabricated guess) when the allowance/budget read fails — the preflight still succeeds', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
+    })
+
+    const result = ok<{
+      allowance: { rail: string; sufficient: boolean | null; source: string }
+      warnings: Array<{ code: string }>
+    }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    expect(result.data.allowance).toEqual({ rail: 'legacy', sufficient: null, source: 'allowance_module' })
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+    // A failed read never fails the preflight — the intent was still created.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  // #1319: the legacy-rail case above was already covered — this is the
+  // delegation-rail twin the #1318 review flagged as untested. The strict
+  // `sufficient === false` refusal guard (step 6) protects correctness, but
+  // that guard never even runs here — `sufficient` is `null`, not `false` —
+  // so the intent is still created exactly like the legacy rail.
+  it('delegation rail: reports sufficient: null (never a fabricated guess) when the allowance/budget read fails — the preflight still succeeds and creates the intent', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
+    })
+
+    const result = ok<{
+      allowance: { rail: string; sufficient: boolean | null; source: string }
+      warnings: Array<{ code: string }>
+    }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    expect(result.data.allowance).toEqual({ rail: 'delegation', sufficient: null, source: 'active_delegations' })
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+    // A failed read degrades to null, never to a fabricated false — the
+    // delegation-rail refusal guard (step 6) only fires on a genuine false,
+    // so it never fires here and the intent is still created.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  // #1319: the #1318 review's second untested combination — a hard refusal
+  // that must fire BEFORE any funding intent exists, unlike the degrade-and-
+  // proceed allowance-read failure above.
+  it('refuses before creating any intent when haven.getAgent() fails — a hard refusal, not a degrade-and-proceed', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 500, body: { error: 'boom' } },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    // No funding intent, and no allowance read either — the agent lookup is
+    // a hard stop, before step 5 (the allowance/budget report) ever runs.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    expect(calls.find((c) => c.url.endsWith('/machine-payments/allowances'))).toBeUndefined()
+  })
+
+  // #1319: surfaces the #1145 provenance nuance — the delegation rail's
+  // on-chain enforcer read deliberately falls back to the full configured
+  // budget (never throws) when the RPC read itself fails, so this preflight's
+  // failed-read branch above never fires for that failure mode; it reports
+  // `sufficient: true` computed from an OPTIMISTIC number instead. The wire
+  // now carries that provenance (`remaining_is_from_chain`), and the
+  // preflight surfaces it as a warning rather than presenting the figure as
+  // confirmed.
+  it('delegation rail: warns ALLOWANCE_READ_OPTIMISTIC when the reported remaining is the #1145 fallback, not a live chain read', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': {
+        status: 200,
+        body: allowancesFixture('5000000', 'delegation', { remainingIsFromChain: false }),
+      },
+    })
+
+    const result = ok<{
+      allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string }
+      warnings: Array<{ code: string; message: string }>
+    }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    // sufficient still reports a real true/false — this is a fund-safe
+    // optimistic read (the caveat enforcer re-checks at redemption), never a
+    // failed read like ALLOWANCE_CHECK_UNAVAILABLE above.
+    expect(result.data.allowance).toEqual({
+      rail: 'delegation', sufficient: true, remaining_atomic: '5000000', source: 'active_delegations',
+    })
+    const warning = result.data.warnings.find((w) => w.code === 'ALLOWANCE_READ_OPTIMISTIC')
+    expect(warning).toBeDefined()
+    expect(warning?.message).toMatch(/on-chain policy .* remains the actual .*gate/)
+    // Never a refusal — the intent was still created.
+    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+  })
+
+  it('delegation rail: does NOT warn ALLOWANCE_READ_OPTIMISTIC when the reported remaining came from a live chain read', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': {
+        status: 200,
+        body: allowancesFixture('5000000', 'delegation', { remainingIsFromChain: true }),
+      },
+    })
+
+    const result = ok<{ warnings: Array<{ code: string }> }>(
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+    )
+
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_READ_OPTIMISTIC')).toBe(false)
+  })
+
+  it('legacy rail: never warns ALLOWANCE_READ_OPTIMISTIC — the provenance flag is delegation-rail only', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000', 'legacy') },
+    })
+
+    const result = ok<{ warnings: Array<{ code: string }> }>(
+      await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+    )
+
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_READ_OPTIMISTIC')).toBe(false)
+  })
+
+  it('passes idempotency_key through to the merchant quote and the funding intent (#1207 replay semantics apply unchanged)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+    })
+
+    ok(
+      await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_1',
+        max_amount: '2000000',
+        idempotency_key: 'catalog-purchase-key-1',
+      }),
+    )
+
+    const intentCall = calls.find((c) => c.url.endsWith('/x402'))
+    expect(intentCall?.body?.idempotencyKey).toBe('catalog-purchase-key-1')
+  })
+})
+
 // ── haven_settle_mcp_tool (fast-path: fund + settle in one call) ──────────────
 
 describe('haven_settle_mcp_tool', () => {
@@ -1368,6 +1949,454 @@ describe('haven_settle_mcp_tool', () => {
     if (payload.success) throw new Error('expected a failure payload')
     expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
     expect(payload.suggested_tool).toBe('haven_sweep_delegate')
+  })
+})
+
+// ── haven_settle_mcp_tool: post-purchase allowance/budget summary (#1310) ─────
+
+describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () => {
+  const SIG = '0x' + '11'.repeat(65)
+  const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+  const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+
+  function allowancesFixture(remaining: string, rail: 'legacy' | 'delegation' = 'legacy') {
+    return {
+      agent_id: 'agt_1',
+      safe_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [{
+        id: rail === 'delegation' ? 'delegation-1' : 'allowance-1',
+        token_address: USDC,
+        token_symbol: 'USDC',
+        configured_amount: rail === 'delegation' ? '5.00' : '5000000',
+        reset_period_min: rail === 'delegation' ? 1440 : 60,
+        onchain: {
+          amount: remaining, spent: '0', remaining, effective_spent: '0',
+          reset_time_min: rail === 'delegation' ? 1440 : 60,
+          last_reset_min: rail === 'delegation' ? 0 : 100,
+          nonce: rail === 'delegation' ? 0 : 7,
+          is_reset_pending: false,
+        },
+      }],
+    }
+  }
+
+  // GET /machine-payments/:id/status fixture — this is how the summary
+  // resolves WHICH token was settled, without the caller passing it.
+  function statusFixture(overrides: Record<string, unknown> = {}) {
+    return {
+      payment_id: 'pay_x402',
+      kind: 'payment_intent',
+      rail: 'x402',
+      status: 'confirmed',
+      phase: 'payment_confirmed',
+      next_action: 'none',
+      amount: '1.50',
+      token: 'USDC',
+      resource_url: 'http://merchant.test/mcp',
+      merchant_address: '0xMerchant',
+      tx_hash: '0xfund',
+      expires_at: '2099-01-01T00:00:00.000Z',
+      chain_id: 8453,
+      message: 'The payment is confirmed.',
+      asset: USDC,
+      ...overrides,
+    }
+  }
+
+  function settleArgs() {
+    return {
+      payment_id: 'pay_x402',
+      signature: SIG,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      payment_header: 'eyJ4IjoxfQ==',
+    }
+  }
+
+  function havenSettled(extraRoutes: Record<string, RouteDefinition>) {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+      ...extraRoutes,
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    // Isolate the summary's OWN getPaymentStatus call (below) from
+    // ensureFundingConfirmed's unrelated, pre-existing, uncaught
+    // getPaymentStatus call — both would otherwise hit the SAME stubbed
+    // status route and conflate two different failure modes.
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+    })
+    return haven
+  }
+
+  it('attaches the rail-aware post-purchase allowance summary (legacy rail)', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000') },
+    })
+
+    const result = ok<{
+      settled: boolean
+      allowance: {
+        rail: string
+        remaining_atomic: string
+        remaining_display?: string
+        token_symbol?: string
+        token_address?: string
+        reset_period?: number
+        source: string
+      } | null
+    }>(await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()))
+
+    expect(result.data.settled).toBe(true)
+    // Deliberately the SAME rail-labeled shape as #1306's preflight `allowance`
+    // block, minus the preflight-only `sufficient` field.
+    expect(result.data.allowance).toEqual({
+      rail: 'legacy',
+      remaining_atomic: '3500000',
+      remaining_display: '3.5 USDC',
+      token_symbol: 'USDC',
+      token_address: USDC,
+      reset_period: 60,
+      source: 'allowance_module',
+    })
+  })
+
+  it('attaches source: active_delegations on the delegation rail, derived via #1090 (not agent_allowances)', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('4200000', 'delegation') },
+    })
+
+    const result = ok<{ allowance: { rail: string; source: string; remaining_atomic: string } | null }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()),
+    )
+
+    expect(result.data.allowance).toEqual(
+      expect.objectContaining({ rail: 'delegation', source: 'active_delegations', remaining_atomic: '4200000' }),
+    )
+  })
+
+  it('parity: remaining_atomic matches haven_get_allowances for the SAME fixture — same source, asserted as equality', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('1234567') },
+    })
+    const h = createToolHandlers(haven)
+
+    const settleResult = ok<{ allowance: { remaining_atomic: string; token_address?: string } | null }>(
+      await h.haven_settle_mcp_tool(settleArgs()),
+    )
+    const allowancesResult = ok<{ allowances: Array<{ tokenAddress: string; onchain: { remaining: string } }> }>(
+      await h.haven_get_allowances({}),
+    )
+    const match = allowancesResult.data.allowances.find((a) => a.tokenAddress.toLowerCase() === USDC)
+
+    expect(settleResult.data.allowance?.remaining_atomic).toBe(match?.onchain.remaining)
+    expect(settleResult.data.allowance?.remaining_atomic).toBe('1234567')
+  })
+
+  it('a failed allowance/budget read NEVER converts settled:true into failure — degrades to a null block + warning', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
+    })
+
+    const result = ok<{
+      settled: boolean
+      allowance: unknown
+      warnings: Array<{ code: string }>
+    }>(await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()))
+
+    expect(result.data.settled).toBe(true)
+    expect(result.data.allowance).toBeNull()
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+  })
+
+  it('a failed payment-status lookup (token resolution) ALSO never converts settled:true into failure', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 502, body: { error: 'boom' } },
+    })
+
+    const result = ok<{ settled: boolean; allowance: unknown; warnings: Array<{ code: string }> }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()),
+    )
+
+    expect(result.data.settled).toBe(true)
+    expect(result.data.allowance).toBeNull()
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+  })
+})
+
+// ── haven_get_payment_status: post-purchase allowance summary (#1310) ─────────
+
+describe('haven_get_payment_status: post-purchase allowance summary (#1310)', () => {
+  const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+
+  function statusFixture(overrides: Record<string, unknown> = {}) {
+    return {
+      payment_id: 'pay_x402',
+      kind: 'payment_intent',
+      rail: 'x402',
+      status: 'confirmed',
+      phase: 'payment_confirmed',
+      next_action: 'none',
+      amount: '1.50',
+      token: 'USDC',
+      resource_url: 'http://merchant.test/mcp',
+      merchant_address: '0xMerchant',
+      tx_hash: '0xfund',
+      expires_at: '2099-01-01T00:00:00.000Z',
+      chain_id: 8453,
+      message: 'The payment is confirmed.',
+      asset: USDC,
+      ...overrides,
+    }
+  }
+
+  function allowancesFixture(remaining: string) {
+    return {
+      agent_id: 'agt_1',
+      safe_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [{
+        id: 'allowance-1',
+        token_address: USDC,
+        token_symbol: 'USDC',
+        configured_amount: '5000000',
+        reset_period_min: 60,
+        onchain: {
+          amount: remaining, spent: '0', remaining, effective_spent: '0',
+          reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false,
+        },
+      }],
+    }
+  }
+
+  it('attaches allowance for a genuinely settled x402 payment (rail: x402, phase: payment_confirmed)', async () => {
+    stubFetch({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3000000') },
+    })
+
+    const result = ok<{ allowance: { rail: string; remaining_atomic: string } | null }>(
+      await handlers().haven_get_payment_status({ payment_id: 'pay_x402' }),
+    )
+
+    expect(result.data.allowance).toEqual(
+      expect.objectContaining({ rail: 'legacy', remaining_atomic: '3000000' }),
+    )
+  })
+
+  it('does NOT attach allowance for funded_but_unsettled — the merchant did not accept the retry', async () => {
+    stubFetch({
+      'GET /machine-payments/pay_x402/status': {
+        status: 200,
+        body: statusFixture({ status: 'funded_but_unsettled', phase: 'funded_but_unsettled' }),
+      },
+    })
+
+    const result = ok<{ allowance?: unknown }>(
+      await handlers().haven_get_payment_status({ payment_id: 'pay_x402' }),
+    )
+
+    expect('allowance' in result.data).toBe(false)
+    // No allowance/agent reads were made for a non-settled status.
+    expect(calls.find((c) => c.url.endsWith('/machine-payments/allowances'))).toBeUndefined()
+  })
+
+  it('does NOT attach allowance for a non-x402 rail', async () => {
+    stubFetch({
+      'GET /machine-payments/pay_direct/status': {
+        status: 200,
+        body: statusFixture({ payment_id: 'pay_direct', rail: 'direct' }),
+      },
+    })
+
+    const result = ok<{ allowance?: unknown }>(
+      await handlers().haven_get_payment_status({ payment_id: 'pay_direct' }),
+    )
+
+    expect('allowance' in result.data).toBe(false)
+  })
+})
+
+// ── merchant-call-context rehydration by payment_id (#1307) ───────────────────
+
+describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context rehydration (#1307)', () => {
+  const SIG = '0x' + '11'.repeat(65)
+
+  it('REFUSES half-explicit context (only one of merchant_url/tool_name) instead of silently overriding (#1316 review)', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'getX402MerchantCallContext')
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
+      merchant_url: 'http://merchant.test/mcp',
+      // tool_name omitted — an agent that supplied merchant_url expects it used
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(payload.message).toMatch(/TOGETHER/)
+    expect(payload.next_action).toBe('retry_with_explicit_context')
+    // Neither rehydrated nor fetched anything — refused up front.
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('haven_complete_mcp_tool: explicit merchant_url/tool_name win OUTRIGHT — rehydration is never called', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const rehydrateSpy = vi.spyOn(haven, 'getX402MerchantCallContext')
+    const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' },
+    })
+
+    const result = ok<{ ok: boolean }>(
+      await createToolHandlers(haven).haven_complete_mcp_tool({
+        payment_id: 'pay_x402',
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'explicit' },
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    expect(rehydrateSpy).not.toHaveBeenCalled()
+    expect(completeSpy.mock.calls[0][0].url).toBe('http://merchant.test/mcp')
+    const envelope = JSON.parse(completeSpy.mock.calls[0][0].init!.body as string)
+    expect(envelope.params).toEqual({ name: 'create_text', arguments: { prompt: 'explicit' } })
+    expect(result.data.ok).toBe(true)
+  })
+
+  it('haven_complete_mcp_tool: omitted merchant_url/tool_name rehydrate the stored context by payment_id', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const rehydrateSpy = vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
+      paymentId: 'pay_x402',
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'buy_cloud_storage',
+      arguments: { tier: '50gb' },
+      mcpTransport: { handshakeRequired: true, source: 'bazaar' },
+    })
+    const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' },
+    })
+
+    const result = ok<{ ok: boolean }>(
+      await createToolHandlers(haven).haven_complete_mcp_tool({
+        payment_id: 'pay_x402',
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    expect(rehydrateSpy).toHaveBeenCalledWith('pay_x402')
+    expect(completeSpy.mock.calls[0][0].url).toBe('http://merchant.test/mcp')
+    expect(completeSpy.mock.calls[0][0].mcpTransport).toEqual({ handshakeRequired: true, source: 'bazaar' })
+    const envelope = JSON.parse(completeSpy.mock.calls[0][0].init!.body as string)
+    expect(envelope.params).toEqual({ name: 'buy_cloud_storage', arguments: { tier: '50gb' } })
+    expect(result.data.ok).toBe(true)
+  })
+
+  it('haven_settle_mcp_tool: omitted merchant_url/tool_name rehydrate the stored context by payment_id', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const rehydrateSpy = vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
+      paymentId: 'pay_x402',
+      merchantUrl: 'http://merchant.test/mcp',
+      toolName: 'buy_cloud_storage',
+      arguments: { tier: '50gb' },
+    })
+    const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+    })
+
+    const result = ok<{ settled: boolean }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        payment_header: 'eyJ4IjoxfQ==',
+      }),
+    )
+
+    expect(rehydrateSpy).toHaveBeenCalledWith('pay_x402')
+    expect(completeSpy.mock.calls[0][0].url).toBe('http://merchant.test/mcp')
+    expect(result.data.settled).toBe(true)
+  })
+
+  it('refuses with a structured, fallback-naming error when no stored context is available (409)', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError(
+        'No stored merchant call context for this intent — pass merchant_url, tool_name, ' +
+          'arguments, and mcp_transport explicitly (version-skew fallback).',
+        409,
+      ),
+    )
+    const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantCallContextUnavailable)
+    expect(payload.statusCode).toBe(409)
+    expect(payload.paymentId).toBe('pay_x402')
+    expect(payload.message).toMatch(/merchant_url, tool_name/)
+    expect(completeSpy).not.toHaveBeenCalled()
+  })
+
+  it('refuses unknown/foreign payment_id the same way as context-missing (404, never a 403 leak)', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('Payment intent not found', 404),
+    )
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_unknown',
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantCallContextUnavailable)
+    expect(payload.statusCode).toBe(404)
+  })
+
+  it('maps an expired stored context (410) to the standard re-quote payload', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('Payment window expired', 410),
+    )
+
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402',
+      payment_header: 'eyJ4IjoxfQ==',
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.PaymentWindowExpired)
+    expect(payload.statusCode).toBe(410)
+    expect(payload.retry_with_new_quote).toBe(true)
+    expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
   })
 })
 
@@ -1520,5 +2549,329 @@ describe('compact x402 signing payload (#1272)', () => {
     expect(
       JSON.parse(Buffer.from(full.data.typed_data_b64 as string, 'base64').toString('utf8')),
     ).toEqual(TYPED_DATA)
+  })
+})
+
+// ── #1271: bounded same-origin merchant endpoint discovery ───────────────────
+
+describe('merchant MCP endpoint discovery (#1271)', () => {
+  const paymentRequiredHeader = () => btoa(JSON.stringify(PAYMENT_REQUIRED))
+  const DISCOVERY_DOC = { name: 'Haven Demo Merchant', mcp_url: 'http://merchant.test/mcp' }
+  const havenStubs = () => ({
+    'GET /machine-payments/agent': { status: 200 as const, body: AGENT_RESPONSE },
+    'POST /x402': { status: 201 as const, body: X402_INTENT_RESPONSE },
+  })
+
+  it('resolves a base URL through /.well-known and returns the RESOLVED merchant_url', async () => {
+    stubFetch({
+      // The base URL is not the MCP endpoint: POST / misses.
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': { status: 200, body: DISCOVERY_DOC },
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+      },
+      ...havenStubs(),
+    })
+
+    const result = ok<{ merchant_url: string; merchant_url_discovered_from?: string }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      }),
+    )
+
+    expect(result.data.merchant_url).toBe('http://merchant.test/mcp')
+    expect(result.data.merchant_url_discovered_from).toBe('http://merchant.test/')
+  })
+
+  it('uses the MCP handshake for a discovery-resolved endpoint that is not named /mcp', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { name: 'Custom MCP Merchant', mcp_url: 'http://merchant.test/v1' },
+      },
+      'POST /v1': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+      },
+      ...havenStubs(),
+    })
+
+    const result = ok<{ merchant_url: string }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/',
+        tool_name: 'buy_vpn',
+        arguments: {},
+        max_amount: '2000000',
+      }),
+    )
+
+    expect(result.data.merchant_url).toBe('http://merchant.test/v1')
+    const lifecycle = calls.filter((call) => call.url === 'http://merchant.test/v1')
+    expect(lifecycle.map((call) => call.body?.method)).toEqual([
+      'initialize',
+      'notifications/initialized',
+      'tools/call',
+    ])
+    expect(new Headers(lifecycle[2].headers).get('Accept')).toBe('application/json, text/event-stream')
+    expect(new Headers(lifecycle[2].headers).get('mcp-session-id')).toBe('sess-tools-test')
+  })
+
+  it('uses the MCP handshake for an explicitly supplied custom endpoint path', async () => {
+    stubFetch({
+      'POST /v1': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+      },
+      ...havenStubs(),
+    })
+
+    const result = ok<{
+      merchant_url: string
+      mcp_transport: { handshake_required: boolean; source: string }
+    }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/v1',
+        tool_name: 'buy_vpn',
+        arguments: {},
+        max_amount: '2000000',
+      }),
+    )
+
+    expect(result.data.merchant_url).toBe('http://merchant.test/v1')
+    expect(result.data.mcp_transport).toEqual({ handshake_required: true, source: 'path' })
+    expect(calls.filter((call) => call.url === 'http://merchant.test/v1').map((call) => call.body?.method)).toEqual([
+      'initialize',
+      'notifications/initialized',
+      'tools/call',
+    ])
+    expect(calls.some((call) => call.url.includes('.well-known'))).toBe(false)
+  })
+
+  it('does NOT run discovery when the exact endpoint answers 402', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+      },
+      ...havenStubs(),
+    })
+
+    const result = ok<{ merchant_url: string; merchant_url_discovered_from?: string }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+      }),
+    )
+
+    expect(result.data.merchant_url).toBe('http://merchant.test/mcp')
+    expect(result.data.merchant_url_discovered_from).toBeUndefined()
+    expect(calls.some((c) => String(c.url).includes('.well-known'))).toBe(false)
+  })
+
+  it('fails with actionable guidance when no discovery document exists', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': { status: 404, body: {} },
+      'GET /': { status: 404, body: {} },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.message).toMatch(/No same-origin discovery document/)
+    expect(result.message).toMatch(/<origin>\/mcp/)
+  })
+
+  it('REFUSES an off-origin mcp_url — never even fetches it (SSRF bound)', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { mcp_url: 'http://evil.example/mcp' },
+      },
+      // The root fallback also serves the off-origin doc.
+      'GET /': { status: 200, body: { mcp_url: 'http://evil.example/mcp' } },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    // The off-origin URL was refused at validation — no request ever went there.
+    expect(calls.some((c) => String(c.url).includes('evil.example'))).toBe(false)
+  })
+
+  it('a non-endpoint-miss error (merchant 500) does not trigger discovery', async () => {
+    stubFetch({
+      'POST /mcp': { status: 500, body: { error: 'boom' } },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    // 500 IS an endpoint miss by shape (non-402) — discovery may run, but the
+    // point pinned here is that failure is reported against the ORIGINAL URL
+    // and nothing beyond the two fixed same-origin paths was fetched.
+    const fetched = calls.map((c) => String(c.url))
+    expect(
+      fetched.every(
+        (u) =>
+          u.startsWith('http://merchant.test/mcp') ||
+          u === 'http://merchant.test/.well-known/haven-demo-merchant' ||
+          u === 'http://merchant.test/' ||
+          u === 'http://haven.test/machine-payments/agent',
+      ),
+    ).toBe(true)
+  })
+  it('labels a retry miss with the DISCOVERED endpoint so the agent can tell the URLs apart', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { mcp_url: 'http://merchant.test/mcp' },
+      },
+      // The discovered endpoint ALSO misses.
+      'POST /mcp': { status: 404, body: { error: 'Not found' } },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.message).toMatch(/DISCOVERED endpoint http:\/\/merchant\.test\/mcp/)
+    expect(result.message).toMatch(/resolved from http:\/\/merchant\.test\//)
+  })
+
+  it('a discovery echo of the same URL (trailing slash) fails fast instead of burning the retry', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      // The document echoes the input back with only a slash difference.
+      'GET /.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { mcp_url: 'http://merchant.test' },
+      },
+      'GET /': { status: 200, body: { mcp_url: 'http://merchant.test' } },
+    })
+
+    const result = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.message).toMatch(/resolved the same URL/)
+    // Exactly one POST probe — the retry was NOT spent on the echo.
+    expect(calls.filter((c) => c.method === 'POST').length).toBe(1)
+  })
+})
+
+// ── #1308: structured next-step contract ─────────────────────────────────────
+
+describe('structured agent guidance (#1308)', () => {
+  const paymentRequiredHeader = () => btoa(JSON.stringify(PAYMENT_REQUIRED))
+  const stubs = () => ({
+    'GET /machine-payments/agent': { status: 200 as const, body: AGENT_RESPONSE },
+    'POST /x402': { status: 201 as const, body: X402_INTENT_RESPONSE },
+    'POST /mcp': {
+      status: 402 as const,
+      responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+    },
+  })
+  const pay = () =>
+    handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+      arguments: { plan: 'basic' },
+    })
+
+  it('a signable quote tells the agent EXACTLY what to do next — from the existing taxonomy', async () => {
+    stubFetch(stubs())
+    const result = ok<{
+      next_action: string
+      next_tool: string
+      next_arguments: Record<string, unknown>
+      safe_to_continue: boolean
+      agent_summary: Record<string, unknown>
+      warnings: Array<{ code: string; message: string }>
+    }>(await pay())
+
+    expect(result.data.next_action).toBe('sign_and_submit_payment') // AgentPaymentNextAction value, no parallel vocabulary
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_x402' })
+    expect(result.data.safe_to_continue).toBe(true)
+    expect(result.data.agent_summary).toMatchObject({ payment_id: 'pay_x402', status: 'pending_signature' })
+  })
+
+  it('warnings absorb the cap nudge as MISSING_MAX_AMOUNT while cap_warning stays for compat', async () => {
+    stubFetch(stubs())
+    const result = ok<{ cap_warning?: string; warnings: Array<{ code: string }> }>(await pay())
+
+    expect(result.data.cap_warning).toBeDefined()
+    expect(result.data.warnings.some((w) => w.code === 'MISSING_MAX_AMOUNT')).toBe(true)
+  })
+
+  it('passing max_amount clears BOTH the legacy field and the structured warning', async () => {
+    stubFetch(stubs())
+    const result = ok<{ cap_warning?: string; warnings: Array<{ code: string }> }>(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+        max_amount: '2000000',
+      }),
+    )
+    expect(result.data.cap_warning).toBeUndefined()
+    expect(result.data.warnings.some((w) => w.code === 'MISSING_MAX_AMOUNT')).toBe(false)
+  })
+
+  it('the decomposed quote twin carries the SAME unsafe pending signal (#1308 review)', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 202, body: { payment_id: 'pay_pending', status: 'pending_approval' } },
+    })
+    const result = ok<{ next_action: string; safe_to_continue: boolean }>(
+      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+    expect(result.data.next_action).toBe('wait_for_user_approval')
+    expect(result.data.safe_to_continue).toBe(false)
+  })
+
+  it('pending approval is UNSAFE to continue and points at status polling', async () => {
+    stubFetch({
+      ...stubs(),
+      'POST /x402': {
+        status: 202,
+        body: { payment_id: 'pay_pending', status: 'pending_approval' },
+      },
+    })
+    const result = ok<{
+      status: string
+      next_action: string
+      next_tool: string
+      safe_to_continue: boolean
+      agent_summary: Record<string, unknown>
+    }>(await pay())
+
+    expect(result.data.status).toBe('pending_approval')
+    expect(result.data.next_action).toBe('wait_for_user_approval')
+    expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(result.data.safe_to_continue).toBe(false)
   })
 })

@@ -6,6 +6,7 @@ export type RuntimeId =
   | 'vscode'
   | 'vscode-insiders'
   | 'claude-desktop'
+  | 'hermes'
   | 'other'
 
 export type RestartMode = 'restart-session' | 'restart-app' | 'hot-reload' | 'manual'
@@ -60,6 +61,12 @@ const RUNTIME_PROFILES: Record<RuntimeId, RuntimeProfile> = {
     restartMode: 'restart-app',
     canWriteRuntimeConfig: true,
   },
+  hermes: {
+    id: 'hermes',
+    label: 'Hermes Agent',
+    restartMode: 'restart-session',
+    canWriteRuntimeConfig: true,
+  },
   other: {
     id: 'other',
     label: 'Other agent runtime',
@@ -98,6 +105,10 @@ const RUNTIME_ALIASES: Record<string, RuntimeId> = {
   'claude_desktop': 'claude-desktop',
   claudesktop: 'claude-desktop',
   desktop: 'claude-desktop',
+  hermes: 'hermes',
+  'hermes-agent': 'hermes',
+  hermes_agent: 'hermes',
+  hermesagent: 'hermes',
   other: 'other',
   manual: 'other',
 }
@@ -140,5 +151,6 @@ function detectRuntime(env: NodeJS.ProcessEnv): RuntimeId | null {
   if (env.CLAUDECODE || env.CLAUDE_CODE || env.CLAUDECODE_CWD) return 'claude-code'
   if (env.CODEX_SANDBOX || env.CODEX_HOME || env.CODEX_CWD) return 'codex-cli'
   if (env.VSCODE_CWD || env.VSCODE_IPC_HOOK_CLI || env.TERM_PROGRAM === 'vscode') return 'vscode'
+  if (env.HERMES_HOME || env.HERMES_AGENT) return 'hermes'
   return null
 }

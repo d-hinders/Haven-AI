@@ -57,6 +57,21 @@ export function isRetiredRailIntent(executionRail: string | null | undefined): b
 }
 
 /**
+ * The two-value rail label exposed on agent-facing read surfaces (#1306),
+ * e.g. `GET /machine-payments/agent`'s `execution_rail` field. Reporting
+ * only — matches the same `agent.execution_rail === 'delegation'` check
+ * `handleGetAllowances` already branches on (#1135); anything else
+ * (including the retired session rail, `allowance_module`, or a missing
+ * column) buckets into `legacy`, since every non-delegation account reads
+ * the AllowanceModule shape on the allowances endpoint today.
+ */
+export function agentExecutionRailLabel(
+  executionRail: string | null | undefined,
+): 'legacy' | 'delegation' {
+  return executionRail === 'delegation' ? 'delegation' : 'legacy'
+}
+
+/**
  * The ONE producer of the session-rail refusal (#993). Fail-closed contract:
  * callers return this VERBATIM with nothing written — no intent row, no
  * audit side effect, no status flip.

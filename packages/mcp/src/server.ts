@@ -89,11 +89,37 @@ export async function createHavenMcpServer(options: HavenMcpServerOptions = {}):
 export const MCP_NAME = '@haven_ai/mcp'
 export const MCP_VERSION = '0.1.21-alpha.0'
 
+/**
+ * MCP `instructions` — the critical path, surfaced to the model at
+ * `initialize`. Shorter than the hosted server's: this runtime signs
+ * in-process with the delegate key it holds, so there is no separate
+ * haven-signer namespace or payment_id signing step to describe. Kept free
+ * of any version literal; a guard test in `server.test.ts` pins that.
+ */
+export const MCP_INSTRUCTIONS = [
+  'Haven local MCP server: signs in-process with the delegate key it holds on',
+  'this machine — the key never leaves this process. Call haven_get_agent',
+  'first, every session: identity, readiness, and live remaining budget in',
+  'one call. Do not guess the wallet, network, or budget.',
+  '',
+  'To pay: haven_discover_tools to find a payable service, then',
+  'haven_pay_mcp_tool for MCP merchants or haven_pay_x402 for any x402',
+  'paywall. Tool responses carry nextAction — follow it; description prose',
+  'is fallback, not the source of truth.',
+  '',
+  'pending_approval means stop and tell the user — do not retry, re-sign, or',
+  're-pay while a payment is pending. Spend authority is enforced on-chain by',
+  'the user\'s account; Haven never holds keys and cannot override it.',
+].join('\n')
+
 export function buildMcpServer(haven: HavenClient): McpServer {
-  const server = new McpServer({
-    name: MCP_NAME,
-    version: MCP_VERSION,
-  })
+  const server = new McpServer(
+    {
+      name: MCP_NAME,
+      version: MCP_VERSION,
+    },
+    { instructions: MCP_INSTRUCTIONS },
+  )
 
   const handlers = createToolHandlers(haven)
   const registerTool = (server as any).tool.bind(server)

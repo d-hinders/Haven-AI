@@ -15,6 +15,11 @@ export interface HavenClientConfig {
 
   /** Timeout in ms for individual HTTP requests (default: 30000) */
   requestTimeout?: number
+  /** Timeout (ms) for MERCHANT-facing requests — x402/MPP probes, MCP
+   *  handshakes, paid retries. Separate from requestTimeout (Haven API):
+   *  merchants may settle on-chain synchronously, so the default is
+   *  deliberately generous. #1300. */
+  merchantTimeout?: number
 
   /** Timeout in ms when polling for tx confirmation (default: 90000) */
   confirmationTimeout?: number
@@ -254,6 +259,14 @@ export interface X402Receipt {
 export interface X402AuthorizationOptions {
   /** Stable caller-supplied key for this user intent. Prevents duplicate approvals across fresh 402 quotes. */
   idempotencyKey?: string
+  /**
+   * #1307: the merchant MCP-tool call context this quote was made against
+   * (merchant_url, tool_name, arguments, mcp_transport). Persisted on the
+   * intent so `getX402MerchantCallContext` can rehydrate it by payment_id at
+   * settle/complete time instead of the caller re-threading it. Optional —
+   * omit for a non-MCP-tool x402 merchant (plain HTTP resource).
+   */
+  mcpCallContext?: X402McpCallContext
 }
 
 /**
@@ -353,6 +366,44 @@ export interface X402RequestSnapshot {
 export interface X402McpTransport {
   handshakeRequired: boolean
   source: 'path' | 'bazaar'
+}
+
+/**
+ * #1307: the merchant MCP-tool call an x402 quote was made against — carried
+ * through `createX402Intent`'s options so Haven can persist it for the
+ * settle-leg rehydration handoff (`getX402MerchantCallContext`). Convenience
+ * metadata for retrying the merchant's OWN JSON-RPC call, never payment
+ * authority.
+ */
+export interface X402McpCallContext {
+  merchantUrl: string
+  toolName: string
+  arguments?: Record<string, unknown>
+  mcpTransport?: X402McpTransport
+}
+
+/**
+ * Response shape of `getX402MerchantCallContext` — the stored merchant call
+ * context for a payment_id, rehydrated instead of re-threaded (#1307).
+ */
+export interface X402MerchantCallContext {
+  paymentId: string
+  merchantUrl: string
+  toolName: string
+  arguments: Record<string, unknown>
+  mcpTransport?: X402McpTransport
+}
+
+/** @internal */
+export interface RawX402MerchantCallContext {
+  payment_id: string
+  merchant_url: string
+  tool_name: string
+  arguments?: Record<string, unknown>
+  mcp_transport?: { handshake_required: boolean; source: 'path' | 'bazaar' }
+  error?: string
+  error_code?: string
+  status?: string
 }
 
 /** Quote parsed from an HTTP 402 response without creating a Haven payment. */
@@ -549,6 +600,14 @@ export interface HavenAgent {
   safeAddress: string
   delegateAddress: string
   chainId: number
+  /**
+   * Which on-chain policy primitive gates this agent's spend (#1306): the
+   * legacy Safe AllowanceModule (import-only accounts) or the delegation
+   * rail's active budget delegations (#1090). Read-only reporting — the
+   * on-chain state is the actual gate either way, this only says which
+   * mechanism a caller should read/derive from.
+   */
+  executionRail: 'legacy' | 'delegation'
 }
 
 export interface HavenAllowance {
@@ -566,6 +625,15 @@ export interface HavenAllowance {
     lastResetMin: number
     nonce: number
     isResetPending: boolean
+    /**
+     * Delegation rail only (#1319, provenance for #1145's fallback): true
+     * when `remaining` came from a live on-chain enforcer read, false when
+     * the read failed and `remaining` is the fallback full configured
+     * budget. Undefined on the legacy AllowanceModule rail, which has no
+     * fallback concept. Reporting only — the on-chain policy remains the
+     * actual spend gate either way.
+     */
+    remainingIsFromChain?: boolean
   }
 }
 
@@ -575,6 +643,35 @@ export interface HavenAllowanceSummary {
   delegateAddress: string
   chainId: number
   allowances: HavenAllowance[]
+}
+
+/**
+ * Post-purchase allowance/budget summary attached to a settled x402 payment
+ * (#1310). Read-only reporting — the on-chain policy remains the actual
+ * spend gate either way, this only says what is left after the purchase.
+ *
+ * Deliberately the SAME rail-labeled field spelling as #1306's
+ * catalog-purchase preflight `allowance` block (never a new spelling),
+ * minus the preflight-only `sufficient` field: post-purchase reporting
+ * answers "what is left", not "was this purchase covered". Read through the
+ * exact same source as {@link HavenAllowanceSummary} / `haven_get_allowances`
+ * (`GET /machine-payments/allowances`; delegation-rail values are the #1090
+ * `deriveDelegationBudgets`-backed enforcer read, never `agent_allowances`),
+ * so this can never disagree with `haven_get_allowances` for the same
+ * fixture.
+ */
+export interface PostPurchaseAllowanceSummary {
+  /** Which on-chain policy primitive gates this agent's spend (#1306 labeling). */
+  rail: 'legacy' | 'delegation'
+  /** Remaining atomic units, read through the same source as {@link HavenAllowance.onchain.remaining}. */
+  remaining_atomic: string
+  /** Human-readable remaining, e.g. "4.96 USDC". Omitted when the token's decimals are unknown. */
+  remaining_display?: string
+  token_symbol?: string
+  token_address?: string
+  /** Minutes — mirrors {@link HavenAllowance.resetPeriodMin} / the delegation's period. */
+  reset_period?: number
+  source: 'allowance_module' | 'active_delegations'
 }
 
 /**
@@ -751,6 +848,8 @@ export const AgentPaymentNextAction = {
   StopAndTellUser: 'stop_and_tell_user',
   /** Ask again only if the user still wants the payment after expiry. */
   RequestAgainIfUserStillWantsIt: 'request_again_if_user_still_wants_it',
+  /** #1307: retry the SAME tool call, supplying the explicit context fields the server could not rehydrate. */
+  RetryWithExplicitContext: 'retry_with_explicit_context',
   /**
    * The x402 funding/quote window expired. Re-quote the same logical merchant
    * operation with the same idempotency key to stay double-charge-safe.
@@ -779,6 +878,20 @@ export const AgentPaymentFailureCode = {
   PaymentWindowExpired: 'PAYMENT_WINDOW_EXPIRED',
   /** The Haven funding leg succeeded, but the merchant rejected the paid retry. */
   MerchantRejectedAfterFunding: 'MERCHANT_REJECTED_AFTER_FUNDING',
+  /** #1300 review: funding is on-chain but the merchant never ANSWERED the
+   *  paid retry within the timeout. NOT proof of rejection — the merchant
+   *  holds a valid EIP-3009 authorization and may still settle late, so the
+   *  guidance is verify-then-sweep, never blind sweep. */
+  MerchantUnresponsiveAfterFunding: 'MERCHANT_UNRESPONSIVE_AFTER_FUNDING',
+  /**
+   * #1307: the caller omitted merchant_url/tool_name (asking Haven to
+   * rehydrate the stored MCP merchant-call context by payment_id), but no
+   * usable context was stored for this intent — either it was never an
+   * MCP-tool quote, or the stored context is incomplete. The fallback is
+   * mechanical: re-send merchant_url, tool_name, arguments, and
+   * mcp_transport explicitly (the version-skew path).
+   */
+  MerchantCallContextUnavailable: 'MERCHANT_CALL_CONTEXT_UNAVAILABLE',
 } as const
 
 export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typeof AgentPaymentFailureCode]
@@ -862,6 +975,8 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
     'The x402 funding/quote window expired. Re-quote with the same idempotency key before asking the signer to build a merchant payment header again.',
   [AgentPaymentNextAction.FundSafeOrRaiseAllowance]:
     'Stop and tell the user that the originating Safe needs to be funded or the agent allowance raised before the payment can succeed.',
+  [AgentPaymentNextAction.RetryWithExplicitContext]:
+    'Retry the same tool call, this time passing merchant_url, tool_name, arguments, and mcp_transport explicitly — the server had no stored context to rehydrate for this payment id.',
   [AgentPaymentNextAction.SweepStrandedFunds]:
     'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating Safe.',
 }
@@ -873,6 +988,87 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
     'The x402 funding/quote window expired before the signer or hosted settle step could finish. Re-quote via haven_pay_mcp_tool with the same idempotency key to avoid duplicate funding.',
   [AgentPaymentFailureCode.MerchantRejectedAfterFunding]:
     'The Haven funding leg succeeded, but the merchant rejected the paid retry. Stop retrying the merchant and reconcile stranded delegate funds with haven_sweep_delegate.',
+  [AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding]:
+    'The Haven funding leg succeeded, but the merchant did not answer the paid retry before the timeout. The merchant may still settle late — check haven_get_payment_status (and retry haven_complete_mcp_tool once) BEFORE sweeping; sweep only if no settlement appears.',
+  [AgentPaymentFailureCode.MerchantCallContextUnavailable]:
+    'merchant_url/tool_name were omitted and no stored merchant call context is available for this payment_id. Re-send merchant_url, tool_name, arguments, and mcp_transport explicitly.',
+}
+
+/**
+ * #1308: machine-readable warning codes carried in the `warnings` array on
+ * x402 MCP tool responses. Warnings are ADVISORY — they never replace a
+ * refusal, and existing failure codes stay authoritative for errors. The
+ * legacy `cap_warning` string field is kept for compatibility; the structured
+ * entry carries the same message under MISSING_MAX_AMOUNT.
+ */
+export const AgentPaymentWarningCode = {
+  /** No max_amount cap was supplied — the live quoted price was accepted as-is. */
+  MissingMaxAmount: 'MISSING_MAX_AMOUNT',
+  /** The signing window closes soon; sign promptly or re-quote with the same idempotency key. */
+  QuoteExpiresSoon: 'QUOTE_EXPIRES_SOON',
+  /** The merchant URL was resolved via discovery — pass the RESOLVED url forward. */
+  MerchantUrlDiscovered: 'MERCHANT_URL_DISCOVERED',
+  /**
+   * #1306: the catalog's last-verified price_atomic differs from the LIVE
+   * merchant quote for a guided catalog purchase. The catalog price is only
+   * ever indicative; the live quote in the same response is authoritative.
+   */
+  CatalogPriceDiffers: 'CATALOG_PRICE_DIFFERS',
+  /**
+   * #1306: the rail-aware allowance/budget pre-check could not be read (RPC
+   * failure, etc). `sufficient` is reported as null rather than a fabricated
+   * true/false — the on-chain policy remains the actual gate either way.
+   */
+  AllowanceCheckUnavailable: 'ALLOWANCE_CHECK_UNAVAILABLE',
+  /**
+   * #1319: the delegation-rail read itself SUCCEEDED, but the remaining
+   * figure it returned is the #1145 fallback (the full configured budget)
+   * rather than a live ERC20PeriodTransferEnforcer read — `sufficient` is a
+   * real true/false, just computed from an optimistic number. Distinct from
+   * {@link AgentPaymentWarningCode.AllowanceCheckUnavailable}, which fires
+   * when the read failed outright and `sufficient` degrades to null. The
+   * on-chain policy re-checks at redemption either way; this only says the
+   * guidance shown here may be optimistic.
+   */
+  AllowanceReadOptimistic: 'ALLOWANCE_READ_OPTIMISTIC',
+} as const
+
+export type AgentPaymentWarningCode =
+  (typeof AgentPaymentWarningCode)[keyof typeof AgentPaymentWarningCode]
+
+export interface AgentPaymentWarning {
+  code: AgentPaymentWarningCode
+  message: string
+}
+
+/**
+ * #1308: the structured next-step contract on x402 MCP tool responses. It
+ * EXTENDS the existing taxonomy — `next_action` values come from
+ * AgentPaymentNextAction, never a parallel vocabulary. `next_arguments`
+ * carries the small, literally-usable arguments; bulky pass-through fields
+ * (payment_required) are named in `reason` and taken from the SAME response.
+ */
+export interface AgentNextStep {
+  next_action: AgentPaymentNextAction
+  /** Fully-qualified tool name for the next call, when one exists. */
+  next_tool?: string
+  /** Small literal arguments for next_tool. Bulky fields are referenced by reason. */
+  next_arguments?: Record<string, unknown>
+  /** False when the agent should stop and involve the user before continuing. */
+  safe_to_continue: boolean
+  reason: string
+}
+
+/** #1308: compact reporting summary — what the agent tells the user. */
+export interface AgentPaymentSummary {
+  payment_id: string
+  status: string
+  amount?: string
+  amount_atomic?: string
+  token?: string
+  network?: string
+  expires_at?: string
+  product?: string
 }
 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {
@@ -1156,6 +1352,7 @@ export interface RawHavenAgent {
   safe_address: string
   delegate_address: string
   chain_id: number
+  execution_rail: string
 }
 
 /** @internal */
@@ -1174,6 +1371,8 @@ export interface RawHavenAllowance {
     last_reset_min: number
     nonce: number
     is_reset_pending: boolean
+    /** #1319 — see {@link HavenAllowance.onchain.remainingIsFromChain}. */
+    remaining_is_from_chain?: boolean
   }
 }
 
@@ -1228,6 +1427,7 @@ export interface HavenCatalogEntry {
   rail: 'x402' | 'mpp'
   protocol: 'http' | 'mcp'
   toolName: string | null
+  toolArguments: Record<string, unknown> | null
   priceDisplay: string | null
   priceAtomic: string | null
   asset: string | null
@@ -1246,6 +1446,7 @@ export interface RawCatalogEntry {
   rail: 'x402' | 'mpp'
   protocol: 'http' | 'mcp'
   tool_name: string | null
+  tool_arguments: Record<string, unknown> | null
   price_display: string | null
   price_atomic: string | null
   asset: string | null
@@ -1307,6 +1508,34 @@ export class HavenApiError extends HavenError {
   }
 }
 
+/**
+ * #1300: quoteX402 hit a URL that answered something other than 402 — the
+ * typed form of "this is not the x402 endpoint". Exists so consumers (the
+ * hosted MCP's #1271 discovery trigger) can key on a class instead of
+ * message text.
+ */
+/**
+ * #1300: a merchant-facing fetch hit the client-side merchantTimeout. Typed
+ * so consumers can distinguish "merchant never answered" from a real HTTP
+ * error response — the funded-retry path routes this to verify-then-sweep
+ * guidance instead of a bare 504.
+ */
+export class MerchantTimeoutError extends HavenApiError {
+  readonly merchantErrorCode = 'merchant_timeout' as const
+  constructor(message: string) {
+    super(message, 504)
+    this.name = 'MerchantTimeoutError'
+  }
+}
+
+export class X402UnexpectedStatusError extends HavenApiError {
+  readonly x402ErrorCode = 'unexpected_non_402_status' as const
+  constructor(message: string, statusCode: number) {
+    super(message, statusCode)
+    this.name = 'X402UnexpectedStatusError'
+  }
+}
+
 export class HavenPaymentStateError extends HavenApiError {
   resumeState?: X402ResumeState | MppResumeState
 
@@ -1337,6 +1566,66 @@ export class HavenSigningError extends HavenError {
   constructor(message: string) {
     super(message, 'SIGNING_ERROR')
     this.name = 'HavenSigningError'
+  }
+}
+
+/**
+ * Refusal codes the local signer returns when it does not recognise the
+ * VERSION of a Haven-signed binding it was asked to sign (#1309). Distinct
+ * from `AgentPaymentFailureCode`: these describe a **signer capability**
+ * problem (this install cannot evaluate what Haven sent), not a payment-domain
+ * outcome, and they never reach the backend's REST/OpenAPI surface — only the
+ * local signer's own MCP tool responses (`haven_sign` / `haven_sign_x402` /
+ * `haven_sign_sweep_delegate`). That is also why this pair does not go through
+ * the `AgentPaymentFailureCode` four-gate (sdk → backend mirror → spec →
+ * api-types): there is no backend mirror to keep in sync with.
+ */
+export const SignerRefusalCode = {
+  /** `SUPPORTED_X402_EXPECTED_VERSIONS` in `@haven_ai/signer` does not include the received version. */
+  UnsupportedExpectedContextVersion: 'UNSUPPORTED_EXPECTED_CONTEXT_VERSION',
+  /** `SUPPORTED_SWEEP_BINDING_VERSIONS` in `@haven_ai/signer` does not include the received version. */
+  UnsupportedSweepBindingVersion: 'UNSUPPORTED_SWEEP_BINDING_VERSION',
+} as const
+
+export type SignerRefusalCode = (typeof SignerRefusalCode)[keyof typeof SignerRefusalCode]
+
+/**
+ * Canonical recovery guidance for a stale local signer (#1309) — the ONE
+ * string both the signer's structured refusal (`fallback` field, carried by
+ * `HavenUnsupportedSignerVersionError`) and the hosted quote's advisory
+ * `signer_compatibility.fallback` (#1155) render, so an agent that meets
+ * either surface is told the identical fix. A second hand-maintained copy of
+ * this sentence is exactly how the two surfaces could start disagreeing about
+ * what to do.
+ */
+export const SIGNER_UPDATE_FALLBACK =
+  'Update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`, which reinstalls the ' +
+  'pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
+  'quote or payment this version came from is unaffected and does not need to be re-quoted.'
+
+/**
+ * Thrown by the local signer when a Haven-signed binding (x402 expected
+ * context or sweep authorization) carries a version outside what this signer
+ * install enforces (#1143, structured as #1309). Machine-readable: `code`,
+ * `supportedVersions`, and `receivedVersion` are DERIVED from the signer's own
+ * `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS`
+ * constants at the throw site, never a second literal — see
+ * `assertSupportedBindingVersion` in `@haven_ai/signer`.
+ *
+ * This narrows HOW the refusal is reported. It does not weaken it: nothing is
+ * signed either way, and the version stays inside the Haven-signed binding
+ * message (callers must not "fix" a mismatch by rewriting it).
+ */
+export class HavenUnsupportedSignerVersionError extends HavenError {
+  constructor(
+    message: string,
+    code: SignerRefusalCode,
+    public readonly supportedVersions: readonly number[],
+    public readonly receivedVersion: number,
+    public readonly fallback: string,
+  ) {
+    super(message, code)
+    this.name = 'HavenUnsupportedSignerVersionError'
   }
 }
 

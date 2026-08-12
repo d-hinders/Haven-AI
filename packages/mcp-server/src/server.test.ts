@@ -2,7 +2,12 @@ import { describe, it, expect } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { HavenClient, HavenSigningError } from '@haven_ai/sdk'
-import { buildHostedMcpServer, createHostedHavenClient } from './server.js'
+import {
+  buildHostedMcpServer,
+  createHostedHavenClient,
+  HOSTED_INSTRUCTIONS,
+  HOSTED_SERVER_VERSION,
+} from './server.js'
 
 describe('createHostedHavenClient', () => {
   it('builds a keyless client (no delegate address, no signing path)', () => {
@@ -44,6 +49,7 @@ describe('buildHostedMcpServer', () => {
         'haven_settle_mcp_tool',
         'haven_pay',
         'haven_pay_mcp_tool',
+        'haven_prepare_catalog_purchase',
         'haven_pay_mpp_challenge',
         'haven_pay_x402_quote',
         'haven_quote_mpp',
@@ -158,5 +164,40 @@ describe('buildHostedMcpServer', () => {
 
     await client.close()
     await server.close()
+  })
+
+  it('advertises the hosted critical-path instructions at initialize', async () => {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const server = buildHostedMcpServer(haven)
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test-client', version: '0.0.0' })
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+
+    const instructions = client.getInstructions()
+    expect(instructions).toBe(HOSTED_INSTRUCTIONS)
+    expect(instructions).toContain('haven_get_agent')
+    expect(instructions).toContain('haven_prepare_catalog_purchase')
+    expect(instructions).toContain('max_amount')
+    expect(instructions).toContain('next_action')
+    expect(instructions).toContain('next_tool')
+    expect(instructions).toContain('next_arguments')
+    expect(instructions).toContain('payment_id')
+    expect(instructions).toContain('pending_approval')
+    expect(instructions).toContain('safe_to_continue')
+    expect(instructions).toContain('never holds keys')
+
+    await client.close()
+    await server.close()
+  })
+
+  it('never carries a version literal in the hosted instructions (drift guard)', () => {
+    // Nothing in HOSTED_INSTRUCTIONS should need a version bump to stay true —
+    // if it does, that content belongs in a per-tool description instead.
+    // A protocol name like x402 is allowed — it never drifts. A semver-shaped
+    // literal or the package's own version constant would.
+    expect(HOSTED_INSTRUCTIONS).not.toMatch(/\d+\.\d+\.\d+/)
+    expect(HOSTED_INSTRUCTIONS).not.toContain(HOSTED_SERVER_VERSION)
   })
 })

@@ -23,7 +23,7 @@ covers:
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-08-09" # re-verified for #1227 (db-mock ratchet joins the gates) — no claim here affected
+last-verified: "2026-08-11" # #1330 Hermes .env credential-reference verification added; prior #1326 hosted-MCP setup and restart checklist, #1227 db-mock ratchet — no claim affected
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
@@ -67,18 +67,24 @@ workflows.
 
 ## #419 — Agent connection, end to end
 
-Run per environment: **Claude Code, Claude Desktop, Cursor, VS Code MCP, custom
-SDK runtime**, plus any others available.
+Run per environment: **Claude Code, Claude Desktop, Cursor, VS Code MCP, Hermes
+Agent, custom SDK runtime**, plus any others available.
 
 1. **Create the setup** in the dashboard (Connect agent) and pick the target
    environment. Expect a single paste-able setup prompt; no private key shown.
 2. **Run the connector** in that environment (`npx @haven_ai/connect@alpha …` or
    the pasted prompt). Expect: credentials written under `~/.haven/agents/<id>/`,
    hosted MCP + `haven-signer` entries written to that runtime's config, and the
-   dashboard advancing to the approval screen.
+   dashboard advancing to the approval screen. For Hermes, verify its
+   `config.yaml` references `MCP_HAVEN_API_KEY` while the matching owner-only
+   `.env` holds the value; do not copy secrets into the run report.
 3. **Confirm MCP wiring** — the Haven tools appear in the runtime (restart only
-   if the runtime needs it; CLI runtimes pick them up in-session). `haven_get_agent`
-   returns identity + readiness.
+   if the runtime needs it; CLI runtimes pick them up in-session). For Hermes,
+   start a new session or run `/restart` in a gateway, then check `hermes mcp
+   list` shows both `haven` and `haven-signer`, and run `hermes mcp test haven`.
+   After restart, confirm `mcp_haven_*` and `mcp_haven_signer_*` tools are
+   available. Install its MCP SDK with `pip install mcp` if tools are absent.
+   `haven_get_agent` returns identity + readiness.
 4. **Confirm allowances are visible** — `haven_get_allowances` (or `haven_get_agent`)
    shows the configured budget and live remaining.
 5. **Confirm a basic action** — approve the budget on-chain (wallet/passkey), then

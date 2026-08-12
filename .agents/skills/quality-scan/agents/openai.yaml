@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quality Scan"
+  short_description: "Find structural Haven quality work"
+  default_prompt: "Use $quality-scan to scan for the next structural quality target."

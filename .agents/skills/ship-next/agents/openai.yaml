@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ship Next"
+  short_description: "Ship one Haven issue to PR"
+  default_prompt: "Use $ship-next to ship the next ready Haven issue."

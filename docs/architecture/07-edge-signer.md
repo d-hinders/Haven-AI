@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-10" # #1272: x402 quote tools compact by default; include_signing_payload restores the full payload
+last-verified: "2026-08-11" # agent-prompt refresh (audit A/B/E): signerInstructions() names the #1309 refusal fields explicitly; hosted/local MCP `instructions` now carry the critical path (see mcp-runtime-compatibility.md)
 ---
 
 # Haven — Edge Signer
@@ -104,6 +104,47 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    handshakes, so the comparison is agent-mediated by construction. The
    handshake carries no key material and no authority.
 
+   **Structured signing-time refusal (#1309).** The #1143 refusal itself is
+   unchanged — an unsupported expected-context or sweep-binding version still
+   fails closed before any content check, and nothing is ever signed — but it
+   is no longer Zod-adjacent prose an agent has to pattern-match. `haven_sign`
+   / `haven_sign_x402` / `haven_sign_sweep_delegate` return
+   `{ success: false, code: 'UNSUPPORTED_EXPECTED_CONTEXT_VERSION' |
+   'UNSUPPORTED_SWEEP_BINDING_VERSION', supported_versions, received_version,
+   fallback, next_action: 'stop_and_tell_user' }`. `supported_versions` /
+   `received_version` are DERIVED at the throw site from
+   `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS`,
+   never a second literal (`assertSupportedBindingVersion` in `core.ts`).
+   `fallback` is the SAME string (`SIGNER_UPDATE_FALLBACK`, `@haven_ai/sdk`)
+   the hosted quote's advisory `signer_compatibility.fallback` carries, so an
+   agent that meets either surface gets identical recovery guidance. This
+   narrows *how* the refusal is reported, not what is enforced — see
+   `docs/operations/mcp-runtime-compatibility.md` for the diagnosability gap
+   it closes and the full skew table. `signerInstructions()` (`capabilities.ts`)
+   now states this in prose too, alongside the version-set lines, so an agent
+   that only ever reads MCP `instructions` still learns the refusal carries
+   `code` / `supported_versions` / `received_version` / `fallback` as data,
+   not just a message to pattern-match.
+
+   **MCP `instructions` on the two payment-brain servers (agent-prompt audit,
+   items A/B).** Since #1306–#1311 shipped the guided catalog-purchase flow
+   (`haven_prepare_catalog_purchase`), the structured next-step contract
+   (`next_action`/`next_tool`/`next_arguments`), and payment_id-only signing
+   and settling, both `buildHostedMcpServer` (`packages/mcp-server/src/server.ts`)
+   and `buildMcpServer` (`packages/mcp/src/server.ts`) also set MCP
+   `instructions` — a compact, version-literal-free critical path (identity
+   first, catalog purchase with `max_amount`, follow the response's guidance
+   fields, sign/settle by `payment_id`, pending approval means stop) for
+   clients that surface `instructions` even when they never render individual
+   tool descriptions. The local server's instructions omit the signer
+   namespace and `payment_id` signing step entirely — that runtime signs
+   in-process with the delegate key it holds, so there is nothing there to
+   describe. Neither server's `instructions` are part of the local MCP or
+   signer consent hash (`packages/mcp/src/consent.ts`,
+   `packages/signer/src/consent.ts` hash identity + tool NAMES + allowance
+   summary / a surface version, never description or instruction text), so
+   this addition does not re-trigger consent.
+
 SDK / autonomous agents use the **core** directly (or the existing
 `HavenClient` signing). MCP-capable runtimes use the **stdio front-end**. One
 signing core, two surfaces, key local in both.
@@ -149,6 +190,18 @@ neither. When the full pair IS requested, `typed_data_b64` wins when both are
 supplied — silently, so a caller that supplies both must keep them in sync: on
 the direct path (no digest check) an edited `typed_data` next to a stale
 `typed_data_b64` would sign the stale one.
+
+Merchant-facing fetches on the hosted path are bounded (#1300):
+`merchantTimeout` default 300 s, calibrated to the merchant's own
+`maxTimeoutSeconds: 300`; a timeout AFTER confirmed funding surfaces as
+`MERCHANT_UNRESPONSIVE_AFTER_FUNDING` with verify-then-sweep guidance —
+never a blind sweep, since the merchant may still settle late.
+
+The one-call tool also accepts a BASE merchant URL (#1271): hosted MCP
+resolves the real MCP endpoint through the merchant's same-origin discovery
+document (bounded, no redirects, off-origin refused) and returns the RESOLVED
+`merchant_url` — the agent passes that to settle/complete. Discovery carries
+no payment authority; the signer's verification is unaffected.
 
 **Preferred x402 form (#1263):** pass `payment_id` alone (plus
 `payment_required` on the one-call tool) — the signer fetches `payload_hash`,

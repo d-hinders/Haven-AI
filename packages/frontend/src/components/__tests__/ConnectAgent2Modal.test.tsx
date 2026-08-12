@@ -582,6 +582,34 @@ describe('ConnectAgent2Modal', () => {
     expect(screen.getByText(/It includes your approval for the exact local setup actions/i)).toBeInTheDocument()
   })
 
+  it('supports Hermes Agent as a first-class runtime option', async () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus({ status: 'active' }),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    renderModal()
+
+    expect(screen.getByRole('option', { name: 'Hermes Agent' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Where will this agent run?'), {
+      target: { value: 'hermes' },
+    })
+    expect(screen.queryByText('Advanced')).not.toBeInTheDocument()
+
+    await fillAndCreateSetup()
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith(
+      '/agent-connection-setups',
+      expect.objectContaining({
+        runtime: 'hermes',
+      }),
+    ))
+    expect(await screen.findByText(/Restart Hermes in a new session/i)).toBeInTheDocument()
+    expect(screen.getByText(/Gateway users should run \/restart/i)).toBeInTheDocument()
+    expect(screen.getByText(/pip install mcp/i)).toBeInTheDocument()
+  })
+
   it('renders local-ready status, runtime status, and wallet approval action', async () => {
     mockUseAgentConnectionSetupStatus.mockReturnValue({
       data: connectedSetupStatus(),

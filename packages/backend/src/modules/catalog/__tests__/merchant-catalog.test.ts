@@ -9,6 +9,7 @@ const X402_ENTRY = {
   resource_url: 'https://api.merchant.example/paid',
   protocol: 'http' as const,
   tool_name: null,
+  tool_arguments: null,
   rail: 'x402' as const,
 }
 
@@ -16,6 +17,7 @@ const MCP_ENTRY = {
   resource_url: 'https://mcp.merchant.example/mcp',
   protocol: 'mcp' as const,
   tool_name: 'create_text',
+  tool_arguments: { prompt: 'hello' },
   rail: 'x402' as const,
 }
 
@@ -23,6 +25,7 @@ const MPP_ENTRY = {
   resource_url: 'https://api.merchant.example/mpp',
   protocol: 'http' as const,
   tool_name: null,
+  tool_arguments: null,
   rail: 'mpp' as const,
 }
 
@@ -130,7 +133,10 @@ describe('probeCatalogEntry', () => {
     const [, init] = fetchMock.mock.calls[0]
     expect(init.method).toBe('POST')
     const body = JSON.parse(init.body as string)
-    expect(body).toMatchObject({ method: 'tools/call', params: { name: 'create_text' } })
+    expect(body).toMatchObject({
+      method: 'tools/call',
+      params: { name: 'create_text', arguments: { prompt: 'hello' } },
+    })
   })
 
   it('verifies an MPP merchant from the MACHINE-PAYMENT-CHALLENGE header', async () => {
@@ -177,6 +183,7 @@ describe('refreshCatalog', () => {
       name: 'n', description: 'd', category: 'c',
       resource_url: 'https://api.merchant.example/paid',
       rail: 'x402', protocol: 'http', tool_name: null,
+      tool_arguments: null,
       price_display: null, price_atomic: null, asset: null, network: null,
       asset_transfer_methods: null,
       status: 'active', verified_at: null, consecutive_failures: 0,

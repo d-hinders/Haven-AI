@@ -300,7 +300,7 @@ No nested filled cards. To group content inside a `Card`, use `Card.Section` (wh
 
 ## Agentic Development Workflow
 
-Use `docs/contributing/ai-agent-workflow.md` for feature delivery, UX feedback iteration, and bug fixing. Agentic delivery is a default workflow decision for non-trivial Haven work, not an opt-in phrase the user must repeat. Portable workflow policy and role instructions live in `.agents/skills/`; `.claude/commands/` and `.claude/agents/` are thin Claude Code adapters. Keep the main interactive session as captain and use the canonical Haven roles for workflow coordination, discovery, bounded implementation, and review when the task shape warrants it.
+Use `docs/contributing/ai-agent-workflow.md` for feature delivery, UX feedback iteration, and bug fixing. Agentic delivery is a default workflow decision for non-trivial Haven work, not an opt-in phrase the user must repeat. Portable workflow policy and role instructions live in `.agents/skills/`; Claude Code definitions for those portable workflows are thin adapters. Keep the main interactive session as captain and use the canonical Haven roles for workflow coordination, discovery, bounded implementation, and review when the task shape warrants it.
 
 The captain owns product judgment, shared files, gravity files, git hygiene, final integration, and verification. Use workers only for clean, disjoint slices with explicit file ownership. Inform the user which agents are being used, but do not ask for permission unless there is a real blocker, destructive action, credential risk, or tool limitation.
 

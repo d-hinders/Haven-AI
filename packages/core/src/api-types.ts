@@ -418,6 +418,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/x402/{id}/merchant-call-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the stored MCP merchant-call context for an x402 intent.
+         * @description Read-only settle-leg handoff (#1307): re-serves the merchant_url, tool_name, arguments, and mcp_transport recorded on the intent at quote time (haven_pay_mcp_tool), so haven_settle_mcp_tool / haven_complete_mcp_tool can omit them and let Haven rehydrate by payment_id instead of the caller re-threading them. Convenience metadata for retrying the MERCHANT's own call — never payment authority.
+         */
+        get: operations["getX402MerchantCallContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/x402": {
         parameters: {
             query?: never;
@@ -821,6 +841,10 @@ export type components = {
             /** @enum {string} */
             protocol: "http" | "mcp";
             tool_name?: string | null;
+            /** @description Suggested MCP tool arguments for this catalog item, when the row represents a specific product variant. Agents should pass this object unchanged to the pay tool arguments field after confirming the live merchant quote. */
+            tool_arguments?: {
+                [key: string]: unknown;
+            } | null;
             price_display?: string | null;
             price_atomic?: string | null;
             asset?: string | null;
@@ -840,7 +864,7 @@ export type components = {
          * @description Stable next action an agent should take for a Haven payment state.
          * @enum {string}
          */
-        AgentPaymentNextAction: "sign_and_submit_payment" | "check_status_later" | "none" | "wait_for_user_approval" | "wait_for_user_to_complete_payment" | "retry_original_x402_request" | "stop_and_tell_user" | "request_again_if_user_still_wants_it" | "payment_window_expired" | "fund_safe_or_raise_allowance" | "sweep_stranded_funds";
+        AgentPaymentNextAction: "sign_and_submit_payment" | "check_status_later" | "none" | "wait_for_user_approval" | "wait_for_user_to_complete_payment" | "retry_original_x402_request" | "stop_and_tell_user" | "request_again_if_user_still_wants_it" | "retry_with_explicit_context" | "payment_window_expired" | "fund_safe_or_raise_allowance" | "sweep_stranded_funds";
         /**
          * @description Stable rail identifier for Haven agent payment states.
          * @enum {string}
@@ -1341,6 +1365,35 @@ export type components = {
             category?: string;
             idempotencyKey?: string;
             signature?: string;
+            /** @description #1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time. */
+            mcpCallContext?: {
+                /** Format: uri */
+                merchantUrl: string;
+                toolName: string;
+                arguments?: {
+                    [key: string]: unknown;
+                };
+                mcpTransport?: {
+                    handshakeRequired: boolean;
+                    /** @enum {string} */
+                    source: "path" | "bazaar";
+                };
+            };
+        };
+        X402MerchantCallContext: {
+            /** Format: uuid */
+            payment_id: string;
+            /** Format: uri */
+            merchant_url: string;
+            tool_name: string;
+            arguments?: {
+                [key: string]: unknown;
+            };
+            mcp_transport?: {
+                handshake_required?: boolean;
+                /** @enum {string} */
+                source?: "path" | "bazaar";
+            };
         };
         X402SignablePayment: components["schemas"]["SignablePaymentIntent"] & {
             chain_id?: number;
@@ -1510,6 +1563,11 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             delegate_address: string;
             chain_id: number;
+            /**
+             * @description Which on-chain policy primitive gates this agent's spend (#1306): the legacy Safe AllowanceModule (import-only accounts) or the delegation rail's active budget delegations. Reporting only — the on-chain state is the real gate either way.
+             * @enum {string}
+             */
+            execution_rail: "legacy" | "delegation";
         };
         AllowanceSummary: {
             /** Format: uuid */
@@ -1536,6 +1594,8 @@ export type components = {
                     last_reset_min: number;
                     nonce: number;
                     is_reset_pending: boolean;
+                    /** @description Delegation rail only (#1319, provenance for #1145's fallback): true when `remaining` came from a live ERC20PeriodTransferEnforcer read, false when the read failed and this is the fallback full configured budget. Absent on the legacy AllowanceModule rail, which has no fallback concept. Reporting only — the on-chain policy is the actual gate either way, this only says how fresh this number is. */
+                    remaining_is_from_chain?: boolean;
                 };
             }[];
         };
@@ -3475,6 +3535,89 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["X402PendingApproval"] | components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"] | components["schemas"]["AgentPaymentStatus"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getX402MerchantCallContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Payment intent id from the quote/authorize response. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored merchant call context. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["X402MerchantCallContext"];
                 };
             };
             /** @description Error response */

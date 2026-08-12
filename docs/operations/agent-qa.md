@@ -20,7 +20,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-08-09" # re-verified for #1227 (db-mock ratchet joins the gates) — no claim here affected
+last-verified: "2026-08-11" # re-verified for #1312 (guided catalog purchase QA leg added)
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -163,7 +163,7 @@ QA identities.
 
 ## Money-flow QA
 
-The deterministic harness runs ten scenarios in order:
+The deterministic harness runs eleven scenarios in order:
 
 | Scenario | Expected result |
 |---|---|
@@ -177,6 +177,7 @@ The deterministic harness runs ten scenarios in order:
 | `x402-erc7710-settle` | The delegation rail's PRIMARY x402 path: authorize (payTo = merchant) builds a narrowed child delegation, the delegate signs it, `POST /x402/:id/settle` wraps the header, and the MERCHANT redeems `[child, budget]` on-chain — treasury pays the merchant **directly**, budget metered by the settlement itself (treasury −amount exactly), **delegate EOA untouched** (no funding leg — the #713 stranded-funds class structurally absent). Needs `MERCHANT_X402_ERC7710=1` + `MERCHANT_ERC7710_DELEGATION_MANAGER` on the dev merchant; skips (→ run FAILS under #1066) with that exact remedy when the merchant is 3009-only |
 | `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
 | `x402-hosted-mcp-signer` | The **default user topology** (#1154): the DEPLOYED hosted MCP over HTTP plus a local `@haven_ai/signer` edge signer in-process — `haven_pay_mcp_tool` → local `haven_sign_x402` → `haven_settle_mcp_tool` → merchant settles. Asserts the quote is a **v2 (delegation-rail) context** (a v1 quote FAILS the leg: the #1138 seam would have gone untouched), that the signer really signed it, that **both** on-chain legs confirmed as distinct `status = 1` transactions, that the treasury fell, and that the delegate residual is **unchanged** (exact-amount funding nets to zero). Needs `QA_HOSTED_MCP_URL` + `QA_X402_BINDING_SIGNER` on top of `QA_DELEGATION_*` |
+| `x402-catalog-guided-purchase` | The **GUIDED catalog purchase path** (epic #1305, #1312): resolves a catalog entry via `GET /catalog` (never a hardcoded id), calls `haven_prepare_catalog_purchase(catalog_id, max_amount)`, signs with the local edge signer using **`payment_id` + `payment_required` only**, then settles with `haven_settle_mcp_tool` using **only `payment_id` + `signature` + `payment_header`** — never re-sending `merchant_url`/`tool_name`/`arguments`/`mcp_transport` (that re-threading is exactly what the epic exists to eliminate; needing it FAILS the leg, does not soften it). Asserts the preflight is COMPACT, carries the #1308 machine-readable next step and a rail-labeled allowance block, marks the catalog price indicative next to the live amount, and that the settled response carries the #1310 post-purchase allowance block. Buys NordShield VPN Basic (`buy_vpn`/`{plan:"basic"}`) — a SETTLING product; never CloudNest 50 GB, which is dev's verify-without-settle sweep fixture. Same env as `x402-hosted-mcp-signer` (`QA_HOSTED_MCP_URL`, `QA_X402_BINDING_SIGNER`, `QA_DELEGATION_*`, `QA_DEMO_MERCHANT_URL`) — no new secrets. **Skips** (not fails) when no catalog row matches on dev (#1299 seed not applied) or the hosted MCP does not yet expose `haven_prepare_catalog_purchase` (pre-#1306 deploy) |
 
 The harness exits non-zero if any non-skipped scenario fails. **A skip IS a
 failure (#1066).** Since every leg's identity is provisioned (#1063) and the
@@ -313,6 +314,50 @@ Unit coverage for the same seam, which does not need credentials:
 backend's expected-context message and the signer's independent reconstruction
 are byte-identical at v1 and v2, drives the v1/v2 binding matrix, and asserts the
 tool schema accepts the real hosted quote shape.
+
+#### The guided catalog purchase leg (`x402-catalog-guided-purchase`, #1312)
+
+Epic #1305 shipped the GUIDED entry point — `haven_prepare_catalog_purchase` —
+so a coding agent starts from a curated `catalog_id` instead of hand-copying a
+`merchant_url`/`tool_name`/`tool_arguments` triple, and finishes without ever
+re-threading `payment_required`/`merchant_url`/`tool_name`/`arguments`/
+`mcp_transport` between tool calls. #1306–#1310 landed and unit-proved the five
+primitives that make that possible, each against mocked collaborators; nothing
+had driven them together, live, in the order a real agent runtime calls them.
+This leg is that proof, reusing `x402-hosted-mcp-signer`'s topology and
+money-proof discipline verbatim (same in-process `@haven_ai/signer`, same
+zero-residual delta assertion) but starting from the catalog and asserting the
+guided contract end to end: a compact preflight, the #1308 machine-readable
+next step, a rail-labeled allowance block, signing with `payment_id` +
+`payment_required` alone, and settling with `payment_id` + `signature` +
+`payment_header` alone — proving `haven_settle_mcp_tool`'s #1307 rehydration
+actually serves the merchant context rather than merely documenting that it
+does.
+
+It needs no new secrets: it reuses the delegation-rail identity and the two
+`QA_HOSTED_MCP_URL` / `QA_X402_BINDING_SIGNER` values `x402-hosted-mcp-signer`
+already requires. It buys NordShield VPN Basic (`buy_vpn`/`{plan:"basic"}`),
+the same settling product `x402-hosted-mcp-signer` uses — **never** CloudNest
+50 GB (`buy_cloud_storage`/`{tier:"50gb"}`), which is the demo merchant's
+`MERCHANT_SKIP_SETTLE_PRODUCT` verify-without-settle fixture on dev
+(`x402-delegation-3009-sweep`'s fixture): funds would strand on the delegate by
+design, and this leg's zero-residual assertion would be asserting a lie.
+
+Two skip conditions are specific to this leg, both unmet-precondition, never a
+code defect:
+
+- **No matching catalog row.** The leg resolves the catalog_id itself via
+  `GET /catalog`, matching by `resource_url`/`tool_name`/`tool_arguments` — it
+  never hardcodes a UUID. If the #1299 seed migration
+  (`058_demo_merchant_catalog`) has not been applied to the target
+  environment, or the QA identity is scoped to a different chain, no row
+  matches and the leg skips naming the migration.
+- **A fresh deploy that has not picked up #1306 yet.** Since this leg is NEW,
+  its very first run against a given dev deploy can predate the merge that
+  registers `haven_prepare_catalog_purchase` on the hosted MCP. The leg
+  recognizes the MCP SDK's own "tool not found" JSON-RPC error and treats it
+  as a deploy-skew skip, not a failure — any OTHER error calling the tool
+  (a real refusal, a transport fault) still fails the leg normally.
 
 ### Run locally
 

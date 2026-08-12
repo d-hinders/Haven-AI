@@ -14,7 +14,7 @@ import { formatTokenValue } from '../../domain/tokens.js'
 import { validateGenericSchemeRail } from './scheme-selection.js'
 import { runDelegationAuthorize } from './delegation-authorize.js'
 import { runLegacyAuthorize } from './legacy-authorize.js'
-import type { X402HandlerResult } from './types.js'
+import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
 
 export interface AuthorizeX402Input {
   agent: AgentContext
@@ -31,13 +31,16 @@ export interface AuthorizeX402Input {
   signature?: string
   settlementScheme?: string
   facilitatorAddresses?: string[]
+  /** #1307: optional MCP merchant-call context, persisted for settle-leg rehydration. */
+  mcpCallContext?: X402McpCallContextInput
   log?: FastifyBaseLogger
 }
 
 export async function authorizeX402(input: AuthorizeX402Input): Promise<X402HandlerResult> {
   const {
     agent, url, payTo, merchantPayTo, amount, asset, network, description, category,
-    idempotencyKey, maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses, log,
+    idempotencyKey, maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses,
+    mcpCallContext, log,
   } = input
 
   const genericSchemeError = validateGenericSchemeRail(agent, settlementScheme, facilitatorAddresses)
@@ -79,11 +82,13 @@ export async function authorizeX402(input: AuthorizeX402Input): Promise<X402Hand
     return runDelegationAuthorize({
       agent, url, payTo, merchantPayTo, amountRaw, amountHuman, category, idempotencyKey,
       maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses, network, tokenConfig, tokenAddress,
+      mcpCallContext,
     })
   }
 
   return runLegacyAuthorize({
     agent, url, payTo, merchantPayTo, amountRaw, amountHuman, asset, network,
     description, category, idempotencyKey, signature, tokenConfig, tokenAddress, log,
+    mcpCallContext,
   })
 }

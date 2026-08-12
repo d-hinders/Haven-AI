@@ -25,6 +25,8 @@ import type {
   X402PaymentOption,
   X402Intent,
   X402McpTransport,
+  X402MerchantCallContext,
+  RawX402MerchantCallContext,
   X402Quote,
   X402Receipt,
   X402RequestSnapshot,
@@ -45,6 +47,7 @@ import type {
   HavenAgentAllowanceSummary,
   HavenAgentReadiness,
   HavenAllowanceSummary,
+  PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
   RawHavenAgent,
   RawHavenAllowanceSummary,
@@ -52,12 +55,17 @@ import type {
   RawHavenPaymentReceipt,
   HavenCatalogEntry,
   RawCatalogEntry,
+  AgentPaymentWarning,
 } from './types.js'
 import {
   AgentPaymentNextAction,
   AgentPaymentPhase,
+  AgentPaymentRail,
+  AgentPaymentWarningCode,
   HavenApiError,
   HavenPaymentStateError,
+  MerchantTimeoutError,
+  X402UnexpectedStatusError,
   HavenSigningError,
   HavenTimeoutError,
 } from './types.js'
@@ -108,6 +116,17 @@ function explorerUrlOrEmpty(chainId: number | undefined, txHash: string | null |
 }
 
 const DEFAULT_REQUEST_TIMEOUT = 30_000
+// #1300: merchant-facing default, CALIBRATED against this repo's own
+// tolerances (post-merge review finding): the demo merchant advertises
+// maxTimeoutSeconds: 300 in every PaymentRequired, and its synchronous
+// settlement wait inherits viem's 180 s waitForTransactionReceipt default —
+// so a shorter client bound would abort settlements the protocol contract
+// itself calls normal. 300 s keeps the hang bounded without racing the
+// merchant's own window. Override per client via config.merchantTimeout.
+const DEFAULT_MERCHANT_TIMEOUT = 300_000
+// The best-effort MCP initialized-notification does not deserve the
+// settlement budget — its result is discarded either way.
+const NOTIFY_TIMEOUT = 10_000
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
 
@@ -367,12 +386,34 @@ function x402TypedDataDigest(typedData: unknown): string | undefined {
   }
 }
 
+/** Shared by {@link HavenClient.discoverTools} and {@link HavenClient.getCatalogEntry} (#1306). */
+function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
+  return {
+    id: entry.id,
+    name: entry.name,
+    description: entry.description,
+    category: entry.category,
+    resourceUrl: entry.resource_url,
+    rail: entry.rail,
+    protocol: entry.protocol,
+    toolName: entry.tool_name,
+    toolArguments: entry.tool_arguments ?? null,
+    priceDisplay: entry.price_display,
+    priceAtomic: entry.price_atomic,
+    asset: entry.asset,
+    network: entry.network,
+    status: entry.status,
+    verifiedAt: entry.verified_at,
+  }
+}
+
 export class HavenClient {
   private readonly apiKey: string
   private readonly delegateKey: string | undefined
   private readonly baseUrl: string
   private readonly x402Wallet: string | undefined
   private readonly requestTimeout: number
+  private readonly merchantTimeout: number
   private readonly confirmationTimeout: number
   private readonly pollingInterval: number
   private readonly chainRpcs: Record<number, string>
@@ -405,6 +446,7 @@ export class HavenClient {
     this.baseUrl = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '')
     this.x402Wallet = config.x402Wallet
     this.requestTimeout = config.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
+    this.merchantTimeout = config.merchantTimeout ?? DEFAULT_MERCHANT_TIMEOUT
     this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT
     this.pollingInterval = config.pollingInterval ?? DEFAULT_POLLING_INTERVAL
     this.chainRpcs = config.chainRpcs ?? {}
@@ -544,6 +586,8 @@ export class HavenClient {
       network: option.network,
       description: paymentRequired.resource.description,
       idempotencyKey,
+      // #1307: persisted so the settle leg can rehydrate it by payment_id.
+      ...(options.mcpCallContext ? { mcpCallContext: options.mcpCallContext } : {}),
     })
 
     // Anything other than a signable funding intent (pending_approval,
@@ -715,6 +759,11 @@ export class HavenClient {
       safeAddress: raw.safe_address,
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
+      // Defensive normalization, not trust: the backend contract is exactly
+      // 'legacy' | 'delegation' (#1306), but an older/mismatched backend
+      // during a rollout window should degrade to the wider legacy bucket
+      // rather than propagate an unrecognized string.
+      executionRail: raw.execution_rail === 'delegation' ? 'delegation' : 'legacy',
     }
   }
 
@@ -896,9 +945,129 @@ export class HavenClient {
           lastResetMin: allowance.onchain.last_reset_min,
           nonce: allowance.onchain.nonce,
           isResetPending: allowance.onchain.is_reset_pending,
+          remainingIsFromChain: allowance.onchain.remaining_is_from_chain,
         },
       })),
     }
+  }
+
+  /**
+   * Post-purchase allowance/budget summary for a settled payment (#1310).
+   *
+   * Reuses the EXACT rail-aware read path {@link getAllowances} / #1306's
+   * catalog-purchase preflight `allowance` block use — `GET
+   * /machine-payments/allowances`, with delegation-rail values coming from
+   * the #1090 `deriveDelegationBudgets`-backed enforcer read, never
+   * `agent_allowances` — so this can never disagree with
+   * {@link getAllowances} for the same fixture. The settled token is
+   * resolved from {@link getPaymentStatus} so callers pass only
+   * `paymentId`, never a second haven_get_agent-style round trip.
+   *
+   * NEVER throws: any failed read (status lookup, agent lookup, or the
+   * allowance/budget lookup itself) degrades to `{ allowance: null,
+   * warnings: [ALLOWANCE_CHECK_UNAVAILABLE] }` rather than converting a
+   * successful settlement into a failure — the on-chain policy remains the
+   * actual spend gate regardless of whether this report can be produced.
+   *
+   * Freshness caveat (#1319): the delegation rail's on-chain enforcer read
+   * can silently fall back to the optimistic full period budget without
+   * throwing when the RPC read itself fails (#1145's fund-safe design,
+   * unchanged here). {@link getAllowances}'s `onchain.remainingIsFromChain`
+   * now carries that provenance on the wire, and the #1306 catalog-purchase
+   * preflight (`haven_prepare_catalog_purchase`) surfaces it as a warning —
+   * this summary does not (yet). `remaining_atomic` here reflects the last
+   * successful chain read, not a guaranteed-live one, and callers should not
+   * phrase it as guaranteed-fresh.
+   */
+  async getPostPurchaseAllowanceSummary(
+    paymentId: string,
+  ): Promise<{ allowance: PostPurchaseAllowanceSummary | null; warnings: AgentPaymentWarning[] }> {
+    const unavailable = (detail: string): { allowance: null; warnings: AgentPaymentWarning[] } => ({
+      allowance: null,
+      warnings: [
+        {
+          code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
+          message:
+            `Could not read the post-purchase allowance/budget for payment ${paymentId} (${detail}). ` +
+            'The payment itself succeeded — the on-chain policy remains the actual spend gate; this ' +
+            'only affects the remaining-budget figure reported here.',
+        },
+      ],
+    })
+    try {
+      // #1320 review: all three reads in ONE parallel leg — the status result
+      // only gates the token MATCH below, so sequencing it first doubled the
+      // worst-case bound (2 × requestTimeout) for a best-effort report.
+      const [status, agent, allowanceSummary] = await Promise.all([
+        this.getPaymentStatus(paymentId),
+        this.getAgent(),
+        this.getAllowances(),
+      ])
+      const tokenAddress = status.asset ?? status.x402?.asset ?? null
+      if (!tokenAddress) {
+        return unavailable('the settled payment does not carry a resolvable token address')
+      }
+      const rail = agent.executionRail
+      const source = rail === 'delegation' ? 'active_delegations' : 'allowance_module'
+      const match = allowanceSummary.allowances.find(
+        (a) => a.tokenAddress.toLowerCase() === tokenAddress.toLowerCase(),
+      )
+      if (!match) {
+        // #1320 review: a missing row is UNKNOWN, not zero — an unexpected
+        // address, rail mismatch, or read race must not report a confident
+        // "$0 remaining" to the user.
+        return unavailable('no allowance/budget row matches the settled token')
+      }
+      // Same "only format when decimals are known" discipline as
+      // getAgentSummary() above — an unregistered token surfaces the exact
+      // atomic value rather than a misformatted guess.
+      const token = resolveTokenFromAddress(match.tokenAddress)
+      const remainingDisplay = token
+        ? `${formatAtomicAmount(safeBigInt(match.onchain.remaining), token.decimals)} ${match.tokenSymbol}`
+        : undefined
+      return {
+        allowance: {
+          rail,
+          remaining_atomic: match.onchain.remaining,
+          ...(remainingDisplay ? { remaining_display: remainingDisplay } : {}),
+          token_symbol: match.tokenSymbol,
+          token_address: match.tokenAddress,
+          reset_period: match.resetPeriodMin,
+          source,
+        },
+        warnings: [],
+      }
+    } catch (err) {
+      return unavailable(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  /**
+   * `haven_get_payment_status` convenience: fetch status and, for a
+   * genuinely SETTLED x402 payment, attach the same post-purchase
+   * allowance/budget summary a settle response carries.
+   *
+   * #1310/#1311 parity: this is the ONE home for logic that was duplicated
+   * verbatim in `packages/mcp-server/src/tools.ts` and `packages/mcp/src/tools.ts`
+   * (both hosted and local `haven_get_payment_status` handlers) — extracted
+   * here because both packages already depend on `@haven_ai/sdk` and call
+   * methods on a `HavenClient` instance, so this needed no new dependency
+   * edge. `funded_but_unsettled` is deliberately excluded: that phase means
+   * the merchant did NOT accept the retry. Every other phase/rail returns
+   * the status untouched.
+   */
+  async getPaymentStatusWithPostPurchaseAllowance(paymentId: string): Promise<
+    PaymentStatusResult & {
+      allowance?: PostPurchaseAllowanceSummary | null
+      warnings?: AgentPaymentWarning[]
+    }
+  > {
+    const status = await this.getPaymentStatus(paymentId)
+    if (status.rail === AgentPaymentRail.X402 && status.phase === AgentPaymentPhase.PaymentConfirmed) {
+      const { allowance, warnings } = await this.getPostPurchaseAllowanceSummary(paymentId)
+      return { ...status, allowance, ...(warnings.length > 0 ? { warnings } : {}) }
+    }
+    return status
   }
 
   /**
@@ -916,22 +1085,21 @@ export class HavenClient {
     if (options.rail) params.set('rail', options.rail)
     const query = params.size > 0 ? `?${params.toString()}` : ''
     const raw = await this.get<{ entries: RawCatalogEntry[] }>(`/catalog${query}`)
-    return raw.entries.map((entry) => ({
-      id: entry.id,
-      name: entry.name,
-      description: entry.description,
-      category: entry.category,
-      resourceUrl: entry.resource_url,
-      rail: entry.rail,
-      protocol: entry.protocol,
-      toolName: entry.tool_name,
-      priceDisplay: entry.price_display,
-      priceAtomic: entry.price_atomic,
-      asset: entry.asset,
-      network: entry.network,
-      status: entry.status,
-      verifiedAt: entry.verified_at,
-    }))
+    return raw.entries.map(mapCatalogEntry)
+  }
+
+  /**
+   * Fetch one curated catalog entry by id (#1306).
+   *
+   * Chain-scoped for free by the backend's SQL when the client is
+   * agent-authenticated (#1299): an unknown id and an id curated for a
+   * DIFFERENT chain than this agent's both 404 identically — this method does
+   * not (and must not) re-filter by chain in JS. Read-only, like
+   * {@link discoverTools}.
+   */
+  async getCatalogEntry(id: string): Promise<HavenCatalogEntry> {
+    const raw = await this.get<RawCatalogEntry>(`/catalog/${encodeURIComponent(id)}`)
+    return mapCatalogEntry(raw)
   }
 
   /**
@@ -1057,10 +1225,11 @@ export class HavenClient {
   ): Promise<X402Quote> {
     const initialInit = this.withX402Wallet(init, this.x402PayerAddress())
     const request = this.snapshotX402Request(url, initialInit)
-    const response = await globalThis.fetch(url, initialInit)
+    const response = await this.merchantFetch(url, initialInit)
 
     if (response.status !== 402) {
-      throw new HavenApiError(
+      // #1300: typed, so consumers key on the class instead of message text.
+      throw new X402UnexpectedStatusError(
         `Expected an x402 quote response with HTTP 402, got HTTP ${response.status}.`,
         response.status || 400,
       )
@@ -1073,6 +1242,44 @@ export class HavenClient {
     const paymentRequired = await parsePaymentRequiredResponse(response)
     const mcpTransport = await this.detectX402McpTransport(url, paymentRequired, response)
     return this.buildX402Quote(paymentRequired, request, options.idempotencyKey, mcpTransport)
+  }
+
+  /**
+   * Probe an MCP tool for its x402 quote without creating a payment.
+   *
+   * Unlike the generic {@link quoteX402} helper, this completes the
+   * Streamable-HTTP MCP lifecycle before sending the unpaid `tools/call`.
+   * Hosted MCP uses this path while remaining keyless: it resolves only the
+   * agent's public delegate address for `x402-wallet`; signing remains local.
+   * It refuses before the quote when the merchant does not establish a session;
+   * callers that need a plain x402 endpoint must use {@link quoteX402}.
+   */
+  async quoteMcpX402(
+    url: string,
+    init?: RequestInit,
+    options: X402AuthorizationOptions = {},
+  ): Promise<X402Quote> {
+    const wallet = await this.resolveX402WalletForMerchantCall()
+    const sessionId = await this.mcpInitialize(url, init, wallet)
+    if (!sessionId) {
+      throw new HavenApiError(
+        'The merchant did not establish an MCP session before the x402 quote. No payment was created.',
+        502,
+        { mcpSessionNotEstablished: true },
+      )
+    }
+
+    let requestInit = this.withX402Wallet(init, wallet)
+    requestInit = this.withMcpHeaders(requestInit, sessionId)
+
+    const quote = await this.quoteX402(url, requestInit, options)
+    // This dedicated helper established an MCP session even when the endpoint
+    // uses a custom path and does not advertise Bazaar metadata. Preserve that
+    // fact for the later, fresh session used by the paid retry.
+    return {
+      ...quote,
+      mcpTransport: quote.mcpTransport ?? { handshakeRequired: true, source: 'path' },
+    }
   }
 
   /**
@@ -1220,7 +1427,7 @@ export class HavenClient {
       if (!url) {
         throw new HavenApiError('x402 resume requires the original URL or a captured request snapshot.', 400)
       }
-      const response = await globalThis.fetch(url, initialInit)
+      const response = await this.merchantFetch(url, initialInit)
       if (response.status !== 402) {
         throw new HavenApiError('Expected the original x402 request to return HTTP 402 before resuming.', 400)
       }
@@ -1276,7 +1483,7 @@ export class HavenClient {
     if (mcpSessionId) requestInit = this.withMcpHeaders(requestInit, mcpSessionId)
 
     // 1. Make the original request
-    const response = await globalThis.fetch(url, requestInit)
+    const response = await this.merchantFetch(url, requestInit)
 
     // 2. Not a 402 — return as-is (collapsing SSE for MCP sessions)
     if (response.status !== 402) {
@@ -1356,7 +1563,7 @@ export class HavenClient {
       headers.set('Accept', MCP_ACCEPT)
       if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
 
-      const response = await globalThis.fetch(url, {
+      const response = await this.merchantFetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -1410,11 +1617,17 @@ export class HavenClient {
       headers.set('mcp-session-id', sessionId)
       if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
 
-      await globalThis.fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
-      })
+      // #1300 review: best-effort notification, discarded either way — do not
+      // give it the settlement-sized budget.
+      await this.merchantFetch(
+        url,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+        },
+        NOTIFY_TIMEOUT,
+      )
     } catch {
       // Best-effort — see doc comment.
     }
@@ -1498,7 +1711,7 @@ export class HavenClient {
     }
 
     const request = this.snapshotX402Request(challengeOrUrl, init)
-    const response = await globalThis.fetch(challengeOrUrl, init)
+    const response = await this.merchantFetch(challengeOrUrl, init)
 
     if (response.status !== 402) {
       throw new HavenApiError(
@@ -1556,7 +1769,7 @@ export class HavenClient {
     const retryHeaders = new Headers(initialInit?.headers)
     retryHeaders.set('X-PAYMENT', receipt.paymentHeader)
 
-    const retryResponse = await globalThis.fetch(url, {
+    const retryResponse = await this.merchantFetch(url, {
       ...initialInit,
       headers: retryHeaders,
     })
@@ -1714,7 +1927,7 @@ export class HavenClient {
     headers.set('X-PAYMENT', input.paymentHeader)
     requestInit = { ...requestInit, headers }
 
-    const response = await globalThis.fetch(input.url, requestInit)
+    const response = await this.merchantFetch(input.url, requestInit)
     const surfaced = mcpSessionId ? await this.surfaceMcpResult(response) : response
     const protocolReceiptHeader = surfaced.headers.get('PAYMENT-RESPONSE') ?? undefined
     const settlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
@@ -1765,6 +1978,36 @@ export class HavenClient {
       ok: surfaced.ok,
       body,
       settlementTxHash: settlement.settlementTxHash ?? undefined,
+    }
+  }
+
+  /**
+   * GET /x402/:id/merchant-call-context — the settle-leg twin of #1263's
+   * sign-context fetch (#1307). Re-serves the stored merchant MCP-tool call
+   * context (merchant_url, tool_name, arguments, mcp_transport) recorded at
+   * quote time, so `haven_settle_mcp_tool` / `haven_complete_mcp_tool` can
+   * omit those fields and let Haven rehydrate them by payment_id instead of
+   * the caller re-threading them. Throws `HavenApiError` (404 unknown/foreign
+   * payment_id, 409 no stored context, 410 expired) — the caller decides the
+   * fallback (re-send the full context explicitly).
+   */
+  async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext> {
+    const raw = await this.get<RawX402MerchantCallContext>(
+      `/x402/${paymentId}/merchant-call-context`,
+    )
+    return {
+      paymentId: raw.payment_id,
+      merchantUrl: raw.merchant_url,
+      toolName: raw.tool_name,
+      arguments: raw.arguments ?? {},
+      ...(raw.mcp_transport
+        ? {
+            mcpTransport: {
+              handshakeRequired: raw.mcp_transport.handshake_required,
+              source: raw.mcp_transport.source,
+            },
+          }
+        : {}),
     }
   }
 
@@ -1929,7 +2172,7 @@ export class HavenClient {
       if (!url) {
         throw new HavenApiError('MPP resume requires the original URL or a captured request snapshot.', 400)
       }
-      const response = await globalThis.fetch(url, initialInit)
+      const response = await this.merchantFetch(url, initialInit)
       if (response.status !== 402) {
         throw new HavenApiError('Expected the original MPP request to return HTTP 402 before resuming.', 400)
       }
@@ -1977,7 +2220,7 @@ export class HavenClient {
     const retryHeaders = new Headers(initialInit?.headers)
     retryHeaders.set('MACHINE-PAYMENT-PROOF', receipt.proofHeader)
 
-    const retryResponse = await globalThis.fetch(url, {
+    const retryResponse = await this.merchantFetch(url, {
       ...initialInit,
       headers: retryHeaders,
     })
@@ -3113,6 +3356,31 @@ export class HavenClient {
 
   private async get<T>(path: string): Promise<T> {
     return this.request<T>('GET', path)
+  }
+
+  /**
+   * #1300: every MERCHANT-facing fetch goes through here. Haven API calls
+   * have always been bounded (request() below); the merchant probes/retries
+   * called globalThis.fetch bare, so a slow-loris merchant could hold a tool
+   * call open forever. A caller-supplied signal still applies (combined via
+   * AbortSignal.any); a timeout abort surfaces as a clear HavenApiError 504
+   * naming the URL rather than a bare AbortError.
+   */
+  private async merchantFetch(
+    url: string,
+    init: RequestInit = {},
+    timeoutMs = this.merchantTimeout,
+  ): Promise<Response> {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs)
+    const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
+    try {
+      return await globalThis.fetch(url, { ...init, signal })
+    } catch (err) {
+      if (timeoutSignal.aborted) {
+        throw new MerchantTimeoutError(`Merchant request timed out after ${timeoutMs}ms: ${url}`)
+      }
+      throw err
+    }
   }
 
   private async request<T>(

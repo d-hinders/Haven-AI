@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-10" # + #1272: hosted x402 quotes compact by default; new skew row (pre-#1263 signer needs the include_signing_payload re-quote) — no floor or manifest change
+last-verified: "2026-08-11" # prompt-refresh + #1319 re-verify (dev); inga versioner/manifest/skew-rader ändrade
 ---
 
 # MCP Runtime Compatibility
@@ -55,6 +55,20 @@ Keep this table in sync with that file.
 | `@haven_ai/signer` | `0.1.21-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
+
+## Hosted-runtime connector profiles
+
+The default Connect topology writes a keyless hosted Haven MCP entry plus a
+separate local `haven-signer` stdio entry; it is distinct from the local-stdio
+runtime described above. Hermes Agent is a supported hosted-runtime profile:
+Connect writes `$HERMES_HOME/config.yaml` and its matching owner-only `.env`
+when `HERMES_HOME` is set, otherwise `~/.hermes/config.yaml` and `.env`. The
+hosted API key stays in `.env`; config uses the `Bearer ${MCP_HAVEN_API_KEY}`
+template. Connect preserves source text outside `mcp_servers` and replaces only
+the `mcp_servers.haven` and `mcp_servers.haven-signer` entries.
+Hermes discovers MCP servers at process startup, so start a new session (or run
+`/restart` for a gateway). Hermes also needs its Python MCP SDK installed (`pip
+install mcp`) to load MCP tools.
 
 ## Where the Node floor is enforced
 
@@ -175,6 +189,27 @@ the update is the fix. The same applies to `expected_auth.version` on the sweep
 binding, which shares the mechanism (`SUPPORTED_SWEEP_BINDING_VERSIONS`) and will
 hit this the first time that binding is versioned.
 
+**Row one is now machine-readable, not just named (#1309).** The Zod rows
+above are a diagnosability gap the table exists to translate; row one — a
+signer ≥ the #1143 release, still stale relative to the backend — no longer
+needs that translation, because it is now structured at the source. The tool
+boundary (`haven_sign` / `haven_sign_x402` / `haven_sign_sweep_delegate`)
+returns the row-one message verbatim (unchanged) PLUS
+`{ code: 'UNSUPPORTED_EXPECTED_CONTEXT_VERSION' | 'UNSUPPORTED_SWEEP_BINDING_VERSION',
+supported_versions, received_version, fallback, next_action:
+'stop_and_tell_user' }` — `assertSupportedBindingVersion` in
+`packages/signer/src/core.ts` throws a typed
+`HavenUnsupportedSignerVersionError` (`@haven_ai/sdk`) instead of the plain
+`HavenSigningError` every other signing refusal uses, so `code` and the two
+version fields are DERIVED at the throw site from
+`SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS` rather
+than a second hand-written literal. `fallback` is the same
+`SIGNER_UPDATE_FALLBACK` string the hosted quote's advisory
+`signer_compatibility.fallback` (below) carries, so an agent that hits either
+surface is told the identical fix. This narrows *how* the refusal is
+diagnosed; it enforces nothing new — nothing was ever signed on this path
+either, before or after.
+
 One more skew row since #1272: the hosted x402 quote tools are **compact by
 default** — no `typed_data`/`typed_data_b64` in the response. A signer old
 enough to lack the #1263 `payment_id` fetch (or an install missing
@@ -186,6 +221,27 @@ only — the signer's verification is identical on both paths — but it convert
 "old signer silently relays bulk bytes" into "old signer asks for them
 explicitly", which is the observable difference an operator will see.
 
+One more skew row since #1307, on the SETTLE leg rather than the sign leg:
+`haven_settle_mcp_tool` / `haven_complete_mcp_tool` accept `merchant_url` /
+`tool_name` / `arguments` / `mcp_transport` as optional and rehydrate them by
+`payment_id` from the stored intent when omitted. Omitting them against a
+backend that never stored a call context — pre-#1307 backend, or an intent
+that was never quoted through `haven_pay_mcp_tool` (a plain non-MCP-tool x402
+resource) — gets a structured `MERCHANT_CALL_CONTEXT_UNAVAILABLE` refusal
+naming the fallback in-band: re-send the four fields explicitly (the same
+values `haven_pay_mcp_tool` returned at quote time). Same shape as the
+`include_signing_payload=true` fallback above: no signature verification
+changes, only which call carries the bulk bytes.
+
+`haven_prepare_catalog_purchase` (#1306) — the guided catalog-id preflight —
+persists the SAME `mcpCallContext` at quote time (it composes the identical
+`createX402Intent` call `haven_pay_mcp_tool` uses, just sourced from a
+`merchant_catalog` row instead of caller-supplied fields), so it carries no
+separate skew row: the settle leg above rehydrates a catalog-preflight-created
+intent exactly like a `haven_pay_mcp_tool`-created one, and the
+`signer_compatibility` version check on the QUOTE side (table above) applies
+identically.
+
 ### Detecting skew before a payment (#1155)
 
 Every row above is a *post-quote* symptom: the agent found out by trying to pay.
@@ -195,7 +251,7 @@ nothing to read.
 | Surface | What it states | Where |
 |---|---|---|
 | Signer `initialize` result | The version sets this signer will verify — `capabilities.experimental["haven/signer-compatibility"]` (machine-readable) and the same numbers in `instructions` (what clients show the model) | `packages/signer/src/capabilities.ts`, wired in `buildSignerMcpServer` |
-| Hosted quote/prepare result | `signer_compatibility.x402_expected_context_version` — the version that quote will emit — plus the comparison instruction in-band | `packages/mcp-server/src/tools.ts` (`haven_pay_x402_quote`, `haven_pay_mcp_tool`) |
+| Hosted quote/prepare result | `signer_compatibility.x402_expected_context_version` — the version that quote will emit — plus the comparison instruction in-band | `packages/mcp-server/src/tools.ts` (`haven_pay_x402_quote`, `haven_pay_mcp_tool`, `haven_prepare_catalog_purchase`) |
 
 **The check is agent-mediated, and cannot be otherwise.** The signer and the
 hosted MCP are two separate servers connected to the same agent client. The
@@ -204,14 +260,28 @@ API — it only signs. Only the agent sees both handshakes, so what ships is the
 information plus the prompt to compare it. The hosted tool descriptions carry
 that prompt; the signer's `instructions` carry the other half.
 
-**A mismatch warns, it does not block** (owner decision, 2026-08-07). No refusal
-was added to the payment path: a quote whose emitted version the signer may not
-know still succeeds and simply reports the number. Refusing on the strength of
-reported client metadata would let a false positive block a working payment,
-which is strictly worse than the reactive state — and the signing-time guard
-above already fails closed, so nothing is unguarded. Both surfaces name the same
-fix (update `@haven_ai/signer`; rerun `npx @haven_ai/connect@alpha`), so an agent
-that meets either says the same thing to the user.
+**A mismatch warns, it does not block** (owner decision, 2026-08-07; unchanged by
+#1309). No refusal was added to the payment path: a quote whose emitted version
+the signer may not know still succeeds and simply reports the number. Refusing
+on the strength of reported client metadata would let a false positive block a
+working payment, which is strictly worse than the reactive state — and the
+signing-time guard above already fails closed, so nothing is unguarded. Both
+surfaces name the same fix (update `@haven_ai/signer`; rerun
+`npx @haven_ai/connect@alpha`), so an agent that meets either says the same
+thing to the user — and since #1309 that is not just true of the prose: the
+quote's `signer_compatibility.fallback` and the signer's own structured
+refusal `fallback` field are the SAME string
+(`SIGNER_UPDATE_FALLBACK`, `@haven_ai/sdk`), so an agent reading either as
+data gets byte-identical guidance, not merely similar wording.
+
+**`signer_compatibility` is the stable contract this pre-payment check reads
+(#1309).** Its shape — `x402_expected_context_version`, `signer_capability`,
+`check` (prose), and now `fallback` (the same guidance as structured data) —
+was already sufficient for the acceptance bar "hosted MCP quote/preflight
+responses surface compatibility requirements in a stable field"; `fallback`
+is the one field #1309 added, because it was the one piece of `check` an
+agent could not previously read without parsing a sentence. See
+`signerCompatibilityNotice` in `packages/mcp-server/src/tools.ts`.
 
 The advertised set is **derived** from `SUPPORTED_X402_EXPECTED_VERSIONS` /
 `SUPPORTED_SWEEP_BINDING_VERSIONS`, never a second literal — including the
@@ -239,6 +309,15 @@ diagnostic.
 This covers the **hosted MCP + local signer** topology only. The local
 `@haven_ai/mcp` runtime signs in-process with the SDK it was installed with, so
 there is no second component to be out of step with.
+
+**Both payment-brain servers set `instructions` too (agent-prompt audit, items
+A/B).** `ServerOptions.instructions` above is the mechanism the signer's own
+handshake reuses; `buildHostedMcpServer` and `buildMcpServer` (the local
+runtime) now set it as well, with a compact critical path — deliberately free
+of any version literal, since nothing there should ever need a release to stay
+true (unlike the signer's compatibility numbers above, which are point-in-time
+by design). See [`07-edge-signer.md`](../architecture/07-edge-signer.md) for
+what each server's instructions say and why they differ in length.
 
 ## Troubleshooting
 

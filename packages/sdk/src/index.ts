@@ -57,6 +57,8 @@ export type {
   X402PaymentRequired,
   X402PaymentOption,
   X402McpTransport,
+  X402McpCallContext,
+  X402MerchantCallContext,
   X402Receipt,
   X402AuthorizationOptions,
   X402Intent,
@@ -64,6 +66,9 @@ export type {
   X402ExpectedContext,
   X402RequestSnapshot,
   X402Quote,
+  AgentNextStep,
+  AgentPaymentSummary,
+  AgentPaymentWarning,
   X402ResumeState,
   PaymentResumeState,
   ResumeAuthorizedX402Input,
@@ -82,6 +87,7 @@ export type {
   HavenAgentReadiness,
   HavenAllowance,
   HavenAllowanceSummary,
+  PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
   SweepResult,
   SweepEntry,
@@ -93,9 +99,15 @@ export type { ClaudeTool, OpenAITool } from './tools.js'
 export {
   HavenError,
   HavenApiError,
+  AgentPaymentWarningCode,
+  MerchantTimeoutError,
+  X402UnexpectedStatusError,
   HavenPaymentStateError,
   HavenSigningError,
   HavenTimeoutError,
+  HavenUnsupportedSignerVersionError,
+  SignerRefusalCode,
+  SIGNER_UPDATE_FALLBACK,
 } from './types.js'
 
 export {
@@ -148,3 +160,10 @@ export {
   encodeBase64Json,
   decodeBase64Json,
 } from './base64.js'
+
+export {
+  MERCHANT_DISCOVERY_PATHS,
+  DISCOVERY_MAX_BYTES,
+  discoverMerchantMcpUrl,
+  sameUrl,
+} from './merchant-discovery.js'

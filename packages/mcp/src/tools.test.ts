@@ -1371,6 +1371,212 @@ describe('haven_pay_mcp_tool', () => {
   })
 })
 
+// ── #1301: bounded same-origin merchant endpoint discovery (local parity with
+// mcp-server's #1271) ─────────────────────────────────────────────────────────
+
+describe('merchant MCP endpoint discovery (#1301)', () => {
+  const DISCOVERY_DELEGATE_KEY = '0x' + 'e'.repeat(64)
+  const DISCOVERY_SIGN_HASH = `0x${'ee'.repeat(32)}`
+  const PAYMENT_REQUIRED_HEADER = btoa(JSON.stringify(x402PaymentRequired))
+
+  function discoveryHandlers() {
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      baseUrl: 'http://haven.test',
+      delegateKey: DISCOVERY_DELEGATE_KEY,
+    })
+    return createToolHandlers(haven)
+  }
+
+  /**
+   * Installs a fetch stub keyed on exact `METHOD url`, with one exception:
+   * any request whose JSON-RPC body names `method: 'initialize'` (the MCP
+   * session handshake `haven.fetch()` runs up front for a `/mcp`-suffixed
+   * URL) is answered with a plain 200 and no `mcp-session-id` header, which
+   * the SDK treats as "not an MCP session" and silently falls back to
+   * standard x402 — keeping these fixtures focused on discovery, not the
+   * MCP transport layer (covered elsewhere in this file).
+   */
+  function installDiscoveryFetch(
+    routes: Record<string, { status: number; body?: unknown; headers?: Record<string, string> } | ((hitCount: number) => { status: number; body?: unknown; headers?: Record<string, string> })>,
+  ): { url: string; method: string }[] {
+    const calls: { url: string; method: string }[] = []
+    const hitCounts: Record<string, number> = {}
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: unknown, init: RequestInit = {}) => {
+      const urlStr = String(url)
+      const method = (init.method ?? 'GET').toUpperCase()
+      calls.push({ url: urlStr, method })
+      const bodyStr = typeof init.body === 'string' ? init.body : undefined
+      let bodyJson: Record<string, unknown> | undefined
+      if (bodyStr) {
+        try {
+          bodyJson = JSON.parse(bodyStr)
+        } catch {
+          bodyJson = undefined
+        }
+      }
+      if (bodyJson?.method === 'initialize') {
+        return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      const key = `${method} ${urlStr}`
+      hitCounts[key] = (hitCounts[key] ?? 0) + 1
+      const raw = routes[key]
+      const def = typeof raw === 'function' ? raw(hitCounts[key]) : raw
+      if (!def) {
+        return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify(def.body ?? {}), {
+        status: def.status,
+        headers: { 'Content-Type': 'application/json', ...(def.headers ?? {}) },
+      })
+    })
+    return calls
+  }
+
+  function havenPaymentRoutes(paymentId: string) {
+    return {
+      'POST http://haven.test/x402': {
+        status: 201,
+        body: {
+          payment_id: paymentId,
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: {
+            hash: DISCOVERY_SIGN_HASH,
+            components: {
+              safe: '0xSafe',
+              token: '0xToken',
+              to: '0xTo',
+              amount: '10000',
+              payment_token: '0x0',
+              payment: '0',
+              nonce: 1,
+            },
+          },
+        },
+      },
+      [`POST http://haven.test/payments/${paymentId}/sign`]: {
+        status: 200,
+        body: { payment_id: paymentId, status: 'confirmed', tx_hash: '0xtx_discovery' },
+      },
+    }
+  }
+
+  it('resolves a base URL through /.well-known and returns the RESOLVED merchant_url', async () => {
+    const calls = installDiscoveryFetch({
+      'POST http://merchant.test/': { status: 404, body: { error: 'Not found' } },
+      'GET http://merchant.test/.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { name: 'Haven Demo Merchant', mcp_url: 'http://merchant.test/mcp' },
+      },
+      'POST http://merchant.test/mcp': (hit) =>
+        hit === 1
+          ? { status: 402, headers: { 'PAYMENT-REQUIRED': PAYMENT_REQUIRED_HEADER } }
+          : { status: 200, body: { ok: true, result: 'paid' } },
+      ...havenPaymentRoutes('mcp_disc_resolve'),
+    })
+
+    const result = await discoveryHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+      arguments: { plan: 'basic' },
+    })
+
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    const data = result.data as { merchant_url: string; merchant_url_discovered_from?: string }
+    expect(data.merchant_url).toBe('http://merchant.test/mcp')
+    expect(data.merchant_url_discovered_from).toBe('http://merchant.test/')
+    expect(calls.some((c) => c.url.includes('.well-known'))).toBe(true)
+  })
+
+  it('does NOT run discovery when the exact endpoint answers 402', async () => {
+    const calls = installDiscoveryFetch({
+      'POST http://merchant.test/mcp': (hit) =>
+        hit === 1
+          ? { status: 402, headers: { 'PAYMENT-REQUIRED': PAYMENT_REQUIRED_HEADER } }
+          : { status: 200, body: { ok: true, result: 'paid' } },
+      ...havenPaymentRoutes('mcp_disc_shortcircuit'),
+    })
+
+    const result = await discoveryHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    const data = result.data as { merchant_url: string; merchant_url_discovered_from?: string }
+    expect(data.merchant_url).toBe('http://merchant.test/mcp')
+    expect(data.merchant_url_discovered_from).toBeUndefined()
+    expect(calls.some((c) => c.url.includes('.well-known'))).toBe(false)
+  })
+
+  it('fails with actionable guidance when no discovery document exists', async () => {
+    installDiscoveryFetch({
+      'POST http://merchant.test/': { status: 404, body: { error: 'Not found' } },
+      'GET http://merchant.test/.well-known/haven-demo-merchant': { status: 404, body: {} },
+      'GET http://merchant.test/': { status: 404, body: {} },
+    })
+
+    const result = await discoveryHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.message).toMatch(/No same-origin discovery document/)
+    expect(result.message).toMatch(/<origin>\/mcp/)
+  })
+
+  it('REFUSES an off-origin mcp_url — never even fetches it (SSRF bound)', async () => {
+    const calls = installDiscoveryFetch({
+      'POST http://merchant.test/': { status: 404, body: { error: 'Not found' } },
+      'GET http://merchant.test/.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { mcp_url: 'http://evil.example/mcp' },
+      },
+      'GET http://merchant.test/': {
+        status: 200,
+        body: { mcp_url: 'http://evil.example/mcp' },
+      },
+    })
+
+    const result = await discoveryHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    expect(calls.some((c) => c.url.includes('evil.example'))).toBe(false)
+  })
+
+  it('bounds discovery fetches to the fixed same-origin path set even on a plain merchant failure', async () => {
+    const calls = installDiscoveryFetch({
+      'POST http://merchant.test/mcp': { status: 500, body: { error: 'boom' } },
+      'GET http://merchant.test/.well-known/haven-demo-merchant': { status: 404, body: {} },
+      'GET http://merchant.test/': { status: 404, body: {} },
+    })
+
+    const result = await discoveryHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    const fetched = calls.map((c) => c.url)
+    expect(
+      fetched.every(
+        (u) =>
+          u.startsWith('http://merchant.test/mcp') ||
+          u === 'http://merchant.test/.well-known/haven-demo-merchant' ||
+          u === 'http://merchant.test/',
+      ),
+    ).toBe(true)
+  })
+})
+
 // ── #318 Tool selection clarity ───────────────────────────────────────────────
 
 describe('Tool selection errors (#318)', () => {
@@ -1625,7 +1831,8 @@ describe('haven_discover_tools (#349)', () => {
     {
       id: 'cat-mcp', name: 'Text generation', description: 'd', category: 'media',
       resource_url: 'https://mcp.merchant.example/mcp', rail: 'x402', protocol: 'mcp',
-      tool_name: 'create_text', price_display: '$0.01 USDC', price_atomic: '10000',
+      tool_name: 'create_text', tool_arguments: { prompt: 'hello' },
+      price_display: '$0.01 USDC', price_atomic: '10000',
       asset: 'USDC', network: 'eip155:8453', status: 'active', verified_at: '2026-06-10T00:00:00.000Z',
     },
     {
@@ -1657,7 +1864,11 @@ describe('haven_discover_tools (#349)', () => {
     const data = (result as { data: Array<Record<string, unknown>> }).data
 
     expect(data).toHaveLength(3)
-    expect(data[0]).toMatchObject({ id: 'cat-mcp', suggested_tool: 'haven_pay_mcp_tool' })
+    expect(data[0]).toMatchObject({
+      id: 'cat-mcp',
+      suggested_tool: 'haven_pay_mcp_tool',
+      tool_arguments: { prompt: 'hello' },
+    })
     expect(data[1]).toMatchObject({ id: 'cat-http', suggested_tool: 'haven_pay_x402' })
     expect(data[2]).toMatchObject({ id: 'cat-mpp', suggested_tool: 'haven_quote_mpp', status: 'degraded' })
 
@@ -1730,6 +1941,83 @@ describe('haven_discover_tools (#349)', () => {
     const payment = await h.haven_pay_x402({ url: entry.resource_url, method: 'GET' })
     expect(payment.success).toBe(true)
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(5)
+  })
+})
+
+// ── haven_get_payment_status: post-purchase allowance summary (#1310) ─────────
+// Parity with the hosted MCP's identical addition in packages/mcp-server —
+// same condition (rail: x402, phase: payment_confirmed), same SDK call.
+
+describe('haven_get_payment_status: post-purchase allowance summary (#1310)', () => {
+  const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+
+  function handlers() {
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    return createToolHandlers(haven)
+  }
+
+  function statusFixture(overrides: Record<string, unknown> = {}) {
+    return {
+      payment_id: 'pay_x402', kind: 'payment_intent', rail: 'x402',
+      status: 'confirmed', phase: 'payment_confirmed', next_action: 'none',
+      amount: '1.50', token: 'USDC',
+      resource_url: 'https://merchant.example/paid', merchant_address: '0xMerchant',
+      tx_hash: txHash, expires_at: '2099-01-01T00:00:00.000Z', chain_id: 8453,
+      message: 'The payment is confirmed.', asset: USDC,
+      ...overrides,
+    }
+  }
+
+  function allowancesFixture(remaining: string) {
+    return {
+      agent_id: 'agent-1', safe_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
+      allowances: [{
+        id: 'allowance-1', token_address: USDC, token_symbol: 'USDC',
+        configured_amount: '5000000', reset_period_min: 60,
+        onchain: {
+          amount: remaining, spent: '0', remaining, effective_spent: '0',
+          reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false,
+        },
+      }],
+    }
+  }
+
+  it('attaches allowance for a genuinely settled x402 payment', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/pay_x402/status')) return jsonResponse(statusFixture())
+      if (u.endsWith('/machine-payments/agent')) {
+        return jsonResponse({
+          id: 'agent-1', name: 'A', status: 'active',
+          safe_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
+          execution_rail: 'legacy',
+        })
+      }
+      if (u.endsWith('/machine-payments/allowances')) return jsonResponse(allowancesFixture('3000000'))
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const result = await handlers().haven_get_payment_status({ payment_id: 'pay_x402' })
+    expect(result.success).toBe(true)
+    const data = (result as { data: { allowance: { rail: string; remaining_atomic: string } | null } }).data
+    expect(data.allowance).toEqual(
+      expect.objectContaining({ rail: 'legacy', remaining_atomic: '3000000' }),
+    )
+  })
+
+  it('does NOT attach allowance for a non-settled x402 phase (funded_but_unsettled)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/pay_x402/status')) {
+        return jsonResponse(statusFixture({ status: 'funded_but_unsettled', phase: 'funded_but_unsettled' }))
+      }
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const result = await handlers().haven_get_payment_status({ payment_id: 'pay_x402' })
+    expect(result.success).toBe(true)
+    const data = (result as { data: Record<string, unknown> }).data
+    expect('allowance' in data).toBe(false)
   })
 })
 

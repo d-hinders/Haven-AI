@@ -33,10 +33,12 @@ const ENTRY = {
   rail: 'x402',
   protocol: 'mcp',
   tool_name: 'create_text',
+  tool_arguments: { format: 'plain' },
   price_display: '$0.01 USDC',
   price_atomic: '10000',
   asset: 'USDC',
   network: 'eip155:8453',
+  asset_transfer_methods: 'eip3009',
   status: 'active',
   verified_at: '2026-06-10T00:00:00.000Z',
   created_at: '2026-06-01T00:00:00.000Z',
@@ -96,6 +98,7 @@ describe('catalog routes', () => {
       rail: 'x402',
       protocol: 'mcp',
       tool_name: 'create_text',
+      tool_arguments: { format: 'plain' },
       price_display: '$0.01 USDC',
       status: 'active',
     })
@@ -117,6 +120,32 @@ describe('catalog routes', () => {
     // agent lookup used the hashed key
     const lookupCall = mockQuery.mock.calls.find(([sql]) => String(sql).includes('api_key_hash'))
     expect(lookupCall?.[1]).toEqual([AGENT_KEY_HASH])
+    const catalogCall = mockQuery.mock.calls
+      .slice()
+      .reverse()
+      .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
+    expect(String(catalogCall?.[0])).toContain('network = $1')
+    expect(catalogCall?.[1]).toEqual(['eip155:8453'])
+  })
+
+  it('scopes agent discovery to the agent chain alongside category and rail filters', async () => {
+    mockAgentLookupThen({ rows: [ENTRY] })
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/catalog?category=storage&rail=x402',
+      headers: { authorization: `Bearer ${AGENT_KEY}` },
+    })
+
+    expect(res.statusCode).toBe(200)
+    const catalogCall = mockQuery.mock.calls
+      .slice()
+      .reverse()
+      .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
+    expect(String(catalogCall?.[0])).toContain('category = $1')
+    expect(String(catalogCall?.[0])).toContain('rail = $2')
+    expect(String(catalogCall?.[0])).toContain('network = $3')
+    expect(catalogCall?.[1]).toEqual(['storage', 'x402', 'eip155:8453'])
   })
 
   it('filters by category and rail', async () => {
@@ -133,6 +162,7 @@ describe('catalog routes', () => {
     const [sql, values] = mockQuery.mock.calls[0]
     expect(String(sql)).toContain('category = $1')
     expect(String(sql)).toContain('rail = $2')
+    expect(String(sql)).not.toContain('network = $3')
     expect(values).toEqual(['media', 'x402'])
   })
 
@@ -157,6 +187,20 @@ describe('catalog routes', () => {
     })
     expect(hit.statusCode).toBe(200)
     expect(hit.json().id).toBe('cat-1')
+
+    mockAgentLookupThen({ rows: [ENTRY] })
+    const agentHit = await app.inject({
+      method: 'GET',
+      url: '/catalog/cat-1',
+      headers: { authorization: `Bearer ${AGENT_KEY}` },
+    })
+    expect(agentHit.statusCode).toBe(200)
+    const catalogCall = mockQuery.mock.calls
+      .slice()
+      .reverse()
+      .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
+    expect(String(catalogCall?.[0])).toContain('network = $2')
+    expect(catalogCall?.[1]).toEqual(['cat-1', 'eip155:8453'])
 
     mockQuery.mockResolvedValueOnce({ rows: [] })
     const miss = await app.inject({

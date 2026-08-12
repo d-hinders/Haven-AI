@@ -885,6 +885,37 @@ export const openapiSpec = {
         },
       },
     },
+    '/x402/{id}/merchant-call-context': {
+      get: {
+        tags: ['x402'],
+        operationId: 'getX402MerchantCallContext',
+        summary: 'Fetch the stored MCP merchant-call context for an x402 intent.',
+        description:
+          'Read-only settle-leg handoff (#1307): re-serves the merchant_url, tool_name, arguments, and mcp_transport recorded on the intent at quote time (haven_pay_mcp_tool), so haven_settle_mcp_tool / haven_complete_mcp_tool can omit them and let Haven rehydrate by payment_id instead of the caller re-threading them. Convenience metadata for retrying the MERCHANT\'s own call — never payment authority.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Payment intent id from the quote/authorize response.',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The stored merchant call context.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/X402MerchantCallContext' } },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '410': errorResponse,
+        },
+      },
+    },
     '/x402': {
       post: {
         tags: ['x402'],
@@ -1687,6 +1718,14 @@ export const openapiSpec = {
           rail: { type: 'string', enum: ['x402', 'mpp'] },
           protocol: { type: 'string', enum: ['http', 'mcp'] },
           tool_name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          tool_arguments: {
+            anyOf: [
+              { type: 'object', additionalProperties: true },
+              { type: 'null' },
+            ],
+            description:
+              'Suggested MCP tool arguments for this catalog item, when the row represents a specific product variant. Agents should pass this object unchanged to the pay tool arguments field after confirming the live merchant quote.',
+          },
           price_display: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           price_atomic: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           asset: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -2344,6 +2383,46 @@ export const openapiSpec = {
           category: { type: 'string' },
           idempotencyKey: { type: 'string', maxLength: 128 },
           signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
+          mcpCallContext: {
+            type: 'object',
+            description:
+              '#1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time.',
+            required: ['merchantUrl', 'toolName'],
+            properties: {
+              merchantUrl: { type: 'string', format: 'uri' },
+              toolName: { type: 'string', minLength: 1 },
+              arguments: { type: 'object', additionalProperties: true },
+              mcpTransport: {
+                type: 'object',
+                required: ['handshakeRequired', 'source'],
+                properties: {
+                  handshakeRequired: { type: 'boolean' },
+                  source: { type: 'string', enum: ['path', 'bazaar'] },
+                },
+                additionalProperties: false,
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      X402MerchantCallContext: {
+        type: 'object',
+        required: ['payment_id', 'merchant_url', 'tool_name'],
+        properties: {
+          payment_id: uuid,
+          merchant_url: { type: 'string', format: 'uri' },
+          tool_name: { type: 'string' },
+          arguments: { type: 'object', additionalProperties: true },
+          mcp_transport: {
+            type: 'object',
+            properties: {
+              handshake_required: { type: 'boolean' },
+              source: { type: 'string', enum: ['path', 'bazaar'] },
+            },
+            additionalProperties: false,
+          },
         },
         additionalProperties: false,
       },
@@ -2555,7 +2634,7 @@ export const openapiSpec = {
       },
       MachinePaymentAgent: {
         type: 'object',
-        required: ['id', 'name', 'status', 'safe_address', 'delegate_address', 'chain_id'],
+        required: ['id', 'name', 'status', 'safe_address', 'delegate_address', 'chain_id', 'execution_rail'],
         properties: {
           id: uuid,
           name: { type: 'string' },
@@ -2563,6 +2642,14 @@ export const openapiSpec = {
           safe_address: address,
           delegate_address: address,
           chain_id: { type: 'integer' },
+          execution_rail: {
+            type: 'string',
+            enum: ['legacy', 'delegation'],
+            description:
+              'Which on-chain policy primitive gates this agent\'s spend (#1306): the legacy Safe ' +
+              'AllowanceModule (import-only accounts) or the delegation rail\'s active budget ' +
+              'delegations. Reporting only — the on-chain state is the real gate either way.',
+          },
         },
         additionalProperties: false,
       },
@@ -2597,6 +2684,16 @@ export const openapiSpec = {
                     last_reset_min: { type: 'integer' },
                     nonce: { type: 'integer' },
                     is_reset_pending: { type: 'boolean' },
+                    remaining_is_from_chain: {
+                      type: 'boolean',
+                      description:
+                        'Delegation rail only (#1319, provenance for #1145\'s fallback): true when ' +
+                        '`remaining` came from a live ERC20PeriodTransferEnforcer read, false when the ' +
+                        'read failed and this is the fallback full configured budget. Absent on the ' +
+                        'legacy AllowanceModule rail, which has no fallback concept. Reporting only — ' +
+                        'the on-chain policy is the actual gate either way, this only says how fresh ' +
+                        'this number is.',
+                    },
                   },
                   additionalProperties: false,
                 },

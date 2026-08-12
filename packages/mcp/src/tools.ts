@@ -16,6 +16,8 @@ import {
   HavenPaymentStateError,
   HavenSigningError,
   composeDescription,
+  discoverMerchantMcpUrl,
+  sameUrl,
   toolDescriptions as sharedDescriptions,
   verifyPaymentReceipt,
   type PaymentReceipt,
@@ -209,16 +211,52 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       return runTool(async () => {
         const args = objectInput('haven_pay_mcp_tool', input)
         const envelope = buildMcpToolsCallEnvelope(args.tool_name as string, args.arguments as Record<string, unknown> | undefined)
-        const response = await haven.fetch(
-          args.merchant_url as string,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(envelope),
-          },
-          { idempotencyKey: args.idempotencyKey as string | undefined },
-        )
-        return responsePayload(response)
+        const init: RequestInit = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(envelope),
+        }
+        // #1301: a base merchant URL is accepted, mirroring the hosted MCP's
+        // #1271 discovery. `haven.fetch()` already resolves a 402 itself
+        // (pays and retries) — it never hands a 402 back to us, and a
+        // successfully-paid retry that the merchant rejects THROWS from
+        // inside the SDK rather than returning a non-ok Response (see
+        // `retryX402Request`). So any Response this call returns with
+        // `.ok === false` can only be the UNTOUCHED first-hop response to a
+        // URL that never spoke 402 at all — free-tool 200s and paid 200s
+        // both stay `.ok === true` and never reach this branch. That is the
+        // local flow's equivalent of the hosted probe's
+        // `X402UnexpectedStatusError` (#1300): "this URL isn't the MCP
+        // endpoint," expressed as a Response instead of a thrown error.
+        let merchantUrl = args.merchant_url as string
+        const idempotencyKey = args.idempotencyKey as string | undefined
+        const attempt = () => haven.fetch(merchantUrl, init, { idempotencyKey })
+
+        let response = await attempt()
+        if (!response.ok) {
+          const discovered = await discoverMerchantMcpUrl(merchantUrl)
+          // Trailing-slash/case echoes of the input are "same URL" — spend
+          // the one retry only on a genuinely different endpoint.
+          if (!discovered || sameUrl(discovered, merchantUrl)) {
+            throw discoveryMissError(response, merchantUrl, discovered)
+          }
+          const inputUrl = merchantUrl
+          merchantUrl = discovered
+          const retryResponse = await attempt()
+          if (!retryResponse.ok) {
+            // Label which URL failed — the agent otherwise cannot tell the
+            // discovered endpoint's miss from the original probe's.
+            throw discoveryMissError(retryResponse, merchantUrl, discovered, inputUrl)
+          }
+          response = retryResponse
+        }
+        const payload = await responsePayload(response)
+        return {
+          ...payload,
+          // The RESOLVED endpoint (#1271/#1301), not the input as given.
+          merchant_url: merchantUrl,
+          ...(merchantUrl !== args.merchant_url ? { merchant_url_discovered_from: args.merchant_url } : {}),
+        }
       })
     },
 
@@ -383,7 +421,12 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
 
     haven_get_payment_status: async (input) => {
       const args = objectInput('haven_get_payment_status', input)
-      return runTool(async () => haven.getPaymentStatus(args.payment_id))
+      // #1310/#1311: shared with mcp-server's haven_get_payment_status
+      // handler — see HavenClient.getPaymentStatusWithPostPurchaseAllowance
+      // in @haven_ai/sdk for the single home of this "settled x402 only"
+      // attach logic (was duplicated verbatim in both packages) and for why
+      // `funded_but_unsettled` is excluded from "settled".
+      return runTool(async () => haven.getPaymentStatusWithPostPurchaseAllowance(args.payment_id))
     },
 
     haven_get_resume_state: async (input) => {
@@ -410,6 +453,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           rail: entry.rail,
           protocol: entry.protocol,
           tool_name: entry.toolName,
+          tool_arguments: entry.toolArguments,
           price_display: entry.priceDisplay,
           price_atomic: entry.priceAtomic,
           asset: entry.asset,
@@ -524,6 +568,35 @@ function parseMaybeJson(text: string): unknown {
   } catch {
     return text
   }
+}
+
+/**
+ * #1301: the local-flow counterpart of mcp-server's `withDiscoveryGuidance`
+ * (kept there, not shared — that helper rewrites a thrown `HavenApiError`;
+ * this one builds a fresh failure from a non-ok `Response`, since the local
+ * `haven.fetch()` idiom never throws for a non-402 answer). Keeps the
+ * original probe status authoritative, but tells the agent what discovery
+ * tried — the pre-#1301 local failure mode was a silent pass-through of
+ * whatever the base path served.
+ */
+function discoveryMissError(
+  response: Response,
+  merchantUrl: string,
+  discovered: string | null,
+  discoveredFromUrl?: string,
+): HavenApiError {
+  const base = discoveredFromUrl
+    ? `Merchant call to ${merchantUrl} failed with HTTP ${response.status} ` +
+      `(at the DISCOVERED endpoint ${merchantUrl}, resolved from ${discoveredFromUrl} ` +
+      `via the merchant discovery document).`
+    : `Merchant call to ${merchantUrl} failed with HTTP ${response.status}.`
+  const guidance = discoveredFromUrl
+    ? ''
+    : discovered
+      ? ` Same-origin discovery resolved the same URL (${discovered}), which still did not answer successfully.`
+      : ` No same-origin discovery document was found at /.well-known/haven-demo-merchant or /. ` +
+        `If ${merchantUrl} is a base merchant URL, pass the exact MCP endpoint instead (often <origin>/mcp).`
+  return new HavenApiError(`${base}${guidance}`, response.status || 400)
 }
 
 function normalizeError(err: unknown): ToolFailure {

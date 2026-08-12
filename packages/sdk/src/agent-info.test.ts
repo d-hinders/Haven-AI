@@ -17,6 +17,7 @@ describe('agent info helpers', () => {
         safe_address: '0xSafe',
         delegate_address: '0xDelegate',
         chain_id: 8453,
+        execution_rail: 'legacy',
       })),
     )
 
@@ -29,6 +30,7 @@ describe('agent info helpers', () => {
       safeAddress: '0xSafe',
       delegateAddress: '0xDelegate',
       chainId: 8453,
+      executionRail: 'legacy',
     })
     expect(fetchMock).toHaveBeenCalledWith(
       `${baseUrl}/machine-payments/agent`,
@@ -74,6 +76,7 @@ describe('agent info helpers', () => {
       safeAddress: '0xSafe',
       delegateAddress: '0xDelegate',
       chainId: 8453,
+      executionRail: 'legacy',
       readiness: 'ready',
       allowances: [{
         tokenSymbol: 'USDC',
@@ -108,7 +111,7 @@ describe('agent info helpers', () => {
     // rail-specific SDK logic.
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       const u = String(url)
-      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active', 'delegation')
       if (u.endsWith('/machine-payments/allowances')) {
         return delegationAllowancesResponse([{ tokenAddress: USDC_BASE, tokenSymbol: 'USDC', budgetAtomic: '10000000' }])
       }
@@ -118,6 +121,7 @@ describe('agent info helpers', () => {
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
     const summary = await haven.getAgentSummary()
 
+    expect(summary.executionRail).toBe('delegation')
     expect(summary.readiness).toBe('ready')
     expect(summary.allowances[0]).toMatchObject({
       tokenSymbol: 'USDC',
@@ -261,6 +265,116 @@ describe('agent info helpers', () => {
   })
 })
 
+describe('getPostPurchaseAllowanceSummary (#1310)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('legacy rail: reports remaining_atomic through the SAME source as getAllowances (parity, not similarity)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/pay_1/status')) return paymentStatusResponse()
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+      if (u.endsWith('/machine-payments/allowances')) return allowancesResponse({ remaining: '3500000' })
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const [summary, allowances] = await Promise.all([
+      haven.getPostPurchaseAllowanceSummary('pay_1'),
+      haven.getAllowances(),
+    ])
+
+    expect(summary).toEqual({
+      allowance: {
+        rail: 'legacy',
+        remaining_atomic: '3500000',
+        remaining_display: '3.5 USDC',
+        token_symbol: 'USDC',
+        token_address: USDC_BASE,
+        reset_period: 60,
+        source: 'allowance_module',
+      },
+      warnings: [],
+    })
+    // Same source, asserted as equality against haven_get_allowances' own mapping.
+    expect(summary.allowance?.remaining_atomic).toBe(allowances.allowances[0].onchain.remaining)
+  })
+
+  it('delegation rail: reports source: active_delegations, derived via #1090 (never agent_allowances)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/pay_1/status')) return paymentStatusResponse()
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active', 'delegation')
+      if (u.endsWith('/machine-payments/allowances')) {
+        return delegationAllowancesResponse([{ tokenAddress: USDC_BASE, tokenSymbol: 'USDC', budgetAtomic: '4200000' }])
+      }
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const summary = await haven.getPostPurchaseAllowanceSummary('pay_1')
+
+    expect(summary.allowance).toMatchObject({
+      rail: 'delegation',
+      source: 'active_delegations',
+      remaining_atomic: '4200000',
+    })
+  })
+
+  it('reports UNKNOWN (null + warning) when no allowance row matches the settled token — never a fabricated zero (#1320 review)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/pay_1/status')) return paymentStatusResponse({ asset: '0xDifferentToken' })
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+      if (u.endsWith('/machine-payments/allowances')) return allowancesResponse()
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const summary = await haven.getPostPurchaseAllowanceSummary('pay_1')
+
+    expect(summary.allowance).toBeNull()
+    expect(summary.warnings).toHaveLength(1)
+    expect(summary.warnings[0].code).toBe('ALLOWANCE_CHECK_UNAVAILABLE')
+    expect(summary.warnings[0].message).toMatch(/no allowance\/budget row matches/)
+  })
+
+  it('NEVER throws when the payment-status lookup fails — degrades to a null block + ALLOWANCE_CHECK_UNAVAILABLE', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/pay_1/status')) return new Response('{}', { status: 502 })
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const summary = await haven.getPostPurchaseAllowanceSummary('pay_1')
+
+    expect(summary.allowance).toBeNull()
+    expect(summary.warnings).toHaveLength(1)
+    expect(summary.warnings[0].code).toBe('ALLOWANCE_CHECK_UNAVAILABLE')
+  })
+
+  it('NEVER throws when the allowance/budget lookup itself fails — the mutation this guards against (a)', async () => {
+    // Mutation-proof (a): if the try/catch below getAllowances() is severed,
+    // this test fails because the call rejects instead of returning a
+    // degraded summary.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/pay_1/status')) return paymentStatusResponse()
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+      if (u.endsWith('/machine-payments/allowances')) return new Response('{}', { status: 502 })
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    await expect(haven.getPostPurchaseAllowanceSummary('pay_1')).resolves.toEqual({
+      allowance: null,
+      warnings: [expect.objectContaining({ code: 'ALLOWANCE_CHECK_UNAVAILABLE' })],
+    })
+  })
+})
+
 const mappedAllowances = {
   agentId: 'agent-1',
   safeAddress: '0xSafe',
@@ -285,7 +399,7 @@ const mappedAllowances = {
   }],
 }
 
-function agentResponse(status: string): Response {
+function agentResponse(status: string, executionRail: 'legacy' | 'delegation' = 'legacy'): Response {
   return new Response(JSON.stringify({
     id: 'agent-1',
     name: 'Research agent',
@@ -293,6 +407,7 @@ function agentResponse(status: string): Response {
     safe_address: '0xSafe',
     delegate_address: '0xDelegate',
     chain_id: 8453,
+    execution_rail: executionRail,
   }))
 }
 
@@ -359,5 +474,26 @@ function allowancesResponse(
         is_reset_pending: false,
       },
     }],
+  }))
+}
+
+/** GET /machine-payments/:id/status fixture — a settled x402 payment_intent. */
+function paymentStatusResponse(overrides: { asset?: string } = {}): Response {
+  return new Response(JSON.stringify({
+    payment_id: 'pay_1',
+    kind: 'payment_intent',
+    rail: 'x402',
+    status: 'confirmed',
+    phase: 'payment_confirmed',
+    next_action: 'none',
+    amount: '1.50',
+    token: 'USDC',
+    resource_url: 'https://merchant.example/paid',
+    merchant_address: '0xMerchant',
+    tx_hash: '0xfund',
+    expires_at: '2099-01-01T00:00:00.000Z',
+    chain_id: 8453,
+    message: 'The payment is confirmed.',
+    asset: overrides.asset ?? USDC_BASE,
   }))
 }

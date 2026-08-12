@@ -23,6 +23,7 @@ export interface CatalogRow {
   rail: 'x402' | 'mpp'
   protocol: 'http' | 'mcp'
   tool_name: string | null
+  tool_arguments: Record<string, unknown> | null
   price_display: string | null
   price_atomic: string | null
   asset: string | null
@@ -130,7 +131,7 @@ function assetSymbol(asset: string | undefined): string {
  * header, MACHINE-PAYMENT-CHALLENGE header, or JSON body counts as verified.
  */
 export async function probeCatalogEntry(
-  entry: Pick<CatalogRow, 'resource_url' | 'protocol' | 'tool_name' | 'rail'>,
+  entry: Pick<CatalogRow, 'resource_url' | 'protocol' | 'tool_name' | 'tool_arguments' | 'rail'>,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ProbeResult> {
   let response: Response
@@ -143,7 +144,7 @@ export async function probeCatalogEntry(
           jsonrpc: '2.0',
           id: 1,
           method: 'tools/call',
-          params: { name: entry.tool_name ?? 'unknown', arguments: {} },
+          params: { name: entry.tool_name ?? 'unknown', arguments: entry.tool_arguments ?? {} },
         }),
       })
     } else {

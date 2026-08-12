@@ -22,7 +22,7 @@ import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'
-import type { X402HandlerResult } from './types.js'
+import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
 
 type ResolvedToken = Extract<ResolvePaymentTokenResult, { ok: true }>
 
@@ -42,12 +42,15 @@ export interface DelegationAuthorizeInput {
   network: string
   tokenConfig: ResolvedToken['tokenConfig']
   tokenAddress: string
+  /** #1307: optional MCP merchant-call context, persisted for settle-leg rehydration. */
+  mcpCallContext?: X402McpCallContextInput
 }
 
 export async function runDelegationAuthorize(input: DelegationAuthorizeInput): Promise<X402HandlerResult> {
   const {
     agent, url, payTo, merchantPayTo, amountRaw, amountHuman, category, idempotencyKey,
     maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses, network, tokenConfig, tokenAddress,
+    mcpCallContext,
   } = input
 
   if (tokenAddress === ZERO_ADDRESS) {
@@ -167,7 +170,10 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       merchantAddress: merchantPayTo.toLowerCase(),
       challengeId: null,
       idempotencyKey: idempotencyKey ?? null,
-      metadata: { network, settlement_scheme: 'eip3009' },
+      // #1307: persist the MCP merchant-call context (when the quote came
+      // through haven_pay_mcp_tool) so the settle leg can rehydrate it by
+      // payment_id instead of the agent re-threading it.
+      metadata: { network, settlement_scheme: 'eip3009', mcp_call_context: mcpCallContext ?? null },
       executionRail: 'delegation',
       delegationHash: fundingAuth.delegationHash,
       // #1059: on the funding leg the budget IS the signed instrument.
@@ -294,7 +300,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     // #1053 review, finding 5 (the quick half): record the scheme like the
     // 3009 path does, so the accounting feed can tell schemes apart without
     // parsing prepared_user_op. The hash-semantics column is the follow-up.
-    metadata: { network, settlement_scheme: 'erc7710' },
+    // #1307: same merchant-call-context persistence as the 3009 branch above.
+    metadata: { network, settlement_scheme: 'erc7710', mcp_call_context: mcpCallContext ?? null },
     executionRail: 'delegation',
     delegationHash: built.childHash,
     // #1059: the CHILD is signed, but the parent budget does the metering —

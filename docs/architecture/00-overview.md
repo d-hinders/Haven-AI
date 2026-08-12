@@ -60,7 +60,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) + #1266 demo merchant x402 settlement selection
+last-verified: "2026-08-11" # #1330 Hermes stores its hosted-MCP identity in owner-only .env with a config reference; prior #1326 Hermes runtime profile, #1251 (MPP seam refusal) + #1266 demo merchant x402 settlement selection
 ---
 
 # Haven — Architecture Overview
@@ -109,7 +109,11 @@ with no funding leg and no approval queue. Deep dive:
 **Hosted MCP + local signer is the default.** For supported writable runtimes,
 the connector writes a hosted MCP entry (URL + Bearer API key) plus a local
 `haven-signer` stdio entry. Current profiles include Claude Code, Codex CLI and
-Desktop, Cursor, VS Code/Insiders, Claude Desktop, and a manual fallback.
+Desktop, Cursor, VS Code/Insiders, Claude Desktop, Hermes Agent, and a manual
+fallback. Hermes uses `$HERMES_HOME/config.yaml` plus an owner-only `.env` when
+set, otherwise `~/.hermes/config.yaml` plus `.env`; the hosted API key stays in
+that `.env` and config references it by name. Hermes loads new MCP servers after
+a new session (or a gateway `/restart`).
 Fully local MCP exists only behind the explicit `--local` opt-in for Claude
 Code and Codex. Details and trade-offs:
 [local vs. hosted MCP](08-local-vs-hosted-mcp.md), [edge signer](07-edge-signer.md).

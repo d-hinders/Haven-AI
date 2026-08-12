@@ -32,6 +32,9 @@ user's approval in Haven.
 
 Hosted tools run in the \`mcp__haven__\` namespace. Local signing tools run in
 the \`mcp__haven-signer__\` namespace and keep the delegate key on this machine.
+Tool results carry the exact next step (\`next_action\`, \`next_tool\`,
+\`next_arguments\`) — follow those fields first; the prose below is fallback
+and orientation, not the source of truth.
 
 ## When to use this skill
 
@@ -56,11 +59,11 @@ Before any payment, confirm the *live remaining* budget with the tools —
 \`agent.json\` shows the configured budget, not what is left after recent
 spending:
 
-- \`haven_get_agent\` — the recommended first call: identity (wallet, network)
-  plus a readiness signal (\`ready\` / \`needs_approval\` / \`revoked\`) and live
-  remaining per-token allowance, in one shot.
-- \`haven_get_allowances\` — detailed per-token breakdown (configured, spent,
-  reset window) when you need more than the summary.
+- \`mcp__haven__haven_get_agent\` — the recommended first call: identity
+  (wallet, network) plus a readiness signal (\`ready\` / \`needs_approval\` /
+  \`revoked\`) and live remaining per-token allowance, in one shot.
+- \`mcp__haven__haven_get_allowances\` — detailed per-token breakdown
+  (configured, spent, reset window) when you need more than the summary.
 
 Budgets reset on a period the user chose. If a payment exceeds the remaining
 budget it is queued for the user to approve in the Haven dashboard — this is
@@ -68,47 +71,79 @@ normal, not an error.
 
 ## Paying
 
-- **Direct transfer:** \`haven_pay\` with recipient, amount, and token.
-- **x402 paywall:** \`haven_quote_x402\` to get a quote, then
-  \`haven_pay_x402_quote\`. In the hosted setup the signing step happens in
-  the local Haven signer; follow the tool results — they tell you the next
-  action at every step. Retry the original request only when the result says
-  \`retry_original_x402_request\`.
-- **Paid MCP tool call:** \`mcp__haven__haven_pay_mcp_tool\` with the merchant
-  URL, tool name, and arguments, then finish in two calls (fast path):
-  \`mcp__haven-signer__haven_sign_x402\` on the local signer (pass
-  \`payload_hash\`, \`x402_expected\` as the nested \`x402.expected\` object, and
-  \`payment_required\`) returns \`{ signature, payment_header }\`; then
-  \`mcp__haven__haven_settle_mcp_tool\` (pass \`payment_id\`, \`signature\`,
-  \`payment_header\`, \`merchant_url\`, \`tool_name\`, \`arguments\`,
-  \`mcp_transport\`) funds and settles in one step and returns the tool result.
-  If it returns \`settled: false\`, funding is queued for the user's approval —
-  tell them and check status later, do not re-pay. Step-by-step alternative:
-  \`mcp__haven-signer__haven_sign\` → \`mcp__haven__haven_submit\` →
-  \`mcp__haven-signer__haven_x402_sign_header\` →
-  \`mcp__haven__haven_complete_mcp_tool\`. Pass \`payment_required\`,
-  \`arguments\`, and \`mcp_transport\` verbatim from the
-  \`mcp__haven__haven_pay_mcp_tool\` result. The returned \`expires_at\` is the
-  signing window; if a tool returns \`PAYMENT_WINDOW_EXPIRED\`, re-run
-  \`mcp__haven__haven_pay_mcp_tool\` with the same
-  \`idempotency_key\`. Do not call the merchant yourself — Haven completes the
-  merchant leg for you.
-- **Prices:** show the user the live price from the pay-tool result, never a
-  catalog price. \`haven_discover_tools\` prices are indicative
-  (\`price_is_indicative\`) and can be stale. The pay-tool result's \`amount\` /
-  \`amount_atomic\` is the amount Haven authorizes for the call — a ceiling the
-  merchant settles at or below — so present it as the most the user will pay.
-  Pass \`max_amount\` (atomic units) to \`haven_pay_mcp_tool\` /
-  \`haven_pay_x402_quote\` to reject a quote whose authorized amount is above the
-  user's cap, before any funds move.
-- **Status:** \`haven_get_payment_status\` with a \`payment_id\` to check on
-  queued or in-flight payments. Do not poll in a tight loop.
+**Catalog purchases — the primary path for MCP merchants:**
+
+1. \`mcp__haven__haven_discover_tools\` to find a payable service and its
+   \`catalog_id\`.
+2. \`mcp__haven__haven_prepare_catalog_purchase\` with \`catalog_id\` and
+   \`max_amount\`. \`max_amount\` (atomic units) is REQUIRED on this tool, and
+   is best practice on every paid call below too — it caps what the LIVE
+   merchant quote may charge, checked before any funding intent is created.
+3. Then FOLLOW THE RESPONSE'S GUIDANCE FIELDS: \`next_action\`, \`next_tool\`,
+   and \`next_arguments\` name the exact next call — act on those first; the
+   prose in this section is fallback and debugging detail. If the catalog
+   entry is missing or degraded, the response instead names
+   \`mcp__haven__haven_pay_mcp_tool\` (merchant URL, tool name, arguments) as
+   the manual fallback.
+
+**Signing:** \`mcp__haven-signer__haven_sign_x402\` with \`payment_id\` and
+\`payment_required\` ONLY — the local signer fetches the exact signing bytes
+itself, so never relay \`typed_data\` yourself. Fallback for an older signer
+or backend: re-run the quote/prepare tool with the SAME \`idempotency_key\`
+plus \`include_signing_payload=true\`, then pass \`payload_hash\`,
+\`x402_expected\` (the nested \`x402.expected\` object), and
+\`typed_data\`/\`typed_data_b64\` through unchanged.
+
+**Settle:** \`mcp__haven__haven_settle_mcp_tool\` with \`payment_id\`,
+\`signature\`, and \`payment_header\` ONLY — Haven rehydrates the merchant call
+context (\`merchant_url\`, \`tool_name\`, \`arguments\`, \`mcp_transport\`)
+server-side from \`payment_id\`. Pass those four fields explicitly only as a
+version-skew fallback when Haven has no stored context for the id — both or
+none together, never just one. If the settle result carries \`settled: false\`,
+funding is queued for the user's approval — tell them and check status later,
+do not re-pay.
+
+Step-by-step alternative (also key-safe; for an older signer or backend, or
+when you already have a merchant URL and tool name instead of a
+\`catalog_id\`): \`mcp__haven__haven_pay_mcp_tool\` then
+\`mcp__haven-signer__haven_sign\` → \`mcp__haven__haven_submit\` →
+\`mcp__haven-signer__haven_x402_sign_header\` →
+\`mcp__haven__haven_complete_mcp_tool\`. Pass \`payment_required\`,
+\`arguments\`, and \`mcp_transport\` verbatim from the quote/prepare result.
+The returned \`expires_at\` is the signing window; if a tool returns
+\`PAYMENT_WINDOW_EXPIRED\`, re-run the same quote/prepare tool with the same
+\`idempotency_key\`. Do not call the merchant yourself — Haven completes the
+merchant leg for you.
+
+**Direct transfer / non-MCP paywall:** \`mcp__haven__haven_pay\` with
+recipient, amount, and token for a plain transfer. For an arbitrary,
+non-MCP x402 paywall: \`mcp__haven__haven_quote_x402\` to get a quote, then
+\`mcp__haven__haven_pay_x402_quote\` — follow the result's guidance fields
+first, sign in the local Haven signer, and retry the original request only
+when the result says \`retry_original_x402_request\`.
+
+**Catalog tool arguments:** when \`haven_discover_tools\` returns
+\`tool_arguments\`, pass that object unchanged as the pay tool's
+\`arguments\` field (for example
+\`tool_arguments: { "tier": "50gb" }\` -> \`arguments: { "tier": "50gb" }\`).
+
+**Prices:** show the user the live price from the pay-tool result, never a
+catalog price. \`haven_discover_tools\` prices are indicative
+(\`price_is_indicative\`) and can be stale. The pay-tool result's \`amount\` /
+\`amount_atomic\` is the amount Haven authorizes for the call — a ceiling the
+merchant settles at or below — so present it as the most the user will pay.
+
+**Status:** \`mcp__haven__haven_get_payment_status\` with a \`payment_id\` to
+check on queued or in-flight payments. Do not poll in a tight loop.
 
 ## Approval semantics
 
 - A result with \`pending_approval\` means the payment exceeded the remaining
   budget and is waiting for the user in Haven. Tell the user, then check
   status later.
+- \`safe_to_continue: false\` on a guidance block is the same signal in
+  machine-readable form: stop and involve the user before calling anything
+  else for this payment.
 - Never ask the user for private keys. Signing happens only in the local Haven
   signer; the hosted Haven tools never receive the signing key. If a tool
   reports a missing or invalid credential, tell the user to re-run the Haven
@@ -125,12 +160,28 @@ present and surface \`message\` or \`error\` verbatim. Common cases:
   Suggest the user add funds in the Haven dashboard.
 - \`PRICE_EXCEEDS_MAX\`: the live merchant price exceeded your \`max_amount\`.
   No funds moved; ask the user before retrying with a higher cap.
-- \`PAYMENT_WINDOW_EXPIRED\`: re-run \`mcp__haven__haven_pay_mcp_tool\` with the same
-  \`idempotency_key\`, then sign the fresh \`payload_hash\`.
-- \`MERCHANT_REJECTED_AFTER_FUNDING\`: stop retrying the merchant and use
+- \`PAYMENT_WINDOW_EXPIRED\`: re-run the quote/prepare tool with the same
+  \`idempotency_key\`, then sign the fresh payload.
+- \`MERCHANT_REJECTED_AFTER_FUNDING\`: the merchant refused the paid retry.
+  Stop-and-sweep — stop retrying the merchant and use
   \`mcp__haven__haven_sweep_delegate\` to recover stranded delegate funds.
+- \`MERCHANT_UNRESPONSIVE_AFTER_FUNDING\`: funding confirmed on-chain, but the
+  merchant never answered the paid retry. This is NOT proof of rejection — the
+  merchant may still settle late. Verify-then-sweep, never a blind sweep:
+  check \`mcp__haven__haven_get_payment_status\`, retry
+  \`mcp__haven__haven_complete_mcp_tool\` ONCE, and only sweep with
+  \`mcp__haven__haven_sweep_delegate\` if no settlement appears.
 - Budget exceeded: tell the user how much remains (from
-  \`haven_get_allowances\`) and that they can raise the budget in Haven.
+  \`mcp__haven__haven_get_allowances\`) and that they can raise the budget in
+  Haven.
+
+## Reporting after a purchase
+
+A settled \`mcp__haven__haven_settle_mcp_tool\` response carries
+\`agent_summary\` and the remaining post-purchase allowance in \`allowance\` —
+report the amount paid and what is left from those fields directly. Do not
+call \`haven_get_agent\` or \`haven_get_allowances\` again just to report a
+purchase you already made.
 
 ## Revoke
 

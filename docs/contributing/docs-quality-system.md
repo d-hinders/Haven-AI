@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/docs-drift/docs-drift.test.ts
   - packages/backend/src/docs-drift/env-example-drift.test.ts
   - .env.example
-last-verified: "2026-08-04"
+last-verified: "2026-08-12" # #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
 ---
 
 # Documentation-quality system

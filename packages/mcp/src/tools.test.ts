@@ -1886,6 +1886,26 @@ describe('haven_discover_tools (#349)', () => {
     expect(String(fetchMock.mock.calls[0][0])).toBe(`${baseUrl}/catalog?category=media&rail=x402`)
   })
 
+  it('forwards a product search without making a payment request', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({ entries: [] }),
+    )
+
+    await handlers().haven_discover_tools({ search: 'NordShield VPN Basic' })
+    expect(String(fetchMock.mock.calls[0][0])).toBe(`${baseUrl}/catalog?search=NordShield+VPN+Basic`)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves blank search terms so the backend can reject them consistently', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({ entries: [] }),
+    )
+
+    await handlers().haven_discover_tools({ search: '' })
+    expect(String(fetchMock.mock.calls[0][0])).toBe(`${baseUrl}/catalog?search=`)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('lets the agent pay a discovered entry in the same session (discover -> pay)', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       // 1. discovery

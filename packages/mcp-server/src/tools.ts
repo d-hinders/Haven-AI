@@ -98,6 +98,7 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   },
   haven_discover_tools: {
     category: z.string().optional(),
+    search: z.string().optional(),
     rail: z.enum(['x402', 'mpp']).optional(),
   },
   haven_send: {
@@ -652,6 +653,7 @@ export function createToolHandlers(
         const args = parse('haven_discover_tools', input)
         const entries = await haven.discoverTools({
           category: args.category,
+          search: args.search,
           rail: args.rail,
         })
         return entries.map((entry) => ({

@@ -1,7 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { useReporting, type ReportingSyncStatus } from '@/hooks/useReporting'
+import {
+  useReporting,
+  type ReportingSyncStatus,
+  type ReportingVerification,
+} from '@/hooks/useReporting'
 import { useFortnox } from '@/hooks/useAccounting'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -22,10 +26,56 @@ function StatusChip({ status }: { status: ReportingSyncStatus }) {
   return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}>{s.label}</span>
 }
 
+/** "fortnox:supplierinvoice:123" → 123 (the number shown in Fortnox's UI). */
+function fortnoxInvoiceNumber(externalRef: string | null): string | null {
+  const match = externalRef?.match(/^fortnox:supplierinvoice:(\d+)$/)
+  return match ? match[1] : null
+}
+
+/** Plain-language verdict from a read-back verification (#1362). */
+function verificationSummary(v: ReportingVerification): { text: string; tone: 'success' | 'warning' | 'danger' } {
+  if (!v.registered) {
+    return {
+      text: `Not found in Fortnox — invoice ${v.invoice_number} no longer exists there. Re-sync to push it again.`,
+      tone: 'danger',
+    }
+  }
+  if (v.cancelled) {
+    return { text: `Registered in Fortnox as invoice ${v.invoice_number}, but cancelled there.`, tone: 'warning' }
+  }
+  if (v.booked) {
+    return {
+      text: `Booked in Fortnox — invoice ${v.invoice_number}${v.voucher ? `, voucher ${v.voucher}` : ''}. Your accountant has accounted for it.`,
+      tone: 'success',
+    }
+  }
+  return {
+    text: `Registered in Fortnox as invoice ${v.invoice_number} — awaiting booking by your accountant.`,
+    tone: 'success',
+  }
+}
+
 export default function ReportingPage() {
-  const { status, loading, error, sync } = useReporting()
+  const { status, loading, error, sync, verify } = useReporting()
   const { connect, disconnect } = useFortnox()
   const [busy, setBusy] = useState<'sync' | 'connect' | 'disconnect' | null>(null)
+  const [verifying, setVerifying] = useState<string | null>(null)
+  const [verifications, setVerifications] = useState<Record<string, ReportingVerification | { error: string }>>({})
+
+  const runVerify = async (paymentId: string) => {
+    setVerifying(paymentId)
+    try {
+      const v = await verify(paymentId)
+      setVerifications((prev) => ({ ...prev, [paymentId]: v }))
+    } catch {
+      setVerifications((prev) => ({
+        ...prev,
+        [paymentId]: { error: 'Could not check Fortnox right now. Try again in a moment.' },
+      }))
+    } finally {
+      setVerifying(null)
+    }
+  }
 
   const run = async (kind: 'sync' | 'connect' | 'disconnect', fn: () => Promise<void>) => {
     setBusy(kind)
@@ -121,15 +171,55 @@ export default function ReportingPage() {
               </div>
             ) : (
               <Card.Section divided>
-                {status.syncs.map((s) => (
-                  <Row
-                    key={`${s.provider}-${s.payment_id}`}
-                    className="px-5"
-                    title={truncate(s.payment_id)}
-                    subtitle={s.error ?? (s.attempts > 1 ? `${s.attempts} attempts` : s.provider)}
-                    trailing={<StatusChip status={s.status} />}
-                  />
-                ))}
+                {status.syncs.map((s) => {
+                  const invoiceNo = s.status === 'pushed' ? fortnoxInvoiceNumber(s.external_ref) : null
+                  const v = verifications[s.payment_id]
+                  return (
+                    <div key={`${s.provider}-${s.payment_id}`}>
+                      <Row
+                        className="px-5"
+                        title={truncate(s.payment_id)}
+                        subtitle={
+                          s.error ??
+                          (invoiceNo
+                            ? `Fortnox invoice ${invoiceNo}`
+                            : s.attempts > 1
+                              ? `${s.attempts} attempts`
+                              : s.provider)
+                        }
+                        trailing={
+                          <span className="flex items-center gap-2">
+                            {invoiceNo && (
+                              <Button
+                                variant="ghost"
+                                onClick={() => void runVerify(s.payment_id)}
+                                disabled={verifying !== null}
+                              >
+                                {verifying === s.payment_id ? 'Checking…' : 'Check in Fortnox'}
+                              </Button>
+                            )}
+                            <StatusChip status={s.status} />
+                          </span>
+                        }
+                      />
+                      {v && (
+                        <p
+                          className={`px-5 pb-3 text-xs ${
+                            'error' in v
+                              ? 'text-[var(--v2-danger)]'
+                              : verificationSummary(v).tone === 'success'
+                                ? 'text-[var(--v2-success)]'
+                                : verificationSummary(v).tone === 'warning'
+                                  ? 'text-[var(--v2-warning)]'
+                                  : 'text-[var(--v2-danger)]'
+                          }`}
+                        >
+                          {'error' in v ? v.error : verificationSummary(v).text}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
               </Card.Section>
             )}
           </Card>

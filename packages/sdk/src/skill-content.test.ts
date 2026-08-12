@@ -55,9 +55,14 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_discover_tools')
     expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_prepare_catalog_purchase')
     expect(HAVEN_SKILL_MD).toContain('catalog_id')
-    // max_amount is REQUIRED on this tool, unlike the manual-fallback tools.
-    expect(HAVEN_SKILL_MD).toContain('max_amount')
-    expect(HAVEN_SKILL_MD).toMatch(/max_amount.*REQUIRED/)
+    // A cap is REQUIRED on this tool, unlike the manual-fallback tools.
+    expect(HAVEN_SKILL_MD).toMatch(/cap is REQUIRED/)
+    // #1351: the skill teaches the human-unit spelling as the default, and
+    // still says what the atomic one means — an agent that reads only this
+    // must not write max_amount "1" meaning one dollar.
+    expect(HAVEN_SKILL_MD).toContain('max_amount_human')
+    expect(HAVEN_SKILL_MD).toMatch(/max_amount_human.*"1".*1 USDC/s)
+    expect(HAVEN_SKILL_MD).toMatch(/0\.000001 USDC/)
   })
 
   it('tells the agent to follow the response guidance fields first (#1308)', () => {

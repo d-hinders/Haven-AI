@@ -48,10 +48,16 @@ function gitLines(args) {
   }
 }
 
-function changedFiles() {
+/**
+ * #1337: distinguish "the diff was COMPUTED and is empty" from "the diff could
+ * not be computed". Only the former may pass in strict mode — a pure merge/
+ * sync PR (e.g. #1336, zero content delta) has nothing to couple, while a
+ * failed computation must stay fail-closed (the #1076 lesson).
+ */
+export function changedFilesWithProvenance() {
   const explicit = arg('changed')
   if (explicit !== undefined) {
-    return explicit.split(',').map((s) => s.trim()).filter(Boolean)
+    return { files: explicit.split(',').map((s) => s.trim()).filter(Boolean), computed: true }
   }
   const base = process.env.BASE_SHA
   if (base) {
@@ -59,18 +65,32 @@ function changedFiles() {
     // THREE-DOT (merge-base): a two-dot diff against a moving base branch lists
     // files the PR never touched as "changed" (same flaw fixed in the
     // design-system coupling gate, code review 2026-07-13).
-    return gitLines(['diff', '--name-only', `${base}...${head}`])
+    try {
+      const out = execFileSync('git', ['diff', '--name-only', `${base}...${head}`], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+      })
+      return { files: out.split('\n').map((s) => s.trim()).filter(Boolean), computed: true }
+    } catch {
+      // The range itself failed (missing SHA, shallow clone) — NOT a clean bill.
+      return { files: [], computed: false }
+    }
   }
   // Local run (no BASE_SHA): the candidate change is whatever a reviewer would
   // look at, which includes work not committed yet. A committed-only range
   // reports a clean bill of health for an uncommitted diff — the false green
   // that let #1076's contract-doc failure reach CI, because the skill runs this
   // during review, before the commit. CI is unaffected: it always sets BASE_SHA.
-  return [...new Set([
-    ...gitLines(['diff', '--name-only', 'origin/dev...HEAD']),
-    ...gitLines(['diff', '--name-only', 'HEAD']), // staged + unstaged tracked
-    ...gitLines(['ls-files', '--others', '--exclude-standard']), // untracked
-  ])].sort()
+  // Local: an empty union here is ambiguous (pre-commit run, #1076) — never
+  // provably computed-and-empty.
+  return {
+    files: [...new Set([
+      ...gitLines(['diff', '--name-only', 'origin/dev...HEAD']),
+      ...gitLines(['diff', '--name-only', 'HEAD']), // staged + unstaged tracked
+      ...gitLines(['ls-files', '--others', '--exclude-standard']), // untracked
+    ])].sort(),
+    computed: false,
+  }
 }
 
 export function ageDays(lastVerified, now = Date.now()) {
@@ -163,7 +183,7 @@ export function implicatedDocs(
 async function main() {
   const outPath = arg('out') || 'coupling-comment.md'
   const strict = process.argv.includes('--strict')
-  const changed = changedFiles()
+  const { files: changed, computed } = changedFilesWithProvenance()
 
   // An empty candidate set means the diff could not be computed — not that the
   // docs are fine. Reporting it as a pass is indistinguishable from a real
@@ -171,10 +191,19 @@ async function main() {
   // commit, the old committed-only range was empty and printed "no covered docs
   // implicated", and that sentence went into the PR body as evidence.
   if (changed.length === 0) {
-    console.log('Coupling gate: no changed files detected — nothing was checked.')
     if (process.env.GITHUB_OUTPUT) {
       await appendFile(process.env.GITHUB_OUTPUT, 'has_findings=false\n')
     }
+    // #1337: a PROVABLY computed empty diff (CI three-dot range succeeded, or
+    // an explicit --changed=) has nothing to couple — a pure merge/sync PR
+    // passes. An empty set whose computation is uncertain stays fail-closed
+    // in strict mode (#1076: a pre-commit run's empty range once shipped as
+    // "no covered docs implicated" in a PR body).
+    if (computed) {
+      console.log('Coupling gate: change-set computed and empty — nothing to couple (pure merge/sync).')
+      return
+    }
+    console.log('Coupling gate: no changed files detected — nothing was checked.')
     if (strict) {
       console.error(
         '\nBLOCKING: nothing was verified. Commit or stage your work, or pass ' +

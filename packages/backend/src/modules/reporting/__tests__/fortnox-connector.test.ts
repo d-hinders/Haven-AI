@@ -437,7 +437,7 @@ describe('verifyFortnoxInvoice (#1362)', () => {
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.verification).toMatchObject({
-        registered: true, booked: false, cancelled: false,
+        registered: true, missing: null, booked: false, cancelled: false,
         invoice_number: 11, voucher: null, total: 10.42,
       })
     }
@@ -463,7 +463,10 @@ describe('verifyFortnoxInvoice (#1362)', () => {
     const { impl } = invoiceStub(null, 404)
     const result = await verifyFortnoxInvoice('u1', 'pay-1', impl)
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.verification.registered).toBe(false)
+    if (result.ok) {
+      expect(result.verification.registered).toBe(false)
+      expect(result.verification.missing).toBe('deleted') // #1376: discriminated from a collision
+    }
   })
 
   it('MUTATION PROOF: an invoice number collision (wrong ExternalInvoiceNumber) must NOT read as registered', async () => {
@@ -480,6 +483,7 @@ describe('verifyFortnoxInvoice (#1362)', () => {
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.verification.registered).toBe(false)
+      expect(result.verification.missing).toBe('foreign_invoice') // #1376: never "no longer exists"
       expect(result.verification.booked).toBeNull()
     }
   })

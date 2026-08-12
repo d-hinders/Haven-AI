@@ -43,7 +43,7 @@ function fortnoxInvoiceNumber(externalRef: string | null): string | null {
 function verificationSummary(v: ReportingVerification): { text: string; tone: 'success' | 'warning' | 'danger' } {
   if (!v.registered) {
     return {
-      text: `Not found in Fortnox — invoice ${v.invoice_number} no longer exists there. Re-sync to push it again.`,
+      text: `Not found in Fortnox — invoice ${v.invoice_number} no longer exists there.`,
       tone: 'danger',
     }
   }
@@ -63,7 +63,7 @@ function verificationSummary(v: ReportingVerification): { text: string; tone: 's
 }
 
 export default function ReportingPage() {
-  const { status, loading, error, sync, verify } = useReporting()
+  const { status, loading, error, sync, verify, reopen } = useReporting()
   const { connect, disconnect } = useFortnox()
   const [busy, setBusy] = useState<'sync' | 'connect' | 'disconnect' | null>(null)
   const [verifying, setVerifying] = useState<string | null>(null)
@@ -90,6 +90,29 @@ export default function ReportingPage() {
   const run = async (kind: 'sync' | 'connect' | 'disconnect', fn: () => Promise<void>) => {
     setBusy(kind)
     try { await fn() } finally { setBusy(null) }
+  }
+
+  // #1376 review: reopen refusals (e.g. the invoice actually still exists,
+  // or the row raced) must SURFACE, not vanish as an unhandled rejection —
+  // same error-into-the-verdict-slot pattern as runVerify.
+  const runReopen = async (paymentId: string) => {
+    setBusy('sync')
+    try {
+      await reopen(paymentId)
+      setVerifications((prev) => {
+        const next = { ...prev }
+        delete next[paymentId] // the row left pushed — the old verdict is void
+        return next
+      })
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Could not re-open right now. Try again in a moment.'
+      setVerifications((prev) => ({ ...prev, [paymentId]: { error: message } }))
+    } finally {
+      setBusy(null)
+    }
   }
 
   if (loading) {
@@ -222,15 +245,26 @@ export default function ReportingPage() {
                       />
                       <div aria-live="polite">
                         {v && (
-                          <p
-                            className={`px-5 pb-3 text-xs ${
-                              'error' in v ? TONE_TEXT.danger : TONE_TEXT[verificationSummary(v).tone]
-                            }`}
-                          >
-                            {'error' in v
-                              ? v.error
-                              : `${verificationSummary(v).text} Checked ${new Date(v.checked_at).toLocaleTimeString()}.`}
-                          </p>
+                          <div className="flex items-center justify-between gap-3 px-5 pb-3">
+                            <p
+                              className={`text-xs ${
+                                'error' in v ? TONE_TEXT.danger : TONE_TEXT[verificationSummary(v).tone]
+                              }`}
+                            >
+                              {'error' in v
+                                ? v.error
+                                : `${verificationSummary(v).text} Checked ${new Date(v.checked_at).toLocaleTimeString()}.`}
+                            </p>
+                            {!('error' in v) && !v.registered && (
+                              <Button
+                                variant="ghost"
+                                onClick={() => void runReopen(s.payment_id)}
+                                disabled={busy !== null}
+                              >
+                                Re-open for sync
+                              </Button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

@@ -52,7 +52,7 @@ export const CLAIM_SYNC_INSERT_SQL = `INSERT INTO reporting_feed_syncs (user_id,
 
 export const CLAIM_SYNC_RECLAIM_FAILED_SQL = `UPDATE reporting_feed_syncs
      SET status = 'pending', attempts = attempts + 1, error = NULL, updated_at = NOW()
-     WHERE provider = $2 AND payment_id = $3 AND user_id = $1 AND status = 'failed'
+     WHERE provider = $2 AND payment_id = $3 AND user_id = $1 AND status IN ('failed', 'skipped')
      RETURNING id`
 
 export const MARK_SYNC_PUSHED_SQL = `UPDATE reporting_feed_syncs
@@ -62,6 +62,25 @@ export const MARK_SYNC_PUSHED_SQL = `UPDATE reporting_feed_syncs
 export const MARK_SYNC_FAILED_SQL = `UPDATE reporting_feed_syncs
      SET status = 'failed', error = $4, updated_at = NOW()
      WHERE provider = $2 AND payment_id = $3 AND user_id = $1`
+
+// #1365: a connector-level skip is a real ledger state now — previously it was
+// recorded via markPushed (status 'pushed', NULL external_ref, reason
+// DROPPED), which read as "Synced" in the UI and was never revisited by the
+// backfill. The reason lands in `error` (the same column the #498 note
+// contract already uses for non-fatal detail).
+export const MARK_SYNC_SKIPPED_SQL = `UPDATE reporting_feed_syncs
+     SET status = 'skipped', error = $4, updated_at = NOW()
+     WHERE provider = $2 AND payment_id = $3 AND user_id = $1`
+
+// #1365: verification-gated reopen for a deleted-in-Fortnox invoice. The
+// status predicate keeps the double-post guard intact: only a `pushed` row
+// flips, only to `failed` (the normal retry path), and the CALLER must first
+// have Fortnox itself confirm the invoice no longer exists — see
+// `reopenMissingPushed`'s contract in routes/reporting.ts.
+export const REOPEN_PUSHED_SQL = `UPDATE reporting_feed_syncs
+     SET status = 'failed', error = $4, updated_at = NOW()
+     WHERE provider = $2 AND payment_id = $3 AND user_id = $1 AND status = 'pushed'
+     RETURNING id`
 
 export const GET_SYNC_STATE_SQL = `SELECT * FROM reporting_feed_syncs
      WHERE provider = $2 AND payment_id = $3 AND user_id = $1`
@@ -124,6 +143,37 @@ export async function markFailed(
   db: Executor = pool,
 ): Promise<void> {
   await db.query(MARK_SYNC_FAILED_SQL, [userId, provider, paymentId, error.slice(0, 1000)])
+}
+
+/** #1365: record a connector skip with its reason — re-claimable like failed. */
+export async function markSkipped(
+  userId: string,
+  provider: string,
+  paymentId: string,
+  reason: string,
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(MARK_SYNC_SKIPPED_SQL, [userId, provider, paymentId, reason.slice(0, 1000)])
+}
+
+/**
+ * #1365: flip a `pushed` row back to retryable `failed` — ONLY valid after
+ * Fortnox itself confirmed the pushed invoice no longer exists (the caller
+ * runs the #1362 read-back first; this function just enforces the row-state
+ * half). Returns false when the row is not currently `pushed` (nothing
+ * written) — the pushed-is-final double-post guard stays intact for every
+ * other path, because the only transition added is pushed→failed on an
+ * invoice the provider says is gone.
+ */
+export async function reopenMissingPushed(
+  userId: string,
+  provider: string,
+  paymentId: string,
+  reason: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(REOPEN_PUSHED_SQL, [userId, provider, paymentId, reason.slice(0, 1000)])
+  return result.rows.length > 0
 }
 
 export async function getSyncState(

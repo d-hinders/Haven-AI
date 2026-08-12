@@ -31,7 +31,8 @@ describe('feed-sync dedup ledger (#497)', () => {
       .mockResolvedValueOnce({ rows: [{ id: 'x' }] }) // re-claim UPDATE on status='failed'
     const res = await claimSync('u1', 'fortnox', 'pi1')
     expect(res).toEqual({ owned: true, status: 'pending' })
-    expect(mockQuery.mock.calls[1][0]).toContain("status = 'failed'")
+    // #1365: skipped rows are re-claimable exactly like failed ones.
+    expect(mockQuery.mock.calls[1][0]).toContain("status IN ('failed', 'skipped')")
   })
 
   it('markPushed records the external ref; markFailed records the error', async () => {
@@ -53,4 +54,5 @@ describe('feed-sync dedup ledger (#497)', () => {
     expect(mockQuery.mock.calls[0][0]).toContain("status = 'failed'")
     expect((mockQuery.mock.calls[0][1] as unknown[])[3]).toBe('boom')
   })
+
 })

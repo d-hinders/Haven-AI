@@ -49,7 +49,7 @@ import {
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a legacy-rail send confirms, so it imports the module's
 // public entry point (same pattern as routes/x402.ts -> modules/x402/).
-import { tryRecordMachinePaymentEvidenceBaseById } from '../modules/mpp/index.js'
+import { tryRecordMachinePaymentEvidenceBaseById, mppDemoRetired } from '../modules/mpp/index.js'
 import {
   deserializeUserOp,
   loadExecutionRailState,
@@ -750,6 +750,16 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // is 410-with-nothing-written (review finding on #1120).
       if (isRetiredRailIntent(intent.execution_rail)) {
         const retired = sessionRailRetired('intent')
+        return reply.code(retired.statusCode).send(retired.body)
+      }
+
+      // #1328 (review finding on #1339): a PRE-EXISTING mpp_demo intent must
+      // not remain executable through this generic sign path after the
+      // retirement — historical rows stay readable, never actionable. Same
+      // 410-with-nothing-written contract as the session-rail gate above,
+      // and BEFORE the expiry flip for the same #1120 reason.
+      if (intent.payment_rail === 'mpp_demo' || intent.source === 'mpp_demo') {
+        const retired = mppDemoRetired()
         return reply.code(retired.statusCode).send(retired.body)
       }
 

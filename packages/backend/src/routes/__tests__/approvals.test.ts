@@ -220,4 +220,66 @@ describe('approval routes', () => {
     expect(response.json()).toEqual({ error: 'Valid tx_hash is required' })
     expect(mockQuery).not.toHaveBeenCalled()
   })
+
+// ── #1328 (review finding on #1339): historical mpp_demo approvals are
+// readable and rejectable, never approvable/proposable ────────────────────────
+
+describe('mpp_demo retirement gates (#1328)', () => {
+  const MPP_PROBE = { rows: [{ payment_rail: 'mpp_demo', source: 'mpp_demo' }] }
+
+  it('POST /:id/approve refuses an mpp_demo approval — 410, guard lives in the UPDATE WHERE (nothing written)', async () => {
+    // The UPDATE excludes mpp_demo rows → 0 rows; the diagnostic probe then
+    // identifies the rail. MUTATION PROOF: dropping the WHERE-clause guard
+    // makes the UPDATE return the row → 200 → this test fails.
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE (guarded) matches nothing
+      .mockResolvedValueOnce(MPP_PROBE)    // diagnostic probe
+    const response = await app.inject({
+      method: 'POST',
+      url: '/approvals/approval-mpp/approve',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toMatch(/mpp_demo flow is retired/)
+    const updateSql = String(mockQuery.mock.calls[0][0])
+    expect(updateSql).toContain("COALESCE(payment_rail, source, 'direct') <> 'mpp_demo'")
+  })
+
+  it('POST /:id/proposed refuses an mpp_demo approval the same way', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce(MPP_PROBE)
+    const response = await app.inject({
+      method: 'POST',
+      url: '/approvals/approval-mpp/proposed',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toMatch(/mpp_demo flow is retired/)
+  })
+
+  it('a missing row is still a plain 404, not a retirement message', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] }) // probe: no row at all
+    const response = await app.inject({
+      method: 'POST',
+      url: '/approvals/approval-gone/approve',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(404)
+  })
+
+  it('POST /:id/reject still works for mpp_demo — cleanup stays possible', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [{ id: 'approval-mpp' }] })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/approvals/approval-mpp/reject',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(200)
+    // The reject UPDATE carries no mpp_demo exclusion:
+    expect(String(mockQuery.mock.calls[0][0])).not.toContain('mpp_demo')
+  })
+})
 })

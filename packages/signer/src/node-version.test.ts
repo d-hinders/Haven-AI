@@ -21,7 +21,7 @@ describe('signer Node floor (#1161)', () => {
     // connect, then downgrade — or a version manager can hand the agent runtime
     // a different Node than the shell that ran setup. Only a startup check sees
     // the version this process is actually running on.
-    expect(() => assertSupportedNodeVersion('23.1.0')).toThrow(/requires Node\.js >=24\.0\.0/)
+    expect(() => assertSupportedNodeVersion('21.1.0')).toThrow(/requires Node\.js >=22\.0\.0/)
     expect(() => assertSupportedNodeVersion('20.0.0')).toThrow(/The Haven signer/)
   })
 
@@ -31,7 +31,7 @@ describe('signer Node floor (#1161)', () => {
   })
 
   it('allows the floor and above', () => {
-    expect(() => assertSupportedNodeVersion('24.0.0')).not.toThrow()
+    expect(() => assertSupportedNodeVersion('22.0.0')).not.toThrow()
     expect(() => assertSupportedNodeVersion('25.2.0')).not.toThrow()
   })
 
@@ -43,9 +43,9 @@ describe('signer Node floor (#1161)', () => {
     await expect(
       runSignerStdioServer({
         credentialsPath: '/nonexistent/haven/signer.json',
-        nodeVersion: '23.1.0',
+        nodeVersion: '21.1.0',
       }),
-    ).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+    ).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
   })
 
   // Guarding only the stdio entrypoint would have reproduced #1161 itself one
@@ -56,14 +56,14 @@ describe('signer Node floor (#1161)', () => {
   describe('every key-bound entry point is guarded, not just the stdio server', () => {
     it('refuses in resolveSignerRuntime', async () => {
       await expect(
-        resolveSignerRuntime({ credentialsPath: '/nonexistent/haven/signer.json', nodeVersion: '23.1.0' }),
-      ).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+        resolveSignerRuntime({ credentialsPath: '/nonexistent/haven/signer.json', nodeVersion: '21.1.0' }),
+      ).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
     })
 
     it('refuses in resolveEdgeSigner', async () => {
       await expect(
-        resolveEdgeSigner({ credentialsPath: '/nonexistent/haven/signer.json', nodeVersion: '23.1.0' }),
-      ).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+        resolveEdgeSigner({ credentialsPath: '/nonexistent/haven/signer.json', nodeVersion: '21.1.0' }),
+      ).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
     })
 
     it('refuses even on the pre-resolved delegateKey fast path', async () => {
@@ -71,12 +71,12 @@ describe('signer Node floor (#1161)', () => {
       // load would miss it entirely — and it is the branch that hands back a
       // working signer with the least ceremony.
       await expect(
-        resolveSignerRuntime({ delegateKey: DELEGATE_KEY, nodeVersion: '23.1.0' }),
-      ).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+        resolveSignerRuntime({ delegateKey: DELEGATE_KEY, nodeVersion: '21.1.0' }),
+      ).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
     })
 
     it('still builds a signer on a supported Node', async () => {
-      const { signer } = await resolveSignerRuntime({ delegateKey: DELEGATE_KEY, nodeVersion: '24.0.0' })
+      const { signer } = await resolveSignerRuntime({ delegateKey: DELEGATE_KEY, nodeVersion: '22.0.0' })
       expect(signer).toBeDefined()
     })
   })

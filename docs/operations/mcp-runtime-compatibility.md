@@ -48,7 +48,7 @@ Keep this table in sync with that file.
 
 | Component | Supported version |
 | --- | --- |
-| Node.js | >= 24.0.0 (pinned to LTS 24 in `.nvmrc` / package `engines`) |
+| Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
 | `@haven_ai/connect` | `0.1.22-alpha.0` |
 | `@haven_ai/mcp` | `0.1.22-alpha.0` |
 | `@haven_ai/sdk` | `0.1.22-alpha.0` |
@@ -98,12 +98,20 @@ diagnostic that needs the full public identifier, use the owner-only, non-secret
 
 ## Where the Node floor is enforced
 
-`>=24.0.0` is declared in four places that must agree: the `engines.node` of the
-four packages this floor governs (`sdk`, `connect`, `signer`, `mcp`), `.nvmrc`,
+`>=22.0.0` is declared in three places that must agree: the `engines.node` of the
+four packages this floor governs (`sdk`, `connect`, `signer`, `mcp`),
 `HAVEN_MINIMUM_NODE_VERSION` in `@haven_ai/sdk`, and
 `MCP_RUNTIME_MANIFEST.minimumNodeVersion`. The manifest field is **derived** from
 the SDK constant, and a guard test in each of those four packages pins its own
-`engines.node` to it. They cannot drift silently.
+`engines.node` to it. They cannot drift silently. `.nvmrc` is separate: it pins
+the version the repo itself develops and runs CI on (LTS 24), which may sit
+*above* the user-facing floor but never below it. The floor is what an agent's
+machine must satisfy; `.nvmrc` is what ours does.
+
+The floor is 22 (maintenance LTS until April 2027) rather than 24 because the
+runtime uses nothing newer than `AbortSignal.any` (Node 20.3), and Node 20 is
+past end-of-life — 22 is the oldest still-supported LTS
+([#1352](https://github.com/d-hinders/Haven-AI/issues/1352)).
 
 They did drift once, which is why the constant exists. `engines` said `>=24`
 everywhere while the manifest enforced `20.0.0`, so the guard meant to hold the
@@ -369,7 +377,7 @@ what each server's instructions say and why they differ in length.
   serializer and validates the generated Haven block before writing. The
   expected shape is `command = ".../bin/haven-mcp"` and `args = []`.
 - **Unsupported Node.js:** the connector, signer, and MCP packages require
-  Node.js `>=24.0.0`, and
+  Node.js `>=22.0.0`, and
   since [#1161](https://github.com/d-hinders/Haven-AI/issues/1161) setup
   **refuses** below it rather than proceeding — see
   [Where the Node floor is enforced](#where-the-node-floor-is-enforced). The

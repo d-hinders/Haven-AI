@@ -60,7 +60,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-12" # #1346 re-verified Connect's runtime-owned activation and read-only post-setup check; #1330 Hermes identity handoff
+last-verified: "2026-08-12" # #1346 re-verified Connect's runtime-owned activation and read-only post-setup check + #1352 Node floor 24->22 (engines/constant only; no numeric floor claim in this doc); #1330 Hermes identity handoff
 ---
 
 # Haven — Architecture Overview

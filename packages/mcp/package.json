@@ -3,7 +3,7 @@
   "version": "0.1.22-alpha.0",
   "description": "Haven MCP server for local, non-custodial agent payments",
   "engines": {
-    "node": ">=24"
+    "node": ">=22"
   },
   "type": "module",
   "bin": {

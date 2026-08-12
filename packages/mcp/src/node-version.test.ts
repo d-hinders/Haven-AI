@@ -16,7 +16,7 @@ describe('MCP server Node floor (#1161)', () => {
   })
 
   it('refuses to start below the floor', () => {
-    expect(() => assertSupportedNodeVersion('23.1.0')).toThrow(/requires Node\.js >=24\.0\.0/)
+    expect(() => assertSupportedNodeVersion('21.1.0')).toThrow(/requires Node\.js >=22\.0\.0/)
     expect(() => assertSupportedNodeVersion('20.0.0')).toThrow(/The Haven MCP server/)
   })
 
@@ -31,7 +31,7 @@ describe('MCP server Node floor (#1161)', () => {
   })
 
   it('allows the floor and above', () => {
-    expect(() => assertSupportedNodeVersion('24.0.0')).not.toThrow()
+    expect(() => assertSupportedNodeVersion('22.0.0')).not.toThrow()
     expect(() => assertSupportedNodeVersion('25.2.0')).not.toThrow()
   })
 
@@ -39,9 +39,9 @@ describe('MCP server Node floor (#1161)', () => {
     await expect(
       runStdioServer({
         credentialsPath: '/nonexistent/haven/agent.json',
-        nodeVersion: '23.1.0',
+        nodeVersion: '21.1.0',
       }),
-    ).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+    ).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
   })
 
   // The client built by these is delegate-key-bound — pay(), sign() and the
@@ -57,24 +57,24 @@ describe('MCP server Node floor (#1161)', () => {
 
     it('refuses in resolveHavenClient', async () => {
       await expect(
-        resolveHavenClient({ credentials: CREDENTIALS, nodeVersion: '23.1.0' }),
-      ).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+        resolveHavenClient({ credentials: CREDENTIALS, nodeVersion: '21.1.0' }),
+      ).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
     })
 
     it('refuses in createHavenClient', async () => {
       await expect(
-        createHavenClient({ credentials: CREDENTIALS, nodeVersion: '23.1.0' }),
-      ).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+        createHavenClient({ credentials: CREDENTIALS, nodeVersion: '21.1.0' }),
+      ).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
     })
 
     it('refuses in createHavenMcpServer', async () => {
       await expect(
-        createHavenMcpServer({ credentials: CREDENTIALS, nodeVersion: '23.1.0' }),
-      ).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+        createHavenMcpServer({ credentials: CREDENTIALS, nodeVersion: '21.1.0' }),
+      ).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
     })
 
     it('still builds a client on a supported Node', async () => {
-      const { client } = await resolveHavenClient({ credentials: CREDENTIALS, nodeVersion: '24.0.0' })
+      const { client } = await resolveHavenClient({ credentials: CREDENTIALS, nodeVersion: '22.0.0' })
       expect(client).toBeDefined()
     })
   })

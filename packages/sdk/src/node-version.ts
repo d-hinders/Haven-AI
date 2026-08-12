@@ -33,9 +33,9 @@
  * package. A guard test in each package asserts exactly that against its own
  * `package.json`, so the two cannot drift again silently.
  */
-export const HAVEN_MINIMUM_NODE_VERSION = '24.0.0'
+export const HAVEN_MINIMUM_NODE_VERSION = '22.0.0'
 
-/** Parse `v24.1.0` / `24.1` / `24` into a comparable triple. */
+/** Parse `v22.1.0` / `22.1` / `22` into a comparable triple. */
 function parseNodeVersion(value: string): [number, number, number] {
   const match = value.trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/)
   if (!match) return [0, 0, 0]

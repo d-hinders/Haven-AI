@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402.ts
-last-verified: "2026-08-11" # re-verified for #1300: topology/custody claims unaffected by timeout calibration (orchestration refs live in 04/07)
+last-verified: "2026-08-12" # re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract

@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-12" # #1348: preflight round-trip budget (reads overlap the probe, getAgent in-flight coalescing, delegateAddress option; failure semantics + refusal order unchanged) + prior same-day: #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Same day #1350: catalog discovery now documents case-insensitive category matching plus read-only search over name/description/category; results remain deterministic and indicative only. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
+last-verified: "2026-08-12" # #1349: settled reporting contract sourced from Haven state, merchant raw result evidence-only. #1348: preflight round-trip budget (reads overlap the probe, getAgent in-flight coalescing, delegateAddress option; failure semantics + refusal order unchanged) + prior same-day: #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Same day #1350: catalog discovery now documents case-insensitive category matching plus read-only search over name/description/category; results remain deterministic and indicative only. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -100,6 +100,16 @@ tools and on the settle tool's queued-funding branch), a compact
 `agent_summary`, and an advisory `warnings[]` (MISSING_MAX_AMOUNT absorbs the
 #1275 cap nudge; QUOTE_EXPIRES_SOON; MERCHANT_URL_DISCOVERED). Warnings never
 replace refusals; failure codes stay authoritative.
+
+Since #1349, a successful hosted `haven_settle_mcp_tool` also places the default
+reporting contract at `agent_summary.purchase_summary`: `{ status: 'settled',
+product, amount, amount_atomic, asset, network, merchant, invoice_id,
+funding_tx_hash, settlement_tx_hash, allowance }`. Haven payment state supplies
+settlement status, money, merchant identity, and funding fields. `product` and
+`invoice_id` are narrow merchant display metadata; `settlement_tx_hash` is an
+optional merchant `PAYMENT-RESPONSE` receipt reference, not Haven settlement
+proof. Missing values are explicit `null`. The top-level raw `result` remains
+advanced merchant evidence and never decides whether Haven reports settlement.
 
 Hosted `haven_pay_mcp_tool` additionally accepts a **base merchant URL**
 (#1271): when the probe misses (non-402), it makes one bounded same-origin
@@ -294,7 +304,8 @@ The recommended three-call fast path for an x402-protected MCP tool is:
    merchant-bound payment header.
 3. `haven_settle_mcp_tool` — hosted MCP relays the funding signature, waits for
    confirmation, performs a fresh merchant MCP handshake, delivers the signed
-   header, and returns the tool result.
+   header, and returns `agent_summary.purchase_summary` as the default report;
+   raw `result` remains optional merchant evidence.
 
 **Settle by `payment_id` (#1307).** `haven_settle_mcp_tool` and
 `haven_complete_mcp_tool` accept `merchant_url` / `tool_name` / `arguments` /

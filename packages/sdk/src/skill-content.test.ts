@@ -90,7 +90,9 @@ describe('generic skill content', () => {
 
   it('reports post-purchase results from agent_summary and remaining allowance, no extra calls (#1310)', () => {
     expect(HAVEN_SKILL_MD).toContain('agent_summary')
+    expect(HAVEN_SKILL_MD).toContain('purchase_summary')
+    expect(HAVEN_SKILL_MD).toMatch(/result[\s\S]*never use[\s\S]*whether[\s\S]*paid/i)
     expect(HAVEN_SKILL_MD).toMatch(/remaining post-purchase allowance/)
-    expect(HAVEN_SKILL_MD).toMatch(/Do not\s+call[\s\S]*?again just to report/)
+    expect(HAVEN_SKILL_MD).toMatch(/Do not\s+call[\s\S]*?again just to\s+report/)
   })
 })

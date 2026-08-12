@@ -180,10 +180,12 @@ present and surface \`message\` or \`error\` verbatim. Common cases:
 ## Reporting after a purchase
 
 A settled \`mcp__haven__haven_settle_mcp_tool\` response carries
-\`agent_summary\` and the remaining post-purchase allowance in \`allowance\` —
-report the amount paid and what is left from those fields directly. Do not
-call \`haven_get_agent\` or \`haven_get_allowances\` again just to report a
-purchase you already made.
+\`agent_summary.purchase_summary\` and the remaining post-purchase allowance
+in \`allowance\` — report the product, Haven-derived payment/transaction
+fields, and what is left from those fields directly. \`result\` is optional
+raw merchant evidence; never use it to decide whether the purchase was paid.
+Do not call \`haven_get_agent\` or \`haven_get_allowances\` again just to
+report a purchase you already made.
 
 ## Revoke
 

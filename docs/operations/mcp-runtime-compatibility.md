@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-12" # re-verified for #1348 (round-trip orchestration; no claim here describes call ordering) + prior same-day: re-verified for #1355 (payment_id-only signing: sign-context carries payment_required; grep-checked: no claim here names the sign-call argument shape) and #1350 (haven_discover_tools gained an additive read-only `search` argument and documented case-insensitive category matching; older runtimes remain compatible because the existing omit-category/omit-rail calls are unchanged). Same day: release 0.1.22-alpha.0 pins
+last-verified: "2026-08-12" # #1349 hosted settled-reporting extension re-verified: no signing/runtime compatibility change. Prior same-day: re-verified for #1348 (round-trip orchestration; no claim here describes call ordering), #1355 (payment_id-only signing: sign-context carries payment_required; grep-checked: no claim here names the sign-call argument shape), and #1350 (haven_discover_tools gained an additive read-only `search` argument and documented case-insensitive category matching; older runtimes remain compatible because the existing omit-category/omit-rail calls are unchanged). Same day: release 0.1.22-alpha.0 pins
 ---
 
 # MCP Runtime Compatibility
@@ -287,6 +287,14 @@ naming the fallback in-band: re-send the four fields explicitly (the same
 values `haven_pay_mcp_tool` returned at quote time). Same shape as the
 `include_signing_payload=true` fallback above: no signature verification
 changes, only which call carries the bulk bytes.
+
+On a successful hosted settle (#1349), agents report from the compact
+`agent_summary.purchase_summary` rather than parsing the merchant's raw
+`result`. This is a backward-compatible reporting extension only: Haven state
+sets status and payment fields, while product/invoice metadata comes from the
+merchant and `settlement_tx_hash` is only an optional merchant PAYMENT-RESPONSE
+receipt reference. Missing values are explicit; it changes neither signing nor
+runtime compatibility.
 
 `haven_prepare_catalog_purchase` (#1306) — the guided catalog-id preflight —
 persists the SAME `mcpCallContext` at quote time (it composes the identical

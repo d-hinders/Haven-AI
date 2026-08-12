@@ -419,6 +419,7 @@ describe('getPostPurchaseAllowanceSummary (#1310)', () => {
     ])
 
     expect(summary).toEqual({
+      payment: expect.objectContaining({ paymentId: 'pay_1' }),
       allowance: {
         rail: 'legacy',
         remaining_atomic: '3500000',
@@ -502,6 +503,7 @@ describe('getPostPurchaseAllowanceSummary (#1310)', () => {
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
     await expect(haven.getPostPurchaseAllowanceSummary('pay_1')).resolves.toEqual({
+      payment: expect.objectContaining({ paymentId: 'pay_1' }),
       allowance: null,
       warnings: [expect.objectContaining({ code: 'ALLOWANCE_CHECK_UNAVAILABLE' })],
     })

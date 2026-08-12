@@ -67,6 +67,7 @@ export type {
   X402RequestSnapshot,
   X402Quote,
   AgentNextStep,
+  AgentPurchaseSummary,
   AgentPaymentSummary,
   AgentPaymentWarning,
   X402ResumeState,

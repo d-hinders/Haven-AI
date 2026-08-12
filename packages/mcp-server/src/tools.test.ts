@@ -2199,6 +2199,104 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     })
   })
 
+  it('returns a compact Haven-derived purchase_summary while preserving the merchant result as evidence', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000') },
+    })
+    const merchantResult = {
+      structuredContent: {
+        summary: {
+          status: 'confirmed',
+          product_name: 'NordShield VPN Basic',
+          invoice_id: 'INV-123',
+          amount: '999999', // merchant display data must not overwrite Haven amount
+        },
+      },
+      invoice: 'large merchant blob',
+    }
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: merchantResult, settlementTxHash: '0xsettle',
+    })
+
+    const result = ok<{
+      result: unknown
+      agent_summary: {
+        status: string
+        purchase_summary: Record<string, unknown>
+      }
+    }>(await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()))
+
+    expect(result.data.result).toBe(merchantResult)
+    expect(result.data.agent_summary).toMatchObject({
+      status: 'settled',
+      purchase_summary: {
+        status: 'settled',
+        product: 'NordShield VPN Basic',
+        amount: '1.50',
+        amount_atomic: null,
+        asset: USDC,
+        network: 'eip155:8453',
+        merchant: { address: '0xMerchant', resource_url: 'http://merchant.test/mcp' },
+        invoice_id: 'INV-123',
+        funding_tx_hash: '0xfund',
+        settlement_tx_hash: '0xsettle',
+        allowance: { remaining_atomic: '3500000' },
+      },
+    })
+    expect(calls.filter((call) => call.method === 'GET' && call.url.endsWith('/machine-payments/pay_x402/status'))).toHaveLength(1)
+  })
+
+  it('does not infer settlement or metadata from a merchant result that merely claims payment', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture({
+        amount: '2.00', token: 'DAI', asset: null, network: null, merchant_address: null, resource_url: null,
+      }) },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000') },
+    })
+    const merchantResult = { paid: true, status: 'confirmed', invoice_id: 'UNTRUSTED' }
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({ status: 200, ok: true, body: merchantResult })
+
+    const result = ok<{ result: unknown; agent_summary: { purchase_summary: Record<string, unknown> } }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()),
+    )
+
+    expect(result.data.result).toBe(merchantResult)
+    expect(result.data.agent_summary.purchase_summary).toMatchObject({
+      status: 'settled',
+      product: null,
+      asset: null,
+      merchant: { address: null, resource_url: null },
+      invoice_id: null,
+      settlement_tx_hash: null,
+    })
+    // The reporting status is set by Haven's completed flow, never this blob.
+    expect(result.data.agent_summary.purchase_summary.status).toBe('settled')
+  })
+
+  it('keeps a merchant receipt transaction hash as optional evidence, not settlement truth', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000') },
+    })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: {}, settlementTxHash: 'merchant-receipt-reference',
+    })
+
+    const result = ok<{ agent_summary: { purchase_summary: Record<string, unknown> } }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()),
+    )
+
+    expect(result.data.agent_summary.purchase_summary).toMatchObject({
+      status: 'settled',
+      funding_tx_hash: '0xfund',
+      settlement_tx_hash: 'merchant-receipt-reference',
+    })
+  })
+
   it('attaches source: active_delegations on the delegation rail, derived via #1090 (not agent_allowances)', async () => {
     const haven = havenSettled({
       'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
@@ -2251,6 +2349,27 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     expect(result.data.settled).toBe(true)
     expect(result.data.allowance).toBeNull()
     expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+  })
+
+  it('keeps verified Haven payment fields when only the allowance read fails', async () => {
+    const haven = havenSettled({
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
+    })
+
+    const result = ok<{ allowance: unknown; agent_summary: { purchase_summary: Record<string, unknown> } }>(
+      await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()),
+    )
+
+    expect(result.data.allowance).toBeNull()
+    expect(result.data.agent_summary.purchase_summary).toMatchObject({
+      amount: '1.50',
+      asset: USDC,
+      network: 'eip155:8453',
+      merchant: { address: '0xMerchant', resource_url: 'http://merchant.test/mcp' },
+      allowance: null,
+    })
   })
 
   it('a failed payment-status lookup (token resolution) ALSO never converts settled:true into failure', async () => {

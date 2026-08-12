@@ -1074,6 +1074,35 @@ export interface AgentNextStep {
   reason: string
 }
 
+/**
+ * #1349: compact, Haven-generated reporting evidence for a completed x402
+ * merchant purchase. `status`, money fields, merchant endpoint/address, and
+ * funding transaction come from Haven payment state; `product` and
+ * `invoice_id` are optional merchant-supplied display metadata. The raw
+ * merchant result remains separate evidence and MUST NOT be used to infer
+ * settlement status.
+ */
+export interface AgentPurchaseSummary {
+  /** Set only after Haven has completed the funding and merchant-settlement flow. */
+  status: 'settled'
+  product: string | null
+  amount: string | null
+  amount_atomic: string | null
+  asset: string | null
+  network: string | null
+  merchant: {
+    address: string | null
+    resource_url: string | null
+  }
+  /** Merchant-supplied identifier, or null when the merchant did not supply one. */
+  invoice_id: string | null
+  funding_tx_hash: string | null
+  /** Optional merchant receipt reference parsed from PAYMENT-RESPONSE; not Haven settlement proof. */
+  settlement_tx_hash: string | null
+  /** Same read-only allowance block returned at the top level, or null when unavailable. */
+  allowance: PostPurchaseAllowanceSummary | null
+}
+
 /** #1308: compact reporting summary — what the agent tells the user. */
 export interface AgentPaymentSummary {
   payment_id: string
@@ -1084,6 +1113,12 @@ export interface AgentPaymentSummary {
   network?: string
   expires_at?: string
   product?: string
+  /**
+   * Default reporting contract for a successful `haven_settle_mcp_tool` call.
+   * The merchant's raw `result` remains available separately as advanced
+   * evidence; do not parse it to determine whether a payment settled.
+   */
+  purchase_summary?: AgentPurchaseSummary
 }
 
 export const AgentPaymentRailDescriptions: Record<AgentPaymentRail, string> = {

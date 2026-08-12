@@ -1007,8 +1007,18 @@ export class HavenClient {
    */
   async getPostPurchaseAllowanceSummary(
     paymentId: string,
-  ): Promise<{ allowance: PostPurchaseAllowanceSummary | null; warnings: AgentPaymentWarning[] }> {
-    const unavailable = (detail: string): { allowance: null; warnings: AgentPaymentWarning[] } => ({
+  ): Promise<{
+    allowance: PostPurchaseAllowanceSummary | null
+    warnings: AgentPaymentWarning[]
+    /** Same authenticated payment-state read used to resolve the settled token. */
+    payment: PaymentStatusResult | null
+  }> {
+    const unavailable = (detail: string): {
+      allowance: null
+      warnings: AgentPaymentWarning[]
+      payment: null
+    } => ({
+      payment: null,
       allowance: null,
       warnings: [
         {
@@ -1020,29 +1030,39 @@ export class HavenClient {
         },
       ],
     })
-    try {
-      // #1320 review: all three reads in ONE parallel leg — the status result
-      // only gates the token MATCH below, so sequencing it first doubled the
-      // worst-case bound (2 × requestTimeout) for a best-effort report.
-      const [status, agent, allowanceSummary] = await Promise.all([
+    // #1320 review: all three reads in ONE parallel leg. Keep a successfully
+    // read payment state even when a best-effort allowance read fails: it is
+    // authoritative reporting data in its own right.
+    const [statusResult, agentResult, allowanceResult] = await Promise.allSettled([
         this.getPaymentStatus(paymentId),
         this.getAgent(),
         this.getAllowances(),
-      ])
+    ])
+    if (statusResult.status === 'rejected') {
+      return unavailable(statusResult.reason instanceof Error ? statusResult.reason.message : String(statusResult.reason))
+    }
+    const status = statusResult.value
+    if (agentResult.status === 'rejected') {
+      return { ...unavailable(agentResult.reason instanceof Error ? agentResult.reason.message : String(agentResult.reason)), payment: status }
+    }
+    if (allowanceResult.status === 'rejected') {
+      return { ...unavailable(allowanceResult.reason instanceof Error ? allowanceResult.reason.message : String(allowanceResult.reason)), payment: status }
+    }
+    try {
       const tokenAddress = status.asset ?? status.x402?.asset ?? null
       if (!tokenAddress) {
-        return unavailable('the settled payment does not carry a resolvable token address')
+        return { ...unavailable('the settled payment does not carry a resolvable token address'), payment: status }
       }
-      const rail = agent.executionRail
+      const rail = agentResult.value.executionRail
       const source = rail === 'delegation' ? 'active_delegations' : 'allowance_module'
-      const match = allowanceSummary.allowances.find(
+      const match = allowanceResult.value.allowances.find(
         (a) => a.tokenAddress.toLowerCase() === tokenAddress.toLowerCase(),
       )
       if (!match) {
         // #1320 review: a missing row is UNKNOWN, not zero — an unexpected
         // address, rail mismatch, or read race must not report a confident
         // "$0 remaining" to the user.
-        return unavailable('no allowance/budget row matches the settled token')
+        return { ...unavailable('no allowance/budget row matches the settled token'), payment: status }
       }
       // Same "only format when decimals are known" discipline as
       // getAgentSummary() above — an unregistered token surfaces the exact
@@ -1052,6 +1072,7 @@ export class HavenClient {
         ? `${formatAtomicAmount(safeBigInt(match.onchain.remaining), token.decimals)} ${match.tokenSymbol}`
         : undefined
       return {
+        payment: status,
         allowance: {
           rail,
           remaining_atomic: match.onchain.remaining,

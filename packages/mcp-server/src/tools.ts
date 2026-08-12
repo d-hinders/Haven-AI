@@ -7,6 +7,7 @@ import {
   X402UnexpectedStatusError,
   AgentPaymentWarningCode,
   type AgentNextStep,
+  type AgentPurchaseSummary,
   type AgentPaymentWarning,
   type AgentPaymentSummary,
   HavenClient,
@@ -1218,7 +1219,16 @@ export function createToolHandlers(
         // trip. A failed read NEVER converts this settled success into a
         // failure — it degrades to a null block plus a warning, folded into
         // the SAME warnings[] buildAgentGuidance already emits.
-        const { allowance, warnings } = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
+        // Reuse the payment-status read the allowance helper already performs;
+        // reporting must not add a second status round trip or race it.
+        const { allowance, warnings, payment } = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
+        const purchaseSummary = buildPurchaseSummary({
+          payment,
+          merchantResult: merchant.result,
+          fundingTxHash: funding.txHash ?? null,
+          settlementTxHash: merchant.settlement_tx_hash,
+          allowance,
+        })
         // Pick explicit fields — don't spread the raw HTTP status/ok, which would
         // collide with the funding/payment-status meaning an agent expects here.
         // Echo payment_id so the agent can reconcile this settled payment against
@@ -1237,11 +1247,12 @@ export function createToolHandlers(
             safeToContinue: true,
             reason:
               'Funding and merchant settlement both succeeded. Report the result to the user ' +
-              '(amounts, settlement_tx_hash, and the merchant result/summary, plus remaining ' +
-              'allowance/budget from `allowance` when not null).',
+              'from agent_summary.purchase_summary; `result` is optional raw merchant evidence, ' +
+              'not Haven payment truth. The summary includes remaining allowance/budget when available.',
             summary: {
               payment_id: args.payment_id,
               status: 'settled',
+              purchase_summary: purchaseSummary,
             },
             warnings,
           }),
@@ -1642,6 +1653,54 @@ function buildAgentGuidance(input: {
     reason: input.reason,
     agent_summary: input.summary,
     warnings: input.warnings ?? [],
+  }
+}
+
+/**
+ * #1349: normalize only the small merchant display fields agents need to
+ * report a purchase. Merchant content is deliberately never allowed to set
+ * status, money, network, merchant identity, or transaction hashes.
+ */
+function buildPurchaseSummary(input: {
+  payment: Awaited<ReturnType<HavenClient['getPaymentStatus']>> | null
+  merchantResult: unknown
+  fundingTxHash: string | null
+  settlementTxHash: string | null
+  allowance: AgentPurchaseSummary['allowance']
+}): AgentPurchaseSummary {
+  const merchantSummary = merchantPurchaseMetadata(input.merchantResult)
+  return {
+    status: 'settled',
+    product: merchantSummary.product,
+    amount: input.payment?.amount ?? null,
+    amount_atomic: input.payment?.amountAtomic ?? null,
+    asset: input.payment?.asset ?? null,
+    network: input.payment?.network ?? (input.payment ? `eip155:${input.payment.chainId}` : null),
+    merchant: {
+      address: input.payment?.merchantAddress ?? null,
+      resource_url: input.payment?.resourceUrl ?? null,
+    },
+    invoice_id: merchantSummary.invoiceId,
+    funding_tx_hash: input.fundingTxHash ?? input.payment?.txHash ?? null,
+    // The merchant's optional PAYMENT-RESPONSE receipt can name its own tx.
+    // Preserve it as evidence, never as the source of the settled status.
+    settlement_tx_hash: input.settlementTxHash,
+    allowance: input.allowance,
+  }
+}
+
+function merchantPurchaseMetadata(result: unknown): { product: string | null; invoiceId: string | null } {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return { product: null, invoiceId: null }
+  const structuredContent = (result as { structuredContent?: unknown }).structuredContent
+  if (!structuredContent || typeof structuredContent !== 'object' || Array.isArray(structuredContent)) {
+    return { product: null, invoiceId: null }
+  }
+  const summary = (structuredContent as { summary?: unknown }).summary
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return { product: null, invoiceId: null }
+  const value = summary as { product_name?: unknown; product?: unknown; invoice_id?: unknown }
+  return {
+    product: typeof value.product_name === 'string' ? value.product_name : typeof value.product === 'string' ? value.product : null,
+    invoiceId: typeof value.invoice_id === 'string' ? value.invoice_id : null,
   }
 }
 

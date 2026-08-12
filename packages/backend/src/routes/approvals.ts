@@ -4,6 +4,7 @@ import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import { mppDemoRetired } from '../modules/mpp/index.js'
+import { getApprovalRail } from '../infra/repositories/approval-requests.js'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -172,12 +173,8 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
 
       if (result.rows.length === 0) {
         // Distinguish the retirement refusal (410) from plain not-found (404)
-        // — diagnostic read on the failure path only.
-        const probe = await pool.query<{ payment_rail: string | null; source: string | null }>(
-          `SELECT payment_rail, source FROM approval_requests WHERE id = $1 AND user_id = $2`,
-          [id, sub],
-        )
-        const rail = probe.rows[0] ? (probe.rows[0].payment_rail ?? probe.rows[0].source) : null
+        // — diagnostic repository read on the failure path only.
+        const rail = await getApprovalRail(id, sub)
         if (rail === 'mpp_demo') {
           const retired = mppDemoRetired()
           return reply.code(retired.statusCode).send(retired.body)
@@ -236,11 +233,7 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
       )
 
       if (result.rows.length === 0) {
-        const probe = await pool.query<{ payment_rail: string | null; source: string | null }>(
-          `SELECT payment_rail, source FROM approval_requests WHERE id = $1 AND user_id = $2`,
-          [id, sub],
-        )
-        const rail = probe.rows[0] ? (probe.rows[0].payment_rail ?? probe.rows[0].source) : null
+        const rail = await getApprovalRail(id, sub)
         if (rail === 'mpp_demo') {
           const retired = mppDemoRetired()
           return reply.code(retired.statusCode).send(retired.body)

@@ -361,3 +361,27 @@ export async function countActionableApprovalsForUser(
   // for a caller that hands in a mock returning none.
   return Number(result.rows[0]?.count ?? '0')
 }
+
+/**
+ * #1328 (review finding on #1339): the rail of an approval row, using the
+ * SAME payment_rail-first derivation GET /approvals reports. Diagnostic read
+ * only — the routes use it on an empty guarded-UPDATE result to distinguish
+ * the mpp_demo retirement refusal (410) from plain not-found (404).
+ */
+export const GET_APPROVAL_RAIL_SQL = `SELECT payment_rail, source
+         FROM approval_requests
+         WHERE id = $1 AND user_id = $2`
+
+/** `userId` is REQUIRED — tenant scope. Null when the row does not exist. */
+export async function getApprovalRail(
+  approvalId: string,
+  userId: string,
+  db: Executor = pool,
+): Promise<string | null> {
+  const result = await db.query<{ payment_rail: string | null; source: string | null }>(
+    GET_APPROVAL_RAIL_SQL,
+    [approvalId, userId],
+  )
+  const row = result.rows[0]
+  return row ? (row.payment_rail ?? row.source) : null
+}

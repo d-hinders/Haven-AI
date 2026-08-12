@@ -78,8 +78,10 @@ This is a TypeScript monorepo:
 
 ## Prerequisites
 
-- **Node.js 24 (LTS)** — pinned in [`.nvmrc`](.nvmrc) and `engines`; CI and the
-  Docker images run the same major. With [`nvm`](https://github.com/nvm-sh/nvm)
+- **Node.js 24 (LTS)** — pinned in [`.nvmrc`](.nvmrc); CI and the
+  Docker images run the same major. (The published agent-runtime packages
+  declare a lower `engines` floor, `>=22` — see
+  [mcp-runtime-compatibility](docs/operations/mcp-runtime-compatibility.md#where-the-node-floor-is-enforced).) With [`nvm`](https://github.com/nvm-sh/nvm)
   or [`fnm`](https://github.com/Schniz/fnm), run `nvm use` / `fnm use` in the repo
   root to match it automatically (otherwise `npm install` warns `EBADENGINE`).
 - **Docker Desktop** (for local hosting) — [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)

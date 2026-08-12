@@ -9,7 +9,7 @@ import { buildMcpServer, createHavenMcpServer, MCP_INSTRUCTIONS, MCP_VERSION } f
 
 // Pinned so the #1161 Node floor cannot make these host-dependent: the
 // guard lives at the credential/client choke point, which these exercise.
-const SUPPORTED_NODE = '24.0.0'
+const SUPPORTED_NODE = '22.0.0'
 
 const baseUrl = 'https://haven.example'
 

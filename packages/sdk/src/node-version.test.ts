@@ -22,21 +22,21 @@ describe('HAVEN_MINIMUM_NODE_VERSION', () => {
 
 describe('compareNodeVersions', () => {
   it('orders by major, then minor, then patch', () => {
-    expect(compareNodeVersions('24.0.0', '24.0.0')).toBe(0)
-    expect(compareNodeVersions('24.1.0', '24.0.9')).toBeGreaterThan(0)
-    expect(compareNodeVersions('23.11.0', '24.0.0')).toBeLessThan(0)
-    expect(compareNodeVersions('24.0.1', '24.0.0')).toBeGreaterThan(0)
+    expect(compareNodeVersions('22.0.0', '22.0.0')).toBe(0)
+    expect(compareNodeVersions('24.1.0', '22.0.9')).toBeGreaterThan(0)
+    expect(compareNodeVersions('21.11.0', '22.0.0')).toBeLessThan(0)
+    expect(compareNodeVersions('22.0.1', '22.0.0')).toBeGreaterThan(0)
   })
 
   it('accepts a leading v and partial versions', () => {
-    expect(compareNodeVersions('v24.0.0', '24')).toBe(0)
-    expect(compareNodeVersions('v24', '24.0.0')).toBe(0)
+    expect(compareNodeVersions('v22.0.0', '22')).toBe(0)
+    expect(compareNodeVersions('v22', '22.0.0')).toBe(0)
   })
 })
 
 describe('isSupportedNodeVersion', () => {
   it('accepts the floor and anything above it', () => {
-    expect(isSupportedNodeVersion('24.0.0')).toBe(true)
+    expect(isSupportedNodeVersion('22.0.0')).toBe(true)
     expect(isSupportedNodeVersion('24.3.1')).toBe(true)
     expect(isSupportedNodeVersion('25.0.0')).toBe(true)
   })
@@ -44,7 +44,7 @@ describe('isSupportedNodeVersion', () => {
   it('rejects everything below the floor, including the observed v23.1.0', () => {
     // v23.1.0 is the version from the #1161 report: a full connect completed
     // "successfully" on it and the signer produced a real testnet signature.
-    expect(isSupportedNodeVersion('23.1.0')).toBe(false)
+    expect(isSupportedNodeVersion('21.1.0')).toBe(false)
     expect(isSupportedNodeVersion('20.0.0')).toBe(false)
     expect(isSupportedNodeVersion('18.19.0')).toBe(false)
   })
@@ -61,10 +61,10 @@ describe('unsupportedNodeVersionMessage', () => {
   it('names the subject, the detected version, and the required version', () => {
     const message = unsupportedNodeVersionMessage({
       subject: 'Haven setup',
-      nodeVersion: '23.1.0',
+      nodeVersion: '21.1.0',
     })
     expect(message).toContain('Haven setup')
-    expect(message).toContain('23.1.0')
+    expect(message).toContain('21.1.0')
     expect(message).toContain(`>=${HAVEN_MINIMUM_NODE_VERSION}`)
   })
 
@@ -73,11 +73,11 @@ describe('unsupportedNodeVersionMessage', () => {
     // they are stuck without telling them how to get unstuck.
     const message = unsupportedNodeVersionMessage({
       subject: 'The Haven signer',
-      nodeVersion: '23.1.0',
+      nodeVersion: '21.1.0',
     })
-    expect(message).toContain('nvm install 24')
-    expect(message).toContain('fnm install 24')
-    expect(message).toContain('volta install node@24')
+    expect(message).toContain('nvm install 22')
+    expect(message).toContain('fnm install 22')
+    expect(message).toContain('volta install node@22')
     expect(message).toContain('https://nodejs.org')
   })
 

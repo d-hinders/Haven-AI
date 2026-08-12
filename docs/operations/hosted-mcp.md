@@ -32,7 +32,7 @@ for the wire contract and the custody invariant.
 - Repo branch with this package built (CI's **MCP server checks** job
   exercises typecheck/test/build; **Docker build (MCP server)** exercises the
   image so a broken Dockerfile is caught before deploy).
-- On the **user's** machine, Node.js `>=24.0.0`. This service is hosted, but the
+- On the **user's** machine, Node.js `>=22.0.0`. This service is hosted, but the
   default topology pairs it with a local signer, and since
   [#1161](https://github.com/d-hinders/Haven-AI/issues/1161) connect refuses to
   set up — and the signer refuses to start — below that floor. See

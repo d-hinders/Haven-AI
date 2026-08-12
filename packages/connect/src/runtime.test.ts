@@ -8,7 +8,7 @@ const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c8
 // #1161 runConnect refuses below the floor before doing anything, so every call
 // site pins a supported version explicitly — otherwise the suite would pass or
 // fail depending on what Node the developer happens to be running.
-const SUPPORTED_NODE = '24.0.0'
+const SUPPORTED_NODE = '22.0.0'
 
 /** Await a promise expected to reject, returning the Error for assertions. */
 async function expectRejection(promise: Promise<unknown>): Promise<Error> {
@@ -169,7 +169,7 @@ describe('runConnect', () => {
     // a full connect on Node v23.1.0 completed "successfully", installed the
     // signer, and signed a real testnet payment. These tests cover the default
     // path specifically, because that is where the hole was.
-    const OLD_NODE = '23.1.0'
+    const OLD_NODE = '21.1.0'
 
     /** Every dependency that would record a side effect if the guard let go. */
     function sideEffectSpies() {
@@ -194,7 +194,7 @@ describe('runConnect', () => {
         apiBaseUrl: 'https://api.haven.example',
         runtime: 'claude-code',
         // No localMcp — this is the default hosted MCP + local signer topology.
-      }, { ...spies, nodeVersion: OLD_NODE })).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+      }, { ...spies, nodeVersion: OLD_NODE })).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
 
       // Nothing may have happened yet: no setup token resolved or consumed, no
       // agent registered, no key minted, no credential written. A failed
@@ -219,7 +219,7 @@ describe('runConnect', () => {
         apiBaseUrl: 'https://api.haven.example',
         runtime: 'claude-code',
         localMcp: true,
-      }, { ...spies, nodeVersion: OLD_NODE })).rejects.toThrow(/requires Node\.js >=24\.0\.0/)
+      }, { ...spies, nodeVersion: OLD_NODE })).rejects.toThrow(/requires Node\.js >=22\.0\.0/)
       expect(spies.api.resolveSetup).not.toHaveBeenCalled()
     })
 
@@ -231,13 +231,13 @@ describe('runConnect', () => {
       }, { ...sideEffectSpies(), nodeVersion: OLD_NODE }))
 
       expect(error.message).toContain(OLD_NODE)
-      expect(error.message).toContain('>=24.0.0')
-      expect(error.message).toContain('nvm install 24')
+      expect(error.message).toContain('>=22.0.0')
+      expect(error.message).toContain('nvm install 22')
       expect(error.message).toMatch(/agent runtime launching Haven/i)
     })
 
     it('does not affect a supported Node', async () => {
-      // The guard must be invisible on >=24 — no behavior change for the
+      // The guard must be invisible on >=22 — no behavior change for the
       // overwhelming majority of runs. The run still fails afterwards (the API
       // stubs return nothing), which is the point: it failed LATER, having got
       // past the guard and started real work.
@@ -246,7 +246,7 @@ describe('runConnect', () => {
         setupToken: 'hv_setup_test',
         apiBaseUrl: 'https://api.haven.example',
         runtime: 'claude-code',
-      }, { ...spies, nodeVersion: '24.0.0' }))
+      }, { ...spies, nodeVersion: '22.0.0' }))
 
       expect(error.message).not.toMatch(/Node\.js/)
       expect(spies.api.resolveSetup).toHaveBeenCalled()

@@ -64,7 +64,14 @@ export function useReporting() {
     return api.get<ReportingVerification>(`/accounting/reporting/verify/${encodeURIComponent(paymentId)}`)
   }, [])
 
-  return { status, loading, error, refetch: () => load(), sync, verify }
+  // #1365: verification-gated reopen — the server re-checks Fortnox and only
+  // flips a pushed row back to retryable when the invoice is confirmed gone.
+  const reopen = useCallback(async (paymentId: string) => {
+    await api.post(`/accounting/reporting/reopen/${encodeURIComponent(paymentId)}`)
+    await load()
+  }, [load])
+
+  return { status, loading, error, refetch: () => load(), sync, verify, reopen }
 }
 
 export interface ReportingVerification {

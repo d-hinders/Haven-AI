@@ -55,10 +55,10 @@ const { ledger } = vi.hoisted(() => {
       })
       return { rows: [{ id: k }] }
     }
-    if (s.includes("SET status = 'pending'")) { // re-claim a previously failed row
+    if (s.includes("SET status = 'pending'")) { // re-claim a failed OR skipped row (#1365)
       const [userId, provider, paymentId] = params as string[]
       const row = rows.get(key(provider, paymentId, userId))
-      if (row && row.status === 'failed') {
+      if (row && (row.status === 'failed' || row.status === 'skipped')) {
         row.status = 'pending'; row.attempts += 1; row.error = null
         return { rows: [{ id: row.id }] }
       }
@@ -68,6 +68,12 @@ const { ledger } = vi.hoisted(() => {
       const [userId, provider, paymentId, externalRef] = params as (string | null)[]
       const row = rows.get(key(provider as string, paymentId as string, userId as string))
       if (row) { row.status = 'pushed'; row.external_ref = (externalRef ?? null) as string | null; row.error = null }
+      return { rows: [] }
+    }
+    if (s.includes("SET status = 'skipped'")) { // #1365: real skipped state, reason preserved
+      const [userId, provider, paymentId, reason] = params as string[]
+      const row = rows.get(key(provider, paymentId, userId))
+      if (row) { row.status = 'skipped'; row.error = reason }
       return { rows: [] }
     }
     if (s.includes("SET status = 'failed'")) {
@@ -103,7 +109,7 @@ vi.mock('../../agents/index.js', () => ({ reportingFeedAvailable: mocks.reportin
 vi.mock('../../accounting/index.js', () => ({ buildAccountingEntryForPayment: mocks.buildAccountingEntryForPayment }))
 
 import { feedSettledPayment } from '../feed-orchestrator.js'
-import { claimSync, markFailed, getSyncState } from '../feed-sync.js'
+import { claimSync, markFailed, markSkipped, getSyncState } from '../feed-sync.js'
 import { registerConnector, clearConnectors, InMemoryConnector } from '../connector.js'
 
 const USER = 'u1'
@@ -166,5 +172,25 @@ describe('reporting feed — integrated never-double-post guard', () => {
     const state = await getSyncState(USER, PROVIDER, PID)
     expect(state?.status).toBe('pushed')
     expect(state?.attempts).toBe(2) // original claim + one retry, never re-claimed after push
+  })
+
+  it('#1365: a skipped payment is a REAL skipped row (reason kept) and recovers to pushed on the next sync', async () => {
+    // A prior attempt claimed then skipped (e.g. the disconnect race between
+    // connector selection and push) — pre-#1365 this was recorded as pushed
+    // with the reason dropped, and never revisited.
+    await claimSync(USER, PROVIDER, PID)
+    await markSkipped(USER, PROVIDER, PID, 'not_connected')
+
+    const afterSkip = await getSyncState(USER, PROVIDER, PID)
+    expect(afterSkip?.status).toBe('skipped')
+    expect(afterSkip?.error).toBe('not_connected')
+
+    const c = connectInMemory()
+    await feedSettledPayment(USER, PID) // recovery sync re-claims the skipped row
+    await feedSettledPayment(USER, PID) // redundant re-sync still pushes exactly once
+
+    expect(c.pushed).toHaveLength(1)
+    const state = await getSyncState(USER, PROVIDER, PID)
+    expect(state?.status).toBe('pushed')
   })
 })

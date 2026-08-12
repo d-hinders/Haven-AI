@@ -14,6 +14,8 @@ export {
   claimSync,
   markPushed,
   markFailed,
+  markSkipped,
+  reopenMissingPushed,
   getSyncState,
   listSyncs,
   type SyncStatus,

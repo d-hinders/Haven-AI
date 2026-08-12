@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-11" # agent-prompt refresh (audit A/B/E): signerInstructions() names the #1309 refusal fields explicitly; hosted/local MCP `instructions` now carry the critical path (see mcp-runtime-compatibility.md)
+last-verified: "2026-08-12" # re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Edge Signer

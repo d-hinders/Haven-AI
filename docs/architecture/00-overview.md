@@ -60,7 +60,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-11" # #1330 Hermes stores its hosted-MCP identity in owner-only .env with a config reference; prior #1326 Hermes runtime profile, #1251 (MPP seam refusal) + #1266 demo merchant x402 settlement selection
+last-verified: "2026-08-12" # re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Architecture Overview

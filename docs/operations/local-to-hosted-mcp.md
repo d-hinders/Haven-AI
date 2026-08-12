@@ -7,7 +7,7 @@ covers:
   - packages/signer/**
   - packages/frontend/src/lib/hosted-connect.ts
   - packages/frontend/src/lib/agent-runtime-snippets.ts
-last-verified: "2026-08-10" # weekly #1248 audit: signer tool table completed (4 tools), the false "makes no network calls" claim replaced with the #1263 read-only fetch, delegation-rail signing added to the walkthrough, spend-gate claims rail-qualified
+last-verified: "2026-08-12" # re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Migration - Local MCP To Hosted MCP

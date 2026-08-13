@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-13" # #1386: re-verified Connect's install-status-before-approval-poll lifecycle and non-authoritative failure posture
+last-verified: "2026-08-13" # release 0.1.23-alpha.2: manifest table follows the atomic prerelease bump; no runtime compatibility or Node-floor claim changed
 ---
 
 # MCP Runtime Compatibility
@@ -57,10 +57,10 @@ Keep this table in sync with that file.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.1.23-alpha.1` |
-| `@haven_ai/mcp` | `0.1.23-alpha.1` |
-| `@haven_ai/sdk` | `0.1.23-alpha.1` |
-| `@haven_ai/signer` | `0.1.23-alpha.1` |
+| `@haven_ai/connect` | `0.1.23-alpha.2` |
+| `@haven_ai/mcp` | `0.1.23-alpha.2` |
+| `@haven_ai/sdk` | `0.1.23-alpha.2` |
+| `@haven_ai/signer` | `0.1.23-alpha.2` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

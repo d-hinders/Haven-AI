@@ -34,10 +34,15 @@ export async function runCli(
     return 0
   }
   try {
-    const result = await runConnect(parsed.options, {
-      log: (message) => (parsed.json ? io.stderr : io.stdout)(`${message}\n`),
-      redactPaths: parsed.json,
-    })
+    // --json is the automation contract: emit the outcome promptly instead of
+    // blocking up to the approval-wait bound (#1377 D).
+    const result = await runConnect(
+      { ...parsed.options, waitForApproval: !parsed.json },
+      {
+        log: (message) => (parsed.json ? io.stderr : io.stdout)(`${message}\n`),
+        redactPaths: parsed.json,
+      },
+    )
     if (parsed.json) io.stdout(`${JSON.stringify(result.outcome)}\n`)
     return 0
   } catch (err) {

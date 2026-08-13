@@ -43,7 +43,7 @@ vi.mock('@/lib/signer', () => ({
   isSafeCapableSigner: (s: { type?: string } | null) => s !== null && s.type !== 'delegator_passkey',
 }))
 
-vi.mock('../ConnectAgent2Modal', () => ({
+vi.mock('../ConnectAgentModal', () => ({
   default: () => null,
 }))
 
@@ -291,10 +291,10 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
   })
 
   it('does not classify a freshly-approved delegate as Unmanaged Delegate', async () => {
-    // Re-mock ConnectAgent2Modal to give the test a trigger for the
+    // Re-mock ConnectAgentModal to give the test a trigger for the
     // onSetupUpdated callback — the real modal fires this after wallet
     // approval lands on-chain.
-    vi.doMock('../ConnectAgent2Modal', () => ({
+    vi.doMock('../ConnectAgentModal', () => ({
       default: (props: { onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void }) => (
         <button
           type="button"
@@ -319,7 +319,7 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
   it('still classifies genuinely external delegates as Unmanaged', async () => {
     // No onSetupUpdated fires — this is a delegate someone set up outside
     // Haven, not a freshly-approved one. The yellow card SHOULD render.
-    vi.doMock('../ConnectAgent2Modal', () => ({ default: () => null }))
+    vi.doMock('../ConnectAgentModal', () => ({ default: () => null }))
     const { default: AgentPanelFresh } = await import('../AgentPanel')
     render(<AgentPanelFresh />)
     expect(screen.getByText('Unmanaged Delegate')).toBeInTheDocument()
@@ -329,7 +329,7 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
     // The slow-backend case: a delegate the user set up through Haven reappears
     // on-chain (suppression expired) before its agent flips active. It must NOT
     // read as "set up outside Haven" — it's mid-confirmation.
-    vi.doMock('../ConnectAgent2Modal', () => ({
+    vi.doMock('../ConnectAgentModal', () => ({
       default: (props: { onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void }) => (
         <button
           type="button"
@@ -383,7 +383,7 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
       refetch,
     })
 
-    vi.doMock('../ConnectAgent2Modal', () => ({
+    vi.doMock('../ConnectAgentModal', () => ({
       default: (props: { onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void }) => (
         <button
           type="button"
@@ -447,7 +447,7 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
       refetch: vi.fn(),
     })
 
-    vi.doMock('../ConnectAgent2Modal', () => ({
+    vi.doMock('../ConnectAgentModal', () => ({
       default: (props: { onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void }) => (
         <button
           type="button"

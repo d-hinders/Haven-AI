@@ -8,7 +8,7 @@ import {
   unexpectedBrowserErrors,
 } from './fixtures/haven-api'
 
-test.describe('Connect Agent 2 setup acceptance', () => {
+test.describe('Connect agent setup acceptance', () => {
   test.beforeEach(async ({ page }) => {
     await mockHavenApi(page)
     await seedAuthenticatedSession(page)
@@ -20,7 +20,7 @@ test.describe('Connect Agent 2 setup acceptance', () => {
     await page.goto('/agents')
     await dismissMobileSidebar(page)
 
-    // "Connect agent" is now the primary CTA and opens ConnectAgent2Modal directly.
+    // "Connect agent" is now the primary CTA and opens ConnectAgentModal directly.
     await expect(page.getByRole('button', { name: 'Connect agent', exact: true }).first()).toBeVisible()
     await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
 
@@ -29,7 +29,6 @@ test.describe('Connect Agent 2 setup acceptance', () => {
     await dialog.getByLabel('Agent name').fill('Research Agent')
     await dialog.getByRole('button', { name: 'Set agent budget' }).click()
     await dialog.getByPlaceholder('Amount').fill('10')
-    await dialog.getByRole('button', { name: 'Add budget' }).click()
     await dialog.getByRole('button', { name: 'Review agent rules' }).click()
     await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 

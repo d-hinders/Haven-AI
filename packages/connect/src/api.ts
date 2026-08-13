@@ -6,6 +6,24 @@ export interface ConnectApiClient {
     apiKey: string,
     input: UpdateInstallStatusInput,
   ): Promise<void>
+  /**
+   * #1377 D: the narrow status read the connector polls after registering,
+   * authenticated with the agent API key it just minted (works while the
+   * agent is still `setup_pending` — the endpoint exists for exactly that
+   * window). Returns status plus the approved budget once approval lands;
+   * never any secret material.
+   */
+  getConnectorStatus(setupId: string, apiKey: string): Promise<ConnectorStatusResponse>
+}
+
+export interface ConnectorStatusResponse {
+  status: string
+  approved_budget: {
+    token_symbol: string
+    token_address: string
+    amount: string
+    reset_period_min: number
+  } | null
 }
 
 export interface ResolveSetupInput {
@@ -128,6 +146,12 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
         }),
       }),
 
+    getConnectorStatus: (setupId, apiKey) =>
+      request(fetchImpl, `${root}/agent-connection-setups/${encodeURIComponent(setupId)}/connector-status`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${apiKey}` },
+      }),
+
     updateInstallStatus: async (setupId, apiKey, input) => {
       await request(fetchImpl, `${root}/agent-connection-setups/${encodeURIComponent(setupId)}/install-status`, {
         method: 'POST',
@@ -155,6 +179,20 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
   }
 }
 
+/**
+ * Request failure carrying the HTTP status, so callers can tell a permanent
+ * verdict (401 revoked key, 404 gone) from transient noise (5xx, network).
+ * The approval poll loop (#1377 D) branches on this: retrying a 401 for the
+ * full window and then saying "still pending" is actively wrong when the user
+ * cancelled the setup and the key was revoked.
+ */
+export class ConnectRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = 'ConnectRequestError'
+  }
+}
+
 async function request<T>(
   fetchImpl: typeof fetch,
   url: string,
@@ -171,7 +209,7 @@ async function request<T>(
   const body = text ? JSON.parse(text) : null
   if (!response.ok) {
     const message = body?.error ?? body?.message ?? `${response.status} ${response.statusText}`
-    throw new Error(`Haven setup request failed: ${message}`)
+    throw new ConnectRequestError(`Haven setup request failed: ${message}`, response.status)
   }
   return body as T
 }

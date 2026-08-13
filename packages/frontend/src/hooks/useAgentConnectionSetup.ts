@@ -111,9 +111,9 @@ export interface UseAgentConnectionSetupOptions {
   onClose: () => void
   safeAddress?: string
   safeId?: string | null
-  /** See ConnectAgent2Modal's prop of the same name. */
+  /** See ConnectAgentModal's prop of the same name. */
   onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void
-  /** See ConnectAgent2Modal's prop of the same name. */
+  /** See ConnectAgentModal's prop of the same name. */
   starterAllowance?: boolean
 }
 
@@ -404,7 +404,7 @@ async function recordWalletApproval(
 /**
  * State machine + async orchestration for the connect-agent flow (#989).
  *
- * Everything ConnectAgent2Modal decides lives here; the modal itself is
+ * Everything ConnectAgentModal decides lives here; the modal itself is
  * composition/layout only. Flow logic is therefore testable without
  * rendering the modal — the two live defects this extraction answers
  * (#1069/#1070) were both flow-logic bugs invisible to render-level tests.
@@ -445,7 +445,6 @@ export function useAgentConnectionSetup({
   const [localMcp, setLocalMcp] = useState(false)
   const [issuePassport, setIssuePassport] = useState(false)
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
-  const [addToken, setAddToken] = useState('')
   const [addAmount, setAddAmount] = useState('')
   const [addAmountError, setAddAmountError] = useState('')
   const [addReset, setAddReset] = useState(1440)
@@ -533,14 +532,11 @@ export function useAgentConnectionSetup({
   // and snap the user's wallet choice back to the default mid-selection.
   const initialSafeIdRef = useRef(initialSafeId)
   initialSafeIdRef.current = initialSafeId
-  const firstTokenRef = useRef<string>(tokenOptions[0]?.symbol ?? '')
-  firstTokenRef.current = tokenOptions[0]?.symbol ?? ''
   const prevOpenRef = useRef(false)
 
   useEffect(() => {
     if (open && !prevOpenRef.current) {
       setSelectedSafeId(initialSafeIdRef.current)
-      setAddToken(firstTokenRef.current)
     }
     prevOpenRef.current = open
   }, [open])
@@ -548,30 +544,47 @@ export function useAgentConnectionSetup({
   useEffect(() => {
     if (!open) return
     const validSymbols = new Set(tokenOptions.map((token) => token.symbol))
-    if (!validSymbols.has(addToken)) setAddToken(tokenOptions[0]?.symbol ?? '')
     setAllowances((prev) => prev.filter((allowance) => validSymbols.has(allowance.tokenSymbol)))
-  }, [addToken, open, tokenOptions])
+  }, [open, tokenOptions])
+
+  // #1377 B: the flow takes exactly ONE budget, in USDC — the token select and
+  // the add-then-continue two-step are gone. The pinned token:
+  const budgetToken =
+    tokenOptions.find((token) => token.symbol === 'USDC') ??
+    tokenOptions.find((token) => token.symbol === 'USDC.e') ??
+    tokenOptions[0]
+
+  // The draft budget derives LIVE from the amount/reset inputs. `allowances`
+  // stays the single source handleCreateSetup maps to the wire (via the same
+  // validateMoneyInput -> parsed.amount value the old Add-button path stored),
+  // so the setup payload is byte-identical to the add-then-continue flow.
+  useEffect(() => {
+    if (!budgetToken) return
+    const parsed = addAmount
+      ? validateMoneyInput(addAmount, budgetToken.decimals, { tokenSymbol: budgetToken.symbol })
+      : null
+    setAllowances(
+      parsed?.ok
+        ? [{
+            tokenSymbol: budgetToken.symbol,
+            tokenAddress: budgetToken.address,
+            decimals: budgetToken.decimals,
+            amount: parsed.amount,
+            resetTimeMin: addReset,
+          }]
+        : [],
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- budgetToken is
+    // recreated per render; its identity is fully captured by these scalars.
+  }, [addAmount, addReset, budgetToken?.symbol, budgetToken?.address, budgetToken?.decimals])
 
   // First-agent hand-off: seed a starter budget so the policy step is
   // payment-ready by default. Only when the form is empty — user edits win.
   useEffect(() => {
-    if (!open || !starterAllowance) return
-    const usdc =
-      tokenOptions.find((token) => token.symbol === 'USDC') ??
-      tokenOptions.find((token) => token.symbol === 'USDC.e')
-    if (!usdc) return
-    setAllowances((prev) =>
-      prev.length > 0
-        ? prev
-        : [{
-            tokenSymbol: usdc.symbol,
-            tokenAddress: usdc.address,
-            decimals: usdc.decimals,
-            amount: '10',
-            resetTimeMin: 1440,
-          }],
-    )
-  }, [open, starterAllowance, tokenOptions])
+    if (!open || !starterAllowance || !budgetToken) return
+    setAddAmount((prev) => (prev === '' ? '10' : prev))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, starterAllowance, budgetToken?.symbol])
 
   const resetForm = useCallback(() => {
     setStep('details')
@@ -581,7 +594,6 @@ export function useAgentConnectionSetup({
     setLocalMcp(false)
     setIssuePassport(false)
     setAllowances([])
-    setAddToken(tokenOptions[0]?.symbol ?? '')
     setAddAmount('')
     setAddAmountError('')
     setAddReset(1440)
@@ -622,16 +634,10 @@ export function useAgentConnectionSetup({
     amount: allowance.amount,
     period: budgetPeriodLabel(allowance.resetTimeMin),
   }))
-  const { budgetSlotsFull, resetPeriodOptions } = railBudgetRules(isDelegationAccount, allowances.length)
-  const availableTokens = budgetSlotsFull
-    ? []
-    : tokenOptions.filter(
-        (token) => !allowances.some((allowance) => allowance.tokenSymbol === token.symbol),
-      )
-  const addTokenOption = availableTokens.find((token) => token.symbol === addToken)
+  const { resetPeriodOptions } = railBudgetRules(isDelegationAccount, allowances.length)
   const addAmountValidation =
-    addAmount && addTokenOption
-      ? validateMoneyInput(addAmount, addTokenOption.decimals, { tokenSymbol: addTokenOption.symbol })
+    addAmount && budgetToken
+      ? validateMoneyInput(addAmount, budgetToken.decimals, { tokenSymbol: budgetToken.symbol })
       : null
   const addAmountMessage =
     addAmountError ||
@@ -679,43 +685,6 @@ export function useAgentConnectionSetup({
       creatingRef.current = false
       setCreating(false)
     }
-  }
-
-  function handleAddAllowance() {
-    if (!addTokenOption) return
-    const parsedAmount = validateMoneyInput(addAmount, addTokenOption.decimals, {
-      tokenSymbol: addTokenOption.symbol,
-    })
-    if (!parsedAmount.ok) {
-      setAddAmountError(parsedAmount.message)
-      return
-    }
-    setAllowances((prev) => [
-      ...prev,
-      {
-        tokenSymbol: addTokenOption.symbol,
-        tokenAddress: addTokenOption.address,
-        decimals: addTokenOption.decimals,
-        amount: parsedAmount.amount,
-        resetTimeMin: addReset,
-      },
-    ])
-    setAddAmount('')
-    setAddAmountError('')
-    setAddToken(availableTokens.find((token) => token.symbol !== addTokenOption.symbol)?.symbol ?? '')
-  }
-
-  function handleRemoveBudget(row: { tokenSymbol: string }) {
-    setAllowances((prev) => prev.filter((allowance) => allowance.tokenSymbol !== row.tokenSymbol))
-    setAddToken(row.tokenSymbol)
-    // Clear any stale validation error from the previously selected token so
-    // it doesn't block the re-selected one.
-    setAddAmountError('')
-  }
-
-  function handleAddTokenChange(symbol: string) {
-    setAddToken(symbol)
-    setAddAmountError('')
   }
 
   function handleAddAmountChange(value: string) {
@@ -923,21 +892,15 @@ export function useAgentConnectionSetup({
     // Policy step
     allowances,
     budgetRows,
-    availableTokens,
-    budgetSlotsFull,
     resetPeriodOptions,
-    addToken,
     addAmount,
     addAmountMessage,
     addAmountValidation,
-    addTokenOption,
+    budgetToken,
     addReset,
     setAddReset,
     issuePassport,
     setIssuePassport,
-    handleAddAllowance,
-    handleRemoveBudget,
-    handleAddTokenChange,
     handleAddAmountChange,
     // Review step
     creating,

@@ -9,7 +9,7 @@ covers:
   - packages/frontend/src/components/SendModal.tsx
   - packages/frontend/src/components/ReceiveFundsModal.tsx
   - packages/frontend/src/components/AddFundsModal.tsx
-  - packages/frontend/src/components/ConnectAgent2Modal.tsx
+  - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx

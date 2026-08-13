@@ -10,7 +10,6 @@ import { DetailsStep } from './connect-agent/DetailsStep'
 import { PolicyStep } from './connect-agent/PolicyStep'
 import { ReviewStep } from './connect-agent/ReviewStep'
 import { StepProgress } from './ui/StepProgress'
-import { StatusBadge } from './ui/StatusBadge'
 
 interface Props {
   open: boolean
@@ -42,7 +41,7 @@ interface Props {
  * flow logic is testable without rendering this modal; each step's markup
  * lives in `./connect-agent/`.
  */
-export default function ConnectAgent2Modal({
+export default function ConnectAgentModal({
   open,
   onClose,
   safeAddress,
@@ -71,14 +70,13 @@ export default function ConnectAgent2Modal({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Connect agent 2"
+        aria-label="Connect agent"
         className="relative w-full max-w-xl max-h-[calc(100vh-24px)] overflow-y-auto overflow-x-hidden rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]"
       >
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Connect agent 2</h2>
-              <StatusBadge tone="brand">Preview</StatusBadge>
+              <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Connect agent</h2>
             </div>
             <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{flow.headerSubtitleText}</p>
           </div>

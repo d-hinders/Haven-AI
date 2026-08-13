@@ -6,11 +6,15 @@ import { StatusBadge, type StatusTone } from '../ui/StatusBadge'
 import { restartCopyForRuntime } from './setup-copy'
 
 /** Loading state while the connector finishes local setup. */
-export function FinalizingLocalSetup({ loading }: { loading: boolean }) {
+export function FinalizingLocalSetup({ loading: _loading }: { loading: boolean }) {
+  // #1377 C: the label is static — polling must never swap it (content shift).
   return (
     <div className="space-y-4 text-center">
       <div className="flex justify-center">
-        <StatusBadge tone="neutral">{loading ? 'Checking' : 'Finishing setup'}</StatusBadge>
+        <StatusBadge tone="neutral">
+          <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current motion-safe:animate-pulse" aria-hidden />
+          Finishing setup
+        </StatusBadge>
       </div>
       <p className="mx-auto max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">
         The connector is finishing local setup. This usually takes a few seconds.
@@ -22,6 +26,7 @@ export function FinalizingLocalSetup({ loading }: { loading: boolean }) {
 /** Terminal state (expired/cancelled/failed) with a restart + close action. */
 export function TerminalSetupState({
   title,
+  badgeLabel,
   body,
   tone,
   primaryLabel,
@@ -30,6 +35,7 @@ export function TerminalSetupState({
   onSecondary,
 }: {
   title: string
+  badgeLabel: string
   body: string
   tone: StatusTone
   primaryLabel: string
@@ -40,7 +46,7 @@ export function TerminalSetupState({
   return (
     <div className="space-y-4 text-center">
       <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-surface-2)]">
-        <StatusBadge tone={tone}>{title.split(' ')[1] ?? 'Setup'}</StatusBadge>
+        <StatusBadge tone={tone}>{badgeLabel}</StatusBadge>
       </div>
       <div>
         <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>

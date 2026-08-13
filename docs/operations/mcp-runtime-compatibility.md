@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-12" # #1328 mpp_demo retirement re-verified: 3 mpp tools removed from BOTH MCP surfaces -> local consent hash changes, ONE re-ack expected on next signer start (by design); no runtime/version claim here affected; prior same-day: release 0.1.23-alpha.0: manifest table follows the bump (ships the Node-22 engines floor to npm); prior same-day: #1349/#1348/#1355/#1350 re-verifications
+last-verified: "2026-08-13" # #1377: connector now waits for budget approval after registering (bounded 5s/180s poll of the new read-only connector-status endpoint, skipped under --json); handoff section updated; no version/floor claim affected
 ---
 
 # MCP Runtime Compatibility
@@ -85,6 +85,17 @@ to approve the agent rules first, activate the current runtime second, then run
 the read-only `haven_get_agent` and `haven_get_allowances` tools to confirm the
 Haven wallet and live budget. Approval — not a restart — unlocks Haven tools.
 The verification must not sign, fund, or create a payment.
+
+Since #1377 the connector does not go silent after registering: it polls the
+narrow read-only `connector-status` endpoint (pending agent API key, usable
+while `setup_pending`-scoped) and waits for the budget approval — every 5
+seconds, for at most 3 minutes, with a progress reminder every 30 seconds. On
+approval it prints a celebratory line naming the granted authority (amount,
+token, reset period); on a terminal setup status it says the setup ended in
+Haven; at the bound it exits cleanly with "approve whenever ready" guidance —
+the connector always terminates on its own. A flaky poll is retried inside the
+same bound, never treated as a verdict. `--json` automation runs skip the wait
+entirely so the structured outcome is emitted promptly.
 
 Automation can pass `--json`: Connect keeps progress and recovery prose on
 stderr and emits one parseable, versioned object on stdout. `schema_version: 1`

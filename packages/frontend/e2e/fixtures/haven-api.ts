@@ -245,7 +245,7 @@ export async function mockHavenApi(page: Page) {
       const connectedLocal = connectAgent2SetupCreated && connectAgent2StatusReads > 1
       await fulfillJson(route, {
         setup_id: 'setup-e2e',
-        agent_id: connectedLocal ? 'agent-connect2-e2e' : null,
+        agent_id: connectedLocal ? 'agent-connect-agent-e2e' : null,
         status: connectedLocal ? 'connected_local' : 'awaiting_connection',
         expires_at: '2099-01-01T00:00:00.000Z',
         agent: { name: 'Research Agent', description: null },
@@ -257,7 +257,7 @@ export async function mockHavenApi(page: Page) {
           network: 'Base',
         },
         agent_budget: [{
-          id: 'budget-connect2-e2e',
+          id: 'budget-connect-agent-e2e',
           token_address: '0x0000000000000000000000000000000000000000',
           token_symbol: 'ETH',
           allowance_amount: '10000000000000000000',

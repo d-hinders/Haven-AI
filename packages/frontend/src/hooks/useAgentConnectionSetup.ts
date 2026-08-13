@@ -913,6 +913,7 @@ export function useAgentConnectionSetup({
     setupStatus,
     statusLoading: statusQuery.loading,
     statusError: statusQuery.error,
+    awaitingConnectionStalled: statusQuery.awaitingConnectionStalled,
     visibleStatus,
     connectView: resolveConnectStepView({
       visibleStatus,

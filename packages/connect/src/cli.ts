@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { pathToFileURL } from 'node:url'
+import { realpathSync } from 'node:fs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { helpText, parseArgs } from './args.js'
 import { failedConnectOutcome, runConnect } from './runtime.js'
 import { redactSecrets } from './redact.js'
@@ -60,4 +61,24 @@ async function main(): Promise<void> {
   if (exitCode !== 0) process.exitCode = exitCode
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) void main()
+/**
+ * npm executes package bins through a `node_modules/.bin` symlink. Node keeps
+ * that symlink in `process.argv[1]`, whereas `import.meta.url` identifies the
+ * real module path. Resolve both sides before comparing so a published
+ * `haven-connect` bin starts, while an ordinary `runCli` import remains inert.
+ */
+export function isCliEntrypoint(
+  argvPath: string | undefined = process.argv[1],
+  moduleUrl: string = import.meta.url,
+): boolean {
+  if (!argvPath) return false
+  try {
+    return realpathSync(argvPath) === realpathSync(fileURLToPath(moduleUrl))
+  } catch {
+    // Keep the direct-file behavior when a loader provides an unresolvable
+    // path. A missing path cannot be a safe reason to run imported CLI code.
+    return pathToFileURL(argvPath).href === moduleUrl
+  }
+}
+
+if (isCliEntrypoint()) void main()

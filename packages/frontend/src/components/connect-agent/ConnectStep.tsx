@@ -55,6 +55,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           onContinueAfterManualCredential={flow.handleContinueAfterManualCredential}
           loading={flow.statusLoading}
           error={flow.statusError}
+          connectionStalled={flow.awaitingConnectionStalled}
           expiresAt={setup.expires_at}
           onCancel={flow.handleCancelSetup}
         />

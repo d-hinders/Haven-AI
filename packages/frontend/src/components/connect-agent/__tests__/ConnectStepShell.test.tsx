@@ -7,11 +7,12 @@
  * (loading true → false → true) and assert the DOM is IDENTICAL across it.
  */
 import { describe, expect, it } from 'vitest'
-import { render } from '@testing-library/react'
+import { fireEvent, render } from '@testing-library/react'
 import { WaitingForConnector } from '../WaitingForConnector'
 import { TerminalSetupState } from '../SetupStates'
 import { FinalizingLocalSetup } from '../SetupStates'
 import { ConnectStepShell } from '../ConnectStepShell'
+import type { CreateSetupResponse } from '@/hooks/useAgentConnectionSetup'
 
 const EXPIRES_AT = '2099-01-01T00:00:00.000Z'
 const SETUP = {
@@ -20,9 +21,10 @@ const SETUP = {
   setup_token: 'hv_setup_test',
   expires_at: EXPIRES_AT,
   status: 'awaiting_connection',
-} as never
+  connector_command: 'npx @haven_ai/connect@alpha --token hv_setup_test',
+} satisfies CreateSetupResponse
 
-function renderWaiting(loading: boolean) {
+function renderWaiting(loading: boolean, connectionStalled = false) {
   return (
     <WaitingForConnector
       setup={SETUP}
@@ -41,6 +43,7 @@ function renderWaiting(loading: boolean) {
       onContinueAfterManualCredential={() => {}}
       loading={loading}
       error={null}
+      connectionStalled={connectionStalled}
       expiresAt={EXPIRES_AT}
       onCancel={() => {}}
     />
@@ -64,6 +67,44 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
   it('WaitingForConnector states the auto-advance promise in the primary instruction block', () => {
     const { container } = render(renderWaiting(false))
     expect(container.textContent).toMatch(/advances this screen automatically/i)
+  })
+
+  it('offers stable, safe recovery only after Haven remains unconnected', () => {
+    const onCopy = vi.fn()
+    const onCancel = vi.fn()
+    const props = {
+      setup: SETUP,
+      runtime: 'claude-code',
+      copied: null,
+      onCopy,
+      manualPathRevealed: false,
+      onManualPathRevealedChange: () => {},
+      manualFallbackConfirmed: false,
+      onManualFallbackConfirmedChange: () => {},
+      manualCredential: null,
+      manualCredentialAcknowledged: false,
+      manualCreating: false,
+      manualError: null,
+      onCreateManualCredential: () => {},
+      onContinueAfterManualCredential: () => {},
+      loading: false,
+      error: null,
+      expiresAt: EXPIRES_AT,
+      onCancel,
+    }
+    const { container, getByRole, rerender } = render(
+      <WaitingForConnector {...props} connectionStalled={false} />,
+    )
+    const reserved = container.querySelector('.min-h-\\[216px\\].sm\\:min-h-\\[144px\\]')
+    expect(reserved).not.toBeNull()
+    expect(container.textContent).not.toContain('Haven has not received a connection yet')
+
+    rerender(<WaitingForConnector {...props} connectionStalled />)
+    expect(container.textContent).toContain('Haven has not received a connection yet')
+    fireEvent.click(getByRole('button', { name: 'Copy local command' }))
+    expect(onCopy).toHaveBeenCalledWith('command', SETUP.connector_command)
+    fireEvent.click(getByRole('button', { name: 'Cancel this setup' }))
+    expect(onCancel).toHaveBeenCalledOnce()
   })
 
   it('FinalizingLocalSetup renders IDENTICAL text across a poll cycle', () => {

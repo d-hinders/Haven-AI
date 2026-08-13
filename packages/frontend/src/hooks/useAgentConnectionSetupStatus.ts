@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 
+/**
+ * A copied setup command normally registers within a few seconds, even when
+ * npm needs to install it. After this bound Haven can truthfully say it has
+ * not received a connection yet and offer recovery without declaring failure.
+ */
+export const AWAITING_CONNECTION_RECOVERY_MS = 60_000
+
 export type AgentConnectionSetupStatus =
   | 'awaiting_connection'
   | 'connected_local'
@@ -77,6 +84,7 @@ export function useAgentConnectionSetupStatus(
   const [data, setData] = useState<AgentConnectionSetupStatusResponse | null>(null)
   const [loading, setLoading] = useState(Boolean(setupId && enabled))
   const [error, setError] = useState<string | null>(null)
+  const [awaitingConnectionStalled, setAwaitingConnectionStalled] = useState(false)
   const generationRef = useRef(0)
 
   const fetchStatus = useCallback(async () => {
@@ -112,6 +120,7 @@ export function useAgentConnectionSetupStatus(
       setData(null)
       setError(null)
       setLoading(false)
+      setAwaitingConnectionStalled(false)
       return
     }
 
@@ -143,10 +152,23 @@ export function useAgentConnectionSetupStatus(
     }
   }, [enabled, fetchStatus, setupId])
 
+  useEffect(() => {
+    if (!setupId || !enabled || data?.status !== 'awaiting_connection' || error) {
+      setAwaitingConnectionStalled(false)
+      return
+    }
+    const timeout = window.setTimeout(
+      () => setAwaitingConnectionStalled(true),
+      AWAITING_CONNECTION_RECOVERY_MS,
+    )
+    return () => window.clearTimeout(timeout)
+  }, [data?.status, enabled, error, setupId])
+
   return {
     data,
     loading,
     error,
+    awaitingConnectionStalled,
     refetch: fetchStatus,
   }
 }

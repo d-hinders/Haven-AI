@@ -5,6 +5,7 @@ import type {
   CreateSetupResponse,
   ManualCredential,
 } from '@/hooks/useAgentConnectionSetup'
+import type { AwaitingConnectionStage } from '@/hooks/useAgentConnectionSetupStatus'
 import { Button } from '../ui/Button'
 import { StatusBadge } from '../ui/StatusBadge'
 import { CopyBlock } from './CopyBlock'
@@ -28,7 +29,7 @@ export function WaitingForConnector({
   onContinueAfterManualCredential,
   loading,
   error,
-  connectionStalled,
+  connectionStage,
   expiresAt,
   onCancel,
 }: {
@@ -48,7 +49,7 @@ export function WaitingForConnector({
   onContinueAfterManualCredential: () => void
   loading: boolean
   error: string | null
-  connectionStalled: boolean
+  connectionStage: AwaitingConnectionStage
   expiresAt: string
   onCancel: () => void
 }) {
@@ -79,11 +80,22 @@ export function WaitingForConnector({
         </div>
       </div>
 
-      {/* Reserved from the first render so the bounded recovery state does not
-          change the Step 4 silhouette while polling. Mobile stacks the two
-          touch-sized actions; wider layouts keep them in one row. */}
-      <div className="min-h-[216px] sm:min-h-[144px]" aria-live="polite">
-        {connectionStalled && (
+      {/* #1399: this slot ALWAYS says something. Reserving it for a recovery
+          state that only ~never arrives left a 144-216px void on every run for
+          the first minute — the reservation is now sized to the status line
+          that is always there, and only the rare recovery block grows past it.
+          The #1377 rule still holds where it matters: polling moves nothing,
+          and the starting → slow transition changes words inside this reserved
+          height. Mobile stacks the two touch-sized recovery actions. */}
+      <div className="min-h-[56px] sm:min-h-[40px]" aria-live="polite">
+        {connectionStage !== 'recovery' && (
+          <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+            {connectionStage === 'slow'
+              ? 'Still going. A first run downloads the Haven connector before it can register, so this can take a minute or two.'
+              : 'Waiting for the agent to run the setup command. This usually takes a few seconds.'}
+          </p>
+        )}
+        {connectionStage === 'recovery' && (
           <div className="rounded-[10px] border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] p-3 text-xs text-[var(--v2-ink-2)]">
             <p className="font-semibold text-[var(--v2-ink)]">Haven has not received a connection yet</p>
             <p className="mt-1 leading-relaxed">

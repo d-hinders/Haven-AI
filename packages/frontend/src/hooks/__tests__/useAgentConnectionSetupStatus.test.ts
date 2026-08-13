@@ -11,6 +11,7 @@ vi.mock('@/lib/api', () => ({
 
 import {
   AWAITING_CONNECTION_RECOVERY_MS,
+  AWAITING_CONNECTION_SLOW_MS,
   useAgentConnectionSetupStatus,
 } from '@/hooks/useAgentConnectionSetupStatus'
 
@@ -79,7 +80,7 @@ describe('useAgentConnectionSetupStatus', () => {
     expect(mockApiGet).toHaveBeenCalledTimes(1)
   })
 
-  it('flags a bounded recovery state only while Haven continues to report awaiting_connection', async () => {
+  it('stages starting → slow → recovery only while Haven continues to report awaiting_connection', async () => {
     mockApiGet.mockResolvedValue({
       setup_id: 'setup-1',
       status: 'awaiting_connection',
@@ -91,13 +92,21 @@ describe('useAgentConnectionSetupStatus', () => {
 
     const { result } = renderHook(() => useAgentConnectionSetupStatus('setup-1'))
     await act(async () => { await Promise.resolve() })
-    expect(result.current.awaitingConnectionStalled).toBe(false)
+    expect(result.current.awaitingConnectionStage).toBe('starting')
 
+    // A slow first run is acknowledged, NOT treated as a failure: the screen
+    // must not be offering recovery at this point (#1399).
     await act(async () => {
-      vi.advanceTimersByTime(AWAITING_CONNECTION_RECOVERY_MS)
+      vi.advanceTimersByTime(AWAITING_CONNECTION_SLOW_MS)
       await Promise.resolve()
     })
-    expect(result.current.awaitingConnectionStalled).toBe(true)
+    expect(result.current.awaitingConnectionStage).toBe('slow')
+
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_CONNECTION_RECOVERY_MS - AWAITING_CONNECTION_SLOW_MS)
+      await Promise.resolve()
+    })
+    expect(result.current.awaitingConnectionStage).toBe('recovery')
 
     mockApiGet.mockResolvedValue({
       setup_id: 'setup-1',
@@ -108,7 +117,16 @@ describe('useAgentConnectionSetupStatus', () => {
       agent_budget: [],
     })
     await act(async () => { await result.current.refetch() })
-    expect(result.current.awaitingConnectionStalled).toBe(false)
+    expect(result.current.awaitingConnectionStage).toBe('starting')
+  })
+
+  it('holds the recovery bound at the connector\'s own approval-wait bound', () => {
+    // Not an arbitrary number: when the dashboard starts advising "run the
+    // command again", @haven_ai/connect's waitForBudgetApproval has just hit
+    // its 180s bound and exited, so the advice is sound. Moving one without
+    // the other silently breaks that (#1399).
+    expect(AWAITING_CONNECTION_RECOVERY_MS).toBe(180_000)
+    expect(AWAITING_CONNECTION_SLOW_MS).toBeLessThan(AWAITING_CONNECTION_RECOVERY_MS)
   })
 
   it('never treats a status-read error as proof that the connector is stalled', async () => {
@@ -134,6 +152,6 @@ describe('useAgentConnectionSetupStatus', () => {
       await Promise.resolve()
     })
 
-    expect(result.current.awaitingConnectionStalled).toBe(false)
+    expect(result.current.awaitingConnectionStage).toBe('starting')
   })
 })

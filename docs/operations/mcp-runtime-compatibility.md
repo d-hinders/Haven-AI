@@ -109,12 +109,26 @@ own. A flaky poll is retried inside the same bound, never treated as a verdict.
 `--json` automation runs skip the wait entirely so the structured outcome is
 emitted promptly.
 
-Before registration, the dashboard remains neutral about a missing connection:
-after one minute of a confirmed `awaiting_connection` status, it says only that
-Haven has not received a connection yet. It asks the user not to approve agent
-rules, offers the same local command for copying, and lets them cancel the
-one-time setup before creating a fresh prompt. A status-read error remains an
-error state, not evidence that the connector succeeded or failed.
+Before registration, the dashboard stages what it says about a missing
+connection over three periods, in one status slot that is never empty (#1399).
+On arrival it says only that it is waiting for the agent to run the setup
+command. After one minute of a confirmed `awaiting_connection` it acknowledges
+that a first run downloads the connector before it can register — an
+observation, not a warning: it offers no recovery actions and does not suggest
+anything is wrong. After **three minutes** of confirmed `awaiting_connection`
+it says Haven has not received a connection yet, asks the user not to approve
+agent rules, offers the same local command for copying, and lets them cancel
+the one-time setup before creating a fresh prompt. A status-read error resets
+the clock rather than advancing it: it remains an error state, not evidence
+that the connector succeeded or failed.
+
+That three-minute bound is **the same number as the connector's own approval
+wait** described above, and deliberately so: when the dashboard starts advising
+"run the local command again", `waitForBudgetApproval` has just hit its bound
+and exited, so the advice is sound rather than a guess. The two are coupled —
+if either moves, both must. They live in
+`AWAITING_CONNECTION_RECOVERY_MS` (`packages/frontend/src/hooks/useAgentConnectionSetupStatus.ts`)
+and `waitForBudgetApproval`'s `timeoutMs` default (`packages/connect/src/runtime.ts`).
 
 Automation can pass `--json`: Connect keeps progress and recovery prose on
 stderr and emits one parseable, versioned object on stdout. `schema_version: 1`

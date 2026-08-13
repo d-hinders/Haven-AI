@@ -4,14 +4,15 @@ import type { AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Select } from '../ui/Select'
-import { AgentBudgetCard } from '../haven'
 
 /**
  * Step 2: wallet choice, the agent's single USDC budget, and the passport
  * opt-in. #1377 B: one budget by design — USDC is a fixed chip (no token
- * select), the draft card mirrors the inputs live, and a valid amount alone
- * enables Continue. Additional tokens for legacy multi-token accounts are
- * added later from the agent's page.
+ * select) and a valid amount alone enables Continue. #1381: the inputs ARE
+ * the draft — nothing mounts below them mid-typing (the old live draft card
+ * caused a content shift on the first keystroke), and the Review step is
+ * where the budget is restated before anything is signed. Additional tokens
+ * for legacy multi-token accounts are added later from the agent's page.
  */
 export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   return (
@@ -73,15 +74,6 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           agent&apos;s page once it is running.
         </p>
       </div>
-
-      {flow.allowances.length > 0 && (
-        <AgentBudgetCard
-          agentName={flow.name || 'New agent'}
-          budgets={flow.budgetRows}
-          status="Budget draft"
-          density="compact"
-        />
-      )}
 
       <label className="flex items-start gap-2 py-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
         <input

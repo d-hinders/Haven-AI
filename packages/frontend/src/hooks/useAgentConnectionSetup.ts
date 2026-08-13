@@ -628,12 +628,6 @@ export function useAgentConnectionSetup({
   const hasMultipleSafes = userSafes.length > 1
   const setupSteps: SetupStep[] = ['details', 'policy', 'review', 'connect']
   const currentStepIndex = setupSteps.indexOf(step)
-  const budgetRows = allowances.map((allowance) => ({
-    id: allowance.tokenSymbol,
-    tokenSymbol: allowance.tokenSymbol,
-    amount: allowance.amount,
-    period: budgetPeriodLabel(allowance.resetTimeMin),
-  }))
   const { resetPeriodOptions } = railBudgetRules(isDelegationAccount, allowances.length)
   const addAmountValidation =
     addAmount && budgetToken
@@ -891,7 +885,6 @@ export function useAgentConnectionSetup({
     walletUnavailable,
     // Policy step
     allowances,
-    budgetRows,
     resetPeriodOptions,
     addAmount,
     addAmountMessage,

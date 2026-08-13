@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-08-12" # #1346 runtime-aware Connect completion handoff re-verified; #1251 MPP seam refusal
+last-verified: "2026-08-13" # #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
 ---
 
 # Haven Screen Recipes
@@ -130,6 +130,9 @@ Structure:
 1. Create and copy a setup prompt for the selected runtime.
 2. Wait for the local connector to generate the signing key and API key, then
    register the public signing address and proof with Haven.
+   If Haven still reports no connection after a bounded wait, say only that it
+   has not received one yet; tell the user not to approve rules, offer the same
+   local command, and let them cancel before creating a fresh one-time prompt.
 3. Show the registered public address and reviewed agent budget before wallet
    approval.
 4. Ask the user to approve the agent's authority: a wallet approval from the selected Haven wallet on legacy Safe accounts, or a single in-modal budget signature on delegation accounts — which activates the agent.

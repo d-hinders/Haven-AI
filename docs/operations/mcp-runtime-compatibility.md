@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-13" # #1377: connector now waits for budget approval after registering (bounded 5s/180s poll of the new read-only connector-status endpoint, skipped under --json); handoff section updated; no version/floor claim affected
+last-verified: "2026-08-13" # #1379: rechecked after the packed npm bin now resolves its symlinked entrypoint, and the dashboard has a bounded pre-registration recovery note; no version/floor claim affected
 ---
 
 # MCP Runtime Compatibility
@@ -80,6 +80,14 @@ install mcp`) to load MCP tools.
 
 ## Completion handoff after Connect
 
+The published `haven-connect` package is also checked through the npm bin
+topology: the package smoke test invokes its packed `node_modules/.bin`
+symlink, not only `node dist/cli.js`. This matters because Node keeps the
+symlink path in `argv[1]`; Connect resolves it before deciding whether it is
+the program entrypoint. A command that exits with no output before it creates
+the local files has not registered an agent and must not be described as a
+completed connection.
+
 The connector's final output is deliberately short and ordered: return to Haven
 to approve the agent rules first, activate the current runtime second, then run
 the read-only `haven_get_agent` and `haven_get_allowances` tools to confirm the
@@ -96,6 +104,13 @@ Haven; at the bound it exits cleanly with "approve whenever ready" guidance —
 the connector always terminates on its own. A flaky poll is retried inside the
 same bound, never treated as a verdict. `--json` automation runs skip the wait
 entirely so the structured outcome is emitted promptly.
+
+Before registration, the dashboard remains neutral about a missing connection:
+after one minute of a confirmed `awaiting_connection` status, it says only that
+Haven has not received a connection yet. It asks the user not to approve agent
+rules, offers the same local command for copying, and lets them cancel the
+one-time setup before creating a fresh prompt. A status-read error remains an
+error state, not evidence that the connector succeeded or failed.
 
 Automation can pass `--json`: Connect keeps progress and recovery prose on
 stderr and emits one parseable, versioned object on stdout. `schema_version: 1`
@@ -199,7 +214,8 @@ seemed to work" is exactly the evidence that cannot be trusted there.
   packages. CI runs connector tests whenever SDK, MCP, signer, or connector
   files change.
 - Run `npm run smoke:pack -w packages/connect` before publishing connector or
-  MCP packages. The smoke packs local SDK/MCP artifacts, stages them into a
+  MCP packages. The smoke packs Connect plus local SDK/MCP artifacts, verifies
+  the packed npm bin starts through an npm-style symlink, stages them into a
   temp Haven runtime, and verifies the wrapper can complete an MCP `initialize`
   + `tools/list` handshake.
 - Verify the generated wrapper with an MCP `initialize` + `tools/list`

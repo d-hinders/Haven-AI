@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-13" # release 0.1.23-alpha.1: manifest table follows the atomic prerelease bump; no runtime compatibility or Node-floor claim changed
+last-verified: "2026-08-13" # #1386: re-verified Connect's install-status-before-approval-poll lifecycle and non-authoritative failure posture
 ---
 
 # MCP Runtime Compatibility
@@ -94,16 +94,20 @@ the read-only `haven_get_agent` and `haven_get_allowances` tools to confirm the
 Haven wallet and live budget. Approval — not a restart — unlocks Haven tools.
 The verification must not sign, fund, or create a payment.
 
-Since #1377 the connector does not go silent after registering: it polls the
-narrow read-only `connector-status` endpoint (pending agent API key, usable
-while `setup_pending`-scoped) and waits for the budget approval — every 5
-seconds, for at most 3 minutes, with a progress reminder every 30 seconds. On
-approval it prints a celebratory line naming the granted authority (amount,
-token, reset period); on a terminal setup status it says the setup ended in
-Haven; at the bound it exits cleanly with "approve whenever ready" guidance —
-the connector always terminates on its own. A flaky poll is retried inside the
-same bound, never treated as a verdict. `--json` automation runs skip the wait
-entirely so the structured outcome is emitted promptly.
+Since #1377 the connector does not go silent after registering: after local
+runtime installation and probes finish, it first makes a best-effort
+install-status report so Haven can expose the existing budget-approval control,
+then it polls the narrow read-only `connector-status` endpoint (pending agent
+API key, usable while `setup_pending`-scoped) and waits for the budget approval
+— every 5 seconds, for at most 3 minutes, with a progress reminder every 30
+seconds. A failed report remains readiness metadata only: it cannot activate an
+agent or change any budget authority. On approval it prints a celebratory line
+naming the granted authority (amount, token, reset period); on a terminal setup
+status it says the setup ended in Haven; at the bound it exits cleanly with
+"approve whenever ready" guidance — the connector always terminates on its
+own. A flaky poll is retried inside the same bound, never treated as a verdict.
+`--json` automation runs skip the wait entirely so the structured outcome is
+emitted promptly.
 
 Before registration, the dashboard remains neutral about a missing connection:
 after one minute of a confirmed `awaiting_connection` status, it says only that

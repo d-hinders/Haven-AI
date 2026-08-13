@@ -487,6 +487,7 @@ describe('runConnect', () => {
     // The status report is best-effort and must not gate the user-facing
     // "you're done + next steps" output, nor make runConnect reject.
     const logs: string[] = []
+    const lifecycleCalls: string[] = []
     const installRuntime = vi.fn(async () => ({
       runtime: 'claude-code' as const,
       runtimeMcpMode: 'local_stdio' as const,
@@ -532,9 +533,13 @@ describe('runConnect', () => {
         next_action: 'return_to_haven_for_wallet_approval',
       })),
       updateInstallStatus: vi.fn(async () => {
+        lifecycleCalls.push('report-install-status')
         throw new Error('network down')
       }),
-      getConnectorStatus: vi.fn(),
+      getConnectorStatus: vi.fn(async () => {
+        lifecycleCalls.push('poll-budget-approval')
+        return { status: 'active', approved_budget: null }
+      }),
     }
 
     const result = await runConnect({
@@ -542,7 +547,7 @@ describe('runConnect', () => {
       apiBaseUrl: 'https://api.haven.example',
       runtime: 'claude-code',
       credentialsDir: '/tmp/haven-connect-test-telemetry',
-      waitForApproval: false,
+      approvalWait: { sleep: async () => {} },
     }, {
       api,
       nodeVersion: SUPPORTED_NODE,
@@ -566,6 +571,10 @@ describe('runConnect', () => {
     expect(output).toContain('Approval — not restarting — unlocks Haven tools')
     // …and the failure is surfaced quietly rather than thrown.
     expect(output).toContain('Could not report install status to Haven')
+    // A failed readiness report is non-authoritative and must not leave the
+    // normal connector flow stranded before its bounded approval wait.
+    expect(lifecycleCalls).toEqual(['report-install-status', 'poll-budget-approval'])
+    expect(output).toContain('Budget approved 🎉')
   })
 })
 
@@ -706,10 +715,14 @@ describe('waitForBudgetApproval (#1377 D)', () => {
 
   it('runConnect polls after registering by default and forwards approvalWait overrides', async () => {
     const logs: string[] = []
-    const getConnectorStatus = vi.fn(async () => ({
-      status: 'active',
-      approved_budget: { token_symbol: 'USDC', token_address: BASE_USDC, amount: '25000000', reset_period_min: 1440 },
-    }))
+    const lifecycleCalls: string[] = []
+    const getConnectorStatus = vi.fn(async () => {
+      lifecycleCalls.push('poll-budget-approval')
+      return {
+        status: 'active',
+        approved_budget: { token_symbol: 'USDC', token_address: BASE_USDC, amount: '25000000', reset_period_min: 1440 },
+      }
+    })
     await runConnect({
       setupToken: 'hv_setup_test_wait',
       apiBaseUrl: 'https://api.haven.example',
@@ -738,7 +751,9 @@ describe('waitForBudgetApproval (#1377 D)', () => {
           hosted_mcp_url: 'https://mcp.haven.example/v1',
           next_action: 'return_to_haven_for_wallet_approval',
         })),
-        updateInstallStatus: vi.fn(async () => undefined),
+        updateInstallStatus: vi.fn(async () => {
+          lifecycleCalls.push('report-install-status')
+        }),
         getConnectorStatus,
       },
       nodeVersion: SUPPORTED_NODE,
@@ -757,6 +772,10 @@ describe('waitForBudgetApproval (#1377 D)', () => {
 
     // Polls with the REGISTERED key (the setup_pending-scoped one it just minted).
     expect(getConnectorStatus).toHaveBeenCalledWith('setup-4', 'sk_agent_waitkey')
+    // The dashboard only exposes the approval controls after this report. It
+    // must settle before the connector's first approval poll, or both sides
+    // wait on each other until the bounded poll window ends (#1386).
+    expect(lifecycleCalls).toEqual(['report-install-status', 'poll-budget-approval'])
     expect(logs.join('\n')).toContain('Budget approved 🎉')
   })
 })

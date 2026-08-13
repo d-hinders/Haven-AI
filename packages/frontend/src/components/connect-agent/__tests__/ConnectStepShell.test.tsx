@@ -121,6 +121,28 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
   })
 })
 
+
+describe('one frame, one rhythm (#1392)', () => {
+  it('the shell body carries the rhythm and distributes reserved slack — at the source', () => {
+    const { container } = render(
+      <ConnectStepShell phase="waiting" stateKey="w">
+        <p>block one</p>
+        <p>block two</p>
+      </ConnectStepShell>,
+    )
+    // gap-5 = the 20px rhythm fragment sub-states lost when #1380 replaced
+    // the space-y-5 wrapper; flex-col + justify-center = short content sits
+    // within the reserved floor instead of leaving slack under its button.
+    const body = container.querySelector('.min-h-\\[340px\\]')
+    expect(body).not.toBeNull()
+    expect(body!.className).toContain('flex-col')
+    expect(body!.className).toContain('gap-5')
+    expect(body!.className).toContain('justify-center')
+    // The floor itself is untouched — the silhouette guarantee from #1377
+    // (asserted across phases below) still rests on min-h.
+  })
+})
+
 describe('ConnectStepShell (#1377 C)', () => {
   it('keeps one silhouette: progress header + reserved-height body in every phase', () => {
     const { container, rerender, getByLabelText } = render(

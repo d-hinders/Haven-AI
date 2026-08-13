@@ -1,4 +1,5 @@
 import { createConnectApiClient, type ConnectApiClient, type ResolvedSetup } from './api.js'
+import { resolveTokenFromAddress } from '@haven_ai/sdk'
 import {
   agentApiKeyPrefix,
   generateAgentApiKey,
@@ -34,6 +35,14 @@ export interface ConnectOptions {
   ackSigner?: boolean
   ackLocalTools?: boolean
   localMcp?: boolean
+  /**
+   * #1377 D: keep the process alive after registering and poll for the
+   * user's budget approval (default). Set false for structured/automation
+   * runs (--json) where prompt output emission matters more than narration.
+   */
+  waitForApproval?: boolean
+  /** Test/injection overrides for the approval poll cadence and clock. */
+  approvalWait?: ApprovalWaitOptions
 }
 
 /** The stable machine-readable result emitted by `haven-connect --json`. */
@@ -241,6 +250,15 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   } else {
     log('Haven setup on this machine is complete.')
   }
+
+  // #1377 D: stay alive through the approval instead of going dead exactly
+  // while the user acts. Skipped in structured/automation mode
+  // (waitForApproval: false — the --json contract emits promptly) and when
+  // the install itself needs manual completion first.
+  if (options.waitForApproval !== false && !runtimeInstall.errorCode) {
+    await waitForBudgetApproval(api, registration.setup_id, localApiKey, log, options.approvalWait)
+  }
+
   printNextSteps(runtimeInstall, log)
 
   try {
@@ -416,6 +434,95 @@ function printRuntimeInstall(result: RuntimeInstallResult, log: (message: string
   } else {
     log('Local Haven signer still needs runtime setup.')
   }
+}
+
+/**
+ * #1377 D: after registering, the connector no longer goes dead while the
+ * user approves in Haven — it polls the narrow connector-status endpoint
+ * (agent-API-key auth, works during `setup_pending`) and narrates progress in
+ * the flow's voice, ending in a concrete celebration naming the granted
+ * authority. Bounds (stated per the issue): poll every 5 s, give up after
+ * 3 minutes — the connector ALWAYS terminates on its own; a timeout is a
+ * clean exit with guidance, never a hang. Injectable clock/cadence for tests.
+ */
+export interface ApprovalWaitOptions {
+  intervalMs?: number
+  timeoutMs?: number
+  sleep?: (ms: number) => Promise<void>
+}
+
+/** Human form of an atomic amount — whole numbers stay whole ("25", not "25.0"). */
+function formatAtomicAmount(atomic: bigint, decimals: number): string {
+  const s = atomic.toString().padStart(decimals + 1, '0')
+  const intPart = s.slice(0, s.length - decimals) || '0'
+  const fracPart = s.slice(s.length - decimals).replace(/0+$/, '')
+  return fracPart ? `${intPart}.${fracPart}` : intPart
+}
+
+function describeResetPeriod(resetPeriodMin: number): string {
+  if (resetPeriodMin === 1440) return 'per day'
+  if (resetPeriodMin === 60) return 'per hour'
+  if (resetPeriodMin === 0) return 'with no automatic reset'
+  return `per ${resetPeriodMin} minutes`
+}
+
+function describeApprovedBudget(budget: {
+  token_symbol: string
+  token_address: string
+  amount: string
+  reset_period_min: number
+}): string {
+  const token = resolveTokenFromAddress(budget.token_address)
+  const amount = token
+    ? `${formatAtomicAmount(BigInt(budget.amount), token.decimals)} ${budget.token_symbol}`
+    : `${budget.amount} ${budget.token_symbol} (atomic units)`
+  return `${amount} ${describeResetPeriod(budget.reset_period_min)}`
+}
+
+export async function waitForBudgetApproval(
+  api: Pick<ConnectApiClient, 'getConnectorStatus'>,
+  setupId: string,
+  apiKey: string,
+  log: (message: string) => void,
+  options: ApprovalWaitOptions = {},
+): Promise<'approved' | 'pending' | 'ended'> {
+  const intervalMs = options.intervalMs ?? 5_000
+  const timeoutMs = options.timeoutMs ?? 180_000
+  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
+  const maxPolls = Math.max(1, Math.floor(timeoutMs / intervalMs))
+  const remindEvery = Math.max(1, Math.floor(30_000 / intervalMs))
+
+  log('Registered with Haven — waiting for you to approve the budget in the dashboard…')
+  for (let i = 0; i < maxPolls; i++) {
+    await sleep(intervalMs)
+    let status: Awaited<ReturnType<ConnectApiClient['getConnectorStatus']>>
+    try {
+      status = await api.getConnectorStatus(setupId, apiKey)
+    } catch {
+      // A flaky poll is not a verdict — keep waiting inside the same bound.
+      continue
+    }
+    if (status.status === 'active') {
+      log(
+        status.approved_budget
+          ? `Budget approved 🎉 — I can now spend up to ${describeApprovedBudget(status.approved_budget)} from your Haven wallet.`
+          : 'Budget approved 🎉 — the agent can now spend within its Haven rules.',
+      )
+      return 'approved'
+    }
+    if (status.status === 'cancelled' || status.status === 'expired' || status.status === 'failed') {
+      log(`This setup ended in Haven (${status.status}) — start a fresh connection from the dashboard when ready.`)
+      return 'ended'
+    }
+    if ((i + 1) % remindEvery === 0) {
+      log('Still waiting for budget approval in Haven…')
+    }
+  }
+  log(
+    'Budget approval is still pending in Haven. Approve it in the dashboard whenever you are ready — ' +
+      'the agent tools unlock the moment you do. Verify later with the read-only haven_get_agent tool.',
+  )
+  return 'pending'
 }
 
 /**

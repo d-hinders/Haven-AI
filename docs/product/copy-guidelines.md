@@ -8,7 +8,7 @@ covers:
   - packages/frontend/src/app/how-it-works/**
   - packages/frontend/src/app/protocols/**
   - packages/frontend/src/app/onboarding/**
-  - packages/frontend/src/components/ConnectAgent2Modal.tsx
+  - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/frontend/src/components/UsingYourAgentInfo.tsx
   - packages/frontend/src/components/haven/HostedConnectCard.tsx
   - packages/frontend/src/lib/agent-credential.ts

@@ -529,6 +529,29 @@ export const openapiSpec = {
         },
       },
     },
+    '/agent-connection-setups/{setupId}/connector-status': {
+      get: {
+        tags: ['Connect Agent 2'],
+        operationId: 'getAgentConnectionConnectorStatus',
+        summary: 'Narrow post-register status read for the local connector.',
+        description:
+          'Lets the connector wait for the user\'s budget approval after registering (#1377). Authenticated with the pending agent API key — deliberately usable while the key is still setup_pending-scoped. Read-only and narrow by design: it reveals only the setup status plus, once active, the approved budget summary; it grants no payment authority and returns 404 for setups not owned by the presented key.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ $ref: '#/components/parameters/SetupId' }],
+        responses: {
+          '200': {
+            description: 'Current setup status for the polling connector.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentConnectionConnectorStatus' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     '/agent-connection-setups/{setupId}/wallet-approval': {
       post: {
         tags: ['Connect Agent 2'],
@@ -2125,6 +2148,32 @@ export const openapiSpec = {
           setup_id: uuid,
           status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
           install_status: { $ref: '#/components/schemas/AgentConnectionInstallStatus' },
+        },
+        additionalProperties: false,
+      },
+      AgentConnectionConnectorStatus: {
+        type: 'object',
+        required: ['status', 'approved_budget'],
+        properties: {
+          status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
+          approved_budget: {
+            // Non-null only once the setup is active — the summary the
+            // connector celebrates with. Never spend authority.
+            oneOf: [
+              {
+                type: 'object',
+                required: ['token_symbol', 'token_address', 'amount', 'reset_period_min'],
+                properties: {
+                  token_symbol: { type: 'string' },
+                  token_address: address,
+                  amount: { type: 'string' },
+                  reset_period_min: { type: 'integer' },
+                },
+                additionalProperties: false,
+              },
+              { type: 'null' },
+            ],
+          },
         },
         additionalProperties: false,
       },

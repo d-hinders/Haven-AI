@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ConnectApiClient, RegisterSetupInput, UpdateInstallStatusInput } from './api.js'
+import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
-import { completionHandoffLines, failedConnectOutcome, runConnect } from './runtime.js'
+import { completionHandoffLines, failedConnectOutcome, runConnect, waitForBudgetApproval } from './runtime.js'
 import type { RuntimeInstallResult } from './runtime-install.js'
 
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
@@ -102,6 +102,7 @@ describe('runConnect', () => {
         })),
         registerSetup: vi.fn(),
         updateInstallStatus: vi.fn(),
+        getConnectorStatus: vi.fn(),
       },
       writeCredentials,
     }))
@@ -126,6 +127,7 @@ describe('runConnect', () => {
         })),
         registerSetup,
         updateInstallStatus: vi.fn(),
+        getConnectorStatus: vi.fn(),
       },
     })).rejects.toThrow(/expired or invalid/)
     expect(registerSetup).not.toHaveBeenCalled()
@@ -190,6 +192,7 @@ describe('runConnect', () => {
       updateInstallStatus: vi.fn(async (_setupId, _apiKey, input) => {
         installInputs.push(input)
       }),
+      getConnectorStatus: vi.fn(),
     }
 
     const result = await runConnect({
@@ -197,6 +200,8 @@ describe('runConnect', () => {
       apiBaseUrl: 'https://api.haven.example',
       runtime: 'claude-code',
       credentialsDir: '/tmp/haven-connect-test',
+      // The approval poll has its own suite below; keep this test focused.
+      waitForApproval: false,
     }, {
       api,
       // Pinned so the #1161 Node floor cannot make this test host-dependent.
@@ -312,6 +317,7 @@ describe('runConnect', () => {
           resolveSetup: vi.fn(),
           registerSetup: vi.fn(),
           updateInstallStatus: vi.fn(),
+          getConnectorStatus: vi.fn(),
         } as unknown as ConnectApiClient,
         preflightStorage: vi.fn(),
         writeCredentials: vi.fn(),
@@ -446,6 +452,7 @@ describe('runConnect', () => {
         next_action: 'return_to_haven_for_wallet_approval',
       })),
       updateInstallStatus: vi.fn(async () => undefined),
+      getConnectorStatus: vi.fn(),
     }
 
     await runConnect({
@@ -453,6 +460,7 @@ describe('runConnect', () => {
       apiBaseUrl: 'https://api.haven.example',
       runtime: 'claude-desktop',
       credentialsDir: '/tmp/haven-connect-test-desktop',
+      waitForApproval: false,
     }, {
       api,
       nodeVersion: SUPPORTED_NODE,
@@ -525,6 +533,7 @@ describe('runConnect', () => {
       updateInstallStatus: vi.fn(async () => {
         throw new Error('network down')
       }),
+      getConnectorStatus: vi.fn(),
     }
 
     const result = await runConnect({
@@ -532,6 +541,7 @@ describe('runConnect', () => {
       apiBaseUrl: 'https://api.haven.example',
       runtime: 'claude-code',
       credentialsDir: '/tmp/haven-connect-test-telemetry',
+      waitForApproval: false,
     }, {
       api,
       nodeVersion: SUPPORTED_NODE,
@@ -555,5 +565,165 @@ describe('runConnect', () => {
     expect(output).toContain('Approval — not restarting — unlocks Haven tools')
     // …and the failure is surfaced quietly rather than thrown.
     expect(output).toContain('Could not report install status to Haven')
+  })
+})
+
+describe('waitForBudgetApproval (#1377 D)', () => {
+  // Base USDC — resolvable in the shared token registry, so the celebration
+  // can name a human amount instead of atomic units.
+  const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+  const noSleep = async () => {}
+
+  it('prints progress while pending and a celebratory line naming amount, token, and period on approval', async () => {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn<(setupId: string, apiKey: string) => Promise<ConnectorStatusResponse>>()
+    getConnectorStatus
+      .mockResolvedValueOnce({ status: 'pending_approval', approved_budget: null })
+      .mockResolvedValueOnce({ status: 'pending_approval', approved_budget: null })
+      .mockResolvedValueOnce({
+        status: 'active',
+        approved_budget: { token_symbol: 'USDC', token_address: BASE_USDC, amount: '25000000', reset_period_min: 1440 },
+      })
+
+    const outcome = await waitForBudgetApproval(
+      { getConnectorStatus }, 'setup-1', 'sk_agent_supersecret',
+      (message) => logs.push(message), { sleep: noSleep },
+    )
+
+    expect(outcome).toBe('approved')
+    expect(getConnectorStatus).toHaveBeenCalledTimes(3)
+    expect(getConnectorStatus).toHaveBeenCalledWith('setup-1', 'sk_agent_supersecret')
+    const output = logs.join('\n')
+    expect(output).toContain('waiting for you to approve the budget')
+    expect(output).toContain('Budget approved 🎉 — I can now spend up to 25 USDC per day from your Haven wallet.')
+  })
+
+  it('always terminates on its own: exits pending with guidance at the timeout bound', async () => {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn(async () => ({ status: 'pending_approval', approved_budget: null }))
+
+    const outcome = await waitForBudgetApproval(
+      { getConnectorStatus }, 'setup-1', 'sk_agent_key',
+      (message) => logs.push(message),
+      { sleep: noSleep, intervalMs: 5_000, timeoutMs: 180_000 },
+    )
+
+    expect(outcome).toBe('pending')
+    // 180s / 5s = the stated bound of 36 polls, then a clean exit — never a hang.
+    expect(getConnectorStatus).toHaveBeenCalledTimes(36)
+    const output = logs.join('\n')
+    expect(output).toContain('Still waiting for budget approval in Haven…')
+    expect(output).toContain('Budget approval is still pending in Haven.')
+    expect(output).toContain('haven_get_agent')
+  })
+
+  it('stops with guidance when the setup reaches a terminal status in Haven', async () => {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn(async () => ({ status: 'cancelled', approved_budget: null }))
+
+    const outcome = await waitForBudgetApproval(
+      { getConnectorStatus }, 'setup-1', 'sk_agent_key',
+      (message) => logs.push(message), { sleep: noSleep },
+    )
+
+    expect(outcome).toBe('ended')
+    expect(getConnectorStatus).toHaveBeenCalledTimes(1)
+    expect(logs.join('\n')).toContain('This setup ended in Haven (cancelled)')
+  })
+
+  it('tolerates flaky polls inside the bound instead of giving up', async () => {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn()
+      .mockRejectedValueOnce(new Error('ECONNRESET'))
+      .mockRejectedValueOnce(new Error('502'))
+      .mockResolvedValueOnce({
+        status: 'active',
+        approved_budget: { token_symbol: 'USDC', token_address: BASE_USDC, amount: '10000000', reset_period_min: 0 },
+      })
+
+    const outcome = await waitForBudgetApproval(
+      { getConnectorStatus }, 'setup-1', 'sk_agent_key',
+      (message) => logs.push(message), { sleep: noSleep },
+    )
+
+    expect(outcome).toBe('approved')
+    expect(logs.join('\n')).toContain('10 USDC with no automatic reset')
+  })
+
+  it('falls back to atomic units without crashing when the token is not in the registry', async () => {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn(async () => ({
+      status: 'active',
+      approved_budget: {
+        token_symbol: 'MYSTERY',
+        token_address: '0x000000000000000000000000000000000000dead',
+        amount: '123',
+        reset_period_min: 60,
+      },
+    }))
+
+    const outcome = await waitForBudgetApproval(
+      { getConnectorStatus }, 'setup-1', 'sk_agent_key',
+      (message) => logs.push(message), { sleep: noSleep },
+    )
+
+    expect(outcome).toBe('approved')
+    expect(logs.join('\n')).toContain('123 MYSTERY (atomic units) per hour')
+  })
+
+  it('runConnect polls after registering by default and forwards approvalWait overrides', async () => {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn(async () => ({
+      status: 'active',
+      approved_budget: { token_symbol: 'USDC', token_address: BASE_USDC, amount: '25000000', reset_period_min: 1440 },
+    }))
+    await runConnect({
+      setupToken: 'hv_setup_test_wait',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-wait',
+      approvalWait: { sleep: noSleep },
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-4',
+          status: 'awaiting_connection',
+          agent: { name: 'Waiting Agent' },
+          haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 8453, network: 'Base' },
+          agent_budget: [],
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-4', message: 'Haven Connect Agent 2\nsetup_id: setup-4\nchallenge: jkl', expires_at: '2099-01-01T00:00:00.000Z' },
+        })),
+        registerSetup: vi.fn(async (input) => ({
+          setup_id: 'setup-4',
+          agent_id: 'agent-4',
+          status: 'connected_local',
+          agent_status: 'pending_approval',
+          api_key_prefix: input.apiKeyPrefix,
+          api_key_scope: 'setup_pending',
+          delegate_address: input.delegateAddress.toLowerCase(),
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          next_action: 'return_to_haven_for_wallet_approval',
+        })),
+        updateInstallStatus: vi.fn(async () => undefined),
+        getConnectorStatus,
+      },
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_waitkey',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-wait'),
+      writeCredentials: vi.fn(async () => ({
+        directory: '/tmp/haven-connect-test-wait/agent-4',
+        identityPath: '/tmp/haven-connect-test-wait/agent-4/identity.json',
+        signerPath: '/tmp/haven-connect-test-wait/agent-4/signer.json',
+        agentPath: '/tmp/haven-connect-test-wait/agent-4/agent.json',
+      })),
+      installRuntime: vi.fn(async () => completedInstall('claude-code')),
+      log: (message) => logs.push(message),
+    })
+
+    // Polls with the REGISTERED key (the setup_pending-scoped one it just minted).
+    expect(getConnectorStatus).toHaveBeenCalledWith('setup-4', 'sk_agent_waitkey')
+    expect(logs.join('\n')).toContain('Budget approved 🎉')
   })
 })

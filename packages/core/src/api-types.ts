@@ -220,6 +220,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agent-connection-setups/{setupId}/connector-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Narrow post-register status read for the local connector.
+         * @description Lets the connector wait for the user's budget approval after registering (#1377). Authenticated with the pending agent API key — deliberately usable while the key is still setup_pending-scoped. Read-only and narrow by design: it reveals only the setup status plus, once active, the approved budget summary; it grants no payment authority and returns 404 for setups not owned by the presented key.
+         */
+        get: operations["getAgentConnectionConnectorStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-connection-setups/{setupId}/wallet-approval": {
         parameters: {
             query?: never;
@@ -1108,6 +1128,16 @@ export type components = {
             setup_id: string;
             status: components["schemas"]["AgentConnectionSetupState"];
             install_status: components["schemas"]["AgentConnectionInstallStatus"];
+        };
+        AgentConnectionConnectorStatus: {
+            status: components["schemas"]["AgentConnectionSetupState"];
+            approved_budget: {
+                token_symbol: string;
+                /** @example 0x1111111111111111111111111111111111111111 */
+                token_address: string;
+                amount: string;
+                reset_period_min: number;
+            } | null;
         };
         AgentAllowance: {
             /** Format: uuid */
@@ -2614,6 +2644,58 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAgentConnectionConnectorStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                setupId: components["parameters"]["SetupId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current setup status for the polling connector. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConnectionConnectorStatus"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

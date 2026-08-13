@@ -61,7 +61,7 @@ vi.mock('@/components/DashboardOnboardingGuide', () => ({
   ),
 }))
 
-vi.mock('@/components/ConnectAgent2Modal', () => ({
+vi.mock('@/components/ConnectAgentModal', () => ({
   default: () => null,
 }))
 

@@ -59,13 +59,21 @@ export function WaitingForConnector({
             <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
               Paste this prompt into the agent environment. It includes your approval for the exact local setup actions, creates the key there, and sends Haven only the public signing address.
             </p>
+            <p className="mt-2 text-xs font-medium leading-relaxed text-[var(--v2-ink)]">
+              Haven advances this screen automatically once the agent connects — no refresh, nothing else to click here.
+            </p>
             {runtime === 'codex-desktop' && (
               <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                 Codex Desktop may ask you to approve running the setup command. That is expected.
               </p>
             )}
           </div>
-          <StatusBadge tone={loading ? 'neutral' : 'warning'}>{loading ? 'Checking' : 'Waiting'}</StatusBadge>
+          {/* #1377 C: static — polling must never swap the label (content shift).
+              The quiet pulse dot is the liveness cue, inside the already-sized badge. */}
+          <StatusBadge tone="warning">
+            <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current motion-safe:animate-pulse" aria-hidden />
+            Waiting
+          </StatusBadge>
         </div>
       </div>
 
@@ -161,8 +169,11 @@ export function WaitingForConnector({
         </div>
       </details>
 
-      <p className="text-xs text-[var(--v2-ink-3)]">
-        Expires {formatAbsoluteDate(expiresAt)}. {error ? `Status check failed: ${error}` : 'Haven will update this screen when the local connection finishes.'}
+      {/* #1377 C: fixed-height slot — the error suffix must not reflow on a
+          poll tick. Two reserved lines cover the longest content. */}
+      <p className="min-h-8 text-xs text-[var(--v2-ink-3)]">
+        Expires {formatAbsoluteDate(expiresAt)}.{' '}
+        {error ? `Status check failed: ${error}` : 'Haven keeps checking in the background.'}
       </p>
 
       <div className="flex gap-3">

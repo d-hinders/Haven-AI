@@ -32,7 +32,7 @@ import { RecoveryNudge } from '@/components/onboarding/RecoveryNudge'
 import { getStoredHybridSigners } from '@/lib/signer'
 import { useSafeApprovers } from '@/hooks/useSafeApprovers'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
-import ConnectAgent2Modal from '@/components/ConnectAgent2Modal'
+import ConnectAgentModal from '@/components/ConnectAgentModal'
 import SendModal from '@/components/SendModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
@@ -1126,7 +1126,7 @@ export default function DashboardClient() {
         )
       })()}
 
-      <ConnectAgent2Modal
+      <ConnectAgentModal
         open={connectAgentOpen}
         onClose={() => {
           setConnectAgentOpen(false)

@@ -389,7 +389,7 @@ export function useAgentPanelState() {
     }
   }
 
-  /** ConnectAgent2Modal's onSetupUpdated — suppress the "Unmanaged Delegate"
+  /** ConnectAgentModal's onSetupUpdated — suppress the "Unmanaged Delegate"
    *  race window, then poll until the new agent lands (see comments above). */
   function handleSetupUpdated(info?: { delegateAddress?: string | null }) {
     markDelegateRecent(info?.delegateAddress)

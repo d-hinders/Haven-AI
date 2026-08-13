@@ -1,6 +1,7 @@
 'use client'
 
 import type { AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
+import { ConnectStepShell, type ConnectShellPhase } from './ConnectStepShell'
 import { DelegationApprovalStep } from './DelegationApprovalStep'
 import { LocalConnectionReady } from './LocalConnectionReady'
 import { FinalizingLocalSetup, SetupDoneState, SetupStatusState, TerminalSetupState } from './SetupStates'
@@ -12,12 +13,30 @@ import { WaitingForConnector } from './WaitingForConnector'
  * #1069/#1070 rail branch between the delegation budget grant and the legacy
  * Safe wallet approval.
  */
+/** #1377 C: map the resolved sub-state onto the shell's progress ticker. */
+function shellPhase(kind: string | undefined): ConnectShellPhase {
+  switch (kind) {
+    case 'waiting_for_connector':
+      return 'waiting'
+    case 'finalizing_local':
+    case 'delegation_approval':
+    case 'legacy_approval':
+    case 'approval_in_progress':
+    case 'proposed':
+      return 'connected'
+    case 'active':
+      return 'approved'
+    default:
+      return 'halted'
+  }
+}
+
 export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   const { setup, setupStatus, connectView } = flow
   if (!setup) return null
 
   return (
-    <div className="v2-animate-step-rise space-y-5">
+    <ConnectStepShell phase={shellPhase(connectView?.kind)} stateKey={connectView?.kind ?? 'none'}>
       {connectView?.kind === 'waiting_for_connector' && (
         <WaitingForConnector
           setup={setup}
@@ -159,6 +178,6 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           onPrimary={flow.handleClose}
         />
       )}
-    </div>
+    </ConnectStepShell>
   )
 }

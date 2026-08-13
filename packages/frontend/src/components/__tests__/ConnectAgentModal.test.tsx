@@ -197,7 +197,7 @@ vi.mock('@/components/haven', async () => {
   }
 })
 
-import ConnectAgent2Modal from '@/components/ConnectAgent2Modal'
+import ConnectAgentModal from '@/components/ConnectAgentModal'
 
 function renderModal({
   onClose = vi.fn(),
@@ -209,7 +209,7 @@ function renderModal({
   safeId?: string | null
 } = {}) {
   render(
-    <ConnectAgent2Modal
+    <ConnectAgentModal
       open
       onClose={onClose}
       safeAddress={safeAddress}
@@ -227,7 +227,7 @@ function ReopenableModal() {
       <button type="button" onClick={() => setOpen(true)}>
         Reopen modal
       </button>
-      <ConnectAgent2Modal
+      <ConnectAgentModal
         open={open}
         onClose={() => setOpen(false)}
         safeAddress={SAFE.safe_address}
@@ -248,7 +248,6 @@ async function fillAndCreateSetup() {
   fireEvent.change(screen.getByPlaceholderText('Amount'), {
     target: { value: '10' },
   })
-  fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
   fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create setup prompt' }))
@@ -322,7 +321,7 @@ const SETUP_PROMPT = [
   'When the connector finishes, tell me to return to Haven to approve the agent rules.',
 ].join('\n')
 
-describe('ConnectAgent2Modal', () => {
+describe('ConnectAgentModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     Object.defineProperty(navigator, 'clipboard', {
@@ -398,7 +397,7 @@ describe('ConnectAgent2Modal', () => {
 
   it('prefills a 10/day starter budget when opened with starterAllowance (#352)', () => {
     render(
-      <ConnectAgent2Modal
+      <ConnectAgentModal
         open
         onClose={vi.fn()}
         safeAddress={SAFE.safe_address}
@@ -437,10 +436,13 @@ describe('ConnectAgent2Modal', () => {
     ))
     const body = mockApiPost.mock.calls[0][1] as Record<string, unknown>
     expect(JSON.stringify(body)).not.toMatch(/delegate_key|private_key|privateKey|sk_agent_/)
+    // #1377 B: the pinned budget token is the wallet chain's USDC variant —
+    // USDC.e on this Gnosis fixture — 6 decimals, address included.
     expect(body.allowances).toEqual([
       expect.objectContaining({
-        token_symbol: 'xDAI',
-        allowance_amount: '10000000000000000000',
+        token_symbol: 'USDC.e',
+        token_address: '0x9999999999999999999999999999999999999999',
+        allowance_amount: '10000000',
         reset_period_min: 1440,
       }),
     ])
@@ -470,7 +472,6 @@ describe('ConnectAgent2Modal', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
     }
     fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '10' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
     fireEvent.click(screen.getByRole('checkbox', { name: /issue an agent passport/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
     await act(async () => {
@@ -493,7 +494,6 @@ describe('ConnectAgent2Modal', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
     }
     fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '10' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
 
     // Unchecked by default — review step must say so, not stay silent.
     fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
@@ -625,6 +625,8 @@ describe('ConnectAgent2Modal', () => {
     // success / awaiting-approval / "Ready for Haven approval" / yellow
     // restart callouts. Restart guidance moves to the post-approval state.
     expect(await screen.findByText('Approve agent rules')).toBeInTheDocument()
+    // #1377 C: the legacy approval renders inside the one step-4 shell.
+    expect(screen.getByLabelText('Connection progress')).toBeInTheDocument()
     expect(screen.getByText(/Local connection verified/i)).toBeInTheDocument()
     expect(screen.getByText(/You sign to give Research Agent authority to spend/i)).toBeInTheDocument()
     expect(screen.queryByText('Connected locally')).not.toBeInTheDocument()
@@ -658,6 +660,8 @@ describe('ConnectAgent2Modal', () => {
     expect(screen.getByText(/10\.00 USDC\.e per day/)).toBeInTheDocument()
     expect(screen.queryByPlaceholderText('Amount')).not.toBeInTheDocument()
 
+    // #1377 C: the delegation approval renders inside the one step-4 shell.
+    expect(screen.getByLabelText('Connection progress')).toBeInTheDocument()
     // The legacy approval UI must be absent — that is the original bug:
     expect(screen.queryByRole('button', { name: 'Approve rules' })).not.toBeInTheDocument()
     expect(document.body.textContent).not.toContain('still connecting to the wallet network')
@@ -843,11 +847,10 @@ describe('ConnectAgent2Modal', () => {
     fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Research Agent' } })
     fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
     fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '10' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
 
     // The add-another affordance is gone, replaced by an explanation.
     expect(screen.queryByRole('button', { name: 'Add budget' })).not.toBeInTheDocument()
-    expect(screen.getByText(/Setup takes one budget/)).toBeInTheDocument()
+    expect(screen.getByText(/Setup grants one .*budget/)).toBeInTheDocument()
     // ...and the flow still continues.
     expect(screen.getByRole('button', { name: 'Review agent rules' })).toBeEnabled()
   })
@@ -1528,7 +1531,6 @@ describe('ConnectAgent2Modal', () => {
     fireEvent.change(screen.getByPlaceholderText('Amount'), {
       target: { value: '10' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
     fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
 
     expect(screen.getByText('Haven wallet unavailable')).toBeInTheDocument()

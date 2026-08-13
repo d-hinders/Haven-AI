@@ -111,9 +111,9 @@ export interface UseAgentConnectionSetupOptions {
   onClose: () => void
   safeAddress?: string
   safeId?: string | null
-  /** See ConnectAgent2Modal's prop of the same name. */
+  /** See ConnectAgentModal's prop of the same name. */
   onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void
-  /** See ConnectAgent2Modal's prop of the same name. */
+  /** See ConnectAgentModal's prop of the same name. */
   starterAllowance?: boolean
 }
 
@@ -404,7 +404,7 @@ async function recordWalletApproval(
 /**
  * State machine + async orchestration for the connect-agent flow (#989).
  *
- * Everything ConnectAgent2Modal decides lives here; the modal itself is
+ * Everything ConnectAgentModal decides lives here; the modal itself is
  * composition/layout only. Flow logic is therefore testable without
  * rendering the modal — the two live defects this extraction answers
  * (#1069/#1070) were both flow-logic bugs invisible to render-level tests.
@@ -552,26 +552,44 @@ export function useAgentConnectionSetup({
     setAllowances((prev) => prev.filter((allowance) => validSymbols.has(allowance.tokenSymbol)))
   }, [addToken, open, tokenOptions])
 
+  // #1377 B: the flow takes exactly ONE budget, in USDC — the token select and
+  // the add-then-continue two-step are gone. The pinned token:
+  const budgetToken =
+    tokenOptions.find((token) => token.symbol === 'USDC') ??
+    tokenOptions.find((token) => token.symbol === 'USDC.e') ??
+    tokenOptions[0]
+
+  // The draft budget derives LIVE from the amount/reset inputs. `allowances`
+  // stays the single source handleCreateSetup maps to the wire (via the same
+  // validateMoneyInput -> parsed.amount value the old Add-button path stored),
+  // so the setup payload is byte-identical to the add-then-continue flow.
+  useEffect(() => {
+    if (!budgetToken) return
+    const parsed = addAmount
+      ? validateMoneyInput(addAmount, budgetToken.decimals, { tokenSymbol: budgetToken.symbol })
+      : null
+    setAllowances(
+      parsed?.ok
+        ? [{
+            tokenSymbol: budgetToken.symbol,
+            tokenAddress: budgetToken.address,
+            decimals: budgetToken.decimals,
+            amount: parsed.amount,
+            resetTimeMin: addReset,
+          }]
+        : [],
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- budgetToken is
+    // recreated per render; its identity is fully captured by these scalars.
+  }, [addAmount, addReset, budgetToken?.symbol, budgetToken?.address, budgetToken?.decimals])
+
   // First-agent hand-off: seed a starter budget so the policy step is
   // payment-ready by default. Only when the form is empty — user edits win.
   useEffect(() => {
-    if (!open || !starterAllowance) return
-    const usdc =
-      tokenOptions.find((token) => token.symbol === 'USDC') ??
-      tokenOptions.find((token) => token.symbol === 'USDC.e')
-    if (!usdc) return
-    setAllowances((prev) =>
-      prev.length > 0
-        ? prev
-        : [{
-            tokenSymbol: usdc.symbol,
-            tokenAddress: usdc.address,
-            decimals: usdc.decimals,
-            amount: '10',
-            resetTimeMin: 1440,
-          }],
-    )
-  }, [open, starterAllowance, tokenOptions])
+    if (!open || !starterAllowance || !budgetToken) return
+    setAddAmount((prev) => (prev === '' ? '10' : prev))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, starterAllowance, budgetToken?.symbol])
 
   const resetForm = useCallback(() => {
     setStep('details')
@@ -931,6 +949,7 @@ export function useAgentConnectionSetup({
     addAmountMessage,
     addAmountValidation,
     addTokenOption,
+    budgetToken,
     addReset,
     setAddReset,
     issuePassport,

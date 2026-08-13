@@ -52,7 +52,7 @@ vi.mock('@/lib/signer', () => ({
   isSafeCapableSigner: (s: { type?: string } | null) => s !== null && s.type !== 'delegator_passkey',
 }))
 
-vi.mock('@/components/ConnectAgent2Modal', () => ({
+vi.mock('@/components/ConnectAgentModal', () => ({
   default: ({ open, starterAllowance }: { open: boolean; starterAllowance?: boolean }) =>
     open ? (
       <div role="dialog">
@@ -87,7 +87,7 @@ describe('AgentPanel Connect Agent entry', () => {
     mockUseActiveSigner.mockReturnValue(null)
   })
 
-  it('opens ConnectAgent2Modal when the Connect agent button is clicked', () => {
+  it('opens ConnectAgentModal when the Connect agent button is clicked', () => {
     render(<AgentPanel />)
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent' })[0])

@@ -3,7 +3,7 @@
 import { ChevronRight, CircleAlert, Clock, LoaderCircle, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
-import ConnectAgent2Modal from './ConnectAgent2Modal'
+import ConnectAgentModal from './ConnectAgentModal'
 import EditAgentModal from './EditAgentModal'
 import { AgentCard } from './agent-panel/AgentCard'
 import { BotIcon } from './agent-panel/agent-display'
@@ -252,7 +252,7 @@ export default function AgentPanel() {
         </div>
       )}
 
-      <ConnectAgent2Modal
+      <ConnectAgentModal
         open={panel.connect2Open}
         onClose={() => panel.setConnect2Open(false)}
         starterAllowance={panel.firstAgentSetup}

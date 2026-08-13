@@ -10,22 +10,22 @@ export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   return (
     <div className="v2-animate-step-rise space-y-5">
       <div>
-        <label htmlFor="connect2-name" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+        <label htmlFor="connect-agent-name" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
           Agent name
         </label>
         <Input
-          id="connect2-name"
+          id="connect-agent-name"
           value={flow.name}
           onChange={(event) => flow.setName(event.target.value)}
           placeholder="e.g. Research Agent"
         />
       </div>
       <div>
-        <label htmlFor="connect2-description" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+        <label htmlFor="connect-agent-description" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
           Description <span className="normal-case">(optional)</span>
         </label>
         <textarea
-          id="connect2-description"
+          id="connect-agent-description"
           value={flow.description}
           onChange={(event) => flow.setDescription(event.target.value)}
           placeholder="What does this agent do?"
@@ -34,11 +34,11 @@ export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         />
       </div>
       <div>
-        <label htmlFor="connect2-runtime" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+        <label htmlFor="connect-agent-runtime" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
           Where will this agent run?
         </label>
         <Select
-          id="connect2-runtime"
+          id="connect-agent-runtime"
           value={flow.runtime}
           onChange={(event) => flow.setRuntime(event.target.value)}
         >

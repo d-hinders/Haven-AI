@@ -6,11 +6,15 @@ import { StatusBadge, type StatusTone } from '../ui/StatusBadge'
 import { restartCopyForRuntime } from './setup-copy'
 
 /** Loading state while the connector finishes local setup. */
-export function FinalizingLocalSetup({ loading }: { loading: boolean }) {
+export function FinalizingLocalSetup({ loading: _loading }: { loading: boolean }) {
+  // #1377 C: the label is static — polling must never swap it (content shift).
   return (
     <div className="space-y-4 text-center">
       <div className="flex justify-center">
-        <StatusBadge tone="neutral">{loading ? 'Checking' : 'Finishing setup'}</StatusBadge>
+        <StatusBadge tone="neutral">
+          <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current motion-safe:animate-pulse" aria-hidden />
+          Finishing setup
+        </StatusBadge>
       </div>
       <p className="mx-auto max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">
         The connector is finishing local setup. This usually takes a few seconds.

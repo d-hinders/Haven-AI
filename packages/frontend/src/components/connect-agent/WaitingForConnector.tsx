@@ -86,12 +86,17 @@ export function WaitingForConnector({
           that is always there, and only the rare recovery block grows past it.
           The #1377 rule still holds where it matters: polling moves nothing,
           and the starting → slow transition changes words inside this reserved
-          height. Mobile stacks the two touch-sized recovery actions. */}
-      <div className="min-h-[56px] sm:min-h-[40px]" aria-live="polite">
+          height. Both floors clear the LONGER (slow) string at their own
+          content width with a line to spare (≈326px mobile / ≈536px from sm),
+          deliberately, because the reviews disagreed on whether it wraps to
+          two lines or three and jsdom cannot settle it — sizing for the worse
+          case costs a few px of slack and removes the guess. Mobile stacks the
+          two touch-sized recovery actions. */}
+      <div className="min-h-16 sm:min-h-11" aria-live="polite">
         {connectionStage !== 'recovery' && (
           <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
             {connectionStage === 'slow'
-              ? 'Still going. A first run downloads the Haven connector before it can register, so this can take a minute or two.'
+              ? 'Still going — a first run downloads the connector first, so it can take a minute or two.'
               : 'Waiting for the agent to run the setup command. This usually takes a few seconds.'}
           </p>
         )}

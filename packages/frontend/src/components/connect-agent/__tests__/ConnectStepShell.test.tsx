@@ -88,7 +88,7 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
     // Nothing but the sentence changed: same element count, same reserved
     // height, and still no recovery affordance offered.
     expect(container.querySelectorAll('*').length).toBe(elementsBefore)
-    expect(slot?.className).toContain('min-h-[56px]')
+    expect(slot?.className).toContain('min-h-16')
     expect(container.textContent).not.toContain('Haven has not received a connection yet')
     expect(container.querySelector('button[class*="min-h-11"]')).toBeNull()
   })
@@ -119,7 +119,7 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
     const { container, getByRole, rerender } = render(
       <WaitingForConnector {...props} connectionStage="starting" />,
     )
-    const reserved = container.querySelector('.min-h-\\[56px\\].sm\\:min-h-\\[40px\\]')
+    const reserved = container.querySelector('.min-h-16.sm\\:min-h-11')
     expect(reserved).not.toBeNull()
     expect(container.textContent).not.toContain('Haven has not received a connection yet')
 

@@ -13,11 +13,16 @@ import { api } from '@/lib/api'
 export const AWAITING_CONNECTION_SLOW_MS = 60_000
 
 /**
- * Only here does Haven offer recovery. Deliberately the same 3 minutes as the
- * connector's own `waitForBudgetApproval` bound in `@haven_ai/connect`: by the
- * time this fires the connector has given up and exited, so "run the command
- * again" is sound advice rather than a guess. **If either bound moves, both
- * must** — see `docs/operations/mcp-runtime-compatibility.md`.
+ * Only here does Haven offer recovery. Three minutes is chosen to sit clear of
+ * a cold `npx` download on a poor network — the population this screen most
+ * often strands — not to line up with anything else.
+ *
+ * It happens to equal `waitForBudgetApproval`'s bound in `@haven_ai/connect`,
+ * and that is a coincidence of scale, NOT a coupling: that wait only starts
+ * after `registerSetup` succeeds, and a successful register moves the setup to
+ * `connected_local`, which ends this clock. The two bounds govern disjoint
+ * phases and can never be running at the same time, so either may be retuned
+ * on its own evidence.
  */
 export const AWAITING_CONNECTION_RECOVERY_MS = 180_000
 

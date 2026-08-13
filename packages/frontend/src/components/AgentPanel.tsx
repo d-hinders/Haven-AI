@@ -70,7 +70,7 @@ export default function AgentPanel() {
         </div>
         <div className="flex items-center gap-2">
           <Button
-            onClick={() => panel.setConnect2Open(true)}
+            onClick={() => panel.setConnectAgentOpen(true)}
             size="sm"
           >
             <Icon icon={Plus} className="h-3.5 w-3.5" />
@@ -155,7 +155,7 @@ export default function AgentPanel() {
           body="Set agent rules, then add your Haven credential to your agent so it can make payments within those rules."
           action={
             <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button onClick={() => panel.setConnect2Open(true)}>
+              <Button onClick={() => panel.setConnectAgentOpen(true)}>
                 Connect agent
               </Button>
             </div>
@@ -253,8 +253,8 @@ export default function AgentPanel() {
       )}
 
       <ConnectAgentModal
-        open={panel.connect2Open}
-        onClose={() => panel.setConnect2Open(false)}
+        open={panel.connectAgentOpen}
+        onClose={() => panel.setConnectAgentOpen(false)}
         starterAllowance={panel.firstAgentSetup}
         safeAddress={safeAddress}
         safeId={panel.activeSafeId}

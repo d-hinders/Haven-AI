@@ -1,4 +1,4 @@
-import { createConnectApiClient, type ConnectApiClient, type ResolvedSetup } from './api.js'
+import { createConnectApiClient, ConnectRequestError, type ConnectApiClient, type ResolvedSetup } from './api.js'
 import { resolveTokenFromAddress } from '@haven_ai/sdk'
 import {
   agentApiKeyPrefix,
@@ -498,7 +498,15 @@ export async function waitForBudgetApproval(
     let status: Awaited<ReturnType<ConnectApiClient['getConnectorStatus']>>
     try {
       status = await api.getConnectorStatus(setupId, apiKey)
-    } catch {
+    } catch (err) {
+      // 401/404 are verdicts, not noise: the user cancelled the setup from
+      // the dashboard (key revoked) or the setup is gone. Retrying for the
+      // rest of the window and then saying "still pending" would be wrong —
+      // there is nothing left to approve.
+      if (err instanceof ConnectRequestError && (err.status === 401 || err.status === 404)) {
+        log('This setup ended in Haven — start a fresh connection from the dashboard when ready.')
+        return 'ended'
+      }
       // A flaky poll is not a verdict — keep waiting inside the same bound.
       continue
     }

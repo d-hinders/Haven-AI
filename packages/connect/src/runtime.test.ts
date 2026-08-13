@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { ConnectRequestError } from './api.js'
 import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
 import { completionHandoffLines, failedConnectOutcome, runConnect, waitForBudgetApproval } from './runtime.js'
@@ -669,6 +670,38 @@ describe('waitForBudgetApproval (#1377 D)', () => {
 
     expect(outcome).toBe('approved')
     expect(logs.join('\n')).toContain('123 MYSTERY (atomic units) per hour')
+  })
+
+
+  it('treats a 401 as a verdict — the setup was cancelled and the key revoked, not a flaky poll', async () => {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn()
+      .mockRejectedValueOnce(new ConnectRequestError('Haven setup request failed: unauthorized', 401))
+
+    const outcome = await waitForBudgetApproval(
+      { getConnectorStatus }, 'setup-1', 'sk_agent_key',
+      (message) => logs.push(message), { sleep: noSleep },
+    )
+
+    expect(outcome).toBe('ended')
+    expect(getConnectorStatus).toHaveBeenCalledTimes(1)
+    expect(logs.join('\n')).toContain('This setup ended in Haven')
+    expect(logs.join('\n')).not.toContain('still pending')
+  })
+
+  it('treats a 404 as a verdict while still retrying genuine 5xx noise', async () => {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn()
+      .mockRejectedValueOnce(new ConnectRequestError('Haven setup request failed: 502 Bad Gateway', 502))
+      .mockRejectedValueOnce(new ConnectRequestError('Haven setup request failed: not found', 404))
+
+    const outcome = await waitForBudgetApproval(
+      { getConnectorStatus }, 'setup-1', 'sk_agent_key',
+      (message) => logs.push(message), { sleep: noSleep },
+    )
+
+    expect(outcome).toBe('ended')
+    expect(getConnectorStatus).toHaveBeenCalledTimes(2)
   })
 
   it('runConnect polls after registering by default and forwards approvalWait overrides', async () => {

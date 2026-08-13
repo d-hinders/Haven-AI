@@ -76,11 +76,13 @@ export function ConnectStepShell({
           )
         })}
       </div>
-      {/* Reserved height: the silhouette must not jump between sub-states. */}
-      <div className="min-h-[340px]">
-        <div key={stateKey} className="v2-animate-step-rise">
-          {children}
-        </div>
+      {/* Reserved height: the silhouette must not jump between sub-states.
+          #1392: the body is a flex column with ONE 20px rhythm (gap-5) so
+          fragment sub-states get the spacing the pre-#1380 wrapper gave them,
+          and short sub-states can pin their action row to the reserved floor
+          (mt-auto) instead of pooling the slack below the primary button. */}
+      <div key={stateKey} className="v2-animate-step-rise flex min-h-[340px] flex-col gap-5">
+        {children}
       </div>
     </div>
   )

@@ -54,7 +54,9 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
   it('WaitingForConnector renders IDENTICAL text and structure across loading true → false → true', () => {
     const { container, rerender } = render(renderWaiting(true))
     const first = container.innerHTML
-    expect(container.textContent).toContain('Waiting')
+    // #1392: the sub-state itself carries NO status badge — the shell ticker
+    // owns the word "Waiting" (asserted in the shell suite below).
+    expect(container.textContent).not.toContain('Waiting')
     expect(container.textContent).not.toContain('Checking')
 
     rerender(renderWaiting(false))
@@ -118,6 +120,33 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
 
     rerender(<FinalizingLocalSetup loading={true} />)
     expect(container.innerHTML).toBe(first)
+  })
+})
+
+
+describe('status is stated once (#1392)', () => {
+  it('the waiting screen says "Waiting" exactly once — in the shell ticker', () => {
+    const { getAllByText, getByLabelText } = render(
+      <ConnectStepShell phase="waiting" stateKey="w">
+        {renderWaiting(false)}
+      </ConnectStepShell>,
+    )
+    expect(getByLabelText('Connection progress').textContent).toContain('Waiting')
+    expect(getAllByText('Waiting')).toHaveLength(1)
+  })
+
+  it('the shell body is a single-rhythm flex column with the reserved floor', () => {
+    const { container } = render(
+      <ConnectStepShell phase="waiting" stateKey="w">
+        {renderWaiting(false)}
+      </ConnectStepShell>,
+    )
+    // One 20px rhythm + distributed slack: the keyed body carries min-h,
+    // flex-col, and gap-5 together (#1392 items 1+2).
+    const body = container.querySelector('.min-h-\\[340px\\]')
+    expect(body).not.toBeNull()
+    expect(body!.className).toContain('flex-col')
+    expect(body!.className).toContain('gap-5')
   })
 })
 

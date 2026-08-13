@@ -6,7 +6,6 @@ import type {
   ManualCredential,
 } from '@/hooks/useAgentConnectionSetup'
 import { Button } from '../ui/Button'
-import { StatusBadge } from '../ui/StatusBadge'
 import { CopyBlock } from './CopyBlock'
 import { InlineErrorNote } from './SetupNotices'
 import { formatAbsoluteDate } from './setup-copy'
@@ -54,55 +53,19 @@ export function WaitingForConnector({
 }) {
   return (
     <>
+      {/* #1392: the shell ticker owns status — no per-sub-state badge. */}
       <div className="rounded-[10px] border border-[var(--v2-brand)]/15 bg-[var(--v2-brand-soft)] p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Connect your agent</h3>
-            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              Paste this prompt into the agent environment. It includes your approval for the exact local setup actions, creates the key there, and sends Haven only the public signing address.
-            </p>
-            <p className="mt-2 text-xs font-medium leading-relaxed text-[var(--v2-ink)]">
-              Haven advances this screen automatically once the agent connects — no refresh, nothing else to click here.
-            </p>
-            {runtime === 'codex-desktop' && (
-              <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Codex Desktop may ask you to approve running the setup command. That is expected.
-              </p>
-            )}
-          </div>
-          {/* #1377 C: static — polling must never swap the label (content shift).
-              The quiet pulse dot is the liveness cue, inside the already-sized badge. */}
-          <StatusBadge tone="warning">
-            <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current motion-safe:animate-pulse" aria-hidden />
-            Waiting
-          </StatusBadge>
-        </div>
-      </div>
-
-      {/* Reserved from the first render so the bounded recovery state does not
-          change the Step 4 silhouette while polling. Mobile stacks the two
-          touch-sized actions; wider layouts keep them in one row. */}
-      <div className="min-h-[216px] sm:min-h-[144px]" aria-live="polite">
-        {connectionStalled && (
-          <div className="rounded-[10px] border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] p-3 text-xs text-[var(--v2-ink-2)]">
-            <p className="font-semibold text-[var(--v2-ink)]">Haven has not received a connection yet</p>
-            <p className="mt-1 leading-relaxed">
-              This setup is still waiting. Do not approve the agent rules yet. Run the same local command again, or cancel it and create a fresh setup prompt.
-            </p>
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="min-h-11"
-                onClick={() => onCopy('command', setup.connector_command)}
-              >
-                Copy local command
-              </Button>
-              <Button variant="ghost" size="sm" className="min-h-11" onClick={onCancel}>
-                Cancel this setup
-              </Button>
-            </div>
-          </div>
+        <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Connect your agent</h3>
+        <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+          Paste this prompt into the agent environment. It includes your approval for the exact local setup actions, creates the key there, and sends Haven only the public signing address.
+        </p>
+        <p className="mt-2 text-xs font-medium leading-relaxed text-[var(--v2-ink)]">
+          Haven advances this screen automatically once the agent connects — no refresh, nothing else to click here.
+        </p>
+        {runtime === 'codex-desktop' && (
+          <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            Codex Desktop may ask you to approve running the setup command. That is expected.
+          </p>
         )}
       </div>
 
@@ -198,6 +161,37 @@ export function WaitingForConnector({
         </div>
       </details>
 
+      {/* Reserved from the first render so the bounded recovery state does not
+          change the Step 4 silhouette while polling (#1379). #1392 moved the
+          slot here from between the callout and the Setup prompt card — the
+          empty reservation was the "~140px void" splitting two related blocks;
+          next to the action zone the slack reads as breathing room, and the
+          recovery affordances land beside the actions when the slot fills.
+          Mobile stacks the two touch-sized actions; wider layouts keep one row. */}
+      <div className="min-h-[216px] sm:min-h-[144px]" aria-live="polite">
+        {connectionStalled && (
+          <div className="rounded-[10px] border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] p-3 text-xs text-[var(--v2-ink-2)]">
+            <p className="font-semibold text-[var(--v2-ink)]">Haven has not received a connection yet</p>
+            <p className="mt-1 leading-relaxed">
+              This setup is still waiting. Do not approve the agent rules yet. Run the same local command again, or cancel it and create a fresh setup prompt.
+            </p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="min-h-11"
+                onClick={() => onCopy('command', setup.connector_command)}
+              >
+                Copy local command
+              </Button>
+              <Button variant="ghost" size="sm" className="min-h-11" onClick={onCancel}>
+                Cancel this setup
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* #1377 C: fixed-height slot — the error suffix must not reflow on a
           poll tick. Two reserved lines cover the longest content. */}
       <p className="min-h-8 text-xs text-[var(--v2-ink-3)]">
@@ -205,11 +199,19 @@ export function WaitingForConnector({
         {error ? `Status check failed: ${error}` : 'Haven keeps checking in the background.'}
       </p>
 
-      <div className="flex gap-3">
-        <Button variant="ghost" onClick={onCancel} className="flex-1">
-          Cancel setup
-        </Button>
-      </div>
+      {/* #1392: copying the prompt IS the next step — it gets the primary
+          slot; aborting is quiet. Cancel stays a real <button> for the
+          existing role-based queries. */}
+      <Button onClick={() => onCopy('prompt', setup.setup_prompt)} className="w-full">
+        {copied === 'prompt' ? 'Copied to clipboard' : 'Copy setup prompt'}
+      </Button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="mx-auto block text-xs text-[var(--v2-ink-3)] underline-offset-2 transition-colors hover:text-[var(--v2-ink)] hover:underline"
+      >
+        Cancel setup
+      </button>
     </>
   )
 }

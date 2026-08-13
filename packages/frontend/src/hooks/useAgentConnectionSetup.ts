@@ -231,7 +231,7 @@ export function headerSubtitle(step: SetupStep, status: string | undefined, runt
     if (status === 'connected_local' && !runtimeConfigured) return 'Finishing local setup'
     if (status === 'connected_local' || status === 'awaiting_wallet_approval') return 'Approve the agent rules'
     if (status === 'approval_in_progress' || status === 'proposed') return 'Waiting for approval to land'
-    if (status === 'active') return 'Agent rules approved'
+    if (status === 'active') return 'Your agent is ready'
     if (status === 'expired') return 'This setup prompt expired'
     if (status === 'cancelled') return 'This setup was cancelled'
     return 'Paste the setup prompt into your agent environment'

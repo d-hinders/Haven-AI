@@ -8,8 +8,9 @@ import { restartCopyForRuntime } from './setup-copy'
 /** Loading state while the connector finishes local setup. */
 export function FinalizingLocalSetup({ loading: _loading }: { loading: boolean }) {
   // #1377 C: the label is static — polling must never swap it (content shift).
+  // #1392: short state with no action — centre it within the reserved height.
   return (
-    <div className="space-y-4 text-center">
+    <div className="flex flex-1 flex-col items-center justify-center gap-5 text-center">
       <div className="flex justify-center">
         <StatusBadge tone="neutral">
           <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current motion-safe:animate-pulse" aria-hidden />
@@ -43,8 +44,10 @@ export function TerminalSetupState({
   onPrimary: () => void
   onSecondary: () => void
 }) {
+  // #1392: flex column fills the reserved height; the action row pins to its
+  // floor so the buttons land where every other sub-state puts them.
   return (
-    <div className="space-y-4 text-center">
+    <div className="flex flex-1 flex-col gap-5 text-center">
       <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-surface-2)]">
         <StatusBadge tone={tone}>{badgeLabel}</StatusBadge>
       </div>
@@ -52,7 +55,7 @@ export function TerminalSetupState({
         <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>
         <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-[var(--v2-ink-2)]">{body}</p>
       </div>
-      <div className="flex gap-3">
+      <div className="mt-auto flex gap-3">
         <Button variant="ghost" onClick={onSecondary} className="flex-1">
           {secondaryLabel}
         </Button>
@@ -79,12 +82,12 @@ export function SetupStatusState({
   onPrimary: () => void
 }) {
   return (
-    <div className="space-y-4 text-center">
+    <div className="flex flex-1 flex-col gap-5 text-center">
       <div className="flex justify-center">
         <StatusBadge tone={tone}>{title}</StatusBadge>
       </div>
       <p className="mx-auto max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">{body}</p>
-      <Button onClick={onPrimary} className="w-full">
+      <Button onClick={onPrimary} className="mt-auto w-full">
         {primaryLabel}
       </Button>
     </div>
@@ -120,12 +123,11 @@ export function SetupDoneState({
     }
   }
 
+  // #1392: the shell ticker already says Approved — no duplicate badge. The
+  // outcome line leads, and Done pins to the reserved floor.
   return (
-    <div className="space-y-4">
-      <div className="flex justify-center">
-        <StatusBadge tone="success">Agent rules approved</StatusBadge>
-      </div>
-      <p className="mx-auto max-w-sm text-center text-sm leading-relaxed text-[var(--v2-ink-2)]">
+    <div className="flex flex-1 flex-col gap-5">
+      <p className="mx-auto max-w-sm text-center text-sm font-medium leading-relaxed text-[var(--v2-ink)]">
         Your agent can now spend within budget.
       </p>
       <ul className="mx-auto max-w-sm space-y-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
@@ -147,7 +149,7 @@ export function SetupDoneState({
         )}
         {restartCopy && <li>{restartCopy}</li>}
       </ul>
-      <Button onClick={onClose} className="w-full">
+      <Button onClick={onClose} className="mt-auto w-full">
         Done
       </Button>
     </div>

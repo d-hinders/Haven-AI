@@ -914,10 +914,12 @@ describe('ConnectAgentModal', () => {
     await fillAndCreateSetup()
 
     // The restart guidance moved from the pre-approval screen to here — it's
-    // only actionable now that approval has landed. "Agent rules approved"
-    // appears in both the StatusBadge title and the header subtitle.
-    const approvedMatches = await screen.findAllByText('Agent rules approved')
-    expect(approvedMatches.length).toBeGreaterThan(0)
+    // only actionable now that approval has landed. #1392: the shell ticker
+    // owns the "Approved" status; the old duplicate badge and the restating
+    // header subtitle are gone.
+    expect(await screen.findByText('Your agent can now spend within budget.')).toBeInTheDocument()
+    expect(screen.queryByText('Agent rules approved')).not.toBeInTheDocument()
+    expect(screen.getByText('Your agent is ready')).toBeInTheDocument()
     // Runtime-specific restart copy: Claude Code (the default) is a session
     // runtime, so users are not told to restart needlessly.
     expect(screen.getByText(/next Claude Code message/i)).toBeInTheDocument()
@@ -1565,7 +1567,7 @@ describe('ConnectAgentModal', () => {
   it.each([
     ['approval_in_progress', 'Approval in progress'],
     ['proposed', 'Waiting for more approvals'],
-    ['active', 'Agent rules approved'],
+    ['active', 'Your agent can now spend within budget.'],
   ])('renders %s setup status without a blank connect step', async (status, title) => {
     mockUseAgentConnectionSetupStatus.mockReturnValue({
       data: {
@@ -1594,9 +1596,6 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    // "Agent rules approved" also appears in the header subtitle for the
-    // `active` state, so multiple matches are valid — we just need at
-    // least one (the StatusBadge title).
     const matches = await screen.findAllByText(title)
     expect(matches.length).toBeGreaterThan(0)
   })

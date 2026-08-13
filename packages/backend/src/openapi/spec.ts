@@ -529,6 +529,29 @@ export const openapiSpec = {
         },
       },
     },
+    '/agent-connection-setups/{setupId}/connector-status': {
+      get: {
+        tags: ['Connect Agent 2'],
+        operationId: 'getAgentConnectionConnectorStatus',
+        summary: 'Narrow post-register status read for the local connector.',
+        description:
+          'Lets the connector wait for the user\'s budget approval after registering (#1377). Authenticated with the pending agent API key — deliberately usable while the key is still setup_pending-scoped. Read-only and narrow by design: it reveals only the setup status plus, once active, the approved budget summary; it grants no payment authority and returns 404 for setups not owned by the presented key.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ $ref: '#/components/parameters/SetupId' }],
+        responses: {
+          '200': {
+            description: 'Current setup status for the polling connector.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentConnectionConnectorStatus' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     '/agent-connection-setups/{setupId}/wallet-approval': {
       post: {
         tags: ['Connect Agent 2'],
@@ -1004,12 +1027,12 @@ export const openapiSpec = {
       post: {
         tags: ['Machine payments'],
         operationId: 'authorizeMachinePayment',
-        summary: 'Authorize an MPP demo machine payment.',
+        summary: 'Retired: the legacy MPP demo machine-payment authorize flow (#1328).',
         description:
-          'Authorizes the internal MPP demo rail with the same non-custodial boundary as x402: the delegate key signs locally, Haven validates and relays, and on-chain allowance state enforces spend. The current MPP rail is an internal demo surface; production MPP merchant settlement needs separate product and legal review.',
+          'The internal mpp_demo flow is retired outright — this endpoint now refuses unconditionally with HTTP 410, fail-closed, before the body is inspected (mirrors the #834 session-rail retirement pattern). DELIBERATE EXCEPTION (review decision on #1339): the route is retained as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries. No new mpp_demo challenge can be authorized. Use the x402 merchant flow instead (POST /x402/authorize). Existing mpp_demo payment/receipt/evidence/status records remain readable through the other /machine-payments/* endpoints.',
         security: [{ AgentApiKey: [] }],
         requestBody: {
-          required: true,
+          required: false,
           content: {
             'application/json': {
               schema: { $ref: '#/components/schemas/MachinePaymentAuthorizeRequest' },
@@ -1017,29 +1040,12 @@ export const openapiSpec = {
           },
         },
         responses: {
-          '200': {
-            description: 'Existing or completed machine-payment state.',
-            content: {
-              'application/json': { schema: { $ref: '#/components/schemas/MachinePaymentAuthorizeResponse' } },
-            },
-          },
-          '201': {
-            description: 'Signable or confirmed machine payment.',
-            content: {
-              'application/json': { schema: { $ref: '#/components/schemas/MachinePaymentAuthorizeResponse' } },
-            },
-          },
-          '202': {
-            description: 'Machine payment is waiting for wallet owner approval.',
-            content: {
-              'application/json': { schema: { $ref: '#/components/schemas/MachinePaymentAuthorizeResponse' } },
-            },
-          },
-          '400': errorResponse,
           '401': errorResponse,
-          '403': errorResponse,
-          '409': errorResponse,
-          '502': errorResponse,
+          '403': agentAuthForbidden,
+          '410': {
+            ...errorResponse,
+            description: 'The mpp_demo flow is retired (#1328) — no new legacy MPP demo challenge can be authorized.',
+          },
         },
       },
     },
@@ -2142,6 +2148,32 @@ export const openapiSpec = {
           setup_id: uuid,
           status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
           install_status: { $ref: '#/components/schemas/AgentConnectionInstallStatus' },
+        },
+        additionalProperties: false,
+      },
+      AgentConnectionConnectorStatus: {
+        type: 'object',
+        required: ['status', 'approved_budget'],
+        properties: {
+          status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
+          approved_budget: {
+            // Non-null only once the setup is active — the summary the
+            // connector celebrates with. Never spend authority.
+            oneOf: [
+              {
+                type: 'object',
+                required: ['token_symbol', 'token_address', 'amount', 'reset_period_min'],
+                properties: {
+                  token_symbol: { type: 'string' },
+                  token_address: address,
+                  amount: { type: 'string' },
+                  reset_period_min: { type: 'integer' },
+                },
+                additionalProperties: false,
+              },
+              { type: 'null' },
+            ],
+          },
         },
         additionalProperties: false,
       },

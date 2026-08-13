@@ -24,9 +24,6 @@ import {
   x402AuthorizationAmount,
   type PaymentReceipt,
   type HavenCatalogEntry,
-  type MachinePaymentChallenge,
-  type MppQuote,
-  type MppResumeState,
   type SweepAuthorization,
   type X402McpTransport,
   type X402PaymentRequired,
@@ -64,9 +61,6 @@ export type HostedToolName =
   | 'haven_quote_x402'
   | 'haven_pay_x402_quote'
   | 'haven_resume_x402_payment'
-  | 'haven_quote_mpp'
-  | 'haven_pay_mpp_challenge'
-  | 'haven_resume_mpp_payment'
   | 'haven_get_payment_status'
   | 'haven_get_resume_state'
   | 'haven_list_receipts'
@@ -254,20 +248,6 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     payment_id: z.string().optional(),
     resume_state: z.record(z.string(), z.unknown()).optional(),
   },
-  haven_quote_mpp: {
-    url: z.string().url().optional(),
-    challenge: z.record(z.string(), z.unknown()).optional(),
-    method: z.string().optional(),
-    headers: z.record(z.string()).optional(),
-  },
-  haven_pay_mpp_challenge: {
-    quote: z.record(z.string(), z.unknown()),
-    idempotency_key: z.string().optional(),
-  },
-  haven_resume_mpp_payment: {
-    payment_id: z.string().optional(),
-    resume_state: z.record(z.string(), z.unknown()).optional(),
-  },
   haven_get_payment_status: {
     payment_id: z.string().min(1),
   },
@@ -353,7 +333,7 @@ function delegationSignFields(signData: {
 
 const SUBMIT_DESCRIPTION = [
   'Relay a delegate signature produced by the local signer to execute a previously constructed',
-  'payment. Pass the payment_id from haven_pay, haven_pay_x402_quote, haven_pay_mpp_challenge,',
+  'payment. Pass the payment_id from haven_pay, haven_pay_x402_quote,',
   'or a resume tool, and the signature over its payload_hash. Funding relay sends',
   '{ payment_id, signature } to Haven — never the signing key. Returns { status, tx_hash }.',
   'For decomposed x402 flows, next after confirmed funding: call mcp__haven-signer__haven_x402_sign_header.',
@@ -519,28 +499,10 @@ const RESUME_X402_DESCRIPTION = [
   'Next: call mcp__haven-signer__haven_x402_sign_header when you have the x402_binding, or mcp__haven-signer__haven_sign first to re-derive it.',
 ].join(' ')
 
-const QUOTE_MPP_DESCRIPTION = composeDescription({
-  ...sharedDescriptions.quoteMpp,
-  behavior:
-    'Probes the merchant directly from the hosted MCP server or parses a provided challenge. ' +
-    'Haven is not contacted. Returns the full quote for haven_pay_mpp_challenge.',
-})
-
-const PAY_MPP_CHALLENGE_DESCRIPTION = [
-  'Construct a machine-payment (MPP) payment intent and return the unsigned hash for the local',
-  'signer to sign. Pass the quote from haven_quote_mpp.',
-  'Returns { payment_id, payload_hash } when within allowance. Sign via haven_sign on the local',
-  'signer, then relay with haven_submit.',
-  'Returns { status: "pending_approval", payload_hash: null } when the amount exceeds the budget.',
-  'Haven never receives the signing key.',
-].join(' ')
-
-const RESUME_MPP_DESCRIPTION = [
-  'Retrieve the signing context for an approved MPP payment.',
-  'Use after haven_get_payment_status returns nextAction=retry_original_x402_request.',
-  'Pass resume_state or payment_id. Returns { payment_id, payload_hash, challenge } with the',
-  'signing context the local signer needs to complete the payment.',
-].join(' ')
+// #1328: QUOTE_MPP_DESCRIPTION / PAY_MPP_CHALLENGE_DESCRIPTION / RESUME_MPP_DESCRIPTION
+// (the mpp_demo challenge/quote/resume tool descriptions) are retired along
+// with the haven_quote_mpp / haven_pay_mpp_challenge / haven_resume_mpp_payment
+// tools they described.
 
 const SWEEP_DELEGATE_DESCRIPTION = [
   'Recover stranded USDC from the delegate wallet back to the user\'s Haven wallet, gaslessly.',
@@ -582,9 +544,6 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_quote_x402: QUOTE_X402_DESCRIPTION,
   haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
   haven_resume_x402_payment: RESUME_X402_DESCRIPTION,
-  haven_quote_mpp: QUOTE_MPP_DESCRIPTION,
-  haven_pay_mpp_challenge: PAY_MPP_CHALLENGE_DESCRIPTION,
-  haven_resume_mpp_payment: RESUME_MPP_DESCRIPTION,
   haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
@@ -728,10 +687,13 @@ export function createToolHandlers(
           verified_at: entry.verifiedAt,
           // Hosted surface is keyless: x402 entries start with the quote half
           // of the split flow; MCP entries go through haven_pay_mcp_tool.
+          // #1328: the 'mpp' rail's only-ever catalog row (the Haven MPP demo
+          // resource) is delisted with the mpp_demo retirement, so this
+          // fallback is unreachable today; it stays x402 rather than naming a
+          // deleted tool in case a future non-demo 'mpp' rail entry appears.
           suggested_tool:
             entry.protocol === 'mcp' ? 'haven_pay_mcp_tool'
-            : entry.rail === 'x402' ? 'haven_quote_x402'
-            : 'haven_quote_mpp',
+            : 'haven_quote_x402',
         }))
       }),
 
@@ -1346,13 +1308,10 @@ export function createToolHandlers(
           },
         }
       } catch (err) {
-        if (err instanceof HavenApiError && err.message.includes('quoteX402 only supports standard x402')) {
-          return wrongTool(
-            'WRONG_RAIL',
-            'The URL responds with an MPP machine-payment challenge, not an x402 payment. Use haven_quote_mpp to inspect this merchant.',
-            'haven_quote_mpp',
-          )
-        }
+        // #1328: quoteX402's defensive MACHINE-PAYMENT-CHALLENGE guard stays,
+        // but nothing in Haven produces that header anymore (the mpp_demo
+        // route it identified is retired) — fall through to the generic
+        // error rather than suggesting the now-deleted haven_quote_mpp.
         return normalizeError(err)
       }
     },
@@ -1481,16 +1440,9 @@ export function createToolHandlers(
 
     haven_resume_x402_payment: async (input) => {
       const args = parse('haven_resume_x402_payment', input)
-      if (args.resume_state && typeof args.resume_state === 'object') {
-        const stateRail = (args.resume_state as { rail?: unknown }).rail
-        if (stateRail && stateRail !== 'x402') {
-          return wrongTool(
-            'WRONG_TOOL',
-            `The resume state is for the '${stateRail}' rail, not x402. Use haven_resume_mpp_payment instead.`,
-            'haven_resume_mpp_payment',
-          )
-        }
-      }
+      // #1328: the mpp-rail redirect (haven_resume_mpp_payment) is retired —
+      // a non-x402 resume_state now falls through to resolveResumeState's own
+      // rail mismatch, not a "use this other tool" suggestion.
       return runTool(async () => {
         const state = await resolveResumeState(haven, args, 'x402') as X402ResumeState
 
@@ -1526,156 +1478,11 @@ export function createToolHandlers(
       })
     },
 
-    haven_quote_mpp: async (input) => {
-      const args = parse('haven_quote_mpp', input)
-      const init: RequestInit = {}
-      if (args.method) init.method = args.method
-      if (args.headers) init.headers = args.headers
-      try {
-        const quote: MppQuote = args.challenge
-          ? await haven.quoteMpp(args.challenge as MachinePaymentChallenge, init)
-          : await haven.quoteMpp(args.url as string, init)
-        return { success: true, data: quote }
-      } catch (err) {
-        if (err instanceof Error && err.message.includes('No MACHINE-PAYMENT-CHALLENGE header found')) {
-          return wrongTool(
-            'WRONG_RAIL',
-            'The URL responds with an x402 payment requirement, not an MPP machine-payment challenge. Use haven_quote_x402 to inspect this merchant.',
-            'haven_quote_x402',
-          )
-        }
-        return normalizeError(err)
-      }
-    },
-
-    haven_pay_mpp_challenge: async (input) => {
-      const args = parse('haven_pay_mpp_challenge', input)
-      const quoteArg = args.quote as Record<string, unknown> | null | undefined
-      if (!quoteArg || typeof quoteArg !== 'object') {
-        return wrongTool(
-          'WRONG_TOOL',
-          'The quote argument is missing or is not a valid MPP quote object. Call haven_quote_mpp first to obtain a quote.',
-          'haven_quote_mpp',
-        )
-      }
-      if (quoteArg.paymentRequired || quoteArg.rail === 'x402') {
-        return wrongTool(
-          'WRONG_TOOL',
-          'The quote is for the x402 rail. Use haven_pay_x402_quote to pay an x402 quote.',
-          'haven_pay_x402_quote',
-        )
-      }
-      if (!quoteArg.challenge) {
-        return wrongTool(
-          'WRONG_TOOL',
-          'The quote is missing the required challenge field. Call haven_quote_mpp first to obtain a valid MPP quote.',
-          'haven_quote_mpp',
-        )
-      }
-      const quote = args.quote as MppQuote
-      return runTool(async () => {
-        try {
-          // Call the internal MPP authorization endpoint directly via the
-          // keyless path: POST /machine-payments/authorize returns a payload_hash
-          // for the agent to sign, or an already-confirmed tx if auto-executed.
-          type PostFn = (path: string, body: Record<string, unknown>) => Promise<unknown>
-          const postFn = (haven as unknown as { post?: PostFn }).post
-          const raw = await (postFn
-            ? postFn.call(haven, '/machine-payments/authorize', {
-                challenge: quote.challenge,
-                idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
-              })
-            : null
-          ) as Record<string, unknown> | null
-
-          // Fallback if internal method not available: use createIntent equiv.
-          if (raw === null) {
-            throw new HavenApiError(
-              'haven_pay_mpp_challenge: internal post unavailable; upgrade @haven_ai/sdk.',
-              500,
-            )
-          }
-
-          // Type-narrow the raw response fields.
-          const rawTyped = raw as {
-            success?: boolean
-            tx_hash?: string
-            payment_id?: string
-            status?: string
-            expires_at?: string
-            sign_data?: { hash?: string }
-          }
-
-          if (rawTyped.success && rawTyped.tx_hash) {
-            return { payment_id: rawTyped.payment_id, status: 'confirmed', tx_hash: rawTyped.tx_hash, payload_hash: null }
-          }
-
-          if (rawTyped.payment_id && rawTyped.sign_data?.hash) {
-            return {
-              payment_id: rawTyped.payment_id,
-              status: rawTyped.status ?? 'pending_signature',
-              payload_hash: rawTyped.sign_data.hash,
-              expires_at: rawTyped.expires_at ?? null,
-              meta: { challenge: quote.challenge },
-            }
-          }
-
-          // Over-budget → pending_approval
-          if (isPendingApproval(rawTyped.status)) {
-            return { payment_id: rawTyped.payment_id, status: 'pending_approval', payload_hash: null }
-          }
-
-          throw new HavenApiError(
-            `Unexpected machine-payment authorize response: ${JSON.stringify(rawTyped)}`,
-            500,
-          )
-        } catch (err) {
-          if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
-            return { payment_id: err.paymentId, status: 'pending_approval', payload_hash: null }
-          }
-          throw err
-        }
-      })
-    },
-
-    haven_resume_mpp_payment: async (input) => {
-      const args = parse('haven_resume_mpp_payment', input)
-      if (args.resume_state && typeof args.resume_state === 'object') {
-        const stateRail = (args.resume_state as { rail?: unknown }).rail
-        if (stateRail && stateRail !== 'mpp') {
-          return wrongTool(
-            'WRONG_TOOL',
-            `The resume state is for the '${stateRail}' rail, not mpp. Use haven_resume_x402_payment instead.`,
-            'haven_resume_x402_payment',
-          )
-        }
-      }
-      return runTool(async () => {
-        const state = await resolveResumeState(haven, args, 'mpp') as MppResumeState
-
-        const status = await haven.getPaymentStatus(state.paymentId)
-        if (status.nextAction !== 'retry_original_x402_request') {
-          throw new HavenPaymentStateError(
-            status.message ??
-              `Payment ${state.paymentId} is not ready to resume (nextAction=${status.nextAction}).`,
-            409,
-            status,
-          )
-        }
-
-        return {
-          payment_id: state.paymentId,
-          status: status.status,
-          tx_hash: status.txHash ?? null,
-          challenge: state.challenge,
-          resource_url: state.resourceUrl,
-          amount: state.amount,
-          amount_atomic: state.amountAtomic,
-          asset: state.asset,
-          network: state.network,
-        }
-      })
-    },
+    // #1328: haven_quote_mpp / haven_pay_mpp_challenge / haven_resume_mpp_payment
+    // (the mpp_demo challenge/quote/resume/authorize tools) are retired —
+    // haven_pay_mpp_challenge in particular called POST /machine-payments/authorize
+    // directly, which now refuses unconditionally on the backend. Use the x402
+    // tools for agent-to-merchant payments.
 
     haven_get_payment_status: async (input) =>
       runTool(async () => {
@@ -2093,16 +1900,25 @@ function parseMcpTransport(input: unknown): X402McpTransport | undefined {
   }
 }
 
+// #1328: the 'mpp' rail branch (and its haven_resume_mpp_payment caller) is
+// retired — this now only ever resolves x402 resume state. Still validates
+// an explicitly-passed resume_state's rail rather than trusting it blindly:
+// a caller holding a pre-retirement 'mpp' resume_state gets a clear mismatch
+// error instead of silently proceeding against the wrong protocol context.
 async function resolveResumeState(
   haven: HavenClient,
   args: { payment_id?: string; resume_state?: unknown },
-  rail: 'x402' | 'mpp',
-): Promise<X402ResumeState | MppResumeState> {
+  rail: 'x402',
+): Promise<X402ResumeState> {
   if (args.resume_state && typeof args.resume_state === 'object') {
-    return args.resume_state as X402ResumeState | MppResumeState
+    const stateRail = (args.resume_state as { rail?: unknown }).rail
+    if (stateRail !== undefined && stateRail !== rail) {
+      throw new HavenApiError(`Resume state is not for the ${rail} rail.`, 409, args.resume_state)
+    }
+    return args.resume_state as X402ResumeState
   }
   if (args.payment_id) {
-    return haven.getResumeState(args.payment_id) as Promise<X402ResumeState | MppResumeState>
+    return haven.getResumeState(args.payment_id) as Promise<X402ResumeState>
   }
   throw new HavenApiError(
     `haven_resume_${rail}_payment requires resume_state or payment_id.`,

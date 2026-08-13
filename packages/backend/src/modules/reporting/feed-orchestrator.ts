@@ -3,7 +3,7 @@ import { reportingFeedAvailable } from '../agents/index.js'
 import { buildAccountingEntryForPayment } from '../accounting/index.js'
 import { toReportingTransaction } from './reporting-transaction.js'
 import { listConnectors, type AccountingConnector } from './connector.js'
-import { claimSync, markPushed, markFailed, listSyncs, type FeedSyncRow } from './feed-sync.js'
+import { claimSync, markPushed, markFailed, markSkipped, listSyncs, type FeedSyncRow } from './feed-sync.js'
 
 /**
  * Sync orchestration for the reporting feed (epic #491, P2 #499).
@@ -46,8 +46,18 @@ export async function feedSettledPayment(userId: string, paymentId: string): Pro
 
   try {
     const result = await connector.pushTransaction(userId, tx)
-    if (result.status === 'pushed' || result.status === 'skipped') {
+    if (result.status === 'pushed') {
       await markPushed(userId, connector.provider, paymentId, result.externalRef, result.note ?? null)
+    } else if (result.status === 'skipped') {
+      // #1365: a connector skip used to be recorded via markPushed — ledger
+      // status 'pushed' with NULL external_ref and the reason DROPPED. The
+      // dashboard then showed "Synced" for a payment never delivered, and the
+      // backfill (which excludes pushed rows) never revisited it, so a
+      // transient skip (e.g. a disconnect race between connector selection
+      // and push) was permanently lost. Now the row is a real 'skipped' with
+      // its reason preserved, and skipped rows are re-claimable exactly like
+      // failed ones.
+      await markSkipped(userId, connector.provider, paymentId, result.reason ?? 'skipped')
     } else {
       await markFailed(userId, connector.provider, paymentId, result.reason ?? 'push_failed')
     }

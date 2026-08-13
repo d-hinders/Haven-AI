@@ -10,14 +10,17 @@
  * 2. Pack-and-install smoke tests (HAVEN_CONNECT_PACKAGE_SMOKE=1) — packs
  *    `@haven_ai/sdk` and `@haven_ai/mcp` into real tarballs via `npm pack`,
  *    extracts them into a fresh temp directory (no workspace symlinks for
- *    Haven packages), and then:
+ *    the packed Haven package itself), and then:
  *      a. verifies installed versions match the manifest;
  *      b. verifies there is no nested `@haven_ai/sdk` inside the mcp
  *         package (the nested-resolution bug from connect@0.1.4-alpha);
  *      c. verifies the X-PAYMENT wire format produced by the installed
  *         runtime matches the spec shape and is bound to the delegate key;
  *      d. probes the installed MCP server via JSON-RPC to confirm all
- *         required tools are advertised.
+ *         required tools are advertised;
+ *      e. launches the packed `haven-connect` bin through an npm-style
+ *         `node_modules/.bin` symlink, so an entrypoint guard cannot silently
+ *         turn a copied `npx` command into a zero-exit no-op.
  *
  * Run locally:
  *   npm run smoke:pack -w packages/connect
@@ -461,11 +464,46 @@ describeSmoke('published package smoke', () => {
       'signer --help should print its usage, proving the module graph (including @haven_ai/sdk) loaded',
     ).toContain('--credentials')
   }, 60_000)
+
+  it('packed haven-connect bin runs through an npm-style symlink', async () => {
+    const connectRoot = join(tempDir, 'connect-bin')
+    const packDir = join(connectRoot, 'packs')
+    const cacheDir = join(connectRoot, 'pack-npm-cache')
+    const nodeModules = join(connectRoot, 'node_modules')
+    const binDir = join(nodeModules, '.bin')
+    await mkdir(packDir, { recursive: true })
+    await mkdir(cacheDir, { recursive: true, mode: 0o700 })
+
+    const connectTarball = await npmPack(packageDir('connect'), packDir, cacheDir)
+    await extractPackageTarball(connectTarball, join(nodeModules, '@haven_ai', 'connect'))
+    for (const dependency of ['@haven_ai/mcp', '@haven_ai/sdk', '@haven_ai/signer', 'ethers', 'yaml']) {
+      await linkWorkspaceDependency(nodeModules, dependency)
+    }
+
+    await mkdir(binDir, { recursive: true })
+    const connectBin = join(binDir, 'haven-connect')
+    await symlink('../@haven_ai/connect/dist/cli.js', connectBin)
+
+    const connectPackage = await readInstalledPackageJson(join(nodeModules, '@haven_ai', 'connect', 'package.json'))
+    const { stdout: versionOutput } = await execFileAsync(connectBin, ['--version'], {
+      cwd: connectRoot,
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024,
+    })
+    const { stdout: helpOutput } = await execFileAsync(connectBin, ['--help'], {
+      cwd: connectRoot,
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024,
+    })
+
+    expect(versionOutput.trim()).toBe(connectPackage.version)
+    expect(helpOutput).toContain('--setup')
+  }, 60_000)
 })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function packageDir(name: 'sdk' | 'mcp' | 'signer'): string {
+function packageDir(name: 'connect' | 'sdk' | 'mcp' | 'signer'): string {
   return fileURLToPath(new URL(`../../${name}/`, import.meta.url))
 }
 

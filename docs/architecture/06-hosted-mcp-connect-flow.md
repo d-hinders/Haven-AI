@@ -5,7 +5,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/connect/**
   - packages/signer/**
-  - packages/frontend/src/components/ConnectAgent2Modal.tsx
+  - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/frontend/src/lib/hosted-connect.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/payments.ts

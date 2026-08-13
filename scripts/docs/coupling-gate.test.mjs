@@ -220,3 +220,55 @@ test1337('a BROKEN range stays fail-closed: empty but not computed (#1076 protec
     delete process.env.HEAD_SHA
   }
 })
+
+// ── #1366: satisfied-by shards ────────────────────────────────────────────────
+
+import { test as test1366 } from 'node:test'
+import assert1366 from 'node:assert'
+
+const SHARDED_DOC = {
+  doc: 'docs/regulatory/casp-risk-guardrails.md',
+  covers: ['packages/signer/**'],
+  lastVerified: '2020-01-01',
+  contract: true,
+  satisfiedBy: ['docs/regulatory/casp-changelog/**'],
+}
+
+test1366('a changed shard satisfies the contract doc in strict mode (#1366)', () => {
+  const f = implicatedDocs(
+    ['packages/signer/src/core.ts', 'docs/regulatory/casp-changelog/2026-08-12-1399.md'],
+    [SHARDED_DOC],
+    undefined,
+    { strict: true },
+  )
+  assert1366.deepStrictEqual(f, [])
+})
+
+test1366('MUTATION PROOF: the same change WITHOUT a shard still blocks (#1366)', () => {
+  const f = implicatedDocs(
+    ['packages/signer/src/core.ts'],
+    [SHARDED_DOC],
+    undefined,
+    { strict: true },
+  )
+  assert1366.strictEqual(f.length, 1)
+  assert1366.strictEqual(f[0].contract, true)
+})
+
+test1366('a shard satisfies ONLY docs that declare it — not every contract doc (#1366)', () => {
+  const other = {
+    doc: 'docs/architecture/04-x402-payment-sequence.md',
+    covers: ['packages/signer/**'],
+    lastVerified: '2020-01-01',
+    contract: true,
+    satisfiedBy: [],
+  }
+  const f = implicatedDocs(
+    ['packages/signer/src/core.ts', 'docs/regulatory/casp-changelog/2026-08-12-1399.md'],
+    [SHARDED_DOC, other],
+    undefined,
+    { strict: true },
+  )
+  assert1366.strictEqual(f.length, 1)
+  assert1366.strictEqual(f[0].doc, other.doc)
+})

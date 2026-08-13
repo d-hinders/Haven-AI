@@ -9,7 +9,7 @@ covers:
   - packages/frontend/playwright.live.config.ts
   - packages/frontend/e2e/fixtures/live-session.ts
   - packages/frontend/e2e/live/**
-  - packages/frontend/e2e/connect-agent-2.spec.ts
+  - packages/frontend/e2e/connect-agent.spec.ts
   - packages/frontend/e2e/hosted-mcp.spec.ts
   - packages/frontend/e2e/transactions-detail.spec.ts
   - packages/connect/src/**
@@ -49,7 +49,7 @@ document for the remaining exploratory checklist.
 |---|---|
 | Base Sepolia money-flow invariants: settle, queue, reject, x402 settle, sweep recovery | `packages/qa-agent`; local `npm run qa:dev -w packages/qa-agent` or Actions `qa-dev.yml` |
 | Unmocked login/dashboard smoke against a Vercel preview + dev backend | `packages/frontend/e2e/live`; local `test:e2e:live` or Actions `qa-live.yml` |
-| Connect-agent modal: create setup → prompt → connected-local → approval screen, no secrets leaked | `e2e/connect-agent-2.spec.ts` |
+| Connect-agent modal: create setup → prompt → connected-local → approval screen, no secrets leaked | `e2e/connect-agent.spec.ts` |
 | Hosted-MCP agent/allowance/CTA states and mobile overflow | `e2e/hosted-mcp.spec.ts` |
 | Hosted connect copy, commands, and deep-link behavior | `HostedConnectCard.test.tsx`; `hosted-connect.test.ts` |
 | **x402 tx displays in history + opens the per-type detail panel** (#420 UI half) | `e2e/transactions-detail.spec.ts` |

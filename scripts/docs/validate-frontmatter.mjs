@@ -131,7 +131,7 @@ export function parseFrontMatter(raw) {
     }
     const key = m[1]
     let rest = m[2]
-    if (key === 'covers') {
+    if (key === 'covers' || key === 'satisfied-by') {
       // Strip a trailing `# comment` (globs never contain `#`).
       const hashIdx = rest.indexOf(' #')
       if (hashIdx !== -1) rest = rest.slice(0, hashIdx)
@@ -152,13 +152,13 @@ export function parseFrontMatter(raw) {
         // line. (Following `- ` lines, if any, are malformed and the main loop
         // reports them loudly rather than silently dropping them.) Empty inline
         // (`covers:`) takes the block list that follows.
-        data.covers = inline === '[]' ? [] : items
+        data[key] = inline === '[]' ? [] : items
         i = inline === '[]' ? i + 1 : j
         continue
       }
       // Inline `[a, b]` form.
       const body = inline.replace(/^\[/, '').replace(/\]$/, '')
-      data.covers = body
+      data[key] = body
         .split(',')
         .map((s) => s.trim().replace(/^["']|["']$/g, ''))
         .filter(Boolean)
@@ -175,7 +175,14 @@ export function parseFrontMatter(raw) {
 }
 
 async function main() {
-  const docFiles = (await walk(join(REPO_ROOT, 'docs'))).filter((p) => p.endsWith('.md'))
+  const docFiles = (await walk(join(REPO_ROOT, 'docs')))
+    .filter((p) => p.endsWith('.md'))
+    // #1366: CASP changelog shards are FRAGMENTS of the parent contract doc
+    // (one per-issue verification entry each), not standalone docs — requiring
+    // owner/status/covers/last-verified on every one-paragraph shard would
+    // recreate the very per-PR boilerplate the sharding removes. The dir's
+    // README.md keeps full front-matter and documents the convention.
+    .filter((p) => !(p.startsWith('docs/regulatory/casp-changelog/') && !p.endsWith('README.md')))
   for (const root of ROOT_DOCS) docFiles.push(root)
 
   const allFiles = await walk(REPO_ROOT)

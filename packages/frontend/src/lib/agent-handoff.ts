@@ -162,7 +162,7 @@ function buildSdkExample(hasDelegateKey: boolean): string {
 
 function buildPaidApiExample(): string {
   return [
-    `// One-call path for standard x402 and Haven machine-payment challenges.`,
+    `// One-call path for standard x402 paywalls.`,
     `const response = await haven.fetch('https://paid-api.example/data')`,
     `const data = await response.json()`,
     ``,
@@ -287,9 +287,10 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     `## Paid APIs and machine-payment requests`,
     ``,
     `Use \`haven.fetch()\` when an API may ask the agent to pay. The SDK handles`,
-    `standard x402 responses and Haven machine-payment challenges by paying`,
-    `within the agent rules, then retrying the request with the proof/header`,
-    `the API expects.`,
+    `standard x402 (HTTP 402) responses by paying within the agent rules, then`,
+    `retrying the request with the payment header the API expects. (The legacy`,
+    `internal machine-payment demo challenge is retired, #1328 — x402 is the`,
+    `merchant protocol.)`,
     ``,
     '```ts',
     buildPaidApiExample(),

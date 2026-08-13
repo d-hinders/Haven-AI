@@ -68,3 +68,30 @@ test('globToRegExp: an exact file path matches only itself', () => {
   assert.match('packages/backend/src/lib/chains.ts', re)
   assert.doesNotMatch('packages/backend/src/lib/chains.test.ts', re)
 })
+
+// ── #1366: satisfied-by is its OWN key — it must never clobber covers ─────────
+
+import { test as test1366fm } from 'node:test'
+import assert1366fm from 'node:assert'
+import { parseFrontMatter as pfm1366 } from './validate-frontmatter.mjs'
+
+test1366fm('satisfied-by parses as a separate list and covers survives (#1366)', () => {
+  const raw = [
+    '---',
+    'owner: "@x"',
+    'status: current',
+    'covers:',
+    '  - packages/signer/**',
+    'satisfied-by:',
+    '  - docs/regulatory/casp-changelog/**',
+    'last-verified: "2026-08-12"',
+    '---',
+    '',
+  ].join('\n')
+  const parsed = pfm1366(raw)
+  assert1366fm.strictEqual(parsed.ok, true)
+  // The clobber bug this guards: both list keys writing to data.covers would
+  // leave covers = the satisfied-by items — silently un-covering the code.
+  assert1366fm.deepStrictEqual(parsed.data.covers, ['packages/signer/**'])
+  assert1366fm.deepStrictEqual(parsed.data['satisfied-by'], ['docs/regulatory/casp-changelog/**'])
+})

@@ -28,13 +28,19 @@ describe('shared Haven tool descriptions', () => {
   })
 
   it('routes read-only budget questions away from payment tools', () => {
-    for (const key of ['payX402', 'payMpp'] as const) {
+    for (const key of ['payX402'] as const) {
       const desc = composeDescription(toolDescriptions[key]).toLowerCase()
 
       expect(desc).toContain('do not use this for read-only allowance')
       expect(desc).toContain('what-can-i-spend')
       expect(desc).toContain('use the allowance lookup tool instead')
     }
+  })
+
+  it('no longer registers the retired mpp_demo tool-description fragments (#1328)', () => {
+    expect(Object.keys(toolDescriptions)).not.toContain('quoteMpp')
+    expect(Object.keys(toolDescriptions)).not.toContain('payMpp')
+    expect(Object.keys(toolDescriptions)).not.toContain('resumeMpp')
   })
 
   // ── Prose-drift guards ──────────────────────────────────────────────
@@ -97,8 +103,6 @@ describe('shared Haven tool descriptions', () => {
         `${key} should reference nextAction=retry_original_x402_request so the agent reads the structured field`,
       ).toContain('nextAction=retry_original_x402_request')
     }
-    const mppDesc = composeDescription(toolDescriptions.payMpp)
-    expect(mppDesc).toContain('nextAction=retry_original_x402_request')
   })
 
   it('warns x402 payment tools about the new insufficient_funds failure mode', () => {
@@ -126,10 +130,6 @@ describe('shared Haven tool descriptions', () => {
     const x402QuoteDesc = composeDescription(toolDescriptions.quoteX402)
     expect(x402QuoteDesc).toContain('haven_pay_x402_quote')
     expect(x402QuoteDesc.toLowerCase()).toContain('do not call the merchant again')
-
-    const mppQuoteDesc = composeDescription(toolDescriptions.quoteMpp)
-    expect(mppQuoteDesc).toContain('haven_pay_mpp_challenge')
-    expect(mppQuoteDesc.toLowerCase()).toContain('do not call the merchant again')
   })
 
   it('describes category-normalized catalog discovery as read-only and indicative', () => {

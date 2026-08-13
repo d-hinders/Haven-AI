@@ -91,9 +91,6 @@ Environment variable form:
 - `haven_quote_x402`
 - `haven_pay_x402_quote`
 - `haven_resume_x402_payment`
-- `haven_quote_mpp`
-- `haven_pay_mpp_challenge`
-- `haven_resume_mpp_payment`
 - `haven_get_payment_status`
 - `haven_get_resume_state`
 - `haven_get_agent`
@@ -174,8 +171,8 @@ every MCP tool that would settle, regardless of audit state.
    then call `haven_resume_x402_payment` with the returned `resume_state` or
    `payment_id`.
 
-The MPP flow is equivalent: `haven_quote_mpp`, `haven_pay_mpp_challenge`, then
-`haven_resume_mpp_payment` after approval when needed.
+The legacy MPP demo flow is retired (#1328) — pay through the x402 merchant
+flow above instead.
 
 ## Non-custodial invariant
 

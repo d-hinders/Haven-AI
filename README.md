@@ -16,7 +16,7 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-08-05"
+last-verified: "2026-08-12" # #1328 — /demo/mpp/* retired from the endpoints table
 ---
 
 # Haven
@@ -366,7 +366,7 @@ Dashboard endpoints use the signed-in user's JWT. The OpenAPI contract is served
 | Agents | JWT | `/agents`, `/agents/:id`, `/agents/:id/pause`, `/agents/:id/resume`, `/agents/:id/revoke`, `/agents/:id/rotate-key`, `/agents/:id/allowances` |
 | Agent payments | API key | `/payments`, `/payments/:id/sign`, `/payments/:id`, `/payments` |
 | Agent info | API key | `/machine-payments/agent`, `/machine-payments/allowances`, `/machine-payments/receipts`, `/machine-payments/:id/status`, resume-state endpoints |
-| x402 / MPP demos | API key or protocol challenge | `/x402`, `/demo/x402/*`, `/demo/mpp/*` |
+| x402 | API key or protocol challenge | `/x402` (the legacy internal `mpp_demo` flow at `/demo/mpp/*` and `POST /machine-payments/authorize` is retired — the latter now refuses with HTTP 410, #1328) |
 | Activity | JWT | `/agent-activity/*` for payments, approvals, MCP tool calls, pending counts, and last activity |
 
 ### Payment intent request

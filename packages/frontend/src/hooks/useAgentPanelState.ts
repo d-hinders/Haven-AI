@@ -46,7 +46,7 @@ export function useAgentPanelState() {
   // no-signer state as before.
   const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
 
-  const [connect2Open, setConnect2Open] = useState(false)
+  const [connectAgentOpen, setConnectAgentOpen] = useState(false)
   const [firstAgentSetup, setFirstAgentSetup] = useState(false)
   // True while the post-approval poll waits for a freshly-signed agent to flip
   // active — drives the "finalizing" placeholder. See `pollForNewAgent`.
@@ -69,7 +69,7 @@ export function useAgentPanelState() {
     const params = new URLSearchParams(window.location.search)
     if (params.get('setup') !== 'first') return
     setFirstAgentSetup(true)
-    setConnect2Open(true)
+    setConnectAgentOpen(true)
     params.delete('setup')
     const query = params.toString()
     window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`)
@@ -389,7 +389,7 @@ export function useAgentPanelState() {
     }
   }
 
-  /** ConnectAgent2Modal's onSetupUpdated — suppress the "Unmanaged Delegate"
+  /** ConnectAgentModal's onSetupUpdated — suppress the "Unmanaged Delegate"
    *  race window, then poll until the new agent lands (see comments above). */
   function handleSetupUpdated(info?: { delegateAddress?: string | null }) {
     markDelegateRecent(info?.delegateAddress)
@@ -436,8 +436,8 @@ export function useAgentPanelState() {
     unmanagedDelegates,
     isPendingHavenSetup,
     // Connect flow
-    connect2Open,
-    setConnect2Open,
+    connectAgentOpen,
+    setConnectAgentOpen,
     firstAgentSetup,
     handleSetupUpdated,
     // Post-approval poll

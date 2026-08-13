@@ -67,7 +67,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Prefer this over the quote+pay split when the agent just wants the paid resource and does not need to inspect the price first. If you already have a quote from haven_quote_x402, use haven_pay_x402_quote instead. Do not use for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
     behavior:
-      'Calls the URL, parses any HTTP 402 x402 challenge, signs the EIP-3009 payment from the delegate wallet, asks Haven for a Safe AllowanceModule top-up if needed, then retries the original request with the X-PAYMENT header and returns the merchant response. If the resource returns an MPP machine-payment challenge instead of standard x402, the MPP payment path is used automatically. If the resource returns a non-402 status, returns it unchanged without contacting Haven.',
+      'Calls the URL, parses any HTTP 402 x402 challenge, signs the EIP-3009 payment from the delegate wallet, asks Haven for a Safe AllowanceModule top-up if needed, then retries the original request with the X-PAYMENT header and returns the merchant response. If the resource returns a non-402 status, returns it unchanged without contacting Haven.',
     nextActionGuidance:
       'If approval is needed, preserve the returned resume_state or paymentId and call the resume tool once nextAction=retry_original_x402_request. ' +
       'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the originating Safe is funded or the agent allowance raised — stop and tell the user the shortfall reported on the response.',
@@ -80,31 +80,10 @@ export const toolDescriptions = {
     nextActionGuidance:
       'Only use when get_payment_status returns nextAction=retry_original_x402_request; do not start a new merchant session.',
   },
-  quoteMpp: {
-    summary:
-      'Inspect a Haven MPP challenge or paid MPP URL without creating a Haven payment, signature, approval, or on-chain transaction.',
-    behavior:
-      'Parses an MPP challenge envelope and returns a typed quote with rail tag, amount, asset, and merchant context. Pure read-only — Haven is not contacted.',
-    nextActionGuidance:
-      'On success the returned quote is the input to haven_pay_mpp_challenge. Do not call the merchant again — Haven re-uses the captured request when paying.',
-  },
-  payMpp: {
-    summary:
-      'Pay an inspected MPP challenge. The delegate key signs locally; Haven only validates and relays signed, on-chain-constrained payment transactions.',
-    selectionGuidance:
-      'Do not use this for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
-    behavior:
-      'Authorizes the payment through Haven within the on-chain allowance, signs the challenge proof, and returns the proof header for retrying the original paid resource.',
-    nextActionGuidance:
-      'If approval is needed, preserve resume_state or payment_id and wait for nextAction=retry_original_x402_request before resuming.',
-  },
-  resumeMpp: {
-    summary:
-      'Resume an MPP payment after the Haven wallet owner approved the funding step.',
-    behavior:
-      'Accepts either resume_state or payment_id and retries the original paid resource with the MPP proof header. No new Haven approval is created.',
-    nextActionGuidance: '',
-  },
+  // #1328: quoteMpp / payMpp / resumeMpp (the mpp_demo challenge/quote/resume
+  // fragments) are retired along with the client surface they described —
+  // MACHINE-PAYMENT-CHALLENGE was never produced by anything besides the now
+  // deleted `/demo/mpp/*` route. Use the x402 fragments above instead.
   getPaymentStatus: {
     summary:
       'Fetch structured Haven payment status, including phase and nextAction taxonomy for agent recovery.',
@@ -114,7 +93,7 @@ export const toolDescriptions = {
   },
   getResumeState: {
     summary:
-      'Rehydrate stored x402 or MPP resume_state by payment_id.',
+      'Rehydrate stored x402 resume_state by payment_id.',
     behavior:
       'Returns the context that the agent originally received in a pending-approval response, reconstructed from Haven\'s database. This is context only; signing still happens locally when a resume tool is called.',
     nextActionGuidance: '',
@@ -193,7 +172,7 @@ export const toolDescriptions = {
       'Sweep stranded USDC and/or ETH from the delegate wallet back to the originating Safe.',
     selectionGuidance:
       'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
-      'Do NOT use for normal payments — use haven_pay_x402 or haven_pay_mpp_challenge. ' +
+      'Do NOT use for normal payments — use haven_pay_x402. ' +
       'Do NOT use to read balances only — use haven_get_allowances.',
     behavior:
       'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating Safe (hardcoded destination). ' +
@@ -207,7 +186,7 @@ export const toolDescriptions = {
       'Send ETH or USDC directly from the agent\'s Haven wallet to a recipient address.',
     selectionGuidance:
       'Use this for plain transfers — refunding a user, paying a freelancer, topping up a co-agent\'s wallet, or moving funds between addresses. ' +
-      'Do NOT use for x402 paid endpoints (use haven_pay_x402 instead) or MPP merchant payments (use haven_pay_mpp_challenge). ' +
+      'Do NOT use for x402 paid endpoints — use haven_pay_x402 instead. ' +
       'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances.',
     behavior:
       'Sends the requested amount through the Safe AllowanceModule. ' +

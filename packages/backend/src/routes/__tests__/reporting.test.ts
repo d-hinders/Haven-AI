@@ -31,7 +31,7 @@ const orchestratorMocks = vi.hoisted(() => ({
   syncUser: vi.fn(),
 }))
 const connectorMocks = vi.hoisted(() => ({ hasLiveConnector: vi.fn() }))
-const fortnoxMocks = vi.hoisted(() => ({ getFortnoxConnection: vi.fn(), verifyFortnoxInvoice: vi.fn() }))
+const fortnoxMocks = vi.hoisted(() => ({ getFortnoxConnection: vi.fn(), verifyFortnoxInvoice: vi.fn(), reopenMissingPushed: vi.fn() }))
 // feed-orchestrator.ts, connector.ts and fortnox-connection.ts all fold into
 // one public entry point post-#998 (modules/reporting/index.ts) — a single
 // mock factory merging all three, not three vi.mock calls to the same
@@ -70,6 +70,7 @@ describe('reporting routes', () => {
     connectorMocks.hasLiveConnector.mockReset().mockReturnValue(false)
     fortnoxMocks.getFortnoxConnection.mockReset().mockResolvedValue(null)
     fortnoxMocks.verifyFortnoxInvoice.mockReset()
+    fortnoxMocks.reopenMissingPushed.mockReset()
   })
 
   function authed(method: 'GET' | 'POST', url: string) {
@@ -178,6 +179,77 @@ describe('reporting routes', () => {
       expect(res.statusCode).toBe(409)
       expect(res.json()).toMatchObject({ error_code: 'not_pushed', status: 'failed' })
       expect(res.json().error).toMatch(/not been pushed/)
+    })
+  })
+
+  describe('POST /reopen/:paymentId (#1365)', () => {
+    const GONE = {
+      ok: true as const,
+      verification: {
+        registered: false, missing: 'deleted' as const, booked: null, cancelled: null,
+        invoice_number: 11, voucher: null, invoice_date: null,
+        total: null, checked_at: '2026-08-13T08:00:00.000Z',
+      },
+    }
+
+    it('is hard-gated: 404 when unavailable, no verification and no write', async () => {
+      entitlementMocks.reportingFeedAvailable.mockResolvedValue(false)
+      const res = await authed('POST', '/accounting/reporting/reopen/pay-1')
+      expect(res.statusCode).toBe(404)
+      expect(fortnoxMocks.verifyFortnoxInvoice).not.toHaveBeenCalled()
+      expect(fortnoxMocks.reopenMissingPushed).not.toHaveBeenCalled()
+    })
+
+    it('reopens ONLY when Fortnox confirms the invoice is gone', async () => {
+      fortnoxMocks.verifyFortnoxInvoice.mockResolvedValue(GONE)
+      fortnoxMocks.reopenMissingPushed.mockResolvedValue(true)
+      const res = await authed('POST', '/accounting/reporting/reopen/pay-1')
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ reopened: true, payment_id: 'pay-1' })
+      expect(fortnoxMocks.reopenMissingPushed).toHaveBeenCalledWith(
+        USER, 'fortnox', 'pay-1', expect.stringMatching(/no longer exists/),
+      )
+    })
+
+    it('a company-switch collision reopens with an HONEST reason — never "no longer exists" (#1376 review)', async () => {
+      fortnoxMocks.verifyFortnoxInvoice.mockResolvedValue({
+        ok: true,
+        verification: { ...GONE.verification, missing: 'foreign_invoice' as const },
+      })
+      fortnoxMocks.reopenMissingPushed.mockResolvedValue(true)
+      const res = await authed('POST', '/accounting/reporting/reopen/pay-1')
+      expect(res.statusCode).toBe(200)
+      const reason = String(fortnoxMocks.reopenMissingPushed.mock.calls[0][3])
+      expect(reason).toMatch(/different external invoice number/)
+      expect(reason).not.toMatch(/no longer exists/)
+    })
+
+    it('MUTATION PROOF: an invoice that still EXISTS refuses — 409, nothing written', async () => {
+      // Removing the registered-check in the route (reopening regardless of
+      // the verification verdict) flips this to a 200 — the double-post the
+      // gate exists to prevent.
+      fortnoxMocks.verifyFortnoxInvoice.mockResolvedValue({
+        ok: true,
+        verification: { ...GONE.verification, registered: true, missing: null, booked: false },
+      })
+      const res = await authed('POST', '/accounting/reporting/reopen/pay-1')
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error_code: 'invoice_exists', invoice_number: 11 })
+      expect(fortnoxMocks.reopenMissingPushed).not.toHaveBeenCalled()
+    })
+
+    it('maps verification refusals and the raced row-state honestly', async () => {
+      fortnoxMocks.verifyFortnoxInvoice.mockResolvedValue({ ok: false, error_code: 'not_pushed', status: 'failed' })
+      let res = await authed('POST', '/accounting/reporting/reopen/pay-1')
+      expect(res.statusCode).toBe(409)
+      expect(res.json().error_code).toBe('not_pushed')
+
+      // Verification says gone, but the row moved before the flip (raced).
+      fortnoxMocks.verifyFortnoxInvoice.mockResolvedValue(GONE)
+      fortnoxMocks.reopenMissingPushed.mockResolvedValue(false)
+      res = await authed('POST', '/accounting/reporting/reopen/pay-1')
+      expect(res.statusCode).toBe(409)
+      expect(res.json().error_code).toBe('not_pushed')
     })
   })
 

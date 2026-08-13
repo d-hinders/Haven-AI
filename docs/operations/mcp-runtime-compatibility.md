@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-12" # release 0.1.23-alpha.0: manifest table follows the bump (ships the Node-22 engines floor to npm); prior same-day: #1349/#1348/#1355/#1350 re-verifications
+last-verified: "2026-08-13" # release 0.1.23-alpha.1: manifest table follows the atomic prerelease bump; no runtime compatibility or Node-floor claim changed
 ---
 
 # MCP Runtime Compatibility
@@ -57,10 +57,10 @@ Keep this table in sync with that file.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.1.23-alpha.0` |
-| `@haven_ai/mcp` | `0.1.23-alpha.0` |
-| `@haven_ai/sdk` | `0.1.23-alpha.0` |
-| `@haven_ai/signer` | `0.1.23-alpha.0` |
+| `@haven_ai/connect` | `0.1.23-alpha.1` |
+| `@haven_ai/mcp` | `0.1.23-alpha.1` |
+| `@haven_ai/sdk` | `0.1.23-alpha.1` |
+| `@haven_ai/signer` | `0.1.23-alpha.1` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -80,11 +80,37 @@ install mcp`) to load MCP tools.
 
 ## Completion handoff after Connect
 
+The published `haven-connect` package is also checked through the npm bin
+topology: the package smoke test invokes its packed `node_modules/.bin`
+symlink, not only `node dist/cli.js`. This matters because Node keeps the
+symlink path in `argv[1]`; Connect resolves it before deciding whether it is
+the program entrypoint. A command that exits with no output before it creates
+the local files has not registered an agent and must not be described as a
+completed connection.
+
 The connector's final output is deliberately short and ordered: return to Haven
 to approve the agent rules first, activate the current runtime second, then run
 the read-only `haven_get_agent` and `haven_get_allowances` tools to confirm the
 Haven wallet and live budget. Approval — not a restart — unlocks Haven tools.
 The verification must not sign, fund, or create a payment.
+
+Since #1377 the connector does not go silent after registering: it polls the
+narrow read-only `connector-status` endpoint (pending agent API key, usable
+while `setup_pending`-scoped) and waits for the budget approval — every 5
+seconds, for at most 3 minutes, with a progress reminder every 30 seconds. On
+approval it prints a celebratory line naming the granted authority (amount,
+token, reset period); on a terminal setup status it says the setup ended in
+Haven; at the bound it exits cleanly with "approve whenever ready" guidance —
+the connector always terminates on its own. A flaky poll is retried inside the
+same bound, never treated as a verdict. `--json` automation runs skip the wait
+entirely so the structured outcome is emitted promptly.
+
+Before registration, the dashboard remains neutral about a missing connection:
+after one minute of a confirmed `awaiting_connection` status, it says only that
+Haven has not received a connection yet. It asks the user not to approve agent
+rules, offers the same local command for copying, and lets them cancel the
+one-time setup before creating a fresh prompt. A status-read error remains an
+error state, not evidence that the connector succeeded or failed.
 
 Automation can pass `--json`: Connect keeps progress and recovery prose on
 stderr and emits one parseable, versioned object on stdout. `schema_version: 1`
@@ -188,7 +214,8 @@ seemed to work" is exactly the evidence that cannot be trusted there.
   packages. CI runs connector tests whenever SDK, MCP, signer, or connector
   files change.
 - Run `npm run smoke:pack -w packages/connect` before publishing connector or
-  MCP packages. The smoke packs local SDK/MCP artifacts, stages them into a
+  MCP packages. The smoke packs Connect plus local SDK/MCP artifacts, verifies
+  the packed npm bin starts through an npm-style symlink, stages them into a
   temp Haven runtime, and verifies the wrapper can complete an MCP `initialize`
   + `tools/list` handshake.
 - Verify the generated wrapper with an MCP `initialize` + `tools/list`

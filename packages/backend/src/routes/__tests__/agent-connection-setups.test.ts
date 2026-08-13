@@ -2472,3 +2472,184 @@ describe('hosted MCP URL resolution (#1129)', () => {
     await app.close()
   })
 })
+
+/**
+ * `GET /:setupId/connector-status` (#1377 part D) — the narrow endpoint the
+ * `@haven_ai/connect` connector polls after /register to learn when the user
+ * approves the budget. Authenticated by the agent API key /register minted
+ * (Bearer sk_agent_…) rather than `authMiddleware` or the setup token — a
+ * `pending_approval` agent's key must work here even though the ordinary
+ * `agentAuthMiddleware` refuses that status outright (#1130).
+ */
+describe('GET /:setupId/connector-status (#1377 part D)', () => {
+  const AGENT_AUTH_ROW = {
+    id: 'agent-1',
+    user_id: 'user-1',
+    name: 'Research Agent',
+    delegate_address: DELEGATE_ADDRESS,
+    safe_address: SAFE.safe_address,
+    chain_id: SAFE.chain_id,
+    status: 'pending_approval',
+    execution_rail: 'delegation',
+    account_type: 'delegator_hybrid',
+  }
+
+  const PENDING_SETUP = {
+    ...CONNECTED_SETUP,
+    agent_id: 'agent-1',
+    status: 'awaiting_wallet_approval',
+  }
+
+  const ACTIVE_SETUP = {
+    ...CONNECTED_SETUP,
+    agent_id: 'agent-1',
+    status: 'active',
+    approval_status: 'confirmed',
+  }
+
+  /** Matches AGENT_BY_API_KEY_SQL (agent lookup by key hash — no setup join). */
+  const agentAuthLookup = (row: Record<string, unknown> | null): DbRoute => [
+    /JOIN users u ON a\.user_id = u\.id/,
+    () => ({ rows: row ? [row] : [] }),
+  ]
+
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientRelease.mockReset()
+  })
+
+  it('reports pre-approval status with a null approved_budget for the agent that owns the setup', async () => {
+    const app = await buildApp()
+    primeDb(
+      agentAuthLookup(AGENT_AUTH_ROW),
+      setupByAgentApiKey(PENDING_SETUP),
+      setupAllowances([]),
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${SETUP.id}/connector-status`,
+      headers: { authorization: 'Bearer sk_agent_pending_key' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      status: 'awaiting_wallet_approval',
+      approved_budget: null,
+    })
+    await app.close()
+  })
+
+  it('carries the approved budget once the setup is active', async () => {
+    const app = await buildApp()
+    primeDb(
+      agentAuthLookup({ ...AGENT_AUTH_ROW, status: 'active' }),
+      setupByAgentApiKey(ACTIVE_SETUP),
+      setupAllowances([ALLOWANCE]),
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${SETUP.id}/connector-status`,
+      headers: { authorization: 'Bearer sk_agent_active_key' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      status: 'active',
+      approved_budget: {
+        token_symbol: ALLOWANCE.token_symbol,
+        token_address: ALLOWANCE.token_address,
+        amount: ALLOWANCE.allowance_amount,
+        reset_period_min: ALLOWANCE.reset_period_min,
+      },
+    })
+    await app.close()
+  })
+
+  it('answers 404 — indistinguishable from not-found — for a different agent\'s valid key', async () => {
+    const app = await buildApp()
+    primeDb(
+      // The key belongs to a real, live agent — just not the one this setup
+      // is scoped to, so the setup-scoped lookup matches nothing.
+      agentAuthLookup({ ...AGENT_AUTH_ROW, id: 'agent-2', status: 'active' }),
+      setupByAgentApiKey(null),
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${SETUP.id}/connector-status`,
+      headers: { authorization: 'Bearer sk_agent_unrelated_key' },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(response.json().error).toBe('Setup not found')
+    await app.close()
+  })
+
+  it('never leaks API keys, setup tokens, or key material in the response', async () => {
+    const app = await buildApp()
+    const setupWithSecretishFields = {
+      ...ACTIVE_SETUP,
+      proof_signature: '0xdeadbeefsk_agent_should_not_leak',
+      challenge_message: 'setup_token: hv_setup_should_not_leak',
+      install_status: { note: 'sk_agent_in_install_status' },
+      connector_context: { note: 'sk_agent_in_connector_context' },
+      api_key_prefix: 'sk_agent_abc',
+      delegate_address: DELEGATE_ADDRESS,
+    }
+    primeDb(
+      agentAuthLookup({ ...AGENT_AUTH_ROW, status: 'active' }),
+      setupByAgentApiKey(setupWithSecretishFields),
+      setupAllowances([ALLOWANCE]),
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${SETUP.id}/connector-status`,
+      headers: { authorization: 'Bearer sk_agent_active_key' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    // Exactly the two documented fields — nothing from the setup row rides
+    // along by accident.
+    expect(Object.keys(body).sort()).toEqual(['approved_budget', 'status'])
+    const serialized = JSON.stringify(body)
+    expect(serialized).not.toMatch(/sk_agent_/)
+    expect(serialized).not.toMatch(/hv_setup_/)
+    expect(serialized).not.toMatch(/delegate_key|private_key|privateKey|proof_signature|setup_token/)
+    await app.close()
+  })
+
+  it('rejects a request with no API key', async () => {
+    const app = await buildApp()
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${SETUP.id}/connector-status`,
+    })
+
+    expect(response.statusCode).toBe(401)
+    expect(response.json().error).toBe('Invalid or revoked API key')
+    expect(mockQuery).not.toHaveBeenCalled()
+    await app.close()
+  })
+
+  it('rejects a revoked agent\'s key the same as an unrecognised one', async () => {
+    const app = await buildApp()
+    primeDb(agentAuthLookup({ ...AGENT_AUTH_ROW, status: 'revoked' }))
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${SETUP.id}/connector-status`,
+      headers: { authorization: 'Bearer sk_agent_revoked_key' },
+    })
+
+    expect(response.statusCode).toBe(401)
+    expect(response.json().error).toBe('Invalid or revoked API key')
+    await app.close()
+  })
+})

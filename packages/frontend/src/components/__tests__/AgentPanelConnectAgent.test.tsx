@@ -52,11 +52,11 @@ vi.mock('@/lib/signer', () => ({
   isSafeCapableSigner: (s: { type?: string } | null) => s !== null && s.type !== 'delegator_passkey',
 }))
 
-vi.mock('@/components/ConnectAgent2Modal', () => ({
+vi.mock('@/components/ConnectAgentModal', () => ({
   default: ({ open, starterAllowance }: { open: boolean; starterAllowance?: boolean }) =>
     open ? (
       <div role="dialog">
-        Connect Agent 2 Modal{starterAllowance ? ' (starter allowance)' : ''}
+        Connect Agent Modal{starterAllowance ? ' (starter allowance)' : ''}
       </div>
     ) : null,
 }))
@@ -87,11 +87,11 @@ describe('AgentPanel Connect Agent entry', () => {
     mockUseActiveSigner.mockReturnValue(null)
   })
 
-  it('opens ConnectAgent2Modal when the Connect agent button is clicked', () => {
+  it('opens ConnectAgentModal when the Connect agent button is clicked', () => {
     render(<AgentPanel />)
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Connect agent' })[0])
-    expect(screen.getByText('Connect Agent 2 Modal')).toBeInTheDocument()
+    expect(screen.getByText('Connect Agent Modal')).toBeInTheDocument()
   })
 
   it('does not render a legacy Manual setup button', () => {
@@ -105,7 +105,7 @@ describe('AgentPanel Connect Agent entry', () => {
 
     render(<AgentPanel />)
 
-    expect(screen.getByText('Connect Agent 2 Modal (starter allowance)')).toBeInTheDocument()
+    expect(screen.getByText('Connect Agent Modal (starter allowance)')).toBeInTheDocument()
     // the param is consumed so refresh/back doesn't re-trigger the hand-off
     expect(window.location.search).toBe('')
 

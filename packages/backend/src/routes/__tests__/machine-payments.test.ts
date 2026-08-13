@@ -780,16 +780,31 @@ describe('machine payment routes', () => {
     expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
-  it('REFUSES a delegation-rail account on /authorize — 422, zero writes, no approval manufactured (#1251)', async () => {
-    primeDb(AUTH, RAIL_DELEGATION)
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:delegation-refusal' },
+  // #1328: the HTTP /authorize route no longer calls authorizeMachinePayment
+  // for any rail — it always refuses (see the "POST /authorize is retired"
+  // describe block below). The underlying rail-gate behavior this test used
+  // to characterize through the route is generic orchestration
+  // (`modules/mpp/authorize.ts`) kept for a future non-demo MPP rail
+  // (#1328's file-ownership scope explicitly excludes it) — proven here by
+  // calling the function directly instead of through the retired HTTP path.
+  it('authorizeMachinePayment REFUSES a delegation-rail account — 422, zero writes, no approval manufactured (#1251)', async () => {
+    primeDb(RAIL_DELEGATION)
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:delegation-refusal',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
     })
-    expect(response.statusCode).toBe(422)
-    expect(response.json().error_code).toBe('rail_not_supported')
+    expect(result.statusCode).toBe(422)
+    expect((result.body as { error_code?: string }).error_code).toBe('rail_not_supported')
     // The bug's signature was a manufactured approval_requests row — assert
     // the refusal writes NOTHING.
     expect(sqlCalls().some((c) => /INSERT INTO approval_requests/.test(c.sql))).toBe(false)
@@ -811,29 +826,107 @@ describe('machine payment routes', () => {
 
   // #993 characterization (written BEFORE the seam change): a replayed
   // idempotency key whose EXISTING intent is session-rail gets 410 with ZERO
-  // writes — no refresh, no status flip, no partial state.
-  it('authorize replay of a session-rail intent — 410, zero writes (#834/#993)', async () => {
-    primeDb(AUTH, existingIntent(pendingIntent({ execution_rail: 'session_key' })))
+  // writes — no refresh, no status flip, no partial state. Direct call per
+  // the #1328 note above (the HTTP /authorize route itself now always 410s).
+  it('authorizeMachinePayment replay of a session-rail intent — 410, zero writes (#834/#993)', async () => {
+    primeDb(existingIntent(pendingIntent({ execution_rail: 'session_key' })))
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
     })
 
-    expect(response.statusCode).toBe(410)
-    expect(response.json().error).toMatch(/session rail is retired/)
+    expect(result.statusCode).toBe(410)
+    expect((result.body as { error?: string }).error).toMatch(/session rail is retired/)
     expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
   })
 
-  it('creates an MPP demo payment intent with generic rail metadata', async () => {
+  // ── POST /authorize is retired (#1328) ──────────────────────────────────
+  // Acceptance: "POST /machine-payments/authorize no longer accepts or
+  // creates mpp_demo payments; no new legacy MPP demo challenge can be
+  // authorized." The route now refuses UNCONDITIONALLY — fail-closed,
+  // mirroring the #834 session-rail 410 pattern — before the body is even
+  // inspected. authorizeMachinePayment's own behavior stays characterized
+  // (above and below, via direct calls) because the generic MPP orchestrator
+  // is kept for a future non-demo MPP rail; only the demo-specific HTTP
+  // wiring is retired.
+  describe('POST /machine-payments/authorize (#1328: mpp_demo retired)', () => {
+    it('refuses a well-formed mpp_demo challenge — 410, zero writes', async () => {
+      primeDb(AUTH)
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+      })
+
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toMatch(/mpp_demo/i)
+      expect(response.json().error).toMatch(/retired/i)
+      // Zero authorization work — the refusal is produced before anything
+      // resembling challenge validation or coverage decisioning runs.
+      expectNoAuthorizationWork()
+      expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
+    })
+
+    it('refuses an empty/garbage body the same way — 410 before any body validation', async () => {
+      primeDb(AUTH)
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: {},
+      })
+
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toMatch(/retired/i)
+      expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
+    })
+
+    it('refuses even a signed one-shot authorize attempt — no execution, no partial state', async () => {
+      primeDb(AUTH)
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+      })
+
+      expect(response.statusCode).toBe(410)
+      expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
+      expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
+    })
+
+    it('still requires agent auth — an unauthenticated request never reaches the refusal body', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/authorize',
+        payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+      })
+
+      expect(response.statusCode).toBe(401)
+    })
+  })
+
+  it('authorizeMachinePayment creates a payment intent with generic rail metadata', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
     allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
 
     primeDb(
-      AUTH,
       existingIntent(null),
       existingApproval(null),
       RAIL_LEGACY,
@@ -841,15 +934,23 @@ describe('machine payment routes', () => {
       insertIntent(pendingIntent()),
     )
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
     })
 
-    expect(response.statusCode).toBe(201)
-    expect(response.json()).toMatchObject({
+    expect(result.statusCode).toBe(201)
+    expect(result.body).toMatchObject({
       payment_id: PAYMENT_ID,
       status: 'pending_signature',
       rail: 'mpp_demo',
@@ -910,18 +1011,26 @@ describe('machine payment routes', () => {
     expect(insert!.params).toContain('mpp_demo:test')
   })
 
-  it('returns a confirmed payment for idempotency replay', async () => {
-    primeDb(AUTH, existingIntent(pendingIntent({ status: 'confirmed', tx_hash: `0x${'ab'.repeat(32)}` })))
+  it('authorizeMachinePayment returns a confirmed payment for idempotency replay', async () => {
+    primeDb(existingIntent(pendingIntent({ status: 'confirmed', tx_hash: `0x${'ab'.repeat(32)}` })))
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
+    expect(result.statusCode).toBe(200)
+    expect(result.body).toMatchObject({
       success: true,
       payment_id: PAYMENT_ID,
       status: 'confirmed',
@@ -945,26 +1054,33 @@ describe('machine payment routes', () => {
     expect(lookup!.params).toEqual([AGENT.id, 'mpp_demo:test', challenge.challengeId, 'mpp_demo'])
   })
 
-  it('guards stale sign data refreshes for duplicate pending intents', async () => {
+  it('authorizeMachinePayment guards stale sign data refreshes for duplicate pending intents', async () => {
     const refreshedHash = `0x${'22'.repeat(32)}`
     allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 4 })
     allowanceMocks.generateTransferHash.mockResolvedValue(refreshedHash)
 
     primeDb(
-      AUTH,
       existingIntent(pendingIntent({ allowance_nonce: 3, sign_hash: SIGN_HASH })),
       refreshNonce({ id: PAYMENT_ID }),
     )
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(response.json().sign_data).toMatchObject({
+    expect(result.statusCode).toBe(200)
+    expect((result.body as { sign_data: unknown }).sign_data).toMatchObject({
       hash: refreshedHash,
       components: { nonce: 4 },
     })
@@ -979,7 +1095,7 @@ describe('machine payment routes', () => {
     expect(refreshCall!.params).toEqual([4, refreshedHash, PAYMENT_ID, AGENT.id, 'mpp_demo'])
   })
 
-  it('reloads rail-scoped existing intents after insert idempotency conflicts', async () => {
+  it('authorizeMachinePayment reloads rail-scoped existing intents after insert idempotency conflicts', async () => {
     // Called twice (the preflight read, then returnExistingIntent's nonce
     // compare) — both calls want the same answer, so a persistent mock covers
     // both without a sequence.
@@ -996,7 +1112,6 @@ describe('machine payment routes', () => {
     // CONFLICT semantics themselves are the repository's to prove.
     let intentReads = 0
     primeDb(
-      AUTH,
       [/COALESCE\(payment_rail, source\) = \$4/, () => {
         intentReads += 1
         return { rows: intentReads > 1 ? [pendingIntent()] : [] }
@@ -1007,15 +1122,23 @@ describe('machine payment routes', () => {
       insertIntent(null),
     )
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
+    expect(result.statusCode).toBe(200)
+    expect(result.body).toMatchObject({
       payment_id: PAYMENT_ID,
       status: 'pending_signature',
       rail: 'mpp_demo',
@@ -1156,12 +1279,11 @@ describe('machine payment routes', () => {
     expect(response.json()).toEqual({ error: 'Payment or approval request not found' })
   })
 
-  it('queues over-allowance MPP demo payments for approval with rail metadata', async () => {
+  it('authorizeMachinePayment queues over-allowance payments for approval with rail metadata', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 1n })
 
     primeDb(
-      AUTH,
       existingIntent(null),
       existingApproval(null),
       RAIL_LEGACY,
@@ -1178,15 +1300,23 @@ describe('machine payment routes', () => {
       }),
     )
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
     })
 
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
+    expect(result.statusCode).toBe(202)
+    expect(result.body).toMatchObject({
       payment_id: 'approval-123',
       status: 'pending_approval',
       rail: 'mpp_demo',
@@ -1218,9 +1348,8 @@ describe('machine payment routes', () => {
     expect(insert!.params).toContain('mpp_demo:test')
   })
 
-  it('returns a specific response for rejected approval retries', async () => {
+  it('authorizeMachinePayment returns a specific response for rejected approval retries', async () => {
     primeDb(
-      AUTH,
       existingIntent(null),
       existingApproval({
         id: 'approval-123',
@@ -1234,122 +1363,50 @@ describe('machine payment routes', () => {
       }),
     )
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:test' },
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
     })
 
-    expect(response.statusCode).toBe(409)
-    expect(response.json()).toMatchObject({
+    expect(result.statusCode).toBe(409)
+    expect(result.body).toMatchObject({
       payment_id: 'approval-123',
       status: 'rejected',
       error: 'Payment was rejected by the account owner',
     })
   })
 
-  it('rejects expired challenges', async () => {
-    primeDb(AUTH)
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: {
-        challenge: { ...challenge, expiresAt: '2020-01-01T00:00:00.000Z' },
-        idempotencyKey: 'mpp_demo:test',
-      },
+  it('authorizeMachinePayment rejects malformed MPP payTo before allowance, hash, or execution work', async () => {
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: 'not-an-address',
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
     })
 
-    expect(response.statusCode).toBe(400)
-    expect(response.json().error).toBe('MPP demo challenge has expired')
-  })
-
-  it('rejects invalid challenge expiry timestamps before authorization work', async () => {
-    const invalidExpiresAtValues = [
-      'not-a-date',
-      '',
-      null,
-    ]
-    primeDb(AUTH)
-
-    for (const expiresAt of invalidExpiresAtValues) {
-      const response = await app.inject({
-        method: 'POST',
-        url: '/machine-payments/authorize',
-        headers: { authorization: 'Bearer sk_agent_test' },
-        payload: {
-          challenge: { ...challenge, expiresAt },
-          idempotencyKey: 'mpp_demo:test',
-        },
-      })
-
-      expect(response.statusCode).toBe(400)
-      expect(response.json().error).toBe('expiresAt must be a valid ISO timestamp')
-    }
-
-    expectNoAuthorizationWork()
-    expect(mockQuery).toHaveBeenCalledTimes(invalidExpiresAtValues.length)
-  })
-
-  // ── validateMppDemoChallenge — authorization boundary (#997) ───────────────
-  // The #997 issue calls this out explicitly: "it must not become more
-  // permissive; test the rejection paths, not just the happy path." Before
-  // this pass, only the expiry branches (above) were pinned — every OTHER
-  // exact-match guard (rail, chain, asset, price) had zero coverage. Each
-  // case here asserts the EXACT error string `validateMppDemoChallenge`
-  // returns, so a loosened guard (e.g. `challenge.rail !== 'mpp_demo'`
-  // becoming `!challenge.rail`) changes the message and fails loudly rather
-  // than silently degrading to a looser check with the same happy path.
-  describe('validateMppDemoChallenge rejection paths (#997)', () => {
-    it.each([
-      ['wrong rail', { rail: 'x402' }, 'Only mpp_demo challenges are supported'],
-      ['missing challengeId', { challengeId: undefined }, 'challengeId is required'],
-      ['missing resource', { resource: undefined }, 'resource is required'],
-      ['wrong chain id', { network: { chainId: 100, name: 'base' } }, 'MPP demo payments must use Base'],
-      ['wrong network name', { network: { chainId: 8453, name: 'gnosis' } }, 'MPP demo payments must use Base'],
-      ['wrong asset symbol', { asset: { symbol: 'USDT', address: USDC, decimals: 6 } }, 'MPP demo payments must use Base USDC'],
-      ['wrong asset decimals', { asset: { symbol: 'USDC', address: USDC, decimals: 18 } }, 'MPP demo payments must use Base USDC'],
-      ['wrong asset address', { asset: { symbol: 'USDC', address: RECIPIENT, decimals: 6 } }, 'MPP demo payments must use Base USDC'],
-      ['wrong amount atomic (underpaying)', { amount: { display: '0.01', atomic: '1' } }, 'MPP demo payments are fixed at 0.01 USDC'],
-      ['wrong amount display', { amount: { display: '1.00', atomic: '10000' } }, 'MPP demo payments are fixed at 0.01 USDC'],
-    ])('%s → 400 with the exact message, zero authorization work', async (_label, overrides, expectedError) => {
-      primeDb(AUTH)
-
-      const response = await app.inject({
-        method: 'POST',
-        url: '/machine-payments/authorize',
-        headers: { authorization: 'Bearer sk_agent_test' },
-        payload: {
-          challenge: { ...challenge, ...overrides },
-          idempotencyKey: 'mpp_demo:test',
-        },
-      })
-
-      expect(response.statusCode).toBe(400)
-      expect(response.json().error).toBe(expectedError)
-      expect(mockQuery).toHaveBeenCalledTimes(1) // only the auth lookup
-      expectNoAuthorizationWork()
+    expect(result).toEqual({
+      statusCode: 400,
+      body: { error: 'Valid payTo address is required' },
     })
-  })
-
-  it('rejects malformed MPP payTo before allowance, hash, or execution work', async () => {
-    primeDb(AUTH)
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: {
-        challenge: { ...challenge, recipient: 'not-an-address' },
-        idempotencyKey: 'mpp_demo:test',
-      },
-    })
-
-    expect(response.statusCode).toBe(400)
-    expect(response.json()).toEqual({ error: 'Valid payTo address is required' })
-    expect(mockQuery).toHaveBeenCalledTimes(1)
+    expect(mockQuery).not.toHaveBeenCalled()
     expectNoAuthorizationWork()
   })
 
@@ -1382,14 +1439,13 @@ describe('machine payment routes', () => {
     expectNoAuthorizationWork()
   })
 
-  it('rejects signatures from the wrong delegate', async () => {
+  it('authorizeMachinePayment rejects signatures from the wrong delegate', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
     allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
     allowanceMocks.recoverSigner.mockReturnValueOnce('0x0000000000000000000000000000000000000001')
 
     primeDb(
-      AUTH,
       existingIntent(null),
       existingApproval(null),
       RAIL_LEGACY,
@@ -1397,22 +1453,31 @@ describe('machine payment routes', () => {
       insertIntent(pendingIntent()),
     )
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
+      signature: '0xsig',
     })
 
-    expect(response.statusCode).toBe(403)
-    expect(response.json()).toMatchObject({
+    expect(result.statusCode).toBe(403)
+    expect(result.body).toMatchObject({
       error: 'Signature does not match delegate address',
       recovered: '0x0000000000000000000000000000000000000001',
     })
     expect(allowanceMocks.executeAllowanceTransfer).not.toHaveBeenCalled()
   })
 
-  it('records one-shot signatures without marking the payment submitted before execution', async () => {
+  it('authorizeMachinePayment records one-shot signatures without marking the payment submitted before execution', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
     allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
@@ -1421,7 +1486,6 @@ describe('machine payment routes', () => {
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0.01, eur: 0.01 })
 
     primeDb(
-      AUTH,
       existingIntent(null),
       existingApproval(null),
       RAIL_LEGACY,
@@ -1431,15 +1495,24 @@ describe('machine payment routes', () => {
       confirm(true),
     )
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
+      signature: '0xsig',
     })
 
-    expect(response.statusCode).toBe(201)
-    expect(response.json()).toMatchObject({
+    expect(result.statusCode).toBe(201)
+    expect(result.body).toMatchObject({
       success: true,
       payment_id: PAYMENT_ID,
       status: 'confirmed',
@@ -1478,7 +1551,7 @@ describe('machine payment routes', () => {
     expect(confirmedUpdate!.params).toEqual([TX_HASH, PAYMENT_ID, 0.01, 0.01, AGENT.id, 'mpp_demo'])
   })
 
-  it('does not overwrite one-shot terminal state after execution failures', async () => {
+  it('authorizeMachinePayment does not overwrite one-shot terminal state after execution failures', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
     allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
@@ -1486,7 +1559,6 @@ describe('machine payment routes', () => {
     allowanceMocks.executeAllowanceTransfer.mockRejectedValueOnce(new Error('relayer unavailable'))
 
     primeDb(
-      AUTH,
       existingIntent(null),
       existingApproval(null),
       RAIL_LEGACY,
@@ -1495,15 +1567,24 @@ describe('machine payment routes', () => {
       recordSignature(true),
     )
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
+      signature: '0xsig',
     })
 
-    expect(response.statusCode).toBe(502)
-    expect(response.json()).toMatchObject({
+    expect(result.statusCode).toBe(502)
+    expect(result.body).toMatchObject({
       payment_id: PAYMENT_ID,
       status: 'failed',
       error: 'On-chain execution failed',
@@ -1518,7 +1599,7 @@ describe('machine payment routes', () => {
     expect(failedUpdate!.params).toEqual(['relayer unavailable', PAYMENT_ID, AGENT.id, 'mpp_demo'])
   })
 
-  it('does not record evidence when a one-shot confirmation loses a terminal-state race', async () => {
+  it('authorizeMachinePayment does not record evidence when a one-shot confirmation loses a terminal-state race', async () => {
     allowanceMocks.getTokenAllowance.mockResolvedValue({ nonce: 3 })
     allowanceMocks.computeEffectiveAllowance.mockReturnValueOnce({ remaining: 10000n })
     allowanceMocks.generateTransferHash.mockResolvedValue(SIGN_HASH)
@@ -1527,7 +1608,6 @@ describe('machine payment routes', () => {
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0.01, eur: 0.01 })
 
     primeDb(
-      AUTH,
       existingIntent(null),
       existingApproval(null),
       RAIL_LEGACY,
@@ -1538,15 +1618,24 @@ describe('machine payment routes', () => {
       intentStatus('confirmed'),
     )
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/machine-payments/authorize',
-      headers: { authorization: 'Bearer sk_agent_test' },
-      payload: { challenge, idempotencyKey: 'mpp_demo:test', signature: '0xsig' },
+    const result = await authorizeMachinePayment({
+      agent: AGENT,
+      rail: 'mpp_demo',
+      resourceUrl: challenge.resource,
+      payTo: challenge.recipient,
+      merchantPayTo: challenge.recipient,
+      amountAtomic: challenge.amount.atomic,
+      asset: challenge.asset.address,
+      chainId: challenge.network.chainId,
+      description: challenge.description,
+      challengeId: challenge.challengeId,
+      idempotencyKey: 'mpp_demo:test',
+      metadata: { protocol: 'mpp', network: challenge.network.name, description: challenge.description },
+      signature: '0xsig',
     })
 
-    expect(response.statusCode).toBe(409)
-    expect(response.json()).toMatchObject({
+    expect(result.statusCode).toBe(409)
+    expect(result.body).toMatchObject({
       payment_id: PAYMENT_ID,
       status: 'confirmed',
       error: 'Payment intent changed after on-chain execution',

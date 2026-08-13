@@ -1,5 +1,5 @@
 {
-  "total": 68,
+  "total": 64,
   "files": {
     "packages/backend/src/index.ts": 1,
     "packages/backend/src/infra/transaction.ts": 3,
@@ -11,7 +11,6 @@
     "packages/backend/src/routes/agent-delegations.ts": 13,
     "packages/backend/src/routes/approvals.ts": 9,
     "packages/backend/src/routes/catalog.ts": 2,
-    "packages/backend/src/routes/demo-mpp.ts": 4,
     "packages/backend/src/routes/hybrid-accounts.ts": 5,
     "packages/backend/src/routes/safe-deploy.ts": 9,
     "packages/backend/src/routes/x402-resources.ts": 10

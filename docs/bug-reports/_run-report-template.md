@@ -8,7 +8,7 @@ covers:
   - packages/frontend/playwright.config.ts
   - packages/frontend/playwright.live.config.ts
   - packages/frontend/e2e/**
-  - packages/frontend/src/components/ConnectAgent2Modal.tsx
+  - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/connect/src/**
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/machine-payments.ts

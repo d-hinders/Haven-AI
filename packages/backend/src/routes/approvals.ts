@@ -3,6 +3,8 @@ import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
+import { mppDemoRetired } from '../modules/mpp/index.js'
+import { getApprovalRail } from '../infra/repositories/approval-requests.js'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -154,15 +156,29 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
       const { sub } = request.user as { sub: string }
       const { id } = request.params
 
+      // #1328 (review finding on #1339): a PRE-EXISTING pending mpp_demo
+      // approval must not become actionable after the retirement — approving
+      // it hands the frontend an executable Safe funding tx. The guard lives
+      // IN the UPDATE's WHERE (race-free, nothing ever written for mpp_demo);
+      // the rail predicate is the same payment_rail-first derivation GET
+      // /approvals reports. Readable and rejectable, never approvable.
       const result = await pool.query<ApprovalRow>(
         `UPDATE approval_requests
          SET status = 'approved', reviewed_at = NOW()
          WHERE id = $1 AND user_id = $2 AND status = 'pending' AND expires_at > NOW()
+           AND COALESCE(payment_rail, source, 'direct') <> 'mpp_demo'
          RETURNING *`,
         [id, sub],
       )
 
       if (result.rows.length === 0) {
+        // Distinguish the retirement refusal (410) from plain not-found (404)
+        // — diagnostic repository read on the failure path only.
+        const rail = await getApprovalRail(id, sub)
+        if (rail === 'mpp_demo') {
+          const retired = mppDemoRetired()
+          return reply.code(retired.statusCode).send(retired.body)
+        }
         return reply.code(404).send({
           error: 'Approval request not found or no longer actionable',
         })
@@ -205,15 +221,23 @@ export default async function approvalRoutes(app: FastifyInstance): Promise<void
       const { sub } = request.user as { sub: string }
       const { id } = request.params
 
+      // #1328: same WHERE-clause guard as /approve — an mpp_demo approval
+      // already flipped to 'approved' before the retirement must not advance.
       const result = await pool.query<ApprovalRow>(
         `UPDATE approval_requests
          SET status = 'proposed', reviewed_at = COALESCE(reviewed_at, NOW())
          WHERE id = $1 AND user_id = $2 AND status = 'approved' AND expires_at > NOW()
+           AND COALESCE(payment_rail, source, 'direct') <> 'mpp_demo'
          RETURNING id`,
         [id, sub],
       )
 
       if (result.rows.length === 0) {
+        const rail = await getApprovalRail(id, sub)
+        if (rail === 'mpp_demo') {
+          const retired = mppDemoRetired()
+          return reply.code(retired.statusCode).send(retired.body)
+        }
         return reply.code(404).send({
           error: 'Approval request not found or no longer actionable',
         })

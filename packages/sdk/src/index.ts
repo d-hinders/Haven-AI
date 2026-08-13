@@ -74,14 +74,7 @@ export type {
   PaymentResumeState,
   ResumeAuthorizedX402Input,
   ResumeX402PaymentInput,
-  MppAuthorizationOptions,
-  MppQuote,
-  MppResumeState,
-  ResumeAuthorizedMppInput,
-  ResumeMppPaymentInput,
   MachinePaymentRail,
-  MachinePaymentChallenge,
-  MachinePaymentReceipt,
   HavenAgent,
   HavenAgentSummary,
   HavenAgentAllowanceSummary,
@@ -152,12 +145,9 @@ export type {
   SweepTypedData,
 } from './sweep.js'
 
-export {
-  parseMachinePaymentChallenge,
-  parseMachinePaymentChallengeResponse,
-  buildMachinePaymentIdempotencyKey,
-  encodeMachinePaymentProof,
-} from './mpp.js'
+// #1328: mpp.ts's demo challenge/proof helpers (parseMachinePaymentChallenge,
+// parseMachinePaymentChallengeResponse, buildMachinePaymentIdempotencyKey,
+// encodeMachinePaymentProof) are retired with the mpp_demo client surface.
 
 export {
   encodeBase64Utf8,

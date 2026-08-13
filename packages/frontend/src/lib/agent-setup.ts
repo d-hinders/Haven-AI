@@ -43,7 +43,7 @@ export interface ExecuteAgentSetupParams {
  * Build, sign, and submit the agent-setup batch (enableModule + addDelegate +
  * setAllowance per token) as a single Safe transaction.
  *
- * Used by the ConnectAgent2Modal flow so the on-chain orchestration — and its
+ * Used by the ConnectAgentModal flow so the on-chain orchestration — and its
  * timeout/confirm semantics — stays in one place. Callers own everything after:
  * saving the agent, recording the wallet approval, and rendering the result.
  *

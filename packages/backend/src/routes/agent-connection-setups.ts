@@ -8,6 +8,7 @@ import type {
   UserSafeRow,
 } from '../infra/repositories/agent-connection-setups.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { findAgentAuthRowByApiKeyHash } from '../infra/repositories/agents.js'
 import {
   SETUP_TOKEN_TTL_MINUTES,
   apiKeyHash,
@@ -404,6 +405,45 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       passport_requested: passportChainId != null,
     })
   })
+
+  // ── GET /:setupId/connector-status — the CONNECTOR's own poll ──
+  //
+  // Authenticated by the agent API key the connector minted at /register, NOT
+  // by `authMiddleware` (there is no dashboard session on a headless
+  // connector) and NOT by the one-shot setup token (already consumed by
+  // /register). That key starts life scoped to a `pending_approval` agent
+  // (`api_key_scope: 'setup_pending'` in the /register response) — the
+  // ordinary `agentAuthMiddleware` refuses a pending agent outright (#1130,
+  // `agent_pending_approval`), which is correct for the money-moving routes it
+  // guards but wrong here: this IS the endpoint a pending agent's key is
+  // supposed to work against, so it needs its own auth path rather than the
+  // shared one.
+  //
+  // Deliberately cheap: this is polled, so it reads the setup row's OWN status
+  // — no RPC/on-chain reconciliation (contrast `maybeActivateFromLiveAuthority`
+  // on the dashboard GET below). The wallet-approval and budget-approval
+  // routes are what verify authority and flip the DB status to 'active'; this
+  // endpoint only ever reports what they already wrote.
+  app.get<{ Params: { setupId: string } }>(
+    '/:setupId/connector-status',
+    async (request, reply) => {
+      const auth = await authenticateConnectorStatusRequest(request)
+      if (!auth) return reply.code(401).send({ error: 'Invalid or revoked API key' })
+
+      // Tenant scope: `findSetupByAgentApiKeyHash` joins the setup to its
+      // OWN agent_id and requires that agent's api_key_hash to equal the
+      // caller's — so a valid key for a DIFFERENT agent looking up someone
+      // else's setup id gets the same empty result as a setup that does not
+      // exist. 404, indistinguishable from not-found, is deliberate: this
+      // route must not confirm or deny that a given setup id belongs to some
+      // other tenant's agent.
+      const setup = await setups.findSetupByAgentApiKeyHash(request.params.setupId, auth.apiKeyHash)
+      if (!setup) return reply.code(404).send({ error: 'Setup not found' })
+
+      const allowances = await loadSetupAllowances(setup.id)
+      return buildConnectorStatusResponse(setup, allowances)
+    },
+  )
 
   app.get<{ Params: { setupId: string } }>(
     '/:setupId',
@@ -955,6 +995,72 @@ async function persistWalletApprovalState(
   input: setups.ApprovalStateInput,
 ): Promise<SetupRow | null> {
   return setups.applyApprovalState(setup, input)
+}
+
+/**
+ * Auth for `GET /:setupId/connector-status` (#1377 part D).
+ *
+ * Distinct from `authenticateInstallStatus` below: that helper accepts a
+ * setup TOKEN as an alternative to an agent key (install status can be
+ * reported before an agent even exists) and folds the tenant check into one
+ * query. This route always has an agent by the time it is called — the
+ * connector only starts polling once /register handed it a key — so it
+ * splits the check in two: first "is this API key valid for ANY agent"
+ * (governs 401 vs proceeding), then the caller does a SEPARATE, setup-scoped
+ * lookup for "is it valid for THIS agent's setup" (governs 404). Collapsing
+ * both into one query, as `findSetupByAgentApiKeyHash` does, cannot
+ * distinguish "no such key" from "wrong tenant" — and this endpoint's
+ * contract requires it to (401 vs 404).
+ *
+ * Statuses allowed mirror `INSTALL_STATUS_AGENT_STATUSES`: `pending_approval`
+ * (the normal pre-approval poll), `active` (the poll that discovers
+ * approval), and `paused` (so a key does not go dark just because the agent
+ * was paused after approval). `revoked` — and any unrecognised future status —
+ * is refused, same fail-closed allow-list `agentAuthMiddleware` uses.
+ */
+async function authenticateConnectorStatusRequest(
+  request: FastifyRequest,
+): Promise<{ agentId: string; apiKeyHash: string } | null> {
+  const apiKey = extractAgentApiKey(request)
+  if (!apiKey) return null
+  const hash = apiKeyHash(apiKey)
+  const agentRow = await findAgentAuthRowByApiKeyHash(hash)
+  if (!agentRow) return null
+  if (!(setups.INSTALL_STATUS_AGENT_STATUSES as readonly string[]).includes(agentRow.status)) {
+    return null
+  }
+  return { agentId: agentRow.id, apiKeyHash: hash }
+}
+
+/**
+ * Poll-tolerant response body: `status` plus the approved budget once (and
+ * only once) the setup is `active`. Sources the four fields from the
+ * `agent_connection_setup_allowances` row(s) the setup itself stores — never
+ * from the agent's api_key_hash/setup token/delegate signing material, none
+ * of which this function ever touches.
+ *
+ * Singular by contract (`{ ... } | null`, not an array): the delegation rail
+ * caps a connect-modal setup at one allowance (#1074), so `allowances[0]` is
+ * the only budget for the setups this endpoint is meant for. A legacy-rail
+ * setup approved with more than one token allowance would have its later
+ * allowances silently unreported here — flagged to the captain rather than
+ * widened, since the response shape was specified as singular.
+ */
+function buildConnectorStatusResponse(setup: SetupRow, allowances: AllowanceRow[]) {
+  const primary = allowances[0]
+  const approvedBudget =
+    setup.status === 'active' && primary
+      ? {
+          token_symbol: primary.token_symbol,
+          token_address: primary.token_address,
+          amount: primary.allowance_amount,
+          reset_period_min: primary.reset_period_min,
+        }
+      : null
+  return {
+    status: effectiveStatus(setup),
+    approved_budget: approvedBudget,
+  }
 }
 
 async function authenticateInstallStatus(

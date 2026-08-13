@@ -20,7 +20,7 @@ import {
 import { loadHavenIdentity } from './sign-context.js'
 
 export const SIGNER_NAME = '@haven_ai/signer'
-export const SIGNER_VERSION = '0.1.23-alpha.1'
+export const SIGNER_VERSION = '0.1.23-alpha.2'
 
 export interface SignerOptions {
   /** Path to a Haven credential JSON file (delegate_key is read from it). */

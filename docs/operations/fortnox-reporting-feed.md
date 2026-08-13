@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/infra/repositories/reporting-feed-syncs.ts
   - packages/frontend/src/app/(authenticated)/reporting/page.tsx
   - packages/frontend/src/hooks/useReporting.ts
-last-verified: "2026-08-13" # #1365: both recovery gaps closed — real skipped status (re-claimable, reason kept) + verification-gated reopen for deleted invoices; status table, Not-found verdict, and schema section rewritten to the shipped behavior
+last-verified: "2026-08-13" # feed live-verified end-to-end on a real user account (entitlement grant -> connect -> x402 purchase -> pushed w/ invoice number -> read-back "Registered"); added the Fortnox first-visit UI-wizard gotcha. Prior same-day: #1365 recovery gaps
 ---
 
 # Fortnox reporting feed — operations runbook
@@ -78,12 +78,21 @@ Three layers, in order of convenience:
    found*, never as a false "registered".
 
 2. **Fortnox's own UI** (production app or the developer-portal sandbox
-   company): *Bokföring → Leverantörsfakturor*. Filter or search for the
+   company): *Meny → Leverantörsfakturor*. Filter or search for the
    supplier (agent merchants appear by name, or as `Merchant 0x1234-abcd`),
    or match the invoice number shown in the Haven dashboard. Open the invoice:
    the *Externt fakturanummer* field carries `HAVEN-<paymentId>` — that string
    is the join key between the two systems. Attachments show the Haven
    payment-evidence PDF (and the merchant receipt when captured).
+
+   **First-visit gotcha (live-hit 2026-08-13):** a company that has never
+   opened the supplier-invoice module in the UI gets Fortnox's one-time
+   onboarding wizard ("Kom igång med leverantörsfakturor") instead of the
+   invoice list. The invoices ARE there — API pushes and the Haven read-back
+   are unaffected — but the list stays hidden until the wizard is clicked
+   through. Every step is skippable (*Hoppa över*); no bank details or
+   registration certificate are needed just to view invoices. Expect real
+   customers to hit this on their first verification walk too.
 
 3. **API, for on-call:** `GET /accounting/reporting/status` (user-scoped)
    returns every sync row with `status`, `external_ref`, `error`, `attempts`.

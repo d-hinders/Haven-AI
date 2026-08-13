@@ -410,15 +410,40 @@ describe('ConnectAgentModal', () => {
       target: { value: 'First Agent' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
-    if (!screen.queryByText('Budget draft')) {
-      fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
-    }
 
-    // The policy step opens with the starter budget already drafted —
-    // visible in the budget card and still removable/editable.
-    expect(screen.getByText('Budget draft')).toBeInTheDocument()
+    // The policy step opens with the starter budget already prefilled in the
+    // amount input — the inputs ARE the draft (#1381, no card below them).
+    expect(screen.getByPlaceholderText('Amount')).toHaveValue('10')
     expect(screen.getAllByText(/USDC/).length).toBeGreaterThan(0)
-    expect(screen.getByText(/10/)).toBeInTheDocument()
+    expect(screen.queryByText('Budget draft')).not.toBeInTheDocument()
+  })
+
+  it('typing a valid amount adds nothing below the input row — no content shift (#1381)', () => {
+    renderModal()
+
+    fireEvent.change(screen.getByLabelText('Agent name'), {
+      target: { value: 'Shift Agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+
+    const amount = screen.getByPlaceholderText('Amount')
+    // Everything below the input row, captured in the empty state.
+    const dialog = amount.closest('[role="dialog"]') ?? document.body
+    const structureBelow = () => {
+      const nodes = Array.from(dialog.querySelectorAll('*'))
+      const start = nodes.indexOf(amount)
+      return nodes.slice(start + 1).map((node) => node.tagName + ':' + (node.getAttribute('class') ?? '')).join('|')
+    }
+    const before = structureBelow()
+
+    fireEvent.change(amount, { target: { value: '25' } })
+
+    // The passport checkbox and the Back/Continue footer keep their exact
+    // structure — no draft card mounts mid-typing.
+    expect(structureBelow()).toBe(before)
+    expect(screen.queryByText('Budget draft')).not.toBeInTheDocument()
+    // Continue still arms on the valid amount alone.
+    expect(screen.getByRole('button', { name: 'Review agent rules' })).toBeEnabled()
   })
 
   it('creates a pending setup and shows a private-key-free setup prompt', async () => {

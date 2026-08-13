@@ -23,7 +23,7 @@ import { normalizeRuntime, runtimeProfile, runtimeVerificationInstruction } from
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.1.23-alpha.1'
+export const CONNECTOR_VERSION = '0.1.23-alpha.2'
 
 export interface ConnectOptions {
   setupToken: string
@@ -251,16 +251,12 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     log('Haven setup on this machine is complete.')
   }
 
-  // #1377 D: stay alive through the approval instead of going dead exactly
-  // while the user acts. Skipped in structured/automation mode
-  // (waitForApproval: false — the --json contract emits promptly) and when
-  // the install itself needs manual completion first.
-  if (options.waitForApproval !== false && !runtimeInstall.errorCode) {
-    await waitForBudgetApproval(api, registration.setup_id, localApiKey, log, options.approvalWait)
-  }
-
-  printNextSteps(runtimeInstall, log)
-
+  // Report the completed runtime state before polling for budget approval.
+  // The dashboard intentionally withholds approval controls until it knows the
+  // local runtime is configured; polling first would wait on controls the
+  // connector itself has not made available yet. This remains best-effort
+  // readiness metadata only: a failed report cannot activate the agent or
+  // change its budget authority.
   try {
     await api.updateInstallStatus(registration.setup_id, localApiKey, {
       runtime: runtimeInstall.runtime,
@@ -283,6 +279,16 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   } catch (err) {
     log(`Could not report install status to Haven: ${err instanceof Error ? err.message : String(err)}`)
   }
+
+  // #1377 D: stay alive through the approval instead of going dead exactly
+  // while the user acts. Skipped in structured/automation mode
+  // (waitForApproval: false — the --json contract emits promptly) and when
+  // the install itself needs manual completion first.
+  if (options.waitForApproval !== false && !runtimeInstall.errorCode) {
+    await waitForBudgetApproval(api, registration.setup_id, localApiKey, log, options.approvalWait)
+  }
+
+  printNextSteps(runtimeInstall, log)
 
   return {
     setupId: registration.setup_id,

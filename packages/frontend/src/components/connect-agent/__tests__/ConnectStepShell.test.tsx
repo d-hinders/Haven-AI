@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
 import { WaitingForConnector } from '../WaitingForConnector'
+import { TerminalSetupState } from '../SetupStates'
 import { FinalizingLocalSetup } from '../SetupStates'
 import { ConnectStepShell } from '../ConnectStepShell'
 
@@ -104,5 +105,25 @@ describe('ConnectStepShell (#1377 C)', () => {
       </ConnectStepShell>,
     )
     expect(getByLabelText('Connection progress').textContent).toBe('WaitingConnectedApproved')
+  })
+})
+
+describe('TerminalSetupState badge (#1377 review finding)', () => {
+  it('shows the explicit badge label, not a word position-guessed from the title', () => {
+    const { getByText } = render(
+      <TerminalSetupState
+        title="Setup prompt expired"
+        badgeLabel="Expired"
+        body="Create a new setup prompt."
+        tone="warning"
+        primaryLabel="Create a new setup"
+        secondaryLabel="Close"
+        onPrimary={() => {}}
+        onSecondary={() => {}}
+      />,
+    )
+    expect(getByText('Expired')).toBeTruthy()
+    // The old derivation rendered the nonsense word "prompt" here.
+    expect(() => getByText('prompt')).toThrow()
   })
 })

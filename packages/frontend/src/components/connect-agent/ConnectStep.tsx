@@ -136,6 +136,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
       {connectView?.kind === 'expired' && (
         <TerminalSetupState
           title="Setup prompt expired"
+          badgeLabel="Expired"
           body="Create a new setup prompt, then paste the fresh prompt into your agent environment."
           tone="warning"
           primaryLabel="Create a new setup"
@@ -148,6 +149,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
       {connectView?.kind === 'cancelled' && (
         <TerminalSetupState
           title="Setup cancelled"
+          badgeLabel="Cancelled"
           body="This setup can no longer connect an agent. Create a new setup prompt when you are ready."
           tone="neutral"
           primaryLabel="Create a new setup"
@@ -160,6 +162,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
       {connectView?.kind === 'failed' && (
         <TerminalSetupState
           title="Setup failed"
+          badgeLabel="Failed"
           body={setupStatus?.failure_reason ?? 'Create a new setup prompt and try again.'}
           tone="danger"
           primaryLabel="Create a new setup"

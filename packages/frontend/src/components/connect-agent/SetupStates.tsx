@@ -26,6 +26,7 @@ export function FinalizingLocalSetup({ loading: _loading }: { loading: boolean }
 /** Terminal state (expired/cancelled/failed) with a restart + close action. */
 export function TerminalSetupState({
   title,
+  badgeLabel,
   body,
   tone,
   primaryLabel,
@@ -34,6 +35,7 @@ export function TerminalSetupState({
   onSecondary,
 }: {
   title: string
+  badgeLabel: string
   body: string
   tone: StatusTone
   primaryLabel: string
@@ -44,7 +46,7 @@ export function TerminalSetupState({
   return (
     <div className="space-y-4 text-center">
       <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-surface-2)]">
-        <StatusBadge tone={tone}>{title.split(' ')[1] ?? 'Setup'}</StatusBadge>
+        <StatusBadge tone={tone}>{badgeLabel}</StatusBadge>
       </div>
       <div>
         <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>

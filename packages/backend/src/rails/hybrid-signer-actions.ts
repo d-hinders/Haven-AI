@@ -9,7 +9,7 @@
  * reach it: agent-scoped (`/agents/:id/account-signers/*`, #888) and
  * account-scoped (`/accounts/hybrid/:address/signers/*`, #1081, so recovery
  * setup does not require creating an agent first). They differ only in how
- * the account is resolved — the authority rules, the ≥2-signer floor, the
+ * the account is resolved — the authority rules, the last-signer guard, the
  * calldata encoding and the signed-op matching are identical, and must stay
  * that way. Two copies of a spend-authority rule is how they drift.
  */
@@ -104,8 +104,6 @@ export function encodeSignerAction(
   owner: { config: { ownerAddress?: Address; passkeys?: Array<{ keyId: string; x: bigint; y: bigint }> } },
 ): { data: Hex } | { error: string } {
   const passkeys = owner.config.passkeys ?? []
-  const signerCount = passkeys.length + (owner.config.ownerAddress ? 1 : 0)
-
   if (body.action === 'add_passkey') {
     const pk = body.passkey
     if (!pk?.key_id || !/^0x[0-9a-fA-F]+$/.test(pk.key_id) || !pk.x || !pk.y) {
@@ -124,19 +122,14 @@ export function encodeSignerAction(
     if (!passkeys.some((k) => k.keyId.toLowerCase() === keyId.toLowerCase())) {
       return { error: 'No such passkey on this account' }
     }
-    if (signerCount - 1 < 2) {
-      // The chain itself only refuses removing the LAST signer (#884
-      // CannotRemoveLastSigner) — do not claim the stricter rule is on-chain.
-      //
-      // This ≥2 refusal is now BRANCH-SPECIFIC, not account-wide (#1153).
-      // `remove_owner`, a few lines below, permits dropping to one signer on
-      // any chain — the owner ruled that a user may move to a single-signer
-      // setup, and that relaxation was scoped to owner removal only. So a
-      // reader here must not infer that ≥2 still holds for the account: it
-      // does not. Whether this branch should match is #1199, an open product
-      // question rather than an oversight.
+    if (passkeys.length === 1 && !owner.config.ownerAddress) {
+      // Mirror the account's CannotRemoveLastSigner guard (#884). A one-signer
+      // setup may be less recoverable, but it remains usable; removing its
+      // final signer would brick the account.
       return {
-        error: 'Removing this would leave fewer than two ways to approve — add a backup first.',
+        error:
+          'Removing this passkey would leave no way to approve anything — it is the only signer. ' +
+          'Add another signer first. The account itself refuses this on-chain.',
       }
     }
     return { data: encodeFunctionData({ abi: HYBRID_SIGNER_ABI, functionName: 'removeKey', args: [keyId] }) }

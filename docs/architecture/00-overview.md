@@ -59,7 +59,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-12" # #1328 mpp_demo retirement — routes/demo-mpp.ts glob removed (file deleted); prior #1330 Hermes stores its hosted-MCP identity in owner-only .env with a config reference; #1326 Hermes runtime profile, #1251 (MPP seam refusal) + #1266 demo merchant x402 settlement selection + same-day dev: #1346 re-verified Connect's runtime-owned activation and read-only post-setup check + #1352 Node floor 24->22 (engines/constant only; no numeric floor claim in this doc); #1330 Hermes identity handoff
+last-verified: "2026-08-14" # #1199: signer-removal recovery change re-verified; delegation authority overview unchanged
 ---
 
 # Haven — Architecture Overview

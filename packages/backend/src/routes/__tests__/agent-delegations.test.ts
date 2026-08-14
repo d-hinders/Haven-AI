@@ -229,14 +229,15 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.json().user_op_hash).toBeTruthy()
     })
 
-    it('refuses removing a passkey that would leave fewer than two signers (the #884 on-chain guard, mirrored)', async () => {
+    it('prepares a two-to-one passkey removal (#1199)', async () => {
       mockDb({ owner: null, passkeys: [PK1, PK2] })
+      mockPrepared()
       const res = await app.inject({
         method: 'POST', url: `/agents/${AGENT_ID}/account-signers/prepare`,
         payload: { action: 'remove_passkey', passkey: { key_id: PK1.key_id } },
       })
-      expect(res.statusCode).toBe(409)
-      expect(res.json().error).toMatch(/fewer than two ways to approve/)
+      expect(res.statusCode).toBe(200)
+      expect(res.json().signature_scheme).toBe('webauthn_userop')
     })
 
     it('allows removal when two signers remain', async () => {

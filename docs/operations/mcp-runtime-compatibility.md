@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-14" # #1332: guidance-surface parity — setup installs the canonical skill via each runtime's documented instruction mechanism (Hermes skills dir, Codex global AGENTS.md managed section); Claude Code unchanged. Prior: #1397 hosted-only quote tools.
+last-verified: "2026-08-14" # #1426 re-verify: the connector celebration line now phrases reset periods in the dashboard voice (per week/per month/in total) — output wording only, the completion-handoff ordering and no-secret boundaries here are untouched. #1332: guidance-surface parity — setup installs the canonical skill via each runtime's documented instruction mechanism (Hermes skills dir, Codex global AGENTS.md managed section); Claude Code unchanged. Prior: #1397 hosted-only quote tools.
 ---
 
 # MCP Runtime Compatibility

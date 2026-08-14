@@ -11,7 +11,7 @@ import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
 import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 
-export type AgentBusyAction = 'pause' | 'resume' | 'revoke' | 'delete' | null
+export type AgentBusyAction = 'pause' | 'resume' | 'revoke' | 'archive' | 'restore' | null
 
 /**
  * State machine + async orchestration for the agents panel (#989).
@@ -32,7 +32,8 @@ export function useAgentPanelState() {
     revokeAgent,
     pauseAgent,
     resumeAgent,
-    deleteAgent,
+    archiveAgent,
+    unarchiveAgent,
     refetch,
   } = useAgents()
   const publicClient = usePublicClient({ chainId })
@@ -58,7 +59,7 @@ export function useAgentPanelState() {
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<AgentBusyAction>(null)
-  const [showRevokedAgents, setShowRevokedAgents] = useState(false)
+  const [showRemovedAgents, setShowRemovedAgents] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   // First-agent hand-off from onboarding: /agents?setup=first auto-opens the
@@ -198,12 +199,15 @@ export function useAgentPanelState() {
   useEffect(() => {
     if (finalizeTimedOut && agents.length > 0) setFinalizeTimedOut(false)
   }, [agents.length, finalizeTimedOut])
+  // #1402: the primary list hides only ARCHIVED agents. Revoked-but-not-
+  // archived rows stay visible with their status chip — a removal that
+  // failed at the filing step is visibly unfinished, which is correct.
   const visibleAgents = useMemo(
-    () => agents.filter((agent) => agent.status !== 'revoked'),
+    () => agents.filter((agent) => !agent.archived_at),
     [agents],
   )
-  const revokedAgents = useMemo(
-    () => agents.filter((agent) => agent.status === 'revoked'),
+  const removedAgents = useMemo(
+    () => agents.filter((agent) => Boolean(agent.archived_at)),
     [agents],
   )
 
@@ -375,14 +379,30 @@ export function useAgentPanelState() {
     }
   }
 
-  async function handleDelete(agent: Agent) {
+  // #1402: removal is an archive (#1401) — the row and its history stay; the
+  // agent moves to Removed. Archive requires status='revoked' server-side.
+  // Rethrows: the only caller is RemoveAgentDialog, which owns the error
+  // display (its "finish removal" retry state), so no toast here.
+  async function handleArchive(agent: Agent) {
     setBusyAgentId(agent.id)
-    setBusyAction('delete')
+    setBusyAction('archive')
     try {
-      await deleteAgent(agent.id)
+      await archiveAgent(agent.id)
+    } finally {
+      setBusyAgentId(null)
+      setBusyAction(null)
+    }
+  }
+
+  // Restores list placement only — the agent stays revoked and cannot spend.
+  async function handleRestore(agent: Agent) {
+    setBusyAgentId(agent.id)
+    setBusyAction('restore')
+    try {
+      await unarchiveAgent(agent.id)
     } catch (err) {
-      console.error('Delete failed:', err)
-      setToastMessage(err instanceof Error ? err.message : 'Delete failed')
+      console.error('Restore failed:', err)
+      setToastMessage(err instanceof Error ? err.message : 'The agent could not be restored to the list')
     } finally {
       setBusyAgentId(null)
       setBusyAction(null)
@@ -427,7 +447,7 @@ export function useAgentPanelState() {
     agents,
     loading,
     visibleAgents,
-    revokedAgents,
+    removedAgents,
     agentUsesActiveSafe,
     // On-chain allowance data
     onChainData,
@@ -456,10 +476,15 @@ export function useAgentPanelState() {
     handlePause,
     handleResume,
     handleRevoke,
-    handleDelete,
+    handleArchive,
+    handleRestore,
+    // #1402: raw credential revoke (POST /agents/:id/revoke, throws on
+    // failure) for RemoveAgentDialog's step 2 — deliberately NOT handleRevoke,
+    // which is the legacy AllowanceModule on-chain teardown.
+    revokeAgentCredential: revokeAgent,
     // Revoked disclosure + toast
-    showRevokedAgents,
-    setShowRevokedAgents,
+    showRemovedAgents,
+    setShowRemovedAgents,
     toastMessage,
   }
 }

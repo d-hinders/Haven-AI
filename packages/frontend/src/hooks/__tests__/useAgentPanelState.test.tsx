@@ -85,7 +85,8 @@ describe('useAgentPanelState', () => {
       revokeAgent: vi.fn(),
       pauseAgent: vi.fn(),
       resumeAgent: vi.fn(),
-      deleteAgent: vi.fn(),
+      archiveAgent: vi.fn(),
+      unarchiveAgent: vi.fn(),
       refetch: vi.fn().mockResolvedValue([]),
     })
     mockUseSafeDetails.mockReturnValue({ details: null })
@@ -191,18 +192,26 @@ describe('useAgentPanelState', () => {
     })
   })
 
-  it('splits visible and revoked agents', () => {
+  // #1402: the primary list hides only ARCHIVED agents. A revoked-but-not-
+  // archived agent stays visible (with its status chip) so an interrupted
+  // remove is never invisible; Removed is keyed off archived_at alone.
+  it('splits the list on archived_at, not status', () => {
     mockUseAgents.mockReturnValue({
-      agents: [baseAgent(), baseAgent({ id: 'agent-2', status: 'revoked' })],
+      agents: [
+        baseAgent(),
+        baseAgent({ id: 'agent-2', status: 'revoked' }),
+        baseAgent({ id: 'agent-3', status: 'revoked', archived_at: '2026-06-01T00:00:00Z' }),
+      ],
       loading: false,
       revokeAgent: vi.fn(),
       pauseAgent: vi.fn(),
       resumeAgent: vi.fn(),
-      deleteAgent: vi.fn(),
+      archiveAgent: vi.fn(),
+      unarchiveAgent: vi.fn(),
       refetch: vi.fn().mockResolvedValue([]),
     })
     const { result } = renderHook(() => useAgentPanelState())
-    expect(result.current.visibleAgents.map((a) => a.id)).toEqual(['agent-1'])
-    expect(result.current.revokedAgents.map((a) => a.id)).toEqual(['agent-2'])
+    expect(result.current.visibleAgents.map((a) => a.id)).toEqual(['agent-1', 'agent-2'])
+    expect(result.current.removedAgents.map((a) => a.id)).toEqual(['agent-3'])
   })
 })

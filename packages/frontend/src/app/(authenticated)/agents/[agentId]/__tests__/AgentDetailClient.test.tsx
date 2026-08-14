@@ -30,6 +30,11 @@ vi.mock('wagmi', () => ({
   usePublicClient: (...args: unknown[]) => mockUsePublicClient(...args),
 }))
 
+// #1402: the component navigates to /agents after a completed remove.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+}))
+
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }))

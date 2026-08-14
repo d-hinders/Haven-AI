@@ -82,6 +82,10 @@ interface RevokePrepare {
   user_operation: unknown
 }
 
+interface RevokeAllPrepare extends RevokePrepare {
+  delegation_hashes: string[]
+}
+
 interface TypedDataPayload {
   domain: Record<string, unknown>
   types: Record<string, unknown>
@@ -238,12 +242,58 @@ export function useDelegationBudget(agentId: string, chainId: number) {
     [agentId, reload, signer, signers, signingPath],
   )
 
+  // #1402/#1400: ONE signature kills every pending/active budget. Mirrors
+  // `revoke` exactly; the 409 'Nothing to revoke' is SUCCESS here — it means
+  // step 1 of the remove flow is already satisfied (never granted, or a
+  // prior partial remove already killed the budgets), so a retry can finish
+  // the filing steps.
+  const revokeAll = useCallback(async (): Promise<BudgetResult> => {
+    setBusy(true)
+    try {
+      let prep: RevokeAllPrepare
+      try {
+        prep = await api.post<RevokeAllPrepare>(`/agents/${agentId}/delegations/revoke-all`, {
+          signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
+        })
+      } catch (err) {
+        if (err instanceof Error && /nothing to revoke/i.test(err.message)) {
+          return { ok: true }
+        }
+        throw err
+      }
+      let signature: string
+      if (prep.signature_scheme === 'webauthn_userop') {
+        if (!signers) return { ok: false, reason: 'failed' }
+        const { signUserOpWithPasskey } = await import('@/lib/delegationPasskeySigner')
+        signature = await signUserOpWithPasskey(
+          signers,
+          prep.user_operation as Record<string, unknown>,
+        )
+      } else {
+        if (!signer || !prep.signing_payload) return { ok: false, reason: 'failed' }
+        signature = await signTyped(signer, prep.signing_payload)
+      }
+      await api.post(`/agents/${agentId}/delegations/revoke-all/submit`, {
+        signature,
+        user_operation: prep.user_operation,
+        delegation_hashes: prep.delegation_hashes,
+      })
+      await reload()
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, reason: cancelled(err) ? 'cancelled' : 'failed' }
+    } finally {
+      setBusy(false)
+    }
+  }, [agentId, reload, signer, signers, signingPath])
+
   // Ready: some signer for this account is reachable from THIS device — a
   // passkey enrolled here, or the connected owner wallet.
   return {
     budgets,
     grant,
     revoke,
+    revokeAll,
     busy,
     ready: signingPath !== null,
     reload,

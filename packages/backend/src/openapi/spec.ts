@@ -133,6 +133,7 @@ const agentPaymentStatus = {
     token: { type: 'string' },
     resource_url: { type: ['string', 'null'], format: 'uri' },
     merchant_address: { anyOf: [address, { type: 'null' }] },
+    payer_address: { anyOf: [address, { type: 'null' }], description: 'Delegate EOA captured on a payment intent.' },
     tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
     expires_at: isoDateTime,
     chain_id: { type: 'integer' },

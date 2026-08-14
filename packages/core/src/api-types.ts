@@ -1324,6 +1324,8 @@ export type components = {
             /** Format: uri */
             resource_url: string | null;
             merchant_address: string | null;
+            /** @description Delegate EOA captured on a payment intent. */
+            payer_address?: string | null;
             tx_hash: string | null;
             /** Format: date-time */
             expires_at: string;

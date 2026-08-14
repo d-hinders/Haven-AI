@@ -77,6 +77,14 @@ Keep this table in sync with that file.
 
 ## Hosted-runtime connector profiles
 
+For the hosted fast-settle path, the local signer may produce either the
+supported legacy x402 v1 envelope or the current v2 `{ x402Version, accepted,
+payload }` envelope. Hosted MCP validates either recognizable form against the
+persisted intent before it relays funding. A malformed, unsupported, expired,
+or mismatched header returns `INVALID_PAYMENT_HEADER` with no funding relay;
+recreate it through the local signer from the same `payment_id`. This preflight
+does not replace merchant or facilitator verification.
+
 The default Connect topology writes a keyless hosted Haven MCP entry plus a
 separate local `haven-signer` stdio entry; it is distinct from the local-stdio
 runtime described above. Hermes Agent is a supported hosted-runtime profile:

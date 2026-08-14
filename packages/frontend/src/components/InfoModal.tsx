@@ -1,10 +1,9 @@
 'use client'
 
-import { ChevronLeft, ChevronRight, MoveDown, MoveRight, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MoveDown, MoveRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { useState, useEffect, useCallback } from 'react'
+import { Modal } from '@/components/ui/Modal'
 
 // ── Shared visual components ──────────────────────────────────────
 
@@ -127,7 +126,6 @@ interface Props {
 
 export default function InfoModal({ open, onClose, pages }: Props) {
   const [page, setPage] = useState(0)
-  const panelRef = useRef<HTMLDivElement>(null)
 
   const handleClose = useCallback(() => {
     setPage(0)
@@ -139,9 +137,6 @@ export default function InfoModal({ open, onClose, pages }: Props) {
     if (open) setPage(0)
   }, [open])
 
-  useEscapeToClose(open, handleClose)
-  useFocusTrap(panelRef, open)
-
   if (!open || pages.length === 0) return null
 
   const current = pages[page]
@@ -149,36 +144,24 @@ export default function InfoModal({ open, onClose, pages }: Props) {
   const isLast = page === pages.length - 1
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 v2-modal-backdrop">
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="info-modal-title"
-        className="bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] flex flex-col"
-      >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-[var(--v2-border)] flex-shrink-0">
-          <div className="min-w-0">
-            <h2 id="info-modal-title" className="text-base font-semibold text-[var(--v2-ink)] leading-tight">{current.title}</h2>
-            <p className="text-sm text-[var(--v2-ink-3)] mt-1 leading-snug">{current.subtitle}</p>
-          </div>
-          <button
-            onClick={handleClose}
-            aria-label="Close"
-            className="p-1.5 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-          >
-            <Icon icon={X} className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Page dots */}
-        {pages.length > 1 && (
-          <div className="flex items-center justify-center gap-1.5 px-6 py-3 border-b border-[var(--v2-border)] flex-shrink-0">
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title={current.title}
+      subtitle={current.subtitle}
+      showCloseButton
+      width="lg"
+      closeOnBackdrop={false}
+      headerAccessory={
+        pages.length > 1 ? (
+          <div className="flex items-center justify-center gap-1.5">
             {pages.map((_, i) => (
               <button
                 key={i}
+                type="button"
                 onClick={() => setPage(i)}
+                aria-label={`Go to page ${i + 1}: ${pages[i].title}`}
+                aria-current={i === page ? 'step' : undefined}
                 className={`h-1.5 rounded-full transition-all duration-200 ${
                   i === page
                     ? 'w-6 bg-[var(--v2-brand)]'
@@ -187,17 +170,14 @@ export default function InfoModal({ open, onClose, pages }: Props) {
               />
             ))}
           </div>
-        )}
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          {current.content}
-        </div>
-
-        {/* Navigation */}
-        {pages.length > 1 && (
-          <div className="flex items-center justify-between px-6 py-4 border-t border-[var(--v2-border)] flex-shrink-0">
+        ) : undefined
+      }
+      bodyClassName="px-6 py-5"
+      footer={
+        pages.length > 1 ? (
+          <div className="flex w-full items-center justify-between">
             <button
+              type="button"
               onClick={() => setPage((p) => p - 1)}
               disabled={isFirst}
               className="text-sm text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] disabled:opacity-0 disabled:cursor-default transition-colors flex items-center gap-1"
@@ -212,6 +192,7 @@ export default function InfoModal({ open, onClose, pages }: Props) {
 
             {isLast ? (
               <button
+                type="button"
                 onClick={handleClose}
                 className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors"
               >
@@ -219,6 +200,7 @@ export default function InfoModal({ open, onClose, pages }: Props) {
               </button>
             ) : (
               <button
+                type="button"
                 onClick={() => setPage((p) => p + 1)}
                 className="text-sm text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] transition-colors flex items-center gap-1"
               >
@@ -227,8 +209,10 @@ export default function InfoModal({ open, onClose, pages }: Props) {
               </button>
             )}
           </div>
-        )}
-      </div>
-    </div>
+        ) : undefined
+      }
+    >
+      {current.content}
+    </Modal>
   )
 }

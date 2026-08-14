@@ -620,6 +620,29 @@ export const SCENARIOS = {
       await shoot(dialog, 'manual-credential-warning')
     },
   },
+  'modal-migrations': {
+    description: 'InfoModal and ComingSoonModal rendered from the design-system reference',
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/design-system`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Open paged explainer' }).click()
+      const infoDialog = page.getByRole('dialog')
+      await infoDialog.getByRole('heading', { name: 'Modal patterns' }).waitFor({ timeout: 15_000 })
+      await infoDialog.getByRole('button', { name: 'Next' }).click()
+      await infoDialog.getByRole('heading', { name: 'Paged explainers' }).waitFor({ timeout: 15_000 })
+      await shoot(infoDialog, 'info-modal')
+      await infoDialog.getByRole('button', { name: 'Close' }).click()
+
+      await page.getByRole('button', { name: 'Open compact dialog' }).click()
+      const comingSoonDialog = page.getByRole('dialog')
+      await comingSoonDialog.getByRole('heading', { name: 'Add funds is coming soon' }).waitFor({ timeout: 15_000 })
+      await shoot(comingSoonDialog, 'coming-soon-modal')
+    },
+  },
 }
 
 function resolveScenarios(names) {

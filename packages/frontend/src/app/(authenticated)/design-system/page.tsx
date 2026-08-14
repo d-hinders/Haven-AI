@@ -24,6 +24,8 @@ import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import ComingSoonModal from '@/components/ComingSoonModal'
+import InfoModal, { type InfoPage } from '@/components/InfoModal'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -47,6 +49,27 @@ import {
 } from '@/components/haven'
 
 const sampleAddress = '0x8f4F0f6d712C5c5C9Bb02F4a5B5c0D7F462A6f4C'
+
+const modalInfoPages: InfoPage[] = [
+  {
+    title: 'Modal patterns',
+    subtitle: 'Consistent dialog behavior',
+    content: (
+      <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
+        Dialogs keep their title and actions available while long content scrolls within the panel.
+      </p>
+    ),
+  },
+  {
+    title: 'Paged explainers',
+    subtitle: 'Guide one idea at a time',
+    content: (
+      <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
+        Use the page controls for short, optional explainers. They stay accessible by keyboard and reset when the dialog closes.
+      </p>
+    ),
+  },
+]
 
 function Section({
   title,
@@ -95,6 +118,8 @@ function DotIcon() {
 
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
+  const [infoModalOpen, setInfoModalOpen] = useState(false)
+  const [comingSoonOpen, setComingSoonOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [checkboxOn, setCheckboxOn] = useState(true)
@@ -1443,6 +1468,14 @@ export default function DesignSystemPage() {
               </p>
             </div>
           </div>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Button variant="ghost" size="sm" onClick={() => setInfoModalOpen(true)}>
+              Open paged explainer
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setComingSoonOpen(true)}>
+              Open compact dialog
+            </Button>
+          </div>
         </Card>
       </Section>
 
@@ -1472,6 +1505,44 @@ export default function DesignSystemPage() {
             <code className="text-xs">text-[11px]</code>{/* design-lint-disable-line */} inside a modal, it&apos;s probably a missed
             migration. Bump to <code className="text-xs">text-xs</code> or compose with the helpers.
           </p>
+        </Card>
+      </Section>
+
+      <Section
+        title="Modal"
+        description="Use the shared Modal for every dialog shell. It keeps focus, Escape, focus return, backdrop treatment, and short-viewport scrolling consistent while callers compose the content."
+      >
+        <Card hover={false} className="p-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Widths</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Choose <code className="rounded bg-[var(--v2-surface)] px-1">sm</code>,{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">md</code>,{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">lg</code>, or{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">xl</code> for the content, not the page.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Header</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Dialog panels are white with a compact <code className="rounded bg-[var(--v2-surface)] px-1">text-sm</code>{' '}
+                title. Add a subtitle, close button, or header accessory when the flow needs them.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Long content</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                The panel caps at the viewport and only its body scrolls, keeping the header and actions available.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Close behavior</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Backdrop, Escape, and the optional close button dismiss ordinary dialogs. Disable only the affordances an active execution step must protect.
+              </p>
+            </div>
+          </div>
         </Card>
       </Section>
 
@@ -1518,6 +1589,10 @@ export default function DesignSystemPage() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         title="Review agent rules"
+        subtitle="Confirm the budget before connecting this agent."
+        showCloseButton
+        width="lg"
+        headerAccessory={<StepProgress totalSteps={4} currentStep={2} />}
         footer={
           <>
             <Button variant="ghost" onClick={() => setModalOpen(false)}>
@@ -1530,6 +1605,17 @@ export default function DesignSystemPage() {
         Confirm the agent budget before connecting your agent. Requests above the remaining
         budget will wait for approval.
       </Modal>
+
+      <InfoModal
+        open={infoModalOpen}
+        onClose={() => setInfoModalOpen(false)}
+        pages={modalInfoPages}
+      />
+
+      <ComingSoonModal
+        open={comingSoonOpen}
+        onClose={() => setComingSoonOpen(false)}
+      />
 
       <SidePanel
         open={panelOpen}

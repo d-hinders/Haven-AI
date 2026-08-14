@@ -724,10 +724,11 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
   })
 
   const HASH2 = `0x${'cd'.repeat(32)}`
-  const storedJson = JSON.stringify({
+  const storedJsonWithSalt = (salt: string) => JSON.stringify({
     delegate: DELEGATE_ACCOUNT, delegator: TREASURY,
-    authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '1', signature: '0x' + 'cd'.repeat(65),
+    authority: `0x${'0'.repeat(64)}`, caveats: [], salt, signature: '0x' + 'cd'.repeat(65),
   })
+  const storedJson = storedJsonWithSalt('1')
 
   function mockBatchDb(opts: {
     agent?: Record<string, unknown> | null
@@ -750,8 +751,8 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
       if (/status IN \('pending', 'active'\)/.test(s)) {
         return Promise.resolve({
           rows: opts.targets ?? [
-            { delegation_hash: HASH, delegation_json: storedJson, status: 'active' },
-            { delegation_hash: HASH2, delegation_json: storedJson, status: 'pending' },
+            { delegation_hash: HASH, delegation_json: storedJsonWithSalt('1'), status: 'active' },
+            { delegation_hash: HASH2, delegation_json: storedJsonWithSalt('2'), status: 'pending' },
           ],
         })
       }
@@ -801,9 +802,14 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
     expect(body.signature_scheme).toBe('eip712_userop')
     expect(body.delegation_hashes).toEqual([HASH, HASH2])
     expect(body.signing_payload.primaryType).toBe('PackedUserOperation')
-    // ONE prepare with BOTH disableDelegation calls in it:
+    // ONE prepare with BOTH disableDelegation calls in it — and they are the
+    // two DISTINCT delegations (different salts → different calldata), not a
+    // duplicate of one; both target the pinned DelegationManager.
     expect(prepareCalls).toHaveBeenCalledTimes(1)
-    expect(prepareCalls.mock.calls[0][0]).toHaveLength(2)
+    const calls = prepareCalls.mock.calls[0][0]
+    expect(calls).toHaveLength(2)
+    expect(calls[0].data).not.toBe(calls[1].data)
+    expect(calls[0].to).toBe(calls[1].to)
     // Custody rule (#824 §3): the signed delegation JSON never leaves the
     // backend. HASH2 legitimately shows up in delegation_hashes (64 cd:s) —
     // the needle is the stored delegation SIGNATURE (130 cd:s), so probe for

@@ -6,9 +6,10 @@ import type {
   ManualCredential,
 } from '@/hooks/useAgentConnectionSetup'
 import type { AwaitingConnectionStage } from '@/hooks/useAgentConnectionSetupStatus'
+import { ChevronRight } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
-import { StatusBadge } from '../ui/StatusBadge'
+import { Icon } from '../ui/Icon'
 import { CopyBlock } from './CopyBlock'
 import { InlineErrorNote } from './SetupNotices'
 import { formatAbsoluteDate } from './setup-copy'
@@ -56,29 +57,23 @@ export function WaitingForConnector({
 }) {
   return (
     <>
+      {/* #1391: no status badge here. The shell ticker (Waiting → Connected →
+          Approved) already says where you are, and saying it twice on one
+          screen made neither instance authoritative. Status is the ticker's
+          job; this block's job is what to DO. */}
       <div className="rounded-[10px] border border-[var(--v2-brand)]/15 bg-[var(--v2-brand-soft)] p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Connect your agent</h3>
-            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              Paste this prompt into the agent environment. It includes your approval for the exact local setup actions, creates the key there, and sends Haven only the public signing address.
-            </p>
-            <p className="mt-2 text-xs font-medium leading-relaxed text-[var(--v2-ink)]">
-              Haven advances this screen automatically once the agent connects — no refresh, nothing else to click here.
-            </p>
-            {runtime === 'codex-desktop' && (
-              <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Codex Desktop may ask you to approve running the setup command. That is expected.
-              </p>
-            )}
-          </div>
-          {/* #1377 C: static — polling must never swap the label (content shift).
-              The quiet pulse dot is the liveness cue, inside the already-sized badge. */}
-          <StatusBadge tone="warning">
-            <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current motion-safe:animate-pulse" aria-hidden />
-            Waiting
-          </StatusBadge>
-        </div>
+        <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Connect your agent</h3>
+        <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+          Paste this prompt into the agent environment. It includes your approval for the exact local setup actions, creates the key there, and sends Haven only the public signing address.
+        </p>
+        <p className="mt-2 text-xs font-medium leading-relaxed text-[var(--v2-ink)]">
+          Haven advances this screen automatically once the agent connects — no refresh, nothing else to click here.
+        </p>
+        {runtime === 'codex-desktop' && (
+          <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            Codex Desktop may ask you to approve running the setup command. That is expected.
+          </p>
+        )}
       </div>
 
       {/* #1399: this slot ALWAYS says something. Reserving it for a recovery
@@ -92,7 +87,18 @@ export function WaitingForConnector({
           deliberately, because the reviews disagreed on whether it wraps to
           two lines or three and jsdom cannot settle it — sizing for the worse
           case costs a few px of slack and removes the guess. Mobile stacks the
-          two touch-sized recovery actions. */}
+          two touch-sized recovery actions.
+
+          #1391 revisited this with real screenshots: on desktop the floor is
+          ~24px taller than the single line usually sitting in it, which reads
+          as slack. It STAYS, deliberately. The slow string is ~87 characters
+          against ~86 characters per line at this width — right on the wrap
+          boundary, which is why two reviews disagreed about it and neither
+          could settle it. A floor sized to one line would hold until the
+          copy, the font, or the viewport moved by a hair, and then the
+          starting → slow transition would jump. A few px of air is the price
+          of a transition that provably never moves; that is the trade, not an
+          oversight. */}
       <div className="min-h-16 sm:min-h-11" aria-live="polite">
         {connectionStage !== 'recovery' && (
           <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
@@ -129,85 +135,111 @@ export function WaitingForConnector({
         value={setup.setup_prompt}
         copied={copied === 'prompt'}
         onCopy={() => onCopy('prompt', setup.setup_prompt)}
+        primary
       />
 
-      <details className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3 text-xs">
-        <summary className="cursor-pointer text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
-          Command fallback
+      {/* #1391: ONE recessive disclosure, not two full-width cards. Both of
+          these are for paths most users never take — and one of them hands out
+          a private signing key — so they should not carry the same weight as
+          the prompt above. The manual path keeps its own nested disclosure:
+          the dangerous route stays one click deeper than the harmless one.
+
+          Design review: the first cut gave BOTH disclosures the Card recipe
+          (rounded + border + bg-white + p-3), so nesting them stacked three
+          identically-styled white boxes — a Card inside a Card inside a Card,
+          which is the surface-hierarchy rule's "no nested filled cards" in its
+          hand-rolled form (design-lint's structural rules only catch the
+          `Card` primitive, so nothing flagged it). This flow already has a
+          lighter convention for exactly this — chevron summary, left rule for
+          the body, no box at all (ConnectionVerificationFooter,
+          HostedConnectCard) — so use it. Depth now reads from indentation
+          instead of from stacked surfaces, and the only card left inside is
+          the CopyBlock, which is genuinely one. */}
+      <details className="group text-xs">
+        <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+          <Icon
+            icon={ChevronRight}
+            className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+          />
+          Having trouble connecting?
         </summary>
-        <div className="mt-3">
+        <div className="mt-3 space-y-3 border-l border-[var(--v2-border)] pl-3">
           <CopyBlock
             label="Local command"
             value={setup.connector_command}
             copied={copied === 'command'}
             onCopy={() => onCopy('command', setup.connector_command)}
           />
-        </div>
-      </details>
 
-      <details className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3 text-xs">
-        <summary className="cursor-pointer text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
-          Manual credential fallback
-        </summary>
-        <div className="mt-3 space-y-3">
-          <p className="leading-relaxed text-[var(--v2-ink-2)]">
-            Use this only if the agent cannot run the setup command or store the local connector files. Haven will still receive only the public signing address and API key hash.
-          </p>
-          {!manualPathRevealed && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onManualPathRevealedChange(true)}
-              className="w-full"
-            >
-              I really can't run the connector — show the manual path
-            </Button>
-          )}
-          {manualPathRevealed && (<>
-          <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
-            <p className="font-semibold text-[var(--v2-ink)]">Before creating a manual credential</p>
-            <ul className="mt-2 list-disc space-y-1 pl-4 leading-relaxed text-[var(--v2-ink-2)]">
-              <li>Use it only in a trusted agent workspace.</li>
-              <li>The private signing key lets the agent sign payments within the approved agent budget.</li>
-              <li>The API key identifies the agent but cannot spend alone.</li>
-              <li>If it may have leaked, pause or revoke the agent in Haven.</li>
-              <li>Do not commit it, upload it, or paste it into shared logs.</li>
-            </ul>
-          </div>
-          <Checkbox
-            checked={manualFallbackConfirmed}
-            onChange={(event) => onManualFallbackConfirmedChange(event.target.checked)}
-            className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 text-[var(--v2-ink-2)]"
-            label="I understand this fallback shows a one-time private signing key and should only be pasted into a trusted agent workspace."
-          />
-          {manualError && <InlineErrorNote>{manualError}</InlineErrorNote>}
-          {!manualCredential && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onCreateManualCredential}
-              disabled={!manualFallbackConfirmed || manualCreating}
-              className="w-full"
-            >
-              {manualCreating ? 'Creating manual credential...' : 'Create manual credential'}
-            </Button>
-          )}
-          {manualCredential && (
-            <div className="space-y-3">
-              <CopyBlock
-                label="Manual credential prompt"
-                value={manualCredential.prompt}
-                copied={copied === 'manual'}
-                onCopy={() => onCopy('manual', manualCredential.prompt)}
+          <details className="group/manual text-xs">
+            <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+              <Icon
+                icon={ChevronRight}
+                className="h-3 w-3 shrink-0 transition-transform group-open/manual:rotate-90"
               />
-              {!manualCredentialAcknowledged && (
-                <Button onClick={onContinueAfterManualCredential} className="w-full">
-                  Continue to wallet approval
+              Manual credential fallback
+            </summary>
+            <div className="mt-3 space-y-3 border-l border-[var(--v2-border)] pl-3">
+              <p className="leading-relaxed text-[var(--v2-ink-2)]">
+                Use this only if the agent cannot run the setup command or store the local connector files. Haven will still receive only the public signing address and API key hash.
+              </p>
+              {!manualPathRevealed && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onManualPathRevealedChange(true)}
+                  className="w-full"
+                >
+                  I really can't run the connector — show the manual path
                 </Button>
               )}
+              {manualPathRevealed && (<>
+              <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
+                <p className="font-semibold text-[var(--v2-ink)]">Before creating a manual credential</p>
+                <ul className="mt-2 list-disc space-y-1 pl-4 leading-relaxed text-[var(--v2-ink-2)]">
+                  <li>Use it only in a trusted agent workspace.</li>
+                  <li>The private signing key lets the agent sign payments within the approved agent budget.</li>
+                  <li>The API key identifies the agent but cannot spend alone.</li>
+                  <li>If it may have leaked, pause or revoke the agent in Haven.</li>
+                  <li>Do not commit it, upload it, or paste it into shared logs.</li>
+                </ul>
+              </div>
+              <Checkbox
+                checked={manualFallbackConfirmed}
+                onChange={(event) => onManualFallbackConfirmedChange(event.target.checked)}
+                className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 text-[var(--v2-ink-2)]"
+                label="I understand this fallback shows a one-time private signing key and should only be pasted into a trusted agent workspace."
+              />
+              {manualError && <InlineErrorNote>{manualError}</InlineErrorNote>}
+              {!manualCredential && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onCreateManualCredential}
+                  disabled={!manualFallbackConfirmed || manualCreating}
+                  className="w-full"
+                >
+                  {manualCreating ? 'Creating manual credential...' : 'Create manual credential'}
+                </Button>
+              )}
+              {manualCredential && (
+                <div className="space-y-3">
+                  <CopyBlock
+                    label="Manual credential prompt"
+                    value={manualCredential.prompt}
+                    copied={copied === 'manual'}
+                    onCopy={() => onCopy('manual', manualCredential.prompt)}
+                  />
+                  {!manualCredentialAcknowledged && (
+                    <Button onClick={onContinueAfterManualCredential} className="w-full">
+                      Continue to wallet approval
+                    </Button>
+                  )}
+                </div>
+              )}
+              </>)}
             </div>
-          )}
-          </>)}
+          </details>
         </div>
       </details>
 
@@ -218,11 +250,31 @@ export function WaitingForConnector({
         {error ? `Status check failed: ${error}` : 'Haven keeps checking in the background.'}
       </p>
 
-      <div className="flex gap-3">
-        <Button variant="ghost" onClick={onCancel} className="flex-1">
-          Cancel setup
-        </Button>
-      </div>
+      {/* #1391: this screen offers EXACTLY ONE cancel-the-setup action at any
+          moment. In the recovery stage the warning block above owns it
+          ("Cancel this setup"), where it is both visible and warranted; here
+          it is a small ghost button — centered, not full-width — because an
+          exit should be findable without competing with the action that moves
+          the user forward. (Called "a quiet link" in an earlier draft of this
+          comment; it is not link-styled and never was.) It stays a
+          <button>: demoting it visually must not demote it semantically, and
+          the stage-conditional render below is pinned by a test, since a
+          missing exit is worse than a loud one.
+
+          Scope, since #1415 gave the modal chrome its own X: that X is
+          handleClose — dismiss the dialog, leave the setup alive server-side
+          to be resumed. This is handleCancelSetup — POST /cancel, the setup is
+          over. Two exits, two outcomes; the "exactly once" rule is about the
+          destructive one. Whether the difference is legible to a user from
+          two unlabelled-vs-labelled affordances is a real question, and it
+          belongs to the modal-chrome track (#1406), not here. */}
+      {connectionStage !== 'recovery' && (
+        <div className="flex justify-center">
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            Cancel setup
+          </Button>
+        </div>
+      )}
     </>
   )
 }

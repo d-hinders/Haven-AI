@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-08-12" # #1328: POST /machine-payments/authorize (mpp_demo) retired to an unconditional 410; prior #1319: GET /machine-payments/allowances gained an additive optional remaining_is_from_chain (delegation-rail onchain rows only) — provenance for #1145's fallback, reporting only, no authority change + same-day dev: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected) and #1350 (GET /catalog now documents additive read-only `search` plus case-insensitive `category`; generated API types must move with the spec). Prior #1319: GET /machine-payments/allowances gained an additive optional remaining_is_from_chain (delegation-rail onchain rows only) — provenance for #1145's fallback, reporting only, no authority change
+last-verified: "2026-08-14" # #1199: signer-removal recovery change re-verified; no API/OpenAPI contract changed
 ---
 
 # Haven Agent API OpenAPI Contract

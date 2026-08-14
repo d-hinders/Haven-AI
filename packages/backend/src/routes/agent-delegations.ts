@@ -138,9 +138,9 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   // Enroll a backup passkey/EOA, or remove a passkey — as ACCOUNT ops
   // (addKey / removeKey / transferOwnership) prepared here and signed by an
   // EXISTING signer. Haven prepares, never signs (#824 invariant 12). The
-  // ≥2-signers rule mirrors the chain's CannotRemoveLastSigner guard (#884
-  // finding: a pure-passkey Hybrid refuses to drop below two keys) so the
-  // user gets a clean 409 instead of an opaque revert.
+  // The shared guard mirrors only the chain's CannotRemoveLastSigner rule
+  // (#884), so an attempted final-signer removal gets a clear 409 instead of
+  // an opaque revert. An informed two-to-one transition is permitted (#1199).
   app.post<{ Params: { id: string }; Body: SignerActionBody }>(
     '/:id/account-signers/prepare',
     async (request, reply) => {

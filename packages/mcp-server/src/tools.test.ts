@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  AgentPaymentPhase,
   HavenApiError,
   HavenClient,
   MerchantTimeoutError,
@@ -10,6 +11,7 @@ import {
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
+const HEADER_SIGNING_KEY = '0x' + '12'.repeat(32)
 const X402_EXPECTED_AUTH = {
   version: 1 as const,
   message: 'Haven x402 expected context v1\n{}',
@@ -82,7 +84,11 @@ function stubFetch(routes: Record<string, RouteDefinition>) {
     }
     const status = route?.status ?? 200
     const responseHeaders = new Headers(route?.responseHeaders ?? {})
-    const bodySnapshot = route?.body
+    const bodySnapshot = route?.body ?? (
+      method === 'GET' && /^\/machine-payments\/[^/]+\/status$/.test(path)
+        ? x402PreflightStatus()
+        : undefined
+    )
     const response = {
       ok: status >= 200 && status < 300,
       status,
@@ -290,10 +296,67 @@ const PAYMENT_REQUIRED = {
       maxAmountRequired: '1500000',
       // Base USDC — selectStandardPaymentOption only accepts this asset.
       asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-      payTo: '0xMerchant',
+      payTo: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
       maxTimeoutSeconds: 60,
+      extra: { name: 'USD Coin', version: '2' },
     },
   ],
+}
+
+const headerSigner = new HavenClient({
+  apiKey: 'sk_agent_test',
+  delegateKey: HEADER_SIGNING_KEY,
+  baseUrl: 'http://haven.test',
+})
+let VALID_PAYMENT_HEADER = ''
+let VALID_PAYMENT_HEADER_V2 = ''
+
+beforeAll(async () => {
+  VALID_PAYMENT_HEADER = await (headerSigner as unknown as {
+    createStandardX402Header(
+      paymentRequired: typeof PAYMENT_REQUIRED,
+      option: (typeof PAYMENT_REQUIRED.accepts)[number],
+    ): Promise<string>
+  }).createStandardX402Header(PAYMENT_REQUIRED, PAYMENT_REQUIRED.accepts[0])
+  VALID_PAYMENT_HEADER_V2 = await (headerSigner as unknown as {
+    createStandardX402Header(
+      paymentRequired: typeof PAYMENT_REQUIRED,
+      option: (typeof PAYMENT_REQUIRED.accepts)[number],
+    ): Promise<string>
+  }).createStandardX402Header({ ...PAYMENT_REQUIRED, x402Version: 2 }, PAYMENT_REQUIRED.accepts[0])
+})
+
+function x402PreflightStatus(overrides: Record<string, unknown> = {}) {
+  return {
+    payment_id: 'pay_x402',
+    kind: 'payment_intent',
+    rail: 'x402',
+    status: 'pending_signature',
+    phase: 'awaiting_agent_signature',
+    next_action: 'sign_and_submit',
+    amount: '1.50',
+    token: 'USDC',
+    resource_url: PAYMENT_REQUIRED.resource.url,
+    merchant_address: PAYMENT_REQUIRED.accepts[0].payTo,
+    payer_address: headerSigner.delegateAddress,
+    tx_hash: null,
+    expires_at: '2099-01-01T00:00:00.000Z',
+    chain_id: 8453,
+    message: 'Ready to sign.',
+    amount_atomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+    asset: PAYMENT_REQUIRED.accepts[0].asset,
+    network: PAYMENT_REQUIRED.accepts[0].network,
+    ...overrides,
+  }
+}
+
+function mutateHeader(
+  paymentHeader: string,
+  mutate: (header: Record<string, unknown>) => void,
+): string {
+  const header = JSON.parse(Buffer.from(paymentHeader, 'base64').toString('utf8')) as Record<string, unknown>
+  mutate(header)
+  return Buffer.from(JSON.stringify(header), 'utf8').toString('base64')
 }
 
 // ── haven_sweep_delegate (phase 1 mapping) ────────────────────────────────────
@@ -539,7 +602,7 @@ describe('haven_pay_x402_quote', () => {
     const x402Call = calls.find((c) => c.url.endsWith('/x402'))
     expect(x402Call?.body).toMatchObject({
       payTo: '0xDelegate',
-      merchantPayTo: '0xMerchant',
+      merchantPayTo: PAYMENT_REQUIRED.accepts[0].payTo,
       amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
     })
     expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
@@ -2104,7 +2167,7 @@ describe('haven_settle_mcp_tool', () => {
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
         max_amount: '2000000',
-        payment_header: 'eyJ4IjoxfQ==',
+        payment_header: VALID_PAYMENT_HEADER,
       }),
     )
 
@@ -2113,13 +2176,62 @@ describe('haven_settle_mcp_tool', () => {
     expect(signCall?.body).toEqual({ signature: SIG })
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy.mock.calls[0][0].paymentId).toBe('pay_x402')
-    expect(spy.mock.calls[0][0].paymentHeader).toBe('eyJ4IjoxfQ==')
+    expect(spy.mock.calls[0][0].paymentHeader).toBe(VALID_PAYMENT_HEADER)
     // payment_id is echoed so the agent can reconcile without retaining it.
     expect(result.data.payment_id).toBe('pay_x402')
     expect(result.data.funding_tx_hash).toBe('0xfund')
     expect(result.data.settled).toBe(true)
     expect(result.data.settlement_tx_hash).toBe('0xsettle')
     expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
+  })
+
+  it('accepts the current v2 payment-header envelope before funding', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({ status: 200, ok: true, body: {} })
+
+    const result = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402', signature: SIG, merchant_url: 'http://merchant.test/mcp', tool_name: 'create_text',
+      payment_header: VALID_PAYMENT_HEADER_V2,
+    })
+
+    expect(result.success).toBe(true)
+    expect(calls.some((call) => call.url.endsWith('/payments/pay_x402/sign'))).toBe(true)
+  })
+
+  it.each([
+    ['malformed base64', 'not-a-payment-header'],
+    ['oversized header', 'A'.repeat(65_540)],
+    ['unsupported version', (header: string) => mutateHeader(header, (value) => { value.x402Version = 99 })],
+    ['merchant', (header: string) => mutateHeader(header, (value) => { (value.accepted as Record<string, unknown>).payTo = '0x0000000000000000000000000000000000000001' })],
+    ['asset', (header: string) => mutateHeader(header, (value) => { (value.accepted as Record<string, unknown>).asset = '0x0000000000000000000000000000000000000001' })],
+    ['network', (header: string) => mutateHeader(header, (value) => { (value.accepted as Record<string, unknown>).network = 'eip155:84532' })],
+    ['amount', (header: string) => mutateHeader(header, (value) => { (value.accepted as Record<string, unknown>).maxAmountRequired = '1' })],
+    ['payer', (header: string) => mutateHeader(header, (value) => { ((value.payload as Record<string, any>).authorization).from = '0x0000000000000000000000000000000000000001' })],
+    ['expiry', (header: string) => mutateHeader(header, (value) => { ((value.payload as Record<string, any>).authorization).validBefore = '1' })],
+    ['nonce', (header: string) => mutateHeader(header, (value) => { ((value.payload as Record<string, any>).authorization).nonce = '0x01' })],
+    ['resource', (header: string) => mutateHeader(header, (value) => { (value.accepted as Record<string, unknown>).resource = 'https://merchant.test/substituted' })],
+  ])('rejects a %s mutation before funding or merchant delivery', async (_name, mutation) => {
+    const paymentHeader = typeof mutation === 'string' ? mutation : mutation(VALID_PAYMENT_HEADER_V2)
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+    const result = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402', signature: SIG, merchant_url: 'http://merchant.test/mcp', tool_name: 'create_text',
+      payment_header: paymentHeader,
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected payment-header preflight failure')
+    expect(result.code).toBe('INVALID_PAYMENT_HEADER')
+    expect(result.message).toContain('No funding was relayed')
+    expect(calls.some((call) => call.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
+    expect(merchant).not.toHaveBeenCalled()
+    expect(JSON.stringify(result)).not.toContain(paymentHeader)
   })
 
   it('does NOT contact the merchant when funding does not confirm', async () => {
@@ -2135,7 +2247,7 @@ describe('haven_settle_mcp_tool', () => {
         signature: SIG,
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
-        payment_header: 'eyJ4IjoxfQ==',
+        payment_header: VALID_PAYMENT_HEADER,
       }),
     )
 
@@ -2162,7 +2274,7 @@ describe('haven_settle_mcp_tool', () => {
         signature: SIG,
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
-        payment_header: 'eyJ4IjoxfQ==',
+        payment_header: VALID_PAYMENT_HEADER,
       }),
     )
 
@@ -2186,7 +2298,7 @@ describe('haven_settle_mcp_tool', () => {
       signature: SIG,
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'create_text',
-      payment_header: 'eyJ4IjoxfQ==',
+      payment_header: VALID_PAYMENT_HEADER,
     })
 
     if (payload.success) throw new Error('expected a failure payload')
@@ -2210,7 +2322,7 @@ describe('haven_settle_mcp_tool', () => {
       signature: SIG,
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'create_text',
-      payment_header: 'eyJ4IjoxfQ==',
+      payment_header: VALID_PAYMENT_HEADER,
     })
 
     if (payload.success) throw new Error('expected a failure payload')
@@ -2261,13 +2373,16 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
       next_action: 'none',
       amount: '1.50',
       token: 'USDC',
-      resource_url: 'http://merchant.test/mcp',
-      merchant_address: '0xMerchant',
+      resource_url: PAYMENT_REQUIRED.resource.url,
+      merchant_address: PAYMENT_REQUIRED.accepts[0].payTo,
+      payer_address: headerSigner.delegateAddress,
       tx_hash: '0xfund',
       expires_at: '2099-01-01T00:00:00.000Z',
       chain_id: 8453,
       message: 'The payment is confirmed.',
+      amount_atomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
       asset: USDC,
+      network: PAYMENT_REQUIRED.accepts[0].network,
       ...overrides,
     }
   }
@@ -2279,7 +2394,7 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'create_text',
       arguments: { prompt: 'Hello' },
-      payment_header: 'eyJ4IjoxfQ==',
+      payment_header: VALID_PAYMENT_HEADER,
     }
   }
 
@@ -2370,28 +2485,41 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
         status: 'settled',
         product: 'NordShield VPN Basic',
         amount: '1.50',
-        amount_atomic: null,
+        amount_atomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
         asset: USDC,
-        network: 'eip155:8453',
-        merchant: { address: '0xMerchant', resource_url: 'http://merchant.test/mcp' },
+        network: PAYMENT_REQUIRED.accepts[0].network,
+        merchant: { address: PAYMENT_REQUIRED.accepts[0].payTo, resource_url: PAYMENT_REQUIRED.resource.url },
         invoice_id: 'INV-123',
         funding_tx_hash: '0xfund',
         settlement_tx_hash: '0xsettle',
         allowance: { remaining_atomic: '3500000' },
       },
     })
-    expect(calls.filter((call) => call.method === 'GET' && call.url.endsWith('/machine-payments/pay_x402/status'))).toHaveLength(1)
+    expect(calls.filter((call) => call.method === 'GET' && call.url.endsWith('/machine-payments/pay_x402/status'))).toHaveLength(2)
   })
 
   it('does not infer settlement or metadata from a merchant result that merely claims payment', async () => {
     const haven = havenSettled({
-      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture({
-        amount: '2.00', token: 'DAI', asset: null, network: null, merchant_address: null, resource_url: null,
-      }) },
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
       'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000') },
     })
     const merchantResult = { paid: true, status: 'confirmed', invoice_id: 'UNTRUSTED' }
+    vi.spyOn(haven, 'getPaymentStatus')
+      .mockResolvedValueOnce({
+        paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'pending_signature',
+        phase: AgentPaymentPhase.AgentSignatureRequired, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, amount: '1.50', token: 'USDC',
+        resourceUrl: PAYMENT_REQUIRED.resource.url, merchantAddress: PAYMENT_REQUIRED.accepts[0].payTo,
+        payerAddress: headerSigner.delegateAddress, txHash: null, expiresAt: '2099-01-01T00:00:00.000Z',
+        chainId: 8453, message: 'Ready', amountAtomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+        asset: USDC, network: PAYMENT_REQUIRED.accepts[0].network,
+      })
+      .mockResolvedValueOnce({
+        paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'confirmed',
+        phase: 'payment_confirmed', nextAction: 'none', amount: '2.00', token: 'DAI',
+        resourceUrl: null, merchantAddress: null, txHash: '0xfund', expiresAt: '2099-01-01T00:00:00.000Z',
+        chainId: 8453, message: 'Confirmed', asset: null, network: null,
+      })
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({ status: 200, ok: true, body: merchantResult })
 
     const result = ok<{ result: unknown; agent_summary: { purchase_summary: Record<string, unknown> } }>(
@@ -2501,16 +2629,26 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     expect(result.data.agent_summary.purchase_summary).toMatchObject({
       amount: '1.50',
       asset: USDC,
-      network: 'eip155:8453',
-      merchant: { address: '0xMerchant', resource_url: 'http://merchant.test/mcp' },
+      network: PAYMENT_REQUIRED.accepts[0].network,
+      merchant: { address: PAYMENT_REQUIRED.accepts[0].payTo, resource_url: PAYMENT_REQUIRED.resource.url },
       allowance: null,
     })
   })
 
   it('a failed payment-status lookup (token resolution) ALSO never converts settled:true into failure', async () => {
     const haven = havenSettled({
-      'GET /machine-payments/pay_x402/status': { status: 502, body: { error: 'boom' } },
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
     })
+    vi.spyOn(haven, 'getPaymentStatus')
+      .mockResolvedValueOnce({
+        paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'pending_signature',
+        phase: AgentPaymentPhase.AgentSignatureRequired, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, amount: '1.50', token: 'USDC',
+        resourceUrl: PAYMENT_REQUIRED.resource.url, merchantAddress: PAYMENT_REQUIRED.accepts[0].payTo,
+        payerAddress: headerSigner.delegateAddress, txHash: null, expiresAt: '2099-01-01T00:00:00.000Z',
+        chainId: 8453, message: 'Ready', amountAtomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+        asset: USDC, network: PAYMENT_REQUIRED.accepts[0].network,
+      })
+      .mockRejectedValueOnce(new HavenApiError('boom', 502))
 
     const result = ok<{ settled: boolean; allowance: unknown; warnings: Array<{ code: string }> }>(
       await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()),
@@ -2631,7 +2769,7 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
       payment_id: 'pay_x402',
       merchant_url: 'http://merchant.test/mcp',
       // tool_name omitted — an agent that supplied merchant_url expects it used
-      payment_header: 'eyJ4IjoxfQ==',
+      payment_header: VALID_PAYMENT_HEADER,
     })
 
     if (payload.success) throw new Error('expected a failure payload')
@@ -2715,7 +2853,7 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
       await createToolHandlers(haven).haven_settle_mcp_tool({
         payment_id: 'pay_x402',
         signature: SIG,
-        payment_header: 'eyJ4IjoxfQ==',
+        payment_header: VALID_PAYMENT_HEADER,
       }),
     )
 

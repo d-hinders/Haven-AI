@@ -1106,6 +1106,8 @@ export interface PaymentStatusResult {
   token: string
   resourceUrl: string | null
   merchantAddress: string | null
+  /** Delegate EOA captured on the payment intent when it was created. */
+  payerAddress?: string | null
   txHash: string | null
   expiresAt: string
   chainId: number
@@ -1281,6 +1283,7 @@ export interface RawPaymentStatusResult {
   token: string
   resource_url: string | null
   merchant_address: string | null
+  payer_address?: string | null
   tx_hash: string | null
   expires_at: string
   chain_id: number

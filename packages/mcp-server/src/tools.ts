@@ -19,6 +19,8 @@ import {
   resolveTokenFromAddress,
   sameUrl,
   selectStandardPaymentOption,
+  validateStandardX402PaymentHeader,
+  X402PaymentHeaderValidationError,
   toolDescriptions as sharedDescriptions,
   verifyPaymentReceipt,
   x402AuthorizationAmount,
@@ -1222,6 +1224,12 @@ export function createToolHandlers(
         // Fast path: fund (relay the signature) then deliver the merchant header
         // in one hosted call. The signature and X-PAYMENT header are both signed
         // by the local edge signer — Haven relays them but never holds the key.
+        //
+        // This MUST precede submitSignature: a malformed or substituted merchant
+        // header is never a reason to fund the delegate balance. It is an
+        // integrity preflight, not a merchant/facilitator verification or a
+        // replacement for the local signer's expected-context binding.
+        await preflightMcpPaymentHeader(haven, args)
         const funding = await submitSignatureWithExpiryMapping(haven, args.payment_id, args.signature)
         if (funding.status !== 'confirmed') {
           // Funding did not confirm (e.g. queued for approval). Do not deliver the
@@ -2477,6 +2485,53 @@ async function submitSignatureWithExpiryMapping(
     const mapped = await paymentWindowExpiredErrorFor(haven, paymentId, err)
     if (mapped) throw mapped
     throw err
+  }
+}
+
+/**
+ * Hosted fast-path preflight (#1398). The status read is agent-scoped and
+ * exposes the intent's captured delegate, unlike getAgent() which may have
+ * changed after the intent was created. Never include an untrusted header in a
+ * thrown error: MCP error payloads and observability consumers serialize it.
+ */
+async function preflightMcpPaymentHeader(haven: HavenClient, args: Record<string, any>): Promise<void> {
+  const status = await haven.getPaymentStatus(args.payment_id)
+  try {
+    if (
+      status.rail !== 'x402' ||
+      !status.merchantAddress ||
+      !status.amountAtomic ||
+      !status.asset ||
+      !status.network ||
+      !status.resourceUrl ||
+      !status.payerAddress
+    ) {
+      throw new X402PaymentHeaderValidationError()
+    }
+    await validateStandardX402PaymentHeader(args.payment_header, {
+      merchantTo: status.merchantAddress,
+      amountAtomic: status.amountAtomic,
+      asset: status.asset,
+      network: status.network,
+      resourceUrl: status.resourceUrl,
+      payer: status.payerAddress,
+      chainId: status.chainId,
+    })
+  } catch (err) {
+    if (!(err instanceof X402PaymentHeaderValidationError)) throw err
+    throw new HostedToolError({
+      code: 'INVALID_PAYMENT_HEADER',
+      message:
+        'The X-PAYMENT header did not match the funded x402 intent. No funding was relayed. ' +
+        'Recreate the header with the local signer from this payment_id, then retry.',
+      statusCode: 400,
+      paymentId: args.payment_id,
+      status: 'invalid_payment_header',
+      phase: 'not_started',
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      rail: 'x402',
+      suggestedTool: 'mcp__haven-signer__haven_sign_x402',
+    })
   }
 }
 

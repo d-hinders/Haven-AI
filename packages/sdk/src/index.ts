@@ -111,6 +111,8 @@ export {
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
+  validateStandardX402PaymentHeader,
+  X402PaymentHeaderValidationError,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
   X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
   buildX402ExpectedMessage,
@@ -120,6 +122,8 @@ export {
   // resolves decimals through exactly the same table the quote used.
   resolveTokenFromAddress,
 } from './x402.js'
+
+export type { X402PaymentHeaderContext } from './x402.js'
 
 export {
   SWEEP_BASE_CHAIN_ID,

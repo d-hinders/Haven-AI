@@ -95,6 +95,7 @@ import {
   UPDATE_CONNECTOR_METADATA_SQL,
 } from '../src/infra/repositories/agent-connection-setups.js'
 import {
+  AGENT_HAS_LIVE_DELEGATIONS_SQL,
   ARCHIVE_AGENT_SQL,
   DELETE_AGENT_ALLOWANCE_SQL,
   UNARCHIVE_AGENT_SQL,
@@ -357,6 +358,7 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: insert allowance inside create tx', sql: INSERT_AGENT_ALLOWANCE_SQL },
   { name: 'agents: profile update (CTE, tenant-scoped)', sql: UPDATE_AGENT_PROFILE_SQL },
   { name: 'agents: archive revoked agent (#1401)', sql: ARCHIVE_AGENT_SQL },
+  { name: 'agents: live-delegation guard for archive (#1436)', sql: AGENT_HAS_LIVE_DELEGATIONS_SQL },
   { name: 'agents: unarchive (#1401)', sql: UNARCHIVE_AGENT_SQL },
   { name: 'agents: revoke', sql: REVOKE_AGENT_SQL },
   { name: 'agents: rotate API key', sql: ROTATE_AGENT_API_KEY_SQL },

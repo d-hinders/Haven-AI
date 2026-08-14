@@ -662,10 +662,30 @@ describe('agent archive routes (#1401)', () => {
     primeDb([
       [/UPDATE agents\s+SET archived_at = COALESCE/, { rows: [] }],
       [/SELECT id FROM agents WHERE id = \$1 AND user_id = \$2/, { rows: [{ id: 'agent-1' }] }],
+      [/SELECT EXISTS[\s\S]*agent_delegations/, { rows: [{ live: false }] }],
     ])
     const response = await app.inject({ method: 'POST', url: '/agents/agent-1/archive' })
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toContain('Revoke the agent first')
+    await app.close()
+  })
+
+  // #1436: the two 409s need DIFFERENT remedies — a caller told "revoke the
+  // agent first" when the real blocker is a live budget is stuck, because it
+  // has already revoked.
+  it('refuses with the revoke-all remedy when budgets are still live (#1436)', async () => {
+    const app = await buildApp()
+    primeDb([
+      [/UPDATE agents\s+SET archived_at = COALESCE/, { rows: [] }],
+      [/SELECT id FROM agents WHERE id = \$1 AND user_id = \$2/, { rows: [{ id: 'agent-1' }] }],
+      [/SELECT EXISTS[\s\S]*agent_delegations/, { rows: [{ live: true }] }],
+    ])
+    const response = await app.inject({ method: 'POST', url: '/agents/agent-1/archive' })
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toContain('revoke-all')
+    expect(response.json().error).toContain('still holds budget delegations')
+    // and NOT the wrong remedy:
+    expect(response.json().error).not.toContain('Revoke the agent first')
     await app.close()
   })
 

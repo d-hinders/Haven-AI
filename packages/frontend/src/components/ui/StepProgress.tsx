@@ -7,15 +7,15 @@ type StepProgressProps = {
 
 export function StepProgress({ totalSteps, currentStep, className = '' }: StepProgressProps) {
   return (
-    <div className={`flex items-center gap-3 ${className}`}>
+    <div className={`flex items-center gap-2 sm:gap-3 ${className}`}>
       {Array.from({ length: totalSteps }).map((_, index) => {
         const isCompleted = index < currentStep
         const isActive = index === currentStep
         return (
-          <div key={index} className="flex items-center gap-3">
+          <div key={index} className="flex items-center gap-2 sm:gap-3">
             <div
               aria-label={`Step ${index + 1} of ${totalSteps}`}
-              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium border transition-colors duration-300 v2-tabular ${
+              className={`h-7 w-7 shrink-0 rounded-full border text-xs font-medium flex items-center justify-center transition-colors duration-300 v2-tabular sm:h-8 sm:w-8 ${
                 isActive
                   ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
                   : isCompleted
@@ -28,7 +28,7 @@ export function StepProgress({ totalSteps, currentStep, className = '' }: StepPr
             {index < totalSteps - 1 && (
               <div
                 data-filled={index < currentStep}
-                className="v2-progress-line h-px w-12 shrink-0 bg-[var(--v2-border)]"
+                className="v2-progress-line h-px w-8 shrink-0 bg-[var(--v2-border)] sm:w-12"
               />
             )}
           </div>

@@ -620,6 +620,87 @@ export const SCENARIOS = {
       await shoot(dialog, 'manual-credential-warning')
     },
   },
+  'connect-agent-approved': {
+    description: 'Connect agent modal, step 4, the APPROVED ending (#1394)',
+    // Separate scenario rather than a stage of `connect-agent`: that one pins
+    // the setup at awaiting_connection for its whole run, which is what makes
+    // the three waiting stages capturable at all. The ending needs the
+    // opposite pin, and a run cannot hold both.
+    api(apiPath, method) {
+      if (apiPath === '/agent-connection-setups' && method === 'POST') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          status: 'active',
+          setup_token: CONNECT_SETUP_TOKEN,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: CONNECT_COMMAND,
+          setup_prompt: 'Please connect this workspace to Haven.',
+        }
+      }
+      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: 'agent-fixture-1',
+          status: 'active',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          agent: { name: 'Research agent', description: null },
+          haven_wallet: {
+            id: FIXTURE_SAFE.id,
+            name: FIXTURE_SAFE.name,
+            address: FIXTURE_SAFE.safe_address,
+            chain_id: FIXTURE_SAFE.chain_id,
+            network: 'Base Sepolia',
+          },
+          // A REAL grant, in atomic units: 25.00 USDC per day. The screen's
+          // whole point is naming the authority concretely, so an empty budget
+          // here would capture only the fallback line and prove nothing.
+          agent_budget: [
+            {
+              id: 'budget-1',
+              token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+              token_symbol: 'USDC',
+              allowance_amount: '25000000',
+              reset_period_min: 1440,
+            },
+          ],
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          // skill_installed false ON PURPOSE: it is the richer of the two
+          // rows, carrying the download control this issue restyled. The
+          // installed variant is strictly a subset (one more check glyph).
+          install_status: {
+            runtime_mcp_mode: 'local_stdio',
+            local_mcp_configured: true,
+            local_mcp_acknowledged: true,
+            credential_files_written: true,
+            skill_installed: false,
+            restart_required: true,
+          },
+          approval: { status: 'active', safe_tx_hash: null, tx_hash: null },
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      await dialog.getByLabel('Agent name').fill('Research agent')
+      await dialog.getByRole('button', { name: 'Set agent budget' }).click()
+      await dialog.getByPlaceholder('Amount').fill('25')
+      await dialog.getByRole('button', { name: 'Review agent rules' }).click()
+      await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
+
+      // Confirmed by the sentence this issue exists to produce, not by a bare
+      // timeout — a run that lands on any other sub-state fails here rather
+      // than shooting it under the approved screen's filename.
+      await dialog
+        .getByText(/Research agent can now spend up to .* from /)
+        .waitFor({ timeout: 30_000 })
+      await shoot(dialog, 'approved')
+    },
+  },
   'modal-migrations': {
     description: 'InfoModal and ComingSoonModal rendered from the design-system reference',
     api() {

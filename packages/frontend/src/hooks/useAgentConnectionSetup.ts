@@ -231,7 +231,12 @@ export function headerSubtitle(step: SetupStep, status: string | undefined, runt
     if (status === 'connected_local' && !runtimeConfigured) return 'Finishing local setup'
     if (status === 'connected_local' || status === 'awaiting_wallet_approval') return 'Approve the agent rules'
     if (status === 'approval_in_progress' || status === 'proposed') return 'Waiting for approval to land'
-    if (status === 'active') return 'Agent rules approved'
+    // #1394: NOT "Agent rules approved" — the shell ticker already reads
+    // "Approved" and the body names the granted authority. Three statements of
+    // one fact in one viewport made none of them authoritative. The subtitle's
+    // job across this flow is to say what to DO, so here it orients the user in
+    // the ending rather than restating the status.
+    if (status === 'active') return 'What your agent can do now'
     if (status === 'expired') return 'This setup prompt expired'
     if (status === 'cancelled') return 'This setup was cancelled'
     return 'Paste the setup prompt into your agent environment'

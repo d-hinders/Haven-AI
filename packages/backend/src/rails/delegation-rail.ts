@@ -169,6 +169,66 @@ export interface DelegationRail {
   submitRedemption(prepared: PreparedRedemption, signature: Hex): Promise<RedemptionSubmitResult>
 }
 
+// #1423: DelegationManager.disableDelegation REVERTS on an already-disabled
+// delegation (`AlreadyDisabled` in the pinned ABI) — it is NOT idempotent.
+// prepareCalls emits an atomic batch (BatchDefault), so a single stale row
+// whose delegation is already disabled on-chain (the #1400 crash window:
+// UserOp landed, process died before the DB UPDATE) would revert the WHOLE
+// retry batch. This read lets the revoke-all prepare drop those entries and
+// reconcile the rows instead of bundling a guaranteed revert.
+const DISABLED_DELEGATIONS_ABI = parseAbi([
+  'function disabledDelegations(bytes32) view returns (bool)',
+])
+
+/**
+ * Which of `hashes` the pinned DelegationManager already reports disabled.
+ *
+ * A positive here leads to a row being marked `revoked` WITHOUT an
+ * owner-signed transaction, so a false positive would silently defeat the
+ * kill switch (the delegation stays live on-chain while every Haven surface
+ * says it is dead). Two safeguards against that direction:
+ *  - reads are pinned to `finalized`, so a shallow reorg cannot produce a
+ *    transient wrong answer;
+ *  - a hash only counts as disabled when TWO consecutive reads agree — a
+ *    single flaky/inconsistent response confirms nothing.
+ * A PERSISTENTLY lying RPC endpoint remains outside this control's threat
+ * model — the same endpoint already sits under gas estimation and submission
+ * on this rail — and callers log every heal distinctly for audit.
+ */
+export async function readDisabledDelegationHashes(
+  chainId: number,
+  rpcUrl: string,
+  hashes: readonly Hex[],
+  readFlag?: (hash: Hex) => Promise<boolean>,
+): Promise<Set<Hex>> {
+  if (hashes.length === 0) return new Set()
+  const read = readFlag ?? makeDisabledDelegationReader(chainId, rpcUrl)
+  const first = await Promise.all(hashes.map((hash) => read(hash)))
+  const candidates = hashes.filter((_, i) => first[i])
+  if (candidates.length === 0) return new Set()
+  const confirmed = await Promise.all(candidates.map((hash) => read(hash)))
+  return new Set(candidates.filter((_, i) => confirmed[i]))
+}
+
+function makeDisabledDelegationReader(chainId: number, rpcUrl: string): (hash: Hex) => Promise<boolean> {
+  const pins = getDelegationContracts(chainId)
+  // multicall batching: viem coalesces the per-hash reads into single
+  // aggregate3 round trips instead of N parallel eth_calls.
+  const publicClient = createPublicClient({
+    chain: chainForId(chainId),
+    transport: http(rpcUrl),
+    batch: { multicall: true },
+  })
+  return (hash) =>
+    publicClient.readContract({
+      address: pins.delegationManager,
+      abi: DISABLED_DELEGATIONS_ABI,
+      functionName: 'disabledDelegations',
+      args: [hash],
+      blockTag: 'finalized',
+    })
+}
+
 export async function createDelegationRail(cfg: DelegationRailConfig): Promise<DelegationRail> {
   getDelegationContracts(cfg.chainId) // fail-closed on unpinned chains
   const chain = chainForId(cfg.chainId)

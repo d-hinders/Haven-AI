@@ -153,71 +153,71 @@ export function WaitingForConnector({
             onCopy={() => onCopy('command', setup.connector_command)}
           />
 
-      <details className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3 text-xs">
-        <summary className="cursor-pointer text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
-          Manual credential fallback
-        </summary>
-        <div className="mt-3 space-y-3">
-          <p className="leading-relaxed text-[var(--v2-ink-2)]">
-            Use this only if the agent cannot run the setup command or store the local connector files. Haven will still receive only the public signing address and API key hash.
-          </p>
-          {!manualPathRevealed && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onManualPathRevealedChange(true)}
-              className="w-full"
-            >
-              I really can't run the connector — show the manual path
-            </Button>
-          )}
-          {manualPathRevealed && (<>
-          <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
-            <p className="font-semibold text-[var(--v2-ink)]">Before creating a manual credential</p>
-            <ul className="mt-2 list-disc space-y-1 pl-4 leading-relaxed text-[var(--v2-ink-2)]">
-              <li>Use it only in a trusted agent workspace.</li>
-              <li>The private signing key lets the agent sign payments within the approved agent budget.</li>
-              <li>The API key identifies the agent but cannot spend alone.</li>
-              <li>If it may have leaked, pause or revoke the agent in Haven.</li>
-              <li>Do not commit it, upload it, or paste it into shared logs.</li>
-            </ul>
-          </div>
-          <Checkbox
-            checked={manualFallbackConfirmed}
-            onChange={(event) => onManualFallbackConfirmedChange(event.target.checked)}
-            className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 text-[var(--v2-ink-2)]"
-            label="I understand this fallback shows a one-time private signing key and should only be pasted into a trusted agent workspace."
-          />
-          {manualError && <InlineErrorNote>{manualError}</InlineErrorNote>}
-          {!manualCredential && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onCreateManualCredential}
-              disabled={!manualFallbackConfirmed || manualCreating}
-              className="w-full"
-            >
-              {manualCreating ? 'Creating manual credential...' : 'Create manual credential'}
-            </Button>
-          )}
-          {manualCredential && (
-            <div className="space-y-3">
-              <CopyBlock
-                label="Manual credential prompt"
-                value={manualCredential.prompt}
-                copied={copied === 'manual'}
-                onCopy={() => onCopy('manual', manualCredential.prompt)}
-              />
-              {!manualCredentialAcknowledged && (
-                <Button onClick={onContinueAfterManualCredential} className="w-full">
-                  Continue to wallet approval
+          <details className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3 text-xs">
+            <summary className="cursor-pointer text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+              Manual credential fallback
+            </summary>
+            <div className="mt-3 space-y-3">
+              <p className="leading-relaxed text-[var(--v2-ink-2)]">
+                Use this only if the agent cannot run the setup command or store the local connector files. Haven will still receive only the public signing address and API key hash.
+              </p>
+              {!manualPathRevealed && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onManualPathRevealedChange(true)}
+                  className="w-full"
+                >
+                  I really can't run the connector — show the manual path
                 </Button>
               )}
+              {manualPathRevealed && (<>
+              <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
+                <p className="font-semibold text-[var(--v2-ink)]">Before creating a manual credential</p>
+                <ul className="mt-2 list-disc space-y-1 pl-4 leading-relaxed text-[var(--v2-ink-2)]">
+                  <li>Use it only in a trusted agent workspace.</li>
+                  <li>The private signing key lets the agent sign payments within the approved agent budget.</li>
+                  <li>The API key identifies the agent but cannot spend alone.</li>
+                  <li>If it may have leaked, pause or revoke the agent in Haven.</li>
+                  <li>Do not commit it, upload it, or paste it into shared logs.</li>
+                </ul>
+              </div>
+              <Checkbox
+                checked={manualFallbackConfirmed}
+                onChange={(event) => onManualFallbackConfirmedChange(event.target.checked)}
+                className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 text-[var(--v2-ink-2)]"
+                label="I understand this fallback shows a one-time private signing key and should only be pasted into a trusted agent workspace."
+              />
+              {manualError && <InlineErrorNote>{manualError}</InlineErrorNote>}
+              {!manualCredential && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onCreateManualCredential}
+                  disabled={!manualFallbackConfirmed || manualCreating}
+                  className="w-full"
+                >
+                  {manualCreating ? 'Creating manual credential...' : 'Create manual credential'}
+                </Button>
+              )}
+              {manualCredential && (
+                <div className="space-y-3">
+                  <CopyBlock
+                    label="Manual credential prompt"
+                    value={manualCredential.prompt}
+                    copied={copied === 'manual'}
+                    onCopy={() => onCopy('manual', manualCredential.prompt)}
+                  />
+                  {!manualCredentialAcknowledged && (
+                    <Button onClick={onContinueAfterManualCredential} className="w-full">
+                      Continue to wallet approval
+                    </Button>
+                  )}
+                </div>
+              )}
+              </>)}
             </div>
-          )}
-          </>)}
-        </div>
-      </details>
+          </details>
         </div>
       </details>
 
@@ -232,8 +232,9 @@ export function WaitingForConnector({
           stage the warning block above owns it ("Cancel this setup"), where it
           is both visible and warranted; here it is a quiet link, because an
           exit should be findable without competing with the action that moves
-          the user forward. It stays a <button> — four tests reach it by role
-          and name, and demoting it visually must not demote it semantically. */}
+          the user forward. It stays a <button>: demoting it visually must not
+          demote it semantically, and the stage-conditional render below is
+          pinned by a test, since a missing exit is worse than a loud one. */}
       {connectionStage !== 'recovery' && (
         <div className="flex justify-center">
           <Button variant="ghost" size="sm" onClick={onCancel}>

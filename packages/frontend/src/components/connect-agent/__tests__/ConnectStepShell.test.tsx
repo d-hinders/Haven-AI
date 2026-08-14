@@ -25,7 +25,11 @@ const SETUP = {
   connector_command: 'npx @haven_ai/connect@alpha --token hv_setup_test',
 } satisfies CreateSetupResponse
 
-function renderWaiting(loading: boolean, connectionStage: AwaitingConnectionStage = 'starting') {
+function renderWaiting(
+  loading: boolean,
+  connectionStage: AwaitingConnectionStage = 'starting',
+  onCancel: () => void = () => {},
+) {
   return (
     <WaitingForConnector
       setup={SETUP}
@@ -46,7 +50,7 @@ function renderWaiting(loading: boolean, connectionStage: AwaitingConnectionStag
       error={null}
       connectionStage={connectionStage}
       expiresAt={EXPIRES_AT}
-      onCancel={() => {}}
+      onCancel={onCancel}
     />
   )
 }
@@ -91,6 +95,43 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
     expect(slot?.className).toContain('min-h-16')
     expect(container.textContent).not.toContain('Haven has not received a connection yet')
     expect(container.querySelector('button[class*="min-h-11"]')).toBeNull()
+  })
+
+  it('keeps the manual-credential path nested INSIDE the trouble disclosure (#1391)', () => {
+    // jsdom has no layout engine, so a closed <details> does not hide its
+    // children: every existing manual-credential test clicks straight into
+    // "Manual credential fallback" and would pass even if these two
+    // disclosures were siblings. This asserts the ancestry directly, so an
+    // accidental flattening — which would put the private-key path back at
+    // the same depth as the harmless one — fails here rather than silently.
+    const { container } = render(renderWaiting(false, 'starting'))
+    const manual = container.querySelector('details details')
+    expect(manual).not.toBeNull()
+    expect(manual?.textContent).toContain('Manual credential fallback')
+    expect(manual?.closest('details:not(details details)')?.textContent).toContain(
+      'Having trouble connecting?',
+    )
+  })
+
+  it('offers exactly one cancel at every stage (#1391)', () => {
+    // starting/slow: the quiet footer link. recovery: the warning block's own
+    // action, and the footer hides so the screen never offers the same exit
+    // twice. No stage may leave the user with NO way out.
+    const onCancel = vi.fn()
+
+    for (const stage of ['starting', 'slow'] as const) {
+      const { getByRole, queryByRole, unmount } = render(renderWaiting(false, stage, onCancel))
+      expect(queryByRole('button', { name: 'Cancel this setup' })).toBeNull()
+      fireEvent.click(getByRole('button', { name: 'Cancel setup' }))
+      expect(onCancel).toHaveBeenCalled()
+      onCancel.mockClear()
+      unmount()
+    }
+
+    const { getByRole, queryByRole } = render(renderWaiting(false, 'recovery', onCancel))
+    expect(queryByRole('button', { name: 'Cancel setup' })).toBeNull()
+    fireEvent.click(getByRole('button', { name: 'Cancel this setup' }))
+    expect(onCancel).toHaveBeenCalled()
   })
 
   it('offers stable, safe recovery only after Haven remains unconnected', () => {

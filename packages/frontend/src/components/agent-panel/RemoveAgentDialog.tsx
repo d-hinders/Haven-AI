@@ -46,7 +46,7 @@ export function RemoveAgentDialog({
   const isDelegation = agent.account_type === 'delegator_hybrid'
   const { revokeAll, ready, busy } = useDelegationBudget(agent.id, chainId)
   const { balance, hasRecoverableUsdc } = useDelegateBalance(agent.id)
-  const [phase, setPhase] = useState<'confirm' | 'working' | 'filing_failed'>('confirm')
+  const [phase, setPhase] = useState<'confirm' | 'working' | 'filing_failed' | 'too_many'>('confirm')
   const [error, setError] = useState<string | null>(null)
 
   const needsSignature = isDelegation && agent.status !== 'revoked'
@@ -59,11 +59,13 @@ export function RemoveAgentDialog({
     if (needsSignature) {
       const result = await revokeAll()
       if (!result.ok) {
-        setPhase('confirm')
+        setPhase(result.reason === 'too_many' ? 'too_many' : 'confirm')
         setError(
           result.reason === 'cancelled'
             ? 'The signature was cancelled — the agent was not removed and can still spend within its budget.'
-            : 'The budget could not be stopped — the agent was not removed and can still spend within its budget.',
+            : result.reason === 'too_many'
+              ? null // the state line below carries the actionable version
+              : 'The budget could not be stopped — the agent was not removed and can still spend within its budget.',
         )
         return
       }
@@ -73,7 +75,19 @@ export function RemoveAgentDialog({
     // filing unfinished (agent visible as revoked in the primary list).
     try {
       if (agent.status !== 'revoked') {
-        await onRevokeCredential()
+        // #1437: another tab may have revoked this agent since the list was
+        // loaded, which makes `agent.status` stale and this call 404. That is
+        // step-already-done, not a failure — the same semantics revoke-all's
+        // 409 already has. Aborting here used to strand the retry forever,
+        // because the retry re-read the same stale prop and archive (which
+        // WOULD have succeeded) was sequenced after the failing call.
+        try {
+          await onRevokeCredential()
+        } catch (err) {
+          if (!/not found|already revoked/i.test(err instanceof Error ? err.message : '')) {
+            throw err
+          }
+        }
       }
       await onArchive()
       onClose()
@@ -142,6 +156,22 @@ export function RemoveAgentDialog({
             <p className="text-xs text-[var(--v2-danger)]" role="alert">
               The agent can no longer spend, but it could not be moved to Removed. Choose Finish
               removal to retry.
+            </p>
+          )}
+          {/* #1437: the backend refuses an oversized batch by naming the
+              remedy; repeating "the budget could not be stopped" would leave
+              the user pressing the same button forever. */}
+          {phase === 'too_many' && (
+            <p className="text-xs text-[var(--v2-danger)]" role="alert">
+              This agent holds too many budgets to stop in one signature. Stop them individually
+              on the{' '}
+              <Link
+                href={`/agents/${agent.id}`}
+                className="text-[var(--v2-brand)] underline-offset-2 hover:underline"
+              >
+                agent&apos;s budget card
+              </Link>
+              , then remove it. Nothing changed — it can still spend until you do.
             </p>
           )}
         </div>

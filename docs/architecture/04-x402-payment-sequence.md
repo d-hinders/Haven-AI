@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-14" # #1397: hosted read-only MCP quote tools use the existing session-bound live probe and bounded discovery, return no payment context or funding authority, and require every later paid call to quote afresh and apply its cap. Prior: #1328 mpp_demo retirement; #1360 3009 shape writers; #1351 human caps; #1349 settled reporting; #1348 preflight round-trip budget; #1355 payment_id-only signing; #1350 catalog search; #1319 allowance provenance; #1321 MCP session; #1311 descriptions.
+last-verified: "2026-08-14" # #1398: hosted fast settle validates the bounded signed X-PAYMENT header against the agent-scoped persisted intent before relaying funding; it emits no header values and merchant/facilitator verification remains final. Prior: #1397 hosted read-only MCP quote tools use the existing session-bound live probe and bounded discovery, return no payment context or funding authority, and require every later paid call to quote afresh and apply its cap.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -321,6 +321,17 @@ The recommended three-call fast path for an x402-protected MCP tool is:
    confirmation, performs a fresh merchant MCP handshake, delivers the signed
    header, and returns `agent_summary.purchase_summary` as the default report;
    raw `result` remains optional merchant evidence.
+
+**Hosted header preflight (#1398).** Before step 3 relays the funding
+signature, hosted MCP validates the bounded, signed `X-PAYMENT` header against
+the agent-scoped persisted intent: payee, asset, network, atomic amount,
+resource when the x402 version carries it, captured delegate payer, valid
+authorization window, nonce shape, and EIP-712 recovery. A malformed,
+unsupported, expired, or mismatched header fails closed with
+`INVALID_PAYMENT_HEADER`; no funding is relayed, no merchant retry occurs, and
+header values are not included in the error. This is an integrity preflight
+only: it never rebuilds or alters the signature/header, persists it, or claims
+merchant settlement. The merchant/facilitator remains the final verifier.
 
 **Settle by `payment_id` (#1307).** `haven_settle_mcp_tool` and
 `haven_complete_mcp_tool` accept `merchant_url` / `tool_name` / `arguments` /

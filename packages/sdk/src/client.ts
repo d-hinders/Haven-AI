@@ -3039,6 +3039,7 @@ export class HavenClient {
       token: raw.token,
       resourceUrl: raw.resource_url,
       merchantAddress: raw.merchant_address,
+      payerAddress: raw.payer_address ?? null,
       txHash: raw.tx_hash,
       expiresAt: raw.expires_at,
       chainId: raw.chain_id,

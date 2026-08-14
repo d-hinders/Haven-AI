@@ -735,7 +735,7 @@ export async function failMachineIntent(
 // ── Status projection (lib/agent-payment-status.ts) ──────────────────────────
 
 export const FIND_INTENT_STATUS_ROW_SQL = `SELECT pi.id, pi.chain_id, pi.token_symbol, pi.token_address, pi.amount_human, pi.amount_raw,
-            pi.status, pi.tx_hash, pi.expires_at,
+            pi.status, pi.tx_hash, pi.expires_at, pi.delegate_address,
             pi.source, pi.payment_rail, pi.payment_resource_url, pi.x402_resource_url,
             pi.merchant_address, pi.x402_merchant_address, pi.x402_idempotency_key,
             pi.machine_challenge_id, pi.machine_idempotency_key, pi.machine_metadata,
@@ -758,6 +758,7 @@ export interface PaymentIntentStatusRow {
   status: string
   tx_hash: string | null
   expires_at: string
+  delegate_address: string
   source: string | null
   payment_rail: string | null
   payment_resource_url: string | null

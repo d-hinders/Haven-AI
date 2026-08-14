@@ -11,9 +11,11 @@
  */
 
 import { createHash } from 'node:crypto'
+import { recoverTypedDataAddress } from 'viem'
 import type { X402ExpectedContext, X402PaymentRequired, X402PaymentOption } from './types.js'
 import type { PaymentRequirements } from 'x402/types'
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
+import { buildSweepTypedData } from './sweep.js'
 
 const BASE_USDC_ADDRESS = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
 const BASE_SEPOLIA_USDC_ADDRESS = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
@@ -21,6 +23,34 @@ const BASE_SEPOLIA_USDC_ADDRESS = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const STANDARD_X402_USDC_ADDRESSES = new Set([BASE_USDC_ADDRESS, BASE_SEPOLIA_USDC_ADDRESS])
 const X402_IDEMPOTENCY_BUCKET_MS = 300_000
 const DECIMAL_ATOMIC_AMOUNT_RE = /^[0-9]+$/
+const X402_PAYMENT_HEADER_MAX_LENGTH = 65_536
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+const SIGNATURE_RE = /^0x[0-9a-fA-F]{130}$/
+const NONCE_RE = /^0x[0-9a-fA-F]{64}$/
+
+/**
+ * Persisted, agent-scoped facts used to preflight a signed standard x402
+ * payment header. This is an integrity comparison only: it never rebuilds,
+ * modifies, persists, or submits the supplied authorization.
+ */
+export interface X402PaymentHeaderContext {
+  merchantTo: string
+  amountAtomic: string
+  asset: string
+  network: string
+  resourceUrl: string
+  payer: string
+  chainId: number
+}
+
+/** A deliberately value-free refusal for untrusted payment-header input. */
+export class X402PaymentHeaderValidationError extends Error {
+  constructor() {
+    super('Invalid X-PAYMENT header.')
+    this.name = 'X402PaymentHeaderValidationError'
+  }
+}
 
 function isPositiveDecimalAtomicAmount(value: string): boolean {
   return DECIMAL_ATOMIC_AMOUNT_RE.test(value) && BigInt(value) > 0n
@@ -419,6 +449,137 @@ export function toStandardPaymentRequirements(
       X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
     extra: option.extra,
   }
+}
+
+/**
+ * Strictly validate an edge-signed EIP-3009 X-PAYMENT header against the
+ * persisted x402 intent context before a hosted relay can submit funding.
+ *
+ * The merchant/facilitator remains the final protocol verifier. This closes a
+ * separate hosted-relay integrity gap: malformed or context-mismatched input
+ * must never cause Haven to relay the funding signature first.
+ */
+export async function validateStandardX402PaymentHeader(
+  paymentHeader: string,
+  context: X402PaymentHeaderContext,
+): Promise<void> {
+  try {
+    if (
+      typeof paymentHeader !== 'string' ||
+      paymentHeader.length === 0 ||
+      paymentHeader.length > X402_PAYMENT_HEADER_MAX_LENGTH ||
+      paymentHeader.length % 4 !== 0 ||
+      !BASE64_RE.test(paymentHeader)
+    ) {
+      throw new Error('wire')
+    }
+
+    const decoded = decodeBase64Json<Record<string, unknown>>(paymentHeader)
+    if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) throw new Error('shape')
+    const version = decoded.x402Version
+    const payload = decoded.payload
+    if ((version !== 1 && version !== 2) || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('shape')
+    }
+
+    if (version === 1) {
+      if (!hasOnlyKeys(decoded, ['x402Version', 'scheme', 'network', 'payload'])) throw new Error('shape')
+      if (decoded.scheme !== 'exact' || decoded.network !== standardX402WireNetwork(context.network)) {
+        throw new Error('context')
+      }
+    } else {
+      if (!hasOnlyKeys(decoded, ['x402Version', 'accepted', 'payload'])) throw new Error('shape')
+      const accepted = selectStandardPaymentOption([decoded.accepted as X402PaymentOption])
+      if (!accepted || !matchesHeaderContext(accepted, context)) throw new Error('context')
+    }
+
+    const record = payload as Record<string, unknown>
+    if (!hasOnlyKeys(record, ['signature', 'authorization'])) throw new Error('shape')
+    if (typeof record.signature !== 'string' || !SIGNATURE_RE.test(record.signature)) throw new Error('shape')
+    const authorization = record.authorization
+    if (!authorization || typeof authorization !== 'object' || Array.isArray(authorization)) throw new Error('shape')
+    const auth = authorization as Record<string, unknown>
+    if (!hasOnlyKeys(auth, ['from', 'to', 'value', 'validAfter', 'validBefore', 'nonce'])) throw new Error('shape')
+    if (
+      typeof auth.from !== 'string' || !ADDRESS_RE.test(auth.from) ||
+      typeof auth.to !== 'string' || !ADDRESS_RE.test(auth.to) ||
+      typeof auth.value !== 'string' || !isPositiveDecimalAtomicAmount(auth.value) ||
+      typeof auth.validAfter !== 'string' || !DECIMAL_ATOMIC_AMOUNT_RE.test(auth.validAfter) ||
+      typeof auth.validBefore !== 'string' || !DECIMAL_ATOMIC_AMOUNT_RE.test(auth.validBefore) ||
+      typeof auth.nonce !== 'string' || !NONCE_RE.test(auth.nonce)
+    ) {
+      throw new Error('shape')
+    }
+    if (!sameAddress(auth.from, context.payer) || !sameAddress(auth.to, context.merchantTo) || auth.value !== context.amountAtomic) {
+      throw new Error('context')
+    }
+
+    const validAfter = BigInt(auth.validAfter)
+    const validBefore = BigInt(auth.validBefore)
+    const now = BigInt(Math.floor(Date.now() / 1000))
+    if (validBefore <= now || validAfter > validBefore) throw new Error('expired')
+
+    // `buildSweepTypedData` pins the correct USDC EIP-712 domain for the
+    // persisted chain + asset pair. Successful recovery makes the nonce and
+    // every authorization field cryptographically covered by the delegate.
+    const typedData = buildSweepTypedData({
+      from: auth.from,
+      to: auth.to,
+      value: auth.value,
+      validAfter: auth.validAfter,
+      validBefore: auth.validBefore,
+      nonce: auth.nonce,
+      token: context.asset,
+      chainId: context.chainId,
+    })
+    const recovered = await recoverTypedDataAddress({
+      ...typedData,
+      // `buildSweepTypedData` keeps the public domain framework-neutral;
+      // viem brands contract addresses at this crypto call boundary only.
+      domain: {
+        ...typedData.domain,
+        verifyingContract: typedData.domain.verifyingContract as `0x${string}`,
+      },
+      message: {
+        ...typedData.message,
+        from: typedData.message.from as `0x${string}`,
+        to: typedData.message.to as `0x${string}`,
+        nonce: typedData.message.nonce as `0x${string}`,
+      },
+      signature: record.signature as `0x${string}`,
+    })
+    if (!sameAddress(recovered, context.payer)) throw new Error('recovery')
+  } catch {
+    // Header values are attacker-controlled and may include merchant data.
+    // Never propagate them into hosted errors, logs, or serialized telemetry.
+    throw new X402PaymentHeaderValidationError()
+  }
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key)) &&
+    allowed.every((key) => key in value)
+}
+
+function sameAddress(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase()
+}
+
+function standardX402WireNetwork(network: string): PaymentRequirements['network'] | null {
+  return STANDARD_X402_NETWORKS[network] ?? null
+}
+
+function matchesHeaderContext(option: X402PaymentOption, context: X402PaymentHeaderContext): boolean {
+  if (
+    option.scheme !== 'exact' ||
+    !sameAddress(option.payTo, context.merchantTo) ||
+    !sameAddress(option.asset, context.asset) ||
+    option.network !== context.network ||
+    x402AuthorizationAmount(option) !== context.amountAtomic
+  ) return false
+  // x402 v2 may scope an accepted option to a resource. When it does, that
+  // resource is part of the header context and must match the intent.
+  return option.resource === undefined || option.resource === context.resourceUrl
 }
 
 export function buildX402IdempotencyKey(

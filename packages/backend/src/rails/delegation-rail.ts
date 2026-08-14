@@ -315,6 +315,8 @@ export interface PreparedTreasuryOp {
 export interface TreasuryOps {
   treasuryAddress: Address
   prepareCall(to: Address, data: Hex): Promise<PreparedTreasuryOp>
+  /** #1400: ONE UserOp carrying several calls — one signature for the batch. */
+  prepareCalls(calls: Array<{ to: Address; data: Hex }>): Promise<PreparedTreasuryOp>
   submitCall(prepared: PreparedTreasuryOp, signature: Hex): Promise<RedemptionSubmitResult>
 }
 
@@ -415,8 +417,17 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
   })
 
   async function prepareCall(to: Address, data: Hex): Promise<PreparedTreasuryOp> {
+    return prepareCalls([{ to, data }])
+  }
+
+  // #1400: the batch form. `prepareUserOperation` already takes a calls
+  // array — the single-call path above was just never generalized. One
+  // UserOp = one owner signature regardless of batch size.
+  async function prepareCalls(
+    calls: Array<{ to: Address; data: Hex }>,
+  ): Promise<PreparedTreasuryOp> {
     const userOperation = await client.prepareUserOperation({
-      calls: [{ to, value: 0n, data }],
+      calls: calls.map(({ to, data }) => ({ to, value: 0n, data })),
     })
     const userOpHash = getUserOperationHash({
       chainId: cfg.chainId,
@@ -450,7 +461,7 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
     }
   }
 
-  return { treasuryAddress: account.address, prepareCall, submitCall }
+  return { treasuryAddress: account.address, prepareCall, prepareCalls, submitCall }
 }
 
 /** Resolves env + pinned config for the delegation rail (the old getSessionRailFor mirror comment predated the #834 retirement). */

@@ -710,3 +710,181 @@ describe('delegation lifecycle API (#828)', () => {
     })
   })
 })
+
+describe('POST /:id/delegations/revoke-all — #1400: one signature, every budget', () => {
+  let app: FastifyInstance
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(agentDelegationRoutes, { prefix: '/agents' })
+  })
+  afterAll(async () => app.close())
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockTreasury.mockReset()
+  })
+
+  const HASH2 = `0x${'cd'.repeat(32)}`
+  const storedJsonWithSalt = (salt: string) => JSON.stringify({
+    delegate: DELEGATE_ACCOUNT, delegator: TREASURY,
+    authority: `0x${'0'.repeat(64)}`, caveats: [], salt, signature: '0x' + 'cd'.repeat(65),
+  })
+  const storedJson = storedJsonWithSalt('1')
+
+  function mockBatchDb(opts: {
+    agent?: Record<string, unknown> | null
+    targets?: Array<Record<string, unknown>>
+    owner?: string | null
+    passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string }>
+  } = {}) {
+    mockQuery.mockImplementation((sql: string) => {
+      const s = String(sql)
+      if (/FROM agents a/.test(s)) {
+        return Promise.resolve({ rows: opts.agent === null ? [] : [opts.agent ?? agentRow()] })
+      }
+      if (/SELECT id, owner_address, single_signer_waiver_at FROM user_safes/.test(s)) {
+        const ownerAddr = opts.owner === undefined ? OWNER : opts.owner
+        return Promise.resolve({ rows: [{ id: 'safe-1', owner_address: ownerAddr }] })
+      }
+      if (/FROM hybrid_account_passkeys/.test(s)) {
+        return Promise.resolve({ rows: opts.passkeys ?? [] })
+      }
+      if (/status IN \('pending', 'active'\)/.test(s)) {
+        return Promise.resolve({
+          rows: opts.targets ?? [
+            { delegation_hash: HASH, delegation_json: storedJsonWithSalt('1'), status: 'active' },
+            { delegation_hash: HASH2, delegation_json: storedJsonWithSalt('2'), status: 'pending' },
+          ],
+        })
+      }
+      if (/SET status = 'revoked'/.test(s)) {
+        return Promise.resolve({ rows: [{ delegation_hash: HASH }, { delegation_hash: HASH2 }] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+  }
+
+  function preparedBatch() {
+    return {
+      userOperation: { nonce: 1n, sender: TREASURY },
+      userOpHash: `0x${'ef'.repeat(32)}`,
+      signingTypedData: { domain: { name: 'HybridDeleGator' }, types: {}, primaryType: 'PackedUserOperation', message: {} },
+      treasuryAddress: TREASURY,
+    }
+  }
+
+  it('404s a foreign agent and 409s a non-delegation-rail agent', async () => {
+    mockBatchDb({ agent: null })
+    const foreign = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all` })
+    expect(foreign.statusCode).toBe(404)
+
+    mockBatchDb({ agent: agentRow({ account_type: null }) })
+    const legacy = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all` })
+    expect(legacy.statusCode).toBe(409)
+    expect(legacy.json().error).toContain('AllowanceModule')
+  })
+
+  it('409s Nothing to revoke — no empty UserOp ever reaches the bundler', async () => {
+    mockBatchDb({ targets: [] })
+    const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all` })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toContain('Nothing to revoke')
+    expect(mockTreasury).not.toHaveBeenCalled()
+  })
+
+  it('prepares ONE batched UserOp for an EOA owner and lists every hash it will kill', async () => {
+    mockBatchDb({})
+    const prepareCalls = vi.fn().mockResolvedValue(preparedBatch())
+    mockTreasury.mockResolvedValue({ treasuryAddress: TREASURY, prepareCalls, submitCall: vi.fn() })
+
+    const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all` })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.signature_scheme).toBe('eip712_userop')
+    expect(body.delegation_hashes).toEqual([HASH, HASH2])
+    expect(body.signing_payload.primaryType).toBe('PackedUserOperation')
+    // ONE prepare with BOTH disableDelegation calls in it — and they are the
+    // two DISTINCT delegations (different salts → different calldata), not a
+    // duplicate of one; both target the pinned DelegationManager.
+    expect(prepareCalls).toHaveBeenCalledTimes(1)
+    const calls = prepareCalls.mock.calls[0][0]
+    expect(calls).toHaveLength(2)
+    expect(calls[0].data).not.toBe(calls[1].data)
+    expect(calls[0].to).toBe(calls[1].to)
+    // Custody rule (#824 §3): the signed delegation JSON never leaves the
+    // backend. HASH2 legitimately shows up in delegation_hashes (64 cd:s) —
+    // the needle is the stored delegation SIGNATURE (130 cd:s), so probe for
+    // a run longer than any hash, and for the json key itself.
+    expect(JSON.stringify(body)).not.toContain('cd'.repeat(50))
+    expect(JSON.stringify(body)).not.toContain('delegation_json')
+    // Nothing marked revoked at prepare time:
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'revoked'/.test(String(c[0])))).toBe(false)
+  })
+
+  it('prepares via the account passkey for pure-passkey accounts (webauthn_userop)', async () => {
+    mockBatchDb({ owner: null, passkeys: [{ key_id: 'abc', public_key_x: '1', public_key_y: '2' }] })
+    const prepareCalls = vi.fn().mockResolvedValue(preparedBatch())
+    mockTreasury.mockResolvedValue({ treasuryAddress: TREASURY, prepareCalls, submitCall: vi.fn() })
+
+    const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all` })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().signature_scheme).toBe('webauthn_userop')
+    expect(res.json().user_op_hash).toBe(`0x${'ef'.repeat(32)}`)
+    expect(mockTreasury.mock.calls[0][0]).toMatchObject({ signWith: 'passkey' })
+  })
+
+  it('submit marks exactly the batch revoked ONLY after the UserOp lands', async () => {
+    mockBatchDb({})
+    const submitCall = vi.fn().mockResolvedValue({ txHash: `0x${'11'.repeat(32)}` })
+    mockTreasury.mockResolvedValue({ treasuryAddress: TREASURY, prepareCalls: vi.fn(), submitCall })
+
+    const res = await app.inject({
+      method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all/submit`,
+      payload: {
+        signature: '0x' + 'ab'.repeat(65),
+        user_operation: { nonce: '1n', sender: TREASURY },
+        delegation_hashes: [HASH, HASH2],
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ revoked: true, tx_hash: `0x${'11'.repeat(32)}`, delegation_hashes: [HASH, HASH2] })
+    const update = mockQuery.mock.calls.find((c) => /SET status = 'revoked'/.test(String(c[0])))!
+    expect(update).toBeDefined()
+    // Batch statement, agent-scoped: ANY($2) with this agent's id first.
+    expect(String(update[0])).toContain('ANY($2)')
+    expect(update[1]).toEqual([AGENT_ID, [HASH, HASH2]])
+  })
+
+  it('a failed submit leaves every row untouched and never leaks the bundler credential', async () => {
+    mockBatchDb({})
+    const submitCall = vi.fn().mockRejectedValue(new Error('bundler https://bundler.example/x?apikey=SECRET exploded'))
+    mockTreasury.mockResolvedValue({ treasuryAddress: TREASURY, prepareCalls: vi.fn(), submitCall })
+
+    const res = await app.inject({
+      method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all/submit`,
+      payload: {
+        signature: '0x' + 'ab'.repeat(65),
+        user_operation: { nonce: '1n', sender: TREASURY },
+        delegation_hashes: [HASH],
+      },
+    })
+    expect(res.statusCode).toBe(502)
+    expect(JSON.stringify(res.json())).not.toContain('SECRET')
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'revoked'/.test(String(c[0])))).toBe(false)
+  })
+
+  it('submit 400s on malformed signature, missing user_operation, and bad hashes', async () => {
+    mockBatchDb({})
+    const cases = [
+      { signature: '0xzz', user_operation: {}, delegation_hashes: [HASH] },
+      { signature: '0x' + 'ab'.repeat(65), delegation_hashes: [HASH] },
+      { signature: '0x' + 'ab'.repeat(65), user_operation: {}, delegation_hashes: [] },
+      { signature: '0x' + 'ab'.repeat(65), user_operation: {}, delegation_hashes: ['nope'] },
+    ]
+    for (const payload of cases) {
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all/submit`, payload,
+      })
+      expect(res.statusCode).toBe(400)
+    }
+  })
+})

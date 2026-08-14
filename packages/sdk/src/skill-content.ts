@@ -216,3 +216,14 @@ for that credential.
 
 /** Directory name for the installed skill folder. */
 export const SKILL_FOLDER_NAME = 'haven-pay'
+
+/**
+ * The skill BODY — HAVEN_SKILL_MD with the YAML front-matter stripped.
+ *
+ * For runtimes whose instruction mechanism is a plain guidance file rather
+ * than a skills folder (Codex's global AGENTS.md, #1332), the front-matter is
+ * skill-registry metadata with no meaning and would render as a stray table.
+ * Derived mechanically from the canonical string above, never maintained by
+ * hand — the substance cannot fork per runtime.
+ */
+export const HAVEN_SKILL_BODY_MD = HAVEN_SKILL_MD.replace(/^---\n[\s\S]*?\n---\n+/, '')

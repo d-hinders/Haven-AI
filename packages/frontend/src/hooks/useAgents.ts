@@ -33,6 +33,8 @@ export interface Agent {
   mcp_last_seen_at?: string | null
   /** True when there are open reconciliation events indicating stranded delegate funds. */
   has_stranded_funds?: boolean
+  /** #1401: non-null = archived (soft-removed; history retained). */
+  archived_at?: string | null
 }
 
 interface CreateAgentParams {
@@ -107,9 +109,21 @@ export function useAgents() {
     [],
   )
 
-  const deleteAgent = useCallback(async (id: string): Promise<void> => {
-    await api.delete(`/agents/${id}`)
-    setAgents((prev) => prev.filter((a) => a.id !== id))
+  // #1402: removal is an archive (#1401) — the agent leaves the primary list
+  // client-side; the row and its history stay readable under Removed.
+  const archiveAgent = useCallback(async (id: string): Promise<void> => {
+    const res = await api.post<{ archived_at: string }>(`/agents/${id}/archive`, {})
+    setAgents((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, archived_at: res.archived_at } : a)),
+    )
+  }, [])
+
+  // Restores nothing but list placement — the agent stays revoked.
+  const unarchiveAgent = useCallback(async (id: string): Promise<void> => {
+    await api.post(`/agents/${id}/unarchive`, {})
+    setAgents((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, archived_at: null } : a)),
+    )
   }, [])
 
   const revokeAgent = useCallback(async (id: string): Promise<void> => {
@@ -139,7 +153,8 @@ export function useAgents() {
     error,
     createAgent,
     updateAgent,
-    deleteAgent,
+    archiveAgent,
+    unarchiveAgent,
     revokeAgent,
     pauseAgent,
     resumeAgent,

@@ -8,6 +8,7 @@ import { type AllowanceInfo } from '@/lib/allowance-module'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import ConfirmDialog from '../ConfirmDialog'
+import { RemoveAgentDialog } from './RemoveAgentDialog'
 import { entityCardClassName } from '../ui/entityCardStyles'
 import { AllowanceBar, AllowanceBarSkeleton, ConfiguredAllowanceRow } from './AllowanceBar'
 import { BotIcon } from './agent-display'
@@ -23,7 +24,9 @@ export function AgentCard({
   onPause,
   onResume,
   onRevoke,
-  onDelete,
+  onRevokeCredential,
+  onArchive,
+  onRestore,
   busyAction,
   canUseWalletActions,
   chainId = DEFAULT_CHAIN_ID,
@@ -37,19 +40,25 @@ export function AgentCard({
   onPause: (agent: Agent) => void
   onResume: (agent: Agent) => void
   onRevoke: (agent: Agent) => void
-  onDelete: (agent: Agent) => void
+  /** RemoveAgentDialog step 2: plain POST /agents/:id/revoke, throws on failure. */
+  onRevokeCredential: (agentId: string) => Promise<void>
+  /** RemoveAgentDialog step 3: archive (#1401), throws on failure. */
+  onArchive: (agent: Agent) => Promise<void>
+  onRestore: (agent: Agent) => void
   busyAction: AgentBusyAction
   canUseWalletActions: boolean
   chainId?: number
 }) {
   const [pauseModalOpen, setPauseModalOpen] = useState(false)
   const [revokeModalOpen, setRevokeModalOpen] = useState(false)
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [removeModalOpen, setRemoveModalOpen] = useState(false)
 
   const isActive = agent.status === 'active'
   const isPaused = agent.status === 'paused'
   const isRevoked = agent.status === 'revoked'
+  const isArchived = Boolean(agent.archived_at)
   const isOperational = !isRevoked
+  const isDelegationAgent = agent.account_type === 'delegator_hybrid'
   const isBusy = busyAction !== null
 
   async function handleConfirmPause() {
@@ -60,11 +69,6 @@ export function AgentCard({
   async function handleConfirmRevoke() {
     setRevokeModalOpen(false)
     onRevoke(agent)
-  }
-
-  async function handleConfirmDelete() {
-    setDeleteModalOpen(false)
-    onDelete(agent)
   }
 
   function openDetails() {
@@ -271,9 +275,9 @@ export function AgentCard({
               </button>
             )}
             {/* Safe revoke is an AllowanceModule teardown; on delegation
-                agents the real path is the budget card's per-budget stop
-                (#1079), so the Safe control is hidden there. */}
-            {canUseWalletActions && agent.account_type !== 'delegator_hybrid' ? (
+                agents the whole shutdown is the Remove flow below (#1402),
+                so the Safe control is hidden there. */}
+            {canUseWalletActions && !isDelegationAgent ? (
               <>
                 <span className="text-[var(--v2-border-strong)]">|</span>
                 <button
@@ -286,23 +290,54 @@ export function AgentCard({
                 </button>
               </>
             ) : null}
+            {/* #1402: Remove = revoke-all budgets + revoke credential +
+                archive, one confirmed action. Delegation agents only while
+                operational; on legacy agents Revoke stays the shutdown and
+                Remove appears after it (the revoked branch below). */}
+            {isDelegationAgent ? (
+              <>
+                <span className="text-[var(--v2-border-strong)]">|</span>
+                <button
+                  onClick={() => setRemoveModalOpen(true)}
+                  disabled={isBusy}
+                  aria-label={`Remove ${agent.name}`}
+                  className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              </>
+            ) : null}
           </>
         )}
-        {isRevoked && (
+        {isRevoked && !isArchived && (
           <>
-            <span className="text-[var(--v2-border-strong)]">|</span>
             <span className="text-xs text-[var(--v2-ink-3)]">
               Network access already revoked
             </span>
             <span className="text-[var(--v2-border-strong)]">|</span>
             <button
-              onClick={() => setDeleteModalOpen(true)}
+              onClick={() => setRemoveModalOpen(true)}
               disabled={isBusy}
-              aria-label={`Delete ${agent.name}`}
+              aria-label={`Remove ${agent.name}`}
               className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
             >
-              Delete
+              {busyAction === 'archive' ? 'Removing...' : 'Remove'}
             </button>
+          </>
+        )}
+        {isArchived && (
+          <>
+            <button
+              onClick={() => onRestore(agent)}
+              disabled={isBusy}
+              aria-label={`Restore ${agent.name} to the list`}
+              className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+            >
+              {busyAction === 'restore' ? 'Restoring...' : 'Restore to list'}
+            </button>
+            <span className="ml-auto text-xs text-[var(--v2-ink-3)]">
+              History stays readable; restoring never re-enables spending
+            </span>
           </>
         )}
       </div>
@@ -359,15 +394,17 @@ export function AgentCard({
       loading={busyAction === 'revoke'}
     />
 
-    <ConfirmDialog
-      open={deleteModalOpen}
-      onCancel={() => setDeleteModalOpen(false)}
-      onConfirm={handleConfirmDelete}
-      title={`Delete ${agent.name}?`}
-      body="This removes the agent record from Haven only. It does not restore or change network access, so deletion is only available after the agent has already been revoked."
-      confirmLabel="Delete agent"
-      loading={busyAction === 'delete'}
-    />
+    {/* Mounted only while open: its hooks (budget prepare, delegate-balance
+        read) are per-agent and must not run for every card in the list. */}
+    {removeModalOpen && (
+      <RemoveAgentDialog
+        agent={agent}
+        chainId={chainId}
+        onRevokeCredential={() => onRevokeCredential(agent.id)}
+        onArchive={() => onArchive(agent)}
+        onClose={() => setRemoveModalOpen(false)}
+      />
+    )}
     </>
   )
 }

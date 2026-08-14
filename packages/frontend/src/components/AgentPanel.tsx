@@ -27,7 +27,7 @@ export default function AgentPanel() {
     agents,
     loading,
     visibleAgents,
-    revokedAgents,
+    removedAgents,
     unmanagedDelegates,
     finalizingAgent,
     finalizeTimedOut,
@@ -189,7 +189,9 @@ export default function AgentPanel() {
                     onPause={panel.handlePause}
                     onResume={panel.handleResume}
                     onRevoke={panel.handleRevoke}
-                    onDelete={panel.handleDelete}
+                    onRevokeCredential={panel.revokeAgentCredential}
+                    onArchive={panel.handleArchive}
+                    onRestore={panel.handleRestore}
                     busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
                     canUseWalletActions={usesActiveSafe}
                     chainId={agentChainId}
@@ -199,25 +201,27 @@ export default function AgentPanel() {
             </div>
           )}
 
-          {revokedAgents.length > 0 && (
+          {/* #1402: Removed = ARCHIVED agents (archived_at set). History
+              stays readable; Restore returns list placement only. */}
+          {removedAgents.length > 0 && (
             <div className="pt-1">
               <button
-                onClick={() => panel.setShowRevokedAgents((prev) => !prev)}
+                onClick={() => panel.setShowRemovedAgents((prev) => !prev)}
                 className="inline-flex items-center gap-2 text-xs text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
               >
                 <Icon
                   icon={ChevronRight}
-                  className={`h-3 w-3 transition-transform ${panel.showRevokedAgents ? 'rotate-90' : ''}`}
+                  className={`h-3 w-3 transition-transform ${panel.showRemovedAgents ? 'rotate-90' : ''}`}
                 />
-                {panel.showRevokedAgents ? 'Hide revoked agents' : 'Show revoked agents'}
-                <span className="text-[var(--v2-ink-3)] v2-tabular">({revokedAgents.length})</span>
+                Removed
+                <span className="text-[var(--v2-ink-3)] v2-tabular">({removedAgents.length})</span>
               </button>
             </div>
           )}
 
-          {panel.showRevokedAgents && (
+          {panel.showRemovedAgents && (
             <div className="grid items-start gap-4 lg:grid-cols-2">
-              {revokedAgents.map((agent) => (
+              {removedAgents.map((agent) => (
                 <AgentCard
                   key={agent.id}
                   agent={agent}
@@ -229,7 +233,9 @@ export default function AgentPanel() {
                   onPause={panel.handlePause}
                   onResume={panel.handleResume}
                   onRevoke={panel.handleRevoke}
-                  onDelete={panel.handleDelete}
+                  onRevokeCredential={panel.revokeAgentCredential}
+                  onArchive={panel.handleArchive}
+                  onRestore={panel.handleRestore}
                   busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
                   canUseWalletActions={panel.agentUsesActiveSafe(agent)}
                   chainId={agent.safe_chain_id ?? chainId}

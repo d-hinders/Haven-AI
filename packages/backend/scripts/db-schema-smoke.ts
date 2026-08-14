@@ -101,7 +101,7 @@ import {
   FIND_AGENT_ID_FOR_USER_SQL,
   FIND_AGENT_ID_STATUS_FOR_USER_SQL,
   FIND_DEFAULT_USER_SAFE_ID_SQL,
-  FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL,
+  FIND_DELEGATE_AGENT_FOR_USER_SQL,
   FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
   FIND_SAFE_INFO_SQL,
   FIND_USER_SAFE_ID_FOR_USER_SQL,
@@ -342,7 +342,7 @@ const QUERIES: SmokeQuery[] = [
   // asymmetry (#1069) is named in the constants.
   { name: 'agents: list for user, ALL statuses (#1069)', sql: LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL },
   { name: 'agents: find for user, ALL statuses (#1069)', sql: FIND_AGENT_FOR_USER_ALL_STATUSES_SQL },
-  { name: 'agents: delegate-balance read, excluding revoked', sql: FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL },
+  { name: 'agents: delegate-balance read (status-agnostic, #1403)', sql: FIND_DELEGATE_AGENT_FOR_USER_SQL },
   { name: 'agents: allowances for many agents', sql: LIST_ALLOWANCES_FOR_AGENTS_SQL },
   { name: 'agents: allowances for one agent (ordered)', sql: LIST_ALLOWANCES_FOR_AGENT_SQL },
   { name: 'agents: allowances for one agent (PUT path, unordered)', sql: LIST_ALLOWANCES_FOR_AGENT_UNORDERED_SQL },

@@ -474,6 +474,24 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByTestId('edit-agent-modal')).toHaveTextContent('budget')
   })
 
+  it('reads the delegate balance for REVOKED agents too — the recovery banner must reach them (#1403)', () => {
+    // The old gate skipped the read for revoked agents ("the endpoint 404s
+    // anyway") — false since #1403, and exactly backwards: the sequence that
+    // strands delegate funds is revoke-mid-x402. The hook must be called with
+    // the agentId regardless of status.
+    const base = mockUseAgents()
+    mockUseAgents.mockReturnValue({
+      ...base,
+      agents: base.agents.map((a: { id: string }) =>
+        a.id === 'agent-1' ? { ...a, status: 'revoked' } : a,
+      ),
+    })
+    render(<AgentDetailClient agentId="agent-1" />)
+    const calls = mockUseDelegateBalance.mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    expect(calls[calls.length - 1][0]).toBe('agent-1')
+  })
+
   it('hides the Safe revoke control on a delegation agent, keeps it on a legacy agent', () => {
     mockDelegationAgent()
     const { unmount } = render(<AgentDetailClient agentId="agent-1" />)

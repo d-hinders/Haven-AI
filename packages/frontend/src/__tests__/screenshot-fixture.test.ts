@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs script; typed via the cast below
-import { fixtureFor, SEED_STORAGE_KEYS, FIXTURE_EMPTY_FALLBACK } from '../../scripts/screenshot.mjs'
+import {
+  fixtureFor,
+  SEED_STORAGE_KEYS,
+  FIXTURE_EMPTY_FALLBACK,
+  SCENARIOS,
+} from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
 import {
   isMcpToolCallActivityItem,
@@ -10,6 +15,12 @@ import {
 } from '../hooks/useAgentActivity'
 
 const fx = fixtureFor as (apiPath: string, mode?: string) => Record<string, unknown> | null
+
+type ScenarioShape = {
+  api: (apiPath: string, method: string) => Record<string, unknown> | undefined
+}
+/** Kept in step with the scenario's own constant in screenshot.mjs. */
+const SETUP_ID = 'setup-screenshot'
 
 describe('screenshot populated fixture (#896 follow-up)', () => {
   it('serves the populated shapes the hooks actually read', () => {
@@ -119,6 +130,38 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     expect(SEED_STORAGE_KEYS).toEqual({
       token: AUTH_TOKEN_STORAGE_KEY,
       activeSafe: ACTIVE_SAFE_STORAGE_KEY,
+    })
+  })
+
+  describe('scenarios (#1409)', () => {
+    const connect = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent']
+
+    it('pins the setup at awaiting_connection for the whole capture', () => {
+      // The shared e2e fixture flips to connected_local after the first status
+      // read, which would end the waiting screen mid-capture. The scenario
+      // must answer `awaiting_connection` EVERY time, not just once.
+      const first = connect.api(`/agent-connection-setups/${SETUP_ID}`, 'GET')
+      const second = connect.api(`/agent-connection-setups/${SETUP_ID}`, 'GET')
+      expect(first).toMatchObject({ status: 'awaiting_connection', agent_id: null })
+      expect(second).toMatchObject({ status: 'awaiting_connection' })
+    })
+
+    it('answers the setup CREATE that the shared fixture does not key', () => {
+      // Without this the modal's create step falls into the empty fallback and
+      // never reaches step 4 — the capture would silently shoot the wrong screen.
+      const created = connect.api('/agent-connection-setups', 'POST')
+      expect(created).toMatchObject({
+        setup_id: SETUP_ID,
+        status: 'awaiting_connection',
+        setup_prompt: expect.stringContaining('@haven_ai/connect'),
+      })
+    })
+
+    it('leaves every other endpoint to the shared fixture', () => {
+      // `undefined` (not null) is the fall-through signal — a scenario states
+      // only what is special about it.
+      expect(connect.api('/agents', 'GET')).toBeUndefined()
+      expect(connect.api('/auth/me', 'GET')).toBeUndefined()
     })
   })
 })

@@ -9,7 +9,7 @@ export type { PaymentReceipt, ReceiptVerification } from './receipt.js'
 export { toolDescriptions, composeDescription } from './tool-descriptions.js'
 export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'
 
-export { HAVEN_SKILL_MD, SKILL_FOLDER_NAME } from './skill-content.js'
+export { HAVEN_SKILL_MD, HAVEN_SKILL_BODY_MD, SKILL_FOLDER_NAME } from './skill-content.js'
 
 // The Node.js floor every published Haven package enforces (#1161). Shared here
 // because connect (at setup), signer and mcp (at startup) all need the same

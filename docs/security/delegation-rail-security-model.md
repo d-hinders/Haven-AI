@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-14" # #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
+last-verified: "2026-08-14" # #1423: revoke-all prepare reconciles crash-window orphans against disabledDelegations() and caps batches at 25; #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -130,9 +130,15 @@ delegation (`prepareCalls`, `ExecutionMode.BatchDefault` — atomic: all
 disable or none do). The owner signs that UserOp exactly as a single revoke;
 Haven still cannot sign it (invariant 3 unchanged). Fail-closed ordering: the
 DB rows flip to `revoked` only AFTER the UserOp lands, so a crash window can
-leave on-chain-disabled rows still marked active (self-healing surplus — a
-later redemption attempt reverts on-chain), never the reverse. An empty batch
-is a 409 (`Nothing to revoke`), which callers treat as already-done. The
+leave on-chain-disabled rows still marked active (a directionally safe
+surplus — a later redemption attempt reverts on-chain), never the reverse.
+Because `disableDelegation` is NOT idempotent (`AlreadyDisabled` revert) and
+the batch is atomic, the prepare step reconciles that window (#1423): it reads
+`disabledDelegations(hash)` for every candidate, heals already-disabled rows
+to `revoked`, and drops them from the batch — a failed read degrades to the
+full batch rather than blocking revocation. Batches are capped at 25 calls
+(422 pointing at per-hash revocation beyond it). An empty batch is a 409
+(`Nothing to revoke`), which callers treat as already-done. The
 per-delegation revoke and the kill-switch story above are unchanged.
 
 ## 4. Exit story — design + acceptance test (#832's contract)

@@ -169,6 +169,39 @@ export interface DelegationRail {
   submitRedemption(prepared: PreparedRedemption, signature: Hex): Promise<RedemptionSubmitResult>
 }
 
+// #1423: DelegationManager.disableDelegation REVERTS on an already-disabled
+// delegation (`AlreadyDisabled` in the pinned ABI) — it is NOT idempotent.
+// prepareCalls emits an atomic batch (BatchDefault), so a single stale row
+// whose delegation is already disabled on-chain (the #1400 crash window:
+// UserOp landed, process died before the DB UPDATE) would revert the WHOLE
+// retry batch. This read lets the revoke-all prepare drop those entries and
+// reconcile the rows instead of bundling a guaranteed revert.
+const DISABLED_DELEGATIONS_ABI = parseAbi([
+  'function disabledDelegations(bytes32) view returns (bool)',
+])
+
+/** Which of `hashes` the pinned DelegationManager already reports disabled. */
+export async function readDisabledDelegationHashes(
+  chainId: number,
+  rpcUrl: string,
+  hashes: readonly Hex[],
+): Promise<Set<Hex>> {
+  if (hashes.length === 0) return new Set()
+  const pins = getDelegationContracts(chainId)
+  const publicClient = createPublicClient({ chain: chainForId(chainId), transport: http(rpcUrl) })
+  const flags = await Promise.all(
+    hashes.map((hash) =>
+      publicClient.readContract({
+        address: pins.delegationManager,
+        abi: DISABLED_DELEGATIONS_ABI,
+        functionName: 'disabledDelegations',
+        args: [hash],
+      }),
+    ),
+  )
+  return new Set(hashes.filter((_, i) => flags[i]))
+}
+
 export async function createDelegationRail(cfg: DelegationRailConfig): Promise<DelegationRail> {
   getDelegationContracts(cfg.chainId) // fail-closed on unpinned chains
   const chain = chainForId(cfg.chainId)

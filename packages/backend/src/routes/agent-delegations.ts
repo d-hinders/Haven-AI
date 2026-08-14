@@ -44,7 +44,11 @@ import {
   delegationSigningPayload,
   type HavenBudgetPolicy,
 } from '../rails/delegation-policy.js'
-import { createTreasuryOps, delegationRailBundlerUrl } from '../rails/delegation-rail.js'
+import {
+  createTreasuryOps,
+  delegationRailBundlerUrl,
+  readDisabledDelegationHashes,
+} from '../rails/delegation-rail.js'
 import {
   listNonRevokedDelegationsForAgent,
   revokeDelegationsByHashes,
@@ -67,6 +71,12 @@ function safeDetails(err: unknown): string {
 
 const MAX_UINT96 = (1n << 96n) - 1n
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/
+
+// #1423: revoke-all bundles one disableDelegation call per delegation into a
+// single UserOp. Unbounded, a pathological agent could blow gas/payload
+// limits (a loud 502 — availability, not safety). Real agents hold a handful
+// of budgets; past this, per-hash revocation is the escape hatch.
+const MAX_REVOKE_ALL_BATCH = 25
 
 interface AgentAccountRow {
   agent_id: string
@@ -447,9 +457,40 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       })
     }
 
-    const targets = await listNonRevokedDelegationsForAgent(request.params.id)
+    let targets = await listNonRevokedDelegationsForAgent(request.params.id)
     if (targets.length === 0) {
       return reply.code(409).send({ error: 'Nothing to revoke — the agent has no pending or active budget delegations.' })
+    }
+
+    // #1423: disableDelegation is NOT idempotent (AlreadyDisabled revert), and
+    // the batch is atomic — one already-disabled entry would revert the whole
+    // op. A row can be stale-active while disabled on-chain (the #1400 crash
+    // window: UserOp landed, process died before the UPDATE). Heal those rows
+    // to `revoked` here and drop them from the batch. A failed read degrades
+    // to the pre-#1423 behavior (full batch) rather than blocking revocation —
+    // availability over a rare bundled revert, which still fails loudly (502).
+    try {
+      const disabled = await readDisabledDelegationHashes(
+        agent.chain_id,
+        getChain(agent.chain_id).rpcUrl,
+        targets.map((t) => t.delegation_hash as Hex),
+      )
+      if (disabled.size > 0) {
+        await revokeDelegationsByHashes(request.params.id, [...disabled])
+        targets = targets.filter((t) => !disabled.has(t.delegation_hash as Hex))
+      }
+    } catch (err) {
+      request.log.warn({ err }, 'disabled-delegations read failed; proceeding with the full batch')
+    }
+    if (targets.length === 0) {
+      // Everything was already disabled on-chain — the rows are now healed,
+      // so this is the same "step already done" signal the retry flow expects.
+      return reply.code(409).send({ error: 'Nothing to revoke — every delegation was already disabled on-chain (records reconciled).' })
+    }
+    if (targets.length > MAX_REVOKE_ALL_BATCH) {
+      return reply.code(422).send({
+        error: `Too many delegations for one batch (${targets.length} > ${MAX_REVOKE_ALL_BATCH}). Revoke individually via POST /agents/:id/delegations/:hash/revoke, then retry.`,
+      })
     }
 
     const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)

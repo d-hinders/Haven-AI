@@ -11,12 +11,11 @@
  *   agents are deliberately SURFACED (an abandoned connect setup used to leave
  *   the user with "Agents 0" and no route back — #1069). The function names
  *   say so: `...AllStatuses`.
- * - The DELEGATE-BALANCE read is the one status-scoped read: it excludes
- *   `revoked` (`...ExcludingRevoked`), because a revoked agent's delegate is
- *   no longer the user's hot key to inspect.
- *
- * Collapsing these into one "find agent" query silently changes what each
- * caller sees. Keep the distinction, keep it named.
+ * - The DELEGATE-BALANCE read is status-agnostic too since #1403: the old
+ *   `ExcludingRevoked` filter removed the sweep page exactly when stranded
+ *   delegate funds need recovering (post-revoke). It stays a separate, narrow
+ *   projection (delegate + chain only) — do not collapse it into the full
+ *   reads, but do not re-add a status filter either.
  *
  * **The SQL here is verbatim from the route.** Anything that looked improvable
  * was left alone and reported in the pull request instead.
@@ -117,13 +116,17 @@ export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.desc
        LIMIT 1`
 
 /**
- * The one status-scoped agent read: excludes `revoked` — a revoked agent's
- * delegate EOA is no longer a hot key the dashboard should inspect.
+ * #1403 retired the old status filter (`a.status != 'revoked'`): this is an
+ * owner-scoped read of a PUBLIC on-chain balance, and the exact sequence that
+ * strands funds on the delegate EOA — agent misbehaving mid-x402, user
+ * revokes it — is the sequence that needs the read to keep working. The old
+ * exclusion made sweep reachable only while the agent was healthy, which is
+ * when nobody needs it.
  */
-export const FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL = `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.safe_address, us.account_type
+export const FIND_DELEGATE_AGENT_FOR_USER_SQL = `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.safe_address, us.account_type
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
-       WHERE a.user_id = $1 AND a.id = $2 AND a.status != 'revoked'
+       WHERE a.user_id = $1 AND a.id = $2
        LIMIT 1`
 
 export const LIST_ALLOWANCES_FOR_AGENTS_SQL = `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
@@ -216,13 +219,13 @@ export async function findAgentForUserAllStatuses(
   return result.rows[0] ?? null
 }
 
-/** `userId` is REQUIRED. Excludes revoked agents — see the header invariant. */
-export async function findDelegateAgentForUserExcludingRevoked(
+/** `userId` is REQUIRED. Status-agnostic since #1403 — see the SQL's note. */
+export async function findDelegateAgentForUser(
   agentId: string,
   userId: string,
   db: Executor = pool,
 ): Promise<DelegateAgentRow | null> {
-  const result = await db.query<DelegateAgentRow>(FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL, [
+  const result = await db.query<DelegateAgentRow>(FIND_DELEGATE_AGENT_FOR_USER_SQL, [
     userId,
     agentId,
   ])

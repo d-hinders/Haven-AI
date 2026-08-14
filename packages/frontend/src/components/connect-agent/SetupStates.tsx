@@ -11,18 +11,23 @@ import { restartCopyForRuntime } from './setup-copy'
 /** Loading state while the connector finishes local setup. */
 export function FinalizingLocalSetup({ loading: _loading }: { loading: boolean }) {
   // #1377 C: the label is static — polling must never swap it (content shift).
+  // #1393: no local `space-y-*` wrapper — ConnectStepShell's body is a
+  // `flex flex-col gap-5`, and that gap is the flow's only vertical rhythm,
+  // so this renders as top-level siblings of the shell rather than a single
+  // wrapped block with its own spacing. `text-center` moves onto the one
+  // element that needs it now that the wrapper no longer supplies it.
   return (
-    <div className="space-y-4 text-center">
+    <>
       <div className="flex justify-center">
         <StatusBadge tone="neutral">
           <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current motion-safe:animate-pulse" aria-hidden />
           Finishing setup
         </StatusBadge>
       </div>
-      <p className="mx-auto max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">
+      <p className="mx-auto max-w-sm text-center text-sm leading-relaxed text-[var(--v2-ink-2)]">
         The connector is finishing local setup. This usually takes a few seconds.
       </p>
-    </div>
+    </>
   )
 }
 
@@ -46,12 +51,18 @@ export function TerminalSetupState({
   onPrimary: () => void
   onSecondary: () => void
 }) {
+  // #1393: no local `space-y-*` — shell `gap-5` is the only rhythm (see
+  // FinalizingLocalSetup above); `text-center` moves onto the title/body
+  // group specifically. The title stays the section tier (text-sm
+  // font-semibold): the modal has exactly one title, the Modal primitive's
+  // own `text-sm font-semibold` (ui/Modal.tsx) — every heading inside the
+  // connect flow plays a SECTION role, never a competing modal-title role.
   return (
-    <div className="space-y-4 text-center">
+    <>
       <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-surface-2)]">
         <StatusBadge tone={tone}>{badgeLabel}</StatusBadge>
       </div>
-      <div>
+      <div className="text-center">
         <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>
         <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-[var(--v2-ink-2)]">{body}</p>
       </div>
@@ -63,7 +74,7 @@ export function TerminalSetupState({
           {primaryLabel}
         </Button>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -81,16 +92,17 @@ export function SetupStatusState({
   primaryLabel: string
   onPrimary: () => void
 }) {
+  // #1393: no local `space-y-*` — shell `gap-5` is the only rhythm.
   return (
-    <div className="space-y-4 text-center">
+    <>
       <div className="flex justify-center">
         <StatusBadge tone={tone}>{title}</StatusBadge>
       </div>
-      <p className="mx-auto max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">{body}</p>
+      <p className="mx-auto max-w-sm text-center text-sm leading-relaxed text-[var(--v2-ink-2)]">{body}</p>
       <Button onClick={onPrimary} className="w-full">
         {primaryLabel}
       </Button>
-    </div>
+    </>
   )
 }
 

@@ -130,6 +130,10 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         <SetupDoneState
           runtime={flow.runtime}
           skillInstalled={Boolean(setupStatus?.install_status?.skill_installed)}
+          agentName={setupStatus?.agent.name}
+          budgets={setupStatus?.agent_budget}
+          walletName={setupStatus?.haven_wallet.name ?? flow.approvalWalletLabel}
+          chainId={setupStatus?.haven_wallet.chain_id ?? flow.approvalChainId}
           onClose={flow.handleClose}
         />
       )}

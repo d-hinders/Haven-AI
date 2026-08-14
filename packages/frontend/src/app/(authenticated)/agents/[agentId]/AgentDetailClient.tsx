@@ -244,7 +244,7 @@ interface Props {
   agentId: string
 }
 
-type PendingAction = 'pause' | 'resume' | 'revoke' | null
+type PendingAction = 'pause' | 'resume' | 'revoke' | 'restore' | null
 type ConfirmAction = 'revoke' | null
 
 export default function AgentDetailClient({ agentId }: Props) {
@@ -441,6 +441,21 @@ export default function AgentDetailClient({ agentId }: Props) {
       await resumeAgent(currentAgent.id)
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Resume failed')
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  // #1402: restores list placement only — the agent stays revoked. Runs
+  // under pendingAction so a double-click can't fire unarchive twice and
+  // paint a false failure over a restore that already succeeded.
+  async function handleRestore() {
+    setPendingAction('restore')
+    setErrorMessage(null)
+    try {
+      await unarchiveAgent(currentAgent.id)
+    } catch {
+      setErrorMessage('The agent could not be restored to the list')
     } finally {
       setPendingAction(null)
     }
@@ -738,12 +753,12 @@ export default function AgentDetailClient({ agentId }: Props) {
                   ) : null}
                   {isArchived ? (
                     <Button
-                      onClick={() => void unarchiveAgent(agentId).catch(() => setErrorMessage('The agent could not be restored to the list'))}
+                      onClick={() => void handleRestore()}
                       disabled={pendingAction !== null}
                       variant="ghost"
                       size="sm"
                     >
-                      Restore to list
+                      {pendingAction === 'restore' ? 'Restoring…' : 'Restore to list'}
                     </Button>
                   ) : null}
                 </div>

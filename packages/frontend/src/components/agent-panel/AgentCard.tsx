@@ -311,7 +311,6 @@ export function AgentCard({
         )}
         {isRevoked && !isArchived && (
           <>
-            <span className="text-[var(--v2-border-strong)]">|</span>
             <span className="text-xs text-[var(--v2-ink-3)]">
               Network access already revoked
             </span>
@@ -328,7 +327,6 @@ export function AgentCard({
         )}
         {isArchived && (
           <>
-            <span className="text-[var(--v2-border-strong)]">|</span>
             <button
               onClick={() => onRestore(agent)}
               disabled={isBusy}

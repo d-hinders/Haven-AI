@@ -401,8 +401,10 @@ export function useAgentPanelState() {
     try {
       await unarchiveAgent(agent.id)
     } catch (err) {
+      // Crafted copy, never err.message — api.ts throws the backend's raw
+      // error string (design-review finding on #1424).
       console.error('Restore failed:', err)
-      setToastMessage(err instanceof Error ? err.message : 'The agent could not be restored to the list')
+      setToastMessage('The agent could not be restored to the list')
     } finally {
       setBusyAgentId(null)
       setBusyAction(null)

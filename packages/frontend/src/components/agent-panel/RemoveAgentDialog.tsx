@@ -7,6 +7,7 @@ import { useDelegateBalance } from '@/hooks/useDelegateBalance'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import Link from 'next/link'
 import ConfirmDialog from '../ConfirmDialog'
+import { ApprovalRequiredBanner } from '../haven/ApprovalRequiredBanner'
 
 /**
  * #1402: "Remove agent" — ONE action with three effects, in an order that is
@@ -76,13 +77,12 @@ export function RemoveAgentDialog({
       }
       await onArchive()
       onClose()
-    } catch (err) {
+    } catch {
+      // Deliberately NOT err.message: api.ts throws the backend's raw error
+      // string, and this is a destructive-flow dialog — the state line below
+      // says what happened and what to do next.
       setPhase('filing_failed')
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'The agent can no longer spend, but it could not be moved to Removed. Remove it again to finish.',
-      )
+      setError(null)
     }
   }
 
@@ -113,21 +113,20 @@ export function RemoveAgentDialog({
             </li>
           </ul>
           {hasRecoverableUsdc && balance && (
-            <div className="rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-3 py-3">
-              <p className="text-xs font-medium text-[var(--v2-ink)] mb-1">
-                This agent&apos;s wallet still holds funds
-              </p>
-              <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                {balance.usdc} USDC can be recovered.{' '}
-                <Link
-                  href={`/agents/${agent.id}/sweep`}
-                  className="text-[var(--v2-brand)] underline-offset-2 hover:underline"
-                >
-                  Sweep funds first
-                </Link>{' '}
-                — or remove now and sweep later; removal never blocks recovery.
-              </p>
-            </div>
+            <ApprovalRequiredBanner
+              title="This agent's wallet still holds funds"
+              tone="warning"
+              density="compact"
+            >
+              {balance.usdc} USDC can be recovered.{' '}
+              <Link
+                href={`/agents/${agent.id}/sweep`}
+                className="text-[var(--v2-brand)] underline-offset-2 hover:underline"
+              >
+                Sweep funds first
+              </Link>{' '}
+              — or remove now and sweep later; removal never blocks recovery.
+            </ApprovalRequiredBanner>
           )}
           {needsSignature && !ready && (
             <p className="text-xs text-[var(--v2-ink-3)]">
@@ -140,19 +139,14 @@ export function RemoveAgentDialog({
             </p>
           )}
           {phase === 'filing_failed' && (
-            <p className="text-xs text-[var(--v2-ink-2)]">
-              The agent can no longer spend. Choose Remove again to finish moving it to Removed.
+            <p className="text-xs text-[var(--v2-danger)]" role="alert">
+              The agent can no longer spend, but it could not be moved to Removed. Choose Finish
+              removal to retry.
             </p>
           )}
         </div>
       }
-      confirmLabel={
-        phase === 'working'
-          ? 'Removing…'
-          : phase === 'filing_failed'
-            ? 'Finish removal'
-            : 'Remove agent'
-      }
+      confirmLabel={phase === 'filing_failed' ? 'Finish removal' : 'Remove agent'}
       tone="danger"
       loading={phase === 'working' || busy}
       confirmDisabled={needsSignature && !ready}

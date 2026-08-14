@@ -140,13 +140,16 @@ describe('RemoveAgentDialog', () => {
   it('archive failure AFTER a successful revoke-all reports honestly and offers to finish', async () => {
     mockRevokeAll.mockResolvedValue({ ok: true })
     const { onClose } = renderDialog(agentFixture(), {
-      onArchive: vi.fn().mockRejectedValue(new Error('network')),
+      // api.ts throws the backend's raw error string as .message — the dialog
+      // must never surface it in this destructive flow (design review, #1424).
+      onArchive: vi.fn().mockRejectedValue(new Error('Archive service temporarily unavailable')),
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
     await waitFor(() =>
-      expect(screen.getByText(/can no longer spend/i)).toBeTruthy(),
+      expect(screen.getByRole('alert').textContent).toMatch(/can no longer spend/i),
     )
+    expect(screen.queryByText(/temporarily unavailable/i)).toBeNull()
     // The dialog stays open with a finish affordance, never a silent success.
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Finish removal' })).toBeTruthy()

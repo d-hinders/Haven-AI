@@ -217,7 +217,9 @@ Use `components/ui/Textarea.tsx` for multi-line fields — the `Input` half of t
 
 Use `components/ui/Checkbox.tsx`. Every checkbox in Haven is a box **plus an explanation**, so the primitive owns the `flex items-start gap-2` label row and takes a required `label` (plus optional `helperText` for a consequence on a second line). Pass `className` for the row's own typography or surface.
 
-It is the **native** control with `accent-color`, not a custom-painted box: keyboard behaviour, focus ring, indeterminate state and screen-reader semantics come from the platform rather than being re-earned. The wrapping `<label>` gives implicit association, so the text is a click target with no `id`/`htmlFor` wiring at the call site — do not re-add one.
+It is the **native** control with `accent-color`, not a custom-painted box: keyboard behaviour, focus ring and screen-reader semantics come from the platform rather than being re-earned. The wrapping `<label>` gives implicit association, so the text is a click target with no `id`/`htmlFor` wiring at the call site — do not re-add one.
+
+One limit worth knowing before you reach for it: no ref is forwarded, so `indeterminate` — a DOM property rather than an attribute — is out of reach. Every checkbox in Haven is a single confirmation, so nothing needs it; add `forwardRef` when a real tri-state (a select-all header, say) actually arrives.
 
 ### Skeletons
 

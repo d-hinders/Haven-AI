@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-14" # #1199: passkey and wallet removal now share the informed two-to-one rule
+last-verified: "2026-08-14" # #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -123,6 +123,17 @@ surfaces.
 Blast radius on full agent compromise is therefore **identical in kind** to
 the retired session rail's (one period's budget per recipient) — with
 revocation one `disableDelegation` away.
+
+**Batch revocation (#1400):** `POST /agents/:id/delegations/revoke-all`
+prepares ONE UserOp batching a `disableDelegation` call per pending/active
+delegation (`prepareCalls`, `ExecutionMode.BatchDefault` — atomic: all
+disable or none do). The owner signs that UserOp exactly as a single revoke;
+Haven still cannot sign it (invariant 3 unchanged). Fail-closed ordering: the
+DB rows flip to `revoked` only AFTER the UserOp lands, so a crash window can
+leave on-chain-disabled rows still marked active (self-healing surplus — a
+later redemption attempt reverts on-chain), never the reverse. An empty batch
+is a 409 (`Nothing to revoke`), which callers treat as already-done. The
+per-delegation revoke and the kill-switch story above are unchanged.
 
 ## 4. Exit story — design + acceptance test (#832's contract)
 

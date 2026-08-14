@@ -149,11 +149,28 @@ export function useAgentConnectionSetupStatus(
 
     let cancelled = false
     let timeout: number | null = null
+    let consecutiveFailures = 0
 
     async function tick() {
       const next = await fetchStatus()
       if (cancelled) return
-      const status = next?.status
+      if (next == null) {
+        // #1404: a failed read schedules the NEXT attempt instead of ending
+        // the loop for the modal's life — the screen promises to advance
+        // itself, so polling must survive a dropped request and resume when
+        // the network does. Back off so repeated failures don't hot-loop at
+        // the fast-poll cadence. Sustained failure stays quiet on the waiting
+        // surface BY DECISION, not default: #1399 established that a flaky
+        // poll is not evidence about the connector (the staleness clock
+        // resets on error for the same reason), and the hook still exposes
+        // `error` for any surface that chooses to show it.
+        consecutiveFailures += 1
+        const backoff = Math.min(3000 * 2 ** (consecutiveFailures - 1), 30_000)
+        timeout = window.setTimeout(tick, backoff)
+        return
+      }
+      consecutiveFailures = 0
+      const status = next.status
       const shouldPoll =
         status === 'awaiting_connection' ||
         status === 'connected_local' ||
@@ -161,7 +178,7 @@ export function useAgentConnectionSetupStatus(
         status === 'approval_in_progress' ||
         status === 'proposed'
       if (shouldPoll) {
-        const localMcpConfigured = next?.install_status?.local_mcp_configured
+        const localMcpConfigured = next.install_status?.local_mcp_configured
         const fastPoll = status === 'awaiting_connection' || (status === 'connected_local' && !localMcpConfigured)
         timeout = window.setTimeout(tick, fastPoll ? 3000 : 10000)
       }

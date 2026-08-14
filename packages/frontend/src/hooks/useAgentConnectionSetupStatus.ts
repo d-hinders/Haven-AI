@@ -4,11 +4,33 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 
 /**
- * A copied setup command normally registers within a few seconds, even when
- * npm needs to install it. After this bound Haven can truthfully say it has
- * not received a connection yet and offer recovery without declaring failure.
+ * A copied setup command normally registers within a few seconds. A FIRST run
+ * has to download the connector first, which on a slow network can take a
+ * minute or more — so at this bound Haven only acknowledges that it is taking
+ * a while. Nothing is wrong yet, and the wording must not suggest otherwise
+ * (#1399).
  */
-export const AWAITING_CONNECTION_RECOVERY_MS = 60_000
+export const AWAITING_CONNECTION_SLOW_MS = 60_000
+
+/**
+ * Only here does Haven offer recovery. Three minutes is chosen to sit clear of
+ * a cold `npx` download on a poor network — the population this screen most
+ * often strands — not to line up with anything else.
+ *
+ * It happens to equal `waitForBudgetApproval`'s bound in `@haven_ai/connect`,
+ * and that is a coincidence of scale, NOT a coupling: that wait only starts
+ * after `registerSetup` succeeds, and a successful register moves the setup to
+ * `connected_local`, which ends this clock. The two bounds govern disjoint
+ * phases and can never be running at the same time, so either may be retuned
+ * on its own evidence.
+ */
+export const AWAITING_CONNECTION_RECOVERY_MS = 180_000
+
+/**
+ * How long a confirmed `awaiting_connection` has been running, as the waiting
+ * screen tells it: reassure, then acknowledge the wait, then offer a way out.
+ */
+export type AwaitingConnectionStage = 'starting' | 'slow' | 'recovery'
 
 export type AgentConnectionSetupStatus =
   | 'awaiting_connection'
@@ -84,7 +106,8 @@ export function useAgentConnectionSetupStatus(
   const [data, setData] = useState<AgentConnectionSetupStatusResponse | null>(null)
   const [loading, setLoading] = useState(Boolean(setupId && enabled))
   const [error, setError] = useState<string | null>(null)
-  const [awaitingConnectionStalled, setAwaitingConnectionStalled] = useState(false)
+  const [awaitingConnectionStage, setAwaitingConnectionStage] =
+    useState<AwaitingConnectionStage>('starting')
   const generationRef = useRef(0)
 
   const fetchStatus = useCallback(async () => {
@@ -120,7 +143,7 @@ export function useAgentConnectionSetupStatus(
       setData(null)
       setError(null)
       setLoading(false)
-      setAwaitingConnectionStalled(false)
+      setAwaitingConnectionStage('starting')
       return
     }
 
@@ -152,23 +175,35 @@ export function useAgentConnectionSetupStatus(
     }
   }, [enabled, fetchStatus, setupId])
 
+  // Two bounds, one clock. Only a CONFIRMED `awaiting_connection` advances it:
+  // a status-read error resets to 'starting' rather than counting toward
+  // recovery, because a flaky poll is not evidence about the connector. The
+  // effect keys on `data?.status`, not `data`, so ordinary poll ticks do not
+  // restart the clock.
   useEffect(() => {
     if (!setupId || !enabled || data?.status !== 'awaiting_connection' || error) {
-      setAwaitingConnectionStalled(false)
+      setAwaitingConnectionStage('starting')
       return
     }
-    const timeout = window.setTimeout(
-      () => setAwaitingConnectionStalled(true),
+    const slow = window.setTimeout(
+      () => setAwaitingConnectionStage('slow'),
+      AWAITING_CONNECTION_SLOW_MS,
+    )
+    const recovery = window.setTimeout(
+      () => setAwaitingConnectionStage('recovery'),
       AWAITING_CONNECTION_RECOVERY_MS,
     )
-    return () => window.clearTimeout(timeout)
+    return () => {
+      window.clearTimeout(slow)
+      window.clearTimeout(recovery)
+    }
   }, [data?.status, enabled, error, setupId])
 
   return {
     data,
     loading,
     error,
-    awaitingConnectionStalled,
+    awaitingConnectionStage,
     refetch: fetchStatus,
   }
 }

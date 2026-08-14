@@ -11,6 +11,7 @@ vi.mock('@/lib/api', () => ({
 
 import {
   AWAITING_CONNECTION_RECOVERY_MS,
+  AWAITING_CONNECTION_SLOW_MS,
   useAgentConnectionSetupStatus,
 } from '@/hooks/useAgentConnectionSetupStatus'
 
@@ -79,7 +80,7 @@ describe('useAgentConnectionSetupStatus', () => {
     expect(mockApiGet).toHaveBeenCalledTimes(1)
   })
 
-  it('flags a bounded recovery state only while Haven continues to report awaiting_connection', async () => {
+  it('stages starting → slow → recovery only while Haven continues to report awaiting_connection', async () => {
     mockApiGet.mockResolvedValue({
       setup_id: 'setup-1',
       status: 'awaiting_connection',
@@ -91,13 +92,21 @@ describe('useAgentConnectionSetupStatus', () => {
 
     const { result } = renderHook(() => useAgentConnectionSetupStatus('setup-1'))
     await act(async () => { await Promise.resolve() })
-    expect(result.current.awaitingConnectionStalled).toBe(false)
+    expect(result.current.awaitingConnectionStage).toBe('starting')
 
+    // A slow first run is acknowledged, NOT treated as a failure: the screen
+    // must not be offering recovery at this point (#1399).
     await act(async () => {
-      vi.advanceTimersByTime(AWAITING_CONNECTION_RECOVERY_MS)
+      vi.advanceTimersByTime(AWAITING_CONNECTION_SLOW_MS)
       await Promise.resolve()
     })
-    expect(result.current.awaitingConnectionStalled).toBe(true)
+    expect(result.current.awaitingConnectionStage).toBe('slow')
+
+    await act(async () => {
+      vi.advanceTimersByTime(AWAITING_CONNECTION_RECOVERY_MS - AWAITING_CONNECTION_SLOW_MS)
+      await Promise.resolve()
+    })
+    expect(result.current.awaitingConnectionStage).toBe('recovery')
 
     mockApiGet.mockResolvedValue({
       setup_id: 'setup-1',
@@ -108,7 +117,16 @@ describe('useAgentConnectionSetupStatus', () => {
       agent_budget: [],
     })
     await act(async () => { await result.current.refetch() })
-    expect(result.current.awaitingConnectionStalled).toBe(false)
+    expect(result.current.awaitingConnectionStage).toBe('starting')
+  })
+
+  it('reassures well before it offers recovery, with room for a cold npx download', () => {
+    // What actually matters is the ORDER and the gap: the user is reassured
+    // first, and recovery only appears long after a slow first run would
+    // normally have finished downloading the connector. The exact 3 minutes is
+    // a judgement call, so this pins the relationship rather than a literal.
+    expect(AWAITING_CONNECTION_SLOW_MS).toBeLessThan(AWAITING_CONNECTION_RECOVERY_MS)
+    expect(AWAITING_CONNECTION_RECOVERY_MS).toBeGreaterThanOrEqual(150_000)
   })
 
   it('never treats a status-read error as proof that the connector is stalled', async () => {
@@ -134,6 +152,6 @@ describe('useAgentConnectionSetupStatus', () => {
       await Promise.resolve()
     })
 
-    expect(result.current.awaitingConnectionStalled).toBe(false)
+    expect(result.current.awaitingConnectionStage).toBe('starting')
   })
 })

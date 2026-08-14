@@ -13,6 +13,7 @@ import { TerminalSetupState } from '../SetupStates'
 import { FinalizingLocalSetup } from '../SetupStates'
 import { ConnectStepShell } from '../ConnectStepShell'
 import type { CreateSetupResponse } from '@/hooks/useAgentConnectionSetup'
+import type { AwaitingConnectionStage } from '@/hooks/useAgentConnectionSetupStatus'
 
 const EXPIRES_AT = '2099-01-01T00:00:00.000Z'
 const SETUP = {
@@ -24,7 +25,7 @@ const SETUP = {
   connector_command: 'npx @haven_ai/connect@alpha --token hv_setup_test',
 } satisfies CreateSetupResponse
 
-function renderWaiting(loading: boolean, connectionStalled = false) {
+function renderWaiting(loading: boolean, connectionStage: AwaitingConnectionStage = 'starting') {
   return (
     <WaitingForConnector
       setup={SETUP}
@@ -43,7 +44,7 @@ function renderWaiting(loading: boolean, connectionStalled = false) {
       onContinueAfterManualCredential={() => {}}
       loading={loading}
       error={null}
-      connectionStalled={connectionStalled}
+      connectionStage={connectionStage}
       expiresAt={EXPIRES_AT}
       onCancel={() => {}}
     />
@@ -67,6 +68,29 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
   it('WaitingForConnector states the auto-advance promise in the primary instruction block', () => {
     const { container } = render(renderWaiting(false))
     expect(container.textContent).toMatch(/advances this screen automatically/i)
+  })
+
+  it('never renders the status slot empty, and the slow stage changes words only (#1399)', () => {
+    // The reserved slot used to render EMPTY for the first minute — a
+    // 144-216px void on every run. It now always carries a status line, and
+    // crossing the 1-minute bound must not move anything below it.
+    const { container, rerender } = render(renderWaiting(false, 'starting'))
+    const slot = container.querySelector('[aria-live="polite"]')
+    expect(slot).not.toBeNull()
+    expect(slot?.textContent?.trim()).not.toBe('')
+    expect(slot?.textContent).toMatch(/waiting for the agent to run the setup command/i)
+    expect(container.textContent).not.toContain('Haven has not received a connection yet')
+
+    const elementsBefore = container.querySelectorAll('*').length
+    rerender(renderWaiting(false, 'slow'))
+
+    expect(slot?.textContent).toMatch(/can take a minute or two/i)
+    // Nothing but the sentence changed: same element count, same reserved
+    // height, and still no recovery affordance offered.
+    expect(container.querySelectorAll('*').length).toBe(elementsBefore)
+    expect(slot?.className).toContain('min-h-16')
+    expect(container.textContent).not.toContain('Haven has not received a connection yet')
+    expect(container.querySelector('button[class*="min-h-11"]')).toBeNull()
   })
 
   it('offers stable, safe recovery only after Haven remains unconnected', () => {
@@ -93,13 +117,13 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
       onCancel,
     }
     const { container, getByRole, rerender } = render(
-      <WaitingForConnector {...props} connectionStalled={false} />,
+      <WaitingForConnector {...props} connectionStage="starting" />,
     )
-    const reserved = container.querySelector('.min-h-\\[216px\\].sm\\:min-h-\\[144px\\]')
+    const reserved = container.querySelector('.min-h-16.sm\\:min-h-11')
     expect(reserved).not.toBeNull()
     expect(container.textContent).not.toContain('Haven has not received a connection yet')
 
-    rerender(<WaitingForConnector {...props} connectionStalled />)
+    rerender(<WaitingForConnector {...props} connectionStage="recovery" />)
     expect(container.textContent).toContain('Haven has not received a connection yet')
     fireEvent.click(getByRole('button', { name: 'Copy local command' }))
     expect(onCopy).toHaveBeenCalledWith('command', SETUP.connector_command)

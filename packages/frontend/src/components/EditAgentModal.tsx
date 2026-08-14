@@ -33,6 +33,7 @@ import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 import { SigningStatus } from './SigningStatus'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
+import { Textarea } from './ui/Textarea'
 import { Select } from './ui/Select'
 import { useToast } from './ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -497,12 +498,11 @@ export default function EditAgentModal({
                     <label className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-3)]">
                       Description <span className="text-[var(--v2-ink-3)]">(optional)</span>
                     </label>
-                    <textarea
+                    <Textarea
                       value={agentDescription}
                       onChange={(e) => setAgentDescription(e.target.value)}
                       placeholder="What does this agent do?"
                       rows={2}
-                      className="w-full bg-[var(--v2-surface-2)] border border-[var(--v2-border)] rounded-[10px] px-4 py-2.5 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus:outline-none focus:border-[var(--v2-brand)]/50 focus:bg-[var(--v2-surface-2)] transition-all resize-none"
                     />
                   </div>
                 </div>

@@ -553,9 +553,22 @@ export const SCENARIOS = {
       await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
       const dialog = page.getByRole('dialog')
       await dialog.getByLabel('Agent name').fill('Research agent')
+
+      // Steps 1-3 are captured too: they carry form controls (description
+      // Textarea, the local-MCP and Agent Passport Checkboxes) that no other
+      // capture reaches. Disclosures are opened first — a control nobody can
+      // see is a control nobody reviewed (#1410).
+      const advanced = dialog.getByText('Advanced', { exact: true })
+      if (await advanced.isVisible().catch(() => false)) await advanced.click()
+      await shoot(dialog, 'step1-details')
+
       await dialog.getByRole('button', { name: 'Set agent budget' }).click()
       await dialog.getByPlaceholder('Amount').fill('25')
+      await shoot(dialog, 'step2-policy')
+
       await dialog.getByRole('button', { name: 'Review agent rules' }).click()
+      await shoot(dialog, 'step3-review')
+
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
       await dialog.getByText('Connect your agent').waitFor({ timeout: 30_000 })
 
@@ -583,6 +596,19 @@ export const SCENARIOS = {
       await page.clock.fastForward(130_000)
       await dialog.getByText('Haven has not received a connection yet').waitFor({ timeout: 15_000 })
       await shoot(dialog, 'waiting-recovery')
+
+      // The manual-credential path, revealed. It holds the most
+      // safety-relevant string in the flow — the confirmation gating a
+      // one-time private signing key — and it is behind two disclosures, so
+      // it is invisible to every other capture. Revealing it shows the
+      // warning and its checkbox; it creates nothing (that needs the button
+      // below it, which is deliberately NOT clicked).
+      await dialog.getByText('Manual credential fallback').click()
+      const revealManual = dialog.getByRole('button', { name: /show the manual path/i })
+      await revealManual.waitFor({ timeout: 10_000 })
+      await revealManual.click()
+      await dialog.getByText(/one-time private signing key/i).first().waitFor({ timeout: 10_000 })
+      await shoot(dialog, 'manual-credential-warning')
     },
   },
 }

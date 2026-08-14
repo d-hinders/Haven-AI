@@ -16,7 +16,9 @@ import {
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
+import { Textarea } from '@/components/ui/Textarea'
 import { Table } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
@@ -95,6 +97,7 @@ export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [checkboxOn, setCheckboxOn] = useState(true)
   const [sampleAmount, setSampleAmount] = useState('')
   const { toast } = useToast()
 
@@ -699,6 +702,46 @@ export default function DesignSystemPage() {
             <Select disabled defaultValue="usdc" aria-label="Token (disabled)">
               <option value="usdc">USDC</option>
             </Select>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="Textarea"
+        description="The multi-line half of the Input family — same radius, surface, padding, focus ring and invalid/disabled treatment, so a description field under a name field belongs to the same form. resize-none by default. Reach for it instead of a raw <textarea>."
+      >
+        <Card hover={false} className="max-w-sm p-5">
+          <div className="space-y-3">
+            <Textarea rows={2} placeholder="What does this agent do?" aria-label="Description" />
+            <Textarea
+              rows={2}
+              invalid
+              defaultValue="Too long…"
+              helperText="Keep it under 200 characters."
+              aria-label="Description (invalid)"
+            />
+            <Textarea rows={2} disabled defaultValue="Read-only" aria-label="Description (disabled)" />
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="Checkbox"
+        description="The styled native checkbox with its label row built in — every use in Haven is a box plus an explanation, so the flex row is part of the primitive. Native + accent-color on purpose: keyboard behaviour, focus ring and screen-reader semantics come from the platform. Wrapping <label> makes the text a click target with no id/htmlFor wiring."
+      >
+        <Card hover={false} className="max-w-sm p-5">
+          <div className="space-y-3 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            <Checkbox
+              checked={checkboxOn}
+              onChange={(event) => setCheckboxOn(event.target.checked)}
+              label="Issue an Agent Passport — a signed, revocable record that this agent was issued by Haven."
+            />
+            <Checkbox
+              defaultChecked={false}
+              label="With helper text"
+              helperText="A second line for the consequence, not the choice."
+            />
+            <Checkbox disabled label="Disabled — the label dims with the box." />
           </div>
         </Card>
       </Section>

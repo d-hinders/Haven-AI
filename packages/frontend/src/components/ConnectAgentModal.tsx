@@ -74,9 +74,24 @@ export default function ConnectAgentModal({
       closeOnEscape={false}
       bodyClassName="p-5"
     >
-      {flow.step === 'details' && <DetailsStep flow={flow} />}
-      {flow.step === 'policy' && <PolicyStep flow={flow} />}
-      {flow.step === 'review' && <ReviewStep flow={flow} />}
+      {/*
+       * #1411: steps 1-3 share ONE 20px rhythm — the same `flex flex-col
+       * gap-5` step 4's shell body carries (ConnectStepShell) — instead of
+       * each setting its own `space-y-*` (DetailsStep/ReviewStep used 5,
+       * PolicyStep used 4). Hoisted here rather than left inside each step
+       * so no step can silently reintroduce a local rhythm. Keyed by
+       * `flow.step` so the entrance animation retriggers on every step
+       * change, the same way ConnectStepShell keys its body by `stateKey`.
+       * Step 4 stays OUTSIDE this wrapper and keeps its own shell/rhythm —
+       * changing it is explicitly out of scope for #1411.
+       */}
+      {flow.step !== 'connect' && (
+        <div key={flow.step} className="v2-animate-step-rise flex flex-col gap-5">
+          {flow.step === 'details' && <DetailsStep flow={flow} />}
+          {flow.step === 'policy' && <PolicyStep flow={flow} />}
+          {flow.step === 'review' && <ReviewStep flow={flow} />}
+        </div>
+      )}
       {flow.step === 'connect' && <ConnectStep flow={flow} />}
     </Modal>
   )

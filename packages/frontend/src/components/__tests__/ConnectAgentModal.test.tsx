@@ -521,13 +521,15 @@ describe('ConnectAgentModal', () => {
     fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '10' } })
 
     // Unchecked by default — review step must say so, not stay silent.
+    // #1411: the row restates the choice only ("Yes"/"No"), no longer a
+    // sentence explaining what issuing means — that stays on the policy step.
     fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
-    expect(screen.getByText('Not requested')).toBeInTheDocument()
+    expect(screen.getByText('No')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     fireEvent.click(screen.getByRole('checkbox', { name: /issue an agent passport/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
-    expect(screen.getByText('Issue on approval')).toBeInTheDocument()
+    expect(screen.getByText('Yes')).toBeInTheDocument()
   })
 
   it('exposes local MCP only as an Advanced opt-in and sends local_mcp when chosen', async () => {
@@ -563,6 +565,66 @@ describe('ConnectAgentModal', () => {
     await waitFor(() => expect(mockApiPost).toHaveBeenCalled())
     const body = mockApiPost.mock.calls[0][1] as Record<string, unknown>
     expect(body.local_mcp).toBeUndefined()
+  })
+
+  it('produces a byte-identical create-setup payload for fixed inputs across steps 1-3 (#1411)', async () => {
+    // #1411 acceptance criterion: the design pass over Details/Policy/Review
+    // must not change the setup payload for the same inputs. This walks all
+    // three steps with one fixed set of inputs — every field the payload
+    // carries (name, description, runtime, wallet, token, atomic amount,
+    // reset_period_min, passport opt-in, local MCP flag) — and asserts the
+    // EXACT request body (not `objectContaining`), so any future step-level
+    // markup change that quietly drops or renames a field fails here.
+    renderModal()
+
+    fireEvent.change(screen.getByLabelText('Agent name'), {
+      target: { value: 'Research Agent' },
+    })
+    fireEvent.change(screen.getByLabelText('Description (optional)'), {
+      target: { value: 'Handles vendor invoices' },
+    })
+    fireEvent.change(screen.getByLabelText('Where will this agent run?'), {
+      target: { value: 'codex-cli' },
+    })
+    fireEvent.click(screen.getByText('Advanced'))
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+
+    fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '42.50' } })
+    fireEvent.change(screen.getByLabelText('Budget reset period'), { target: { value: '10080' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /issue an agent passport/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+
+    // Review restates the exact choices made above — Runtime and Budget rows
+    // in particular are new to this pass (#1411); assert them here too so a
+    // silently-dropped row and a silently-changed payload are both caught.
+    expect(screen.getByText('Codex CLI')).toBeInTheDocument()
+    expect(screen.getByText(/42\.50 USDC\.e per week/)).toBeInTheDocument()
+    expect(screen.getByText('Yes')).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create setup prompt' }))
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/agent-connection-setups', expect.any(Object)))
+    const body = mockApiPost.mock.calls[0][1] as Record<string, unknown>
+    expect(body).toEqual({
+      name: 'Research Agent',
+      description: 'Handles vendor invoices',
+      safe_id: SAFE.id,
+      runtime: 'codex-cli',
+      local_mcp: true,
+      allowances: [
+        {
+          token_address: '0x9999999999999999999999999999999999999999',
+          token_symbol: 'USDC.e',
+          allowance_amount: '42500000',
+          reset_period_min: 10080,
+        },
+      ],
+      issue_passport: true,
+    })
   })
 
   it('defaults the wallet picker to a supported-chain wallet and does not offer the legacy Gnosis one', () => {

@@ -920,7 +920,17 @@ describe('ConnectAgentModal', () => {
     // every part of this sentence is derived, not hardcoded prose: a decimals
     // bug or a period-label regression breaks it.
     const grantLine = 'Research Agent can now spend up to 10.00 USDC.e per day from Operating wallet.'
-    expect(await screen.findByText(grantLine)).toBeInTheDocument()
+    // Matched on the whole paragraph: the amount is wrapped in a .v2-tabular
+    // span (design-system.md wants tabular numerals on every amount), and
+    // getByText's default only joins an element's DIRECT text-node children,
+    // so a plain string query would no longer see the sentence.
+    expect(
+      await screen.findByText(
+        (_content, element) => element?.tagName === 'P' && element.textContent === grantLine,
+      ),
+    ).toBeInTheDocument()
+    // The amount itself carries the tabular class, not the whole sentence.
+    expect(document.querySelector('.v2-tabular')?.textContent).toBe('10.00 USDC.e per day')
     // Stated once, not once per render path.
     expect(countOccurrences(document.body.textContent ?? '', grantLine)).toBe(1)
     // ...and it leads with a heading rather than a badge, so the ending reads

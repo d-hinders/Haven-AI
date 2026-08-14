@@ -158,9 +158,20 @@ export function SetupDoneState({
           {canNameGrant ? `${grantedName} is ready to spend` : 'Your agent is ready to spend'}
         </h3>
         <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          {canNameGrant
-            ? `${grantedName} can now spend up to ${grants.join(', ')} from ${walletName}.`
-            : 'Your agent can now spend within budget.'}
+          {canNameGrant ? (
+            <>
+              {/* .v2-tabular on the amount: design-system.md asks for tabular
+                  numerals on EVERY amount, and this sentence is the flow's
+                  money-clarity payoff. Wrapping the whole grant phrase rather
+                  than splitting the digits out is deliberate — tabular-nums
+                  only affects figures, so the symbol and period ride along
+                  harmlessly and the describer stays one string. */}
+              {grantedName} can now spend up to{' '}
+              <span className="v2-tabular">{grants.join(', ')}</span> from {walletName}.
+            </>
+          ) : (
+            'Your agent can now spend within budget.'
+          )}
         </p>
       </div>
 

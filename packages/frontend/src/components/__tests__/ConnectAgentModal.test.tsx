@@ -933,6 +933,10 @@ describe('ConnectAgentModal', () => {
     // restate it.
     expect(screen.queryByText('Agent rules approved')).not.toBeInTheDocument()
     expect(countOccurrences(document.body.textContent ?? '', 'Approved')).toBe(1)
+    // The subtitle's job on this flow is to say what to DO; on the ending it
+    // orients rather than restating the ticker. Asserted positively, not just
+    // by the absence of the old string.
+    expect(screen.getByText('What your agent can do now')).toBeInTheDocument()
 
     // Runtime-specific restart copy: Claude Code (the default) is a session
     // runtime, so users are not told to restart needlessly.

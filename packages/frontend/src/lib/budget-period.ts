@@ -24,8 +24,22 @@ export function budgetPeriodLabel(mins: number): string {
  * per day from your Haven wallet"). Three surfaces describing one authority is
  * exactly where wording drifts — a user who reads "25 USDC per day" before
  * approving and "25 USDC daily" after has to wonder whether they are the same
- * number. The amount+symbol+period shape was already assembled by hand at four
- * call sites, so it becomes one function here.
+ * number.
+ *
+ * Scope of the absorption, precisely: the two screens a user sees back to back
+ * in this flow (`LocalConnectionReady`, `SetupDoneState`). Four call sites
+ * hand-assemble `amount + symbol + period`; the other two —
+ * `useAgentConnectionSetup`'s manual-credential PROMPT builder and
+ * `DelegationApprovalStep` — are not migrated, because they need only the
+ * label form and neither sits beside the other in a single viewport. Worth
+ * folding in later; not claimed as done.
+ *
+ * Parity with the connector holds for the periods this flow actually offers on
+ * the delegation rail (daily/weekly/monthly, one-time on legacy). It is NOT
+ * total: the connector's own `describeResetPeriod` special-cases only 1440, 60
+ * and 0, so a weekly budget prints "per 10080 minutes" in the agent's terminal
+ * against "per week" here. That divergence lives in `packages/connect` and is
+ * tracked separately rather than silently claimed as fixed.
  *
  * `allowance_amount` is the raw on-chain bigint string, so formatting needs the
  * chain to resolve the token's decimals.

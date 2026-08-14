@@ -903,7 +903,7 @@ describe('ConnectAgentModal', () => {
     expect(screenText).not.toContain('Return to Haven and approve')
   })
 
-  it('shows post-approval restart hint and "Agent rules approved" headline on success', async () => {
+  it('names the granted authority on the approved screen, and states status once (#1394)', async () => {
     mockUseAgentConnectionSetupStatus.mockReturnValue({
       data: connectedSetupStatus({ status: 'active' }),
       loading: false,
@@ -913,16 +913,63 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    // The restart guidance moved from the pre-approval screen to here — it's
-    // only actionable now that approval has landed. "Agent rules approved"
-    // appears in both the StatusBadge title and the header subtitle.
-    const approvedMatches = await screen.findAllByText('Agent rules approved')
-    expect(approvedMatches.length).toBeGreaterThan(0)
+    // The success line names what the user just granted, in the same shape the
+    // connector prints in the agent's own terminal ("I can now spend up to
+    // 25 USDC per day from your Haven wallet"). The fixture grants 10000000
+    // atomic USDC.e (6 decimals) per 1440 minutes from "Operating wallet", so
+    // every part of this sentence is derived, not hardcoded prose: a decimals
+    // bug or a period-label regression breaks it.
+    const grantLine = 'Research Agent can now spend up to 10.00 USDC.e per day from Operating wallet.'
+    // Matched on the whole paragraph: the amount is wrapped in a .v2-tabular
+    // span (design-system.md wants tabular numerals on every amount), and
+    // getByText's default only joins an element's DIRECT text-node children,
+    // so a plain string query would no longer see the sentence.
+    expect(
+      await screen.findByText(
+        (_content, element) => element?.tagName === 'P' && element.textContent === grantLine,
+      ),
+    ).toBeInTheDocument()
+    // The amount itself carries the tabular class, not the whole sentence.
+    expect(document.querySelector('.v2-tabular')?.textContent).toBe('10.00 USDC.e per day')
+    // Stated once, not once per render path.
+    expect(countOccurrences(document.body.textContent ?? '', grantLine)).toBe(1)
+    // ...and it leads with a heading rather than a badge, so the ending reads
+    // as a conclusion instead of a fragment.
+    expect(screen.getByText('Research Agent is ready to spend')).toBeInTheDocument()
+
+    // ONE status voice. "Agent rules approved" used to appear twice in this
+    // viewport — a success StatusBadge and the header subtitle — on top of the
+    // shell ticker's "Approved". The ticker owns status now; nothing else may
+    // restate it.
+    expect(screen.queryByText('Agent rules approved')).not.toBeInTheDocument()
+    expect(countOccurrences(document.body.textContent ?? '', 'Approved')).toBe(1)
+    // The subtitle's job on this flow is to say what to DO; on the ending it
+    // orients rather than restating the ticker. Asserted positively, not just
+    // by the absence of the old string.
+    expect(screen.getByText('What your agent can do now')).toBeInTheDocument()
+
     // Runtime-specific restart copy: Claude Code (the default) is a session
     // runtime, so users are not told to restart needlessly.
     expect(screen.getByText(/next Claude Code message/i)).toBeInTheDocument()
     expect(screen.getByText(/Haven tools wired/i)).toBeInTheDocument()
     expect(screen.queryByText('Agent restart prepared')).not.toBeInTheDocument()
+  })
+
+  it('falls back to the generic success line when no budget is available (#1394)', async () => {
+    // A half-named authority ("can spend up to  from ") would read worse than
+    // the abstract line, so an absent budget degrades rather than interpolates.
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus({ status: 'active', agent_budget: [] }),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    renderModal()
+    await fillAndCreateSetup()
+
+    expect(await screen.findByText('Your agent is ready to spend')).toBeInTheDocument()
+    expect(screen.getByText('Your agent can now spend within budget.')).toBeInTheDocument()
+    expect(screen.queryByText(/can now spend up to/)).not.toBeInTheDocument()
   })
 
   it('hides verification details behind a disclosure on the approval screen', async () => {
@@ -1565,7 +1612,9 @@ describe('ConnectAgentModal', () => {
   it.each([
     ['approval_in_progress', 'Approval in progress'],
     ['proposed', 'Waiting for more approvals'],
-    ['active', 'Agent rules approved'],
+    // #1394: this row carries `agent_budget: []`, so `active` renders the
+    // generic heading — the same graceful-degradation path asserted above.
+    ['active', 'Your agent is ready to spend'],
   ])('renders %s setup status without a blank connect step', async (status, title) => {
     mockUseAgentConnectionSetupStatus.mockReturnValue({
       data: {
@@ -1594,9 +1643,8 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    // "Agent rules approved" also appears in the header subtitle for the
-    // `active` state, so multiple matches are valid — we just need at
-    // least one (the StatusBadge title).
+    // findAllByText, not findByText: the non-`active` rows still render their
+    // title in both a StatusBadge and the header subtitle.
     const matches = await screen.findAllByText(title)
     expect(matches.length).toBeGreaterThan(0)
   })

@@ -87,3 +87,44 @@ export async function selectDelegationForPayment(
   ])
   return result.rows[0] ?? null
 }
+
+/**
+ * #1400: everything the batch revocation must kill — pending AND active
+ * (a pending grant is still a signed delegation that could activate).
+ */
+export const LIST_NON_REVOKED_DELEGATIONS_FOR_AGENT_SQL = `SELECT delegation_hash, delegation_json, status
+       FROM agent_delegations
+       WHERE agent_id = $1 AND status IN ('pending', 'active')
+       ORDER BY created_at ASC`
+
+export async function listNonRevokedDelegationsForAgent(
+  agentId: string,
+): Promise<Array<{ delegation_hash: string; delegation_json: string; status: string }>> {
+  const result = await pool.query<{ delegation_hash: string; delegation_json: string; status: string }>(
+    LIST_NON_REVOKED_DELEGATIONS_FOR_AGENT_SQL,
+    [agentId],
+  )
+  return result.rows
+}
+
+/**
+ * #1400: ONE statement marks exactly the submitted batch revoked. Scoped by
+ * agent_id so a stray hash from another agent flips nothing, and predicated
+ * on status so an already-revoked row is not churned. Returns the hashes
+ * actually flipped so the caller can report honestly.
+ */
+export const REVOKE_DELEGATIONS_BY_HASHES_SQL = `UPDATE agent_delegations
+       SET status = 'revoked', updated_at = NOW()
+       WHERE agent_id = $1 AND delegation_hash = ANY($2) AND status != 'revoked'
+       RETURNING delegation_hash`
+
+export async function revokeDelegationsByHashes(
+  agentId: string,
+  hashes: string[],
+): Promise<string[]> {
+  const result = await pool.query<{ delegation_hash: string }>(REVOKE_DELEGATIONS_BY_HASHES_SQL, [
+    agentId,
+    hashes,
+  ])
+  return result.rows.map((row) => row.delegation_hash)
+}

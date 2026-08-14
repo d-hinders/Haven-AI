@@ -58,6 +58,7 @@ import * as multiPasskeyPerChain from './056_multi_passkey_per_chain.js'
 import * as fixMppDemoCatalogUrl from './057_fix_mpp_demo_catalog_url.js'
 import * as demoMerchantCatalog from './058_demo_merchant_catalog.js'
 import * as retireMppDemoCatalog from './059_retire_mpp_demo_catalog.js'
+import * as agentsArchivedAt from './060_agents_archived_at.js'
 
 export interface Migration {
   version: string
@@ -129,4 +130,5 @@ export const migrations: Migration[] = [
   fixMppDemoCatalogUrl,
   demoMerchantCatalog,
   retireMppDemoCatalog,
+  agentsArchivedAt,
 ]

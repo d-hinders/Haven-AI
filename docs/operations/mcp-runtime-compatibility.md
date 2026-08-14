@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-14" # #1397: default hosted MCP exposes read-only generic/catalog MCP quote tools; local stdio intentionally does not expose a misleading quote-then-pay contract because its one-shot payment path cannot enforce a later fresh quote/cap. Prior: release 0.1.23-alpha.2 manifest table update.
+last-verified: "2026-08-14" # #1332: guidance-surface parity — setup installs the canonical skill via each runtime's documented instruction mechanism (Hermes skills dir, Codex global AGENTS.md managed section); Claude Code unchanged. Prior: #1397 hosted-only quote tools.
 ---
 
 # MCP Runtime Compatibility
@@ -96,6 +96,32 @@ the `mcp_servers.haven` and `mcp_servers.haven-signer` entries.
 Hermes discovers MCP servers at process startup, so start a new session (or run
 `/restart` for a gateway). Hermes also needs its Python MCP SDK installed (`pip
 install mcp`) to load MCP tools.
+
+## Guidance surfaces (skill parity, #1332)
+
+Setup also installs the generic, secret-free payment skill wherever the
+runtime has a documented instruction mechanism. The substance is the single
+canonical string in `packages/sdk/src/skill-content.ts` on every runtime —
+only the wrapper differs, never the content:
+
+- **Claude Code** — `~/.claude/skills/haven-pay/SKILL.md` (canonical bytes).
+- **Hermes** — `$HERMES_HOME/skills/haven-pay/SKILL.md` (default
+  `~/.hermes/skills/…`); Hermes auto-discovers SKILL.md skills in the same
+  front-matter format, so the file is byte-identical to the Claude install.
+- **Codex CLI / Codex Desktop** — a marker-delimited managed section in the
+  global `~/.codex/AGENTS.md` (Codex's documented global-guidance file, shared
+  by both). The section carries the skill body without front matter
+  (`HAVEN_SKILL_BODY_MD`); re-runs replace the section in place, everything
+  outside the markers is preserved byte-for-byte, and a damaged marker pair
+  makes the write fail closed with the file untouched. `AGENTS.override.md` is
+  never written.
+- **Every other runtime** (Cursor, VS Code, Claude Desktop, `other`) — no
+  documented instruction file; the MCP server-level initialize instructions
+  carry the baseline guidance and nothing is written.
+
+A guidance write happens only when the runtime config write itself succeeded,
+and a failed skill install never fails the setup — the messages point at the
+dashboard download instead.
 
 ## Completion handoff after Connect
 

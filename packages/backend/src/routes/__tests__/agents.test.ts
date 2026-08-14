@@ -615,3 +615,88 @@ describe('delegation-rail budget view derives from active delegations (#1090)', 
     expect(allowance.allowance_amount).toBe('2.00')
   })
 })
+
+describe('agent archive routes (#1401)', () => {
+  // SQL-pattern dispatch per the #1227 ratchet — no positional mocks.
+  function primeDb(handlers: Array<[RegExp, { rows: unknown[] }]>) {
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql)
+      for (const [pattern, result] of handlers) {
+        if (pattern.test(text)) return result
+      }
+      return { rows: [] }
+    })
+  }
+
+  async function buildApp() {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    return app
+  }
+
+  it('DELETE /agents/:id is a 410 tombstone that touches nothing', async () => {
+    const app = await buildApp()
+    mockQuery.mockClear()
+    const response = await app.inject({ method: 'DELETE', url: '/agents/agent-1' })
+    expect(response.statusCode).toBe(410)
+    expect(response.json().error).toContain('archive')
+    // Nothing is read and nothing is written on the retired path.
+    expect(mockQuery).not.toHaveBeenCalled()
+    await app.close()
+  })
+
+  it('archives a revoked agent and returns archived_at', async () => {
+    const app = await buildApp()
+    const archivedAt = '2026-08-14T12:00:00.000Z'
+    primeDb([
+      [/UPDATE agents\s+SET archived_at = COALESCE/, { rows: [{ id: 'agent-1', archived_at: archivedAt }] }],
+    ])
+    const response = await app.inject({ method: 'POST', url: '/agents/agent-1/archive' })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ success: true, archived_at: archivedAt })
+    await app.close()
+  })
+
+  it('refuses to archive a non-revoked agent with 409 and an actionable message', async () => {
+    const app = await buildApp()
+    primeDb([
+      [/UPDATE agents\s+SET archived_at = COALESCE/, { rows: [] }],
+      [/SELECT id FROM agents WHERE id = \$1 AND user_id = \$2/, { rows: [{ id: 'agent-1' }] }],
+    ])
+    const response = await app.inject({ method: 'POST', url: '/agents/agent-1/archive' })
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toContain('Revoke the agent first')
+    await app.close()
+  })
+
+  it('404s archive/unarchive for a foreign or missing agent', async () => {
+    const app = await buildApp()
+    primeDb([
+      [/UPDATE agents/, { rows: [] }],
+      [/SELECT id FROM agents WHERE id = \$1 AND user_id = \$2/, { rows: [] }],
+    ])
+    for (const url of ['/agents/agent-x/archive', '/agents/agent-x/unarchive']) {
+      const response = await app.inject({ method: 'POST', url })
+      expect(response.statusCode).toBe(404)
+    }
+    await app.close()
+  })
+
+  it('unarchive succeeds, and is an idempotent no-op on a non-archived agent', async () => {
+    const app = await buildApp()
+    primeDb([
+      [/UPDATE agents\s+SET archived_at = NULL/, { rows: [{ id: 'agent-1' }] }],
+    ])
+    const first = await app.inject({ method: 'POST', url: '/agents/agent-1/unarchive' })
+    expect(first.statusCode).toBe(200)
+
+    primeDb([
+      [/UPDATE agents\s+SET archived_at = NULL/, { rows: [] }],
+      [/SELECT id FROM agents WHERE id = \$1 AND user_id = \$2/, { rows: [{ id: 'agent-1' }] }],
+    ])
+    const second = await app.inject({ method: 'POST', url: '/agents/agent-1/unarchive' })
+    expect(second.statusCode).toBe(200)
+    expect(second.json()).toEqual({ success: true })
+    await app.close()
+  })
+})

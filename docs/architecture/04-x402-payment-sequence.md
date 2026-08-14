@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-14" # #1398: hosted fast settle validates the bounded signed X-PAYMENT header against the agent-scoped persisted intent before relaying funding; it emits no header values and merchant/facilitator verification remains final. Prior: #1397 hosted read-only MCP quote tools use the existing session-bound live probe and bounded discovery, return no payment context or funding authority, and require every later paid call to quote afresh and apply its cap.
+last-verified: "2026-08-14" # #1400 re-verify: delegation-rail.ts gained prepareCalls (batch UserOp for revoke-all); the x402 sequences here are untouched — prepareCall now delegates to the batch form with identical single-call behavior, and no payment path uses the batch. Prior: #1398 hosted fast settle validates the bounded signed X-PAYMENT header against the agent-scoped persisted intent before relaying funding; merchant/facilitator verification remains final.
 ---
 
 # Haven - x402 Payment Execution Sequence

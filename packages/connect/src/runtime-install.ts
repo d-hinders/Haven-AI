@@ -1,7 +1,4 @@
 import { execFile } from 'node:child_process'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { writeRuntimeConfig, type RuntimeMcpMode } from './config-writers.js'
 import {
@@ -27,7 +24,7 @@ import {
   type PrepareSignerRuntimeInput,
 } from './signer-runtime.js'
 import { MCP_RUNTIME_MANIFEST, mcpPackageSpec, signerPackageSpec } from './runtime-manifest.js'
-import { HAVEN_SKILL_MD, SKILL_FOLDER_NAME } from '@haven_ai/sdk'
+import { installSkillForRuntime } from './skill-install.js'
 import { normalizeRuntime, restartRequiredForRuntime, runtimeProfile, type RuntimeId } from './runtime-registry.js'
 import {
   acknowledgeLocalSignerConsent,
@@ -260,9 +257,12 @@ export async function installRuntime(
       : []
 
   // The generic payment skill is static and secret-free, so it is installed
-  // like the other acknowledged local writes on runtimes with a skills folder.
-  const skillInstall = runtime === 'claude-code' && !configResult.errorCode
-    ? await installClaudeSkill(deps.homeDir)
+  // like the other acknowledged local writes on every runtime with a
+  // documented instruction mechanism (#1332): Claude's and Hermes's skills
+  // folders, Codex's global AGENTS.md managed section. Runtimes without one
+  // rely on the MCP server-level initialize instructions.
+  const skillInstall = !configResult.errorCode
+    ? await installSkillForRuntime(runtime, { homeDir: deps.homeDir, env: deps.env })
     : undefined
 
   return {
@@ -430,23 +430,6 @@ async function configureClaudeCodeHosted(
 
 async function defaultRunCommand(command: string, args: string[]): Promise<void> {
   await execFileAsync(command, args, { timeout: 10_000 })
-}
-
-async function installClaudeSkill(homeDir?: string): Promise<{ installed: boolean; messages: string[] }> {
-  try {
-    const skillDir = resolve(homeDir ?? homedir(), '.claude', 'skills', SKILL_FOLDER_NAME)
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(join(skillDir, 'SKILL.md'), HAVEN_SKILL_MD, 'utf8')
-    return {
-      installed: true,
-      messages: ['Installed the generic Haven payment skill (~/.claude/skills/haven-pay). It contains no secrets.'],
-    }
-  } catch (err) {
-    return {
-      installed: false,
-      messages: [`Could not install the Haven payment skill: ${err instanceof Error ? err.message : String(err)}. Download it from the Haven dashboard instead.`],
-    }
-  }
 }
 
 function buildProbeResult(

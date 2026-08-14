@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HAVEN_SKILL_MD, SKILL_FOLDER_NAME } from './skill-content.js'
+import { HAVEN_SKILL_MD, HAVEN_SKILL_BODY_MD, SKILL_FOLDER_NAME } from './skill-content.js'
 
 describe('generic skill content', () => {
   it('contains no secrets and no per-agent values', () => {
@@ -107,5 +107,20 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toMatch(/result[\s\S]*never use[\s\S]*whether[\s\S]*paid/i)
     expect(HAVEN_SKILL_MD).toMatch(/remaining post-purchase allowance/)
     expect(HAVEN_SKILL_MD).toMatch(/Do not\s+call[\s\S]*?again just to\s+report/)
+  })
+
+  // #1332: the body derivation is a regex over the canonical string; these pin
+  // the invariants that make it safe, LOUDLY at the source. If a future edit
+  // reformats the front matter so the strip stops matching, the first
+  // assertion fails here rather than the Codex AGENTS.md write silently
+  // carrying raw YAML as prose; if the front matter ever grows a block scalar
+  // containing a literal `---` line, the truncated match leaks front-matter
+  // fragments and the starts-with assertion fails.
+  it('HAVEN_SKILL_BODY_MD is the canonical skill minus exactly the front matter (#1332)', () => {
+    expect(HAVEN_SKILL_BODY_MD).not.toBe(HAVEN_SKILL_MD) // the strip DID something
+    expect(HAVEN_SKILL_MD.endsWith(HAVEN_SKILL_BODY_MD)).toBe(true) // a pure prefix removal
+    expect(HAVEN_SKILL_BODY_MD.startsWith('# Haven: pay from a Haven wallet')).toBe(true)
+    expect(HAVEN_SKILL_BODY_MD).not.toContain('name: haven-pay')
+    expect(HAVEN_SKILL_BODY_MD).not.toMatch(/^---/m) // no front-matter fragments leaked
   })
 })

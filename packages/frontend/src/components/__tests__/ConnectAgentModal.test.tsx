@@ -714,6 +714,9 @@ describe('ConnectAgentModal', () => {
     expect(await screen.findByText('Approve agent rules')).toBeInTheDocument()
     // #1377 C: the legacy approval renders inside the one step-4 shell.
     expect(screen.getByLabelText('Connection progress')).toBeInTheDocument()
+    // #1418: ONE status voice on step 4 — the shell ticker above is the only
+    // progress chrome; the wizard band must NOT stack on top of it.
+    expect(screen.queryByLabelText(/^Step \d+ of \d+$/)).not.toBeInTheDocument()
     expect(screen.getByText(/Local connection verified/i)).toBeInTheDocument()
     expect(screen.getByText(/You sign to give Research Agent authority to spend/i)).toBeInTheDocument()
     expect(screen.queryByText('Connected locally')).not.toBeInTheDocument()
@@ -917,13 +920,17 @@ describe('ConnectAgentModal', () => {
     })
     useDelegationAccount()
     renderModal()
-    await fillAndCreateSetup()
 
+    // The stepper mock reports "Step {current} of {total}": the TOTAL is 4 on
+    // this rail exactly as on the legacy one — the rail changes the
+    // instrument, never the shape of the flow. Asserted on step 1 because
+    // since #1418 the wizard band no longer renders on step 4 at all (the
+    // shell ticker is the one status voice there).
+    expect(screen.getByLabelText('Step 1 of 4')).toBeInTheDocument()
+
+    await fillAndCreateSetup()
     await screen.findByText('Approve agent rules')
-    // The stepper mock reports "Step {current} of {total}": approval is the
-    // 4th of 4 on this rail exactly as it is on the legacy one — the rail
-    // changes the instrument, never the shape of the flow.
-    expect(screen.getByLabelText('Step 4 of 4')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Step \d+ of \d+$/)).not.toBeInTheDocument()
   })
 
   it('delegation setup takes ONE budget — further tokens are added later (#1073)', async () => {

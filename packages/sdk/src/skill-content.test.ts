@@ -20,6 +20,8 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('mcp_transport')
     expect(HAVEN_SKILL_MD).toContain('expires_at')
     expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_pay_mcp_tool')
+    expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_quote_mcp_tool')
+    expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_quote_catalog_purchase')
     expect(HAVEN_SKILL_MD).toContain('mcp__haven-signer__haven_sign_x402')
     expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_settle_mcp_tool')
     expect(HAVEN_SKILL_MD).toContain('x402_expected')
@@ -63,6 +65,12 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('max_amount_human')
     expect(HAVEN_SKILL_MD).toMatch(/max_amount_human.*"1".*1 USDC/s)
     expect(HAVEN_SKILL_MD).toMatch(/0\.000001 USDC/)
+  })
+
+  it('teaches read-only MCP quotes before an explicit capped purchase (#1397)', () => {
+    expect(HAVEN_SKILL_MD).toMatch(/haven_quote_catalog_purchase[\s\S]*?informational only/i)
+    expect(HAVEN_SKILL_MD).toMatch(/haven_quote_mcp_tool[\s\S]*?fresh quote/i)
+    expect(HAVEN_SKILL_MD).toMatch(/never reserves a price/i)
   })
 
   it('tells the agent to follow the response guidance fields first (#1308)', () => {

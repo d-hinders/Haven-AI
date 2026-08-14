@@ -51,7 +51,7 @@ covers:
   - packages/demo-merchant-mcp/src/**
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-12" # #1366: verification entries move to docs/regulatory/casp-changelog/ shards (satisfied-by); this date now tracks re-verification of the BODY claims only. EOF log below frozen as of 2026-08-12
+last-verified: "2026-08-14" # #1397: hosted MCP's new live-price quote tools are read-only session probes only — no intent, approval, signing context, funding, paid retry, or key handling; later paid calls still require a fresh quote and cap. #1366: verification entries move to docs/regulatory/casp-changelog/ shards (satisfied-by); this date tracks re-verification of the BODY claims only. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails

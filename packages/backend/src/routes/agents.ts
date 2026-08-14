@@ -29,7 +29,7 @@ import {
   findAgentForUserAllStatuses,
   findAgentIdStatusForUser,
   findDefaultUserSafeId,
-  findDelegateAgentForUserExcludingRevoked,
+  findDelegateAgentForUser,
   findNonRevokedAgentIdByDelegate,
   findUserSafeIdForUser,
   listAgentsForUserAllStatuses,
@@ -147,8 +147,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
 
-    // Excludes revoked — the one status-scoped agent read (see the repository).
-    const agent = await findDelegateAgentForUserExcludingRevoked(id, sub)
+    // Status-agnostic since #1403: revoked and archived agents resolve like
+    // any other — the delegate EOA can hold stranded funds precisely AFTER a
+    // revoke, and this read backs the sweep page that recovers them.
+    const agent = await findDelegateAgentForUser(id, sub)
     if (!agent) {
       return reply.code(404).send({ error: 'Agent not found' })
     }

@@ -228,11 +228,10 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
   //
   // The agent-scoped twin (`/agents/:id/account-signers/*`, #888) required an
   // agent to exist before an account could enrol a backup or remove a key —
-  // so a fresh account had no path to its own recovery setup, which is
-  // exactly when it matters most: the #908 mainnet floor wants a second
-  // signer enrolled BEFORE anything else happens.
+  // so a fresh account had no path to its own recovery setup, which is when
+  // a user can add a backup before it holds funds.
   //
-  // Same helpers, same authority rules, same ≥2-signer floor — the only
+  // Same helpers, same authority rules, same last-signer guard — the only
   // difference is that the account is resolved by (address, chain) instead of
   // through an agent. `chain_id` stays on the query string so an account is
   // addressed identically here and on the sibling GET.

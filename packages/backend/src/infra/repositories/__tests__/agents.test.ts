@@ -4,7 +4,7 @@ import {
   FIND_AGENT_ID_FOR_USER_SQL,
   FIND_AGENT_ID_STATUS_FOR_USER_SQL,
   FIND_DEFAULT_USER_SAFE_ID_SQL,
-  FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL,
+  FIND_DELEGATE_AGENT_FOR_USER_SQL,
   FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
   FIND_USER_SAFE_ID_FOR_USER_SQL,
   LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
@@ -14,7 +14,7 @@ import {
   findAgentForUserAllStatuses,
   findAgentIdStatusForUser,
   findDefaultUserSafeId,
-  findDelegateAgentForUserExcludingRevoked,
+  findDelegateAgentForUser,
   findNonRevokedAgentIdByDelegate,
   findUserSafeIdForUser,
   listAgentsForUserAllStatuses,
@@ -52,18 +52,17 @@ describe('the #1069 status-scoping asymmetry, pinned in SQL and in names', () =>
     }
   })
 
-  it('the delegate-balance read is the ONE status-scoped read: it excludes revoked', () => {
-    expect(FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL).toContain("a.status != 'revoked'")
+  it('the delegate-balance read is status-AGNOSTIC (#1403) — sweep must work post-revoke', () => {
+    // The old `a.status != 'revoked'` filter removed the sweep page exactly
+    // when stranded delegate funds need recovering. Re-adding ANY status
+    // filter here must be a conscious act that fails this test first.
+    expect(FIND_DELEGATE_AGENT_FOR_USER_SQL).not.toContain('status')
   })
 
-  it('the asymmetry is named: AllStatuses vs ExcludingRevoked', () => {
-    // A rename that collapses these into one "find agent" function loses the
-    // distinction #1069 was — this tripwire makes that a conscious act.
+  it('the naming stays honest: AllStatuses reads + the narrow delegate read', () => {
     expect(listAgentsForUserAllStatuses.name).toBe('listAgentsForUserAllStatuses')
     expect(findAgentForUserAllStatuses.name).toBe('findAgentForUserAllStatuses')
-    expect(findDelegateAgentForUserExcludingRevoked.name).toBe(
-      'findDelegateAgentForUserExcludingRevoked',
-    )
+    expect(findDelegateAgentForUser.name).toBe('findDelegateAgentForUser')
   })
 })
 
@@ -72,7 +71,7 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     for (const sql of [
       LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
       FIND_AGENT_FOR_USER_ALL_STATUSES_SQL,
-      FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL,
+      FIND_DELEGATE_AGENT_FOR_USER_SQL,
       FIND_USER_SAFE_ID_FOR_USER_SQL,
       FIND_DEFAULT_USER_SAFE_ID_SQL,
       FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
@@ -96,10 +95,10 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     expect(await findAgentForUserAllStatuses('agent-1', OWNER, db)).not.toBeNull()
   })
 
-  it('findDelegateAgentForUserExcludingRevoked: another tenant gets null', async () => {
+  it('findDelegateAgentForUser: another tenant gets null', async () => {
     const db = tenantExecutor({ delegate_address: '0xdead' })
-    expect(await findDelegateAgentForUserExcludingRevoked('agent-1', ATTACKER, db)).toBeNull()
-    expect(await findDelegateAgentForUserExcludingRevoked('agent-1', OWNER, db)).not.toBeNull()
+    expect(await findDelegateAgentForUser('agent-1', ATTACKER, db)).toBeNull()
+    expect(await findDelegateAgentForUser('agent-1', OWNER, db)).not.toBeNull()
   })
 
   it('findUserSafeIdForUser: another tenant cannot claim the safe', async () => {

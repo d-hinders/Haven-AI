@@ -543,6 +543,89 @@ describe('installRuntime hosted default topology', () => {
     expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
     expect(result.hostedMcpConfigured).toBe(true)
   })
+
+  // #1332: guidance-surface parity — setup on each runtime with a documented
+  // instruction mechanism leaves the agent the guidance that runtime can
+  // consume, with the same secret-free canonical substance everywhere.
+  it('installs the skill guidance into Codex global AGENTS.md during setup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-codex-skill-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+    })
+
+    expect(result.skillInstalled).toBe(true)
+    const agentsMd = await readFile(join(dir, '.codex', 'AGENTS.md'), 'utf8')
+    expect(agentsMd).toContain('managed by @haven_ai/connect')
+    expect(agentsMd).toContain('haven_get_agent')
+    expect(agentsMd).not.toContain(API_KEY)
+    expect(agentsMd).not.toContain(PRIVATE_KEY)
+  })
+
+  it('installs the SKILL.md into the Hermes skills folder during setup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-skill-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'hermes',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      env: {},
+      fetch: okToolsFetch(),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+    })
+
+    expect(result.skillInstalled).toBe(true)
+    const skill = await readFile(join(dir, '.hermes', 'skills', 'haven-pay', 'SKILL.md'), 'utf8')
+    expect(skill).toContain('name: haven-pay')
+    expect(skill).toContain('haven_get_agent')
+    expect(skill).not.toContain(API_KEY)
+    expect(skill).not.toContain(PRIVATE_KEY)
+  })
+
+  it('does not write any guidance file for runtimes without a documented mechanism', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-cursor-noskill-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'cursor',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+    })
+
+    expect(result.skillInstalled).toBeUndefined()
+  })
 })
 
 async function writeIdentityCredential(directory: string): Promise<string> {

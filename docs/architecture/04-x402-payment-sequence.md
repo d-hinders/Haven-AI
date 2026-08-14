@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-12" # #1328 mpp_demo retirement re-verified: the x402 sequences here are UNTOUCHED (mpp_demo was the legacy MPP demo path, not x402; its routes/tools deleted, generic /machine-payments/* preserved); prior same-day: #1360: SDK 3009-shape writers always declare settlementScheme (stale-delegate payTo now fails the shape check loudly; old-SDK shape-only selection characterization-tested) + prior same-day: #1351: the guided path's required cap accepts either spelling — max_amount_human (whole tokens, converted with the LIVE quote's decimals) or the unchanged atomic max_amount; both-sent, neither-sent and unconvertible are pre-funding refusals. Prior same-day: #1349: settled reporting contract sourced from Haven state, merchant raw result evidence-only. #1348: preflight round-trip budget (reads overlap the probe, getAgent in-flight coalescing, delegateAddress option; failure semantics + refusal order unchanged) + prior same-day: #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Same day #1350: catalog discovery now documents case-insensitive category matching plus read-only search over name/description/category; results remain deterministic and indicative only. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
+last-verified: "2026-08-14" # #1397: hosted read-only MCP quote tools use the existing session-bound live probe and bounded discovery, return no payment context or funding authority, and require every later paid call to quote afresh and apply its cap. Prior: #1328 mpp_demo retirement; #1360 3009 shape writers; #1351 human caps; #1349 settled reporting; #1348 preflight round-trip budget; #1355 payment_id-only signing; #1350 catalog search; #1319 allowance provenance; #1321 MCP session; #1311 descriptions.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -77,9 +77,13 @@ header, and a JSON-body fallback. When the delegate address is known, probes
 also send `x402-wallet`. The paid retry uses `X-PAYMENT`; a successful merchant
 response may include `PAYMENT-RESPONSE` evidence.
 
-`quoteX402()` and `haven_quote_x402` are read-only. They parse the challenge but
-do not create a Haven payment, approval request, signature, or on-chain
-transaction.
+`quoteX402()`, `haven_quote_x402`, `haven_quote_mcp_tool`, and
+`haven_quote_catalog_purchase` are read-only. The MCP variants establish the
+merchant session and send an unpaid `tools/call` probe (and may read the public
+agent delegate address to send `x402-wallet`), but none creates a Haven payment,
+approval request, signature, funding operation, paid merchant retry, or
+on-chain transaction. Every quote is informational rather than a price
+reservation or payment authority.
 
 Every merchant-facing SDK fetch (probes, MCP handshakes, paid retries,
 resume retries) is bounded since #1300: `config.merchantTimeout` (default
@@ -294,6 +298,17 @@ boundary (owner decision, 2026-08-06), not a sequencing preference.
 
 ## Hosted Paid-MCP-Tool Flow
 
+Before the paid flow, `haven_quote_mcp_tool({ merchant_url, tool_name,
+arguments? })` can return the live merchant/resource identity, amount in atomic
+and display form, token/decimals, network/chain, timeout, and session transport
+without creating an intent. It runs the same bounded, same-origin endpoint
+discovery as the paid tool, and returns the resolved `merchant_url` when a base
+URL was supplied. It deliberately returns no `payment_required`, `payment_id`,
+signing context, cap/allowance guidance, or persisted call context. A later
+`haven_pay_mcp_tool` must re-run the live quote and apply its own explicit cap
+before creating any funding intent; the informational result cannot be reused as
+a paid authorization.
+
 The recommended three-call fast path for an x402-protected MCP tool is:
 
 1. `haven_pay_mcp_tool` — hosted MCP establishes an MCP session (`initialize`,
@@ -356,6 +371,16 @@ existing `rail` plus agent-chain scoping still apply. Results stay
 deterministically ordered and may be empty or multi-row; they never authorize
 payment, and any catalog price remains indicative until the live quote below.
 
+`haven_quote_catalog_purchase({ catalog_id })` is the read-only catalog wrapper:
+it performs the same chain-scoped catalog lookup and usable-MCP-row guard, then
+runs the same live merchant probe as `haven_quote_mcp_tool`. It returns the
+generic quote fields plus the catalog identity and its price, explicitly marked
+indicative. It creates no intent, approval, signing context, allowance check, or
+price reservation. An unknown/degraded/non-MCP catalog row keeps the existing
+manual fallback: use `haven_pay_mcp_tool` with an explicit merchant URL and
+tool name. When ready to buy, call `haven_prepare_catalog_purchase` with a cap;
+that paid preflight obtains a fresh live quote and checks the cap independently.
+
 `haven_prepare_catalog_purchase({ catalog_id, max_amount_human | max_amount, idempotency_key? })`
 starts a paid-MCP-tool purchase from a curated `merchant_catalog` row instead
 of a hand-copied `merchant_url` / `tool_name` / `tool_arguments`. It is a
@@ -400,8 +425,8 @@ Sequence:
    agent, allowances, `POST /x402` — enforced by round-trip-count unit tests
    (deterministic, unlike wall-clock); per-step wall-clock telemetry rides the
    promotion-gating QA scenario's pass detail.
-4. A spending cap is **required** on this tool (unlike `haven_pay_mcp_tool`'s
-   optional cap) — this IS the guided path, so there is no `cap_warning`
+4. A spending cap is **required** on this tool, as on `haven_pay_mcp_tool` —
+   this IS the guided path, so there is no `cap_warning`
    softness. Enforced against the LIVE quote via the SAME
    `assertWithinMaxAmount` guard, before any funding intent exists
    (`PRICE_EXCEEDS_MAX`).

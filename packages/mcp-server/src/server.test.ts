@@ -49,7 +49,9 @@ describe('buildHostedMcpServer', () => {
         'haven_settle_mcp_tool',
         'haven_pay',
         'haven_pay_mcp_tool',
+        'haven_quote_mcp_tool',
         'haven_prepare_catalog_purchase',
+        'haven_quote_catalog_purchase',
         'haven_pay_x402_quote',
         'haven_quote_x402',
         'haven_resume_x402_payment',
@@ -176,6 +178,8 @@ describe('buildHostedMcpServer', () => {
     expect(instructions).toBe(HOSTED_INSTRUCTIONS)
     expect(instructions).toContain('haven_get_agent')
     expect(instructions).toContain('haven_prepare_catalog_purchase')
+    expect(instructions).toContain('haven_quote_mcp_tool')
+    expect(instructions).toContain('haven_quote_catalog_purchase')
     expect(instructions).toContain('max_amount')
     expect(instructions).toContain('next_action')
     expect(instructions).toContain('next_tool')

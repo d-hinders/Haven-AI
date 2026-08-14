@@ -228,13 +228,22 @@ export function WaitingForConnector({
         {error ? `Status check failed: ${error}` : 'Haven keeps checking in the background.'}
       </p>
 
-      {/* #1391: cancel is offered EXACTLY ONCE at any moment. In the recovery
-          stage the warning block above owns it ("Cancel this setup"), where it
-          is both visible and warranted; here it is a quiet link, because an
-          exit should be findable without competing with the action that moves
-          the user forward. It stays a <button>: demoting it visually must not
-          demote it semantically, and the stage-conditional render below is
-          pinned by a test, since a missing exit is worse than a loud one. */}
+      {/* #1391: this screen offers EXACTLY ONE cancel-the-setup action at any
+          moment. In the recovery stage the warning block above owns it
+          ("Cancel this setup"), where it is both visible and warranted; here
+          it is a quiet link, because an exit should be findable without
+          competing with the action that moves the user forward. It stays a
+          <button>: demoting it visually must not demote it semantically, and
+          the stage-conditional render below is pinned by a test, since a
+          missing exit is worse than a loud one.
+
+          Scope, since #1415 gave the modal chrome its own X: that X is
+          handleClose — dismiss the dialog, leave the setup alive server-side
+          to be resumed. This is handleCancelSetup — POST /cancel, the setup is
+          over. Two exits, two outcomes; the "exactly once" rule is about the
+          destructive one. Whether the difference is legible to a user from
+          two unlabelled-vs-labelled affordances is a real question, and it
+          belongs to the modal-chrome track (#1406), not here. */}
       {connectionStage !== 'recovery' && (
         <div className="flex justify-center">
           <Button variant="ghost" size="sm" onClick={onCancel}>

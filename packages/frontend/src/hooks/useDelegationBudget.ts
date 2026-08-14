@@ -100,7 +100,15 @@ export interface GrantInput {
   periodSeconds: number
 }
 
-export type BudgetResult = { ok: true } | { ok: false; reason: 'cancelled' | 'failed' }
+/**
+ * `too_many` (#1437) is distinct from `failed` on purpose: the backend refuses
+ * an oversized batch by NAMING per-budget revocation as the remedy, and a
+ * caller that flattens it into the generic failure strands the user on a
+ * screen that repeats a refusal without ever saying what to do instead.
+ */
+export type BudgetResult =
+  | { ok: true }
+  | { ok: false; reason: 'cancelled' | 'failed' | 'too_many' }
 
 async function signTyped(
   signer: NonNullable<ReturnType<typeof useActiveSigner>>,
@@ -258,6 +266,12 @@ export function useDelegationBudget(agentId: string, chainId: number) {
       } catch (err) {
         if (err instanceof Error && /nothing to revoke/i.test(err.message)) {
           return { ok: true }
+        }
+        // #1437: the batch/reconcile refusals are recoverable and name their
+        // own remedy — surface them as such instead of "the budget could not
+        // be stopped", which tells the user nothing they can act on.
+        if (err instanceof Error && /too many delegations/i.test(err.message)) {
+          return { ok: false, reason: 'too_many' }
         }
         throw err
       }

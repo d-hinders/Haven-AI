@@ -73,7 +73,8 @@ describe('AgentPanel Connect Agent entry', () => {
       revokeAgent: vi.fn(),
       pauseAgent: vi.fn(),
       resumeAgent: vi.fn(),
-      deleteAgent: vi.fn(),
+      archiveAgent: vi.fn(),
+      unarchiveAgent: vi.fn(),
       refetch: vi.fn(),
     })
     mockUseSafeDetails.mockReturnValue({ details: null, loading: false, error: null })

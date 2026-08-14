@@ -116,7 +116,8 @@ describe('AgentPanel last-activity metadata', () => {
       revokeAgent: vi.fn(),
       pauseAgent: vi.fn(),
       resumeAgent: vi.fn(),
-      deleteAgent: vi.fn(),
+      archiveAgent: vi.fn(),
+      unarchiveAgent: vi.fn(),
       refetch: vi.fn(),
     })
     mockUseSafeDetails.mockReturnValue({ details: null })
@@ -190,7 +191,8 @@ describe('AgentPanel last-activity metadata', () => {
       revokeAgent: vi.fn(),
       pauseAgent: vi.fn(),
       resumeAgent: vi.fn(),
-      deleteAgent: vi.fn(),
+      archiveAgent: vi.fn(),
+      unarchiveAgent: vi.fn(),
       refetch: vi.fn(),
     })
     mockUseOnChainAllowances.mockReturnValue({
@@ -254,7 +256,8 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
       revokeAgent: vi.fn(),
       pauseAgent: vi.fn(),
       resumeAgent: vi.fn(),
-      deleteAgent: vi.fn(),
+      archiveAgent: vi.fn(),
+      unarchiveAgent: vi.fn(),
       refetch: vi.fn(),
     })
     mockUseSafeDetails.mockReturnValue({ details: null })
@@ -379,7 +382,8 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
       revokeAgent: vi.fn(),
       pauseAgent: vi.fn(),
       resumeAgent: vi.fn(),
-      deleteAgent: vi.fn(),
+      archiveAgent: vi.fn(),
+      unarchiveAgent: vi.fn(),
       refetch,
     })
 
@@ -432,7 +436,8 @@ describe('AgentPanel unmanaged-delegate suppression', () => {
       revokeAgent: vi.fn(),
       pauseAgent: vi.fn(),
       resumeAgent: vi.fn(),
-      deleteAgent: vi.fn(),
+      archiveAgent: vi.fn(),
+      unarchiveAgent: vi.fn(),
       refetch,
     })
     // The genuine timeout scenario: nothing is visible on-chain yet either (the

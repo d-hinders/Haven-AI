@@ -210,6 +210,58 @@ describe('RemoveAgentDialog', () => {
     expect(confirm.disabled).toBe(false)
   })
 
+  // #1437: two refusals that used to be dead ends — the user could press the
+  // same button forever with nothing to act on.
+  it('the batch-cap refusal names the remedy instead of repeating the generic failure', async () => {
+    mockRevokeAll.mockResolvedValue({ ok: false, reason: 'too_many' })
+    const { onRevokeCredential, onArchive } = renderDialog(agentFixture())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toMatch(/too many budgets/i),
+    )
+    // Actionable: a link to where the per-budget stop lives.
+    const link = screen.getByRole('link', { name: /budget card/i }) as HTMLAnchorElement
+    expect(link.getAttribute('href')).toBe('/agents/agent-1')
+    // And it must NOT claim the generic budget-not-stopped line.
+    expect(document.body.textContent).not.toMatch(/could not be stopped/i)
+    expect(onRevokeCredential).not.toHaveBeenCalled()
+    expect(onArchive).not.toHaveBeenCalled()
+  })
+
+  it('a credential already revoked in another tab still completes the removal', async () => {
+    // The stale-status race: revoke-all no-ops (409 → ok), the credential
+    // revoke 404s because another tab already did it, and archive — which
+    // WOULD succeed — used to be unreachable behind that failure.
+    mockRevokeAll.mockResolvedValue({ ok: true })
+    const onArchive = vi.fn().mockResolvedValue(undefined)
+    const { onClose } = renderDialog(agentFixture(), {
+      onRevokeCredential: vi.fn().mockRejectedValue(new Error('Agent not found')),
+      onArchive,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() => expect(onArchive).toHaveBeenCalled())
+    expect(onClose).toHaveBeenCalled()
+    expect(screen.queryByText(/could not be moved to Removed/i)).toBeNull()
+  })
+
+  it('a genuine credential-revoke failure still aborts to filing_failed', async () => {
+    // The escape hatch above must not swallow real errors.
+    mockRevokeAll.mockResolvedValue({ ok: true })
+    const onArchive = vi.fn().mockResolvedValue(undefined)
+    renderDialog(agentFixture(), {
+      onRevokeCredential: vi.fn().mockRejectedValue(new Error('Internal server error')),
+      onArchive,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Finish removal' })).toBeTruthy(),
+    )
+    expect(onArchive).not.toHaveBeenCalled()
+  })
+
   it('names all three consequences and the restore promise in the confirm copy', () => {
     renderDialog(agentFixture())
     const text = document.body.textContent ?? ''

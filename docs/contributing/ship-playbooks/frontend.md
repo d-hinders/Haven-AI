@@ -48,6 +48,8 @@ npm run screenshot -w packages/frontend -- --scenario=all             # every sc
 
 `connect-agent` captures step 4 at all three connection stages (`starting` → `slow` → `recovery`) at both viewports, writing `connect-agent-waiting-<stage>-<viewport>.png`. It pins the setup at `awaiting_connection` and drives Playwright's virtual clock past the staging bounds, so a three-minute state is reached in milliseconds. A scenario that cannot reach its state **fails the command** rather than writing fewer PNGs — a missing stage is the evidence gap, not a smaller run. Add new scenarios to the `SCENARIOS` registry in `scripts/screenshot.mjs`; their fixture contract is pinned by `src/__tests__/screenshot-fixture.test.ts`.
 
+**Two PNGs when a dialog scrolls.** An element screenshot captures only the visible box, so a dialog that caps its own height drops everything below the fold — and its rounded bottom edge makes the clipped capture look complete, which would have a reviewer judge a screen they have only partly seen. When a capture overflows, the run says so (`⚠ … had content BELOW THE FOLD`, with the pixel shortfall) and writes a second `…-full.png` at a viewport tall enough to show all of it. **Judge the content from the `-full` PNG; judge what is reachable without scrolling from the other** — the fold itself is often the finding.
+
 **If Chromium fails to launch** with an error naming a `chromium_headless_shell-<n>` path that does not exist, the cached browser build does not match the pinned Playwright version. Point `PLAYWRIGHT_CHROMIUM_PATH` at the Chromium that *is* installed rather than running `playwright install`:
 
 ```

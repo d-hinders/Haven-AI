@@ -606,6 +606,7 @@ async function main() {
   const captured = []
   const consoleErrors = []
   const gotoFailures = []
+  const clipped = []
   try {
     for (const vp of VIEWPORTS) {
       const context = await newFixtureContext(browser, vp, null)
@@ -659,9 +660,33 @@ async function main() {
         // missing stage is exactly the evidence gap this exists to close.
         const shoot = async (target, name) => {
           await scenarioPage.waitForTimeout(300) // settle the transition
-          const file = path.join(OUT_DIR, `${scenario.name}-${name}-${vp.name}.png`)
+          const base = `${scenario.name}-${name}-${vp.name}`
+          const file = path.join(OUT_DIR, `${base}.png`)
           await target.screenshot({ path: file })
           captured.push(path.relative(ROOT, file))
+
+          // An element screenshot captures the VISIBLE box. A dialog that caps
+          // itself (max-h + overflow-y-auto) therefore drops everything below
+          // the fold — and its rounded bottom edge renders cleanly at the clip,
+          // so the PNG LOOKS complete. That is worse than a missing capture: a
+          // reviewer would judge a screen they have only partly seen. Record
+          // the shortfall and shoot the whole thing alongside it.
+          const hidden = await target
+            .evaluate((el) => el.scrollHeight - el.clientHeight)
+            .catch(() => 0)
+          if (hidden > 4) {
+            clipped.push({ capture: base, hidden })
+            await scenarioPage.setViewportSize({
+              width: vp.width,
+              height: vp.height + hidden + 48,
+            })
+            await scenarioPage.waitForTimeout(200)
+            const fullFile = path.join(OUT_DIR, `${base}-full.png`)
+            await target.screenshot({ path: fullFile })
+            captured.push(path.relative(ROOT, fullFile))
+            await scenarioPage.setViewportSize({ width: vp.width, height: vp.height })
+            await scenarioPage.waitForTimeout(200)
+          }
         }
         try {
           await scenario.run({ page: scenarioPage, vp, shoot })
@@ -685,6 +710,13 @@ async function main() {
   if (gotoFailures.length > 0) {
     console.error(`\n✗ ${gotoFailures.length} capture(s) FAILED — their PNGs were NOT written:`)
     for (const e of gotoFailures) console.error(`  [${e.route} · ${e.viewport}] ${e.text}`)
+  }
+  if (clipped.length > 0) {
+    console.log(
+      `\n⚠ ${clipped.length} capture(s) had content BELOW THE FOLD — the plain PNG shows only what a user sees without scrolling:`,
+    )
+    for (const c of clipped) console.log(`  ${c.capture}: ${c.hidden}px hidden → also wrote ${c.capture}-full.png`)
+    console.log('  (judge content from the -full PNG; judge what is reachable without scrolling from the other)')
   }
   if (consoleErrors.length > 0) {
     console.log(`\n⚠ ${consoleErrors.length} console error(s) during capture — the PNGs may show broken screens:`)

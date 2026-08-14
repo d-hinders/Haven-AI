@@ -64,7 +64,16 @@ export default function ConnectAgentModal({
       title="Connect agent"
       subtitle={flow.headerSubtitleText}
       headerAccessory={
-        <StepProgress totalSteps={flow.setupStepCount} currentStep={Math.max(flow.currentStepIndex, 0)} />
+        // #1418: ONE status voice. On steps 1-3 the wizard band is the only
+        // status signal. On step 4 the shell ticker (Waiting — Connected —
+        // Approved) takes over as the single voice — the epic's rule 2 —
+        // so the wizard band does not render there: two stacked trackers in
+        // the same dot/line language made the user decode which meant what,
+        // on the screen whose whole job is calm. The ticker also carries the
+        // remaining journey, so "step 4 of 4" loses no information.
+        flow.step !== 'connect' ? (
+          <StepProgress totalSteps={flow.setupStepCount} currentStep={Math.max(flow.currentStepIndex, 0)} />
+        ) : undefined
       }
       showCloseButton
       closeButtonDisabled={flow.busy}

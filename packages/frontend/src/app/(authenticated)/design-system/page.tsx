@@ -967,12 +967,12 @@ export default function DesignSystemPage() {
           <AgentRulesSummary
             items={[
               {
-                label: 'Who can spend',
+                label: 'Agent name',
                 value: 'Research assistant',
                 helper: 'This agent can request payments using its Haven credential.',
               },
               {
-                label: 'From wallet',
+                label: 'Spend from',
                 value: 'Operating wallet',
                 helper: 'Payments come from this Haven wallet only.',
               },
@@ -1350,12 +1350,12 @@ export default function DesignSystemPage() {
           description="What this agent can spend, where the money comes from, and how you stay in control."
           items={[
             {
-              label: 'Who can spend',
+              label: 'Agent name',
               value: 'Research assistant',
               helper: 'Connected via Haven credential.',
             },
             {
-              label: 'From account',
+              label: 'Spend from',
               value: 'Operating wallet on Base',
               helper: 'Payments come from this Haven account only.',
             },

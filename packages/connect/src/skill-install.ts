@@ -126,26 +126,49 @@ function codexManagedSection(): string {
  */
 export function upsertManagedSection(existing: string | null, section: string): string {
   if (existing === null || existing.trim() === '') return section
-  const begin = existing.indexOf(CODEX_AGENTS_BEGIN_MARKER)
-  const end = existing.indexOf(CODEX_AGENTS_END_MARKER)
-  if (begin !== -1 && end !== -1 && end > begin) {
-    const afterEnd = end + CODEX_AGENTS_END_MARKER.length
-    // Swallow the newline the section itself terminates with, if present.
-    const tail = existing.startsWith('\n', afterEnd) ? existing.slice(afterEnd + 1) : existing.slice(afterEnd)
-    return existing.slice(0, begin) + section + tail
+  // Line-anchored: a marker quoted mid-line (prose, a code fence example)
+  // must not be mistaken for a live section boundary.
+  const begins = markerLineIndexes(existing, CODEX_AGENTS_BEGIN_MARKER)
+  const ends = markerLineIndexes(existing, CODEX_AGENTS_END_MARKER)
+  if (begins.length === 1 && ends.length === 1 && ends[0] > begins[0]) {
+    const afterEnd = ends[0] + CODEX_AGENTS_END_MARKER.length
+    // Swallow the line break the section itself terminates with (LF or CRLF),
+    // so re-runs replace in place instead of accreting blank lines.
+    const tail = existing.startsWith('\r\n', afterEnd)
+      ? existing.slice(afterEnd + 2)
+      : existing.startsWith('\n', afterEnd)
+        ? existing.slice(afterEnd + 1)
+        : existing.slice(afterEnd)
+    return existing.slice(0, begins[0]) + section + tail
   }
-  if (begin !== -1 || end !== -1) {
-    // One marker without its pair. Appending would plant a second marker and
-    // make a LATER run's replace span swallow user content between the orphan
-    // and the new section — fail closed instead and leave the file alone.
+  if (begins.length > 0 || ends.length > 0) {
+    // Anything but exactly one well-ordered pair — an orphaned marker, or a
+    // duplicated section — is damage. Appending or guessing a span here could
+    // swallow user content between markers on this or a LATER run; fail
+    // closed and leave the file alone.
     throw new Error(
-      'found a damaged Haven marker section (one marker without its pair); remove the leftover marker line and re-run setup',
+      'found a damaged Haven marker section (orphaned or duplicated markers); remove the leftover marker lines and re-run setup',
     )
   }
   // No markers: append at the end, separated by a blank line.
   return `${existing.replace(/\n*$/, '\n\n')}${section}`
 }
 
+/** Indexes of `marker` occurrences that sit at the start of a line. */
+function markerLineIndexes(text: string, marker: string): number[] {
+  const indexes: number[] = []
+  for (let from = 0; ; ) {
+    const at = text.indexOf(marker, from)
+    if (at === -1) return indexes
+    if (at === 0 || text[at - 1] === '\n') indexes.push(at)
+    from = at + marker.length
+  }
+}
+
+// Must resolve the SAME home as config-writers' hermesHomePath (which reads
+// the real process.env) — the skill and the config.yaml/.env writes belong in
+// one Hermes home. `deps.env` exists for test isolation only; production
+// callers never pass it, so both resolvers read the same process.env.
 function hermesHome(deps: SkillInstallDeps): string {
   const env = deps.env ?? process.env
   return env.HERMES_HOME ?? join(deps.homeDir ?? homedir(), '.hermes')

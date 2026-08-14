@@ -135,6 +135,29 @@ describe('upsertManagedSection', () => {
       /damaged Haven marker/i,
     )
   })
+
+  it('fails closed on a DUPLICATED section instead of silently keeping the stray copy', () => {
+    const doubled = `${section}\nuser text\n\n${section}`
+    expect(() => upsertManagedSection(doubled, section)).toThrow(/damaged Haven marker/i)
+  })
+
+  it('ignores marker text quoted mid-line — only line-anchored markers are boundaries', () => {
+    // A user documenting this mechanism ("the section between
+    // `<!-- BEGIN haven-pay ... -->` markers") must not have their prose
+    // treated as a live section boundary.
+    const quoted = `See the \`${CODEX_AGENTS_BEGIN_MARKER}\` marker for details.\n`
+    const result = upsertManagedSection(quoted, section)
+    expect(result.startsWith(quoted.trimEnd())).toBe(true)
+    expect(result.endsWith(section)).toBe(true)
+  })
+
+  it('replaces in place without accreting blank lines on CRLF files', () => {
+    const crlf = `user line\r\n\r\n${section.replace(/\n/g, '\r\n')}\r\ntrailing\r\n`
+    const once = upsertManagedSection(crlf, section)
+    const twice = upsertManagedSection(once, section)
+    expect(twice).toBe(once)
+    expect(once).toContain('trailing')
+  })
 })
 
 describe('HAVEN_SKILL_BODY_MD derivation', () => {

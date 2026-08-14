@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { installRuntime, supportsLocalMcp } from './runtime-install.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
@@ -580,6 +580,16 @@ describe('installRuntime hosted default topology', () => {
     const credentialDirectory = join(dir, 'agent-1')
     const identityPath = await writeIdentityCredential(credentialDirectory)
     const signerPath = await writeSignerCredential(credentialDirectory)
+    // The parallel Hermes CONFIG write resolves its home from the real
+    // process.env (config-writers' hermesHomePath), so clear it for the test's
+    // duration — otherwise a developer shell with HERMES_HOME set would make
+    // this test write outside its temp dir.
+    const savedHermesHome = process.env.HERMES_HOME
+    delete process.env.HERMES_HOME
+    onTestFinished(() => {
+      if (savedHermesHome === undefined) delete process.env.HERMES_HOME
+      else process.env.HERMES_HOME = savedHermesHome
+    })
 
     const result = await installRuntime({
       runtime: 'hermes',

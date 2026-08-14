@@ -607,6 +607,11 @@ export const SCENARIOS = {
       // it is invisible to every other capture. Revealing it shows the
       // warning and its checkbox; it creates nothing (that needs the button
       // below it, which is deliberately NOT clicked).
+      // #1391 folded both fallbacks under one recessive disclosure, and kept
+      // the manual path nested one level deeper — so the outer one has to be
+      // opened first. The previous selector timed out rather than silently
+      // shooting the wrong screen, which is the guard working.
+      await dialog.getByText('Having trouble connecting?').click()
       await dialog.getByText('Manual credential fallback').click()
       const revealManual = dialog.getByRole('button', { name: /show the manual path/i })
       await revealManual.waitFor({ timeout: 10_000 })

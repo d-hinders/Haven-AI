@@ -95,8 +95,9 @@ import {
   UPDATE_CONNECTOR_METADATA_SQL,
 } from '../src/infra/repositories/agent-connection-setups.js'
 import {
+  ARCHIVE_AGENT_SQL,
   DELETE_AGENT_ALLOWANCE_SQL,
-  DELETE_REVOKED_AGENT_SQL,
+  UNARCHIVE_AGENT_SQL,
   FIND_AGENT_FOR_USER_ALL_STATUSES_SQL,
   FIND_AGENT_ID_FOR_USER_SQL,
   FIND_AGENT_ID_STATUS_FOR_USER_SQL,
@@ -355,7 +356,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: safe info inside create tx', sql: FIND_SAFE_INFO_SQL },
   { name: 'agents: insert allowance inside create tx', sql: INSERT_AGENT_ALLOWANCE_SQL },
   { name: 'agents: profile update (CTE, tenant-scoped)', sql: UPDATE_AGENT_PROFILE_SQL },
-  { name: 'agents: delete revoked agent', sql: DELETE_REVOKED_AGENT_SQL },
+  { name: 'agents: archive revoked agent (#1401)', sql: ARCHIVE_AGENT_SQL },
+  { name: 'agents: unarchive (#1401)', sql: UNARCHIVE_AGENT_SQL },
   { name: 'agents: revoke', sql: REVOKE_AGENT_SQL },
   { name: 'agents: rotate API key', sql: ROTATE_AGENT_API_KEY_SQL },
   { name: 'agents: pause', sql: PAUSE_AGENT_SQL },

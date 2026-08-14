@@ -489,12 +489,48 @@ export async function updateAgentProfile(
  * (COALESCE keeps the first value; the WHERE still matches so the call
  * reports success).
  */
+/**
+ * #1436: archiving requires BOTH a revoked credential and dead budgets.
+ *
+ * `status = 'revoked'` alone was not enough. Revoking an agent only flips this
+ * table's status — it never touches `agent_delegations` — so revoke+archive
+ * through the API (no dashboard, no revoke-all) filed an agent under "Removed"
+ * while its delegation stayed `active` and redeemable on-chain by whoever held
+ * the delegate key. The Remove dialog's ordering (revoke-all first) made that
+ * unreachable from the dashboard, but a safety property that lives only in
+ * frontend orchestration is not enforced; "Removed" promises the agent cannot
+ * spend, so the database is where that promise belongs.
+ *
+ * Legacy AllowanceModule agents have no rows here, so the NOT EXISTS passes
+ * for them — their authority is torn down by the on-chain revoke path instead.
+ * Crash-window orphans (#1423: disabled on-chain, still `active` here) DO
+ * block archiving, correctly: revoke-all heals them, and that is the same
+ * remedy this refusal names.
+ */
 export const ARCHIVE_AGENT_SQL = `UPDATE agents
        SET archived_at = COALESCE(archived_at, NOW()), updated_at = NOW()
        WHERE id = $1 AND user_id = $2 AND status = 'revoked'
+         AND NOT EXISTS (
+           SELECT 1 FROM agent_delegations ad
+           WHERE ad.agent_id = agents.id AND ad.status IN ('pending', 'active')
+         )
        RETURNING id, archived_at`
 
-/** Returns null when nothing matched (missing, foreign, or not revoked). */
+/** True when the agent still holds budget authority that archiving must not hide. */
+export const AGENT_HAS_LIVE_DELEGATIONS_SQL = `SELECT EXISTS (
+         SELECT 1 FROM agent_delegations
+         WHERE agent_id = $1 AND status IN ('pending', 'active')
+       ) AS live`
+
+export async function agentHasLiveDelegations(
+  agentId: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query<{ live: boolean }>(AGENT_HAS_LIVE_DELEGATIONS_SQL, [agentId])
+  return result.rows[0]?.live === true
+}
+
+/** Returns null when nothing matched (missing, foreign, not revoked, or still holding live delegations). */
 export async function archiveAgent(
   agentId: string,
   userId: string,

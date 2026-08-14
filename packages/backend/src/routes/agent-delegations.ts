@@ -467,8 +467,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     }
 
     if (targets.length > RECONCILE_READ_CEILING) {
+      // Cite the ceiling this actually gated on — quoting the batch cap here
+      // told an agent with 150 delegations "150 > 25", a true refusal with a
+      // wrong number.
       return reply.code(422).send({
-        error: `Too many delegations for one batch (${targets.length} > ${MAX_REVOKE_ALL_BATCH}). Revoke individually via POST /agents/:id/delegations/:hash/revoke, then retry.`,
+        error: `Too many delegations to reconcile in one request (${targets.length} > ${RECONCILE_READ_CEILING}). Revoke individually via POST /agents/:id/delegations/:hash/revoke, then retry.`,
       })
     }
 

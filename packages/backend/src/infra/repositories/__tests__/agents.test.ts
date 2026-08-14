@@ -10,6 +10,7 @@ import {
   LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
   UPDATE_AGENT_PROFILE_SQL,
   agentExistsForUser,
+  agentHasLiveDelegations,
   archiveAgent,
   unarchiveAgent,
   findAgentForUserAllStatuses,
@@ -202,6 +203,56 @@ describeDb('agents archive (#1401, real DB)', () => {
     const archived = await archiveAgent(agentId, userId)
     expect(archived).not.toBeNull()
     expect(archived!.archived_at).toBeInstanceOf(Date)
+  })
+
+  // #1436: revoking flips only agents.status — it never touches
+  // agent_delegations. So "revoked" alone was never proof that the agent had
+  // stopped spending, and archiving on that basis filed an agent under
+  // "Removed" while its budget stayed redeemable on-chain. The invariant lives
+  // here now, not in the dashboard's call ordering.
+  async function seedDelegation(agentId: string, status: string): Promise<void> {
+    await db.query(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, delegation_hash, delegation_json, version, token_address,
+          status, budget_atomic, period_seconds, start_date, expires_at)
+       VALUES ($1, 84532, $2, '{}', 1, '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+               $3, '1000000', 86400, 0, 0)`,
+      [agentId, `0x${(++seq).toString(16).padStart(2, '0').repeat(32)}`, status],
+    )
+  }
+
+  it.each(['pending', 'active'])(
+    'REFUSES to archive a revoked agent that still holds a %s delegation (#1436)',
+    async (delegationStatus) => {
+      const { userId, agentId } = await seedAgent('revoked')
+      await seedDelegation(agentId, delegationStatus)
+
+      expect(await archiveAgent(agentId, userId)).toBeNull()
+      const row = await db.query<{ archived_at: Date | null }>(
+        `SELECT archived_at FROM agents WHERE id = $1`,
+        [agentId],
+      )
+      expect(row.rows[0].archived_at).toBeNull()
+      expect(await agentHasLiveDelegations(agentId)).toBe(true)
+    },
+  )
+
+  it('archives once the delegations are revoked — the documented remedy works (#1436)', async () => {
+    const { userId, agentId } = await seedAgent('revoked')
+    await seedDelegation(agentId, 'active')
+    expect(await archiveAgent(agentId, userId)).toBeNull()
+
+    // What revoke-all does to the rows:
+    await db.query(`UPDATE agent_delegations SET status = 'revoked' WHERE agent_id = $1`, [agentId])
+
+    expect(await agentHasLiveDelegations(agentId)).toBe(false)
+    expect(await archiveAgent(agentId, userId)).not.toBeNull()
+  })
+
+  it('already-revoked delegations never block archiving (#1436)', async () => {
+    const { userId, agentId } = await seedAgent('revoked')
+    await seedDelegation(agentId, 'revoked')
+    expect(await archiveAgent(agentId, userId)).not.toBeNull()
   })
 
   it('re-archiving is idempotent and keeps the ORIGINAL archived_at', async () => {

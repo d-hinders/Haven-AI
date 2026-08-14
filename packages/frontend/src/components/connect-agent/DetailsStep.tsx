@@ -82,6 +82,9 @@ export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         )}
       </div>
       <div className="flex gap-3">
+        {/* handleClose is safe here without a confirm: its only guard
+            (manualCredentialNeedsSave) is a step-4 concern unreachable from
+            step 1, so Cancel behaves exactly like backdrop/X/Escape. */}
         <Button variant="ghost" onClick={flow.handleClose} disabled={flow.busy} className="flex-1">
           Cancel
         </Button>

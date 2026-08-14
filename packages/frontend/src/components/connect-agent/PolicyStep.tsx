@@ -85,10 +85,14 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           tightens to one outcome-first sentence plus one short helper line,
           matching every other helper in the flow instead of a three-line
           explainer. */}
+      {/* ink-2, NOT ink-3: the Checkbox primitive renders helperText at ink-3
+          by design, so the label must sit one tier darker for the built-in
+          label/helper hierarchy to read — an on-chain attestation is a
+          decision, not a footnote (design review, #1411). */}
       <Checkbox
         checked={flow.issuePassport}
         onChange={(event) => flow.setIssuePassport(event.target.checked)}
-        className="py-1 text-xs text-[var(--v2-ink-3)]"
+        className="py-1 text-xs text-[var(--v2-ink-2)]"
         label="Issue an Agent Passport — a signed, revocable record that Haven issued this agent."
         helperText="Optional. Haven covers the small on-chain fee."
       />

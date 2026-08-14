@@ -1,8 +1,10 @@
 'use client'
 
+import { ChevronRight } from 'lucide-react'
 import { RUNTIME_OPTIONS, type AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
+import { Icon } from '../ui/Icon'
 import { Input } from '../ui/Input'
 import { Select } from '../ui/Select'
 import { Textarea } from '../ui/Textarea'
@@ -61,15 +63,24 @@ export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           Haven tailors the setup prompt and restart steps to this environment. "Other" always works.
         </p>
         {flow.localMcpSupported && (
-          // #1411: footnote weight, not a technical essay. A power-user
-          // opt-in on the first screen gets one outcome-language sentence
-          // behind a disclosure — was a protocol paragraph ("Construct and
-          // relay happen on this machine; you update it yourself and Haven
-          // keeps no central payment log.") that read denser than anything
-          // else in the flow. Stays on this screen (moving it is a flow
-          // change, out of scope here) but no longer competes for attention.
-          <details className="mt-2">
-            <summary className="cursor-pointer text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)]">
+          /* #1411: footnote weight, not a technical essay. A power-user
+             opt-in on the first screen gets one outcome-language sentence
+             behind a disclosure — was a protocol paragraph ("Construct and
+             relay happen on this machine; you update it yourself and Haven
+             keeps no central payment log.") that read denser than anything
+             else in the flow. Stays on this screen (moving it is a flow
+             change, out of scope here) but no longer competes for attention.
+
+             #1393: the design system's chevron Icon, not the native <details>
+             triangle — same group/list-none/group-open:rotate-90 idiom the
+             step-4 disclosures use (WaitingForConnector,
+             ConnectionVerificationFooter). */
+          <details className="group mt-2">
+            <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)]">
+              <Icon
+                icon={ChevronRight}
+                className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+              />
               Advanced
             </summary>
             <Checkbox

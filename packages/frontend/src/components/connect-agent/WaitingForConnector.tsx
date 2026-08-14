@@ -62,6 +62,10 @@ export function WaitingForConnector({
           screen made neither instance authoritative. Status is the ticker's
           job; this block's job is what to DO. */}
       <div className="rounded-[10px] border border-[var(--v2-brand)]/15 bg-[var(--v2-brand-soft)] p-4">
+        {/* #1393 type scale: the modal has ONE title — the Modal primitive's
+            own `text-sm font-semibold` (ui/Modal.tsx). Every heading inside
+            the connect flow, including this one, plays a SECTION role and
+            stays at this tier; none is promoted to compete with it. */}
         <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Connect your agent</h3>
         <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
           Paste this prompt into the agent environment. It includes your approval for the exact local setup actions, creates the key there, and sends Haven only the public signing address.

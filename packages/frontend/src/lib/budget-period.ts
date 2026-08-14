@@ -34,12 +34,12 @@ export function budgetPeriodLabel(mins: number): string {
  * label form and neither sits beside the other in a single viewport. Worth
  * folding in later; not claimed as done.
  *
- * Parity with the connector holds for the periods this flow actually offers on
- * the delegation rail (daily/weekly/monthly, one-time on legacy). It is NOT
- * total: the connector's own `describeResetPeriod` special-cases only 1440, 60
- * and 0, so a weekly budget prints "per 10080 minutes" in the agent's terminal
- * against "per week" here. That divergence lives in `packages/connect` and is
- * tracked separately rather than silently claimed as fixed.
+ * Parity with the connector (#1426): `describeResetPeriod` in
+ * `packages/connect/src/runtime.ts` phrases every dashboard-offered period
+ * with this file's sentence words ("per week", "per month", "in total") and
+ * its tests pin each one. The mapping is deliberately duplicated, not shared:
+ * connect is a published package and the only shared home would be the
+ * PRIVATE `@haven_ai/core` — the tests are the coupling.
  *
  * `allowance_amount` is the raw on-chain bigint string, so formatting needs the
  * chain to resolve the token's decimals.

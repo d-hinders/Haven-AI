@@ -125,7 +125,9 @@ export function SetupDoneState({
   // Degrades to that generic line whenever any part is missing — a half-named
   // authority ("can spend up to  from ") would be worse than the abstract one.
   const grantedName = agentName?.trim() || null
-  const grants = (budgets ?? []).map((budget) => describeBudgetGrant(budget, chainId))
+  const grants = (budgets ?? []).map((budget) =>
+    describeBudgetGrant(budget, chainId, { form: 'sentence' }),
+  )
   const canNameGrant = grantedName != null && grants.length > 0 && Boolean(walletName?.trim())
 
   async function handleDownloadSkill() {

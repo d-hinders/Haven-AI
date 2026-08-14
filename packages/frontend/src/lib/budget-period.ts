@@ -33,7 +33,16 @@ export function budgetPeriodLabel(mins: number): string {
 export function describeBudgetGrant(
   budget: { allowance_amount: string; token_symbol: string; reset_period_min: number },
   chainId: number | null | undefined,
+  options: { form?: 'label' | 'sentence' } = {},
 ): string {
   const amount = formatAllowanceForToken(budget.allowance_amount, chainId, budget.token_symbol)
-  return `${amount} ${budget.token_symbol} ${budgetPeriodLabel(budget.reset_period_min)}`
+  const period = budgetPeriodLabel(budget.reset_period_min)
+  // `budgetPeriodLabel` is built for a LABEL slot ("Budget: 10 USDC total
+  // budget"), and one of its outputs is a noun phrase. Dropped into a sentence
+  // that reads "…can now spend up to 10 USDC total budget from Operating
+  // wallet" — broken grammar on the flow's payoff screen. Sentence callers get
+  // the adverbial form. Only the one-time case differs; every other label
+  // ("per day", "every 60m") is already adverbial.
+  const phrase = options.form === 'sentence' && period === 'total budget' ? 'in total' : period
+  return `${amount} ${budget.token_symbol} ${phrase}`
 }

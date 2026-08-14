@@ -20,10 +20,15 @@ interface CheckboxProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'typ
  * label row — so the row is part of the primitive, not left to callers.
  *
  * Intentionally the NATIVE control with `accent-color`, not a custom-painted
- * box: it keeps the platform's keyboard behaviour, focus ring, indeterminate
- * support and screen-reader semantics for free, which a hand-built div would
- * have to re-earn. Wrapping in `<label>` gives implicit association, so the
- * text is a click target with no `id`/`htmlFor` wiring at the call site.
+ * box: it keeps the platform's keyboard behaviour, focus ring and
+ * screen-reader semantics for free, which a hand-built div would have to
+ * re-earn. Wrapping in `<label>` gives implicit association, so the text is a
+ * click target with no `id`/`htmlFor` wiring at the call site.
+ *
+ * No ref is forwarded, so `indeterminate` — a DOM property, not an attribute —
+ * is out of reach. Nothing needs it yet (every checkbox in the app is a single
+ * confirmation, not a select-all); add `forwardRef` when a real tri-state
+ * arrives rather than speculatively.
  */
 export function Checkbox({
   label,

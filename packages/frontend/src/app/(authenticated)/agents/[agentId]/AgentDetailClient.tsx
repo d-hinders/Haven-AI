@@ -272,10 +272,14 @@ export default function AgentDetailClient({ agentId }: Props) {
   )
   // Gate recovery UI on the delegate EOA actually holding *recoverable* funds — not
   // on a funded-but-unsettled payment record (which can linger after a sweep), and
-  // specifically on USDC, since the gasless recovery path is USDC-only. Skip the
-  // read for revoked agents (the endpoint 404s anyway).
+  // specifically on USDC, since the gasless recovery path is USDC-only. #1403:
+  // the read is status-agnostic now — revoked agents resolve too, and that is
+  // the POINT: the sequence that strands delegate funds (agent misbehaving
+  // mid-x402 → revoke) is the one that needs the recovery banner. The hook's
+  // catch treats errors as "nothing to recover", so a failing read degrades
+  // silently rather than blocking.
   const { balance: delegateBalance, hasRecoverableUsdc } = useDelegateBalance(
-    agent && agent.status !== 'revoked' ? agentId : null,
+    agent ? agentId : null,
   )
   // #1098: the human field can be absent while atomic is set (a partial API
   // response mid-load) — "Recover undefined USDC" is worse than the generic

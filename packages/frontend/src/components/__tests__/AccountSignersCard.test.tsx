@@ -50,7 +50,7 @@ describe('AccountSignersCard (#888)', () => {
     await waitFor(() => expect(enrollBackupPasskey).toHaveBeenCalled())
   })
 
-  it('with two ways, Remove is enabled and calls removePasskey with the key id', async () => {
+  it('with two ways, passkey removal requires a consequence-naming confirmation (#1199)', async () => {
     const removePasskey = vi.fn().mockResolvedValue({ ok: true })
     mockUseSigners.mockReturnValue(
       base({
@@ -69,6 +69,59 @@ describe('AccountSignersCard (#888)', () => {
     const remove = removes[1]
     expect(remove.disabled).toBe(false)
     fireEvent.click(remove)
+    expect(removePasskey).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(screen.getByText(/this account will have no recovery/i)).toBeTruthy()
+    expect(screen.getByText(/Haven cannot restore access/i)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove anyway' }))
+    await waitFor(() => expect(removePasskey).toHaveBeenCalledWith('0x' + '11'.repeat(32)))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('cancelling the passkey confirmation leaves the passkey in place (#1199)', () => {
+    const removePasskey = vi.fn().mockResolvedValue({ ok: true })
+    mockUseSigners.mockReturnValue(
+      base({
+        removePasskey,
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    const [, passkeyRemove] = screen.getAllByText('Remove') as HTMLButtonElement[]
+    fireEvent.click(passkeyRemove)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(removePasskey).not.toHaveBeenCalled()
+  })
+
+  it('removes a passkey directly when at least two approval ways remain', async () => {
+    const removePasskey = vi.fn().mockResolvedValue({ ok: true })
+    mockUseSigners.mockReturnValue(
+      base({
+        removePasskey,
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [
+            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' },
+            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4' },
+          ],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    const removes = screen.getAllByText('Remove') as HTMLButtonElement[]
+    fireEvent.click(removes[1])
+
+    expect(screen.queryByRole('dialog')).toBeNull()
     await waitFor(() => expect(removePasskey).toHaveBeenCalledWith('0x' + '11'.repeat(32)))
   })
 

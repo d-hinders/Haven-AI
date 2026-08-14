@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-10" # #1205 re-verify: §7 recommendation now has its production call site (session safes payload) — no invariant, refusal or authority changed
+last-verified: "2026-08-14" # #1199: passkey and wallet removal now share the informed two-to-one rule
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -189,14 +189,15 @@ anywhere (invariants 5/7/12/13 unchanged). Sponsorship pays gas only; the
 transfer itself is bounded by nothing but the owner's signature, which is the
 point — it is the owner's own money.
 
-**The signer set is symmetric (#1087):** enrolling an EOA owner is not a
-one-way door — `remove_owner` encodes `transferOwnership(address(0))` through
-the same prepare/submit path and returns the account to passkey-only. Refused
-before any op is prepared when the wallet is the account's **only** signer —
-that would leave nothing able to approve anything, and the account refuses it
-on-chain regardless. A removal that leaves exactly ONE signer is **permitted**
-since #1153, on any chain: the dashboard names the consequence and asks for
-confirmation, and the API does not refuse (see §7 for the decision).
+**The signer set is symmetric (#1087, #1199):** enrolling an EOA owner is not
+a one-way door — `remove_owner` encodes `transferOwnership(address(0))` through
+the same prepare/submit path and returns the account to passkey-only. Removing
+a passkey uses that same shared path and is subject to the same recovery rule.
+Either removal is refused before any op is prepared when it would leave the
+account with **no** signer — the account itself refuses that on-chain. A removal
+that leaves exactly ONE signer is **permitted** on any chain: the dashboard
+names the consequence and asks for confirmation, and the API does not refuse
+(see §7 for the decision).
 
 **Recovery invariants (non-custody preserved through recovery):**
 
@@ -206,10 +207,10 @@ confirmation, and the API does not refuse (see §7 for the decision).
   invariant 13, CI-enforced.
 - **The account enforces ≥1 signer on-chain** (`CannotRemoveLastSigner`, proven
   in the #884 spike), and that is the only hard floor. Haven mirrored a **≥2**
-  refusal in the API until #1153 turned it into a recommendation; the UI still
-  never lets you approach a no-recovery state *silently*, but it now warns
-  rather than refuses. `remove_passkey` is the one place the ≥2 refusal
-  remains, on every chain — an asymmetry #1153 records rather than resolves.
+  refusal in the API until #1153 turned it into a recommendation. Both signer
+  removal actions now permit an informed two-to-one transition: the UI names
+  the no-recovery consequence before calling, while the API preserves no
+  stricter policy gate.
 - **Storage tracks the chain, not the reverse.** The stored signer set (which the
   deploy/sign paths rebuild the account config from) is synced only *after* the
   on-chain op confirms, and the submit step **pins the sync to the signed
@@ -242,9 +243,8 @@ stays live server-side (it is the same shared implementation below, just
 resolved differently) but has no remaining frontend caller.
 The two surfaces differ only in how the account is resolved: agent lookup
 versus an owner-scoped `(address, chain)` lookup on `user_safes`. Authority
-rules, the last-signer refusal (§7 — the ≥2 floor itself relaxed in #1153,
-with a branch-specific remnant tracked in #1199), the calldata encoding and
-the signed-op matching
+rules, the last-signer refusal (§7), the calldata encoding and the signed-op
+matching
 are **one implementation** (`rails/hybrid-signer-actions.ts`), because two copies
 of a spend-authority rule is how they drift apart. Invariant 13 is asserted
 against that shared core and against both routes reaching it. Client-side, signing selects the passkey whose credential is
@@ -266,8 +266,10 @@ overstate what is actually gated.
 **The honest limit, stated plainly:** a **single-signer account has no recovery**
 — if its only signer is lost, the account is unreachable by the user *and* by
 Haven. This is inherent to self-custody, not a Haven policy. Mitigation is
-structural: onboarding nudges a backup, the account blocks dropping below the
-safe floor, and copy never promises recovery Haven cannot deliver.
+structural: onboarding nudges a backup, the account itself refuses removal of
+its last signer, and the dashboard requires an explicit confirmation before an
+informed two-to-one transition. Copy never promises recovery Haven cannot
+deliver.
 
 ## 7. Two signers: a recommendation, not a gate (#1153)
 
@@ -303,11 +305,11 @@ moment the user has nothing at risk and no context for what a backup protects.
 - **Provisioning and grant activation do not consider signer count.** A
   single-signer account may be created on a value-bearing chain and may receive
   a budget.
-- **`remove_owner` succeeds** in dropping a value-bearing account to one
-  signer. The dashboard requires an explicit confirmation naming the
-  consequence before it calls; an API-level acknowledgement flag was rejected
-  on #1153 because it would still be a block to any non-UI caller, which is the
-  thing being removed.
+- **`remove_owner` and `remove_passkey` succeed** in dropping a value-bearing
+  account to one signer. The dashboard requires an explicit confirmation
+  naming the consequence before it calls; an API-level acknowledgement flag
+  was rejected on #1153 because it would still be a block to any non-UI caller,
+  which is the thing being removed.
 - **The recommendation is delivered after funding**, and only when the account
   is genuinely below two signers — recommending a backup to someone who has one
   teaches them to ignore the banner.
@@ -348,8 +350,11 @@ hard backstop). And a provisioning-time EOA owner is **not signature-verified**
 — the floor counts enrolled signers, it cannot prove each is usable (the zero
 address, which provably is NOT a signer, is rejected at every entry point).
 
-Remaining for the UI (when mainnet onboarding opens): a first-class backup
-step or an explicit waiver screen — the API refuses either way.
+The dashboard now delivers the recovery recommendation after funding, and both
+two-to-one signer-removal paths require an explicit consequence confirmation.
+The API deliberately has no waiver or acknowledgement gate: it permits those
+informed transitions while the account's on-chain last-signer guard remains the
+hard backstop.
 
 ## 8. x402 dual-scheme settlement — the EIP-3009 interop bridge (#946)
 

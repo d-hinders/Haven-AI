@@ -45,6 +45,10 @@ import {
   type HavenBudgetPolicy,
 } from '../rails/delegation-policy.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from '../rails/delegation-rail.js'
+import {
+  listNonRevokedDelegationsForAgent,
+  revokeDelegationsByHashes,
+} from '../infra/repositories/delegation-budgets.js'
 import { redactVendorSecrets } from '../rails/execution-rail.js'
 // Signer management is shared with the account-scoped routes (#1081) — one
 // copy of the authority rules, reached two ways.
@@ -427,6 +431,136 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       return { activated: true, delegation_hash: request.params.hash }
     },
   )
+
+  // ── POST /:id/delegations/revoke-all — #1400: ONE signature kills every
+  // non-revoked budget delegation. Step 1 of #1402's Remove-agent action.
+  // Mirrors the per-hash prepare exactly; the only new mechanics is the
+  // batched UserOp (prepareCalls) — no second copy of the authority rules.
+  app.post<{ Params: { id: string } }>('/:id/delegations/revoke-all', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const agent = await loadOwnedDelegationAgent(request.params.id, sub)
+    if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+    if (agent.account_type !== 'delegator_hybrid') {
+      return reply.code(409).send({
+        error:
+          'Batch revocation is a delegation-rail operation. This agent is on the AllowanceModule rail — remove its allowances via the wallet-approval teardown instead.',
+      })
+    }
+
+    const targets = await listNonRevokedDelegationsForAgent(request.params.id)
+    if (targets.length === 0) {
+      return reply.code(409).send({ error: 'Nothing to revoke — the agent has no pending or active budget delegations.' })
+    }
+
+    const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
+    if (!owner) {
+      return reply.code(409).send({
+        error: 'Account signer configuration unknown — revoke via the exit path (docs)',
+      })
+    }
+
+    try {
+      const calls = targets.map((target) => {
+        const revocation = buildRevocation(JSON.parse(target.delegation_json), agent.chain_id)
+        return { to: revocation.to, data: revocation.data }
+      })
+      const resolved = resolveSignatureScheme(
+        (request.body as { signature_scheme?: string } | undefined)?.signature_scheme,
+        owner.config,
+      )
+      if ('error' in resolved) return reply.code(409).send({ error: resolved.error })
+      const treasury = await createTreasuryOps({
+        ownerAddress: owner.config.ownerAddress,
+        passkeys: owner.config.passkeys,
+        accountAddress: agent.treasury_address as Address,
+        chainId: agent.chain_id,
+        bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
+        rpcUrl: getChain(agent.chain_id).rpcUrl,
+        sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
+        signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
+      })
+      const prepared = await treasury.prepareCalls(calls)
+      const user_operation = JSON.parse(
+        JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
+      )
+      const delegation_hashes = targets.map((target) => target.delegation_hash)
+      if (resolved.scheme === 'webauthn_userop') {
+        return {
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: prepared.userOpHash,
+          user_operation,
+          treasury_address: prepared.treasuryAddress,
+          delegation_hashes,
+          instructions:
+            'Sign user_op_hash with the account passkey (WebAuthn), then POST /revoke-all/submit',
+        }
+      }
+      return {
+        signature_scheme: 'eip712_userop',
+        signing_payload: prepared.signingTypedData,
+        user_operation,
+        treasury_address: prepared.treasuryAddress,
+        delegation_hashes,
+        instructions:
+          'Sign signing_payload (EIP-712) with the treasury owner key, then POST /revoke-all/submit',
+      }
+    } catch (err) {
+      return reply.code(502).send({ error: 'Could not prepare the batch revocation', details: safeDetails(err) })
+    }
+  })
+
+  // ── POST /:id/delegations/revoke-all/submit — step 2 ─────────────────────
+  app.post<{
+    Params: { id: string }
+    Body: { signature?: string; user_operation?: unknown; delegation_hashes?: unknown }
+  }>('/:id/delegations/revoke-all/submit', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const agent = await loadOwnedDelegationAgent(request.params.id, sub)
+    if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+    const { signature, user_operation, delegation_hashes } = request.body ?? {}
+    if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
+      return reply.code(400).send({ error: 'signature is required' })
+    }
+    if (!user_operation || typeof user_operation !== 'object') {
+      return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
+    }
+    if (
+      !Array.isArray(delegation_hashes) ||
+      delegation_hashes.length === 0 ||
+      !delegation_hashes.every((h) => typeof h === 'string' && HASH_RE.test(h))
+    ) {
+      return reply.code(400).send({ error: 'delegation_hashes (from the prepare step) is required' })
+    }
+    const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
+    if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
+
+    try {
+      const treasury = await createTreasuryOps({
+        ownerAddress: owner.config.ownerAddress,
+        passkeys: owner.config.passkeys,
+        accountAddress: agent.treasury_address as Address,
+        chainId: agent.chain_id,
+        bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
+        rpcUrl: getChain(agent.chain_id).rpcUrl,
+        sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
+      })
+      const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>
+        typeof v === 'string' && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v,
+      )
+      const result = await treasury.submitCall(
+        { userOperation: revived, userOpHash: '0x' as Hex, signingTypedData: null, treasuryAddress: treasury.treasuryAddress },
+        signature as Hex,
+      )
+      // DB write ONLY after the UserOp landed — a failed submit leaves every
+      // row untouched (no optimistic revocation). Scoped to this agent, so a
+      // stray hash flips nothing foreign; the response reports what actually
+      // flipped rather than echoing the request.
+      const revoked = await revokeDelegationsByHashes(request.params.id, delegation_hashes as string[])
+      return { revoked: true, tx_hash: result.txHash, delegation_hashes: revoked }
+    } catch (err) {
+      return reply.code(502).send({ error: 'Batch revocation failed', details: safeDetails(err) })
+    }
+  })
 
   // ── POST /:id/delegations/:hash/revoke — step 1: prepare (one signature) ──
   app.post<{ Params: { id: string; hash: string } }>(

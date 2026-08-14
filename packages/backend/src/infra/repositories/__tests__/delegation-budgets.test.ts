@@ -238,3 +238,60 @@ describeDb('delegation-budgets repository (#1221)', () => {
     expect(winner.rows[0].budget_atomic).toBe('222')
   })
 })
+
+/**
+ * #1400 real-DB proof: the batch revocation is ONE statement, agent-scoped,
+ * status-predicated — what Postgres must guarantee for "submit marks exactly
+ * those hashes revoked".
+ */
+import {
+  listNonRevokedDelegationsForAgent,
+  revokeDelegationsByHashes,
+} from '../delegation-budgets.js'
+
+describeDb('batch revocation (#1400, real DB)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  it('lists pending AND active, never revoked/replaced; batch-revoke flips exactly the given hashes', async () => {
+    const agentId = await seedUserAndAgent('Batch agent')
+    const otherAgent = await seedUserAndAgent('Other agent')
+    const hActive = await seedDelegation({ agentId, status: 'active', tokenAddress: USDC })
+    const hPending = await seedDelegation({ agentId, status: 'pending', tokenAddress: '0x' + '11'.repeat(20) })
+    await seedDelegation({ agentId, status: 'revoked', tokenAddress: '0x' + '22'.repeat(20) })
+    const hForeign = await seedDelegation({ agentId: otherAgent, status: 'active', tokenAddress: USDC })
+
+    const targets = await listNonRevokedDelegationsForAgent(agentId)
+    expect(targets.map((t) => t.status).sort()).toEqual(['active', 'pending'])
+    const hashes = targets.map((t) => t.delegation_hash)
+
+    // The foreign hash rides along in the request — the agent scope must
+    // make it flip NOTHING outside this agent.
+    const foreignRow = await db.query<{ delegation_hash: string }>(
+      `SELECT delegation_hash FROM agent_delegations WHERE id = $1`, [hForeign],
+    )
+    const flipped = await revokeDelegationsByHashes(agentId, [...hashes, foreignRow.rows[0].delegation_hash])
+    expect(flipped.sort()).toEqual(hashes.sort())
+
+    const after = await db.query<{ status: string }>(
+      `SELECT status FROM agent_delegations WHERE id = ANY($1)`, [[hActive, hPending]],
+    )
+    expect(after.rows.every((r) => r.status === 'revoked')).toBe(true)
+    const foreign = await db.query<{ status: string }>(
+      `SELECT status FROM agent_delegations WHERE id = $1`, [hForeign],
+    )
+    expect(foreign.rows[0].status).toBe('active')
+  })
+
+  it('re-running the batch is a no-op (status predicate) — nothing double-flips', async () => {
+    const agentId = await seedUserAndAgent('Idempotent agent')
+    await seedDelegation({ agentId, status: 'active', tokenAddress: USDC })
+    const hashes = (await listNonRevokedDelegationsForAgent(agentId)).map((t) => t.delegation_hash)
+    expect(await revokeDelegationsByHashes(agentId, hashes)).toHaveLength(1)
+    expect(await revokeDelegationsByHashes(agentId, hashes)).toHaveLength(0)
+  })
+})

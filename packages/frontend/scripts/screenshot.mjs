@@ -558,8 +558,12 @@ export const SCENARIOS = {
       // Textarea, the local-MCP and Agent Passport Checkboxes) that no other
       // capture reaches. Disclosures are opened first — a control nobody can
       // see is a control nobody reviewed (#1410).
-      const advanced = dialog.getByText('Advanced', { exact: true })
-      if (await advanced.isVisible().catch(() => false)) await advanced.click()
+      // Not guarded: the same principle as the manual-credential reveal below.
+      // This scenario pins runtime=claude-code, for which the Advanced
+      // disclosure always renders, so a missing one means the flow changed and
+      // the capture should fail rather than quietly omit the control it exists
+      // to show.
+      await dialog.getByText('Advanced', { exact: true }).click()
       await shoot(dialog, 'step1-details')
 
       await dialog.getByRole('button', { name: 'Set agent budget' }).click()

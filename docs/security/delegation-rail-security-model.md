@@ -136,8 +136,18 @@ Because `disableDelegation` is NOT idempotent (`AlreadyDisabled` revert) and
 the batch is atomic, the prepare step reconciles that window (#1423): it reads
 `disabledDelegations(hash)` for every candidate, heals already-disabled rows
 to `revoked`, and drops them from the batch — a failed read degrades to the
-full batch rather than blocking revocation. Batches are capped at 25 calls
-(422 pointing at per-hash revocation beyond it). An empty batch is a 409
+full batch rather than blocking revocation. A heal marks a row revoked
+WITHOUT an owner signature, so a false positive would defeat the kill switch
+— therefore reads are pinned to `finalized` (no reorg transients), a hash
+counts as disabled only when TWO consecutive reads agree, and every heal is
+logged distinctly from an owner-signed revoke. A persistently lying RPC
+endpoint remains outside this control's threat model — the same endpoint
+already sits under gas estimation and submission on this rail. The same
+heal-or-prepare check guards the per-hash revoke route (409 "Already
+revoked … reconciled" instead of an eternal 502). Batches are capped at 25
+calls (422 pointing at per-hash revocation beyond it), with a coarse
+pre-read ceiling of 100 so an over-cap agent cannot burn unbounded RPC reads
+either. An empty batch is a 409
 (`Nothing to revoke`), which callers treat as already-done. The
 per-delegation revoke and the kill-switch story above are unchanged.
 

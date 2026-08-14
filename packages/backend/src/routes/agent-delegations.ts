@@ -77,6 +77,10 @@ const HASH_RE = /^0x[0-9a-fA-F]{64}$/
 // limits (a loud 502 — availability, not safety). Real agents hold a handful
 // of budgets; past this, per-hash revocation is the escape hatch.
 const MAX_REVOKE_ALL_BATCH = 25
+// Coarse pre-read ceiling: past this we refuse BEFORE spending any RPC budget
+// on the reconciliation reads. Sits well above the batch cap so healed
+// orphans can never push a legitimately-sized batch into this refusal.
+const RECONCILE_READ_CEILING = 100
 
 interface AgentAccountRow {
   agent_id: string
@@ -462,6 +466,12 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       return reply.code(409).send({ error: 'Nothing to revoke — the agent has no pending or active budget delegations.' })
     }
 
+    if (targets.length > RECONCILE_READ_CEILING) {
+      return reply.code(422).send({
+        error: `Too many delegations for one batch (${targets.length} > ${MAX_REVOKE_ALL_BATCH}). Revoke individually via POST /agents/:id/delegations/:hash/revoke, then retry.`,
+      })
+    }
+
     // #1423: disableDelegation is NOT idempotent (AlreadyDisabled revert), and
     // the batch is atomic — one already-disabled entry would revert the whole
     // op. A row can be stale-active while disabled on-chain (the #1400 crash
@@ -469,6 +479,9 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     // to `revoked` here and drop them from the batch. A failed read degrades
     // to the pre-#1423 behavior (full batch) rather than blocking revocation —
     // availability over a rare bundled revert, which still fails loudly (502).
+    // Heals are marked-without-a-signature, so the read is double-confirmed at
+    // `finalized` (see readDisabledDelegationHashes) and every heal is logged
+    // distinctly from an owner-signed revoke.
     try {
       const disabled = await readDisabledDelegationHashes(
         agent.chain_id,
@@ -476,7 +489,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         targets.map((t) => t.delegation_hash as Hex),
       )
       if (disabled.size > 0) {
-        await revokeDelegationsByHashes(request.params.id, [...disabled])
+        const healed = await revokeDelegationsByHashes(request.params.id, [...disabled])
+        request.log.warn(
+          { agentId: request.params.id, healed },
+          'revoke-all reconciled on-chain-disabled delegations to revoked (no signature — chain state was already disabled)',
+        )
         targets = targets.filter((t) => !disabled.has(t.delegation_hash as Hex))
       }
     } catch (err) {
@@ -622,6 +639,28 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       if (!target) return reply.code(404).send({ error: 'Delegation not found' })
       if (target.status === 'revoked') {
         return reply.code(409).send({ error: 'Already revoked' })
+      }
+
+      // #1423: same crash-window hardening as revoke-all — disableDelegation
+      // REVERTS on an already-disabled delegation, so an orphaned row here
+      // would 502 on prepare forever. Heal it and answer with the same
+      // already-done signal; a failed read degrades to the normal prepare.
+      try {
+        const disabled = await readDisabledDelegationHashes(
+          agent.chain_id,
+          getChain(agent.chain_id).rpcUrl,
+          [request.params.hash as Hex],
+        )
+        if (disabled.size > 0) {
+          const healed = await revokeDelegationsByHashes(request.params.id, [request.params.hash])
+          request.log.warn(
+            { agentId: request.params.id, healed },
+            'per-hash revoke reconciled an on-chain-disabled delegation to revoked (no signature — chain state was already disabled)',
+          )
+          return reply.code(409).send({ error: 'Already revoked — the delegation was disabled on-chain and the record has been reconciled.' })
+        }
+      } catch (err) {
+        request.log.warn({ err }, 'disabled-delegation read failed; proceeding with the normal prepare')
       }
 
       // Reconstruct the treasury's owner config (#885): an EOA account signs

@@ -128,6 +128,9 @@ describe('delegation lifecycle API (#828)', () => {
     mockCompute.mockResolvedValue(DELEGATE_ACCOUNT)
     // Default: the delegator account is (or becomes) deployed at the stored address.
     mockEnsureDeployed.mockResolvedValue({ address: TREASURY, alreadyDeployed: true })
+    // #1423 default: nothing already disabled on-chain.
+    mockReadDisabled.mockReset()
+    mockReadDisabled.mockResolvedValue(new Set())
   })
 
   describe('POST /:id/delegations/build — grant step 1', () => {
@@ -592,6 +595,20 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.json().error).toMatch(/exit path/)
     })
 
+    it('heals a crash-window orphan instead of 502ing on the AlreadyDisabled revert (#1423)', async () => {
+      mockDb({ stored: { delegation_json: '{}', status: 'active' } })
+      mockReadDisabled.mockResolvedValue(new Set([HASH]))
+
+      const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke` })
+      expect(res.statusCode).toBe(409)
+      expect(res.json().error).toMatch(/Already revoked.*reconciled/i)
+      const heal = mockQuery.mock.calls.find((c) => /SET status = 'revoked'/.test(String(c[0])))
+      expect(heal).toBeDefined()
+      expect(heal![1]).toEqual([AGENT_ID, [HASH]])
+      // Nothing was prepared — no UserOp for a call that would only revert.
+      expect(mockTreasury).not.toHaveBeenCalled()
+    })
+
     it('submit marks revoked and never leaks the bundler credential on failure', async () => {
       mockDb({ stored: { delegation_json: '{}', status: 'active' } })
       mockTreasury.mockResolvedValue({
@@ -894,6 +911,20 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
     const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all` })
     expect(res.statusCode).toBe(422)
     expect(res.json().error).toContain('Revoke individually')
+    expect(mockTreasury).not.toHaveBeenCalled()
+  })
+
+  it('past the coarse ceiling it refuses BEFORE spending any RPC reads (#1423 review)', async () => {
+    const many = Array.from({ length: 101 }, (_, i) => ({
+      delegation_hash: `0x${(i % 251).toString(16).padStart(2, '0').repeat(32)}`,
+      delegation_json: storedJsonWithSalt(String(i)),
+      status: 'active',
+    }))
+    mockBatchDb({ targets: many })
+
+    const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all` })
+    expect(res.statusCode).toBe(422)
+    expect(mockReadDisabled).not.toHaveBeenCalled()
     expect(mockTreasury).not.toHaveBeenCalled()
   })
 

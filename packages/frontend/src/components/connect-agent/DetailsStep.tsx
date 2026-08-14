@@ -2,8 +2,10 @@
 
 import { RUNTIME_OPTIONS, type AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
 import { Button } from '../ui/Button'
+import { Checkbox } from '../ui/Checkbox'
 import { Input } from '../ui/Input'
 import { Select } from '../ui/Select'
+import { Textarea } from '../ui/Textarea'
 
 /** Step 1: agent name, description, and runtime. */
 export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
@@ -24,13 +26,12 @@ export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         <label htmlFor="connect-agent-description" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
           Description <span className="normal-case">(optional)</span>
         </label>
-        <textarea
+        <Textarea
           id="connect-agent-description"
           value={flow.description}
           onChange={(event) => flow.setDescription(event.target.value)}
           placeholder="What does this agent do?"
           rows={2}
-          className="w-full resize-none rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] transition-colors focus:border-[var(--v2-brand)] focus:outline-none focus:ring-2 focus:ring-[var(--v2-brand)]/20"
         />
       </div>
       <div>
@@ -56,19 +57,12 @@ export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
             <summary className="cursor-pointer text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)]">
               Advanced
             </summary>
-            <label className="mt-2 flex items-start gap-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              <input
-                type="checkbox"
-                checked={flow.localMcp}
-                onChange={(event) => flow.setLocalMcp(event.target.checked)}
-                className="mt-0.5"
-              />
-              <span>
-                Run a fully-local Haven MCP (no hosted dependency). Construct and relay happen on
-                this machine; you update it yourself and Haven keeps no central payment log.
-                Recommended only for offline or self-host setups.
-              </span>
-            </label>
+            <Checkbox
+              checked={flow.localMcp}
+              onChange={(event) => flow.setLocalMcp(event.target.checked)}
+              className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]"
+              label="Run a fully-local Haven MCP (no hosted dependency). Construct and relay happen on this machine; you update it yourself and Haven keeps no central payment log. Recommended only for offline or self-host setups."
+            />
           </details>
         )}
       </div>

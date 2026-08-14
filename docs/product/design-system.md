@@ -207,6 +207,18 @@ Use `components/ui/Input.tsx` for product forms. Inputs have visible borders, to
 
 Amount fields should use `.v2-tabular`. Paste handlers should trim pasted whitespace. Do not rely on toast alone for validation; field errors belong next to the field.
 
+`Input`, `Select`, `Textarea` and `Checkbox` are **one family**: same radius, surface, padding, focus ring, and `invalid`/`disabled` treatment, so a mixed form row aligns and nothing looks bolted on. Reach for the primitive — a hand-rolled control drifts from the family the moment either side changes, which is what [#1410](https://github.com/d-hinders/Haven-AI/issues/1410) had to undo.
+
+### Textarea
+
+Use `components/ui/Textarea.tsx` for multi-line fields — the `Input` half of the family, with the same `invalid` and `helperText` support. `resize-none` by default (dialog fields should not grow under the user); pass `className="resize-y"` where growing is genuinely wanted.
+
+### Checkbox
+
+Use `components/ui/Checkbox.tsx`. Every checkbox in Haven is a box **plus an explanation**, so the primitive owns the `flex items-start gap-2` label row and takes a required `label` (plus optional `helperText` for a consequence on a second line). Pass `className` for the row's own typography or surface.
+
+It is the **native** control with `accent-color`, not a custom-painted box: keyboard behaviour, focus ring, indeterminate state and screen-reader semantics come from the platform rather than being re-earned. The wrapping `<label>` gives implicit association, so the text is a click target with no `id`/`htmlFor` wiring at the call site — do not re-add one.
+
 ### Skeletons
 
 Use `components/ui/Skeleton.tsx` instead of inline `animate-pulse` divs. The primitive is caller-sized; choose `variant="text"`, `variant="rect"`, or `variant="circle"` for radius only. Loading containers that replace meaningful content should use `role="status"`, `aria-busy="true"`, and `aria-live="polite"` around the skeletons.

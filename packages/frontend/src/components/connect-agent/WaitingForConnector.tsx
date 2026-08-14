@@ -7,6 +7,7 @@ import type {
 } from '@/hooks/useAgentConnectionSetup'
 import type { AwaitingConnectionStage } from '@/hooks/useAgentConnectionSetupStatus'
 import { Button } from '../ui/Button'
+import { Checkbox } from '../ui/Checkbox'
 import { StatusBadge } from '../ui/StatusBadge'
 import { CopyBlock } from './CopyBlock'
 import { InlineErrorNote } from './SetupNotices'
@@ -173,17 +174,12 @@ export function WaitingForConnector({
               <li>Do not commit it, upload it, or paste it into shared logs.</li>
             </ul>
           </div>
-          <label className="flex items-start gap-2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 text-[var(--v2-ink-2)]">
-            <input
-              type="checkbox"
-              checked={manualFallbackConfirmed}
-              onChange={(event) => onManualFallbackConfirmedChange(event.target.checked)}
-              className="mt-0.5"
-            />
-            <span>
-              I understand this fallback shows a one-time private signing key and should only be pasted into a trusted agent workspace.
-            </span>
-          </label>
+          <Checkbox
+            checked={manualFallbackConfirmed}
+            onChange={(event) => onManualFallbackConfirmedChange(event.target.checked)}
+            className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 text-[var(--v2-ink-2)]"
+            label="I understand this fallback shows a one-time private signing key and should only be pasted into a trusted agent workspace."
+          />
           {manualError && <InlineErrorNote>{manualError}</InlineErrorNote>}
           {!manualCredential && (
             <Button

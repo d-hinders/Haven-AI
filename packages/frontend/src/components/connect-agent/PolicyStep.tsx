@@ -2,6 +2,7 @@
 
 import type { AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
 import { Button } from '../ui/Button'
+import { Checkbox } from '../ui/Checkbox'
 import { Input } from '../ui/Input'
 import { Select } from '../ui/Select'
 
@@ -75,19 +76,12 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         </p>
       </div>
 
-      <label className="flex items-start gap-2 py-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-        <input
-          type="checkbox"
-          checked={flow.issuePassport}
-          onChange={(event) => flow.setIssuePassport(event.target.checked)}
-          className="mt-0.5"
-        />
-        <span>
-          Optional: issue an Agent Passport — a signed record that this agent was issued
-          by Haven, bound to this wallet, and revocable at any time. Haven covers the
-          small on-chain fee to issue it.
-        </span>
-      </label>
+      <Checkbox
+        checked={flow.issuePassport}
+        onChange={(event) => flow.setIssuePassport(event.target.checked)}
+        className="py-1 text-xs leading-relaxed text-[var(--v2-ink-3)]"
+        label="Optional: issue an Agent Passport — a signed record that this agent was issued by Haven, bound to this wallet, and revocable at any time. Haven covers the small on-chain fee to issue it."
+      />
 
       <div className="flex gap-3">
         <Button variant="ghost" onClick={() => flow.setStep('details')} className="flex-1">

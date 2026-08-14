@@ -162,14 +162,30 @@ describe('account-scoped signer management (#1081)', () => {
     expect(mockTreasury).not.toHaveBeenCalled()
   })
 
-  it('applies the SAME >=2-signer floor as the agent-scoped route', async () => {
-    ownedAccount({ passkeys: [PK1, PK2] })
+  it('prepares a wallet-plus-passkey removal down to one signer (#1199)', async () => {
+    ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] })
+    mockPrepared()
+    const res = await app.inject({
+      method: 'POST', url: prepareUrl,
+      payload: {
+        action: 'remove_passkey',
+        passkey: { key_id: PK1.keyId },
+        signature_scheme: 'webauthn_userop',
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().signature_scheme).toBe('webauthn_userop')
+    expect(mockTreasury).toHaveBeenCalled()
+  })
+
+  it('still refuses removing the final passkey before preparing an operation', async () => {
+    ownedAccount({ passkeys: [PK1] })
     const res = await app.inject({
       method: 'POST', url: prepareUrl,
       payload: { action: 'remove_passkey', passkey: { key_id: PK1.keyId } },
     })
     expect(res.statusCode).toBe(409)
-    expect(res.json().error).toMatch(/fewer than two ways to approve/)
+    expect(res.json().error).toMatch(/only signer/)
     expect(mockTreasury).not.toHaveBeenCalled()
   })
 
@@ -226,6 +242,33 @@ describe('account-scoped signer management (#1081)', () => {
       /INSERT INTO hybrid_account_passkeys/.test(String(sql)),
     )
     expect(insert?.[1]).toEqual(['safe-1', NEW_PK.key_id, NEW_PK.x, NEW_PK.y])
+  })
+
+  it('submits a two-to-one passkey removal and syncs storage to the signed op (#1199)', async () => {
+    ownedAccount({ passkeys: [PK1, PK2] })
+    mockPrepared()
+    const { encodeFunctionData } = await import('viem')
+    const { HYBRID_SIGNER_ABI } = await import('../../rails/hybrid-signer-actions.js')
+    const callData = encodeFunctionData({
+      abi: HYBRID_SIGNER_ABI,
+      functionName: 'removeKey',
+      args: [PK1.keyId],
+    })
+
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/submit?chain_id=84532`,
+      payload: {
+        action: 'remove_passkey', passkey: { key_id: PK1.keyId },
+        signature: '0x' + 'ab'.repeat(80),
+        user_operation: { sender: ACCOUNT, callData },
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    const removal = mockQuery.mock.calls.find(([sql]) =>
+      /DELETE FROM hybrid_account_passkeys/.test(String(sql)),
+    )
+    expect(removal?.[1]).toEqual(['safe-1', PK1.keyId])
   })
 
   it('a malformed envelope is a 400 before the account is even resolved', async () => {

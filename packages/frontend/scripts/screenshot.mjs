@@ -498,6 +498,33 @@ const CONNECT_SETUP_TOKEN = 'hv_setup_screenshot'
 const CONNECT_COMMAND = `npx -y @haven_ai/connect@alpha --setup ${CONNECT_SETUP_TOKEN} --api https://api.haven.example --ack-local-tools --runtime claude-code`
 
 export const SCENARIOS = {
+  'account-signer-removal': {
+    description: 'Account backup-removal consequence dialog with exactly two approval ways',
+    api(apiPath) {
+      if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('heading', { name: 'Backup & recovery' }).waitFor({ timeout: 15_000 })
+      // The wallet row is first; this opens the confirmation for the remaining
+      // Face ID / Touch ID without executing any signer change.
+      await page.getByRole('button', { name: 'Remove', exact: true }).nth(1).click()
+      const dialog = page.getByRole('dialog')
+      await dialog.getByRole('heading', { name: 'Remove this approval?' }).waitFor({ timeout: 15_000 })
+      await dialog.getByText(/this account will have no recovery/i).waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'confirmation')
+    },
+  },
   'connect-agent': {
     description:
       'Connect agent modal, step 4, at each connection stage (starting → slow → recovery)',

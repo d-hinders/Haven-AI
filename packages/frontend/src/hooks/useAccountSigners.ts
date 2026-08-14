@@ -7,13 +7,13 @@
  * passkey or the owner — each an ACCOUNT op (addKey/removeKey/
  * transferOwnership) the backend prepares and an EXISTING signer signs
  * (WebAuthn or EOA — whichever this DEVICE can produce, #1086). Haven signs
- * nothing. Haven's ≥2-signer rule is surfaced as a clean 409 (the chain
- * itself refuses only removing the LAST signer, the #884
- * CannotRemoveLastSigner finding), so the UI never has to guess.
+ * nothing. The chain's LAST-signer refusal is surfaced as a clean 409 (#884);
+ * an informed two-to-one transition is permitted by the shared API (#1199),
+ * and the UI presents its consequence confirmation before calling it.
  *
  * Account-scoped (#1089) — calls `/accounts/hybrid/:address/signers/*` (#1081)
  * rather than the agent-scoped twin, so a fresh account with zero agents can
- * still enrol the second signer the #908 mainnet floor requires.
+ * still enrol a backup before it holds funds.
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -153,8 +153,8 @@ export function useAccountSigners(safeAddress: string, chainId: number, userEmai
   )
 
   // #1087: enrolling a wallet owner is not a one-way door — the account can
-  // return to passkey-only. The backend refuses removals that would leave no
-  // signer (and applies the #908 mainnet floor).
+  // return to passkey-only. The backend refuses only removals that would leave
+  // no signer; the UI confirms an informed transition down to one signer.
   const removeOwner = useCallback(
     (): Promise<SignerResult> => run({ action: 'remove_owner' }),
     [run],

@@ -135,6 +135,16 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
 
   describe('scenarios (#1409)', () => {
     const connect = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent']
+    const signerRemoval = (SCENARIOS as Record<string, ScenarioShape>)['account-signer-removal']
+
+    it('overrides only the account signer set needed to reach the removal confirmation (#1199)', () => {
+      const signers = signerRemoval.api('/accounts/hybrid/0x111/signers', 'GET')
+      expect(signers).toMatchObject({
+        owner_address: '0x' + 'ee'.repeat(20),
+        passkeys: [expect.objectContaining({ key_id: '0x' + '11'.repeat(32) })],
+      })
+      expect(signerRemoval.api('/auth/me', 'GET')).toBeUndefined()
+    })
 
     it('pins the setup at awaiting_connection for the whole capture', () => {
       // The shared e2e fixture flips to connected_local after the first status

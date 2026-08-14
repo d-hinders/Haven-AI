@@ -465,11 +465,28 @@ function formatAtomicAmount(atomic: bigint, decimals: number): string {
   return fracPart ? `${intPart}.${fracPart}` : intPart
 }
 
+/**
+ * #1426: one voice with the dashboard. The celebration line renders next to
+ * the dashboard's approved screen describing the SAME grant, so every period
+ * the dashboard offers (RESET_PERIODS: 0/1440/10080/43200) must phrase
+ * identically to `budgetPeriodLabel`'s sentence form — "per 10080 minutes"
+ * made the user do arithmetic on a reassurance message. `0` says "in total"
+ * (the dashboard's sentence form), not "with no automatic reset" — one voice,
+ * decided here rather than left as a recorded divergence.
+ *
+ * Deliberately NOT one source of truth with the frontend: the shared mapping
+ * lives in dashboard code, and the only shared home would be
+ * `@haven_ai/core` — a PRIVATE workspace package that published packages
+ * (this one) must never depend on. Same structural reason the frontend keeps
+ * an inline copy of the skill content; the parity tests are the coupling.
+ */
 function describeResetPeriod(resetPeriodMin: number): string {
   if (resetPeriodMin === 1440) return 'per day'
+  if (resetPeriodMin === 10080) return 'per week'
+  if (resetPeriodMin === 43200) return 'per month'
   if (resetPeriodMin === 60) return 'per hour'
-  if (resetPeriodMin === 0) return 'with no automatic reset'
-  return `per ${resetPeriodMin} minutes`
+  if (resetPeriodMin === 0) return 'in total'
+  return `every ${resetPeriodMin} minutes`
 }
 
 function describeApprovedBudget(budget: {

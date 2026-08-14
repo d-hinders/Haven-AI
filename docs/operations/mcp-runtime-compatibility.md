@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-13" # release 0.1.23-alpha.2: manifest table follows the atomic prerelease bump; no runtime compatibility or Node-floor claim changed
+last-verified: "2026-08-14" # #1397: default hosted MCP exposes read-only generic/catalog MCP quote tools; local stdio intentionally does not expose a misleading quote-then-pay contract because its one-shot payment path cannot enforce a later fresh quote/cap. Prior: release 0.1.23-alpha.2 manifest table update.
 ---
 
 # MCP Runtime Compatibility
@@ -43,6 +43,17 @@ matching is case-insensitive after trim, `search` matches catalog `name`,
 `description`, or `category`, and omitting the new field preserves the older
 request shape exactly. The result is still read-only discovery metadata:
 catalog prices are indicative hints, never payment authority.
+
+The default hosted MCP + local signer topology additionally exposes
+`haven_quote_mcp_tool` and `haven_quote_catalog_purchase` (#1397). They are
+read-only live-price probes for an arbitrary MCP merchant or a curated catalog
+entry: no payment intent, approval, signing context, allowance check, funding,
+or paid retry is created. Their response is informational only; a later hosted
+`haven_pay_mcp_tool` or `haven_prepare_catalog_purchase` always obtains a fresh
+quote and enforces its own cap before creating an intent. The local stdio MCP
+intentionally does **not** expose these tools yet: its current one-shot payment
+path cannot honor that quote-then-pay cap/re-quote contract, so publishing the
+same names there would imply a safety guarantee it cannot make.
 
 ```text
 ~/.haven/agents/<agent-id>/bin/haven-mcp

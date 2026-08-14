@@ -75,14 +75,18 @@ normal, not an error.
 
 1. \`mcp__haven__haven_discover_tools\` to find a payable service and its
    \`catalog_id\`.
-2. \`mcp__haven__haven_prepare_catalog_purchase\` with \`catalog_id\` and a
+2. If the user needs the live price before authorizing a cap, call
+   \`mcp__haven__haven_quote_catalog_purchase\` with \`catalog_id\`. It is
+   read-only and informational only: it never reserves a price or creates a
+   payment. Tell the user its \`amount\` / \`amount_atomic\`, then choose a cap.
+3. \`mcp__haven__haven_prepare_catalog_purchase\` with \`catalog_id\` and a
    spending cap. A cap is REQUIRED on this tool and is best practice on every
    paid call below too — it caps what the LIVE merchant quote may charge,
    checked before any funding intent is created. Write it the way the user
    said it: \`max_amount_human\` is whole tokens, so "no more than 1 USDC" is
    \`max_amount_human: "1"\`. (\`max_amount\` is the atomic-unit form, where
    "1" means 0.000001 USDC — do not convert by hand, and never send both.)
-3. Then FOLLOW THE RESPONSE'S GUIDANCE FIELDS: \`next_action\`, \`next_tool\`,
+4. Then FOLLOW THE RESPONSE'S GUIDANCE FIELDS: \`next_action\`, \`next_tool\`,
    and \`next_arguments\` name the exact next call — act on those first; the
    prose in this section is fallback and debugging detail. If the catalog
    entry is missing or degraded, the response instead names
@@ -110,7 +114,12 @@ do not re-pay.
 
 Step-by-step alternative (also key-safe; for an older signer or backend, or
 when you already have a merchant URL and tool name instead of a
-\`catalog_id\`): \`mcp__haven__haven_pay_mcp_tool\` then
+\`catalog_id\`): if the user needs the live price before choosing a cap, first
+call \`mcp__haven__haven_quote_mcp_tool\` with that merchant URL, tool name,
+and arguments. It is informational only; then call
+\`mcp__haven__haven_pay_mcp_tool\` with the same inputs and the explicit cap.
+The paid call always obtains a fresh quote before it creates any intent. Then
+continue \`mcp__haven__haven_pay_mcp_tool\` →
 \`mcp__haven-signer__haven_sign\` → \`mcp__haven__haven_submit\` →
 \`mcp__haven-signer__haven_x402_sign_header\` →
 \`mcp__haven__haven_complete_mcp_tool\`. Pass \`payment_required\`,
@@ -132,11 +141,13 @@ when the result says \`retry_original_x402_request\`.
 \`arguments\` field (for example
 \`tool_arguments: { "tier": "50gb" }\` -> \`arguments: { "tier": "50gb" }\`).
 
-**Prices:** show the user the live price from the pay-tool result, never a
-catalog price. \`haven_discover_tools\` prices are indicative
-(\`price_is_indicative\`) and can be stale. The pay-tool result's \`amount\` /
-\`amount_atomic\` is the amount Haven authorizes for the call — a ceiling the
-merchant settles at or below — so present it as the most the user will pay.
+**Prices:** show the user the live price from a read-only quote or the pay-tool
+result, never a catalog price. \`haven_discover_tools\` prices are indicative
+(\`price_is_indicative\`) and can be stale. A read-only quote is informational
+only and does not reserve a price; the later paid call re-quotes and enforces
+the cap. The pay-tool result's \`amount\` / \`amount_atomic\` is the amount
+Haven authorizes for that call — a ceiling the merchant settles at or below —
+so present it as the most the user will pay.
 
 **Status:** \`mcp__haven__haven_get_payment_status\` with a \`payment_id\` to
 check on queued or in-flight payments. Do not poll in a tight loop.

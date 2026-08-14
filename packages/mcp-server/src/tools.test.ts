@@ -913,6 +913,64 @@ describe('haven_send', () => {
 
 // ── haven_pay_mcp_tool ────────────────────────────────────────────────────────
 
+describe('haven_quote_mcp_tool', () => {
+  const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+
+  it('returns a compact live MCP quote without creating a Haven payment or reading allowance state', async () => {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+    })
+
+    const result = ok<{
+      rail: string
+      merchant_url: string
+      tool_name: string
+      arguments: Record<string, unknown>
+      amount_atomic: string
+      amount: string
+      token: string
+      decimals: number | null
+      resource_url: string
+      merchant_address: string
+      mcp_transport?: { handshake_required: boolean; source: string }
+      quote_is_informational: boolean
+      payment_required?: unknown
+      payment_id?: unknown
+    }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
+      }),
+    )
+
+    expect(result.data).toMatchObject({
+      rail: 'x402',
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      amount_atomic: '1500000',
+      amount: '1.5',
+      token: 'USDC',
+      decimals: 6,
+      resource_url: 'https://merchant.test/paid',
+      merchant_address: PAYMENT_REQUIRED.accepts[0].payTo,
+      mcp_transport: { handshake_required: true, source: 'path' },
+      quote_is_informational: true,
+    })
+    // The raw 402 is intentionally not a resumable payment input; a later
+    // paid call must obtain a fresh quote and enforce its explicit cap.
+    expect(result.data.payment_required).toBeUndefined()
+    expect(result.data.payment_id).toBeUndefined()
+    expect(calls.find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
+    // The MCP lifecycle needs the existing public delegate address for
+    // x402-wallet. It must not read allowances, create an intent, or write.
+    expect(calls.filter((call) => new URL(call.url).pathname.endsWith('/machine-payments/agent'))).toHaveLength(1)
+    expect(calls.find((call) => new URL(call.url).pathname.includes('/machine-payments/allowances'))).toBeUndefined()
+  })
+})
+
 describe('haven_pay_mcp_tool', () => {
   const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
 
@@ -987,6 +1045,7 @@ describe('haven_pay_mcp_tool', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
       }),
     )
 
@@ -1031,6 +1090,7 @@ describe('haven_pay_mcp_tool', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
       }),
     )
 
@@ -1148,6 +1208,7 @@ describe('haven_pay_mcp_tool', () => {
         merchant_url: 'http://merchant.test/paid',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
       }),
     )
 
@@ -1401,6 +1462,7 @@ describe('haven_pay_mcp_tool', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: {},
+        max_amount: '2000000',
       }),
     )
 
@@ -1420,6 +1482,74 @@ describe('haven_pay_mcp_tool', () => {
 })
 
 // ── haven_prepare_catalog_purchase (#1306) ────────────────────────────────────
+
+describe('haven_quote_catalog_purchase', () => {
+  const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+  const catalogEntry = {
+    id: 'cat_1',
+    name: 'CloudNest 50GB',
+    description: 'Cloud storage tier',
+    category: 'compute',
+    resource_url: 'http://merchant.test/mcp',
+    rail: 'x402',
+    protocol: 'mcp',
+    tool_name: 'create_text',
+    tool_arguments: { prompt: 'Hello' },
+    price_display: '$1.50 USDC',
+    price_atomic: '1500000',
+    asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+    network: 'eip155:8453',
+    status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+
+  it('wraps the catalog lookup and live quote without allowance reads or intent creation', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': { status: 200, body: catalogEntry },
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+    })
+
+    const result = ok<{
+      catalog_id: string
+      catalog_name: string
+      catalog_price_atomic: string | null
+      catalog_price_is_indicative: boolean
+      catalog_price_differs: boolean
+      amount_atomic: string
+      tool_name: string
+      arguments: Record<string, unknown>
+      quote_is_informational: boolean
+    }>(await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_1' }))
+
+    expect(result.data).toMatchObject({
+      catalog_id: 'cat_1',
+      catalog_name: 'CloudNest 50GB',
+      catalog_price_atomic: '1500000',
+      catalog_price_is_indicative: true,
+      catalog_price_differs: false,
+      amount_atomic: '1500000',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      quote_is_informational: true,
+    })
+    expect(calls.find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
+    expect(calls.filter((call) => new URL(call.url).pathname.endsWith('/machine-payments/agent'))).toHaveLength(1)
+    expect(calls.find((call) => new URL(call.url).pathname.includes('/machine-payments/allowances'))).toBeUndefined()
+  })
+
+  it('preserves the catalog preflight refusal when a row cannot produce a live MCP quote', async () => {
+    stubFetch({
+      'GET /catalog/cat_missing': { status: 404, body: { error: 'Catalog entry not found' } },
+    })
+
+    const payload = await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_missing' })
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('CATALOG_ENTRY_NOT_FOUND')
+    expect(payload.suggested_tool).toBe('haven_discover_tools')
+    expect(calls).toHaveLength(1)
+  })
+})
 
 describe('haven_prepare_catalog_purchase', () => {
   const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
@@ -1973,6 +2103,7 @@ describe('haven_settle_mcp_tool', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
         payment_header: 'eyJ4IjoxfQ==',
       }),
     )
@@ -2787,6 +2918,7 @@ describe('compact x402 signing payload (#1272)', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
       }),
     )
     expect('typed_data_b64' in compact.data).toBe(false)
@@ -2798,6 +2930,7 @@ describe('compact x402 signing payload (#1272)', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
         include_signing_payload: true,
       }),
     )
@@ -2817,6 +2950,33 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     'POST /x402': { status: 201 as const, body: X402_INTENT_RESPONSE },
   })
 
+  it('uses the same bounded discovery for a read-only generic quote without creating an intent', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': { status: 200, body: DISCOVERY_DOC },
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+      },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+    })
+
+    const result = ok<{ merchant_url: string; merchant_url_was_discovered: boolean }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      }),
+    )
+
+    expect(result.data).toEqual(expect.objectContaining({
+      merchant_url: 'http://merchant.test/mcp',
+      merchant_url_was_discovered: true,
+    }))
+    expect(calls.find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
+    expect(calls.find((call) => new URL(call.url).pathname.includes('/allowances'))).toBeUndefined()
+  })
+
   it('resolves a base URL through /.well-known and returns the RESOLVED merchant_url', async () => {
     stubFetch({
       // The base URL is not the MCP endpoint: POST / misses.
@@ -2834,6 +2994,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
         merchant_url: 'http://merchant.test/',
         tool_name: 'buy_vpn',
         arguments: { plan: 'basic' },
+        max_amount: '2000000',
       }),
     )
 
@@ -2919,6 +3080,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
       await handlers().haven_pay_mcp_tool({
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'buy_vpn',
+        max_amount: '2000000',
       }),
     )
 
@@ -2937,6 +3099,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     const result = await handlers().haven_pay_mcp_tool({
       merchant_url: 'http://merchant.test/',
       tool_name: 'buy_vpn',
+      max_amount: '2000000',
     })
 
     expect(result.success).toBe(false)
@@ -2959,6 +3122,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     const result = await handlers().haven_pay_mcp_tool({
       merchant_url: 'http://merchant.test/',
       tool_name: 'buy_vpn',
+      max_amount: '2000000',
     })
 
     expect(result.success).toBe(false)
@@ -2974,6 +3138,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     const result = await handlers().haven_pay_mcp_tool({
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'buy_vpn',
+      max_amount: '2000000',
     })
 
     expect(result.success).toBe(false)
@@ -3005,6 +3170,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     const result = await handlers().haven_pay_mcp_tool({
       merchant_url: 'http://merchant.test/',
       tool_name: 'buy_vpn',
+      max_amount: '2000000',
     })
 
     expect(result.success).toBe(false)
@@ -3027,6 +3193,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     const result = await handlers().haven_pay_mcp_tool({
       merchant_url: 'http://merchant.test/',
       tool_name: 'buy_vpn',
+      max_amount: '2000000',
     })
 
     expect(result.success).toBe(false)
@@ -3054,6 +3221,7 @@ describe('structured agent guidance (#1308)', () => {
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'buy_vpn',
       arguments: { plan: 'basic' },
+      max_amount: '2000000',
     })
 
   it('a signable quote tells the agent EXACTLY what to do next — from the existing taxonomy', async () => {
@@ -3074,12 +3242,19 @@ describe('structured agent guidance (#1308)', () => {
     expect(result.data.agent_summary).toMatchObject({ payment_id: 'pay_x402', status: 'pending_signature' })
   })
 
-  it('warnings absorb the cap nudge as MISSING_MAX_AMOUNT while cap_warning stays for compat', async () => {
+  it('refuses an uncapped paid MCP call before contacting the merchant', async () => {
     stubFetch(stubs())
-    const result = ok<{ cap_warning?: string; warnings: Array<{ code: string }> }>(await pay())
+    const payload = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+      arguments: { plan: 'basic' },
+    })
 
-    expect(result.data.cap_warning).toBeDefined()
-    expect(result.data.warnings.some((w) => w.code === 'MISSING_MAX_AMOUNT')).toBe(true)
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(payload.message).toContain('REQUIRED')
+    expect(calls).toHaveLength(0)
   })
 
   it('passing max_amount clears BOTH the legacy field and the structured warning', async () => {
@@ -3277,18 +3452,16 @@ describe('human-unit spending caps (#1351)', () => {
       }
     })
 
-    it('an uncapped call still warns in both spellings, naming the human field first', async () => {
-      stubFetch(payRoutes)
+  it('refuses an uncapped paid MCP call before the merchant probe', async () => {
+    stubFetch(payRoutes)
 
-      const result = ok<{ cap_warning: string; warnings: Array<{ code: string; message: string }> }>(
-        await payMcpTool({}),
-      )
+      const payload = await payMcpTool({})
 
-      expect(result.data.cap_warning).toContain('max_amount_human')
-      // #1275's legacy field kept its substance — still names max_amount too.
-      expect(result.data.cap_warning).toContain('max_amount')
-      const missing = result.data.warnings.find((w) => w.code === 'MISSING_MAX_AMOUNT')
-      expect(missing?.message).toContain('max_amount_human')
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe('INVALID_INPUT')
+      expect(payload.message).toContain('max_amount_human')
+      expect(calls).toHaveLength(0)
     })
   })
 

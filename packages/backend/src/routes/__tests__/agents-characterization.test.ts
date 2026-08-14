@@ -341,39 +341,19 @@ describe('PUT /agents/:id', () => {
   })
 })
 
-describe('DELETE /agents/:id', () => {
-  it('deletes a revoked agent', async () => {
+describe('DELETE /agents/:id — retired (#1401)', () => {
+  it('is a 410 tombstone regardless of agent state, and touches the database not at all', async () => {
+    // The old contract (delete revoked / 409 / 404) is GONE by design: hard
+    // deletion 500'd on any agent with payment history and cascaded away
+    // seven tables of audit trail where it succeeded. Removal is an archive
+    // now — POST /agents/:id/archive.
     const app = await makeApp()
-    mockQuery.mockResolvedValueOnce({ rows: [{ id: 'agent-1' }] })
+    mockQuery.mockClear()
 
     const res = await app.inject({ method: 'DELETE', url: '/agents/agent-1' })
-    expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ success: true })
-    expect(String(mockQuery.mock.calls[0][0])).toContain("status = 'revoked'")
-    expect(mockQuery.mock.calls[0][1]).toEqual(['agent-1', 'user-1'])
-    await app.close()
-  })
-
-  it('409s for an agent that exists but is not revoked', async () => {
-    const app = await makeApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [] }) // guarded DELETE matched nothing
-      .mockResolvedValueOnce({ rows: [{ id: 'agent-1' }] }) // …but the agent exists
-
-    const res = await app.inject({ method: 'DELETE', url: '/agents/agent-1' })
-    expect(res.statusCode).toBe(409)
-    expect(res.json().error).toMatch(/Only revoked agents/)
-    await app.close()
-  })
-
-  it('404s for an agent that does not exist', async () => {
-    const app = await makeApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-
-    const res = await app.inject({ method: 'DELETE', url: '/agents/agent-x' })
-    expect(res.statusCode).toBe(404)
+    expect(res.statusCode).toBe(410)
+    expect(res.json().error).toMatch(/archive/)
+    expect(mockQuery).not.toHaveBeenCalled()
     await app.close()
   })
 })

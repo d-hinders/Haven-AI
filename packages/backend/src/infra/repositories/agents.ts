@@ -43,6 +43,7 @@ export interface AgentRow {
   api_key_prefix: string | null
   status: string
   created_at: string
+  archived_at: string | null
   mcp_last_seen_at: string | null
   has_stranded_funds: boolean
 }
@@ -81,7 +82,7 @@ export interface AgentIdStatusRow {
 export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               us.account_type,
-              a.api_key_prefix, a.status, a.created_at,
+              a.api_key_prefix, a.status, a.created_at, a.archived_at,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -101,7 +102,7 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
 export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               us.account_type,
-              a.api_key_prefix, a.status, a.created_at,
+              a.api_key_prefix, a.status, a.created_at, a.archived_at,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -477,17 +478,47 @@ export async function updateAgentProfile(
   return result.rows[0] ?? null
 }
 
-export const DELETE_REVOKED_AGENT_SQL = `DELETE FROM agents
+/**
+ * #1401: archive replaces deletion. The row and every dependent audit row
+ * stay; the agent just leaves the primary list. Requires `revoked` — archiving
+ * is a filing action and must never be what stops spending. Idempotent
+ * without timestamp churn: re-archiving keeps the ORIGINAL archived_at
+ * (COALESCE keeps the first value; the WHERE still matches so the call
+ * reports success).
+ */
+export const ARCHIVE_AGENT_SQL = `UPDATE agents
+       SET archived_at = COALESCE(archived_at, NOW()), updated_at = NOW()
        WHERE id = $1 AND user_id = $2 AND status = 'revoked'
+       RETURNING id, archived_at`
+
+/** Returns null when nothing matched (missing, foreign, or not revoked). */
+export async function archiveAgent(
+  agentId: string,
+  userId: string,
+  db: Executor = pool,
+): Promise<{ id: string; archived_at: Date } | null> {
+  const result = await db.query<{ id: string; archived_at: Date }>(ARCHIVE_AGENT_SQL, [
+    agentId,
+    userId,
+  ])
+  return result.rows[0] ?? null
+}
+
+/**
+ * Clears archived_at and nothing else — the agent returns to the primary
+ * list still `revoked`. Un-archiving restores no authority of any kind.
+ */
+export const UNARCHIVE_AGENT_SQL = `UPDATE agents
+       SET archived_at = NULL, updated_at = NOW()
+       WHERE id = $1 AND user_id = $2 AND archived_at IS NOT NULL
        RETURNING id`
 
-/** Returns false when nothing matched (missing, foreign, or not revoked). */
-export async function deleteRevokedAgent(
+export async function unarchiveAgent(
   agentId: string,
   userId: string,
   db: Executor = pool,
 ): Promise<boolean> {
-  const result = await db.query<{ id: string }>(DELETE_REVOKED_AGENT_SQL, [agentId, userId])
+  const result = await db.query<{ id: string }>(UNARCHIVE_AGENT_SQL, [agentId, userId])
   return result.rows.length > 0
 }
 

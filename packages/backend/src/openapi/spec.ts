@@ -360,6 +360,66 @@ export const openapiSpec = {
         },
       },
     },
+    '/agents/{id}/archive': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'archiveAgent',
+        summary: 'Archive a revoked agent (soft removal — history is kept).',
+        description:
+          'Replaces agent deletion (#1401). Requires status=revoked — archiving is a filing action and never the thing that stops spending. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'Archived (or already archived).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['success', 'archived_at'],
+                  properties: {
+                    success: { type: 'boolean' },
+                    archived_at: isoDateTime,
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/unarchive': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'unarchiveAgent',
+        summary: 'Return an archived agent to the primary list.',
+        description:
+          'Clears archived_at and nothing else — the agent remains revoked; un-archiving restores no authority of any kind. Idempotent on a non-archived agent.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'No longer archived (or was not archived).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['success'],
+                  properties: { success: { type: 'boolean' } },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     '/agents/{id}/revoke': {
       post: {
         tags: ['Agents'],
@@ -2208,6 +2268,12 @@ export const openapiSpec = {
           api_key_prefix: { type: ['string', 'null'] },
           status: { type: 'string', enum: ['active', 'paused', 'pending_approval', 'revoked'] },
           created_at: isoDateTime,
+          /**
+           * #1401: non-null when the agent is archived (soft removal — the row
+           * and its full audit history remain; the agent leaves the primary
+           * list client-side). Archiving requires status='revoked'.
+           */
+          archived_at: { anyOf: [isoDateTime, { type: 'null' }] },
           allowances: { type: 'array', items: { $ref: '#/components/schemas/AgentAllowance' } },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },

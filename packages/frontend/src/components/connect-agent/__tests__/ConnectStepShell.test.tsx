@@ -78,7 +78,7 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
     // The reserved slot used to render EMPTY for the first minute — a
     // 144-216px void on every run. It now always carries a status line, and
     // crossing the 1-minute bound must not move anything below it.
-    const { container, rerender } = render(renderWaiting(false, 'starting'))
+    const { container, queryByRole, rerender } = render(renderWaiting(false, 'starting'))
     const slot = container.querySelector('[aria-live="polite"]')
     expect(slot).not.toBeNull()
     expect(slot?.textContent?.trim()).not.toBe('')
@@ -94,7 +94,14 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
     expect(container.querySelectorAll('*').length).toBe(elementsBefore)
     expect(slot?.className).toContain('min-h-16')
     expect(container.textContent).not.toContain('Haven has not received a connection yet')
-    expect(container.querySelector('button[class*="min-h-11"]')).toBeNull()
+    // Assert the recovery ACTIONS are absent by name. This used to look for
+    // `button[class*="min-h-11"]`, which was only ever a proxy: the recovery
+    // block's two buttons happened to be the only min-h-11 controls on the
+    // screen. #1391's design review put that class on the primary Copy button
+    // too (44px touch target), and the proxy started reporting a recovery
+    // affordance that was never rendered. Name what the test means.
+    expect(queryByRole('button', { name: 'Copy local command' })).toBeNull()
+    expect(queryByRole('button', { name: 'Cancel this setup' })).toBeNull()
   })
 
   it('keeps the manual-credential path nested INSIDE the trouble disclosure (#1391)', () => {

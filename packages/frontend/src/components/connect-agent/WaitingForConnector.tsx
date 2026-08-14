@@ -6,8 +6,10 @@ import type {
   ManualCredential,
 } from '@/hooks/useAgentConnectionSetup'
 import type { AwaitingConnectionStage } from '@/hooks/useAgentConnectionSetupStatus'
+import { ChevronRight } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
+import { Icon } from '../ui/Icon'
 import { CopyBlock } from './CopyBlock'
 import { InlineErrorNote } from './SetupNotices'
 import { formatAbsoluteDate } from './setup-copy'
@@ -140,12 +142,28 @@ export function WaitingForConnector({
           these are for paths most users never take — and one of them hands out
           a private signing key — so they should not carry the same weight as
           the prompt above. The manual path keeps its own nested disclosure:
-          the dangerous route stays one click deeper than the harmless one. */}
-      <details className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3 text-xs">
-        <summary className="cursor-pointer text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+          the dangerous route stays one click deeper than the harmless one.
+
+          Design review: the first cut gave BOTH disclosures the Card recipe
+          (rounded + border + bg-white + p-3), so nesting them stacked three
+          identically-styled white boxes — a Card inside a Card inside a Card,
+          which is the surface-hierarchy rule's "no nested filled cards" in its
+          hand-rolled form (design-lint's structural rules only catch the
+          `Card` primitive, so nothing flagged it). This flow already has a
+          lighter convention for exactly this — chevron summary, left rule for
+          the body, no box at all (ConnectionVerificationFooter,
+          HostedConnectCard) — so use it. Depth now reads from indentation
+          instead of from stacked surfaces, and the only card left inside is
+          the CopyBlock, which is genuinely one. */}
+      <details className="group text-xs">
+        <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+          <Icon
+            icon={ChevronRight}
+            className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+          />
           Having trouble connecting?
         </summary>
-        <div className="mt-3 space-y-3">
+        <div className="mt-3 space-y-3 border-l border-[var(--v2-border)] pl-3">
           <CopyBlock
             label="Local command"
             value={setup.connector_command}
@@ -153,11 +171,15 @@ export function WaitingForConnector({
             onCopy={() => onCopy('command', setup.connector_command)}
           />
 
-          <details className="rounded-[10px] border border-[var(--v2-border)] bg-white p-3 text-xs">
-            <summary className="cursor-pointer text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+          <details className="group/manual text-xs">
+            <summary className="flex cursor-pointer list-none items-center gap-1 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+              <Icon
+                icon={ChevronRight}
+                className="h-3 w-3 shrink-0 transition-transform group-open/manual:rotate-90"
+              />
               Manual credential fallback
             </summary>
-            <div className="mt-3 space-y-3">
+            <div className="mt-3 space-y-3 border-l border-[var(--v2-border)] pl-3">
               <p className="leading-relaxed text-[var(--v2-ink-2)]">
                 Use this only if the agent cannot run the setup command or store the local connector files. Haven will still receive only the public signing address and API key hash.
               </p>
@@ -231,8 +253,10 @@ export function WaitingForConnector({
       {/* #1391: this screen offers EXACTLY ONE cancel-the-setup action at any
           moment. In the recovery stage the warning block above owns it
           ("Cancel this setup"), where it is both visible and warranted; here
-          it is a quiet link, because an exit should be findable without
-          competing with the action that moves the user forward. It stays a
+          it is a small ghost button — centered, not full-width — because an
+          exit should be findable without competing with the action that moves
+          the user forward. (Called "a quiet link" in an earlier draft of this
+          comment; it is not link-styled and never was.) It stays a
           <button>: demoting it visually must not demote it semantically, and
           the stage-conditional render below is pinned by a test, since a
           missing exit is worse than a loud one.

@@ -559,10 +559,29 @@ export const SCENARIOS = {
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
       await dialog.getByText('Connect your agent').waitFor({ timeout: 30_000 })
 
+      // The stage timers are armed by the effect that runs once a POLLED GET
+      // reports `awaiting_connection` — a different round-trip from the POST
+      // that got us here. Fast-forwarding before it lands would advance a
+      // clock with nothing scheduled on it: a silent no-op that would shoot
+      // the PREVIOUS stage's screen under the next stage's filename. Wait for
+      // a real status response first.
+      await page.waitForResponse(
+        (res) => res.url().includes(`/agent-connection-setups/${CONNECT_SETUP_ID}`),
+        { timeout: 30_000 },
+      )
+
+      // Each stage is CONFIRMED by its own copy before it is captured, so a
+      // stage that never arrives fails the run instead of producing a
+      // convincing, wrongly-labelled PNG.
+      await dialog.getByText('Waiting for the agent to run').waitFor({ timeout: 15_000 })
       await shoot(dialog, 'waiting-starting')
+
       await page.clock.fastForward(65_000)
+      await dialog.getByText('Still going').waitFor({ timeout: 15_000 })
       await shoot(dialog, 'waiting-slow')
+
       await page.clock.fastForward(130_000)
+      await dialog.getByText('Haven has not received a connection yet').waitFor({ timeout: 15_000 })
       await shoot(dialog, 'waiting-recovery')
     },
   },
@@ -582,6 +601,11 @@ function resolveScenarios(names) {
 }
 
 async function main() {
+  // Validate BEFORE acquiring anything: a typo'd --scenario name throws, and
+  // doing that after the dev server is spawned and the browser is launched
+  // leaks both (the try/finally that cleans them up starts further down).
+  const scenarios = resolveScenarios(SCENARIO_ARGS)
+
   await rm(OUT_DIR, { recursive: true, force: true })
   await mkdir(OUT_DIR, { recursive: true })
 
@@ -602,7 +626,6 @@ async function main() {
   const browser = await chromium.launch({
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
   })
-  const scenarios = resolveScenarios(SCENARIO_ARGS)
   const captured = []
   const consoleErrors = []
   const gotoFailures = []

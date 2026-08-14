@@ -25,6 +25,7 @@ import {
   agentExistsForUser,
   createAgentWithAllowances,
   deleteAgentAllowance,
+  agentHasLiveDelegations,
   archiveAgent,
   unarchiveAgent,
   findAgentForUserAllStatuses,
@@ -344,6 +345,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   // action only: requires status='revoked' so archiving is never the thing
   // that stops spending, keeps every dependent audit row, and is idempotent
   // (re-archiving keeps the original archived_at, no timestamp churn).
+  //
+  // #1436: it also requires DEAD BUDGETS. Revoking only flips the agent's
+  // status, so revoke+archive without revoke-all used to file an agent under
+  // "Removed" while its delegation was still redeemable on-chain. The Remove
+  // dialog always killed budgets first, but that ordering was frontend
+  // convention, not an invariant — and "Removed" is a promise about spending.
   app.post<{ Params: { id: string } }>('/:id/archive', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
@@ -353,6 +360,14 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       const exists = await agentExistsForUser(id, sub)
       if (!exists) {
         return reply.code(404).send({ error: 'Agent not found' })
+      }
+      // Name the actual blocker: live budgets and a live credential need
+      // different remedies, and a caller told the wrong one is stuck.
+      if (await agentHasLiveDelegations(id)) {
+        return reply.code(409).send({
+          error:
+            'This agent still holds budget delegations, so archiving would hide an agent that can still spend. Stop them first with POST /agents/:id/delegations/revoke-all, then archive.',
+        })
       }
       return reply.code(409).send({
         error: 'Only revoked agents can be archived. Revoke the agent first — archiving never stops spending by itself.',

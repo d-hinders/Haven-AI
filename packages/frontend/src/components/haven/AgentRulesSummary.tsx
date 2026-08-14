@@ -45,8 +45,12 @@ export function AgentRulesSummary({
             <dt className="text-xs font-medium text-[var(--v2-ink-3)]">{item.label}</dt>
             <dd>
               <div className="text-sm font-medium text-[var(--v2-ink)]">{item.value}</div>
+              {/* Row helpers are ink-3, matching the form steps' field-helper
+                  tier (#1431) — the connect Review screen renders both one
+                  screen apart. The top DESCRIPTION paragraph stays ink-2:
+                  that is body copy, not a helper. */}
               {item.helper && (
-                <p className={`${compact ? 'mt-0.5' : 'mt-1'} text-xs leading-relaxed text-[var(--v2-ink-2)]`}>
+                <p className={`${compact ? 'mt-0.5' : 'mt-1'} text-xs leading-relaxed text-[var(--v2-ink-3)]`}>
                   {item.helper}
                 </p>
               )}

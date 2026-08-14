@@ -662,12 +662,12 @@ export default function AgentDetailClient({ agentId }: Props) {
             description="What this agent can spend, where the money comes from, and how you stay in control."
             items={[
               {
-                label: 'Who can spend',
+                label: 'Agent name',
                 value: currentAgent.name,
                 helper: currentAgent.description || undefined,
               },
               {
-                label: 'From account',
+                label: 'Spend from',
                 value: `${walletName} on ${networkName}`,
                 helper: 'Payments come from this Haven account only.',
               },

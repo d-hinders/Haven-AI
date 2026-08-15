@@ -809,6 +809,34 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         }
       }
 
+      // #1482: refuse a MISDIRECTED erc7710 intent before anything is claimed.
+      //
+      // `prepared_user_op` is a SHARED column meaning different things per
+      // settlement scheme — a UserOp on the 3009 bridge, a `{ child, budget }`
+      // delegation chain on erc7710 (#946/#1454) — and both also set
+      // `delegation_hash`, so the presence checks below cannot tell them apart.
+      //
+      // ORDER IS THE POINT, and the first draft of this guard got it wrong:
+      // placed after `claimIntentForSubmission`, the throw landed in the catch
+      // that calls `failSubmittedIntent`, so a misdirected call BURNED the
+      // intent. `POST /x402/:id/settle` requires `pending_signature`, so a
+      // burned intent could never be retried on the endpoint that would have
+      // worked — a refusal that destroys the thing it refuses. The sibling #946
+      // guard in `modules/x402/settle.ts` gets this right for the mirror case:
+      // check before mutating, answer 409, let the client retry correctly.
+      if (
+        intent.execution_rail === 'delegation' &&
+        intent.prepared_user_op != null &&
+        isSettlementChainState(deserializeUserOp(intent.prepared_user_op))
+      ) {
+        return reply.code(409).send({
+          error:
+            'This intent settles via erc7710 direct settlement, not a UserOperation. Its signed ' +
+            `child belongs to POST /x402/${id}/settle, which assembles the merchant header. ` +
+            'Nothing was claimed — the intent is still signable there.',
+        })
+      }
+
       // 3. Atomically claim the pending intent before any on-chain execution.
       const claimed = await claimIntentForSubmission(signature, id, agent.id)
 
@@ -836,31 +864,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           if (intent.prepared_user_op == null || !intent.delegation_hash) {
             throw new Error('delegation-rail intent is missing its prepared UserOperation state')
           }
-          // #1482: `prepared_user_op` is a SHARED column meaning different
-          // things per settlement scheme — a UserOp on the 3009-bridge path, a
-          // `{ child, budget }` delegation chain on erc7710 (#946/#1454). Both
-          // schemes also set `delegation_hash`, so the presence checks above
-          // cannot tell them apart. Without this guard an erc7710 intent
-          // reaching here would be handed to submitDelegationPayment as though
-          // it were a UserOp.
-          //
-          // Unreachable today — the hosted settle tool's header preflight
-          // recovers an EIP-3009 signature that an erc7710 child can never
-          // produce, and the account would reject a signature not over the
-          // correct UserOp hash. Both of those live OUTSIDE this route. A type
-          // guard belongs where the assumption is made, so a third writer to
-          // this column cannot quietly invalidate it.
-          const preparedState = deserializeUserOp(intent.prepared_user_op)
-          if (isSettlementChainState(preparedState)) {
-            throw new Error(
-              'This intent settles via erc7710 direct settlement, not a UserOperation. Its signed ' +
-                'child belongs to POST /x402/:id/settle, which assembles the merchant header — ' +
-                'refusing to submit a delegation chain as a UserOp.',
-            )
-          }
           const result = await submitDelegationPayment(
             { chain_id: intent.chain_id, delegate_address: intent.delegate_address },
-            preparedState,
+            deserializeUserOp(intent.prepared_user_op),
             signature as `0x${string}`,
           )
           txHash = result.txHash

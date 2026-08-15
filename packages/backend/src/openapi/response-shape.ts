@@ -115,24 +115,38 @@ function compile(schema: Json): ValidateFunction {
  * Add `additionalProperties: false` to every object schema that does not state
  * a preference, recursively. Returns a copy — the spec object is shared with
  * the served `/openapi.json` and must never be mutated by a test helper.
+ *
+ * **Never inside an `allOf`.** This is the classic JSON Schema composition
+ * trap: `additionalProperties` only sees the properties declared at its OWN
+ * level, so closing one `allOf` member makes it reject the properties its
+ * sibling members contribute — and a payload that is perfectly valid gets
+ * reported as a spec violation. The spec has such shapes today (`mpp`,
+ * `AgentConnectionAllowance`); none is on a route asserted here yet, so the
+ * bug would have lain dormant until someone widened coverage and hit a
+ * baffling false failure. A schema composed with `allOf` is left open.
  */
-function closeObjects(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(closeObjects)
+function closeObjects(node: unknown, insideAllOf: boolean = false): unknown {
+  if (Array.isArray(node)) return node.map((item) => closeObjects(item, insideAllOf))
   if (node === null || typeof node !== 'object') return node
 
   const copy: Json = {}
   for (const [key, value] of Object.entries(node as Json)) {
-    copy[key] = closeObjects(value)
+    copy[key] = closeObjects(value, key === 'allOf')
   }
   const declaresProperties = 'properties' in copy
   const statesPreference = 'additionalProperties' in copy
-  // Only close schemas that actually describe an object's properties; leaving
-  // `anyOf`/`$ref` wrappers alone keeps composition working.
-  if (declaresProperties && !statesPreference) {
+  const composes = 'allOf' in copy
+  // Only close schemas that actually describe an object's properties on their
+  // own; leaving `anyOf`/`$ref` wrappers and `allOf` composition alone keeps
+  // composed shapes valid.
+  if (declaresProperties && !statesPreference && !composes && !insideAllOf) {
     copy.additionalProperties = false
   }
   return copy
 }
+
+/** Exported for the composition tests only — not part of the assertion API. */
+export const __closeObjectsForTest = closeObjects
 
 export interface ShapeMismatch {
   /** JSON pointer into the payload, e.g. `/agents/0/status`. */

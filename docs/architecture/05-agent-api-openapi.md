@@ -193,6 +193,14 @@ explicitly open schema stays open. That is the spec's decision; tightening it
 is a separate contract change, not something a test helper should do behind the
 spec's back.
 
+A schema composed with `allOf` is also left open, on purpose. `additionalProperties`
+only sees the properties declared at its own level, so closing one `allOf` member
+makes it reject the properties its siblings contribute — a valid payload would be
+reported as a spec violation. The spec has such shapes (`mpp`,
+`AgentConnectionAllowance`); none is on an asserted route yet, which is exactly why
+this is guarded by a test now rather than rediscovered as a baffling false failure
+during the #1446 backfill.
+
 Coverage is deliberately partial: four assertions today (`GET /agents`,
 `GET /agents/{id}`, `POST /agents/{id}/archive`,
 `GET /machine-payments/agent`). Widening it is per-route work that belongs with

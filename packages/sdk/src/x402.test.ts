@@ -8,6 +8,10 @@ import {
   parsePaymentRequiredResponse,
   selectPaymentOption,
   selectStandardPaymentOption,
+  selectErc7710PaymentOption,
+  selectX402SettlementScheme,
+  x402FacilitatorAddresses,
+  isErc7710Option,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
@@ -1751,18 +1755,20 @@ describe('selectStandardPaymentOption — characterization before #1453', () => 
     expect(selectStandardPaymentOption([first, second])).toBe(first)
   })
 
-  it('ignores extra.assetTransferMethod entirely — the #1453 footgun, before the fix', () => {
-    // An erc7710-tagged entry placed first is returned by the STANDARD
-    // (EIP-3009) selector. On the legacy two-leg that means echoing the 7710
-    // option while signing a 3009 authorization: the merchant rejects it, but
-    // the Safe -> delegate funding transfer has already run, leaving a stranded
-    // delegate balance for the sweep. #1453 inverts this expectation.
+  it('SKIPS an erc7710-tagged entry listed first (#1453 — was the footgun)', () => {
+    // Before #1453 this returned `tagged`: the standard (EIP-3009) selector
+    // never read extra.assetTransferMethod, so a merchant that listed its 7710
+    // entry first made a Haven client echo that option while signing a 3009
+    // authorization. The merchant rejects the mismatch — but on the legacy
+    // two-leg the Safe -> delegate funding transfer has already run, leaving a
+    // stranded delegate balance for the sweep. The class is gone, not deferred
+    // to merchant ordering we do not control.
     const tagged = opt({
       payTo: '0x1111111111111111111111111111111111111111',
       extra: { assetTransferMethod: 'erc7710' },
     })
     const plain = opt({ payTo: '0x2222222222222222222222222222222222222222' })
-    expect(selectStandardPaymentOption([tagged, plain])).toBe(tagged)
+    expect(selectStandardPaymentOption([tagged, plain])).toBe(plain)
   })
 
   it('skips entries that fail scheme, network, asset or amount', () => {
@@ -1779,5 +1785,118 @@ describe('selectStandardPaymentOption — characterization before #1453', () => 
   it('returns null for an empty list and when nothing matches', () => {
     expect(selectStandardPaymentOption([])).toBeNull()
     expect(selectStandardPaymentOption([opt({ scheme: 'upto' })])).toBeNull()
+  })
+})
+
+/**
+ * #1453 — the preference rule from the #1450 owner decision, and the selectors
+ * it composes. One place decides; callers do not re-derive.
+ */
+describe('erc7710-aware option selection (#1453)', () => {
+  function opt(over: Partial<X402PaymentOption> = {}): X402PaymentOption {
+    return {
+      scheme: 'exact',
+      network: 'eip155:8453',
+      asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      amount: '20000',
+      payTo: '0x3333333333333333333333333333333333333333',
+      maxTimeoutSeconds: 300,
+      ...over,
+    }
+  }
+  const FACILITATOR = '0x4444444444444444444444444444444444444444'
+  const erc7710 = (over: Partial<X402PaymentOption> = {}) =>
+    opt({ extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] }, ...over })
+
+  it('finds the erc7710 entry and its facilitator addresses', () => {
+    const tagged = erc7710({ payTo: '0x1111111111111111111111111111111111111111' })
+    const selected = selectErc7710PaymentOption([opt(), tagged])
+    expect(selected).toBe(tagged)
+    expect(x402FacilitatorAddresses(tagged)).toEqual([FACILITATOR])
+  })
+
+  it('treats an EMPTY facilitatorAddresses array as absent, not as an empty pin', () => {
+    // The backend 400s on an empty redeemers list, so `[]` is not a narrower
+    // pin — it is an unbuildable delegation. Returning [] here would push that
+    // failure to the backend instead of never constructing it.
+    expect(
+      x402FacilitatorAddresses(opt({ extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [] } })),
+    ).toBeNull()
+  })
+
+  it('drops non-address entries rather than passing them into a caveat', () => {
+    const messy = opt({
+      extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR, 42, 'not-an-address', null] },
+    })
+    expect(x402FacilitatorAddresses(messy)).toEqual([FACILITATOR])
+  })
+
+  it('is null when facilitatorAddresses is absent or not an array', () => {
+    expect(x402FacilitatorAddresses(erc7710({ extra: { assetTransferMethod: 'erc7710' } }))).toBeNull()
+    expect(
+      x402FacilitatorAddresses(opt({ extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: 'nope' } })),
+    ).toBeNull()
+  })
+
+  it('does not treat a non-string assetTransferMethod as erc7710', () => {
+    expect(isErc7710Option(opt({ extra: { assetTransferMethod: 7710 } }))).toBe(false)
+    expect(isErc7710Option(opt({ extra: { assetTransferMethod: 'ERC7710' } }))).toBe(false)
+    expect(isErc7710Option(opt())).toBe(false)
+  })
+
+  describe('selectX402SettlementScheme — the #1450 preference rule', () => {
+    it('merchant advertises both, delegation rail -> erc7710 with its pin', () => {
+      const plain = opt({ payTo: '0x2222222222222222222222222222222222222222' })
+      const tagged = erc7710({ payTo: '0x1111111111111111111111111111111111111111' })
+      const sel = selectX402SettlementScheme([plain, tagged], { delegationRail: true })
+      expect(sel).toEqual({ scheme: 'erc7710', option: tagged, facilitatorAddresses: [FACILITATOR] })
+    })
+
+    it('merchant advertises both, LEGACY rail -> 3009, never the 7710 entry', () => {
+      // A legacy AllowanceModule account cannot settle a delegation chain. The
+      // preference is conditional on the rail, and this is that condition.
+      const plain = opt({ payTo: '0x2222222222222222222222222222222222222222' })
+      const tagged = erc7710()
+      const sel = selectX402SettlementScheme([tagged, plain], { delegationRail: false })
+      expect(sel?.scheme).toBe('eip3009')
+      expect(sel?.option).toBe(plain)
+      expect(sel?.facilitatorAddresses).toBeNull()
+    })
+
+    it('erc7710-only merchant on the legacy rail -> null, not a mis-scheme', () => {
+      // Nothing payable rather than "pay it the wrong way". The alternative is
+      // the stranded-funds path this issue exists to close.
+      expect(selectX402SettlementScheme([erc7710()], { delegationRail: false })).toBeNull()
+    })
+
+    it('erc7710-only merchant on the delegation rail -> erc7710', () => {
+      const tagged = erc7710()
+      expect(selectX402SettlementScheme([tagged], { delegationRail: true })?.scheme).toBe('erc7710')
+    })
+
+    it('3009-only merchant -> 3009 on BOTH rails, byte-identical option', () => {
+      // ~all real x402 merchants. The characterization block above pins that
+      // this choice did not move; this pins that the rail flag cannot move it.
+      const plain = opt()
+      for (const delegationRail of [true, false]) {
+        const sel = selectX402SettlementScheme([plain], { delegationRail })
+        expect(sel?.scheme).toBe('eip3009')
+        expect(sel?.option).toBe(selectStandardPaymentOption([plain]))
+      }
+    })
+
+    it('falls back to 3009 when the 7710 entry is unpayable (wrong asset)', () => {
+      // Tagged but not payable must not shadow a perfectly good 3009 entry.
+      const unpayable = erc7710({ asset: '0x9999999999999999999999999999999999999999' })
+      const plain = opt({ payTo: '0x2222222222222222222222222222222222222222' })
+      const sel = selectX402SettlementScheme([unpayable, plain], { delegationRail: true })
+      expect(sel?.scheme).toBe('eip3009')
+      expect(sel?.option).toBe(plain)
+    })
+
+    it('returns null when nothing is payable', () => {
+      expect(selectX402SettlementScheme([], { delegationRail: true })).toBeNull()
+      expect(selectX402SettlementScheme([opt({ scheme: 'upto' })], { delegationRail: true })).toBeNull()
+    })
   })
 })

@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-15" # #1452: the SDK can now SIGN the settlement child (eip712_delegation, verbatim); it still cannot select erc7710 — #1453/#1454 remain. #1451: records the #1450 owner decision — prefer erc7710 on the delegation rail when the merchant advertises assetTransferMethod erc7710, 3009 bridge as the merchant-reach fallback. Docs only; the payTo-shape dispatch contract is unchanged. #1423 re-verify: delegation-rail.ts gained the read-only disabledDelegations() probe used by revoke-all prepare — no payment path reads it and the x402 sequences are untouched. #1400 re-verify: delegation-rail.ts gained prepareCalls (batch UserOp for revoke-all); the x402 sequences here are untouched — prepareCall now delegates to the batch form with identical single-call behavior, and no payment path uses the batch. Prior: #1398 hosted fast settle validates the bounded signed X-PAYMENT header against the agent-scoped persisted intent before relaying funding; merchant/facilitator verification remains final.
+last-verified: "2026-08-15" # #1453: the SDK can now SELECT the scheme (selectX402SettlementScheme); the standard selector skips erc7710 entries, closing the echo-7710-sign-3009 stranded-funds path. #1454 (end-to-end) remains. #1452: the SDK can now SIGN the settlement child (eip712_delegation, verbatim); it still cannot select erc7710 — #1453/#1454 remain. #1451: records the #1450 owner decision — prefer erc7710 on the delegation rail when the merchant advertises assetTransferMethod erc7710, 3009 bridge as the merchant-reach fallback. Docs only; the payTo-shape dispatch contract is unchanged. #1423 re-verify: delegation-rail.ts gained the read-only disabledDelegations() probe used by revoke-all prepare — no payment path reads it and the x402 sequences are untouched. #1400 re-verify: delegation-rail.ts gained prepareCalls (batch UserOp for revoke-all); the x402 sequences here are untouched — prepareCall now delegates to the batch form with identical single-call behavior, and no payment path uses the batch. Prior: #1398 hosted fast settle validates the bounded signed X-PAYMENT header against the agent-scoped persisted intent before relaying funding; merchant/facilitator verification remains final.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -734,12 +734,24 @@ stands, which is precisely why the bridge stays. Epic
 [#1450](https://github.com/d-hinders/Haven-AI/issues/1450) is making it
 reachable from Haven's own clients, one step at a time — as of
 [#1452](https://github.com/d-hinders/Haven-AI/issues/1452) the SDK **can sign**
-the settlement child (`sign_data.signature_scheme: 'eip712_delegation'`,
-signed verbatim via `signSettlementDelegationTypedData`), but it still cannot
-*select* erc7710: the standard-x402 path hardcodes the 3009 shape (#1453) and
-there is no end-to-end authorize→sign→settle path yet (#1454). Until those
-land, a bespoke client written against the raw API is still the only way to pay
-a 7710 merchant end to end.
+the settlement child (`sign_data.signature_scheme: 'eip712_delegation'`, signed
+verbatim via `signSettlementDelegationTypedData`), and as of
+[#1453](https://github.com/d-hinders/Haven-AI/issues/1453) it **can choose**
+the scheme: `selectX402SettlementScheme` is the single place the preference
+rule lives, and `selectStandardPaymentOption` now skips erc7710-tagged entries
+instead of returning them positionally. What is still missing is the path that
+joins them — no end-to-end authorize→sign→settle exists in the SDK yet
+(#1454), so a bespoke client written against the raw API remains the only way
+to pay a 7710 merchant end to end.
+
+**#1453 also closed a live footgun on the EIP-3009 path**, worth recording
+because it cost real funds to reason about rather than being hypothetical:
+because the old selector ignored `extra.assetTransferMethod`, a merchant that
+listed its erc7710 entry first made a client echo THAT option while signing a
+standard 3009 authorization. The merchant rejects the mismatch cleanly — but on
+the legacy two-leg the Safe→delegate funding transfer has already executed, so
+the result is a stranded delegate balance for the sweep. Only our own demo
+merchant's `accepts[]` ordering was holding it shut.
 
 **How the scheme is chosen (the mechanism).** The `modules/x402/` authorize
 orchestration (`scheme-selection.ts`, since #996) keys on the authorize

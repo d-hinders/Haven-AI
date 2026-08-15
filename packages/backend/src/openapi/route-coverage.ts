@@ -152,10 +152,6 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
     because: 'Wallet linking/renaming plus the Safe approvers subsection. See the Safe-retirement decision in #1440 before documenting the approver half.',
   },
   {
-    file: 'contacts.ts',
-    because: 'Address book; dashboard-only, no agent or money path.',
-  },
-  {
     file: 'auth.ts',
     because: 'Login/session for the dashboard. Deliberately outside the agent-facing spec.',
   },
@@ -212,5 +208,5 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
  * `index.ts` — and one of them (`GET /chains`) turned out to be undocumented.
  * That is the gate earning its keep on its first run, not slack being taken.
  */
-export const MAX_UNDOCUMENTED_MODULES = 18
-export const MAX_UNDOCUMENTED_ROUTES = 90
+export const MAX_UNDOCUMENTED_MODULES = 17
+export const MAX_UNDOCUMENTED_ROUTES = 86

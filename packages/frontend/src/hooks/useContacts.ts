@@ -2,14 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
+import type { ApiSchema } from '@haven_ai/core'
 
-export interface Contact {
-  id: string
-  name: string
-  address: string
-  created_at: string
-  updated_at: string
-}
+/**
+ * #1446: `/contacts` is documented in the spec now, so this is the generated
+ * type rather than a hand-written copy of it.
+ */
+export type Contact = ApiSchema<'Contact'>
 
 interface UseContactsReturn {
   contacts: Contact[]

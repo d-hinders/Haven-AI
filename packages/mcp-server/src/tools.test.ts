@@ -4026,7 +4026,7 @@ describe('hosted erc7710 (#1456)', () => {
       status: 200,
       ok: true,
       body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } },
-      settlementTxHash: null,
+      settlementTxHash: undefined,
     })
     vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
       allowance: null,

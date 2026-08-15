@@ -1900,3 +1900,27 @@ describe('erc7710-aware option selection (#1453)', () => {
     })
   })
 })
+
+/**
+ * #1469 CHARACTERIZATION — pinned BEFORE the fix, per the issue's own AC:
+ * changing throw→skip is money-path-adjacent behaviour, so what callers see
+ * today is recorded first. These two tests are INVERTED by the fix commit.
+ */
+describe('null holes in accepts[] — before #1469', () => {
+  const valid: X402PaymentOption = {
+    scheme: 'exact',
+    network: 'eip155:8453',
+    asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    amount: '20000',
+    payTo: '0x3333333333333333333333333333333333333333',
+    maxTimeoutSeconds: 300,
+  }
+
+  it('selectStandardPaymentOption THROWS on a null entry today', () => {
+    expect(() => selectStandardPaymentOption([null as never, valid])).toThrow(TypeError)
+  })
+
+  it('selectErc7710PaymentOption THROWS on a null entry today', () => {
+    expect(() => selectErc7710PaymentOption([null as never, valid])).toThrow(TypeError)
+  })
+})

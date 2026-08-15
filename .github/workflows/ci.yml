@@ -527,6 +527,11 @@ jobs:
       - name: Design-system drift gate
         run: npm run design:lint -w packages/frontend
 
+      - name: Wire-type ratchet (#1447)
+        run: |
+          npm run lint:wire-types
+          npm run lint:wire-types:test
+
       - name: Run frontend unit tests
         run: npm run test -w packages/frontend
 

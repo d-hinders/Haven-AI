@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-07-27"
+last-verified: "2026-08-15" # #1447: wire-type ratchet is a blocking frontend gate — import ApiSchema types rather than hand-rolling wire shapes
 ---
 
 # Frontend playbook
@@ -58,6 +58,15 @@ PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome \
 ```
 
 **Visual regression (blocking CI, #897).** `/design-system` is pixel-compared against committed Linux baselines on every frontend PR (the *Design visual regression* job). An unintended pixel change in a shared primitive fails the PR with a downloadable diff artifact (`visual-regression-diffs`). **Updating baselines for an intended change — in the SAME PR:** dispatch the **Update visual baselines** workflow on your PR branch (Actions → Update visual baselines → Run workflow → pick the branch) — it regenerates the Linux-rendered baselines and commits them to the branch, where they appear as a reviewable image diff. Caveat: without the `BASELINE_PUSH_TOKEN` secret (a PAT with contents:write), the bot pushes with `GITHUB_TOKEN`, whose commits do **not** trigger PR workflows — on an already-open PR the new head gets zero check runs and every required check waits forever; the workflow warns about this, and the fix is a manual empty commit (`git commit --allow-empty && git push`) or setting the secret. Any PR that intentionally changes what `/design-system` renders (including its prose) without carrying new baselines leaves the job red for every PR after it. Never commit locally-rendered (macOS) baselines; fonts differ and CI will reject them. Run the spec locally only inside a Linux container with `VISUAL_REGRESSION=1`. Note: the job gates auto-merge only while it's listed in the "Haven automerge rules" ruleset's required checks — see [`autonomous-pr-loop.md`](../autonomous-pr-loop.md) §One-time setup. **Before reporting a frontend PR shipped, confirm this job's conclusion on the head SHA** — merged-state alone doesn't prove it ran green.
+
+**Wire shapes come from the spec, not from you (#1447).** `npm run lint:wire-types` is a **blocking CI job** on the frontend surface. It counts hand-written types in `hooks/` and `types/` that declare a snake_case property — the API's convention — against a shrink-only baseline (`packages/frontend/wire-type-baseline.json`, frozen at 18 after #1445's migration). If the route is in the spec, import the type instead of restating it:
+
+```
+import type { ApiSchema } from '@haven_ai/core'
+export type Thing = ApiSchema<'Thing'>
+```
+
+If the route is not in the spec yet, document it there first — [#1446](https://github.com/d-hinders/Haven-AI/issues/1446) tracks that backfill, and the 18 baselined shapes are waiting on it. If a type is genuinely UI-side and merely happens to carry a snake_case field, mark it `// ui-local: <reason, at least 20 chars>` on the line above; a bare marker does not exempt. After removing shapes, tighten with `npm run lint:wire-types:update` (it refuses to ratchet upward). The gate reads casing, so it does **not** see a wire shape that uses camelCase — that hole is stated in the script's header with a live example, and review is the backstop.
 
 ## 5. Review (two passes: code + rendered)
 

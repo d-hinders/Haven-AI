@@ -33,6 +33,10 @@ function entry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
     resource_url: 'https://mcp.merchant.example/mcp',
     rail: 'x402',
     protocol: 'mcp',
+    // #1445: the route emits these on every row; the fixture omitted them
+    // while the spec's `required` list under-declared the shape.
+    tool_arguments: null,
+    asset_transfer_methods: null,
     tool_name: 'create_text',
     price_display: '$0.01 USDC',
     price_atomic: '10000',

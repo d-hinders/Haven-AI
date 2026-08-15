@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
+import type { ApiSchema } from '@haven_ai/core'
 
 /**
  * A copied setup command normally registers within a few seconds. A FIRST run
@@ -43,61 +44,11 @@ export type AgentConnectionSetupStatus =
   | 'cancelled'
   | 'failed'
 
-export interface AgentConnectionSetupStatusResponse {
-  setup_id: string
-  agent_id: string | null
-  status: AgentConnectionSetupStatus
-  expires_at: string
-  agent: {
-    name: string
-    description?: string | null
-  }
-  haven_wallet: {
-    id: string
-    name: string
-    address: string
-    chain_id: number
-    network: string
-  }
-  agent_budget: Array<{
-    id?: string
-    token_address: string
-    token_symbol: string
-    allowance_amount: string
-    reset_period_min: number
-  }>
-  delegate_address?: string | null
-  api_key_prefix?: string | null
-  runtime?: string | null
-  connector?: {
-    connector_version?: string | null
-    environment_label?: string
-    runtime_version?: string
-    config_target?: string
-  }
-  install_status?: {
-    runtime_mcp_mode?: string
-    skill_installed?: boolean
-    hosted_mcp_configured?: boolean
-    local_signer_configured?: boolean
-    local_mcp_configured?: boolean
-    credential_files_written?: boolean
-    signer_acknowledged?: boolean
-    local_mcp_acknowledged?: boolean
-    activation_command_available?: boolean
-    probe_result?: string
-    restart_required?: boolean
-    next_user_action?: string
-    error_code?: string | null
-    last_probe_at?: string
-  }
-  approval?: {
-    safe_tx_hash?: string | null
-    tx_hash?: string | null
-    status?: string | null
-  }
-  failure_reason?: string | null
-}
+/**
+ * #1445: generated from the spec's `AgentConnectionSetupStatus` schema instead
+ * of a hand-written union of status literals.
+ */
+export type AgentConnectionSetupStatusResponse = ApiSchema<'AgentConnectionSetupStatus'>
 
 export function useAgentConnectionSetupStatus(
   setupId: string | null,

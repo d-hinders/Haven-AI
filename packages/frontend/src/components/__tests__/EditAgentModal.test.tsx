@@ -55,6 +55,11 @@ const BASE_AGENT: Agent = {
   safe_id: 'safe-1',
   safe_address: SAFE_ADDRESS,
   safe_name: 'Operating wallet',
+  // #1445: the read routes always return these two; the fixture omitted them
+  // while the hand-written Agent type marked them optional, so the test was
+  // describing a response the API cannot produce.
+  safe_chain_id: 100,
+  api_key_prefix: 'sk_agent_abc',
   status: 'active',
   created_at: '2026-05-01T00:00:00Z',
   allowances: [

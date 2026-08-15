@@ -2,40 +2,27 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
-import type { AgentStatus } from '@/lib/payment-status'
+import type { ApiSchema } from '@haven_ai/core'
 
-export interface AgentAllowance {
-  id: string
-  agent_id: string
-  token_address: string
-  token_symbol: string
-  allowance_amount: string
-  reset_period_min: number
-}
-
-export interface Agent {
-  id: string
-  name: string
-  description: string | null
-  delegate_address: string | null
-  safe_id: string | null
-  safe_address: string | null
-  safe_name: string | null
-  safe_chain_id?: number | null
-  /** 'delegator_hybrid' = delegation rail (#821). */
-  account_type?: string | null
-  api_key?: string | null
-  api_key_prefix?: string | null
-  status: AgentStatus
-  created_at: string
-  allowances: AgentAllowance[]
-  /** ISO timestamp of the most recent MCP tool call. Null until first contact. */
-  mcp_last_seen_at?: string | null
-  /** True when there are open reconciliation events indicating stranded delegate funds. */
-  has_stranded_funds?: boolean
-  /** #1401: non-null = archived (soft-removed; history retained). */
-  archived_at?: string | null
-}
+/**
+ * Wire shapes from the generated API types (#1445, epic #1442). These were
+ * hand-maintained duplicates of what `openapi/spec.ts` already declares, and
+ * they had drifted in both directions:
+ *
+ *   - `api_key_prefix` and `safe_chain_id` were optional here, though every
+ *     read route returns them; the local type made call sites defend against
+ *     a case the API does not produce.
+ *   - `api_key` was folded into the shared shape even though ONLY the creation
+ *     response carries it — hence `CreateAgentResponse` below, which is what
+ *     the spec models with `allOf: [Agent, { api_key, passport_requested }]`.
+ *   - `has_stranded_funds` and `passport_requested` were returned by the routes
+ *     and absent from the spec entirely. Both are documented there now; they
+ *     had gone unnoticed because `Agent` sets `additionalProperties: true`, so
+ *     nothing in the contract chain was looking (#1444).
+ */
+export type AgentAllowance = ApiSchema<'AgentAllowance'>
+export type Agent = ApiSchema<'Agent'>
+export type CreateAgentResponse = ApiSchema<'CreateAgentResponse'>
 
 interface CreateAgentParams {
   name: string

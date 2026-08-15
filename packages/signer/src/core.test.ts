@@ -464,4 +464,25 @@ describe('signX402FundingTypedData with a settlement child (#1455)', () => {
       /does not match the digest Haven committed to/,
     )
   })
+
+  it('names the mapping gap when it cannot map the signed network', async () => {
+    // Distinct from a chain mismatch on purpose (#1455 second review): folding
+    // this into the comparison reported "expected chain -1" and sent a reader
+    // after a phantom mismatch rather than the signer's own gap.
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const CHILD2 = JSON.parse(
+      JSON.stringify(require('../../sdk/src/__fixtures__/settlement-delegation-payload.json')),
+    )
+    const expected = await expectedX402({
+      merchantTo: '0x3333333333333333333333333333333333333333',
+      amount: '1000',
+      asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      network: 'solana',
+      typedDataHash: hashTypedData(CHILD2 as Parameters<typeof hashTypedData>[0]),
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    } as never)
+    await expect(signer.signX402FundingTypedData(CHILD2 as never, expected)).rejects.toThrow(
+      /cannot map the network 'solana'/,
+    )
+  })
 })

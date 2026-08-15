@@ -226,6 +226,18 @@ export function createEdgeSigner(
       // disagrees with the declaration. A backend could otherwise declare one
       // payee and pin another, and the pair would bind perfectly.
       if (isSettlementChildTypedData(typedData)) {
+        // A network this signer cannot map is its OWN failure, not a chain
+        // mismatch. Folding it into the comparison (as `?? -1` did) refused
+        // correctly but reported "expected chain -1", sending a reader after a
+        // phantom mismatch instead of the mapping gap (#1455 second review).
+        const settlementChainId = chainIdForNetwork(expected.network)
+        if (settlementChainId === undefined) {
+          throw new HavenSigningError(
+            `Refusing to sign the x402 settlement child: this signer cannot map the network ` +
+              `'${expected.network}' to a chain id, so it cannot check which chain the child is ` +
+              'scoped to. Update @haven_ai/signer.',
+          )
+        }
         verifySettlementChild(typedData, {
           merchantTo: expected.merchantTo,
           amount: expected.amount,
@@ -234,7 +246,7 @@ export function createEdgeSigner(
           // Number(typedData.domain.chainId) here made the check compare a
           // value to itself — vacuous, and precisely the "declared one thing,
           // signed another" class this file exists to catch (#1455 review).
-          chainId: chainIdForNetwork(expected.network) ?? -1,
+          chainId: settlementChainId,
           expiresAt: expected.expiresAt,
         })
       }

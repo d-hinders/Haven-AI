@@ -239,7 +239,14 @@ describe('chainIdForNetwork — the expectation must come from the signed field'
  * restrictive GROUP. Resolved against the framework source: `redeemDelegations`
  * calls `beforeHook` on every caveat with no break and no try/catch, so
  * top-level caveats are strictly AND-ed and the wrapper is just one more of
- * them. These pin both halves of that conclusion.
+ * them.
+ *
+ * SCOPE, so nobody over-reads these: they pin THIS FILE'S reaction to that
+ * conclusion — accept a wrapper-style sibling, refuse a child whose pin is not
+ * top-level. They cannot pin the Solidity AND-semantics itself; a vitest unit
+ * test executes no contract. That claim rests on the framework's redemption
+ * loop, cited in settlement-child.ts, and would need a fork-based integration
+ * test to verify mechanically.
  */
 describe('the AND premise, after the LogicalOrWrapper challenge (#1455)', () => {
   const LOGICAL_OR_WRAPPER = '0x' + 'c0ffee'.padEnd(40, '0')

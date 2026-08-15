@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — no direct code mirror
-last-verified: "2026-07-15"
+last-verified: "2026-08-15" # #1459: the #946 EIP-3009 bridge was described as "planned"; it has been built and live-proven since 2026-07, and #1450 made erc7710 the preferred scheme with the bridge as the merchant-reach fallback.
 ---
 
 # About Haven
@@ -93,7 +93,7 @@ The SDK supports `haven.fetch()`, quote-first helpers, and resume helpers for st
 
 How x402 settles depends on the account's rail:
 
-- **New (delegation-rail) accounts settle directly via ERC-7710** with **no funding leg**. The agent's budget delegation is the settlement instrument: it re-delegates a narrowed slice (exact amount, payee pin, short expiry) to the merchant, who redeems it so funds move account→merchant directly, metered on-chain by the same budget. No delegate hot balance, no sweep. The limit today is **merchant reach**: erc7710 needs facilitator-side support, which is still thin, so EIP-3009-only merchants are not yet reachable on this rail. The planned bridge is EIP-3009 support on the delegation rail (issue #946), which reintroduces a bounded, transient funding leg for interop.
+- **New (delegation-rail) accounts settle directly via ERC-7710** with **no funding leg**. The agent's budget delegation is the settlement instrument: it re-delegates a narrowed slice (exact amount, payee pin, short expiry) to the merchant, who redeems it so funds move account→merchant directly, metered on-chain by the same budget. No delegate hot balance, no sweep. The limit today is **merchant reach**: erc7710 needs facilitator-side support, which is still thin, so EIP-3009-only merchants are not yet reachable on this rail. That bridge is **built** and live-proven since 2026-07: EIP-3009 support on the delegation rail (issue #946) reintroduces a bounded, transient funding leg for interop, selected per payment. Since the #1450 decision, erc7710 is the **preferred** scheme whenever a delegation-rail account meets a merchant that advertises it — the bridge is the fallback that keeps EIP-3009-only merchants reachable, not the default.
 - **Legacy (AllowanceModule) accounts** use the EIP-3009 two-leg below, where the delegate wallet is the merchant-facing payer because the merchant protocol verifies an EIP-3009 authorization from an externally owned account.
 
 The legacy two-leg flow:

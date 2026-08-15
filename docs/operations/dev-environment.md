@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-08-08" # #1154: the hosted MCP is now on the money-flow QA path (x402-hosted-mcp-signer), and qa-dev.yml gained a signer build step plus QA_HOSTED_MCP_URL / QA_X402_BINDING_SIGNER. Endpoints re-confirmed by a live run against dev the same day.
+last-verified: "2026-08-15" # #1459: the "no automated scenario covers the erc7710 rail" claim was false (x402-erc7710-settle has run nightly since #1064), and the QA-interaction note argued from a selector that #1453 changed — both corrected against the code as it now stands. #1154: the hosted MCP is now on the money-flow QA path (x402-hosted-mcp-signer), and qa-dev.yml gained a signer build step plus QA_HOSTED_MCP_URL / QA_X402_BINDING_SIGNER. Endpoints re-confirmed by a live run against dev the same day.
 ---
 
 # Dev environment
@@ -33,7 +33,7 @@ how to configure it. For the branch workflow that feeds it, see
 | Frontend | **Vercel** | `dev` branch alias + per-PR previews | Canonical dev URL: the **branch-tracking preview of `dev`** (stable hostname, always the newest `dev` build). Per-PR previews exist alongside it. There is no separate "dev" environment in Vercel — Haven's dev frontend **is** Vercel's **Preview** scope, which sets `NEXT_PUBLIC_HAVEN_ENV=dev` (→ `DEV` badge) and points the build at the dev backend. That is why every preview link is the same dev environment on a different domain. |
 | Backend / API | **Railway** (dev project) | `dev` branch | Own isolated Postgres — never the prod DB. |
 | Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend via its own `HAVEN_API_URL`. ⚠️ Was found wired to `main` with a dead upstream on 2026-08-06 — [verify before trusting it](#verifying-a-dev-service-actually-works). |
-| Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. EIP-3009 by default; the experimental ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
+| Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. Advertises EIP-3009 first by default; the ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
 | Postgres | **Railway** managed | — | A separate managed instance, isolated from prod. |
 
 Production is the same shape deploying from `main`. The two never share a
@@ -260,32 +260,49 @@ manager is configured, or set `MERCHANT_X402_SETTLEMENT_METHODS=eip3009`
 explicitly. The manager variable can stay; without ERC-7710 in the effective
 method list, the merchant advertises EIP-3009 only.
 
-To confirm it actually redeems end-to-end, the repo's one tool for this is the
-manual pilot buyer:
-`npm run pilot:x402-7710-buyer -w packages/qa-agent` (see its header for the
-`PILOT_*` env it needs). No automated scenario covers the erc7710 rail.
+**An automated scenario covers this rail.** `x402-erc7710-settle`
+(`packages/qa-agent/src/scenarios/x402-erc7710-settle.ts`, registered in
+`run.ts`'s `SCENARIOS` since #1064) runs in the nightly money-flow QA and
+settles a real 0.001 USDC treasury→merchant payment through the budget
+delegation, asserting the delegate EOA is untouched. It **skips** — and under
+the #1066 completeness gate that skip FAILS the run — when
+`QA_DEMO_MERCHANT_URL` is unset or the merchant is not advertising erc7710,
+which is the signal that this flag got turned off on dev.
 
-> **Interaction with QA (#946) — it is safe, but not for the reason you might
-> expect.** Enabling this flag **cannot** move the `x402-delegation-3009*`
-> scenarios onto erc7710, because Haven's scheme selection never reads the
-> merchant's `accepts` array. `authorizeStandardX402` sends
-> `payTo = the agent's delegate EOA` + `merchantPayTo = the merchant`
-> unconditionally (`packages/sdk/src/client.ts`), and the backend dispatches on
-> that **payTo shape alone** (`routes/x402.ts`) — a point its own test pins with
-> *"the erc7710 selector was never consulted."*
+`npm run pilot:x402-7710-buyer -w packages/qa-agent` remains the **manual**
+tool for a one-off check against an arbitrary merchant (see its header for the
+`PILOT_*` env it needs); it is not what proves the rail.
+
+> **Interaction with QA (#946) — corrected after #1453/#1454.** This note used
+> to say enabling the flag "cannot" move the `x402-delegation-3009*` scenarios
+> onto erc7710 *because Haven's scheme selection never reads the merchant's
+> `accepts` array*. That reasoning no longer holds, and the paragraph is kept
+> rather than deleted because the old claim was load-bearing for how people
+> reasoned about this flag.
 >
-> The merchant's ordering (EIP-3009 stays `accepts[0]`, pinned by
-> `packages/demo-merchant-mcp/src/erc7710.test.ts`) matters for a **generic**
-> x402 client that infers the scheme from the first entry — the SDK's
-> `selectStandardPaymentOption` takes the first match on
-> scheme/network/asset/amount and never inspects `assetTransferMethod`. If that
-> array were reordered, such a client would echo the erc7710-tagged option while
-> still signing a standard EIP-3009 authorization, and the merchant would reject
-> it cleanly with `Invalid erc7710 payment field: delegator must be an address`
-> — before any simulation or settlement. On the legacy two-leg path the
-> Safe→delegate funding leg has already executed by then, so the visible
-> consequence is a **stranded delegate balance** for the sweep to reclaim, not a
-> mis-signed payment.
+> Selection **does** read the array now. `selectStandardPaymentOption`
+> (#1453) skips erc7710-tagged entries instead of taking the first positional
+> match, and `selectX402SettlementScheme` expresses the #1450 preference rule:
+> prefer erc7710 on a delegation-rail account when the merchant advertises it,
+> else the EIP-3009 bridge.
+>
+> The 3009 scenarios are still unaffected, for a **better** reason than before:
+> `authorizeStandardX402` sends `payTo = the agent's delegate EOA` +
+> `merchantPayTo = the merchant` with an explicit `settlementScheme: 'eip3009'`
+> (#1360), and the backend dispatches on that shape (`routes/x402.ts`). Reaching
+> erc7710 now takes a deliberate call — `HavenClient.settleX402Erc7710()`
+> (#1454) — not an accident of array ordering.
+>
+> **The footgun that ordering was holding shut is gone.** Because the old
+> selector ignored `assetTransferMethod`, a reordered `accepts[]` would have
+> made a client echo the erc7710-tagged option while signing a standard
+> EIP-3009 authorization; the merchant rejects that cleanly, but on the legacy
+> two-leg the Safe→delegate funding transfer has already executed, so the
+> visible result is a **stranded delegate balance** for the sweep. #1453 closed
+> that class by construction. Keeping EIP-3009 at `accepts[0]` (pinned by
+> `packages/demo-merchant-mcp/src/erc7710.test.ts`) still matters for a
+> **generic** x402 client that infers the scheme from the first entry — it is
+> no longer what protects Haven's own clients.
 
 Reference: `packages/demo-merchant-mcp/README.md` § *ERC-7710 Smart-Account
 Payments*.

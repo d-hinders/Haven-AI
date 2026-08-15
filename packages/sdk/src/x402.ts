@@ -364,8 +364,16 @@ export function isErc7710Option(option: X402PaymentOption): boolean {
  * `redeemers` list with a 400 (`routes/x402.ts`), and the QA scenario already
  * treats empty as absent. Returning `[]` here would hand callers a value that
  * means "pin to nobody" — which is not a narrower pin, it is an unbuildable
- * delegation. Non-string entries are dropped rather than passed through to a
- * caveat.
+ * delegation.
+ *
+ * Malformed entries are DROPPED rather than failing the whole option, and that
+ * asymmetry is deliberate. A pin narrowed by a merchant's typo means the
+ * facilitator that actually tries to redeem is not on the list, so redemption
+ * reverts — and erc7710 has no funding leg, so nothing moved and nothing is
+ * stranded. Refusing the option outright would instead deny a payment the
+ * remaining valid facilitators could have settled. Losing the payment is the
+ * worse outcome, precisely because the failure this issue closes (#1453) is the
+ * one where funds move BEFORE the rejection.
  */
 export function x402FacilitatorAddresses(option: X402PaymentOption): string[] | null {
   const raw = option.extra?.facilitatorAddresses

@@ -19,6 +19,7 @@ vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery
 // Dummy hex now (correctly) 400s — see the wrong-signer regression test.
 import { privateKeyToAccount } from 'viem/accounts'
 import { delegationSigningPayload } from '../../rails/delegation-policy.js'
+import { typedDataDigest } from '../../modules/x402/x402-delegation.js'
 const DELEGATE_SIGNER = privateKeyToAccount(('0x' + '11'.repeat(32)) as `0x${string}`)
 async function signChild(child: unknown): Promise<`0x${string}`> {
   const payload = delegationSigningPayload(child as never, 84532)
@@ -131,6 +132,18 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(body.sign_data.signature_scheme).toBe('eip712_delegation')
     expect(body.sign_data.typed_data.domain.name).toBe('DelegationManager')
     expect(body.sign_data.instructions).toMatch(/X-PAYMENT header/)
+    // #1474: parity with the 3009 branch — the response carries its own
+    // Haven-signed declaration, so a client signing straight from it (the SDK's
+    // settleX402Erc7710) does not need a second round-trip to sign-context.
+    expect(body.x402_expected_auth).toBeDefined()
+    expect(body.x402_expected_auth.version).toBe(2)
+    // The binding must cover the BYTES being signed, not a hash travelling
+    // beside them: the declaration's digest has to be the digest of the typed
+    // data in the SAME response. Asserted here because a mismatch is exactly
+    // what makes a signer's verification vacuous.
+    expect(body.x402_expected_auth.message).toContain(
+      typedDataDigest(body.sign_data.typed_data),
+    )
     // The intent was pinned to the delegation rail, and the METERING budget
     // is recorded uniformly (#1059): delegation_hash carries the signed CHILD,
     // budget_delegation_hash the parent budget — never equal on erc7710.

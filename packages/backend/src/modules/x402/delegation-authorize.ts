@@ -337,12 +337,45 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     return { code: 409, body: { error: 'Idempotent replay in progress — retry the original request' } }
   }
 
+  // #1474: PARITY between the two branches, not a missing boundary.
+  //
+  // The 3009 branch above emits a Haven-signed expected context; this one did
+  // not. That was survivable because the local signer's `{ payment_id }` path
+  // fetches GET /x402/:id/sign-context, where `rebuildDelegationSignContext`
+  // builds one for this scheme too — so the binding discipline was already
+  // applied there. What it was NOT survivable for is a client that signs
+  // straight from the authorize response, as HavenClient.settleX402Erc7710()
+  // (#1454) does: it had no declaration available without a second round-trip.
+  //
+  // Emitting it here makes the response self-sufficient and the two branches
+  // symmetric. Note what it does and does not cover: the context binds the
+  // DIGEST of the child plus the declared fields; it does not prove the
+  // child's caveats implement them. That check is #1455's job.
+  //
+  // `payloadHash` is the child hash and `typedDataHash` the digest of the
+  // payload actually signed — the pair is what lets the signer bind the
+  // declaration to the bytes rather than to a hash travelling beside them.
+  // merchantTo is `payTo` here BECAUSE this is the direct-settlement shape:
+  // payTo IS the merchant, which is what selected this branch.
+  const settlementExpectedAuth = await signX402ExpectedContext({
+    paymentId: intent.id,
+    payloadHash: built.childHash,
+    resourceUrl: url,
+    merchantTo: payTo.toLowerCase(),
+    amount: amountRaw.toString(),
+    asset: tokenAddress,
+    network,
+    expiresAt: intent.expires_at,
+    typedDataHash: typedDataDigest(built.signingPayload),
+  })
+
   return {
     code: 201,
     body: {
       payment_id: intent.id,
       status: intent.status,
       expires_at: intent.expires_at,
+      x402_expected_auth: settlementExpectedAuth,
       sign_data: {
         hash: built.childHash,
         signature_scheme: 'eip712_delegation',

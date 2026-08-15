@@ -273,3 +273,43 @@ describe('the AND premise, after the LogicalOrWrapper challenge (#1455)', () => 
     expectRefusal(td, /no payee pin/)
   })
 })
+
+/**
+ * #1476 — the hole #1455 did not close.
+ *
+ * #1455 made the signer verify a settlement child's caveats, but only on the
+ * path that HAS an expected context. `haven_sign` also accepts raw
+ * payload_hash + typed_data with no context at all, so whether a child got
+ * verified depended on which tool the caller reached for. That is a
+ * convention, not a boundary.
+ */
+describe('unbound delegation payloads are refused (#1476)', () => {
+  it('classifies the settlement child as a delegation, and a UserOp as not', () => {
+    // The gate is the payload's SHAPE, so #1254's direct-payment UserOp — the
+    // account validating its own operation, not granting anyone anything —
+    // keeps signing unbound as before.
+    expect(isSettlementChildTypedData(child())).toBe(true)
+    expect(
+      isSettlementChildTypedData({
+        primaryType: 'PackedUserOperation',
+        domain: { verifyingContract: '0x' + '98'.repeat(20) },
+        types: {},
+        message: { sender: '0x1', nonce: '1' },
+      }),
+    ).toBe(false)
+  })
+
+  it('does not classify a delegation-named payload without caveats', () => {
+    // `caveats` being an array is part of the test: an authority grant that
+    // carries no restrictions at all is not the shape this gate describes,
+    // and verifySettlementChild refuses it separately for being unconstrained.
+    expect(
+      isSettlementChildTypedData({
+        primaryType: 'Delegation',
+        domain: { verifyingContract: DELEGATION_MANAGER },
+        types: {},
+        message: {},
+      }),
+    ).toBe(false)
+  })
+})

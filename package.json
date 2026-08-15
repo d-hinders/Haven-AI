@@ -31,6 +31,7 @@
     "lint:copy:test": "node --test scripts/frontend-copy-lint.test.mjs",
     "lint:db-mocks": "node scripts/db-mock-ratchet.mjs",
     "lint:wire-types": "node scripts/lint-wire-types.mjs",
+    "lint:network-pins": "node --test scripts/network-map-pins.test.mjs",
     "lint:wire-types:update": "node scripts/lint-wire-types.mjs --update",
     "lint:wire-types:test": "node --test scripts/lint-wire-types.test.mjs",
     "lint:db-mocks:test": "node --test scripts/db-mock-ratchet.test.mjs",

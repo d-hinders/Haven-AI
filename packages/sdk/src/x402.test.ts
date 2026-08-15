@@ -1722,3 +1722,62 @@ describe('merchant receipt capture (#956)', () => {
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/merchant-receipt'))).toBe(false)
   })
 })
+
+/**
+ * #1453 CHARACTERIZATION — what `selectStandardPaymentOption` does TODAY,
+ * pinned BEFORE it becomes scheme-aware.
+ *
+ * Not aspirational. These exist so the erc7710 change can prove it did not
+ * disturb the merchants that make up ~all real x402 traffic: a 3009-only
+ * merchant must select byte-identically afterwards. If one of these changes,
+ * that is a regression on the live path, not a refinement.
+ */
+describe('selectStandardPaymentOption — characterization before #1453', () => {
+  function opt(over: Partial<X402PaymentOption> = {}): X402PaymentOption {
+    return {
+      scheme: 'exact',
+      network: 'eip155:8453',
+      asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      amount: '20000',
+      payTo: '0x3333333333333333333333333333333333333333',
+      maxTimeoutSeconds: 300,
+      ...over,
+    }
+  }
+
+  it('returns the FIRST positional match', () => {
+    const first = opt({ payTo: '0x1111111111111111111111111111111111111111' })
+    const second = opt({ payTo: '0x2222222222222222222222222222222222222222' })
+    expect(selectStandardPaymentOption([first, second])).toBe(first)
+  })
+
+  it('ignores extra.assetTransferMethod entirely — the #1453 footgun, before the fix', () => {
+    // An erc7710-tagged entry placed first is returned by the STANDARD
+    // (EIP-3009) selector. On the legacy two-leg that means echoing the 7710
+    // option while signing a 3009 authorization: the merchant rejects it, but
+    // the Safe -> delegate funding transfer has already run, leaving a stranded
+    // delegate balance for the sweep. #1453 inverts this expectation.
+    const tagged = opt({
+      payTo: '0x1111111111111111111111111111111111111111',
+      extra: { assetTransferMethod: 'erc7710' },
+    })
+    const plain = opt({ payTo: '0x2222222222222222222222222222222222222222' })
+    expect(selectStandardPaymentOption([tagged, plain])).toBe(tagged)
+  })
+
+  it('skips entries that fail scheme, network, asset or amount', () => {
+    const wrongScheme = opt({ scheme: 'upto' })
+    const wrongNetwork = opt({ network: 'solana' })
+    const wrongAsset = opt({ asset: '0x9999999999999999999999999999999999999999' })
+    const zeroAmount = opt({ amount: '0' })
+    const good = opt({ payTo: '0x4444444444444444444444444444444444444444' })
+    expect(
+      selectStandardPaymentOption([wrongScheme, wrongNetwork, wrongAsset, zeroAmount, good]),
+    ).toBe(good)
+  })
+
+  it('returns null for an empty list and when nothing matches', () => {
+    expect(selectStandardPaymentOption([])).toBeNull()
+    expect(selectStandardPaymentOption([opt({ scheme: 'upto' })])).toBeNull()
+  })
+})

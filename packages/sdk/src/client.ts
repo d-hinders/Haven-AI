@@ -1467,6 +1467,13 @@ export class HavenClient {
    * (`validateGenericSchemeRail`), and so does this method, before building a
    * request the backend would only reject: an error a client can explain is
    * worth more than a 400 it has to decode.
+   *
+   * **MCP callers must pass `options.resourceUrl`.** An in-band MCP 402
+   * challenge frequently carries no `resource` object at all, so
+   * `paymentRequired.resource?.url` is undefined and the backend answers
+   * "Valid url is required". The QA scenario this path was ported from falls
+   * back to the request URL for exactly that reason — the SDK cannot, because
+   * it never saw the request. Pass it.
    */
   async settleX402Erc7710(
     paymentRequired: X402PaymentRequired,

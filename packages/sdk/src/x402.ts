@@ -144,7 +144,7 @@ function normalizePaymentOption(value: unknown): X402PaymentOption | null {
   }
 }
 
-function normalizePaymentRequired(value: unknown): X402PaymentRequired | null {
+export function normalizePaymentRequired(value: unknown): X402PaymentRequired | null {
   const candidate = value as Partial<X402PaymentRequired> | null
   if (
     !candidate ||
@@ -157,7 +157,7 @@ function normalizePaymentRequired(value: unknown): X402PaymentRequired | null {
 
   const accepts = candidate.accepts
     .map((option) => normalizePaymentOption(option))
-    .filter((option): option is X402PaymentOption => !!option)
+    .filter((option): option is X402PaymentOption => !!option && typeof option === 'object')
 
   if (accepts.length === 0) return null
 
@@ -413,6 +413,12 @@ export function selectStandardPaymentOption(
   if (!accepts || accepts.length === 0) return null
 
   for (const opt of accepts) {
+    // #1469: a null hole in accepts[] is unpayable data, not a crash. The
+    // parsed-Response path filters these in normalizePaymentRequired, but at
+    // least one caller (mcp-server, agent-supplied payment_required) reaches
+    // here unsanitized — and a throw there became a 500 where every other
+    // caller gets the clean no-compatible-option refusal.
+    if (opt === null || typeof opt !== 'object') continue
     if (!isErc7710Option(opt) && isPayableStandardOption(opt)) return opt
   }
 
@@ -428,6 +434,12 @@ export function selectErc7710PaymentOption(
   if (!accepts || accepts.length === 0) return null
 
   for (const opt of accepts) {
+    // #1469: a null hole in accepts[] is unpayable data, not a crash. The
+    // parsed-Response path filters these in normalizePaymentRequired, but at
+    // least one caller (mcp-server, agent-supplied payment_required) reaches
+    // here unsanitized — and a throw there became a 500 where every other
+    // caller gets the clean no-compatible-option refusal.
+    if (opt === null || typeof opt !== 'object') continue
     if (isErc7710Option(opt) && isPayableStandardOption(opt)) return opt
   }
 

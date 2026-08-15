@@ -30,18 +30,34 @@ export function signHash(privateKey: string, hash: string): string {
  * verbatim and never reconstruct it (a second source of truth could drift
  * from the account's own rules).
  */
-export async function signUserOpTypedDataForDelegation(
+export interface Eip712TypedData {
+  domain: Record<string, unknown>
+  types: Record<string, unknown>
+  primaryType: string
+  message: Record<string, unknown>
+}
+
+/**
+ * Sign backend-supplied EIP-712 typed data VERBATIM.
+ *
+ * One implementation for every typed-data scheme on purpose: the
+ * `EIP712Domain` removal below is the kind of subtlety that rots when it is
+ * copied. Today the backend's payloads do NOT carry `EIP712Domain` in `types`
+ * (checked against a real `buildSettlementDelegation` payload — see
+ * `__fixtures__/settlement-delegation-payload.json`), so the delete is
+ * defensive rather than load-bearing; ethers derives the domain itself and
+ * throws if it also finds it in `types`.
+ *
+ * `label` only shapes the error message. Nothing about the signature depends
+ * on which caller asked.
+ */
+async function signTypedDataVerbatim(
   privateKey: string,
-  typedData: {
-    domain: Record<string, unknown>
-    types: Record<string, unknown>
-    primaryType: string
-    message: Record<string, unknown>
-  },
+  typedData: Eip712TypedData,
+  label: string,
 ): Promise<string> {
   try {
     const wallet = new ethers.Wallet(privateKey)
-    // ethers derives EIP712Domain itself and rejects it in `types`.
     const types = { ...typedData.types }
     delete (types as Record<string, unknown>).EIP712Domain
     return await wallet.signTypedData(
@@ -51,9 +67,35 @@ export async function signUserOpTypedDataForDelegation(
     )
   } catch (err) {
     throw new HavenSigningError(
-      `Failed to sign delegation UserOperation: ${err instanceof Error ? err.message : String(err)}`,
+      `Failed to sign ${label}: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
+}
+
+export async function signUserOpTypedDataForDelegation(
+  privateKey: string,
+  typedData: Eip712TypedData,
+): Promise<string> {
+  return signTypedDataVerbatim(privateKey, typedData, 'delegation UserOperation')
+}
+
+/**
+ * Sign the erc7710 x402 SETTLEMENT CHILD delegation (#1452, epic #1450).
+ *
+ * A different object from the UserOperation above, and a materially different
+ * authority: this signature is what lets a merchant's facilitator redeem the
+ * `[child, budget]` chain and pull the exact amount from the treasury. The
+ * child's caveats — exact amount, payee pin, expiry, redeemer pin — are what
+ * bound it, and they are enforced ON-CHAIN. Signing it verbatim is therefore
+ * not a style preference: a reconstructed payload that differed from what the
+ * DelegationManager will hash is the #829 failure, and it fails at redemption
+ * rather than here.
+ */
+export async function signSettlementDelegationTypedData(
+  privateKey: string,
+  typedData: Eip712TypedData,
+): Promise<string> {
+  return signTypedDataVerbatim(privateKey, typedData, 'x402 settlement delegation')
 }
 
 /**

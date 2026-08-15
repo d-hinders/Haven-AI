@@ -51,7 +51,7 @@ covers:
   - packages/demo-merchant-mcp/src/**
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-14" # #1397: hosted MCP's new live-price quote tools are read-only session probes only — no intent, approval, signing context, funding, paid retry, or key handling; later paid calls still require a fresh quote and cap. #1366: verification entries move to docs/regulatory/casp-changelog/ shards (satisfied-by); this date tracks re-verification of the BODY claims only. EOF log below frozen as of 2026-08-12
+last-verified: "2026-08-15" # #1452: SDK signs the erc7710 settlement child (eip712_delegation) — verbatim, bounds already fixed by the backend and enforced on-chain by caveats; reachability change, not an authority change. Verification entry in casp-changelog/2026-08-15-1452.md. #1397: hosted MCP's new live-price quote tools are read-only session probes only — no intent, approval, signing context, funding, paid retry, or key handling; later paid calls still require a fresh quote and cap. #1366: verification entries move to docs/regulatory/casp-changelog/ shards (satisfied-by); this date tracks re-verification of the BODY claims only. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails

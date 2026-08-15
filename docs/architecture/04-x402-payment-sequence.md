@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-15" # #1456 (SDK half): prepare/submit split enabling the hosted flow; hosted tool wiring still outstanding. #1455: local caveat verification in the signer — the binding covers the digest, this covers the meaning. #1474: the erc7710 authorize response now carries its own Haven-signed expected context, like the 3009 branch. #1454: HavenClient.settleX402Erc7710 joins sign+select into an end-to-end path; shapes pinned, live balance proof still owed by #1457. #1453: the SDK can now SELECT the scheme (selectX402SettlementScheme); the standard selector skips erc7710 entries, closing the echo-7710-sign-3009 stranded-funds path. #1454 (end-to-end) remains. #1452: the SDK can now SIGN the settlement child (eip712_delegation, verbatim); it still cannot select erc7710 — #1453/#1454 remain. #1451: records the #1450 owner decision — prefer erc7710 on the delegation rail when the merchant advertises assetTransferMethod erc7710, 3009 bridge as the merchant-reach fallback. Docs only; the payTo-shape dispatch contract is unchanged. #1423 re-verify: delegation-rail.ts gained the read-only disabledDelegations() probe used by revoke-all prepare — no payment path reads it and the x402 sequences are untouched. #1400 re-verify: delegation-rail.ts gained prepareCalls (batch UserOp for revoke-all); the x402 sequences here are untouched — prepareCall now delegates to the batch form with identical single-call behavior, and no payment path uses the batch. Prior: #1398 hosted fast settle validates the bounded signed X-PAYMENT header against the agent-scoped persisted intent before relaying funding; merchant/facilitator verification remains final.
+last-verified: "2026-08-15" # #1456: hosted MCP wiring landed — pay selects the scheme, settle exchanges the signed child for the header with no funding leg. Live hosted proof still owed (#1457). Prior #1456 (SDK half): prepare/submit split enabling the hosted flow; hosted tool wiring still outstanding. #1455: local caveat verification in the signer — the binding covers the digest, this covers the meaning. #1474: the erc7710 authorize response now carries its own Haven-signed expected context, like the 3009 branch. #1454: HavenClient.settleX402Erc7710 joins sign+select into an end-to-end path; shapes pinned, live balance proof still owed by #1457. #1453: the SDK can now SELECT the scheme (selectX402SettlementScheme); the standard selector skips erc7710 entries, closing the echo-7710-sign-3009 stranded-funds path. #1454 (end-to-end) remains. #1452: the SDK can now SIGN the settlement child (eip712_delegation, verbatim); it still cannot select erc7710 — #1453/#1454 remain. #1451: records the #1450 owner decision — prefer erc7710 on the delegation rail when the merchant advertises assetTransferMethod erc7710, 3009 bridge as the merchant-reach fallback. Docs only; the payTo-shape dispatch contract is unchanged. #1423 re-verify: delegation-rail.ts gained the read-only disabledDelegations() probe used by revoke-all prepare — no payment path reads it and the x402 sequences are untouched. #1400 re-verify: delegation-rail.ts gained prepareCalls (batch UserOp for revoke-all); the x402 sequences here are untouched — prepareCall now delegates to the batch form with identical single-call behavior, and no payment path uses the batch. Prior: #1398 hosted fast settle validates the bounded signed X-PAYMENT header against the agent-scoped persisted intent before relaying funding; merchant/facilitator verification remains final.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -742,7 +742,17 @@ rule lives, and `selectStandardPaymentOption` now skips erc7710-tagged entries
 instead of returning them positionally. [#1454](https://github.com/d-hinders/Haven-AI/issues/1454)
 joins them into `HavenClient.settleX402Erc7710()` — authorize (`payTo` = the
 merchant) → sign the child → settle → the backend-assembled `X-PAYMENT` header,
-which the caller replays on the merchant retry. Note what the SDK does NOT do
+which the caller replays on the merchant retry. As of
+[#1456](https://github.com/d-hinders/Haven-AI/issues/1456) the same flow is
+reachable from the **hosted MCP tool surface**, which is the topology a normal
+agent uses: `haven_pay_mcp_tool` selects the scheme server-side (rail from the
+account, capability from the merchant's `accepts[]`) and reports it, and
+`haven_settle_mcp_tool` exchanges the signed child for the header. Note the
+sequence inversion, because it is the whole substance of that wiring: on the
+3009 path the agent's signature FUNDS the delegate and the header is built by
+the local signer; on erc7710 the signature IS the settlement child and the
+header comes back from Haven. So the settle tool branches before the funding
+relay, not after it. Note what the SDK does NOT do
 on this path: it builds no header locally and touches no funds, because the
 backend assembles the MetaMask payload in `assembleSettlementPayload`.
 

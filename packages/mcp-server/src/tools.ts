@@ -29,6 +29,7 @@ import {
   type SweepAuthorization,
   type X402McpTransport,
   type X402PaymentRequired,
+  selectX402SettlementScheme,
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
@@ -211,7 +212,9 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
       source: z.enum(['path', 'bazaar']),
     }).optional(),
     // The X-PAYMENT header built by the local signer (haven_x402_sign_header).
-    payment_header: z.string().min(1),
+    // #1456: OPTIONAL — its absence selects erc7710, where Haven assembles the
+    // header at settle instead of the signer building it locally.
+    payment_header: z.string().min(1).optional(),
   },
   haven_settle_mcp_tool: {
     // Fast-path settle: fund (relay signature) AND deliver the merchant header
@@ -230,7 +233,9 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
       source: z.enum(['path', 'bazaar']),
     }).optional(),
     // The X-PAYMENT header built by the local signer (haven_sign_x402).
-    payment_header: z.string().min(1),
+    // #1456: OPTIONAL — its absence selects erc7710, where Haven assembles the
+    // header at settle instead of the signer building it locally.
+    payment_header: z.string().min(1).optional(),
   },
   haven_quote_x402: {
     url: z.string().url(),
@@ -839,8 +844,12 @@ export function createToolHandlers(
           // prefetch failure is IGNORED here — createX402Intent then runs its
           // own internal fetch and fails exactly as it always did, so error
           // shape and ordering are unchanged.
+          // #1456: yields the AGENT, not just its delegate address — the
+          // settlement-scheme rule needs the account's rail, and #1348 pins
+          // this path to exactly ONE agent round-trip. A second GET for one
+          // field would break that budget (its test caught precisely that).
           const agentPrefetch = haven.getAgent().then(
-            (a) => a.delegateAddress,
+            (a) => a,
             () => undefined,
           )
           const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
@@ -854,7 +863,81 @@ export function createToolHandlers(
           // #1351: a human cap binds to the LIVE quote's own asset/decimals here.
           const capAtomic = resolveCapAtomic(cap, quote)
           assertWithinMaxAmount(quote.amountAtomic, capAtomic.atomic, quote.token, capAtomic.label)
-          const prefetchedDelegate = await agentPrefetch
+          const prefetchedAgent = await agentPrefetch
+          const prefetchedDelegate = prefetchedAgent?.delegateAddress
+
+          // Both halves of the #1450 rule: the merchant must advertise erc7710
+          // AND the account must be on the delegation rail. #1453's selector is
+          // the single place that rule lives. A prefetch FAILURE deliberately
+          // yields the 3009 path — guessing 'delegation' would build a request
+          // the backend then refuses, and this tool's pre-#1456 behaviour was
+          // 3009 anyway.
+          const paySelection = selectX402SettlementScheme(
+            (quote.paymentRequired as X402PaymentRequired).accepts,
+            { delegationRail: prefetchedAgent?.executionRail === 'delegation' },
+          )
+
+          if (paySelection?.scheme === 'erc7710') {
+            const prepared = await haven.prepareX402Erc7710(
+              quote.paymentRequired as X402PaymentRequired,
+              { resourceUrl: merchantUrl, delegationRail: true },
+            )
+            return {
+              payment_id: prepared.paymentId,
+              settlement_scheme: 'erc7710',
+              settlement: {
+                scheme: 'erc7710',
+                funding_leg: false,
+                merchant_pay_to: prepared.settlement.merchantPayTo,
+                facilitator_addresses: prepared.settlement.facilitatorAddresses,
+              },
+              amount_atomic: quote.amountAtomic,
+              amount: quote.amount,
+              token: quote.token,
+              merchant_url: merchantUrl,
+              ...(merchantUrl !== args.merchant_url
+                ? { merchant_url_discovered_from: args.merchant_url }
+                : {}),
+              tool_name: args.tool_name,
+              arguments: args.arguments ?? {},
+              ...(quote.mcpTransport
+                ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) }
+                : {}),
+              ...buildAgentGuidance({
+                nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+                nextTool: 'mcp__haven-signer__haven_sign',
+                nextArguments: { payment_id: prepared.paymentId },
+                safeToContinue: true,
+                reason:
+                  'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
+                  "fetches the settlement child itself and verifies its caveats against Haven's " +
+                  'signed context (#1455) before signing. Then call haven_settle_mcp_tool with the ' +
+                  'returned signature and the merchant_url/tool_name/arguments from this response. ' +
+                  'Do NOT pass payment_header: on this scheme Haven assembles it at settle, so ' +
+                  'there is nothing to build locally and no funding transaction to wait for.',
+                summary: {
+                  payment_id: prepared.paymentId,
+                  status: 'pending_signature',
+                  amount: quote.amount,
+                  amount_atomic: quote.amountAtomic,
+                  token: quote.token,
+                  network: prepared.settlement.network,
+                  expires_at: undefined,
+                  product: args.tool_name,
+                },
+                warnings: quoteWarnings({
+                  capped: cap.kind !== 'none',
+                  // The child's own short expiry is the binding window here,
+                  // not the intent's — no quote-expiry warning applies.
+                  expiresAt: undefined,
+                  ...(merchantUrl !== args.merchant_url
+                    ? { discoveredFrom: args.merchant_url }
+                    : {}),
+                }),
+              }),
+            }
+          }
+
           const intent = await haven.createX402Intent(
             quote.paymentRequired as X402PaymentRequired,
             {
@@ -1229,6 +1312,53 @@ export function createToolHandlers(
         // header is never a reason to fund the delegate balance. It is an
         // integrity preflight, not a merchant/facilitator verification or a
         // replacement for the local signer's expected-context binding.
+        // #1456: erc7710 direct settlement inverts this whole sequence, so it
+        // branches HERE rather than deeper — an earlier attempt put the branch
+        // inside deliverMerchantPayment and the signature had already been
+        // relayed as a FUNDING signature by then.
+        //
+        // On this scheme the signature IS the settlement child, not a funding
+        // authorization: it goes to POST /x402/:id/settle, which returns the
+        // merchant header Haven assembles. There is no funding leg to relay and
+        // no agent-supplied header to preflight — the absence of
+        // `payment_header` is what tells the two schemes apart, because the
+        // 3009 path always carries one built by the local signer.
+        if (!args.payment_header) {
+          const paymentHeader = await haven.submitX402Erc7710(args.payment_id, args.signature)
+          const merchant7710 = await deliverMerchantPayment(
+            haven,
+            { ...args, payment_header: paymentHeader },
+            // No funding tx to confirm — passing one would make the delivery
+            // helper wait for a transaction that will never exist.
+            undefined,
+          )
+          const summary7710 = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
+          return {
+            payment_id: args.payment_id,
+            settlement_scheme: 'erc7710',
+            funding_tx_hash: null,
+            settled: merchant7710.ok,
+            settlement_tx_hash: merchant7710.settlement_tx_hash,
+            result: merchant7710.result,
+            allowance: summary7710.allowance,
+            ...buildAgentGuidance({
+              // Same terminal value the 3009 success path uses (#1308) — one
+              // vocabulary, not a parallel one per scheme.
+              nextAction: AgentPaymentNextAction.None,
+              safeToContinue: true,
+              reason:
+                'Settled directly from the treasury through the budget delegation — no funding ' +
+                'leg, so the delegate wallet never held these funds and there is nothing to sweep.',
+              summary: {
+                payment_id: args.payment_id,
+                status: summary7710.payment?.status ?? 'settled',
+                product: args.tool_name,
+              },
+              warnings: summary7710.warnings,
+            }),
+          }
+        }
+
         await preflightMcpPaymentHeader(haven, args)
         const funding = await submitSignatureWithExpiryMapping(haven, args.payment_id, args.signature)
         if (funding.status !== 'confirmed') {

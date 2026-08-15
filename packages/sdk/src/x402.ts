@@ -338,10 +338,74 @@ export function selectPaymentOption(
   return null
 }
 
+/** The `extra.assetTransferMethod` value that marks an erc7710-settleable entry. */
+export const ERC7710_ASSET_TRANSFER_METHOD = 'erc7710'
+
+/**
+ * Read `extra.assetTransferMethod` defensively. `extra` is the merchant's own
+ * object, so it is untrusted shape: anything that is not the exact string is
+ * treated as "not erc7710" rather than coerced.
+ */
+export function x402AssetTransferMethod(option: X402PaymentOption): string | null {
+  const raw = option.extra?.assetTransferMethod
+  return typeof raw === 'string' ? raw : null
+}
+
+/** True when the merchant advertises this entry as erc7710-settleable. */
+export function isErc7710Option(option: X402PaymentOption): boolean {
+  return x402AssetTransferMethod(option) === ERC7710_ASSET_TRANSFER_METHOD
+}
+
+/**
+ * The facilitator addresses a merchant advertises for an erc7710 entry, for
+ * the #1058 redeemer pin — or `null` when it pins nothing.
+ *
+ * **An EMPTY array is `null`, not `[]`.** The backend rejects an empty
+ * `redeemers` list with a 400 (`routes/x402.ts`), and the QA scenario already
+ * treats empty as absent. Returning `[]` here would hand callers a value that
+ * means "pin to nobody" — which is not a narrower pin, it is an unbuildable
+ * delegation.
+ *
+ * Malformed entries are DROPPED rather than failing the whole option, and that
+ * asymmetry is deliberate. A pin narrowed by a merchant's typo means the
+ * facilitator that actually tries to redeem is not on the list, so redemption
+ * reverts — and erc7710 has no funding leg, so nothing moved and nothing is
+ * stranded. Refusing the option outright would instead deny a payment the
+ * remaining valid facilitators could have settled. Losing the payment is the
+ * worse outcome, precisely because the failure this issue closes (#1453) is the
+ * one where funds move BEFORE the rejection.
+ */
+export function x402FacilitatorAddresses(option: X402PaymentOption): string[] | null {
+  const raw = option.extra?.facilitatorAddresses
+  if (!Array.isArray(raw)) return null
+  const addresses = raw.filter((a): a is string => typeof a === 'string' && ADDRESS_RE.test(a))
+  return addresses.length > 0 ? addresses : null
+}
+
+/** Shared shape test: scheme/network/asset/amount, ignoring settlement scheme. */
+function isPayableStandardOption(opt: X402PaymentOption): boolean {
+  return (
+    opt.scheme === 'exact' &&
+    opt.network in STANDARD_X402_NETWORKS &&
+    STANDARD_X402_USDC_ADDRESSES.has(opt.asset.toLowerCase()) &&
+    isPositiveDecimalAtomicAmount(optionAuthorizationAmount(opt))
+  )
+}
+
 /**
  * Select an option that can be paid with the official x402 EIP-3009 exact
  * scheme. Haven's older tx-hash proof path can describe more networks; the
  * merchant-verified path currently needs Base USDC.
+ *
+ * **Skips erc7710-tagged entries (#1453).** It used to return the first
+ * positional match and never look at `extra.assetTransferMethod`, so a merchant
+ * that listed its erc7710 entry first made a Haven client echo that option
+ * while signing a standard EIP-3009 authorization. The merchant rejects the
+ * mismatch cleanly — but on the legacy two-leg the Safe→delegate funding
+ * transfer has already executed, so the visible result is a stranded delegate
+ * balance for the sweep to reclaim. Only our own demo merchant's ordering was
+ * holding that shut, and that pin binds our merchant, not the ones we do not
+ * control.
  */
 export function selectStandardPaymentOption(
   accepts: X402PaymentOption[],
@@ -349,15 +413,70 @@ export function selectStandardPaymentOption(
   if (!accepts || accepts.length === 0) return null
 
   for (const opt of accepts) {
-    if (
-      opt.scheme === 'exact' &&
-      opt.network in STANDARD_X402_NETWORKS &&
-      STANDARD_X402_USDC_ADDRESSES.has(opt.asset.toLowerCase()) &&
-      isPositiveDecimalAtomicAmount(optionAuthorizationAmount(opt))
-    ) {
-      return opt
+    if (!isErc7710Option(opt) && isPayableStandardOption(opt)) return opt
+  }
+
+  return null
+}
+
+/**
+ * Select the erc7710-settleable option, if the merchant advertises one.
+ */
+export function selectErc7710PaymentOption(
+  accepts: X402PaymentOption[],
+): X402PaymentOption | null {
+  if (!accepts || accepts.length === 0) return null
+
+  for (const opt of accepts) {
+    if (isErc7710Option(opt) && isPayableStandardOption(opt)) return opt
+  }
+
+  return null
+}
+
+/** What a settlement-scheme decision resolved to. */
+export interface X402SchemeSelection {
+  scheme: 'erc7710' | 'eip3009'
+  option: X402PaymentOption
+  /** Redeemer pin for the settlement child; only ever set on erc7710. */
+  facilitatorAddresses: string[] | null
+}
+
+/**
+ * THE preference rule, in one place (#1450 owner decision, #1453).
+ *
+ *   Prefer erc7710 whenever the account is on the delegation rail and the
+ *   merchant advertises `extra.assetTransferMethod: "erc7710"`; fall back to
+ *   the EIP-3009 bridge otherwise.
+ *
+ * Both halves of that condition are required, and the rail half is the
+ * caller's to supply — the SDK cannot see which rail an account is on from a
+ * 402 response alone. A legacy AllowanceModule account passing
+ * `delegationRail: true` would select a scheme its account cannot settle; the
+ * backend refuses that at authorize (`validateGenericSchemeRail`), which is
+ * where a rail mismatch SHOULD fail, on-chain-adjacent rather than in a client
+ * that could be lying to itself.
+ *
+ * Returns `null` when neither scheme has a payable entry — the caller decides
+ * whether that is an error or a reason to look elsewhere.
+ */
+export function selectX402SettlementScheme(
+  accepts: X402PaymentOption[],
+  opts: { delegationRail: boolean },
+): X402SchemeSelection | null {
+  if (opts.delegationRail) {
+    const preferred = selectErc7710PaymentOption(accepts)
+    if (preferred) {
+      return {
+        scheme: 'erc7710',
+        option: preferred,
+        facilitatorAddresses: x402FacilitatorAddresses(preferred),
+      }
     }
   }
+
+  const fallback = selectStandardPaymentOption(accepts)
+  if (fallback) return { scheme: 'eip3009', option: fallback, facilitatorAddresses: null }
 
   return null
 }

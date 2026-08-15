@@ -109,6 +109,12 @@ export {
   parsePaymentRequiredResponse,
   selectPaymentOption,
   selectStandardPaymentOption,
+  selectErc7710PaymentOption,
+  selectX402SettlementScheme,
+  isErc7710Option,
+  x402AssetTransferMethod,
+  x402FacilitatorAddresses,
+  ERC7710_ASSET_TRANSFER_METHOD,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
   validateStandardX402PaymentHeader,
@@ -123,7 +129,7 @@ export {
   resolveTokenFromAddress,
 } from './x402.js'
 
-export type { X402PaymentHeaderContext } from './x402.js'
+export type { X402PaymentHeaderContext, X402SchemeSelection } from './x402.js'
 
 export {
   SWEEP_BASE_CHAIN_ID,

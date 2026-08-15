@@ -219,6 +219,21 @@ export interface X402PaymentOption {
   asset: string              // Token contract address
   payTo: string              // Recipient address
   maxTimeoutSeconds: number
+  /**
+   * Merchant-supplied scheme metadata. Two keys are load-bearing for Haven
+   * (#1453), both from MetaMask's erc7710 x402 shape:
+   *
+   *   assetTransferMethod  — 'erc7710' marks this entry as settleable by
+   *                          redeeming a delegation chain. Absent/other means
+   *                          the standard EIP-3009 authorization.
+   *   facilitatorAddresses — who may redeem it, pinned into the settlement
+   *                          child's redeemer caveat (#1058).
+   *
+   * Left as an open record on purpose: the field is the merchant's, and
+   * narrowing it to Haven's two keys would silently drop everything else a
+   * merchant sends. Read it through `x402AssetTransferMethod` /
+   * `x402FacilitatorAddresses` rather than indexing it raw.
+   */
   extra?: Record<string, unknown>
 }
 

@@ -298,7 +298,7 @@ route `POST /x402/{id}/settle` (#830) currently sits on the drift check's
 model: [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
 **How much of the API the spec actually describes (#1443, measured 2026-08-15):**
-136 registered routes, **86 of them undocumented** across 17 deferred modules —
+138 registered routes, **86 of them undocumented** across 17 deferred modules —
 the whole `agent-delegations.ts` lifecycle among them. (#1446 has started the
 backfill: `contacts.ts` came off the list first, taking the ceilings from
 18 modules / 90 routes to 17 / 86.) That was invisible until the

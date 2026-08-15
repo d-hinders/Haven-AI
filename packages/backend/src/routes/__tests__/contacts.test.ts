@@ -170,6 +170,7 @@ describe('contacts routes', () => {
 
       expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ id: CONTACT.id, name: 'Renamed' })
+      expectMatchesSpec('PUT', '/contacts/{id}', res.json())
     })
   })
 

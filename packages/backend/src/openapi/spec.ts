@@ -1666,7 +1666,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
-            description: 'Contacts, newest first.',
+            description: 'Contacts, alphabetical by name (LIST_CONTACTS_FOR_USER_SQL orders by name ASC).',
             content: {
               'application/json': {
                 schema: {

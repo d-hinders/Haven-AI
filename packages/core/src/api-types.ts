@@ -5532,7 +5532,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Contacts, newest first. */
+            /** @description Contacts, alphabetical by name (LIST_CONTACTS_FOR_USER_SQL orders by name ASC). */
             200: {
                 headers: {
                     [name: string]: unknown;

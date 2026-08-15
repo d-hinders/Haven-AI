@@ -172,7 +172,7 @@ describe('settleX402Erc7710 (#1454)', () => {
       const { client } = harness({ rail: 'legacy' })
       await expect(
         client.settleX402Erc7710(paymentRequired([erc7710Option()])),
-      ).rejects.toThrow(/this agent is on 'legacy'/)
+      ).rejects.toThrow(/requires a delegation-rail account/)
     })
 
     it('refuses to sign when authorize returns a different scheme', async () => {

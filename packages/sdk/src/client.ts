@@ -1502,7 +1502,21 @@ export class HavenClient {
    */
   async prepareX402Erc7710(
     paymentRequired: X402PaymentRequired,
-    options: { resourceUrl?: string } = {},
+    options: {
+      resourceUrl?: string
+      /**
+       * The account's rail, when the caller has ALREADY read it from
+       * `GET /machine-payments/agent` — passing it skips a duplicate fetch
+       * (#1456: the hosted tool reads the agent for the delegate address
+       * anyway, and #1348 pins that path to exactly one agent round-trip).
+       *
+       * This is an optimisation, not a trust boundary: omit it and the rail is
+       * read here, and either way the backend independently refuses erc7710
+       * from a non-delegation account (`validateGenericSchemeRail`). A caller
+       * that asserted the wrong rail would build a request the backend rejects.
+       */
+      delegationRail?: boolean
+    } = {},
   ): Promise<{
     paymentId: string
     signData: SignData
@@ -1513,8 +1527,8 @@ export class HavenClient {
     // response — it is a property of the ACCOUNT, so read it rather than let a
     // caller assert it. #1453's selector takes it as input for exactly this
     // reason, and this is the one place that input is sourced from truth.
-    const agent = await this.getAgent()
-    const delegationRail = agent.executionRail === 'delegation'
+    const delegationRail =
+      options.delegationRail ?? (await this.getAgent()).executionRail === 'delegation'
 
     // Rail first, and BEFORE selection — the two failures have different
     // remedies and the caller needs the one that applies. Checking selection
@@ -1523,7 +1537,7 @@ export class HavenClient {
     // there, the account cannot use it. (Found by this method's own tests.)
     if (!delegationRail) {
       throw new HavenApiError(
-        `erc7710 settlement requires a delegation-rail account; this agent is on '${agent.executionRail}'. ` +
+        'erc7710 settlement requires a delegation-rail account; this one is not on it. ' +
           'Use authorizeX402() for the standard EIP-3009 path.',
         400,
       )

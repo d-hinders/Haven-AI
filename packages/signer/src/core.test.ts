@@ -401,3 +401,67 @@ describe('signX402FundingTypedData (#1138)', () => {
     ).rejects.toThrow(HavenSigningError)
   })
 })
+
+/**
+ * #1455 review: `signX402FundingTypedData` had no `Delegation`-shaped case at
+ * all, which is exactly why a wiring bug survived — the unit tests in
+ * settlement-child.test.ts supply their own expectation and never exercise the
+ * derivation this call site performs. These run the production path.
+ */
+describe('signX402FundingTypedData with a settlement child (#1455)', () => {
+  const CHILD = JSON.parse(
+    JSON.stringify(require('../../sdk/src/__fixtures__/settlement-delegation-payload.json')),
+  )
+  const childDigest = () => hashTypedData(CHILD as Parameters<typeof hashTypedData>[0])
+
+  // The fixture's own values, so a pass means agreement rather than luck.
+  const CHILD_EXPECTED = {
+    merchantTo: '0x3333333333333333333333333333333333333333',
+    amount: '1000',
+    asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    network: 'eip155:84532',
+  }
+
+  it('refuses a child whose chain disagrees with the SIGNED network', async () => {
+    // THE bug this suite was missing. The child is built for 84532; the signed
+    // context says Base. Deriving the expectation from the payload made these
+    // agree by construction, so the check could never fire.
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const expected = await expectedX402({
+      ...CHILD_EXPECTED,
+      network: 'eip155:8453',
+      typedDataHash: childDigest(),
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    } as never)
+    await expect(signer.signX402FundingTypedData(CHILD as never, expected)).rejects.toThrow(
+      /scoped to the wrong chain/,
+    )
+  })
+
+  it('refuses a child paying an address the signed context does not name', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const expected = await expectedX402({
+      ...CHILD_EXPECTED,
+      merchantTo: '0x9999999999999999999999999999999999999999',
+      typedDataHash: childDigest(),
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    } as never)
+    await expect(signer.signX402FundingTypedData(CHILD as never, expected)).rejects.toThrow(
+      /pays a different address/,
+    )
+  })
+
+  it('still refuses on the digest commitment before it ever looks at caveats', async () => {
+    // Ordering matters: a child that disagrees with the DECLARED bytes is not
+    // a caveat problem, and saying so keeps the two failures distinguishable.
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const expected = await expectedX402({
+      ...CHILD_EXPECTED,
+      typedDataHash: `0x${'11'.repeat(32)}`,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    } as never)
+    await expect(signer.signX402FundingTypedData(CHILD as never, expected)).rejects.toThrow(
+      /does not match the digest Haven committed to/,
+    )
+  })
+})

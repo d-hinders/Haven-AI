@@ -23,11 +23,28 @@
  * (`settlement-child.pins.test.ts`), the same pattern
  * `packages/core/src/chains.ts` uses against its registry.
  *
- * EXTRA CAVEATS ARE ALLOWED, and that is deliberate. Caveats are AND-ed
- * restrictions, so one this file does not recognise can only narrow authority
- * further, never widen it. Requiring the expected caveats to be present and
- * correct is the security property; forbidding unknown ones would break the
- * next legitimate backend addition and buy nothing.
+ * EXTRA CAVEATS ARE ALLOWED, and that is deliberate — verified, not assumed
+ * (#1455 review challenged it directly).
+ *
+ * `DelegationManager.redeemDelegations` loops every caveat of every delegation
+ * and calls `beforeHook` on each, with no break and no try/catch: a single
+ * revert aborts the whole redemption, and nothing lets one caveat cause another
+ * to be skipped. Top-level caveats are therefore strictly AND-ed, so one this
+ * file does not recognise can only add a constraint, never remove one.
+ *
+ * The specific challenge was `LogicalOrWrapperEnforcer`, whose terms encode
+ * several caveat GROUPS and whose own security notice warns that "the redeemer
+ * can select the least restrictive group, bypassing stricter requirements in
+ * other groups". That warning is about groups INSIDE the wrapper — it binds
+ * whoever authors wrapper terms. The wrapper is itself one caveat among the
+ * delegation's, so it is AND-ed with the four required below and cannot unlock
+ * them.
+ *
+ * The shape that WOULD be dangerous is the inverse: a required caveat hidden
+ * inside a wrapper group instead of sitting at top level, where the redeemer
+ * could select a group that omits it. This file scans top-level caveats and
+ * refuses on absence, so that child is refused for lacking the caveat — which
+ * is the correct outcome and is pinned by a test.
  */
 
 import { HavenSigningError } from '@haven_ai/sdk'

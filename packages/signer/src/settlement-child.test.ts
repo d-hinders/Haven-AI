@@ -232,3 +232,37 @@ describe('chainIdForNetwork — the expectation must come from the signed field'
     ).toThrow(/scoped to the wrong chain/)
   })
 })
+
+/**
+ * #1455 review challenged the "extra caveats can only narrow" premise, citing
+ * `LogicalOrWrapperEnforcer` — which really does let a redeemer pick its least
+ * restrictive GROUP. Resolved against the framework source: `redeemDelegations`
+ * calls `beforeHook` on every caveat with no break and no try/catch, so
+ * top-level caveats are strictly AND-ed and the wrapper is just one more of
+ * them. These pin both halves of that conclusion.
+ */
+describe('the AND premise, after the LogicalOrWrapper challenge (#1455)', () => {
+  const LOGICAL_OR_WRAPPER = '0x' + 'c0ffee'.padEnd(40, '0')
+
+  it('allows a wrapper-style caveat alongside the required four', () => {
+    // It cannot unlock them: every caveat must pass, so this can only add a
+    // constraint on top of the payee/amount/expiry pins.
+    const td = child()
+    ;(td.message.caveats as Array<{ enforcer: string; terms: string }>).push({
+      enforcer: LOGICAL_OR_WRAPPER,
+      terms: '0x' + '00'.repeat(64),
+    })
+    expect(() => verifySettlementChild(td, EXPECTED, nowInsideWindow(child()))).not.toThrow()
+  })
+
+  it('refuses a child whose payee pin is NOT a top-level caveat', () => {
+    // The genuinely dangerous shape: the pin hidden inside a wrapper group,
+    // where a redeemer could select a group that omits it. Absence at top
+    // level is what this file refuses on, so it is caught for the right reason.
+    const td = child()
+    td.message.caveats = (td.message.caveats as Array<{ enforcer: string }>)
+      .filter((c) => c.enforcer.toLowerCase() !== CAVEAT_ENFORCERS.allowedCalldata.toLowerCase())
+      .concat([{ enforcer: LOGICAL_OR_WRAPPER, terms: '0x' + '11'.repeat(64) } as never])
+    expectRefusal(td, /no payee pin/)
+  })
+})

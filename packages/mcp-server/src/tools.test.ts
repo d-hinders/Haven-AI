@@ -3922,3 +3922,133 @@ describe('human-unit spending caps (#1351)', () => {
     })
   })
 })
+
+/**
+ * #1456 — erc7710 through the hosted tool surface.
+ *
+ * The negatives carry this suite. A selector that always answered "erc7710"
+ * would pass a happy-path-only file, so both halves of the #1450 rule are
+ * tested for the case where they must NOT fire.
+ */
+describe('hosted erc7710 (#1456)', () => {
+  const SIG7710 = '0x' + '22'.repeat(65)
+  const ERC7710_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      ...PAYMENT_REQUIRED.accepts,
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        extra: {
+          assetTransferMethod: 'erc7710',
+          facilitatorAddresses: ['0x4444444444444444444444444444444444444444'],
+        },
+      },
+    ],
+  }
+  const erc7710Header = btoa(JSON.stringify(ERC7710_PR))
+  const plainHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const CHILD = {
+    payment_id: 'pay_7710',
+    status: 'pending_signature',
+    sign_data: {
+      hash: '0x' + '11'.repeat(32),
+      signature_scheme: 'eip712_delegation',
+      typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+    },
+  }
+
+  // The intent body is chosen by the EXPECTED scheme, not by the challenge —
+  // a legacy account meeting a 7710-advertising merchant must still get the
+  // 3009 intent, which is exactly the case this helper got wrong at first.
+  async function pay(header: string, agent: Record<string, unknown>, expectErc7710 = false) {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': header } },
+      'GET /machine-payments/agent': { status: 200, body: agent },
+      'POST /x402': { status: 201, body: expectErc7710 ? CHILD : X402_INTENT_RESPONSE },
+    })
+    return ok(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
+      }),
+    ) as { data: Record<string, any> }
+  }
+
+  it('selects erc7710, reports it structurally, and shapes the request for direct settlement', async () => {
+    const res = await pay(erc7710Header, DELEGATION_AGENT, true)
+    expect(res.data.settlement_scheme).toBe('erc7710')
+    expect(res.data.settlement.funding_leg).toBe(false)
+    expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign')
+
+    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
+    // payTo = the MERCHANT is what selects direct settlement server-side.
+    expect(body.settlementScheme).toBe('erc7710')
+    expect(body.payTo).toBe(PAYMENT_REQUIRED.accepts[0].payTo)
+    expect(body).not.toHaveProperty('merchantPayTo')
+  })
+
+  it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
+    const res = await pay(erc7710Header, { ...AGENT_RESPONSE, execution_rail: 'legacy' })
+    expect(res.data.settlement_scheme).toBeUndefined()
+    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
+    expect(body.settlementScheme).toBe('eip3009')
+  })
+
+  it('a 3009-only merchant stays on the bridge, even on a delegation account', async () => {
+    const res = await pay(plainHeader, DELEGATION_AGENT)
+    expect(res.data.settlement_scheme).toBeUndefined()
+    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
+    expect(body.settlementScheme).toBe('eip3009')
+  })
+
+  it('keeps #1348 round-trip budget: still exactly ONE agent fetch', async () => {
+    await pay(erc7710Header, DELEGATION_AGENT, true)
+    expect(
+      calls.filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent')).length,
+    ).toBe(1)
+  })
+
+  it('settle exchanges the signature for the header, with NO funding relay and NO preflight', async () => {
+    // The sequence inversion this issue turns on: on 3009 the signature funds
+    // the delegate; here it IS the settlement child.
+    stubFetch({
+      'POST /x402/pay_7710/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+      'GET /payments/pay_7710': { status: 200, body: { payment_id: 'pay_7710', status: 'settled' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } },
+      settlementTxHash: null,
+    })
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null,
+      warnings: [],
+      payment: { status: 'settled' },
+    } as never)
+
+    const res = ok(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: SIG7710,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.settlement_scheme).toBe('erc7710')
+    expect(res.data.funding_tx_hash).toBeNull()
+    expect(spy.mock.calls[0][0].paymentHeader).toBe('HEADER_FROM_HAVEN')
+    // The signature went to settle, NOT to the funding relay.
+    expect(calls.find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG7710 })
+    expect(calls.find((c) => c.url.includes('/payments/pay_7710/sign'))).toBeUndefined()
+  })
+})

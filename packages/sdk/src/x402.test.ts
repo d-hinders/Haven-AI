@@ -1916,11 +1916,17 @@ describe('null holes in accepts[] — before #1469', () => {
     maxTimeoutSeconds: 300,
   }
 
-  it('selectStandardPaymentOption THROWS on a null entry today', () => {
-    expect(() => selectStandardPaymentOption([null as never, valid])).toThrow(TypeError)
+  it('selectStandardPaymentOption SKIPS a null entry and finds the valid one (#1469)', () => {
+    expect(selectStandardPaymentOption([null as never, valid])).toBe(valid)
   })
 
-  it('selectErc7710PaymentOption THROWS on a null entry today', () => {
-    expect(() => selectErc7710PaymentOption([null as never, valid])).toThrow(TypeError)
+  it('selectErc7710PaymentOption skips nulls, and non-object entries generally', () => {
+    expect(selectErc7710PaymentOption([null as never, 'garbage' as never, 42 as never])).toBeNull()
+    expect(selectStandardPaymentOption([undefined as never, valid])).toBe(valid)
+  })
+
+  it('selectX402SettlementScheme survives a null-holed accepts on both branches', () => {
+    expect(selectX402SettlementScheme([null as never, valid], { delegationRail: true })?.option).toBe(valid)
+    expect(selectX402SettlementScheme([null as never], { delegationRail: false })).toBeNull()
   })
 })

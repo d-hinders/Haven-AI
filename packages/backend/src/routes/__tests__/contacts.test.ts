@@ -18,11 +18,14 @@ const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }))
 vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
 
 import contactRoutes from '../contacts.js'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 const USER = 'user-1'
 const VALID_ADDRESS = '0x' + 'ab'.repeat(20)
 const CONTACT = {
-  id: 'contact-1',
+  // A real row's id is a uuid, and the spec says so (#1446) — 'contact-1'
+  // would describe a response the database cannot produce.
+  id: '7c41b8e0-2d95-4a63-b1f7-8e5c39a0d264',
   name: 'Acme Vendor',
   address: VALID_ADDRESS,
   created_at: '2026-06-01T00:00:00.000Z',
@@ -78,6 +81,9 @@ describe('contacts routes', () => {
 
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({ contacts: [CONTACT] })
+      // #1444: the spec's own schema decides the shape, now that #1446 has
+      // documented this route.
+      expectMatchesSpec('GET', '/contacts', res.json())
       const [sql, params] = mockQuery.mock.calls[0]
       expect(String(sql)).toMatch(/WHERE user_id = \$1/)
       expect(params).toEqual([USER])
@@ -92,6 +98,7 @@ describe('contacts routes', () => {
 
       expect(res.statusCode).toBe(201)
       expect(res.json()).toEqual(CONTACT)
+      expectMatchesSpec('POST', '/contacts', res.json(), '201')
       const [sql, params] = mockQuery.mock.calls[0]
       expect(String(sql)).toMatch(/INSERT INTO contacts/)
       // user id from the token, name trimmed, address as given.
@@ -162,7 +169,7 @@ describe('contacts routes', () => {
       const res = await auth('PUT', '/contacts/contact-1', { name: 'Renamed' })
 
       expect(res.statusCode).toBe(200)
-      expect(res.json()).toMatchObject({ id: 'contact-1', name: 'Renamed' })
+      expect(res.json()).toMatchObject({ id: CONTACT.id, name: 'Renamed' })
     })
   })
 

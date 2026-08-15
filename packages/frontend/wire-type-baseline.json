@@ -23,9 +23,6 @@
     "ApprovalRequest": 1,
     "ApprovalsResponse": 1
   },
-  "packages/frontend/src/hooks/useContacts.ts": {
-    "Contact": 1
-  },
   "packages/frontend/src/hooks/useDelegationBudget.ts": {
     "BuildResponse": 1,
     "DelegationBudget": 1,

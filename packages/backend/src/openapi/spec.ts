@@ -1656,6 +1656,125 @@ export const openapiSpec = {
         },
       },
     },
+    '/contacts': {
+      get: {
+        tags: ['Contacts'],
+        operationId: 'listContacts',
+        summary: "List the user's saved address-book entries.",
+        description:
+          'Dashboard address book: a name for an address, scoped to the user. Naming an address changes nothing on-chain and grants no authority — it is presentation only, so a transfer to a named contact is exactly as constrained as a transfer to a raw address.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Contacts, newest first.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['contacts'],
+                  properties: {
+                    contacts: { type: 'array', items: { $ref: '#/components/schemas/Contact' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      post: {
+        tags: ['Contacts'],
+        operationId: 'createContact',
+        summary: 'Save a new address-book entry.',
+        description:
+          'The address must be a valid EVM address and unique per user — a second entry for the same address is a 409, not a silent overwrite, so an existing name is never replaced by accident.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name', 'address'],
+                properties: {
+                  name: { type: 'string', minLength: 1, description: 'Trimmed before storage; blank after trimming is a 400.' },
+                  address: address,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Contact created.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Contact' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/contacts/{id}': {
+      put: {
+        tags: ['Contacts'],
+        operationId: 'renameContact',
+        summary: 'Rename an address-book entry.',
+        description: 'Only the name is mutable; an address is never re-pointed under an existing name. To point a name at a different address, delete and re-create.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: uuid },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name'],
+                properties: { name: { type: 'string', minLength: 1 } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated contact.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Contact' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Contacts'],
+        operationId: 'deleteContact',
+        summary: 'Delete an address-book entry.',
+        description:
+          'Hard delete of a label, not of history: transactions to that address remain, and simply stop rendering a name. A contact belonging to another user is a 404, never a 403 — the route does not confirm that an id exists.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: uuid },
+        ],
+        responses: {
+          '200': {
+            description: 'Deleted.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['success'],
+                  properties: { success: { type: 'boolean' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     '/catalog': {
       get: {
         tags: ['Catalog'],
@@ -1766,6 +1885,23 @@ export const openapiSpec = {
       },
     },
     schemas: {
+      /**
+       * #1446: an address-book label. `LIST_CONTACTS_FOR_USER_SQL` and both
+       * RETURNING clauses in `infra/repositories/contacts.ts` select exactly
+       * these five columns, so every one is required.
+       */
+      Contact: {
+        type: 'object',
+        required: ['id', 'name', 'address', 'created_at', 'updated_at'],
+        properties: {
+          id: uuid,
+          name: { type: 'string' },
+          address: address,
+          created_at: isoDateTime,
+          updated_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
       CatalogEntry: {
         type: 'object',
         /**

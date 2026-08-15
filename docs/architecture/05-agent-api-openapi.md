@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-08-15" # #1445: four spec corrections found by making the generated types load-bearing in the frontend (has_stranded_funds, passport_requested, skill_installed, CatalogEntry.required), plus a named DelegateBalance schema. #1444: adds `expectMatchesSpec` — real responses validated against the spec's own schema (4 routes), with the mutation proofs and the `additionalProperties: true` limit recorded. #1443: the drift check no longer scopes itself to seven hand-listed route files — route-coverage.test.ts derives its scope from the app registration table; records that 89 of 136 registered routes are undocumented, deferred to #1446 under a shrink-only ceiling
+last-verified: "2026-08-15" # #1446: backfill started — contacts.ts documented and off the deferral list; ceilings lowered 18/90 → 17/86. #1445: four spec corrections found by making the generated types load-bearing in the frontend (has_stranded_funds, passport_requested, skill_installed, CatalogEntry.required), plus a named DelegateBalance schema. #1444: adds `expectMatchesSpec` — real responses validated against the spec's own schema (4 routes), with the mutation proofs and the `additionalProperties: true` limit recorded. #1443: the drift check no longer scopes itself to seven hand-listed route files — route-coverage.test.ts derives its scope from the app registration table; records that 89 of 136 registered routes are undocumented, deferred to #1446 under a shrink-only ceiling
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -297,9 +297,11 @@ route `POST /x402/{id}/settle` (#830) currently sits on the drift check's
 `KNOWN_UNDOCUMENTED_ROUTES` allowlist pending the epic docs sweep (#834). Deep
 model: [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
-**How much of the API the spec actually describes (#1443, measured 2026-08-14):**
-136 registered routes, **89 of them undocumented** — the whole
-`agent-delegations.ts` lifecycle among them. That was invisible until the
+**How much of the API the spec actually describes (#1443, measured 2026-08-15):**
+136 registered routes, **86 of them undocumented** across 17 deferred modules —
+the whole `agent-delegations.ts` lifecycle among them. (#1446 has started the
+backfill: `contacts.ts` came off the list first, taking the ceilings from
+18 modules / 90 routes to 17 / 86.) That was invisible until the
 coverage gate widened its scope beyond the seven hand-listed files above, which
 is the finding epic #1442 was opened on. The gap is now *recorded* rather than
 absent: `route-coverage.ts` carries a per-module deferral list with a reason per

@@ -70,6 +70,40 @@ describe('sign_data.signature_scheme dispatch (#776)', () => {
     expect(recovered.toLowerCase()).toBe(DELEGATE.address.toLowerCase())
   })
 
+  it("'eip712_delegation' produces the exact expected signature (golden value)", async () => {
+    // Review finding on #1452: recovering the signature over the SAME fixture
+    // it was made from is self-referential — it proves the signer is internally
+    // consistent, not that it signed the right thing. A hand-corrupted fixture
+    // would still recover to the delegate.
+    //
+    // This is the independent anchor: the EIP-712 digest and signature for this
+    // fixture under this test key, computed once with ethers and pinned here.
+    // Any change to the fixture's domain, types, primaryType, message OR to how
+    // the SDK signs moves both numbers.
+    const EXPECTED_DIGEST =
+      '0x6ff8c0bfa640d21f732187a70c4143029adaebb5065286d17d05316f94b3d458'
+    const EXPECTED_SIGNATURE =
+      '0x52da4962aead8b69e321fbf0fa9e566312d2a9ba327da94529030f0d00c9db4d' +
+      '61933895500986fbcdffd0c04b355f4cbac15df202b9639e6d6d9257a25f49531c'
+
+    const types = { ...(SETTLEMENT_PAYLOAD.types as Record<string, unknown>) }
+    delete types.EIP712Domain
+    expect(
+      ethers.TypedDataEncoder.hash(
+        SETTLEMENT_PAYLOAD.domain as never,
+        types as never,
+        SETTLEMENT_PAYLOAD.message as never,
+      ),
+    ).toBe(EXPECTED_DIGEST)
+
+    const sig = await signFor(client(), {
+      hash: HASH,
+      signature_scheme: 'eip712_delegation',
+      typed_data: SETTLEMENT_PAYLOAD,
+    })
+    expect(sig).toBe(EXPECTED_SIGNATURE)
+  })
+
   it("'eip712_delegation' does NOT produce the bare-hash signature", async () => {
     // Belt and braces on the branch above: a fallthrough to signHash would
     // still return a valid-looking 65-byte signature, so assert it is NOT the

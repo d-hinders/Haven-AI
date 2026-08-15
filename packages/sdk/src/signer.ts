@@ -50,6 +50,14 @@ export interface Eip712TypedData {
  *
  * `label` only shapes the error message. Nothing about the signature depends
  * on which caller asked.
+ *
+ * A consequence worth stating before someone refactors this (#1452 review):
+ * because the two wrappers below differ ONLY in that label, calling the wrong
+ * one for a given scheme produces a byte-identical signature and no test can
+ * see it. That is safe today — both sign backend-supplied typed data verbatim
+ * — but it stops being safe the moment either wrapper does anything the other
+ * does not. If you add per-scheme behaviour, split the implementations rather
+ * than branching inside this one.
  */
 async function signTypedDataVerbatim(
   privateKey: string,

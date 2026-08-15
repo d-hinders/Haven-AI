@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { hashMessage, hashTypedData, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { exact } from 'x402/schemes'
-import { isSettlementChildTypedData, verifySettlementChild } from './settlement-child.js'
+import {
+  chainIdForNetwork,
+  isSettlementChildTypedData,
+  verifySettlementChild,
+} from './settlement-child.js'
 import {
   addressFromKey,
   buildX402ExpectedMessage,
@@ -226,7 +230,11 @@ export function createEdgeSigner(
           merchantTo: expected.merchantTo,
           amount: expected.amount,
           asset: expected.asset,
-          chainId: Number(typedData.domain.chainId),
+          // From the SIGNED network, not the payload's own claim. Passing
+          // Number(typedData.domain.chainId) here made the check compare a
+          // value to itself — vacuous, and precisely the "declared one thing,
+          // signed another" class this file exists to catch (#1455 review).
+          chainId: chainIdForNetwork(expected.network) ?? -1,
           expiresAt: expected.expiresAt,
         })
       }

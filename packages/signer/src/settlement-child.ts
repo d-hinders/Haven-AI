@@ -98,10 +98,30 @@ function refuse(what: string, detail: string): never {
   )
 }
 
+/**
+ * Map an x402 network string to a chain id. Local on purpose (#1455 review):
+ * the chain must come from Haven's SIGNED `network` field, never from the
+ * payload under verification — see `verifySettlementChild`.
+ */
+export function chainIdForNetwork(network: string | undefined): number | undefined {
+  if (!network) return undefined
+  const caip = /^eip155:(\d+)$/.exec(network)
+  if (caip) return Number(caip[1])
+  if (network === 'base') return 8453
+  if (network === 'base-sepolia') return 84532
+  return undefined
+}
+
 export interface SettlementChildExpectation {
   merchantTo: string
   amount: string
   asset: string
+  /**
+   * Derived from the expected context's SIGNED `network`, never from
+   * `typedData.domain.chainId`. Comparing the payload's own claim against
+   * itself is a check that cannot fail — which is exactly what shipped in the
+   * first draft of this file's call site, and what the review caught.
+   */
   chainId: number
   /** ISO timestamp; the child must not outlive it. */
   expiresAt?: string

@@ -12,6 +12,7 @@ import { HavenSigningError } from '@haven_ai/sdk'
 import CHILD from '../../sdk/src/__fixtures__/settlement-delegation-payload.json' with { type: 'json' }
 import {
   CAVEAT_ENFORCERS,
+  chainIdForNetwork,
   DELEGATION_MANAGER,
   MAX_SETTLEMENT_WINDOW_SECONDS,
   isSettlementChildTypedData,
@@ -190,5 +191,44 @@ describe('verifySettlementChild (#1455)', () => {
 
   it('pins the DelegationManager the fixture actually uses', () => {
     expect(child().domain.verifyingContract?.toLowerCase()).toBe(DELEGATION_MANAGER.toLowerCase())
+  })
+})
+
+/**
+ * Review finding (#1455): the production call site passed
+ * `Number(typedData.domain.chainId)` as the expectation, so the chain check
+ * compared a value to itself and could never fire. The unit test above passed
+ * throughout, because it supplied an independent expectation the call site did
+ * not. These pin the DERIVATION instead.
+ */
+describe('chainIdForNetwork — the expectation must come from the signed field', () => {
+  it('maps the network strings Haven actually signs', () => {
+    expect(chainIdForNetwork('eip155:84532')).toBe(84532)
+    expect(chainIdForNetwork('eip155:8453')).toBe(8453)
+    expect(chainIdForNetwork('base')).toBe(8453)
+    expect(chainIdForNetwork('base-sepolia')).toBe(84532)
+  })
+
+  it('returns undefined for a network it cannot map, so the caller cannot pass silently', () => {
+    // The call site turns this into -1, which no domain chainId can equal.
+    // Failing closed on an unmappable network beats guessing one.
+    expect(chainIdForNetwork('solana')).toBeUndefined()
+    expect(chainIdForNetwork(undefined)).toBeUndefined()
+    expect(chainIdForNetwork('eip155:')).toBeUndefined()
+  })
+
+  it('refuses a child whose domain chain disagrees with the SIGNED network', () => {
+    // The end-to-end shape of the bug: Haven signs network=base-sepolia while
+    // the child is built for Base. Deriving the expectation from the payload
+    // made these agree by construction.
+    const td = child()
+    td.domain.chainId = 8453
+    expect(() =>
+      verifySettlementChild(
+        td,
+        { ...EXPECTED, chainId: chainIdForNetwork('eip155:84532')! },
+        nowInsideWindow(child()),
+      ),
+    ).toThrow(/scoped to the wrong chain/)
   })
 })

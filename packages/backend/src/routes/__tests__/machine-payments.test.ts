@@ -360,6 +360,9 @@ describe('machine payment routes', () => {
       status: AGENT.status,
       safe_address: AGENT.safe_address,
       delegate_address: AGENT.delegate_address,
+      // #1472: null here BECAUSE the fixture buckets into legacy — the
+      // delegate account only exists on the delegation rail.
+      delegate_account_address: null,
       chain_id: AGENT.chain_id,
       // #1306: AGENT fixture carries no execution_rail — buckets into legacy,
       // same as handleGetAllowances' own branch below.

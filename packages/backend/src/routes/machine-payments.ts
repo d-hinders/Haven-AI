@@ -3,6 +3,7 @@ import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { getAgentPaymentStatus } from '../modules/payments/index.js'
 import { agentExecutionRailLabel } from '../rails/execution-rail.js'
+import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   handleGetAllowances,
@@ -41,12 +42,32 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   app.get('/agent', async (request) => {
     const agent = request.agent as AgentContext
 
+    // #1472: the DELEGATE ACCOUNT is what an erc7710 merchant sees as the
+    // header's `delegator` and may print as "payer" — the #1454 live run
+    // proved a receipt naming an address no API surface could map back to a
+    // Haven agent. It is a pure derivation (counterfactual Hybrid address of
+    // the signing EOA), so exposing it costs a computation, not a column. Null
+    // on the legacy rail, where no such account exists. A failed derivation
+    // degrades to null rather than failing the whole identity read — this
+    // field is reconciliation metadata, not authority.
+    let delegateAccountAddress: string | null = null
+    if (agentExecutionRailLabel(agent.execution_rail) === 'delegation') {
+      try {
+        delegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
+          ownerAddress: agent.delegate_address as `0x${string}`,
+        })
+      } catch {
+        delegateAccountAddress = null
+      }
+    }
+
     return {
       id: agent.id,
       name: agent.name,
       status: agent.status,
       safe_address: agent.safe_address,
       delegate_address: agent.delegate_address,
+      delegate_account_address: delegateAccountAddress,
       chain_id: agent.chain_id,
       // #1306: which on-chain policy primitive gates this agent's spend —
       // reporting only, same two-value bucketing handleGetAllowances already

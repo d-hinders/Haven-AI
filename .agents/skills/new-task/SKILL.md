@@ -23,6 +23,26 @@ Turn a freeform request into a loop-ready GitHub issue without implementing it.
 7. Apply every inferred `area:*` label and `money-path` when applicable. Assign the requester when their GitHub identity is discoverable.
 8. Return the issue link and applied labels.
 
+## Epics
+
+A request whose remedy spans several disjoint pull requests is an **epic**: file
+one tracking issue plus one issue per slice. A [quality-scan](../quality-scan/SKILL.md)
+finding always arrives in this shape.
+
+- **Label the tracking issue `epic`**, in addition to its `area:*` labels. An
+  epic without the label is invisible to every epic-scoped query, including the
+  one a reader uses to ask what epics are open.
+- **Attach each slice as a GitHub sub-issue of the tracking issue**, not only as
+  a checklist line in its body. [ship-next](../ship-next/SKILL.md)'s `epic=#<n>`
+  selects the lowest-numbered open **sub-issue**; slices tracked only as prose
+  resolve to nothing, so the epic cannot be shipped from the queue at all.
+- **Keep the build-order list in the body as well.** Sub-issue links carry
+  membership but not sequencing, and `ship-next` reads that list to decide what
+  is blocked.
+- File slices in build order where possible, so lowest-numbered-open matches the
+  intended sequence.
+- Backlog-only still applies to both the epic and its slices.
+
 ## Backlog And Shipping
 
 - Default to backlog-only: do not add `code-quality`.

@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify from 'fastify'
 import agentRoutes from '../agents.js'
+// #1444: the spec's own schema decides whether a response matches what we
+// promise external integrators — not a hand-written toMatchObject.
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 const { mockQuery } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -104,6 +107,8 @@ describe('agent routes', () => {
     // 'Needs setup' and links to the page where the budget grant activates.
     expect(String(mockQuery.mock.calls[0][0])).not.toContain("pending_approval")
     expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', 'agent-1'])
+    // The populated shape is where drift would actually show.
+    expectMatchesSpec('GET', '/agents/{id}', response.json())
 
     await app.close()
   })
@@ -161,6 +166,7 @@ describe('agent routes', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({ agents: [] })
+    expectMatchesSpec('GET', '/agents', response.json())
     // #1069: pending_approval agents are SURFACED, not hidden — an abandoned
     // setup used to leave the user with "Agents 0" and no route back to an
     // agent that exists. The list/detail include them; the UI badges them
@@ -654,6 +660,7 @@ describe('agent archive routes (#1401)', () => {
     const response = await app.inject({ method: 'POST', url: '/agents/agent-1/archive' })
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({ success: true, archived_at: archivedAt })
+    expectMatchesSpec('POST', '/agents/{id}/archive', response.json())
     await app.close()
   })
 

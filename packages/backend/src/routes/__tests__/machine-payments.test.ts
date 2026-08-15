@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
+// #1444: validate the real payload against the spec's own schema.
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { authorizeMachinePayment } from '../../modules/mpp/index.js'
 
 const { mockQuery, allowanceMocks, fiatMocks, reportingMocks } = vi.hoisted(() => ({
@@ -351,6 +353,7 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(200)
+    expectMatchesSpec('GET', '/machine-payments/agent', response.json())
     expect(response.json()).toEqual({
       id: AGENT.id,
       name: AGENT.name,

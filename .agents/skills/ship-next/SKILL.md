@@ -26,6 +26,22 @@ Accept one source:
 If every remaining candidate is blocked, stop and report the dependency chain instead
 of forcing the lowest number.
 
+Note what that rule can and cannot see: it reads references pointing **out** of the
+candidate's body. A constraint written the other way round — a newly filed issue
+saying it should land before some queued issue — is invisible here, which is why
+*Independent Review* records it in the dependent issue instead.
+
+**Check for a blocked promotion path.** Look for an open `qa-failure` issue before
+selecting. It carries no `code-quality` label, so the default queue never surfaces
+it, while the `qa-freshness` gate stands between `dev` and `main` (its exact
+conditions and its documented bypasses live in
+[`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) — do not
+restate them here, and do not assume a red QA run means promotion is strictly
+impossible). This is **information, not a gate**: do not block selection on it and do
+not pull it into the queue, but name it in the closeout so the user can choose
+between shipping the next item and unblocking the promotion path. A day of merged
+work behind a silently red gate is the failure this line exists to prevent.
+
 Before selecting new work, find any open pull request linked with `Closes #<issue>`.
 
 - If it is waiting on CI or has a fixable failure, finish that pull request.
@@ -125,7 +141,12 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
 1. Review the complete candidate change against `origin/dev`, including staged changes, unstaged tracked changes, and untracked files. If review happens after committing, inspect `git diff origin/dev...HEAD` and separately inspect any later working-tree changes. Never use a committed range that omits the current candidate diff. Use the reviewer role from [haven-agent-workflow](../haven-agent-workflow/SKILL.md); delegate to an independent reviewer when supported, otherwise perform a distinct findings-first review pass. **For `area:frontend` diffs, run a second, rendered pass** with the [design-reviewer role](../haven-agent-workflow/references/design-reviewer.md) (`haven-design-reviewer`) over the #896 screenshots — code review and visual review are complementary, and a finding from either trips the frontend merge gate (see [`frontend.md`](../../../docs/contributing/ship-playbooks/frontend.md) §5–6).
 2. Apply clear, scoped blocking and should-fix findings, then rerun affected checks.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
-4. Record applied and deferred findings with reasons.
+4. Record applied and deferred findings with reasons. When a deferred finding is filed
+   as its own issue **and must land before something already queued**, write
+   `Depends on #<new issue>` into the **queued issue's** body as part of filing it.
+   Stating the constraint only in the new issue's prose does not bind anything: the
+   selector's BLOCKED check reads outbound references from the candidate it is about
+   to ship, so an inbound "close this before #N" is invisible and #N ships anyway.
 5. Run `npm run docs:coupling`. Two kinds of finding, and they are not the same obligation:
    - **⚠️ contract doc → blocking.** The strict gate exits 1 and so will CI. Resolve it in *this* pull request: update the stale claims, or genuinely re-verify the doc and bump `last-verified`. Never push with this red.
    - **Everything else → advisory.** Run the doc-reviewer role over the implicated docs; this is a **hard definition-of-done step**, not optional. Update what the diff actually made stale. Bump `last-verified` only on a doc you really re-read — a rubber-stamped date is worse than a stale one, because the weekly staleness audit ranks on it, so leaving a doc untouched and saying why is a legitimate outcome.
@@ -202,6 +223,16 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
 ## Closeout
 
 Leave the issue open until the pull request merges. Report the issue, pull request, gate result, risk, and merge mode, then stop. A caller may invoke the skill again for the next item.
+
+Report an open `qa-failure` when selection found one — one line naming the issue and
+that `dev → main` is gated by it. The user decides what to do about it; the loop's job
+is to stop it being invisible.
+
+**Parent epic.** When the shipped issue is an epic sub-issue and the epic body carries
+a build-order list, tick that slice's line, so the epic reads as status instead of
+needing its sub-issue states queried one by one. When it was the epic's **last open
+sub-issue**, say so and report the epic ready to close — do not close it: an epic can
+carry acceptance criteria and operator-verify steps of its own that outlive its slices.
 
 **Acceptance-criteria evidence.** When the issue body has acceptance-criteria
 checkboxes, the closing comment ticks each one with a link to its evidence (test

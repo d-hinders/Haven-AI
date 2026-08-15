@@ -337,20 +337,7 @@ export const openapiSpec = {
             description: 'Delegate balance.',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address'],
-                  properties: {
-                    delegate_address: { type: 'string' },
-                    safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-                    chain_id: { type: 'integer' },
-                    eth: { type: 'string' },
-                    eth_atomic: { type: 'string' },
-                    usdc: { type: 'string' },
-                    usdc_atomic: { type: 'string' },
-                    usdc_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/DelegateBalance' },
               },
             },
           },
@@ -1781,7 +1768,17 @@ export const openapiSpec = {
     schemas: {
       CatalogEntry: {
         type: 'object',
-        required: ['id', 'name', 'description', 'category', 'resource_url', 'rail', 'protocol', 'status'],
+        /**
+         * #1445: `catalog.ts`'s `serialize()` emits every one of these keys on
+         * every row — nullable ones as null, never absent. The old list named
+         * only 8, so the generated type made the other 9 optional and the UI
+         * had to defend against a shape the route does not produce.
+         */
+        required: [
+          'id', 'name', 'description', 'category', 'resource_url', 'rail', 'protocol', 'status',
+          'tool_name', 'tool_arguments', 'price_display', 'price_atomic', 'asset', 'network',
+          'asset_transfer_methods', 'verified_at',
+        ],
         properties: {
           id: { type: 'string', format: 'uuid' },
           name: { type: 'string' },
@@ -1977,6 +1974,14 @@ export const openapiSpec = {
           signer_acknowledged: { type: 'boolean' },
           local_mcp_acknowledged: { type: 'boolean' },
           activation_command_available: { type: 'boolean' },
+          /**
+           * #1445: the connector reports this and the backend persists it
+           * (`agent-connection-setup.ts`), but the schema omitted it — and this
+           * schema is `additionalProperties: false`, so the spec actively
+           * FORBADE a field the API sends. A strict generated client would have
+           * rejected a valid response.
+           */
+          skill_installed: { type: 'boolean' },
           probe_result: { type: 'string' },
           restart_required: { type: 'boolean' },
           next_user_action: { type: 'string' },
@@ -2277,6 +2282,13 @@ export const openapiSpec = {
           allowances: { type: 'array', items: { $ref: '#/components/schemas/AgentAllowance' } },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
+          /**
+           * True when open reconciliation events indicate stranded delegate
+           * funds (#1445). Derived by the list and detail reads, so it is NOT
+           * required: the creation response is built from the freshly inserted
+           * row and omits it — a brand-new agent cannot have stranded funds.
+           */
+          has_stranded_funds: { type: 'boolean' },
         },
         additionalProperties: true,
       },
@@ -2305,14 +2317,41 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      /**
+       * #1445: lifted out of the inline `/agents/{id}/delegate-balance`
+       * response so consumers can name it. An inline schema generates an
+       * anonymous type, which is why the frontend hand-wrote this one instead
+       * of importing it — identical shape, no behaviour change.
+       */
+      DelegateBalance: {
+        type: 'object',
+        required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address'],
+        properties: {
+          delegate_address: { type: 'string' },
+          safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          chain_id: { type: 'integer' },
+          eth: { type: 'string' },
+          eth_atomic: { type: 'string' },
+          usdc: { type: 'string' },
+          usdc_atomic: { type: 'string' },
+          usdc_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        },
+      },
       CreateAgentResponse: {
         allOf: [
           { $ref: '#/components/schemas/Agent' },
           {
             type: 'object',
-            required: ['api_key'],
+            required: ['api_key', 'passport_requested'],
             properties: {
               api_key: { type: 'string', pattern: '^sk_agent_' },
+              /**
+               * #1445: whether an Agent Passport attestation was requested for
+               * this agent (#970). Always present on creation — false when the
+               * caller did not opt in, or the chain has no passport support.
+               * Governance metadata, never spend authority.
+               */
+              passport_requested: { type: 'boolean' },
             },
           },
         ],

@@ -2,23 +2,15 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import type { ApiSchema } from '@haven_ai/core'
 
-export interface CatalogEntry {
-  id: string
-  name: string
-  description: string
-  category: string
-  resource_url: string
-  rail: 'x402' | 'mpp'
-  protocol: 'http' | 'mcp'
-  tool_name: string | null
-  price_display: string | null
-  price_atomic: string | null
-  asset: string | null
-  network: string | null
-  status: 'active' | 'degraded' | 'delisted'
-  verified_at: string | null
-}
+/**
+ * #1445: was a hand-written copy that had fallen two fields behind the spec —
+ * `tool_arguments` (suggested MCP tool arguments for a product variant) and
+ * `asset_transfer_methods` were invisible to the UI because the local type
+ * never declared them.
+ */
+export type CatalogEntry = ApiSchema<'CatalogEntry'>
 
 export function useCatalog() {
   const [entries, setEntries] = useState<CatalogEntry[]>([])

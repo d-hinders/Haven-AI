@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-08-15" # #1444: adds `expectMatchesSpec` — real responses validated against the spec's own schema (4 routes), with the mutation proofs and the `additionalProperties: true` limit recorded. #1443: the drift check no longer scopes itself to seven hand-listed route files — route-coverage.test.ts derives its scope from the app registration table; records that 89 of 136 registered routes are undocumented, deferred to #1446 under a shrink-only ceiling
+last-verified: "2026-08-15" # #1445: four spec corrections found by making the generated types load-bearing in the frontend (has_stranded_funds, passport_requested, skill_installed, CatalogEntry.required), plus a named DelegateBalance schema. #1444: adds `expectMatchesSpec` — real responses validated against the spec's own schema (4 routes), with the mutation proofs and the `additionalProperties: true` limit recorded. #1443: the drift check no longer scopes itself to seven hand-listed route files — route-coverage.test.ts derives its scope from the app registration table; records that 89 of 136 registered routes are undocumented, deferred to #1446 under a shrink-only ceiling
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -205,6 +205,30 @@ Coverage is deliberately partial: four assertions today (`GET /agents`,
 `GET /agents/{id}`, `POST /agents/{id}/archive`,
 `GET /machine-payments/agent`). Widening it is per-route work that belongs with
 the #1446 backfill rather than a big-bang sweep.
+
+### Four Contract Corrections The Type Migration Surfaced (#1445)
+
+Making the generated types load-bearing in the frontend is a type-level change
+with no runtime effect — but `tsc` acts as a differ between what the spec says
+and what the UI had assumed, and it found four places where the spec was wrong
+about routes that had shipped long ago:
+
+| Correction | What was wrong |
+|---|---|
+| `Agent.has_stranded_funds` added | The list and detail reads derive it in SQL and return it; the spec never declared it. Not required — the creation response is built from the inserted row and omits it. |
+| `CreateAgentResponse.passport_requested` added | Returned by `POST /agents` on every creation, undeclared. |
+| `AgentConnectionInstallStatus.skill_installed` added | The connector reports it and the backend persists it — and that schema is `additionalProperties: false`, so the spec **forbade** a field the API sends. A strict generated client would have rejected a valid response. |
+| `CatalogEntry.required` widened from 8 keys to 16 | `serialize()` emits all 16 on every row, nullable ones as `null`. The narrow list made 8 fields optional in the generated type, so the UI defended against a shape the route does not produce. |
+
+The first two went unnoticed because `Agent` sets `additionalProperties: true` —
+the same limit recorded above. An open schema is a deliberate choice, but it
+means undeclared fields accumulate silently, and consumers generating clients
+from the spec never learn the fields exist.
+
+`DelegateBalance` was also lifted out of the inline
+`/agents/{id}/delegate-balance` response into a named component. An inline
+schema generates an anonymous type, which is precisely why the frontend
+hand-wrote a copy instead of importing one.
 
 ## Authentication And Authority Boundaries
 

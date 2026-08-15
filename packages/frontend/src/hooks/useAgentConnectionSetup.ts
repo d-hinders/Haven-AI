@@ -10,6 +10,7 @@ import {
   type AllowanceSetup,
 } from '@/lib/allowance-module'
 import { api, getResolvedApiBaseUrl } from '@/lib/api'
+import type { ApiSchema } from '@haven_ai/core'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useSafeDetails } from '@/hooks/useSafeDetails'
@@ -40,52 +41,16 @@ export interface AllowanceEntry {
   resetTimeMin: number
 }
 
-export interface CreateSetupResponse {
-  setup_id: string
-  status: 'awaiting_connection'
-  setup_token: string
-  expires_at: string
-  connector_command: string
-  setup_prompt: string
-}
-
-interface ResolveSetupResponse {
-  setup_id: string
-  status: string
-  agent: {
-    name: string
-    description?: string | null
-  }
-  haven_wallet: {
-    name: string
-    address: string
-    chain_id: number
-    network: string
-  }
-  agent_budget: Array<{
-    token_symbol: string
-    allowance_amount: string
-    reset_period_min: number
-  }>
-  hosted_mcp_url: string
-  challenge: {
-    id: string
-    message: string
-    expires_at: string
-  }
-}
-
-interface RegisterSetupResponse {
-  setup_id: string
-  agent_id: string
-  status: 'connected_local'
-  agent_status: 'pending_approval'
-  api_key_prefix: string
-  api_key_scope: 'setup_pending'
-  delegate_address: string
-  hosted_mcp_url: string
-  next_action: 'return_to_haven_for_wallet_approval'
-}
+/**
+ * Connection-setup wire shapes from the generated API types (#1445). The
+ * hand-written copies pinned `status` to a single string literal each
+ * (`'awaiting_connection'`, `'connected_local'`) where the spec models the
+ * full `AgentConnectionSetupState` — narrower than the API, so a state the
+ * backend can legitimately return would not have type-checked here.
+ */
+export type CreateSetupResponse = ApiSchema<'CreateAgentConnectionSetupResponse'>
+type ResolveSetupResponse = ApiSchema<'ResolveAgentConnectionSetupResponse'>
+type RegisterSetupResponse = ApiSchema<'RegisterAgentConnectionSetupResponse'>
 
 export interface ManualCredential {
   prompt: string
@@ -246,7 +211,12 @@ export function headerSubtitle(step: SetupStep, status: string | undefined, runt
   return 'Review before creating the local setup prompt'
 }
 
-export function runtimeIsConfigured(install: AgentConnectionSetupStatusResponse['install_status']): boolean {
+// `install_status` is required on the status response, but callers hold it as
+// `setupStatus?.install_status` — hence the explicit `| undefined`. The body
+// already guarded for it; only the type was pretending otherwise (#1445).
+export function runtimeIsConfigured(
+  install: AgentConnectionSetupStatusResponse['install_status'] | undefined,
+): boolean {
   if (!install) return false
   if (install.local_mcp_configured && install.local_mcp_acknowledged) return true
   return Boolean(install.hosted_mcp_configured && install.local_signer_configured)

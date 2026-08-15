@@ -900,20 +900,20 @@ export type components = {
             rail: "x402" | "mpp";
             /** @enum {string} */
             protocol: "http" | "mcp";
-            tool_name?: string | null;
+            tool_name: string | null;
             /** @description Suggested MCP tool arguments for this catalog item, when the row represents a specific product variant. Agents should pass this object unchanged to the pay tool arguments field after confirming the live merchant quote. */
-            tool_arguments?: {
+            tool_arguments: {
                 [key: string]: unknown;
             } | null;
-            price_display?: string | null;
-            price_atomic?: string | null;
-            asset?: string | null;
-            network?: string | null;
+            price_display: string | null;
+            price_atomic: string | null;
+            asset: string | null;
+            network: string | null;
             /** @description Comma-separated set of x402 assetTransferMethods the merchant advertises (e.g. "eip3009" or "eip3009,erc7710"). Null until the first successful x402 probe; MPP entries stay null. */
-            asset_transfer_methods?: string | null;
+            asset_transfer_methods: string | null;
             /** @enum {string} */
             status: "active" | "degraded" | "delisted";
-            verified_at?: string | null;
+            verified_at: string | null;
         };
         /**
          * @description Stable Haven agent payment state phase.
@@ -1013,6 +1013,7 @@ export type components = {
             signer_acknowledged?: boolean;
             local_mcp_acknowledged?: boolean;
             activation_command_available?: boolean;
+            skill_installed?: boolean;
             probe_result?: string;
             restart_required?: boolean;
             next_user_action?: string;
@@ -1209,6 +1210,7 @@ export type components = {
             archived_at?: string | null;
             allowances: components["schemas"]["AgentAllowance"][];
             mcp_last_seen_at?: string | null;
+            has_stranded_funds?: boolean;
         } & {
             [key: string]: unknown;
         };
@@ -1228,8 +1230,19 @@ export type components = {
                 reset_period_min: number;
             }[];
         };
+        DelegateBalance: {
+            delegate_address: string;
+            safe_address: string | null;
+            chain_id: number;
+            eth: string;
+            eth_atomic: string;
+            usdc: string;
+            usdc_atomic: string;
+            usdc_address: string | null;
+        };
         CreateAgentResponse: components["schemas"]["Agent"] & {
             api_key: string;
+            passport_requested: boolean;
         };
         CreatePaymentRequest: {
             /**
@@ -2246,16 +2259,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        delegate_address: string;
-                        safe_address: string | null;
-                        chain_id: number;
-                        eth: string;
-                        eth_atomic: string;
-                        usdc: string;
-                        usdc_atomic: string;
-                        usdc_address: string | null;
-                    };
+                    "application/json": components["schemas"]["DelegateBalance"];
                 };
             };
             /** @description Error response */

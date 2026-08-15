@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - .agents/skills/quality-scan/SKILL.md
-last-verified: "2026-08-10"
+last-verified: "2026-08-14" # 2026-08-14 full-repo run appended: the API-contract finding (epic #1442, approved); prior real-DB finding re-checked and excluded as improved
 ---
 
 # Quality-Scan Ledger
@@ -37,3 +37,49 @@ entry; a changed disposition gets a new dated line under the finding.
 still open as a standalone). The ratchet (`npm run lint:db-mocks`) holds the
 ceiling shrink-only, so the finding cannot silently regrow; a future re-surface
 must cite a ratchet-ceiling INCREASE to qualify.
+
+---
+
+## 2026-08-14 — full repo
+
+**Finding: the API contract is declared three times and checked across none of
+the boundaries.**
+
+- Evidence: **136** route registrations across 30 backend route files against an
+  OpenAPI spec covering **46 paths / 48 operations** — **18 of 30 route files
+  have zero spec presence** (`/user/safes`, `/contacts`, `/hybrid*`,
+  `/delegations`, `/passkeys`, `/reporting`, `/fortnox` verified absent by
+  direct search). The generated `api-types.ts` (**5,596** lines, CI-gated by
+  `check:api-types`) is consumed by **2 frontend files / ~7 types**, while
+  `packages/frontend/src/hooks/` hand-maintains **68** interfaces describing the
+  same wire shapes. Request validation is hand-rolled per route (**0** zod
+  imports, 181 `code(400)` sites, 42 `typeof … !== 'string'` checks). Every gate
+  compares within a layer: `check:api-types` is spec → types generated from that
+  spec; `docs-drift.test.ts` is CLAUDE.md's table → spec paths. Nothing compares
+  spec ↔ actual route behaviour, or generated types ↔ what the frontend uses.
+- Demonstrated cost: `scripts/generate-api-types.mjs` names the failure mode in
+  its own header ("the frontend used to hand-maintain a parallel copy, which
+  nothing kept honest") — and the remedy built for it reaches ~7 of 68 shapes.
+  `packages/connect/src/runtime-manifest.ts` records an incident of the same
+  class: a hand-maintained mirror of a canonical list "drifted out of sync with
+  the MCP package … which broke the consent screen and the post-setup probe",
+  fixed by deriving from the source. A `haven-doc-reviewer` pass the same day
+  flagged the missing delegation routes as "a real capability gap" while noting
+  it matches the file's own pattern — the gap is normalised.
+- Honest negative result: a live-drift probe (frontend's hand-written `Agent`
+  interface vs the backend's `AgentRow`) found **no** current mismatch. Filed on
+  the precedent and the coverage gap, not on a live outage.
+- Unlock: the spec is already importable in tests (`docs-drift.test.ts` reads
+  `openapiSpec.paths`) and Fastify exposes its routing table at boot — the
+  coverage gate needs no new infrastructure.
+- Slicing: coverage gate (#1443, blocks the rest) → response-shape assertions
+  (#1444) → frontend consumption (#1445) → spec backfill by domain (#1446) →
+  shrink-only wire-shape ratchet (#1447).
+
+**Disposition: approved by the owner 2026-08-14 → epic #1442** (backlog; no
+`code-quality` label yet, so the loop will not pick the slices up until queued).
+Becomes `shipped` when the epic closes.
+
+**Excluded this run:** the 2026-07 real-DB finding — its ratchet reads 62
+mocks / 465 calls against the 1,059 recorded above, i.e. materially improved,
+so it does not qualify for re-surfacing.

@@ -33,7 +33,9 @@ last-verified: "2026-08-15" # #1451: §1's "keep EIP-3009 as the production defa
 > **Superseded on one point (2026-08-15, #1450):** §1 below recommends keeping
 > EIP-3009/delegate as the production default "until a replacement is mature +
 > audited + facilitator-supported". On the **delegation rail** that condition is
-> now met and the owner decision reverses the default: prefer erc7710 whenever
+> now met **for the merchants that advertise it** — the mechanism is mature and
+> audited; what remains thin is how many facilitators have implemented it. The
+> owner decision reverses the default on that basis: prefer erc7710 whenever
 > the merchant advertises `extra.assetTransferMethod: "erc7710"`, with the 3009
 > bridge as the merchant-reach fallback. The legacy AllowanceModule rail is
 > unchanged — EIP-3009 is not a preference there, it is the only scheme.

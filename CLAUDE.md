@@ -21,7 +21,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-08-12" # #1341: re-verified ship-next stop conditions after #1289 active-claim coordination landed in the skill
+last-verified: "2026-08-15" # #1451: records the #1450 owner decision — prefer erc7710 on the delegation rail when the merchant advertises assetTransferMethod erc7710; the payTo-shape dispatch contract and the merchant-reach caveat are unchanged. #1341: re-verified ship-next stop conditions after #1289 active-claim coordination landed in the skill
 ---
 
 # Haven — CLAUDE.md
@@ -173,7 +173,7 @@ Haven logs receipt
 ```
 The period budget is metered by the settlement itself; over-budget/wrong-recipient reverts on-chain (`modules/x402/x402-delegation.ts`, `routes/x402.ts`). **Caveat — merchant reach:** erc7710 requires facilitator-side support to redeem the chain, and adoption is still thin (≈every real x402 merchant is EIP-3009-only). The **EIP-3009 fallback (#946, RFC #791 §18) is BUILT**: a delegation-metered two-leg where the budget delegation is redeemed to transiently fund the agent EOA, which signs the standard EIP-3009 header. The scheme is selected per payment by the authorize request's payTo shape (merchant payTo → erc7710 direct settlement; payTo = the agent's own delegate EOA + `merchantPayTo` → 3009-mode; optional explicit `settlementScheme` is validated against the shape) — the shape is how a client SAYS which scheme it wants; **which one it should want is the preference rule below**, not a coin flip between equals. 3009-mode structurally requires an **open (unpinned) budget** — a recipient-pinned delegation cannot fund the EOA, so pinned agents are erc7710-only (owner decision 2026-07-15). The bridge deliberately reintroduces a bounded funding leg: budget metered at the funding hop, transient EOA hot balance, sweep/monitor machinery reused (`settlement_scheme: 'eip3009'` recorded in intent metadata for observability). erc7710 remains the destination.
 
-> **Owner decision (#1450, recorded 2026-08-15):** "Prefer erc7710 whenever the account is on the delegation rail and the merchant advertises `extra.assetTransferMethod: "erc7710"`; fall back to the EIP-3009 bridge otherwise."
+> **Owner decision (recorded by @d-hinders in #1450, 2026-08-15):** "Prefer erc7710 whenever the account is on the delegation rail and the merchant advertises `extra.assetTransferMethod: "erc7710"`; fall back to the EIP-3009 bridge otherwise."
 
 The reason is structural, not aesthetic: erc7710 has **no funding leg**, so the entire stranded-delegate-funds class — hot balances, sweeps, the delegate-balance monitor, epic #713's reconciliation — is *absent* on the preferred path rather than something Haven keeps reconciling. Recipient-pinned budgets were already erc7710-only (`modules/x402/delegation-authorize.ts`), so they stop being a special case and become the ordinary one.
 

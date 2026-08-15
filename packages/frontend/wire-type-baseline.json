@@ -1,0 +1,42 @@
+{
+  "packages/frontend/src/hooks/useAccountSigners.ts": {
+    "PrepareResponse": 1
+  },
+  "packages/frontend/src/hooks/useAccounting.ts": {
+    "MerchantAccountOverride": 1
+  },
+  "packages/frontend/src/hooks/useAgentActivity.ts": {
+    "AgentStats": 1,
+    "McpToolCallActivityItem": 1,
+    "PaymentActivityItem": 1
+  },
+  "packages/frontend/src/hooks/useAgentLastSeen.ts": {
+    "AgentLastSeenResponse": 1
+  },
+  "packages/frontend/src/hooks/useAgentPassport.ts": {
+    "AgentPassport": 1
+  },
+  "packages/frontend/src/hooks/useAgents.ts": {
+    "CreateAgentParams": 1
+  },
+  "packages/frontend/src/hooks/useApprovals.ts": {
+    "ApprovalRequest": 1,
+    "ApprovalsResponse": 1
+  },
+  "packages/frontend/src/hooks/useContacts.ts": {
+    "Contact": 1
+  },
+  "packages/frontend/src/hooks/useDelegationBudget.ts": {
+    "BuildResponse": 1,
+    "DelegationBudget": 1,
+    "RevokeAllPrepare": 1,
+    "RevokePrepare": 1
+  },
+  "packages/frontend/src/hooks/useReporting.ts": {
+    "ReportingSync": 1,
+    "ReportingVerification": 1
+  },
+  "packages/frontend/src/hooks/useSafeApprovers.ts": {
+    "KnownApprover": 1
+  }
+}

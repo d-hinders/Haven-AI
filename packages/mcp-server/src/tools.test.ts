@@ -4052,3 +4052,85 @@ describe('hosted erc7710 (#1456)', () => {
     expect(calls.find((c) => c.url.includes('/payments/pay_7710/sign'))).toBeUndefined()
   })
 })
+
+/**
+ * #1456 review: the code comment claims "a prefetch FAILURE deliberately
+ * yields the 3009 path", and nothing pinned it. Mutating the rail test from
+ * `=== 'delegation'` to `!== 'legacy'` — which makes an UNKNOWN rail
+ * erc7710-eligible — passed all 151 tests. A guarantee stated in a comment and
+ * checked by nothing is the failure mode this repo keeps naming.
+ */
+describe('hosted erc7710 rail fallback (#1456 review)', () => {
+  const ERC7710_PR2 = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      ...PAYMENT_REQUIRED.accepts,
+      { ...PAYMENT_REQUIRED.accepts[0], extra: { assetTransferMethod: 'erc7710' } },
+    ],
+  }
+  const header2 = btoa(JSON.stringify(ERC7710_PR2))
+
+  async function payWithAgent(agentStub: Record<string, unknown>) {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': header2 } },
+      'GET /machine-payments/agent': agentStub,
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+    return ok(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
+      }),
+    ) as { data: Record<string, any> }
+  }
+
+  function scheme() {
+    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
+    return body.settlementScheme
+  }
+
+  it('an agent record with NO rail field falls back to 3009, not erc7710', async () => {
+    // The mutation the review used: an unknown rail must never be treated as
+    // delegation-eligible just because it is not the string 'legacy'.
+    const res = await payWithAgent({ status: 200, body: AGENT_RESPONSE })
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(scheme()).toBe('eip3009')
+  })
+
+  it('an unrecognised rail value falls back to 3009', async () => {
+    const res = await payWithAgent({ status: 200, body: { ...AGENT_RESPONSE, execution_rail: 'session_key' } })
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(scheme()).toBe('eip3009')
+  })
+
+  it('a FAILED agent read never constructs an erc7710 request', async () => {
+    // The case the two above cannot reach: getAgent() normalises any unknown
+    // rail to 'legacy', so only an outright prefetch REJECTION yields
+    // undefined — which is exactly what the review's `!== 'legacy'` mutant
+    // treats as delegation-eligible. The call itself fails (createX402Intent
+    // re-fetches and hits the same 500), so the assertion is about the SHAPE
+    // that was or was not built, not about success.
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': header2 } },
+      'GET /machine-payments/agent': { status: 500, body: { error: 'boom' } },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+    await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      max_amount: '2000000',
+    })
+    const authorize = calls.find((c) => new URL(c.url).pathname === '/x402')
+    if (authorize) {
+      const raw = authorize.body
+      const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
+      expect(body.settlementScheme).not.toBe('erc7710')
+    }
+    // Whatever else happened, no settlement child was requested.
+    expect(calls.find((c) => new URL(c.url).pathname.endsWith('/settle'))).toBeUndefined()
+  })
+})

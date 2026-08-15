@@ -1484,13 +1484,51 @@ export class HavenClient {
         'delegateKey is required for x402 payments. Pass it in the HavenClient config.',
       )
     }
+    const prepared = await this.prepareX402Erc7710(paymentRequired, options)
+    const signature = await this.signForData(prepared.signData)
+    const paymentHeader = await this.submitX402Erc7710(prepared.paymentId, signature)
+    return { ...prepared.settlement, paymentHeader }
+  }
+
+  /**
+   * The AUTHORIZE half of erc7710 settlement (#1456): select the scheme, build
+   * the request, and return the child to be signed — without signing it.
+   *
+   * Split out because the hosted topology cannot use `settleX402Erc7710()`:
+   * that method signs in-process with `delegateKey`, and hosted Haven does not
+   * have one and must not. The hosted MCP server drives these two halves with
+   * the LOCAL signer in between, so the key stays where it belongs and the
+   * request shaping stays in one place rather than being reimplemented.
+   */
+  async prepareX402Erc7710(
+    paymentRequired: X402PaymentRequired,
+    options: {
+      resourceUrl?: string
+      /**
+       * The account's rail, when the caller has ALREADY read it from
+       * `GET /machine-payments/agent` — passing it skips a duplicate fetch
+       * (#1456: the hosted tool reads the agent for the delegate address
+       * anyway, and #1348 pins that path to exactly one agent round-trip).
+       *
+       * This is an optimisation, not a trust boundary: omit it and the rail is
+       * read here, and either way the backend independently refuses erc7710
+       * from a non-delegation account (`validateGenericSchemeRail`). A caller
+       * that asserted the wrong rail would build a request the backend rejects.
+       */
+      delegationRail?: boolean
+    } = {},
+  ): Promise<{
+    paymentId: string
+    signData: SignData
+    settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>
+  }> {
 
     // The rail half of the #1450 preference rule is not visible in a 402
     // response — it is a property of the ACCOUNT, so read it rather than let a
     // caller assert it. #1453's selector takes it as input for exactly this
     // reason, and this is the one place that input is sourced from truth.
-    const agent = await this.getAgent()
-    const delegationRail = agent.executionRail === 'delegation'
+    const delegationRail =
+      options.delegationRail ?? (await this.getAgent()).executionRail === 'delegation'
 
     // Rail first, and BEFORE selection — the two failures have different
     // remedies and the caller needs the one that applies. Checking selection
@@ -1499,7 +1537,7 @@ export class HavenClient {
     // there, the account cannot use it. (Found by this method's own tests.)
     if (!delegationRail) {
       throw new HavenApiError(
-        `erc7710 settlement requires a delegation-rail account; this agent is on '${agent.executionRail}'. ` +
+        'erc7710 settlement requires a delegation-rail account; this one is not on it. ' +
           'Use authorizeX402() for the standard EIP-3009 path.',
         400,
       )
@@ -1562,10 +1600,31 @@ export class HavenClient {
       )
     }
 
-    const signature = await this.signForData(signData)
+    return {
+      paymentId: raw.payment_id,
+      signData,
+      settlement: {
+        paymentId: raw.payment_id,
+        merchantPayTo,
+        amountAtomic,
+        asset: option.asset,
+        network: option.network,
+        facilitatorAddresses: selection.facilitatorAddresses,
+      },
+    }
+  }
 
+  /**
+   * The SETTLE half (#1456): exchange the signed child for the merchant header.
+   *
+   * The SDK builds no header on this path — the backend assembles the MetaMask
+   * erc7710 payload in `assembleSettlementPayload`. Whoever produced the
+   * signature (an in-process delegate key, or the local edge signer over the
+   * hosted boundary) is irrelevant here.
+   */
+  async submitX402Erc7710(paymentId: string, signature: string): Promise<string> {
     const settled = await this.post<RawX402SettleResponse>(
-      `/x402/${raw.payment_id}/settle`,
+      `/x402/${paymentId}/settle`,
       { signature },
     )
     if (!settled.payment_header) {
@@ -1575,16 +1634,7 @@ export class HavenClient {
         settled,
       )
     }
-
-    return {
-      paymentId: raw.payment_id,
-      paymentHeader: settled.payment_header,
-      merchantPayTo,
-      amountAtomic,
-      asset: option.asset,
-      network: option.network,
-      facilitatorAddresses: selection.facilitatorAddresses,
-    }
+    return settled.payment_header
   }
 
   async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt> {

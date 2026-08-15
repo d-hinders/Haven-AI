@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-08-14" # #1199: signer-removal recovery change re-verified; no API/OpenAPI contract changed
+last-verified: "2026-08-14" # #1443: the drift check no longer scopes itself to seven hand-listed route files — route-coverage.test.ts derives its scope from the app registration table; records that 89 of 136 registered routes are undocumented, deferred to #1446 under a shrink-only ceiling
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -139,6 +139,10 @@ dedicated `OpenAPI drift check` step in
   `machine-payments.ts`, `transactions.ts`, and `catalog.ts`) is either
   documented in the spec or listed on an explicit
   `KNOWN_UNDOCUMENTED_ROUTES` allowlist with a justification
+- **(#1443)** every route module the server *registers* — not a hand-listed
+  subset — is documented, individually justified, or explicitly deferred to the
+  #1446 backfill, and the deferred surface is **shrink-only**
+  (`route-coverage.test.ts`)
 - the security scheme states the authority boundary
 - `/openapi.json` serves the same spec object the tests inspect
 
@@ -224,3 +228,13 @@ Not all delegation-rail routes are in the OpenAPI spec yet: the x402 settlement
 route `POST /x402/{id}/settle` (#830) currently sits on the drift check's
 `KNOWN_UNDOCUMENTED_ROUTES` allowlist pending the epic docs sweep (#834). Deep
 model: [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
+
+**How much of the API the spec actually describes (#1443, measured 2026-08-14):**
+136 registered routes, **89 of them undocumented** — the whole
+`agent-delegations.ts` lifecycle among them. That was invisible until the
+coverage gate widened its scope beyond the seven hand-listed files above, which
+is the finding epic #1442 was opened on. The gap is now *recorded* rather than
+absent: `route-coverage.ts` carries a per-module deferral list with a reason per
+entry and a shrink-only ceiling, and #1446 documents the modules one domain at a
+time. Read the numbers there as the current truth; this paragraph is a pointer,
+not a second copy.

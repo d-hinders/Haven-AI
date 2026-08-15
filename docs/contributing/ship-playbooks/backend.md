@@ -2,14 +2,15 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-08-09" # #1228: db-schema-smoke is no longer the only real-DB check — scoped against testing-strategy.md
+last-verified: "2026-08-14" # #1443: route-coverage.test.ts widens the OpenAPI gate beyond the seven hand-listed files to every registered module, with a shrink-only per-module deferral list; keeping spec.test.ts green is no longer sufficient
 ---
 
 # Backend / API playbook
 
 Loaded by `ship-next` for `area:backend` issues.
 
-- **OpenAPI drift.** Keep `packages/backend/src/openapi/spec.test.ts` green — a route on the agent-payment surface must be documented in `openapi/spec.ts` or carry a `because:` entry in the allowlist. Adding a route means updating the spec.
+- **OpenAPI drift.** Keep `packages/backend/src/openapi/spec.test.ts` green — a route on the agent-payment surface must be documented in `openapi/spec.ts` or carry a `because:` entry in the allowlist (now `KNOWN_UNDOCUMENTED_ROUTES` in `openapi/route-coverage.ts`). Adding a route means updating the spec.
+- **Route coverage, wider than the above (#1443).** `openapi/route-coverage.test.ts` gates **every route module the server registers**, not just the seven agent-payment files — it derives its scope from `index.ts`'s registration table, so a brand-new route file is covered from its first commit. A new route is accounted for by documenting it, by a per-route `KNOWN_UNDOCUMENTED_ROUTES` entry, or — for a module whose whole surface is deferred to the #1446 backfill — by `UNDOCUMENTED_MODULES`. Both lists sit under **shrink-only ceilings**: raising one is the failure the gate exists to catch, so document the route instead. Keeping `spec.test.ts` green is no longer sufficient on its own.
 - **Generated wire types (#984).** Any edit to `openapi/spec.ts` must regenerate the shared wire types: run `npm run generate:api-types` and commit the resulting `packages/core/src/api-types.ts`. CI's **blocking** `npm run check:api-types` drift gate fails the PR if the spec and the generated types disagree. Never hand-edit `api-types.ts`.
 - **Package gate.** `npm run typecheck -w packages/backend` and `npm run test -w packages/backend` must pass. **Run `typecheck` as the LAST step, after every test file is written or edited** — `vitest`/`tsx` strip types and do NOT type-check, so a green test run says nothing about type errors in the test itself. `tsc` is the only thing that checks `*.test.ts`; a type error there (a wrong config field, a stale mock shape) fails CI's typecheck but never the test run (#781, the #776 miss).
 - **SQL schema drift.** When the diff adds or changes a money-path query, add it to the curated list in `packages/backend/scripts/db-schema-smoke.ts` — CI applies the migrations and `PREPARE`s each query against a real Postgres, so a column/type mismatch fails in CI instead of dev (mocked route tests never validate SQL against the schema — how `agents.safe_address` reached dev, #757). Run locally against a throwaway DB with `DATABASE_URL=… npm run db:schema-smoke -w packages/backend`. Since epic #1219 the smoke is no longer the only real-database check: repository *behaviour* (idempotency, locking, transactions) is proven on the real-DB harness — see [`testing-strategy.md`](../testing-strategy.md) for which check owns what.

@@ -2,7 +2,13 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { exact } from 'x402/schemes'
 import { hashTypedData } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { signHash, signUserOpTypedDataForDelegation, addressFromKey, verifySignature } from './signer.js'
+import {
+  signHash,
+  signUserOpTypedDataForDelegation,
+  signSettlementDelegationTypedData,
+  addressFromKey,
+  verifySignature,
+} from './signer.js'
 import { verifyPaymentReceipt, type PaymentReceipt, type ReceiptVerification } from './receipt.js'
 import type {
   HavenClientConfig,
@@ -695,6 +701,20 @@ export class HavenClient {
         )
       }
       return signUserOpTypedDataForDelegation(this.delegateKey, signData.typed_data as never)
+    }
+    if (scheme === 'eip712_delegation') {
+      // The erc7710 x402 settlement child (#1452, epic #1450). Same guard as
+      // eip712_userop above, and for a sharper reason: this signature lets a
+      // facilitator pull the exact amount from the treasury. Falling back to
+      // the bare hash would produce a signature the DelegationManager rejects
+      // at redemption — a failure that surfaces on-chain, after the agent has
+      // already told the merchant it paid.
+      if (!signData.typed_data) {
+        throw new HavenSigningError(
+          'sign_data.signature_scheme is eip712_delegation but typed_data is missing — refusing to sign the bare hash (the settlement would be rejected on redemption).',
+        )
+      }
+      return signSettlementDelegationTypedData(this.delegateKey, signData.typed_data as never)
     }
     if (scheme === undefined) {
       return signHash(this.delegateKey, signData.hash) // legacy AllowanceModule rail

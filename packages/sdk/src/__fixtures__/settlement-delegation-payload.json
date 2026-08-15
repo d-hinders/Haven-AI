@@ -1,0 +1,77 @@
+{
+  "domain": {
+    "name": "DelegationManager",
+    "version": "1",
+    "chainId": 84532,
+    "verifyingContract": "0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3"
+  },
+  "types": {
+    "Caveat": [
+      {
+        "name": "enforcer",
+        "type": "address"
+      },
+      {
+        "name": "terms",
+        "type": "bytes"
+      }
+    ],
+    "Delegation": [
+      {
+        "name": "delegate",
+        "type": "address"
+      },
+      {
+        "name": "delegator",
+        "type": "address"
+      },
+      {
+        "name": "authority",
+        "type": "bytes32"
+      },
+      {
+        "name": "caveats",
+        "type": "Caveat[]"
+      },
+      {
+        "name": "salt",
+        "type": "uint256"
+      }
+    ]
+  },
+  "primaryType": "Delegation",
+  "message": {
+    "delegate": "0x0000000000000000000000000000000000000a11",
+    "delegator": "0x1111111111111111111111111111111111111111",
+    "authority": "0x186128594752bfa2f03cd1a0599b1d19a2f992e6ac60e5e69776928d6521e757",
+    "caveats": [
+      {
+        "enforcer": "0x92Bf12322527cAA612fd31a0e810472BBB106A8F",
+        "terms": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "args": "0x00"
+      },
+      {
+        "enforcer": "0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc",
+        "terms": "0x036CbD53842c5426634e7929541eC2318f3dCF7e00000000000000000000000000000000000000000000000000000000000003e8",
+        "args": "0x00"
+      },
+      {
+        "enforcer": "0xc2b0d624c1c4319760C96503BA27C347F3260f55",
+        "terms": "0x00000000000000000000000000000000000000000000000000000000000000040000000000000000000000003333333333333333333333333333333333333333",
+        "args": "0x00"
+      },
+      {
+        "enforcer": "0x1046bb45C8d673d4ea75321280DB34899413c069",
+        "terms": "0x000000000000000000000000000000000000000000000000000000006a80709b",
+        "args": "0x00"
+      },
+      {
+        "enforcer": "0xE144b0b2618071B4E56f746313528a669c7E65c5",
+        "terms": "0x4444444444444444444444444444444444444444",
+        "args": "0x00"
+      }
+    ],
+    "salt": "0x00",
+    "signature": "0x"
+  }
+}

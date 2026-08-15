@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-15" # #1453: the SDK can now SELECT the scheme (selectX402SettlementScheme); the standard selector skips erc7710 entries, closing the echo-7710-sign-3009 stranded-funds path. #1454 (end-to-end) remains. #1452: the SDK can now SIGN the settlement child (eip712_delegation, verbatim); it still cannot select erc7710 — #1453/#1454 remain. #1451: records the #1450 owner decision — prefer erc7710 on the delegation rail when the merchant advertises assetTransferMethod erc7710, 3009 bridge as the merchant-reach fallback. Docs only; the payTo-shape dispatch contract is unchanged. #1423 re-verify: delegation-rail.ts gained the read-only disabledDelegations() probe used by revoke-all prepare — no payment path reads it and the x402 sequences are untouched. #1400 re-verify: delegation-rail.ts gained prepareCalls (batch UserOp for revoke-all); the x402 sequences here are untouched — prepareCall now delegates to the batch form with identical single-call behavior, and no payment path uses the batch. Prior: #1398 hosted fast settle validates the bounded signed X-PAYMENT header against the agent-scoped persisted intent before relaying funding; merchant/facilitator verification remains final.
+last-verified: "2026-08-15" # #1454: HavenClient.settleX402Erc7710 joins sign+select into an end-to-end path; shapes pinned, live balance proof still owed by #1457. #1453: the SDK can now SELECT the scheme (selectX402SettlementScheme); the standard selector skips erc7710 entries, closing the echo-7710-sign-3009 stranded-funds path. #1454 (end-to-end) remains. #1452: the SDK can now SIGN the settlement child (eip712_delegation, verbatim); it still cannot select erc7710 — #1453/#1454 remain. #1451: records the #1450 owner decision — prefer erc7710 on the delegation rail when the merchant advertises assetTransferMethod erc7710, 3009 bridge as the merchant-reach fallback. Docs only; the payTo-shape dispatch contract is unchanged. #1423 re-verify: delegation-rail.ts gained the read-only disabledDelegations() probe used by revoke-all prepare — no payment path reads it and the x402 sequences are untouched. #1400 re-verify: delegation-rail.ts gained prepareCalls (batch UserOp for revoke-all); the x402 sequences here are untouched — prepareCall now delegates to the batch form with identical single-call behavior, and no payment path uses the batch. Prior: #1398 hosted fast settle validates the bounded signed X-PAYMENT header against the agent-scoped persisted intent before relaying funding; merchant/facilitator verification remains final.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -739,10 +739,20 @@ verbatim via `signSettlementDelegationTypedData`), and as of
 [#1453](https://github.com/d-hinders/Haven-AI/issues/1453) it **can choose**
 the scheme: `selectX402SettlementScheme` is the single place the preference
 rule lives, and `selectStandardPaymentOption` now skips erc7710-tagged entries
-instead of returning them positionally. What is still missing is the path that
-joins them — no end-to-end authorize→sign→settle exists in the SDK yet
-(#1454), so a bespoke client written against the raw API remains the only way
-to pay a 7710 merchant end to end.
+instead of returning them positionally. [#1454](https://github.com/d-hinders/Haven-AI/issues/1454)
+joins them into `HavenClient.settleX402Erc7710()` — authorize (`payTo` = the
+merchant) → sign the child → settle → the backend-assembled `X-PAYMENT` header,
+which the caller replays on the merchant retry. Note what the SDK does NOT do
+on this path: it builds no header locally and touches no funds, because the
+backend assembles the MetaMask payload in `assembleSettlementPayload`.
+
+**Still unproven end to end, and worth stating rather than assuming.** The
+nightly `x402-erc7710-settle` QA leg exercises the RAW API and deliberately
+excludes the SDK, so nothing yet demonstrates a full purchase through
+`HavenClient` — including the property the path exists for, that the delegate
+EOA's balance is unchanged across the flow. #1454 pins the request shapes;
+[#1457](https://github.com/d-hinders/Haven-AI/issues/1457) is where the
+topology gets proven with balances.
 
 **#1453 also closed a live footgun on the EIP-3009 path**, worth recording
 because it cost real funds to reason about rather than being hypothetical:

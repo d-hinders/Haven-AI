@@ -1202,6 +1202,38 @@ export interface RawX402AuthorizeResponse {
   error?: string
 }
 
+/** @internal Response of `POST /x402/:id/settle` (erc7710 direct settlement). */
+export interface RawX402SettleResponse {
+  success?: boolean
+  payment_id?: string
+  /** The backend-assembled MetaMask erc7710 X-PAYMENT header. */
+  payment_header?: string
+  status?: string
+  error?: string
+}
+
+/**
+ * Result of an erc7710 direct settlement (#1454).
+ *
+ * Deliberately NOT an `X402Receipt`. A 3009 receipt describes a completed
+ * two-leg payment — funding tx included — whereas here nothing has settled yet
+ * when this returns: the merchant redeems the delegation chain when the caller
+ * retries with the header. Reusing the receipt type would let a caller read
+ * `txHash` as "paid" on a payment that has not moved a cent.
+ */
+export interface X402Erc7710Settlement {
+  paymentId: string
+  /** Pass verbatim as the `X-PAYMENT` header on the merchant retry. */
+  paymentHeader: string
+  /** The merchant address the child delegation is pinned to. */
+  merchantPayTo: string
+  amountAtomic: string
+  asset: string
+  network: string
+  /** Facilitators the child is redeemable by, when the merchant advertised any. */
+  facilitatorAddresses: string[] | null
+}
+
 // ── API Response Shapes (raw, snake_case from server) ────────────
 
 /** @internal */

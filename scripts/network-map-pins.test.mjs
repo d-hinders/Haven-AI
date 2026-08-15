@@ -39,13 +39,13 @@ const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 const KNOWN_ALIASES = { base: 8453, 'base-sepolia': 84532 }
 
 /**
- * The one KNOWN divergence, documented rather than silently tolerated
- * (#1471): the SDK and signer accept the bare literal 'base-sepolia' that the
- * backend gate rejects. A client can therefore call an option payable that
- * the backend then 400s. #1471 owns deciding which side is wrong; this test
- * owns making sure the divergence set never grows past what is written here.
+ * KNOWN divergences between the client-side maps and the backend gate.
+ * EMPTY since #1471: 'base-sepolia' is a canonical identifier in the x402
+ * spec's NetworkSchema enum, so the backend was wrong to reject it and now
+ * maps it. Any entry appearing here again is a decision to record, not a
+ * default to inherit — #1471 is the precedent for how one gets resolved.
  */
-const DOCUMENTED_DIVERGENCE = ['base-sepolia']
+const DOCUMENTED_DIVERGENCE = []
 
 /** Extract `if (network === '<alias>') return <id>` pairs from a function body. */
 function bareAliasesFromConditionals(source, fnName) {

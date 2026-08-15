@@ -66,7 +66,7 @@ import type { ApiSchema } from '@haven_ai/core'
 export type Thing = ApiSchema<'Thing'>
 ```
 
-If the route is not in the spec yet, document it there first — [#1446](https://github.com/d-hinders/Haven-AI/issues/1446) tracks that backfill, and the 18 baselined shapes are waiting on it. If a type is genuinely UI-side and merely happens to carry a snake_case field, mark it `// ui-local: <reason, at least 20 chars>` on the line above; a bare marker does not exempt. After removing shapes, tighten with `npm run lint:wire-types:update` (it refuses to ratchet upward). The gate reads casing, so it does **not** see a wire shape that uses camelCase — that hole is stated in the script's header with a live example, and review is the backstop.
+If the route is not in the spec yet, document it there first — [#1446](https://github.com/d-hinders/Haven-AI/issues/1446) tracks that backfill, and the 18 baselined shapes are waiting on it. If a type is genuinely UI-side and merely happens to carry a snake_case field, mark it `// ui-local: <reason, at least 20 chars>` on the line above; a bare marker does not exempt. After removing shapes, tighten with `npm run lint:wire-types:update` (it refuses to ratchet upward). The gate reads casing, so it does **not** see a wire shape that uses camelCase, and it cannot see an anonymous inline shape (`useState<{ tx_hash: string }>`) because there is no declaration to find. Both holes are stated in the script's header with live examples; review is the backstop.
 
 ## 5. Review (two passes: code + rendered)
 

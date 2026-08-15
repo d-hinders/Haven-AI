@@ -105,9 +105,26 @@ jobs:
               # The dependency-boundary gate (#982) lives outside packages/ but
               # polices packages/backend. Without this case, weakening a rule or
               # the ratchet script would ship without the gate ever running.
-              .dependency-cruiser.cjs|scripts/dep-lint.mjs|scripts/dep-lint.test.mjs|scripts/db-mock-ratchet.mjs|scripts/db-mock-ratchet.test.mjs|scripts/lib/ratchet.mjs|scripts/generate-api-types.mjs)
+              .dependency-cruiser.cjs|scripts/dep-lint.mjs|scripts/dep-lint.test.mjs|scripts/db-mock-ratchet.mjs|scripts/db-mock-ratchet.test.mjs|scripts/generate-api-types.mjs)
                 code=true
                 backend=true
+                ;;
+              # The shared ratchet engine backs BOTH the backend db-mock gate
+              # and the frontend wire-type gate (#1447) — weakening it must run
+              # both, not just the backend one.
+              scripts/lib/ratchet.mjs)
+                code=true
+                backend=true
+                frontend=true
+                ;;
+              # Same rule as the dep-lint case above, for the wire-type ratchet
+              # (#1447): it lives outside packages/ but polices packages/frontend,
+              # and only the frontend job runs it. Without this case, a PR that
+              # ONLY loosens the scanner — widening the exemption regex, deleting
+              # the --update refusal — would go green with the gate never running.
+              scripts/lint-wire-types.mjs|scripts/lint-wire-types.test.mjs)
+                code=true
+                frontend=true
                 ;;
               packages/frontend/*)
                 code=true

@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { newViolations } from './lib/ratchet.mjs'
-import { scanSource, readBlock, BASELINE_PATH } from './lint-wire-types.mjs'
+import { scanSource, readBlock, updateRefusals, BASELINE_PATH } from './lint-wire-types.mjs'
 
 // — scanSource — what counts as a wire shape —
 test('counts an interface with a snake_case property', () => {
@@ -95,4 +95,50 @@ test('the same shape appearing in a NEW file is not grandfathered', () => {
   const baseline = { 'packages/frontend/src/hooks/useContacts.ts': { Contact: 1 } }
   const elsewhere = { 'packages/frontend/src/hooks/useOther.ts': { Contact: 1 } }
   assert.equal(newViolations(elsewhere, baseline).length, 1)
+})
+
+// — holes found in review (#1447), each now a regression test —
+test('a stray } inside a comment does not end the block early', () => {
+  // Before the fix this returned {} — the comment closed the block and
+  // chain_id vanished, turning the gate off for that declaration.
+  const source = `interface T {\n  // closes here } oops\n  chain_id: number\n}`
+  assert.deepEqual(scanSource(source), { T: 1 })
+})
+
+test('a block comment containing braces does not end the block early', () => {
+  const source = `interface U {\n  /* shape: { a } */\n  tx_hash: string\n}`
+  assert.deepEqual(scanSource(source), { U: 1 })
+})
+
+test('a generic parameter does not hide a declaration', () => {
+  assert.deepEqual(scanSource(`export type Paginated<T> = {\n  items: T[]\n  next_cursor: string\n}`), { Paginated: 1 })
+  assert.deepEqual(scanSource(`export interface Box<T> extends Base<T> {\n  chain_id: number\n}`), { Box: 1 })
+})
+
+test('an indented declaration is still counted', () => {
+  const source = `function useThing() {\n  interface Local {\n    chain_id: number\n  }\n}`
+  assert.deepEqual(scanSource(source), { Local: 1 })
+})
+
+test('an exemption does NOT ride onto the adjacent declaration below it', () => {
+  // The lookback used to span 3 lines, so a shape written directly under
+  // someone else's marker got a free pass with no marker of its own.
+  const source =
+    `// ui-local: reason of at least twenty chars here\n` +
+    `interface A { token_symbol: string }\n` +
+    `interface B { token_symbol: string }`
+  assert.deepEqual(scanSource(source), { B: 1 })
+})
+
+// — --update may tighten the baseline, never raise it —
+test('--update refuses to raise the baseline', () => {
+  const baseline = { 'packages/frontend/src/hooks/useContacts.ts': { Contact: 1 } }
+  const grown = { 'packages/frontend/src/hooks/useContacts.ts': { Contact: 1, Extra: 1 } }
+  assert.equal(updateRefusals(grown, baseline).length, 1)
+})
+
+test('--update allows a shrink, and allows the very first write', () => {
+  const baseline = { 'packages/frontend/src/hooks/useContacts.ts': { Contact: 1 } }
+  assert.deepEqual(updateRefusals({}, baseline), [])
+  assert.deepEqual(updateRefusals({ 'a.ts': { Any: 9 } }, {}), [])
 })

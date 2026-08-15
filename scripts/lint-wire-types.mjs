@@ -26,6 +26,18 @@
 // plus review, not this counter. Do not "fix" it by counting every interface —
 // see the paragraph above for why that trade is worse.
 //
+// The other known hole, and it is structural: an ANONYMOUS inline shape has no
+// declaration to find — `useState<{ tx_hash: string }>(…)`, or a function whose
+// return type is written inline. The scanner looks for named declarations, so
+// those are invisible to it at any casing. Review is the backstop there too.
+//
+// Review of this gate (#1447) closed four OTHER holes that were not deliberate,
+// each now a regression test: a stray `}` in a comment ended the block early
+// and hid every field after it; `<T>` after the name hid the declaration; four
+// spaces of indentation hid it; and a 3-line exemption lookback let one marker
+// exempt its unmarked neighbour. If you extend this scanner, extend the tests
+// with the input that defeats it first.
+//
 // NOT counted:
 //   - anything derived from `ApiSchema<'…'>` — that IS the generated type
 //   - a declaration carrying `// ui-local: <reason of at least 20 chars>`
@@ -47,30 +59,56 @@ const SCAN_DIRS = [
   join(REPO_ROOT, 'packages', 'frontend', 'src', 'types'),
 ]
 
-/** `interface X {` or `type X = {` at the start of a line (export optional). */
-const DECL_RE = /^(?:export\s+)?(?:interface\s+([A-Za-z0-9_]+)\s*(?:extends[^{]*)?\{|type\s+([A-Za-z0-9_]+)\s*=\s*\{)/gm
+/**
+ * `interface X {` or `type X = {`, with optional `export`, optional generic
+ * parameters, and optional leading indentation.
+ *
+ * Every one of those "optional"s is a hole this gate had in review: `<T>` after
+ * the name, or four spaces before `interface`, made a declaration invisible —
+ * a syntax quirk anyone could hit without meaning to dodge anything.
+ */
+const DECL_RE =
+  /^[ \t]*(?:export\s+)?(?:interface\s+([A-Za-z0-9_]+)\s*(?:<[^{]*?>)?\s*(?:extends[^{]*)?\{|type\s+([A-Za-z0-9_]+)\s*(?:<[^=]*?>)?\s*=\s*\{)/gm
 /** A snake_case property key: `api_key_prefix:` or `'api_key_prefix':`. */
 const SNAKE_PROP_RE = /(?:^|[{;,\s])'?([a-z][a-z0-9]*(?:_[a-z0-9]+)+)'?\??\s*:/
 const EXEMPT_RE = /\/\/ ui-local: .{20,}/
 
 /**
- * Read the balanced `{…}` block starting at `openIndex`, ignoring braces
- * inside strings and template literals. Returns the body text.
+ * Read the balanced `{…}` block starting at `openIndex`, ignoring braces inside
+ * strings, template literals AND comments. Returns the body text.
  *
  * A regex cannot do this: a nested object property (`connector: { … }`) would
  * end the match at the first `}`, and the wire shapes here nest routinely.
+ *
+ * Comments matter as much as strings, which review caught the hard way. A
+ * declaration whose JSDoc contains a stray `}` — an ordinary thing to write —
+ * ended the block early, and EVERY real field after it vanished from the scan.
+ * No marker and no camelCase needed: one comment silently turned the gate off
+ * for that declaration.
  */
 export function readBlock(source, openIndex) {
   let depth = 0
-  let i = openIndex
   let quote = null
-  for (; i < source.length; i++) {
+  let comment = null // 'line' | 'block'
+  for (let i = openIndex; i < source.length; i++) {
     const c = source[i]
+    const next = source[i + 1]
+
+    if (comment === 'line') {
+      if (c === '\n') comment = null
+      continue
+    }
+    if (comment === 'block') {
+      if (c === '*' && next === '/') i++, (comment = null)
+      continue
+    }
     if (quote) {
       if (c === '\\') i++
       else if (c === quote) quote = null
       continue
     }
+    if (c === '/' && next === '/') { comment = 'line'; i++; continue }
+    if (c === '/' && next === '*') { comment = 'block'; i++; continue }
     if (c === "'" || c === '"' || c === '`') { quote = c; continue }
     if (c === '{') depth++
     else if (c === '}') {
@@ -90,11 +128,12 @@ export function scanSource(source) {
     const openIndex = source.indexOf('{', match.index)
     if (openIndex === -1) continue
 
-    // The line above the declaration carries the exemption, matching how
-    // db-mock-exempt and design-lint markers are placed.
+    // The marker sits on the line IMMEDIATELY above the declaration. A wider
+    // lookback leaked: two declarations stacked together, and one legitimate
+    // marker silently exempted its unmarked neighbour too — a free ride for
+    // any new shape written under someone else's exemption.
     const lineNo = source.slice(0, match.index).split('\n').length - 1
-    const preceding = lines.slice(Math.max(0, lineNo - 3), lineNo).join('\n')
-    if (EXEMPT_RE.test(preceding)) continue
+    if (lineNo > 0 && EXEMPT_RE.test(lines[lineNo - 1])) continue
 
     const body = readBlock(source, openIndex)
     if (!SNAKE_PROP_RE.test(body)) continue
@@ -148,6 +187,19 @@ const REMEDY =
   'a snake_case field, mark it:\n' +
   '  // ui-local: <why this is not a wire shape, at least 20 chars>'
 
+/**
+ * The `--update` guard, as a pure function so it can be tested rather than
+ * only read: an update may TIGHTEN the baseline, never raise it. Returns the
+ * violations that block the write ([] when the write is allowed).
+ *
+ * The first-run case (no baseline yet) is deliberately allowed — that is how
+ * the baseline gets created.
+ */
+export function updateRefusals(counts, baseline) {
+  if (Object.keys(baseline).length === 0) return []
+  return newViolations(counts, baseline)
+}
+
 async function main() {
   const counts = await scanAll()
   const baseline = readBaseline(BASELINE_PATH)
@@ -157,8 +209,8 @@ async function main() {
   )
 
   if (process.argv.includes('--update')) {
-    const violations = newViolations(counts, baseline)
-    if (Object.keys(baseline).length > 0 && violations.length > 0) {
+    const violations = updateRefusals(counts, baseline)
+    if (violations.length > 0) {
       console.error('✗ --update refuses to RAISE the baseline. Grown:')
       for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)
       console.error(`\n${REMEDY}`)

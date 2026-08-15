@@ -8,6 +8,7 @@ import {
   type X402PaymentRequired,
 } from '@haven_ai/sdk'
 import { z } from 'zod/v3'
+import { isSettlementChildTypedData } from './settlement-child.js'
 import {
   appendSigningAuditEntry,
   createSigningAuditEntry,
@@ -467,6 +468,26 @@ export function createToolHandlers(
           // live). When typed_data is present it is what gets signed; the
           // raw-hash path below is the legacy AllowanceModule rail only.
           if (typedData) {
+            // #1476: a DELEGATION payload is an authority grant to a third
+            // party — the erc7710 settlement child, whose signature lets a
+            // merchant's facilitator pull from the treasury. It must never be
+            // signed without a Haven-signed expected context to verify against
+            // (#1455), and until now nothing stopped that: whether the child
+            // got verified depended on WHICH TOOL the caller happened to use,
+            // which is a convention, not a boundary.
+            //
+            // Keyed off the payload's own shape rather than the caller's
+            // choice, so #1254's direct-payment UserOp case is untouched: that
+            // is the account validating its OWN operation, not a grant.
+            if (isSettlementChildTypedData(typedData)) {
+              throw new HavenSigningError(
+                'Refusing to sign a delegation payload with no expected context. This typed data ' +
+                  'is a DELEGATION — signing it grants a third party authority to move funds — so ' +
+                  'it is only ever signed against a Haven-signed context that the caveats are ' +
+                  'verified against. Call this tool with { payment_id } instead (the signer then ' +
+                  'fetches and verifies the context itself), or use haven_sign_x402.',
+              )
+            }
             const signature = await signer.signDelegationTypedData(typedData)
             await auditSigning('haven_sign', payloadHash)
             return { signature }

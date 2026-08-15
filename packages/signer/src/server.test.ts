@@ -534,3 +534,51 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
     expect(payload.message).toContain('expires_at')
   })
 })
+
+/**
+ * #1476 — `haven_sign`'s raw payload_hash + typed_data fallback must refuse a
+ * DELEGATION payload. Whether an erc7710 settlement child got verified used to
+ * depend on which tool the caller reached for; the signer's core property
+ * cannot rest on a convention.
+ */
+describe('haven_sign refuses an unbound delegation payload (#1476)', () => {
+  const CHILD = JSON.parse(
+    JSON.stringify(require('../../sdk/src/__fixtures__/settlement-delegation-payload.json')),
+  )
+
+  it('refuses a settlement child passed with no expected context', async () => {
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY))
+    const result = await handlers.haven_sign({
+      payload_hash: HASH,
+      typed_data: CHILD,
+    })
+    expect(result.success).toBe(false)
+    expect(JSON.stringify(result)).toMatch(/Refusing to sign a delegation payload/)
+    // The remedy is named, and it is the path that DOES verify.
+    expect(JSON.stringify(result)).toMatch(/payment_id/)
+  })
+
+  it('still signs a direct-payment UserOp unbound (#1254 untouched)', async () => {
+    // The account validating its OWN operation is not an authority grant, and
+    // a raw hash is rejected on-chain there — so this path must keep working.
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY))
+    const result = await handlers.haven_sign({
+      payload_hash: HASH,
+      typed_data: {
+        domain: {
+          chainId: 84532,
+          name: 'HybridDeleGator',
+          version: '1',
+          verifyingContract: '0x' + '98'.repeat(20),
+        },
+        types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+        primaryType: 'PackedUserOperation',
+        message: { sender: '0x' + '98'.repeat(20) },
+      },
+    })
+    // Asserting on the REFUSAL rather than on a signature: this test exists to
+    // prove the new gate does not catch a UserOp, and whatever else this
+    // fixture does downstream is #1254's business, not #1476's.
+    expect(JSON.stringify(result)).not.toMatch(/Refusing to sign a delegation payload/)
+  })
+})

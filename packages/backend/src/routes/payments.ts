@@ -52,6 +52,7 @@ import {
 import { tryRecordMachinePaymentEvidenceBaseById, mppDemoRetired } from '../modules/mpp/index.js'
 import {
   deserializeUserOp,
+  isSettlementChainState,
   loadExecutionRailState,
   redactVendorSecrets,
   resolveExecutionRail,
@@ -835,9 +836,31 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           if (intent.prepared_user_op == null || !intent.delegation_hash) {
             throw new Error('delegation-rail intent is missing its prepared UserOperation state')
           }
+          // #1482: `prepared_user_op` is a SHARED column meaning different
+          // things per settlement scheme — a UserOp on the 3009-bridge path, a
+          // `{ child, budget }` delegation chain on erc7710 (#946/#1454). Both
+          // schemes also set `delegation_hash`, so the presence checks above
+          // cannot tell them apart. Without this guard an erc7710 intent
+          // reaching here would be handed to submitDelegationPayment as though
+          // it were a UserOp.
+          //
+          // Unreachable today — the hosted settle tool's header preflight
+          // recovers an EIP-3009 signature that an erc7710 child can never
+          // produce, and the account would reject a signature not over the
+          // correct UserOp hash. Both of those live OUTSIDE this route. A type
+          // guard belongs where the assumption is made, so a third writer to
+          // this column cannot quietly invalidate it.
+          const preparedState = deserializeUserOp(intent.prepared_user_op)
+          if (isSettlementChainState(preparedState)) {
+            throw new Error(
+              'This intent settles via erc7710 direct settlement, not a UserOperation. Its signed ' +
+                'child belongs to POST /x402/:id/settle, which assembles the merchant header — ' +
+                'refusing to submit a delegation chain as a UserOp.',
+            )
+          }
           const result = await submitDelegationPayment(
             { chain_id: intent.chain_id, delegate_address: intent.delegate_address },
-            deserializeUserOp(intent.prepared_user_op),
+            preparedState,
             signature as `0x${string}`,
           )
           txHash = result.txHash

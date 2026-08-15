@@ -3,6 +3,11 @@ import { hashMessage, hashTypedData, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { exact } from 'x402/schemes'
 import {
+  chainIdForNetwork,
+  isSettlementChildTypedData,
+  verifySettlementChild,
+} from './settlement-child.js'
+import {
   addressFromKey,
   buildX402ExpectedMessage,
   buildSweepAuthorizationMessage,
@@ -213,6 +218,37 @@ export function createEdgeSigner(
             'between tool calls (#1255): re-run the hosted quote and pass its typed_data_b64 string ' +
             'through UNCHANGED instead of re-emitting the nested JSON.',
         )
+      }
+      // #1455: the digest check above proves Haven DECLARED these bytes. It
+      // says nothing about what they mean. When the payload is a delegation —
+      // the erc7710 settlement child, whose signature lets a merchant pull from
+      // the treasury — re-derive the meaning from the caveats and refuse if it
+      // disagrees with the declaration. A backend could otherwise declare one
+      // payee and pin another, and the pair would bind perfectly.
+      if (isSettlementChildTypedData(typedData)) {
+        // A network this signer cannot map is its OWN failure, not a chain
+        // mismatch. Folding it into the comparison (as `?? -1` did) refused
+        // correctly but reported "expected chain -1", sending a reader after a
+        // phantom mismatch instead of the mapping gap (#1455 second review).
+        const settlementChainId = chainIdForNetwork(expected.network)
+        if (settlementChainId === undefined) {
+          throw new HavenSigningError(
+            `Refusing to sign the x402 settlement child: this signer cannot map the network ` +
+              `'${expected.network}' to a chain id, so it cannot check which chain the child is ` +
+              'scoped to. Update @haven_ai/signer.',
+          )
+        }
+        verifySettlementChild(typedData, {
+          merchantTo: expected.merchantTo,
+          amount: expected.amount,
+          asset: expected.asset,
+          // From the SIGNED network, not the payload's own claim. Passing
+          // Number(typedData.domain.chainId) here made the check compare a
+          // value to itself — vacuous, and precisely the "declared one thing,
+          // signed another" class this file exists to catch (#1455 review).
+          chainId: settlementChainId,
+          expiresAt: expected.expiresAt,
+        })
       }
       const account = privateKeyToAccount(delegateKey as `0x${string}`)
       // Signed VERBATIM (#829): the exact structure Haven sent, never one

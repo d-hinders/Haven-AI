@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { hashMessage, hashTypedData, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { exact } from 'x402/schemes'
+import { isSettlementChildTypedData, verifySettlementChild } from './settlement-child.js'
 import {
   addressFromKey,
   buildX402ExpectedMessage,
@@ -213,6 +214,21 @@ export function createEdgeSigner(
             'between tool calls (#1255): re-run the hosted quote and pass its typed_data_b64 string ' +
             'through UNCHANGED instead of re-emitting the nested JSON.',
         )
+      }
+      // #1455: the digest check above proves Haven DECLARED these bytes. It
+      // says nothing about what they mean. When the payload is a delegation —
+      // the erc7710 settlement child, whose signature lets a merchant pull from
+      // the treasury — re-derive the meaning from the caveats and refuse if it
+      // disagrees with the declaration. A backend could otherwise declare one
+      // payee and pin another, and the pair would bind perfectly.
+      if (isSettlementChildTypedData(typedData)) {
+        verifySettlementChild(typedData, {
+          merchantTo: expected.merchantTo,
+          amount: expected.amount,
+          asset: expected.asset,
+          chainId: Number(typedData.domain.chainId),
+          expiresAt: expected.expiresAt,
+        })
       }
       const account = privateKeyToAccount(delegateKey as `0x${string}`)
       // Signed VERBATIM (#829): the exact structure Haven sent, never one

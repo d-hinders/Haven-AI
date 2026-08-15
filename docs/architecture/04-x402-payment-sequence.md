@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-14" # #1423 re-verify: delegation-rail.ts gained the read-only disabledDelegations() probe used by revoke-all prepare — no payment path reads it and the x402 sequences are untouched. #1400 re-verify: delegation-rail.ts gained prepareCalls (batch UserOp for revoke-all); the x402 sequences here are untouched — prepareCall now delegates to the batch form with identical single-call behavior, and no payment path uses the batch. Prior: #1398 hosted fast settle validates the bounded signed X-PAYMENT header against the agent-scoped persisted intent before relaying funding; merchant/facilitator verification remains final.
+last-verified: "2026-08-15" # #1451: records the #1450 owner decision — prefer erc7710 on the delegation rail when the merchant advertises assetTransferMethod erc7710, 3009 bridge as the merchant-reach fallback. Docs only; the payTo-shape dispatch contract is unchanged. #1423 re-verify: delegation-rail.ts gained the read-only disabledDelegations() probe used by revoke-all prepare — no payment path reads it and the x402 sequences are untouched. #1400 re-verify: delegation-rail.ts gained prepareCalls (batch UserOp for revoke-all); the x402 sequences here are untouched — prepareCall now delegates to the batch form with identical single-call behavior, and no payment path uses the batch. Prior: #1398 hosted fast settle validates the bounded signed X-PAYMENT header against the agent-scoped persisted intent before relaying funding; merchant/facilitator verification remains final.
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -714,10 +714,33 @@ merchants — so the rail now selects a settlement scheme **per payment**
 live-proven 2026-07-18; design of record: RFC
 [#791](https://github.com/d-hinders/Haven-AI/issues/791) §18 "B4-D").
 
-**How the scheme is chosen.** The `modules/x402/` authorize orchestration
-(`scheme-selection.ts`, since #996) keys on the authorize request's
-`payTo` shape — which is exactly the standard-x402 SDK contract, so existing
-SDKs gained delegation-rail merchant reach with no client change:
+**Which scheme a client should PREFER (#1450, owner decision 2026-08-15).**
+Read this before the mechanism below, because the table describes how a client
+*says* what it wants, not what it *should* want:
+
+> Prefer erc7710 whenever the account is on the delegation rail and the merchant
+> advertises `extra.assetTransferMethod: "erc7710"`; fall back to the EIP-3009
+> bridge otherwise.
+
+The reason is structural: erc7710 has no funding leg, so the stranded-delegate-
+funds class ([#713](https://github.com/d-hinders/Haven-AI/issues/713) — hot
+balances, sweeps, the delegate-balance monitor) is **absent** on the preferred
+path rather than reconciled. Recipient-pinned budgets were already erc7710-only
+(`modules/x402/delegation-authorize.ts`), so they become the ordinary case
+instead of a special one.
+
+This is a preference, not a merchant-reach claim: the adoption paragraph above
+stands, which is precisely why the bridge stays. And it is not yet reachable
+from Haven's own clients — the SDK's standard-x402 path still hardcodes the
+3009 shape, and `signForData` refuses `eip712_delegation`. Epic
+[#1450](https://github.com/d-hinders/Haven-AI/issues/1450) closes that; until it
+lands, only a bespoke client written against the raw API can pay a 7710
+merchant.
+
+**How the scheme is chosen (the mechanism).** The `modules/x402/` authorize
+orchestration (`scheme-selection.ts`, since #996) keys on the authorize
+request's `payTo` shape — which is exactly the standard-x402 SDK contract, so
+existing SDKs gained delegation-rail merchant reach with no client change:
 
 | `payTo` | Scheme | Merchant sees |
 |---|---|---|

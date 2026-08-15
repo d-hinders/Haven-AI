@@ -39,6 +39,13 @@ vi.mock('../../middleware/auth.js', () => ({
   },
 }))
 
+// The spec promises `format: uuid` for these ids and the database delivers it;
+// a fixture id like 'agent-1' would make the response-shape assertion (#1444)
+// pass against a payload production can never produce.
+const AGENT_UUID = '4f9a1c2e-7b3d-4a10-9c55-2f8e6d0b1a34'
+const SAFE_UUID = 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16'
+const ALLOWANCE_UUID = '9e6b0f37-52c1-4d8a-b3f9-71a4c8e2d905'
+
 const VALID_DELEGATE = '0x1111111111111111111111111111111111111111'
 const VALID_TOKEN = '0x3333333333333333333333333333333333333333'
 const UINT96_OVERFLOW = (1n << 96n).toString()
@@ -64,11 +71,11 @@ describe('agent routes', () => {
     mockQuery
       .mockResolvedValueOnce({
         rows: [{
-          id: 'agent-1',
+          id: AGENT_UUID,
           name: 'Research Agent',
           description: null,
           delegate_address: '0x1111111111111111111111111111111111111111',
-          safe_id: 'safe-1',
+          safe_id: SAFE_UUID,
           safe_address: '0x2222222222222222222222222222222222222222',
           safe_name: 'Main wallet',
           safe_chain_id: 8453,
@@ -80,8 +87,8 @@ describe('agent routes', () => {
       })
       .mockResolvedValueOnce({
         rows: [{
-          id: 'allowance-1',
-          agent_id: 'agent-1',
+          id: ALLOWANCE_UUID,
+          agent_id: AGENT_UUID,
           token_address: '0x3333333333333333333333333333333333333333',
           token_symbol: 'USDC',
           allowance_amount: '25',
@@ -91,14 +98,14 @@ describe('agent routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/agents/agent-1',
+      url: `/agents/${AGENT_UUID}`,
     })
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({
-      id: 'agent-1',
+      id: AGENT_UUID,
       name: 'Research Agent',
-      allowances: [{ id: 'allowance-1', token_symbol: 'USDC' }],
+      allowances: [{ id: ALLOWANCE_UUID, token_symbol: 'USDC' }],
       mcp_last_seen_at: null,
     })
     // #1069: pending_approval agents are SURFACED, not hidden — an abandoned
@@ -106,7 +113,7 @@ describe('agent routes', () => {
     // agent that exists. The list/detail include them; the UI badges them
     // 'Needs setup' and links to the page where the budget grant activates.
     expect(String(mockQuery.mock.calls[0][0])).not.toContain("pending_approval")
-    expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', 'agent-1'])
+    expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', AGENT_UUID])
     // The populated shape is where drift would actually show.
     expectMatchesSpec('GET', '/agents/{id}', response.json())
 

@@ -8,17 +8,26 @@
  * test hands its real payload to `expectMatchesSpec` and the spec's own schema
  * decides.
  *
- * Deliberately strict. `additionalProperties: false` is injected into every
- * object schema that does not set it, so a field the route returns and the spec
- * never declared is a failure rather than a shrug — undeclared fields are
- * exactly the drift a consumer generating types from the spec cannot see.
- * A schema that genuinely wants to be open says so explicitly and keeps it.
+ * Strict where the spec lets it be. `additionalProperties: false` is injected
+ * into every object schema that does not state a preference, so an undeclared
+ * field is a failure rather than a shrug. **A schema that explicitly sets
+ * `additionalProperties: true` keeps it** — several do, `Agent` among them, and
+ * for those an undeclared field is permitted BY THE CONTRACT and this helper
+ * will not flag it. That is the spec's decision to make, not this file's; what
+ * still bites everywhere is a missing required field, a wrong type, a bad enum
+ * value, and (since `ajv-formats` is wired) a malformed uuid or timestamp.
  *
  * OpenAPI 3.1 schemas are JSON Schema 2020-12, so this uses ajv's 2020 entry
  * point rather than the draft-07 default.
  */
 
-import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020'
+// Two interop details, both load-bearing under `moduleResolution: NodeNext`:
+// the `.js` extension (a bare `ajv/dist/2020` does not resolve, and would throw
+// at runtime in plain node), and the NAMED `Ajv2020` import — ajv sets
+// `module.exports = Ajv2020` on a CJS module, so the default import is typed as
+// the namespace and is not constructable.
+import { Ajv2020, type ErrorObject, type ValidateFunction } from 'ajv/dist/2020.js'
+import addFormatsModule, { type FormatsPlugin } from 'ajv-formats'
 import { openapiSpec } from './spec.js'
 
 type Json = Record<string, unknown>
@@ -33,6 +42,16 @@ const ajv = new Ajv2020({
   strict: false, // OpenAPI keywords (`example`, `discriminator`) are not JSON Schema
   allErrors: true,
 })
+// Without this, `format: 'uuid'` / `'date-time'` are silently IGNORED — ajv logs
+// "unknown format … ignored" and validates nothing. A spec that promises a uuid
+// and a route that returns "banana" would have passed.
+// ajv-formats is CJS (`module.exports = plugin`, with a `.default` alias), so
+// under NodeNext the default import is typed as the namespace rather than the
+// callable. Both shapes point at the same function at runtime.
+const addFormats: FormatsPlugin =
+  (addFormatsModule as unknown as { default?: FormatsPlugin }).default ??
+  (addFormatsModule as unknown as FormatsPlugin)
+addFormats(ajv)
 
 /**
  * Resolve the response schema the spec declares for one operation.
@@ -81,13 +100,13 @@ function compile(schema: Json): ValidateFunction {
   if (!compiledFor) {
     compiledFor = new Map()
     for (const [name, definition] of Object.entries(spec.components.schemas)) {
-      ajv.addSchema(closeObjects(definition), `#/components/schemas/${name}`)
+      ajv.addSchema(closeObjects(definition) as Json, `#/components/schemas/${name}`)
     }
   }
   const key = JSON.stringify(schema)
   const existing = compiledFor.get(key)
   if (existing) return existing
-  const validate = ajv.compile(closeObjects(schema))
+  const validate = ajv.compile(closeObjects(schema) as Json)
   compiledFor.set(key, validate)
   return validate
 }

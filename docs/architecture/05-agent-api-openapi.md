@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-08-14" # #1443: the drift check no longer scopes itself to seven hand-listed route files — route-coverage.test.ts derives its scope from the app registration table; records that 89 of 136 registered routes are undocumented, deferred to #1446 under a shrink-only ceiling
+last-verified: "2026-08-15" # #1444: adds `expectMatchesSpec` — real responses validated against the spec's own schema (4 routes), with the mutation proofs and the `additionalProperties: true` limit recorded. #1443: the drift check no longer scopes itself to seven hand-listed route files — route-coverage.test.ts derives its scope from the app registration table; records that 89 of 136 registered routes are undocumented, deferred to #1446 under a shrink-only ceiling
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -143,6 +143,10 @@ dedicated `OpenAPI drift check` step in
   subset — is documented, individually justified, or explicitly deferred to the
   #1446 backfill, and the deferred surface is **shrink-only**
   (`route-coverage.test.ts`)
+- **(#1444)** selected route tests hand their REAL response payload to
+  `expectMatchesSpec` (`openapi/response-shape.ts`), which validates it against
+  the spec's own schema with ajv — see *What the response-shape assertion can
+  and cannot catch* below
 - the security scheme states the authority boundary
 - `/openapi.json` serves the same spec object the tests inspect
 
@@ -161,6 +165,38 @@ via `scripts/generate-api-types.mjs`), and a blocking CI drift check
 regenerating. Editing the spec now changes the dashboard's compile-time types
 — an inaccurate spec entry fails the frontend typecheck, which is exactly the
 pressure that keeps the contract honest.
+
+### What The Response-Shape Assertion Can And Cannot Catch (#1444)
+
+`check:api-types` compares the spec to types generated FROM that spec. Both
+sides derive from one file, so they agree by construction — including when the
+spec describes a shape no route returns. Nothing compared the spec to an actual
+response until `expectMatchesSpec(method, path, payload)`.
+
+It catches, proven by mutation on `GET /agents/{id}`:
+
+| Mutation applied to the route | Result |
+|---|---|
+| `status` dropped from the response | fails — `must have required property 'status'` |
+| `status` set to a value outside the enum | fails — `must be equal to one of the allowed values` |
+| an id that is not a uuid | fails — `must match format "uuid"` |
+
+The uuid case was not hypothetical: wiring `ajv-formats` failed the agents
+route test immediately, because its fixture returned `'agent-1'` where the spec
+promises a uuid and the database delivers one. Fixtures now use realistic uuids
+on the asserted paths.
+
+It does **not** catch an undeclared extra field on a schema that sets
+`additionalProperties: true` — `Agent` is one. The helper injects
+`additionalProperties: false` only where the schema states no preference, so an
+explicitly open schema stays open. That is the spec's decision; tightening it
+is a separate contract change, not something a test helper should do behind the
+spec's back.
+
+Coverage is deliberately partial: four assertions today (`GET /agents`,
+`GET /agents/{id}`, `POST /agents/{id}/archive`,
+`GET /machine-payments/agent`). Widening it is per-route work that belongs with
+the #1446 backfill rather than a big-bang sweep.
 
 ## Authentication And Authority Boundaries
 

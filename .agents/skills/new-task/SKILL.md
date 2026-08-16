@@ -18,6 +18,14 @@ Turn a freeform request into a loop-ready GitHub issue without implementing it.
    - **Files**: best-effort ownership.
    - **Surface**: checked surface labels.
    - **Money-path?**: explicit Yes or No.
+
+   Take the template's **body shape and its sizing rule** — "keep it small and
+   self-contained, one PR's worth of work"; anything larger is an epic, below.
+   Do **not** take its `labels:` default. The template auto-applies
+   `code-quality` because a human opening it through GitHub's UI is queueing work
+   deliberately; this skill files to the backlog unless shipping was asked for,
+   per *Backlog And Shipping*. Same template, opposite default, and only the
+   filer knows which one applies.
 5. Check GitHub for a materially duplicate open issue.
 6. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
 7. Apply every inferred `area:*` label and `money-path` when applicable. **Leave the issue unassigned** unless the requester asks to own it — both issue templates ship `assignees: []`, and a queue of unassigned issues is what the loop expects to read. Assignment records ownership; a `🔒 CLAIM` comment, never an assignee, records that someone is building right now.

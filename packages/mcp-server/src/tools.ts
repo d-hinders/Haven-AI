@@ -30,6 +30,7 @@ import {
   type X402McpTransport,
   type X402PaymentRequired,
   selectX402SettlementScheme,
+  normalizePaymentRequired,
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
@@ -1495,8 +1496,13 @@ export function createToolHandlers(
 
     haven_pay_x402_quote: async (input) => {
       const args = parse('haven_pay_x402_quote', coerceJsonField(input, 'payment_required'))
-      const payReq = args.payment_required as Record<string, unknown> | null | undefined
-      if (!payReq || typeof payReq !== 'object') {
+      // #1469: agent-supplied shape, sanitized through the SAME normalizer the
+      // parsed-Response path uses — it drops null/non-object accepts[] entries
+      // and validates the envelope. The raw cast this replaced let a null hole
+      // reach the selectors and 500 where every other caller gets a clean
+      // refusal; the Zod schema only guarantees a string-keyed record.
+      const payReq = normalizePaymentRequired(args.payment_required)
+      if (!payReq) {
         return wrongTool(
           'WRONG_TOOL',
           'The payment_required argument is missing or is not a valid x402 PaymentRequired object. Call haven_quote_x402 first to obtain the payment_required, or use haven_pay_mcp_tool for a full round trip.',
@@ -1510,9 +1516,7 @@ export function createToolHandlers(
         try {
           // Enforce the optional price cap against the merchant-authoritative
           // selected option, before creating the funding intent.
-          const option = selectStandardPaymentOption(
-            (args.payment_required as X402PaymentRequired).accepts,
-          )
+          const option = selectStandardPaymentOption(payReq.accepts)
           if (option) {
             // #1351: this path holds a payment OPTION rather than a built
             // quote, so decimals come from the same address→token binding
@@ -1554,10 +1558,9 @@ export function createToolHandlers(
               suggestedTool: 'haven_quote_x402',
             })
           }
-          const intent = await haven.createX402Intent(
-            args.payment_required as X402PaymentRequired,
-            { idempotencyKey: args.idempotency_key },
-          )
+          const intent = await haven.createX402Intent(payReq, {
+            idempotencyKey: args.idempotency_key,
+          })
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
             // #1275: optional-cap soft nudge for this generic x402 flow.

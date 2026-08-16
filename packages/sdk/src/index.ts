@@ -106,6 +106,7 @@ export {
 
 export {
   parsePaymentRequired,
+  normalizePaymentRequired,
   parsePaymentRequiredResponse,
   selectPaymentOption,
   selectStandardPaymentOption,

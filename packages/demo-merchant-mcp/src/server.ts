@@ -227,7 +227,14 @@ function completePurchase(
     `✅ Köp bekräftat!\n\n` +
     `Produkt:  ${product.name}\n` +
     `Betalat:  $${formatUsdc(payment.value)} USDC\n` +
-    `Från:     ${payment.from}\n` +
+    // #1472, decision recorded: the receipt says what the address IS. On
+    // erc7710 `payment.from` is the DELEGATE ACCOUNT (the header's delegator)
+    // — the funds provably leave the owner's treasury, not this address, so
+    // printing it as a bare "Från" made a claim about custody the chain
+    // contradicts. The #1454 live run surfaced exactly that confusion.
+    (payment.settlementMethod === 'erc7710'
+      ? `Från:     ${payment.from} (delegatkonto — betalningen dras från ägarens treasury)\n`
+      : `Från:     ${payment.from}\n`) +
     `Tx:       ${payment.txHash}\n` +
     `Nonce:    ${payment.nonce}\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +

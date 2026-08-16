@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/docs-drift/docs-drift.test.ts
   - packages/backend/src/docs-drift/env-example-drift.test.ts
   - .env.example
-last-verified: "2026-08-12" # #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
+last-verified: "2026-08-16" # #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
 ---
 
 # Documentation-quality system
@@ -64,6 +64,16 @@ satisfied-by:              # OPTIONAL (#1366): globs whose touch counts as
 last-verified: "2026-06-28" # YYYY-MM-DD a human last confirmed accuracy
 ---
 ```
+
+**Shard-first is the convention, not the fallback (#1496).** When a doc declares
+`satisfied-by:`, a PR touching its covered code writes the shard and does NOT
+edit the doc — not even to bump `last-verified`. Three merge conflicts landed in
+one day between PRs that had each already written a satisfying shard, because
+the gate's old error message said only "update each doc" and everyone obeyed it;
+the mandatory line-prepend also eventually corrupted the note line itself. The
+strict error now names the shard path for docs that declare one. Bump
+`last-verified` only when you genuinely re-read the doc body against the code —
+the per-change history lives in the shards and git log, not on that line.
 
 - `covers` is **required** but may be empty (`covers: []`) for narrative docs
   with no direct code mirror (indexes, research, archives, process prose). Keep

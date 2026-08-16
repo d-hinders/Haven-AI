@@ -1,7 +1,8 @@
 // config.ts loads dotenv and validates required env vars — import first
 import { config } from './config.js'
+import { httpErrorHandler } from './infra/http-error-handler.js'
 
-import Fastify, { type FastifyError, type FastifyRequest } from 'fastify'
+import Fastify, { type FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
 import rateLimit from '@fastify/rate-limit'
@@ -71,21 +72,8 @@ const app = Fastify({
   },
 })
 
-// --- Global error handler ---
-app.setErrorHandler((error: FastifyError, request, reply) => {
-  const statusCode = error.statusCode ?? 500
-
-  if (statusCode >= 500) {
-    request.log.error({ err: error, reqId: request.id }, 'Unhandled server error')
-  } else {
-    request.log.warn({ err: error, reqId: request.id }, 'Client error')
-  }
-
-  reply.status(statusCode).send({
-    error: statusCode >= 500 ? 'Internal server error' : error.message,
-    statusCode,
-  })
-})
+// --- Global error handler (extracted for testability, #1464) ---
+app.setErrorHandler(httpErrorHandler)
 
 // --- Process-level error handlers ---
 process.on('unhandledRejection', (reason) => {

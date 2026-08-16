@@ -13,7 +13,10 @@ instead of resetting to whoever happens to run it.
 
 It does **not** implement anything, and it does **not** file issues on its own.
 On explicit approval of a finding, append the disposition to the ledger and
-hand off to [new-task](../new-task/SKILL.md) to create the epic and sub-issues.
+hand off to [new-task](../new-task/SKILL.md) to create the epic and its slices —
+following its **Epics** section, which is what gets the `epic` label and the
+sub-issue links right. A finding filed without those is a tracking issue nothing
+can query and `ship-next` cannot pull from.
 
 ## Scope
 
@@ -77,7 +80,8 @@ scan would otherwise be empty, so the emptiness is explained.
 6. Report the **top 1–2** findings: evidence tables, the demonstrated cost,
    and a proposed slicing into disjoint sub-issues.
 7. **Stop.** Wait for the human decision. On approval: append the ledger
-   entry, then hand off to [new-task](../new-task/SKILL.md) for the epic.
+   entry, then hand off to [new-task](../new-task/SKILL.md) § *Epics* for the
+   tracking issue and its slices.
 
 ## Worked example (the run that motivated this skill)
 

@@ -2926,13 +2926,21 @@ export const openapiSpec = {
       },
       MachinePaymentAgent: {
         type: 'object',
-        required: ['id', 'name', 'status', 'safe_address', 'delegate_address', 'chain_id', 'execution_rail'],
+        required: ['id', 'name', 'status', 'safe_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail'],
         properties: {
           id: uuid,
           name: { type: 'string' },
           status: { type: 'string' },
           safe_address: address,
           delegate_address: address,
+          /**
+           * #1472: the counterfactual Hybrid account the signing EOA owns —
+           * what an erc7710 merchant sees as the X-PAYMENT header's delegator
+           * and may print as "payer". Derived per request; null on the legacy
+           * rail, and null when the derivation fails (reconciliation metadata,
+           * never authority).
+           */
+          delegate_account_address: { anyOf: [address, { type: 'null' }] },
           chain_id: { type: 'integer' },
           execution_rail: {
             type: 'string',

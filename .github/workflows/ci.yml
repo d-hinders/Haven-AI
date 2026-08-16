@@ -126,6 +126,15 @@ jobs:
                 code=true
                 frontend=true
                 ;;
+              # The network-map pin test (#1478) spans backend, sdk and signer
+              # sources — weakening it must run every job that would have
+              # caught the drift, same rule as the ratchet scripts above.
+              scripts/network-map-pins.test.mjs)
+                code=true
+                backend=true
+                sdk=true
+                signer=true
+                ;;
               packages/frontend/*)
                 code=true
                 frontend=true
@@ -240,6 +249,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Network-map pins (#1478)
+        run: npm run lint:network-pins
+
       - name: Type-check SDK
         run: npm run typecheck -w packages/sdk
 
@@ -312,6 +324,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Network-map pins (#1478)
+        run: npm run lint:network-pins
 
       - name: Type-check backend
         run: npm run typecheck -w packages/backend
@@ -510,6 +525,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Network-map pins (#1478)
+        run: npm run lint:network-pins
 
       - name: Type-check signer
         run: npm run typecheck -w packages/signer

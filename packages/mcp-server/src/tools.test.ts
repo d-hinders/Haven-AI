@@ -4134,3 +4134,31 @@ describe('hosted erc7710 rail fallback (#1456 review)', () => {
     expect(calls.find((c) => new URL(c.url).pathname.endsWith('/settle'))).toBeUndefined()
   })
 })
+
+/**
+ * #1469 — a null hole in agent-supplied accepts[] gets the clean refusal,
+ * not a 500. The Zod schema only guarantees a string-keyed record; the raw
+ * cast this fixes let the hole reach the selectors and throw.
+ */
+describe('null-holed payment_required (#1469)', () => {
+  it('haven_pay_x402_quote survives a null accepts entry and still selects the valid one', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+    const result = await handlers().haven_pay_x402_quote({
+      payment_required: { ...PAYMENT_REQUIRED, accepts: [null, ...PAYMENT_REQUIRED.accepts] },
+    })
+    // Whatever else this stub run yields, it must NOT be the crash shape.
+    expect(JSON.stringify(result)).not.toMatch(/Cannot read properties of null/)
+  })
+
+  it('an accepts of ONLY garbage entries refuses cleanly with the wrong-tool guidance', async () => {
+    const result = await handlers().haven_pay_x402_quote({
+      payment_required: { ...PAYMENT_REQUIRED, accepts: [null, 'garbage', 42] },
+    })
+    const text = JSON.stringify(result)
+    expect(text).not.toMatch(/Cannot read properties/)
+    expect(text).toMatch(/No compatible payment option|not a valid x402 PaymentRequired/)
+  })
+})

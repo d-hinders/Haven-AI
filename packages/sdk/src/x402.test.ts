@@ -1900,3 +1900,33 @@ describe('erc7710-aware option selection (#1453)', () => {
     })
   })
 })
+
+/**
+ * #1469 CHARACTERIZATION — pinned BEFORE the fix, per the issue's own AC:
+ * changing throw→skip is money-path-adjacent behaviour, so what callers see
+ * today is recorded first. These two tests are INVERTED by the fix commit.
+ */
+describe('null holes in accepts[] — before #1469', () => {
+  const valid: X402PaymentOption = {
+    scheme: 'exact',
+    network: 'eip155:8453',
+    asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    amount: '20000',
+    payTo: '0x3333333333333333333333333333333333333333',
+    maxTimeoutSeconds: 300,
+  }
+
+  it('selectStandardPaymentOption SKIPS a null entry and finds the valid one (#1469)', () => {
+    expect(selectStandardPaymentOption([null as never, valid])).toBe(valid)
+  })
+
+  it('selectErc7710PaymentOption skips nulls, and non-object entries generally', () => {
+    expect(selectErc7710PaymentOption([null as never, 'garbage' as never, 42 as never])).toBeNull()
+    expect(selectStandardPaymentOption([undefined as never, valid])).toBe(valid)
+  })
+
+  it('selectX402SettlementScheme survives a null-holed accepts on both branches', () => {
+    expect(selectX402SettlementScheme([null as never, valid], { delegationRail: true })?.option).toBe(valid)
+    expect(selectX402SettlementScheme([null as never], { delegationRail: false })).toBeNull()
+  })
+})

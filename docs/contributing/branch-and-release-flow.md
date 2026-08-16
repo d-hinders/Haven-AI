@@ -7,7 +7,7 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - .github/workflows/publish.yml
-last-verified: "2026-08-12" # post-promotion sync-back: dev must re-absorb main-mergecommiten (up-to-date-regeln på promotions-PR:ar) — verifierat live på #1335/#1336
+last-verified: "2026-08-16" # #1500: Branch-lifetime section added; the #1335/#1336 sync-back rule (dev re-absorbs main's merge commit post-promotion) still holds
 ---
 
 # Branch & release flow
@@ -43,6 +43,40 @@ feature/* or claude/*  →  dev  →  main
 The `dev-gate` workflow (`.github/workflows/dev-gate.yml`) lets only `dev` or
 `hotfix/*` merge into `main`; a `feature/*`/`claude/*` PR aimed at `main` fails
 the gate — retarget it to `dev`.
+
+### Branch lifetime: one branch per PR
+
+"Short-lived" above is a rule, not a mood: a work branch is **cut fresh from
+current `origin/dev`, carries exactly one PR, and dies on merge**. Reusing one
+branch for a sequence of PRs manufactures merge conflicts — the #1500 evidence
+was six `Merge branch 'dev' into <branch>` resyncs in one day from a single
+6-PR branch, against zero the next day at the same volume on per-PR branches.
+The cost is worse than the resync itself: a stale branch's CONFLICTING PR
+produces **no** `pull_request` check runs, so an armed auto-merge silently
+never fires and the queue stalls (#1366).
+
+**Sessions launched with a pinned "designated branch"** (Claude Code's remote
+environments inject one, with an instruction never to push elsewhere): do not
+stack PRs on the branch's previous state. Reset it from `dev` before each new
+piece of work:
+
+```sh
+git fetch origin dev && git checkout -B <designated-branch> origin/dev
+```
+
+**Guard before resetting:** the branch's previous PR must already be
+**merged** — `gh pr list --head <designated-branch> --state open` must come
+back empty. The mechanics of why: `checkout -B` is purely local and touches
+nothing remote; the hazard is the **push** that follows. Under a still-open PR
+the histories have diverged, a plain push is rejected as non-fast-forward, and
+the only way through is a force push — which rewrites the open PR's head and
+orphans its work. Once the previous PR has merged, the repo's
+delete-branch-on-merge setting has already removed the remote branch, so the
+next plain push simply recreates it — no force needed. Never force-push a
+designated branch. If a PR is open, wait for its merge or escalate. This is
+#1500's interim option 3 — the clean fix, launching sessions without a
+long-lived pinned branch, is an environment setting owned by whoever
+configures them, not something a session can change from inside.
 
 ## Issue lifecycle (implementation, not promotion)
 

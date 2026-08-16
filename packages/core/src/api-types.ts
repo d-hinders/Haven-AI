@@ -1715,6 +1715,7 @@ export type components = {
             safe_address: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             delegate_address: string;
+            delegate_account_address: string | null;
             chain_id: number;
             /**
              * @description Which on-chain policy primitive gates this agent's spend (#1306): the legacy Safe AllowanceModule (import-only accounts) or the delegation rail's active budget delegations. Reporting only — the on-chain state is the real gate either way.

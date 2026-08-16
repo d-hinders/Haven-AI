@@ -308,6 +308,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Agent details.',
             content: {
@@ -333,6 +336,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Delegate balance.',
             content: {
@@ -357,6 +363,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Archived (or already archived).',
             content: {
@@ -389,6 +398,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'No longer archived (or was not archived).',
             content: {
@@ -417,6 +429,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Agent revoked.',
             content: {
@@ -942,6 +957,9 @@ export const openapiSpec = {
           },
         ],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description:
               'The rebuilt sign_data + complete snake_case x402_expected context (field-for-field as signed).',
@@ -974,6 +992,9 @@ export const openapiSpec = {
           },
         ],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'The stored merchant call context.',
             content: {
@@ -1031,6 +1052,9 @@ export const openapiSpec = {
         summary: 'Fetch the authenticated agent identity.',
         security: [{ AgentApiKey: [] }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Agent identity for machine-payment tools.',
             content: {

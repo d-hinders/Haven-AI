@@ -2271,6 +2271,21 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -2320,6 +2335,21 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DelegateBalance"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Error response */
@@ -2394,6 +2424,21 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -2463,6 +2508,21 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -2512,6 +2572,21 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SuccessResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Error response */
@@ -3860,6 +3935,21 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3940,6 +4030,21 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["X402MerchantCallContext"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Error response */
@@ -4143,6 +4248,21 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MachinePaymentAgent"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Error response */

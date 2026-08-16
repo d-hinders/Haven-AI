@@ -32,6 +32,12 @@ export function normaliseAddress(addr: string): string {
 
 export function chainIdFromX402Network(network: string): number | null {
   if (network === 'base') return 8453
+  // #1471: 'base-sepolia' is a CANONICAL network identifier in the x402
+  // spec's own NetworkSchema enum — real merchants send the bare literal, and
+  // the SDK has always accepted it. Rejecting it here made the client call an
+  // option payable and then 400 on it, which undercut #1453's promise that
+  // selection is decided once and is trustworthy.
+  if (network === 'base-sepolia') return 84532
   if (network.startsWith('eip155:')) {
     const chainId = Number(network.slice('eip155:'.length))
     return Number.isInteger(chainId) ? chainId : null

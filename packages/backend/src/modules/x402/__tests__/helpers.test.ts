@@ -154,6 +154,10 @@ describe('chainIdFromX402Network', () => {
     expect(chainIdFromX402Network('base')).toBe(8453)
   })
 
+  it("maps the bare 'base-sepolia' alias to 84532 (#1471 — the spec's own enum)", () => {
+    expect(chainIdFromX402Network('base-sepolia')).toBe(84532)
+  })
+
   it('parses a CAIP-2 eip155 network id', () => {
     expect(chainIdFromX402Network('eip155:84532')).toBe(84532)
   })

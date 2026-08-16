@@ -192,6 +192,10 @@ const PAYMENT_STATE_STATUS_CODES: Record<string, number> = {
 
 function chainIdFromNetwork(network: string | undefined): number | undefined {
   if (network === 'base') return 8453
+  // #1471: canonical in the x402 spec's NetworkSchema, and the backend maps
+  // it as of the same change — the #1478 pin test enforces that every copy
+  // widens together, which is exactly how this line got here.
+  if (network === 'base-sepolia') return 84532
   if (!network?.startsWith('eip155:')) return undefined
   const chainId = Number(network.slice('eip155:'.length))
   return Number.isFinite(chainId) ? chainId : undefined

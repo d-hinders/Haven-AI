@@ -547,6 +547,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Recoverable setup status for the Haven UI.',
             content: {
@@ -602,6 +605,9 @@ export const openapiSpec = {
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Current setup status for the polling connector.',
             content: {
@@ -667,6 +673,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'The budget was confirmed and the setup status was returned.',
             content: {
@@ -692,6 +701,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Setup cancelled.',
             content: {
@@ -782,6 +794,9 @@ export const openapiSpec = {
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Payment intent status.',
             content: {
@@ -848,6 +863,9 @@ export const openapiSpec = {
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Receipt bundle and verification result.',
             content: {
@@ -878,6 +896,9 @@ export const openapiSpec = {
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Serializable x402 or MPP resume state.',
             content: {
@@ -1052,9 +1073,6 @@ export const openapiSpec = {
         summary: 'Fetch the authenticated agent identity.',
         security: [{ AgentApiKey: [] }],
         responses: {
-          // #1464: a malformed uuid in the path is a 400 (central 22P02
-          // mapping in infra/http-error-handler.ts), not a 500.
-          '400': errorResponse,
           '200': {
             description: 'Agent identity for machine-payment tools.',
             content: {
@@ -1129,6 +1147,9 @@ export const openapiSpec = {
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Agent payment status.',
             content: {
@@ -1570,6 +1591,9 @@ export const openapiSpec = {
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
         ],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Available filter options.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/TransactionFilterOptionsResponse' } } },
@@ -1782,6 +1806,9 @@ export const openapiSpec = {
           { name: 'id', in: 'path', required: true, schema: uuid },
         ],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Deleted.',
             content: {
@@ -1852,6 +1879,9 @@ export const openapiSpec = {
           { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
         ],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Catalog entry.',
             content: {

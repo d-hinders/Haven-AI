@@ -2,7 +2,7 @@
 import { config } from './config.js'
 import { httpErrorHandler } from './infra/http-error-handler.js'
 
-import Fastify, { type FastifyError, type FastifyRequest } from 'fastify'
+import Fastify, { type FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
 import rateLimit from '@fastify/rate-limit'

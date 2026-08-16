@@ -20,7 +20,10 @@ const PG_INVALID_TEXT_REPRESENTATION = '22P02'
  * choke point is deliberate — per-route schemas would cover only the routes
  * someone remembered to audit, while every uuid path param in the app (15
  * routes across 9 files at the time of writing, and every future one) flows
- * through THIS handler when Postgres rejects the cast.
+ * through THIS handler when Postgres rejects the cast — PROVIDED the route
+ * lets errors propagate. A route-local catch-all (user-safes deploy has one)
+ * bypasses this entirely, so the claim holds for the default error path, not
+ * as a law of nature.
  *
  * 400, not the issue's suggested 404, for a reason worth keeping: this
  * handler cannot know whether the malformed uuid came from a path param or a
@@ -34,7 +37,14 @@ export function httpErrorHandler(
   request: FastifyRequest,
   reply: FastifyReply,
 ): void {
-  if ((error as { code?: string }).code === PG_INVALID_TEXT_REPRESENTATION) {
+  if (
+    (error as { code?: string }).code === PG_INVALID_TEXT_REPRESENTATION &&
+    // Scoped to uuid casts on purpose (#1464 review): 22P02 also covers bad
+    // int/enum/jsonb casts, and a SERVER-computed value failing one of those
+    // should stay a 500 that pages someone — not a 400 blaming the client.
+    // Postgres names the type in the message, so the message is the scope.
+    /invalid input syntax for type uuid/.test(error.message ?? '')
+  ) {
     // Logged as a warn with the real error: if a 22P02 ever originates from
     // server-constructed values rather than client input, the log is where
     // that bug surfaces instead of being masked by the 400.

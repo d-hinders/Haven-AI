@@ -61,6 +61,17 @@ describe('httpErrorHandler (#1464)', () => {
     await app.close()
   })
 
+  it('a 22P02 from a NON-uuid cast stays a 500 — scoped on purpose', async () => {
+    // #1464 review: an int/enum/jsonb 22P02 can come from a SERVER-computed
+    // value, and mapping it to 400 would blame the client for a server bug.
+    const err = new Error('invalid input syntax for type integer: "abc"') as Error & { code: string }
+    err.code = '22P02'
+    const app = appThrowing(err)
+    const res = await app.inject({ method: 'GET', url: '/boom' })
+    expect(res.statusCode).toBe(500)
+    await app.close()
+  })
+
   it('does not treat a NON-pg error that happens to have a code as 22P02', async () => {
     const err = new Error('some lib error') as Error & { code: string }
     err.code = 'ERR_SOMETHING'

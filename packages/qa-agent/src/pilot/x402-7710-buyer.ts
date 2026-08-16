@@ -13,13 +13,18 @@
  * Per the #452 decisions (research doc §7): ready-made framework first
  * (MetaMask Smart Accounts Kit) to prove settlement fast — porting to Safe is
  * the follow-up; local demo-merchant as the facilitator so nothing blocks on a
- * vendor. Testnet-only, experimental, isolated from every production path.
+ * vendor. Experimental and isolated from every production path. Testnet by
+ * default; `PILOT_CHAIN=base` exists solely for the owner-run #1458 mainnet
+ * canary (the epic #1450 closing proof) — automation never sets it.
  *
  * Env (~/.haven/pilot.env):
  *   PILOT_7710_DELEGATOR_PRIVATE_KEY  throwaway EOA key controlling the smart account
  *   PILOT_MERCHANT_URL                demo-merchant base URL (e.g. http://localhost:8402)
- *   PILOT_BUNDLER_URL                 Pimlico Base Sepolia URL (deploys the delegator, sponsored)
- *   PILOT_RPC_URL                     optional, default https://sepolia.base.org
+ *   PILOT_BUNDLER_URL                 Pimlico bundler URL for the SELECTED chain (deploys the delegator, sponsored)
+ *   PILOT_CHAIN                       'base-sepolia' (default) or 'base' — 'base' is the #1458
+ *                                     mainnet canary and moves REAL USDC; it is an owner-run
+ *                                     step, never an automated one
+ *   PILOT_RPC_URL                     optional, defaults to the selected chain's public RPC
  *
  * Run: npm run pilot:x402-7710-buyer -w packages/qa-agent
  *
@@ -38,7 +43,7 @@ import {
   type Hex,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { baseSepolia } from 'viem/chains'
+import { base, baseSepolia } from 'viem/chains'
 import { entryPoint07Address } from 'viem/account-abstraction'
 import { createSmartAccountClient } from 'permissionless'
 import { createPimlicoClient } from 'permissionless/clients/pimlico'
@@ -47,8 +52,35 @@ import { createx402DelegationProvider } from '@metamask/smart-accounts-kit/exper
 import { x402Erc7710Client } from '@metamask/x402'
 import { wrapFetchWithPayment, x402Client, decodePaymentResponseHeader } from '@x402/fetch'
 
-const CHAIN: Chain = baseSepolia
-const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e' as Address
+/**
+ * Chain selection (#1458): everything chain-specific lives in one row so a
+ * mainnet run cannot end up half-Sepolia — the first draft hardcoded the chain
+ * while the operator swapped only the URLs, which would have signed a
+ * delegation for the wrong chain id.
+ */
+const CHAIN_CONFIGS = {
+  'base-sepolia': {
+    chain: baseSepolia as Chain,
+    usdc: '0x036CbD53842c5426634e7929541eC2318f3dCF7e' as Address,
+    defaultRpc: 'https://sepolia.base.org',
+    explorerTx: 'https://sepolia.basescan.org/tx/',
+  },
+  base: {
+    chain: base as Chain,
+    usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as Address,
+    defaultRpc: 'https://mainnet.base.org',
+    explorerTx: 'https://basescan.org/tx/',
+  },
+} as const
+
+const chainName = (process.env.PILOT_CHAIN ?? 'base-sepolia') as keyof typeof CHAIN_CONFIGS
+const CHAIN_CONFIG = CHAIN_CONFIGS[chainName]
+if (!CHAIN_CONFIG) {
+  console.error(`PILOT_CHAIN must be one of: ${Object.keys(CHAIN_CONFIGS).join(', ')}`)
+  process.exit(2)
+}
+const CHAIN: Chain = CHAIN_CONFIG.chain
+const USDC = CHAIN_CONFIG.usdc
 const ERC20_ABI = parseAbi(['function balanceOf(address) view returns (uint256)'])
 const VPN_BASIC_PRICE = 1_000n // 0.001 USDC — the demo merchant's cheapest product
 const DELEGATION_EXPIRY_SECONDS = 3600
@@ -84,7 +116,15 @@ async function main(): Promise<void> {
   const delegatorKey = requireEnv('PILOT_7710_DELEGATOR_PRIVATE_KEY') as Hex
   const merchantUrl = requireEnv('PILOT_MERCHANT_URL').replace(/\/$/, '')
   const bundlerUrl = requireEnv('PILOT_BUNDLER_URL')
-  const rpcUrl = process.env.PILOT_RPC_URL ?? 'https://sepolia.base.org'
+  const rpcUrl = process.env.PILOT_RPC_URL ?? CHAIN_CONFIG.defaultRpc
+
+  console.log(`chain: ${chainName} (id ${CHAIN.id})`)
+  if (chainName === 'base') {
+    // The #1458 canary is deliberately manual: the operator, not an agent,
+    // runs this. The banner is here so a mainnet run is never mistaken for a
+    // routine testnet pass in scrollback.
+    console.log('⚠️  BASE MAINNET — this run moves REAL USDC.')
+  }
 
   const publicClient = createPublicClient({ chain: CHAIN, transport: http(rpcUrl) })
   const owner = privateKeyToAccount(delegatorKey)
@@ -137,8 +177,8 @@ async function main(): Promise<void> {
   console.log(`delegator USDC balance:    ${formatUnits(balanceBefore, 6)}`)
   if (balanceBefore < VPN_BASIC_PRICE) {
     console.error('')
-    console.error(`Fund the DELEGATOR with test USDC first (≥ ${formatUnits(VPN_BASIC_PRICE, 6)}):`)
-    console.error(`  send Base Sepolia USDC to ${delegator}`)
+    console.error(`Fund the DELEGATOR with USDC first (≥ ${formatUnits(VPN_BASIC_PRICE, 6)}):`)
+    console.error(`  send ${chainName} USDC to ${delegator}`)
     console.error('then re-run. (This is the smart account paying the merchant — the whole point.)')
     process.exit(2)
   }
@@ -229,7 +269,7 @@ async function main(): Promise<void> {
   console.log(`   delegator:      ${delegator}`)
   console.log(`   spent:          ${formatUnits(balanceBefore - balanceAfter, 6)} USDC (price ${formatUnits(VPN_BASIC_PRICE, 6)})`)
   if (settle && typeof settle === 'object' && 'transaction' in settle) {
-    console.log(`   settle tx:      https://sepolia.basescan.org/tx/${(settle as { transaction?: string }).transaction}`)
+    console.log(`   settle tx:      ${CHAIN_CONFIG.explorerTx}${(settle as { transaction?: string }).transaction}`)
   } else if (paymentResponseHeader) {
     console.log(`   settle header:  ${paymentResponseHeader.slice(0, 60)}…`)
   }

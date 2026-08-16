@@ -272,3 +272,27 @@ test1366('a shard satisfies ONLY docs that declare it — not every contract doc
   assert1366.strictEqual(f.length, 1)
   assert1366.strictEqual(f[0].doc, other.doc)
 })
+
+// #1496 — a doc with satisfied-by is satisfied by a shard, NOT by editing the
+// doc; and the strict error names that path. Three one-day merge conflicts
+// came from PRs editing the same last-verified line while their shards
+// already satisfied the gate — because the message never said so.
+test('a satisfied-by shard suppresses the strict contract finding (#1496)', () => {
+  const docs = [{
+    doc: 'docs/regulatory/casp-risk-guardrails.md',
+    covers: ['packages/backend/src/modules/x402/**'],
+    lastVerified: '2020-01-01',
+    contract: true,
+    satisfiedBy: ['docs/regulatory/casp-changelog/**'],
+  }]
+  const withShard = implicatedDocs(
+    ['packages/backend/src/modules/x402/helpers.ts', 'docs/regulatory/casp-changelog/2026-08-16-1.md'],
+    docs, '2000-01-01', { strict: true },
+  )
+  assert.deepEqual(withShard, [])
+  const withoutShard = implicatedDocs(
+    ['packages/backend/src/modules/x402/helpers.ts'],
+    docs, '2000-01-01', { strict: true },
+  )
+  assert.equal(withoutShard.length, 1)
+})

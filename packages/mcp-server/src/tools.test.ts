@@ -4051,6 +4051,71 @@ describe('hosted erc7710 (#1456)', () => {
     expect(calls.find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG7710 })
     expect(calls.find((c) => c.url.includes('/payments/pay_7710/sign'))).toBeUndefined()
   })
+
+  /**
+   * #1508. The test above stubs `GET /payments/:id` as **200 / 'settled'**, and
+   * that fixture is precisely why this shipped green: the real backend answers
+   * **409** for a `submitted` intent (`agentPaymentStatusHttpCode`), and a
+   * successful erc7710 settle leaves the intent exactly there — the merchant
+   * redeems the [child, budget] chain afterwards, so 'submitted' is the
+   * EXPECTED end state on this scheme, not a transient one.
+   *
+   * `deliverMerchantPayment` then called `ensureFundingConfirmed`, which reads
+   * that endpoint UNCONDITIONALLY (the fundingTxHash argument only gates the
+   * WAIT, not the READ). The 409 became a throw, and a payment whose settlement
+   * had already succeeded was reported to the agent as API_ERROR — every time,
+   * with the merchant never contacted. Found by probing the live intent status
+   * across the handoff: after_quote=pending_signature, after_sign=
+   * pending_signature, after_settle_refused=submitted.
+   *
+   * So this pins the REAL response, not a convenient one.
+   */
+  it('#1508: settles even though the payment read 409s on the submitted intent', async () => {
+    stubFetch({
+      'POST /x402/pay_7710/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+      // What the backend actually returns once settle has flipped the intent.
+      'GET /payments/pay_7710': {
+        status: 409,
+        body: {
+          payment_id: 'pay_7710',
+          status: 'submitted',
+          message: 'The payment was submitted and is waiting for confirmation.',
+        },
+      },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } },
+      settlementTxHash: undefined,
+    })
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null,
+      warnings: [],
+      payment: null,
+    } as never)
+    // The guard is "never call it", not "call it and tolerate the failure" —
+    // there is no funding transaction on this scheme, so the wait is
+    // meaningless work whose only possible effect is this bug.
+    const fundingSpy = vi.spyOn(haven, 'ensureFundingConfirmed')
+
+    const res = ok(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: SIG7710,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.settled).toBe(true)
+    expect(res.data.settlement_scheme).toBe('erc7710')
+    expect(fundingSpy).not.toHaveBeenCalled()
+    // The merchant leg still ran — the whole point of settling.
+    expect(spy.mock.calls[0][0].paymentHeader).toBe('HEADER_FROM_HAVEN')
+  })
 })
 
 /**

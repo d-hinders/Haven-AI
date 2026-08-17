@@ -11,6 +11,7 @@ import {
   PAYMENT_REQUIRED_HEADER,
   PAYMENT_RESPONSE_HEADER,
   PAYMENT_SIGNATURE_HEADER,
+  AuthorizationAlreadyUsedError,
   SettlementRevertedError,
   USDC_ADDRESS,
   createX402PaymentProcessor,
@@ -467,7 +468,17 @@ describe('demo merchant MCP x402 flow', () => {
         method: 'tools/call',
         params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
       }, { 'mcp-session-id': sessionId, [PAYMENT_SIGNATURE_HEADER]: await signedHeader(paymentRequired) })
-      return { status: paid.status, body: await paid.json() as PaymentRequired & { error?: string } }
+      // On a 402 the body is the JSON challenge; on success it is the MCP event
+      // stream, which is not JSON — so parse defensively rather than assuming
+      // the failure shape.
+      const text = await paid.text()
+      let body: (PaymentRequired & { error?: string }) | undefined
+      try {
+        body = JSON.parse(text) as PaymentRequired & { error?: string }
+      } catch {
+        body = undefined
+      }
+      return { status: paid.status, body: body ?? ({} as PaymentRequired & { error?: string }), text }
     }
 
     it('names the fault class and points at the logs, instead of "Payment failed"', async () => {
@@ -491,6 +502,26 @@ describe('demo merchant MCP x402 flow', () => {
       const [message, context] = consoleError.mock.calls[0]
       expect(String(message)).toContain('FAULT')
       expect(context).toMatchObject({ productId: 'vpn_basic', error: rpcDown })
+    })
+
+    it('serves the goods when the authorization already settled on-chain (#1519)', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      // The chain says this authorization already moved the money. The buyer
+      // has PAID; answering 402 would charge them and deliver nothing — the
+      // exact defect observed on dev on 2026-08-17, where a successful
+      // settlement (0.001 USDC on-chain) was reported as a merchant fault.
+      const { status, body, text } = await payAndCaptureError({
+        submit: vi
+          .fn<SettlementClient['submit']>()
+          .mockRejectedValue(new AuthorizationAlreadyUsedError('nonce 0xdead already used')),
+      })
+
+      expect(status).toBe(200)
+      expect(body.error).toBeUndefined()
+      // The goods, not a challenge.
+      expect(text).toContain('Köp bekräftat')
+      // A settled payment is not a fault, so nothing is logged as one.
+      expect(consoleError).not.toHaveBeenCalled()
     })
 
     it('still reports a genuine policy rejection by its own reason, unlogged', async () => {

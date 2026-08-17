@@ -109,7 +109,22 @@ export const PRODUCTS: Record<ProductId, Product> = {
     description: 'Premium VPN. Obegränsade enheter. Höghastighetsservrar. Dubbel-VPN. 90+ länder.',
     price_usdc: 3_000n,
     category: 'vpn',
-    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
+    // #1441: deliberately EIP-3009 ONLY — the fixture that keeps the hosted
+    // FUNDING-LEG path exercisable.
+    //
+    // #1450 made Haven prefer erc7710 whenever the merchant advertises it, so
+    // once this merchant offered erc7710 on every product, no client could ask
+    // for the funding-leg flow any more and `x402-hosted-mcp-signer` had
+    // nothing to assert. Skipping that leg is not an option: the repo runs
+    // `QA_REQUIRE_ALL_LEGS=1`, whose whole point is that a leg which never runs
+    // is not coverage. Withholding erc7710 on ONE otherwise-unused product
+    // restores a merchant shape that still exists in the wild (≈every real
+    // x402 merchant is EIP-3009-only) without weakening the preference rule or
+    // touching the products other legs buy.
+    //
+    // Keep this list as-is unless the funding-leg QA moves elsewhere; widening
+    // it to SUPPORTED_SETTLEMENT_METHODS silently re-breaks that leg.
+    x402: { settlementMethods: ['eip3009'], defaultSettlementMethod: 'eip3009' },
   },
   vpn_ultra: {
     id: 'vpn_ultra',

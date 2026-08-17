@@ -20,7 +20,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-08-17" # #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
+last-verified: "2026-08-17" # #1519: merchant checks authorizationState/balanceOf before submitting, so an already-settled purchase serves the goods instead of 402ing a paid buyer; Troubleshooting gains "a merchant 402 that the chain says was paid". Prior: #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -804,6 +804,24 @@ Do not infer the cause from timing or from which legs failed: legs whose
 invariant is "the merchant did *not* settle" (`x402-delegation-3009-sweep`)
 **pass** against a merchant that is broken in this way, because a broken
 merchant and a deliberately non-settling one look identical to them.
+
+### A merchant 402 that the chain says was paid
+
+Before treating an x402 failure as a money-path defect, **check the chain**. On
+2026-08-17 `x402-settle` and `x402-delegation-3009` failed for hours while the
+money moved correctly end to end: funding Safe→delegate, then settlement
+delegate→merchant, both `Success`, delegate left at zero. Only the merchant's
+HTTP status was wrong.
+
+The tell is a `merchant-side fault (ContractFunctionExecutionError)` whose
+merchant log shows `ERC20: transfer amount exceeds balance`. That is a
+**second** settlement attempt on a delegate the merchant already drained — it
+reverts during gas estimation, so it never becomes a transaction and leaves no
+trace on-chain. Since #1519 the merchant checks `authorizationState` and
+`balanceOf` before submitting and reports both cases in plain language, so this
+should not recur; if something like it does, take the funding `tx_hash` from
+the QA failure line and look at what follows it on the delegate's ERC-20 tab
+before assuming Haven is at fault.
 
 ### GitHub warning about actions using Node 20
 

@@ -82,6 +82,7 @@ import { HavenClient } from '@haven_ai/sdk'
 import { ethers } from 'ethers'
 import { HavenApi, type MachinePaymentReceipt } from '../lib/haven-api.js'
 import { merchant402Reason } from '../lib/merchant-402.js'
+import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 
 const BASE_SEPOLIA_RPC = 'https://sepolia.base.org'
@@ -202,16 +203,23 @@ export const x402Delegation3009: Scenario = {
     // buy_vpn basic (0.001 USDC) — the settling product, same as x402-settle.
     // storage_50gb is the merchant's verify-without-settle product and belongs
     // to the sweep scenario, not this one.
-    const res = await client.fetch(mcpUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'tools/call',
-        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
-      }),
-    })
+    const res = await client.fetch(
+      mcpUrl,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+        }),
+      },
+      // A distinct purchase, not a retry of a previous one (#1520). Without
+      // this the SDK's 5-minute idempotency bucket collapses the workflow's
+      // second attempt into the first — replaying an already-spent payment.
+      { idempotencyKey: freshPurchaseIdempotencyKey('x402-delegation-3009') },
+    )
 
     if (res.status === 402) {
       return fail(

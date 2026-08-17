@@ -27,6 +27,7 @@
 
 import { ethers } from 'ethers'
 import { HavenClient } from '@haven_ai/sdk'
+import { merchant402Reason } from '../lib/merchant-402.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 
 const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
@@ -146,7 +147,9 @@ export const x402Erc7710Sdk: Scenario = {
       headers: { ...MCP_HEADERS, 'X-PAYMENT': settlement.paymentHeader },
       body: mcpBody(2),
     })
-    if (paid.status === 402) return fail('merchant still returned 402 with the erc7710 header')
+    if (paid.status === 402) {
+      return fail(`merchant still returned 402 with the erc7710 header${await merchant402Reason(paid)}`)
+    }
     const paidText = await paid.text()
     let served = false
     for (const line of paidText.split('\n')) {

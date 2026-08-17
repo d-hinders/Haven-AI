@@ -22,7 +22,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { readFile, writeFile, rm } from 'node:fs/promises'
+import { readFile, writeFile, rm, readdir } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -36,14 +36,29 @@ const pkg = (name) => join(ROOT, 'packages', name, 'package.json')
 
 const PACKAGES = ['sdk', 'signer', 'mcp', 'connect', 'cli']
 
-// Every package whose published/deployed artifact resolves @haven_ai/* deps
-// from outside the workspace (fresh `npx` install or container build). These
-// MUST pin internal deps to a concrete version — a `*` / `latest` / `workspace:*`
-// range resolves to the workspace sibling in-repo (green) but to whatever the
-// registry serves on a user's machine (the signer@0.1.10-alpha.0 / sdk crash
-// that motivated this guard). `mcp-server` is Docker-deployed rather than
-// npx-installed, but it is not private, so it is held to the same rule.
-const PUBLISHED_PACKAGES = ['sdk', 'signer', 'mcp', 'mcp-server', 'connect', 'cli']
+// Every package whose published artifact resolves @haven_ai/* deps from
+// OUTSIDE the workspace (a fresh `npx` install on someone else's machine).
+// These MUST pin internal deps to a concrete version — a `*` / `latest` /
+// `workspace:*` range resolves to the workspace sibling in-repo (green) but to
+// whatever the registry serves on a user's machine (the
+// signer@0.1.10-alpha.0 / sdk crash that motivated this guard).
+//
+// #1526: `mcp-server` used to be in this list, justified as "not private, so
+// it is held to the same rule". That reasoning inverted the actual test. Its
+// Dockerfile installs with `npm ci --workspace=packages/mcp-server
+// --workspace=packages/sdk --include-workspace-root` and builds the SDK from
+// source — it resolves from INSIDE the workspace, like `backend`. The exact
+// pin bought nothing and carried the private-consumer hazard instead: the
+// moment it fell one release out of step, `npm ci` would stop satisfying the
+// range from the workspace and silently install the published registry
+// tarball. The package is now correctly `private: true` and uses `"*"`;
+// `scripts/workspace-pin-lint.mjs` enforces both directions on every PR.
+const PUBLISHED_PACKAGES = ['sdk', 'signer', 'mcp', 'connect', 'cli']
+
+// Packages whose VERSION moves in lockstep with a release. A superset of the
+// published set: `mcp-server` is versioned for coherence with its
+// HOSTED_SERVER_VERSION constant, without being pin-managed.
+const VERSIONED_PACKAGES = [...PUBLISHED_PACKAGES, 'mcp-server']
 
 // Dep ranges that are forbidden for an internal @haven_ai/* dependency in any
 // published package, because none of them pin a concrete co-released version.
@@ -270,6 +285,62 @@ async function verifyNoWildcardInternalDeps() {
 }
 
 /**
+ * The inverse rule (#1526): fail the release if a PRIVATE workspace consumer
+ * exact-pins an internal `@haven_ai/*` dependency.
+ *
+ * This direction was unenforced, and it is the one a release can actively
+ * create: `release:bump` moves the workspace version, leaving any private
+ * consumer that names the OLD version depending on a range its sibling no
+ * longer satisfies.
+ *
+ * Measured consequence on npm 10.9.7 (#1526), rather than assumed: with the
+ * dependency's workspace outside the install scope, an exact pin leaves it
+ * NOT INSTALLED, while `"*"` symlinks regardless; a range nothing satisfies
+ * fails the install outright. The stronger claim this rule is usually told
+ * with — that npm silently substitutes the stale registry tarball, per the
+ * 2026-07-13 money-flow QA breakage — did NOT reproduce; npm linked the
+ * workspace even on a mismatched pin. Recorded as unconfirmed rather than
+ * repeated as fact.
+ *
+ * `scripts/workspace-pin-lint.mjs` checks the same rule on every PR. It is
+ * repeated here because a release must not depend on a lint having been run,
+ * and because this is the moment the hazard is actually created.
+ */
+async function verifyPrivateConsumersUnpinned() {
+  const names = (await readdir(join(ROOT, 'packages'), { withFileTypes: true }))
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+  const violations = []
+  for (const name of names) {
+    let data
+    try {
+      data = await readJson(pkg(name))
+    } catch {
+      continue
+    }
+    if (data.private !== true) continue
+    for (const depType of ['dependencies', 'devDependencies', 'peerDependencies']) {
+      for (const [depName, range] of Object.entries(data[depType] ?? {})) {
+        if (depName.startsWith('@haven_ai/') && range !== '*') {
+          violations.push(`  ${data.name} → ${depType}.${depName} = "${range}"`)
+        }
+      }
+    }
+  }
+  if (violations.length > 0) {
+    die(
+      'Private workspace consumer(s) exact-pin an internal dependency:\n' +
+      violations.join('\n') + '\n\n' +
+      'These are installed only from inside this workspace, so they must use "*".\n' +
+      'This bump would leave the pin naming a version its workspace sibling no\n' +
+      'longer is — which resolves only while that workspace is in the install\n' +
+      'scope, and not at all when it is not.',
+    )
+  }
+  log('  ✓ no exact internal @haven_ai/* pins in private workspace consumers')
+}
+
+/**
  * Verify that connect's built dist contains the expected sdkVersion and
  * signerVersion literals (they are inlined at build time), and that the
  * mcpVersion is accessible (it is a runtime reference to @haven_ai/mcp).
@@ -349,7 +420,12 @@ async function main() {
   log(`  MCP_VERSION = '${newVersion}'  (packages/mcp/src/server.ts)`)
   log(`  sdkVersion + signerVersion = '${newVersion}'  (packages/connect/src/runtime-manifest.ts)`)
   log(`  ${SOURCE_VERSION_CONSTANTS.map((c) => c.name).join(', ')} = '${newVersion}'`)
-  log(`  no wildcard internal @haven_ai/* deps (verified)`)
+  // These two are CHECKS THIS RUN WILL PERFORM, not results — the guards run
+  // after the pins are rewritten, further down. Saying "(verified)" here
+  // printed a reassuring line immediately before the run died on that very
+  // check (#1526).
+  log(`  will verify: no wildcard internal @haven_ai/* deps in published packages`)
+  log(`  will verify: no exact internal @haven_ai/* pins in private consumers`)
   log(`  dist directories wiped, packages rebuilt in order: sdk → signer → mcp → connect`)
 
   if (!process.argv.includes('--yes') && process.stdout.isTTY) {
@@ -373,7 +449,7 @@ async function main() {
   // HOSTED_SERVER_VERSION constant) even though build/publish below is scoped
   // to PACKAGES — it is Docker-deployed from source, not npm-published here.
   header('Updating package.json versions')
-  for (const name of PUBLISHED_PACKAGES) {
+  for (const name of VERSIONED_PACKAGES) {
     await updatePackageVersion(name, newVersion)
   }
 
@@ -390,11 +466,13 @@ async function main() {
   await updateDepPin('mcp', '@haven_ai/sdk', newVersion)
   log(`  packages/mcp: @haven_ai/sdk → "${newVersion}"`)
 
-  // mcp-server depends on sdk (runtime) + signer (dev). Docker-deployed, but
-  // pinned so the hosted build tracks the released SDK/signer.
-  await updateDepPin('mcp-server', '@haven_ai/sdk', newVersion)
-  await updateDepPin('mcp-server', '@haven_ai/signer', newVersion)
-  log(`  packages/mcp-server: @haven_ai/sdk, @haven_ai/signer → "${newVersion}"`)
+  // mcp-server is deliberately NOT pinned here (#1526). It is a private
+  // workspace consumer: its Docker build installs the sdk/signer workspaces
+  // directly, so `"*"` links the sibling and an exact pin would only create a
+  // window in which `npm ci` resolves the registry tarball instead. Rewriting
+  // it back to a concrete version would reintroduce exactly that window, so
+  // this omission is load-bearing — `verifyPrivateConsumersUnpinned` below
+  // fails the release if anything puts it back.
 
   // connect depends on sdk, mcp, signer (exact pins)
   await updateDepPin('connect', '@haven_ai/sdk', newVersion)
@@ -405,6 +483,7 @@ async function main() {
   // Guard: after rewriting pins, no published package may still carry a
   // wildcard internal dep. Fail loudly here rather than discover it post-publish.
   await verifyNoWildcardInternalDeps()
+  await verifyPrivateConsumersUnpinned()
 
   // ── 5. Update source-code version constants ───────────────────────────────
   header('Updating source-code version constants')

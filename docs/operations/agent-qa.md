@@ -20,7 +20,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-08-15" # #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
+last-verified: "2026-08-17" # #1519: merchant checks authorizationState/balanceOf before submitting, so an already-settled purchase serves the goods instead of 402ing a paid buyer; Troubleshooting gains "a merchant 402 that the chain says was paid". Prior: #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -178,7 +178,7 @@ The deterministic harness runs eleven scenarios in order:
 | `x402-erc7710-sdk` | The same settlement through **`HavenClient`** instead of the raw API (#1457). The leg above deliberately excludes the SDK, so it stays green whether or not Haven's own client works; this one drives `settleX402Erc7710()` end to end and asserts the same money proof — treasury −amount exactly, merchant +amount exactly, **delegate EOA unchanged**. That last assertion is the point: a silent reroute to the EIP-3009 bridge would still deliver the goods and still debit the treasury, and would only be visible in the delegate's balance. Needs `QA_DELEGATION_DELEGATE_PRIVATE_KEY` (the SDK signs in-process, unlike the hosted topology). The hosted MCP + local signer variant waits on #1456 |
 | `x402-erc7710-hosted` | The same settlement through the **default topology** — hosted MCP + local edge signer, what `npx @haven_ai/connect` installs (#1457). The two legs above cover the raw API and the SDK; neither exercises the hosted boundary, where the server must never hold a delegate key and the signature has to come from the local signer. Asserts the hosted quote **reports** `settlement_scheme: erc7710` (a silent reroute to the 3009 bridge would still deliver the goods), that settle reports **no funding tx**, and that the delegate EOA is unchanged. Signs with `haven_sign` rather than `haven_sign_x402` — the latter builds an EIP-3009 header this scheme has no use for. Ordered right after `x402-hosted-mcp-signer` so a failure is diagnosable against a topology that leg has already shown healthy |
 | `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
-| `x402-hosted-mcp-signer` | The **default user topology** (#1154): the DEPLOYED hosted MCP over HTTP plus a local `@haven_ai/signer` edge signer in-process — `haven_pay_mcp_tool` → local `haven_sign_x402` → `haven_settle_mcp_tool` → merchant settles. Asserts the quote is a **v2 (delegation-rail) context** (a v1 quote FAILS the leg: the #1138 seam would have gone untouched), that the signer really signed it, that **both** on-chain legs confirmed as distinct `status = 1` transactions, that the treasury fell, and that the delegate residual is **unchanged** (exact-amount funding nets to zero). Needs `QA_HOSTED_MCP_URL` + `QA_X402_BINDING_SIGNER` on top of `QA_DELEGATION_*` |
+| `x402-hosted-mcp-signer` | The **default user topology** (#1154): the DEPLOYED hosted MCP over HTTP plus a local `@haven_ai/signer` edge signer in-process — `haven_pay_mcp_tool` → local `haven_sign_x402` → `haven_settle_mcp_tool` → merchant settles. Asserts the quote is a **v2 (delegation-rail) context** (a v1 quote FAILS the leg: the #1138 seam would have gone untouched), that the signer really signed it, that **both** on-chain legs confirmed as distinct `status = 1` transactions, that the treasury fell, and that the delegate residual is **unchanged** (exact-amount funding nets to zero). Needs `QA_HOSTED_MCP_URL` + `QA_X402_BINDING_SIGNER` on top of `QA_DELEGATION_*`. **Skips** (#1441) when the hosted quote comes back **erc7710-shaped**: #1450's preference rule selects erc7710 whenever the merchant advertises it, and this leg's invariant is the FUNDING-LEG one, so against such a merchant it is unreachable rather than violated. Nothing goes uncovered — hosted erc7710 is `x402-erc7710-hosted`, hosted 3009 is `x402-catalog-guided-purchase` (same topology, both on-chain legs, zero residual). What this leg alone still covers is the `haven_pay_mcp_tool` ENTRY POINT on the funding path; point it at a merchant that does not advertise erc7710 to exercise that, and note `QA_REQUIRE_ALL_LEGS=1` turns the skip into a run failure |
 | `x402-catalog-guided-purchase` | The **GUIDED catalog purchase path** (epic #1305, #1312): resolves a catalog entry via `GET /catalog` (never a hardcoded id), calls `haven_prepare_catalog_purchase(catalog_id, max_amount | max_amount_human)`, signs with the local edge signer by **`payment_id`** (#1355 — the harness also sends `payment_required`, exercising the pre-#1355 fallback path alongside the new context-fetched one), then settles with `haven_settle_mcp_tool` using **only `payment_id` + `signature` + `payment_header`** — never re-sending `merchant_url`/`tool_name`/`arguments`/`mcp_transport` (that re-threading is exactly what the epic exists to eliminate; needing it FAILS the leg, does not soften it). Asserts the preflight is COMPACT, carries the #1308 machine-readable next step and a rail-labeled allowance block, marks the catalog price indicative next to the live amount, and that the settled response carries the #1310 post-purchase allowance block. Buys NordShield VPN Basic (`buy_vpn`/`{plan:"basic"}`) — a SETTLING product; never CloudNest 50 GB, which is dev's verify-without-settle sweep fixture. Same env as `x402-hosted-mcp-signer` (`QA_HOSTED_MCP_URL`, `QA_X402_BINDING_SIGNER`, `QA_DELEGATION_*`, `QA_DEMO_MERCHANT_URL`) — no new secrets. **Skips** (not fails) when no catalog row matches on dev (#1299 seed not applied) or the hosted MCP does not yet expose `haven_prepare_catalog_purchase` (pre-#1306 deploy) |
 
 The harness exits non-zero if any non-skipped scenario fails. **A skip IS a
@@ -763,6 +763,65 @@ more relayer gas than it returns, so it is left on the delegate. The scenario
 returns `below_min: true` with the balance and floor. In dev this should not
 happen (dev sets `SWEEP_MIN_USDC=0`); if it does, confirm the dev backend's
 floor is `0` rather than lowering the prod default.
+
+### An x402 leg fails with `still HTTP 402 after payment`
+
+Read the rest of the line before doing anything else. Since #1516 the leg
+appends the merchant's own account of the 402, and the two shapes it
+distinguishes have opposite causes:
+
+- **`— merchant said: <reason>`** — the merchant looked at the payment and
+  **rejected** it. The reason is the merchant's `PaymentError`; treat it as the
+  finding (a reverted settlement tx, an unusable `assetTransferMethod`, an
+  invalid payer address). Its settlement wallet and RPC are the usual suspects
+  when the reason mentions the chain.
+- **`… merchant-side fault (<Class>) … [not a policy rejection]`** — the merchant
+  **broke**, it did not refuse. Something that is not a `PaymentError` escaped
+  verification or settlement: an RPC failure, a viem error, a bug. The class
+  name is the only detail that crosses to the client on purpose; the message
+  and stack are in the merchant's own logs, which is where to look next
+  ([#1517](https://github.com/d-hinders/Haven-AI/issues/1517)). Nothing about
+  the payment is wrong — do not go looking at budgets, delegations or
+  signatures until the merchant is healthy.
+- **`— merchant re-issued a bare challenge`** — the merchant **rejected
+  nothing**. It never associated the `X-PAYMENT` header with the request, which
+  means it lost the session or pending-payment record between the challenge and
+  the paid retry. That state is in memory
+  ([#1515](https://github.com/d-hinders/Haven-AI/issues/1515)), so any container
+  restart between the two produces exactly this — including a Railway redeploy,
+  which fires on **every push to `dev`**.
+
+  Note this is detected by the challenge's `error` reading the x402 default
+  `"Payment required"`, **not** by the key being absent: the `PaymentRequired`
+  shape always carries an `error`, so a merchant response with no `error` key
+  never occurs in practice.
+
+A run that overlaps a dev merge can therefore go red without anything being
+wrong with the code. Re-dispatch once the deploy settles before investigating
+further.
+
+Do not infer the cause from timing or from which legs failed: legs whose
+invariant is "the merchant did *not* settle" (`x402-delegation-3009-sweep`)
+**pass** against a merchant that is broken in this way, because a broken
+merchant and a deliberately non-settling one look identical to them.
+
+### A merchant 402 that the chain says was paid
+
+Before treating an x402 failure as a money-path defect, **check the chain**. On
+2026-08-17 `x402-settle` and `x402-delegation-3009` failed for hours while the
+money moved correctly end to end: funding Safe→delegate, then settlement
+delegate→merchant, both `Success`, delegate left at zero. Only the merchant's
+HTTP status was wrong.
+
+The tell is a `merchant-side fault (ContractFunctionExecutionError)` whose
+merchant log shows `ERC20: transfer amount exceeds balance`. That is a
+**second** settlement attempt on a delegate the merchant already drained — it
+reverts during gas estimation, so it never becomes a transaction and leaves no
+trace on-chain. Since #1519 the merchant checks `authorizationState` and
+`balanceOf` before submitting and reports both cases in plain language, so this
+should not recur; if something like it does, take the funding `tx_hash` from
+the QA failure line and look at what follows it on the delegate's ERC-20 tab
+before assuming Haven is at fault.
 
 ### GitHub warning about actions using Node 20
 

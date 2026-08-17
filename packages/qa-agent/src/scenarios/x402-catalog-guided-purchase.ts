@@ -454,7 +454,10 @@ export const x402CatalogGuidedPurchase: Scenario = {
       )
     } catch (err) {
       if (err instanceof HostedMcpToolError) {
-        return fail(`hosted haven_settle_mcp_tool refused: ${err.code} — ${err.message.slice(0, 220)}`)
+        // 600, not 220: MERCHANT_REJECTED_AFTER_FUNDING appends the merchant's
+        // own response, and 220 chars truncated it at "Merchant response" —
+        // dropping the one sentence that names the cause (#1516).
+        return fail(`hosted haven_settle_mcp_tool refused: ${err.code} — ${err.message.slice(0, 600)}`)
       }
       throw err
     }

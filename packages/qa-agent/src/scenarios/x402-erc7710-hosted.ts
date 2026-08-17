@@ -165,7 +165,10 @@ export const x402Erc7710Hosted: Scenario = {
     } catch (err) {
       if (err instanceof HostedMcpToolError) {
         return fail(
-          `hosted haven_settle_mcp_tool refused: ${err.code} — ${err.message.slice(0, 180)}`,
+          // 600, not 180: on MERCHANT_REJECTED_AFTER_FUNDING the hosted message
+          // ends with the merchant's own response, which is the only part that
+          // says WHY — and 180 chars cut it off exactly there (#1516).
+          `hosted haven_settle_mcp_tool refused: ${err.code} — ${err.message.slice(0, 600)}`,
         )
       }
       throw err

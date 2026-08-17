@@ -2089,8 +2089,18 @@ export class HavenClient {
    * balance — otherwise it rejects with "Payment verification failed". The
    * SDK's local path already does this (see authorizeStandardX402); the hosted
    * split flow regressed when the 5→3 collapse removed the incidental
-   * inter-call latency that used to mask it. No-op when the funding tx hash or
-   * a chain RPC (chainRpcs[chainId]) is unavailable.
+   * inter-call latency that used to mask it.
+   *
+   * **NOT a no-op when the funding tx hash is absent** (#1508). The WAIT is
+   * skipped without a hash or a chain RPC, but the `GET /payments/:id` read
+   * below runs UNCONDITIONALLY — it is how the fallback hash and the chainId
+   * are obtained. That distinction is load-bearing: this method must never be
+   * called on a scheme with no funding leg, because the read itself fails once
+   * the intent reaches a status the backend maps to a non-2xx (`submitted` is a
+   * 409), turning a settled payment into a reported error. The previous wording
+   * here said "No-op when the funding tx hash ... is unavailable", and the
+   * hosted erc7710 path was written against that promise — see
+   * `deliverMerchantPayment`'s `noFundingLeg` option.
    */
   async ensureFundingConfirmed(paymentId: string, fundingTxHash?: string): Promise<void> {
     const status = await this.getPaymentStatus(paymentId)
@@ -2103,11 +2113,26 @@ export class HavenClient {
     paymentId: string
     paymentHeader: string
     mcpTransport?: X402McpTransport
+    /**
+     * #1508: the payment settles with NO funding leg (erc7710). This method was
+     * written for EIP-3009 and encodes that lifecycle in two places — the
+     * readiness gate wants `confirmed`, and a Haven funding tx hash is
+     * mandatory. Neither is reachable on a scheme where the MERCHANT redeems
+     * the delegation chain: the intent sits at `submitted` by design, and there
+     * is no Haven-submitted transaction at all. Set this to take the
+     * no-funding-leg path through both.
+     */
+    noFundingLeg?: boolean
   }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string }> {
     const evidenceContext = await this.resolveX402MerchantCompletionContext({
       paymentId: input.paymentId,
       url: input.url,
+      noFundingLeg: input.noFundingLeg === true,
     })
+    // Non-null on the funding-leg path (the gate below throws without it) and
+    // always null on erc7710. Bound once so the evidence calls — which require
+    // a string — are provably unreachable without one.
+    const fundingTxHash = evidenceContext.txHash
     const shouldHandshakeMcp =
       isMcpUrl(input.url) ||
       input.mcpTransport?.handshakeRequired === true
@@ -2137,33 +2162,45 @@ export class HavenClient {
     }
 
     if (!surfaced.ok) {
-      await this.recordMerchantRetryRejected({
-        rail: 'x402',
-        paymentId: evidenceContext.paymentId,
-        txHash: evidenceContext.txHash,
-        resourceUrl: evidenceContext.resourceUrl,
-        merchant: {
-          merchant_status: surfaced.status,
-          merchant_status_text: surfaced.statusText,
-          merchant_headers: Object.fromEntries(surfaced.headers.entries()),
-          merchant_body: text,
-        },
-        details: {
-          merchant_to: evidenceContext.merchantAddress,
-        },
-      })
+      // #1508: both evidence surfaces below require a txHash — the backend
+      // answers `400 txHash is required` without one, and these calls swallow
+      // failures, so an erc7710 row would vanish silently rather than fail
+      // loudly. Skipping deliberately (owner decision 2026-08-17) instead of
+      // writing a row that cannot be written: their consumer is funding-leg
+      // reconciliation (#713 — stranded delegate balances), and this rail has
+      // no funding leg to strand. The merchant receipt below still runs, so the
+      // paid call remains recorded.
+      if (!input.noFundingLeg && fundingTxHash) {
+        await this.recordMerchantRetryRejected({
+          rail: 'x402',
+          paymentId: evidenceContext.paymentId,
+          txHash: fundingTxHash,
+          resourceUrl: evidenceContext.resourceUrl,
+          merchant: {
+            merchant_status: surfaced.status,
+            merchant_status_text: surfaced.statusText,
+            merchant_headers: Object.fromEntries(surfaced.headers.entries()),
+            merchant_body: text,
+          },
+          details: {
+            merchant_to: evidenceContext.merchantAddress,
+          },
+        })
+      }
     } else {
-      await this.reportMachinePaymentEvidence({
-        paymentId: evidenceContext.paymentId,
-        rail: 'x402',
-        txHash: evidenceContext.txHash,
-        resourceUrl: evidenceContext.resourceUrl,
-        merchantStatus: surfaced.status,
-        paymentProofHeaderName: 'X-PAYMENT',
-        paymentProofHeader: input.paymentHeader,
-        protocolReceiptHeaderName: protocolReceiptHeader ? 'PAYMENT-RESPONSE' : undefined,
-        protocolReceiptHeader,
-      })
+      if (!input.noFundingLeg && fundingTxHash) {
+        await this.reportMachinePaymentEvidence({
+          paymentId: evidenceContext.paymentId,
+          rail: 'x402',
+          txHash: fundingTxHash,
+          resourceUrl: evidenceContext.resourceUrl,
+          merchantStatus: surfaced.status,
+          paymentProofHeaderName: 'X-PAYMENT',
+          paymentProofHeader: input.paymentHeader,
+          protocolReceiptHeaderName: protocolReceiptHeader ? 'PAYMENT-RESPONSE' : undefined,
+          protocolReceiptHeader,
+        })
+      }
       // #956: the hosted-MCP completion path is a successful paid retry too —
       // capture the merchant's receipt exactly like the local flow does.
       await this.reportMerchantReceipt(evidenceContext.paymentId, surfaced)
@@ -2210,9 +2247,12 @@ export class HavenClient {
   private async resolveX402MerchantCompletionContext(input: {
     paymentId: string
     url: string
+    /** #1508: see completeX402MerchantCall's option of the same name. */
+    noFundingLeg?: boolean
   }): Promise<{
     paymentId: string
-    txHash: string
+    /** Null on a no-funding-leg scheme — there is no Haven-submitted tx. */
+    txHash: string | null
     resourceUrl: string
     merchantAddress: string | null
   }> {
@@ -2226,20 +2266,38 @@ export class HavenClient {
       )
     }
 
-    const readyForMerchantCompletion =
-      status.nextAction === AgentPaymentNextAction.RetryOriginalX402Request ||
-      (
-        status.kind === 'payment_intent' &&
-        status.status === 'confirmed' &&
-        status.phase === AgentPaymentPhase.PaymentConfirmed &&
-        status.nextAction === AgentPaymentNextAction.None
-      )
+    // #1508: BOTH conditions below encode the EIP-3009 lifecycle, where
+    // `confirmed` means Haven's funding transaction mined and its hash is the
+    // evidence anchor. On a no-funding-leg scheme neither is reachable, and
+    // #1456 reused this helper unadapted — so every hosted erc7710 call threw
+    // `HavenPaymentStateError(status.message)`, surfacing as "The payment was
+    // submitted and is waiting for confirmation" AFTER the settlement had
+    // already succeeded, with the merchant never contacted.
+    //
+    // `submitted` is not a transient state to wait out here: it is the CORRECT
+    // and final Haven-side state for erc7710 (`modules/x402/settle.ts` — "The
+    // intent flips to 'submitted'; final settlement is observed via the
+    // merchant/receipt path"). The merchant redeems the [child, budget] chain,
+    // which is exactly the call this method is about to make.
+    const readyForMerchantCompletion = input.noFundingLeg
+      ? status.kind === 'payment_intent' && status.status === 'submitted'
+      : status.nextAction === AgentPaymentNextAction.RetryOriginalX402Request ||
+        (
+          status.kind === 'payment_intent' &&
+          status.status === 'confirmed' &&
+          status.phase === AgentPaymentPhase.PaymentConfirmed &&
+          status.nextAction === AgentPaymentNextAction.None
+        )
 
     if (!readyForMerchantCompletion) {
       throw new HavenPaymentStateError(status.message, PAYMENT_STATE_STATUS_CODES[status.status] ?? 409, status)
     }
 
-    if (!status.txHash) {
+    // Deliberately NOT relaxed to "absent is fine": on the funding-leg path a
+    // missing hash still means the evidence anchor is gone and remains a 502.
+    // The no-funding-leg path skips it because there is no such transaction to
+    // be missing — not because the check is inconvenient.
+    if (!input.noFundingLeg && !status.txHash) {
       throw new HavenApiError(
         `x402 payment ${status.paymentId} is ready for merchant completion but has no Haven transaction hash.`,
         502,

@@ -114,6 +114,32 @@ const USDC_TRANSFER_WITH_AUTHORIZATION_ABI = [
   },
 ] as const
 
+/**
+ * Read-only USDC views used to explain a settlement BEFORE submitting it
+ * (#1519). `authorizationState` is EIP-3009's own replay flag; `balanceOf` is
+ * the only other thing `transferWithAuthorization` can fail on once the
+ * signature has been verified off-chain.
+ */
+const USDC_VIEW_ABI = [
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'authorizationState',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'authorizer', type: 'address' },
+      { name: 'nonce', type: 'bytes32' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+] as const
+
 // ── Experimental ERC-7710 rail (#747, epic #452) ─────────────────────────────
 // x402 exact-EVM `assetTransferMethod: 'erc7710'`: the payer is a smart account
 // that signed an ERC-7710 delegation; verification is by *simulating*
@@ -230,6 +256,14 @@ export interface X402PaymentProcessor {
     resource: string
     description: string
     settlementMethod?: SettlementMethod
+    /**
+     * The PRODUCT's advertised methods (#1441), already intersected with what
+     * this merchant has enabled. Omitting it falls back to the merchant-wide
+     * set — which is what the challenge did before, so a product restricting
+     * its settlement methods was honoured in the catalogue metadata and
+     * IGNORED in the 402 it actually served. The 402 is the one that decides.
+     */
+    settlementMethods?: readonly SettlementMethod[]
   }): PaymentRequired
   paymentRequiredHeader(paymentRequired: PaymentRequired): string
   paymentResponseHeader(response: SettleResponse): string
@@ -318,7 +352,25 @@ export function createX402PaymentProcessor(
     const nextAttempt: SettlementAttempt = { productId: params.productId }
     attempts.set(paymentKey, nextAttempt)
     const promise = (async (): Promise<SettledCacheEntry> => {
-      const txHash = await params.verified.submit()
+      let txHash: Hex
+      try {
+        txHash = await params.verified.submit()
+      } catch (err) {
+        if (err instanceof AuthorizationAlreadyUsedError) {
+          // The chain says this authorization already moved the money (#1519).
+          // In-memory `settled`/`attempts` are the fast path; the chain is the
+          // TRUTH, and it survives the restarts they do not. Record the
+          // settlement so the buyer is told what actually happened — the goods
+          // are owed — rather than being charged and handed a 402.
+          const entry: SettledCacheEntry = {
+            productId: params.productId,
+            payment: buildSettledPayment(params, ZERO_TX_HASH),
+          }
+          settled.set(productKey, entry)
+          return entry
+        }
+        throw err
+      }
       nextAttempt.txHash = txHash
       return confirmSubmittedPayment(params, productKey, txHash)
     })()
@@ -469,7 +521,20 @@ export function createX402PaymentProcessor(
     buildPaymentRequired: (params) =>
       buildPaymentRequired({
         ...params,
-        settlementMethods,
+        // INTERSECTION, not precedence (#1441). The two lists mean different
+        // things and neither may simply win:
+        //   - the merchant-wide set is a HARD GATE — erc7710 absent here means
+        //     it is unconfigured, and must never be advertised whatever a
+        //     product claims;
+        //   - the caller's list is the PRODUCT's own restriction, which may
+        //     narrow the gate further but never widen it.
+        // Written as `...params, settlementMethods` this sat after the spread
+        // and silently discarded the product's list, so a 3009-only product
+        // still advertised erc7710 in its 402 — the catalogue and the
+        // challenge disagreed, and the challenge is the one that decides.
+        settlementMethods: params.settlementMethods
+          ? settlementMethods.filter((method) => params.settlementMethods?.includes(method))
+          : settlementMethods,
         facilitatorAddresses: settlementClient.erc7710?.redeemerAddress
           ? [settlementClient.erc7710.redeemerAddress]
           : undefined,
@@ -529,6 +594,60 @@ export function createViemSettlementClient(params: {
       if (parsed.v === undefined) {
         throw new PaymentError('Payment signature is missing v value')
       }
+
+      // Explain the settlement BEFORE submitting it (#1519).
+      //
+      // Once the signature has verified off-chain, `transferWithAuthorization`
+      // has exactly two remaining on-chain failure modes, and viem reports both
+      // as an unwrapped `ContractFunctionExecutionError` raised during gas
+      // estimation — which the caller could only surface as a merchant-side
+      // FAULT, i.e. "this merchant is broken". Neither is a merchant fault:
+      // both are facts about the payer that the payer needs told plainly.
+      //
+      // This cost a full day of triage on 2026-08-17: the demo merchant settled
+      // a payment successfully, was asked to settle the same purchase again,
+      // and reported `ERC20: transfer amount exceeds balance` as a fault. The
+      // money had moved correctly; only the report was wrong.
+      const [payerBalance, authorizationUsed] = (await Promise.all([
+        publicClient.readContract({
+          address: USDC_ADDRESS,
+          abi: USDC_VIEW_ABI,
+          functionName: 'balanceOf',
+          args: [getAddress(authorization.from)],
+        }),
+        publicClient.readContract({
+          address: USDC_ADDRESS,
+          abi: USDC_VIEW_ABI,
+          functionName: 'authorizationState',
+          args: [getAddress(authorization.from), authorization.nonce as Hex],
+        }),
+      ])) as [bigint, boolean]
+
+      console.log('[x402] pre-submit', {
+        from: authorization.from,
+        to: authorization.to,
+        value: authorization.value,
+        nonce: authorization.nonce,
+        payerBalance: payerBalance.toString(),
+        authorizationUsed,
+      })
+
+      if (authorizationUsed) {
+        // EIP-3009 nonces are single-use. Re-submitting is guaranteed to revert
+        // and would misreport an ALREADY-SETTLED payment as a failure.
+        throw new AuthorizationAlreadyUsedError(
+          `Payment authorization ${authorization.nonce} has already been used on-chain by ` +
+            `${authorization.from}. This purchase already settled — do not resubmit it.`,
+        )
+      }
+      if (payerBalance < BigInt(authorization.value)) {
+        throw new PaymentError(
+          `Payer ${authorization.from} holds ${payerBalance} USDC units but the authorization ` +
+            `requires ${authorization.value}. The payment was not funded, or its funds were ` +
+            'already spent by an earlier settlement of the same purchase.',
+        )
+      }
+
       return walletClient.writeContract({
         address: USDC_ADDRESS,
         abi: USDC_TRANSFER_WITH_AUTHORIZATION_ABI,
@@ -873,3 +992,14 @@ export class PaymentError extends Error {
  * double-submit revert harmlessly on-chain.
  */
 export class SettlementRevertedError extends PaymentError {}
+
+/**
+ * The EIP-3009 authorization was ALREADY consumed on-chain (#1519) — the
+ * purchase settled, and this is a duplicate submission of it.
+ *
+ * A `PaymentError` subclass so it is reported as a decision rather than a
+ * merchant fault, and distinct so `settleOnce` can treat it as the success it
+ * describes instead of a refusal: a buyer whose money already reached the
+ * merchant must not be told the payment failed.
+ */
+export class AuthorizationAlreadyUsedError extends PaymentError {}

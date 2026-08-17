@@ -123,6 +123,20 @@ async function waitForReceipt(
   }
 }
 
+/**
+ * The ONLY merchant plan that advertises eip3009 ALONE (#1441).
+ *
+ * Every other product also offers erc7710, and #1450's preference rule then
+ * picks it — which has no funding leg, leaving this leg's invariant ("two
+ * on-chain legs, zero delegate residual") with nothing to assert. That is why
+ * this leg skipped permanently rather than failing: it was unreachable, not
+ * broken.
+ *
+ * Both the quote and the settle must name the same plan, so it lives here
+ * rather than being written twice.
+ */
+const FUNDING_LEG_PLAN = 'legacy'
+
 export const x402HostedMcpSigner: Scenario = {
   name: 'x402-hosted-mcp-signer',
   invariant:
@@ -206,7 +220,14 @@ export const x402HostedMcpSigner: Scenario = {
       quote = await hosted.callTool<HostedPayMcpToolResult>('haven_pay_mcp_tool', {
         merchant_url: mcpUrl,
         tool_name: 'buy_vpn',
-        arguments: { plan: 'basic' },
+        arguments: { plan: FUNDING_LEG_PLAN },
+        // #1351 made a spending cap MANDATORY on haven_pay_mcp_tool; this leg
+        // predates that and went uncapped, so the hosted tool refused with
+        // INVALID_INPUT before contacting the merchant — the leg never reached
+        // the topology it exists to cover. Whole tokens (max_amount_human) is
+        // the preferred spelling and matches x402-erc7710-hosted; the purchase
+        // is 0.001 USDC, so 1 USDC is a real ceiling that never binds.
+        max_amount_human: '1',
         // Fresh per attempt: a reused key would resume the previous run's
         // intent, and a resumed intent proves nothing about this run.
         idempotency_key: `qa-hosted-${Date.now()}`,
@@ -216,6 +237,48 @@ export const x402HostedMcpSigner: Scenario = {
         return fail(`hosted haven_pay_mcp_tool refused: ${err.code} — ${err.message.slice(0, 180)}`)
       }
       throw err
+    }
+
+    // #1441: this leg's invariant is the FUNDING-LEG topology — "both on-chain
+    // legs succeed, delegate left with zero residual". #1450 made the hosted
+    // tool prefer erc7710 whenever the merchant advertises it, and erc7710 has
+    // no funding leg at all, so against such a merchant the invariant is not
+    // merely failing, it is unreachable: the quote comes back in the erc7710
+    // shape (payment_id + settlement_scheme, no status/payload_hash) and the
+    // checks below have nothing to read.
+    //
+    // Skip rather than fail, and NOT because failing is inconvenient — nothing
+    // here goes uncovered:
+    //   - hosted erc7710 → `x402-erc7710-hosted` (settles, asserts the delegate
+    //     EOA is untouched),
+    //   - hosted 3009 → `x402-catalog-guided-purchase`, which drives the SAME
+    //     hosted MCP + local signer topology through
+    //     `haven_prepare_catalog_purchase` and proves both on-chain legs plus a
+    //     zero delegate residual.
+    // What this leg alone still covers is the `haven_pay_mcp_tool` ENTRY POINT
+    // on the funding path, which is why it stays rather than being deleted.
+    //
+    // Under QA_REQUIRE_ALL_LEGS=1 the runner turns this skip into a run
+    // failure, which is the intended escalation for an operator who wants the
+    // funding path exercised from this entry point (point it at a merchant that
+    // does not advertise erc7710).
+    // #1441: this leg buys `vpn_legacy`, the one product advertising eip3009
+    // ALONE, so the funding-leg topology is now REACHABLE and an erc7710 quote
+    // is a regression rather than an unreachable invariant. It used to skip
+    // here — permanently, because every product offered erc7710 and #1450's
+    // preference rule always picked it, which under QA_REQUIRE_ALL_LEGS=1 meant
+    // the suite could never report green.
+    //
+    // Failing, not skipping, is the point: if scheme selection ever ignores a
+    // merchant that offers no erc7710 option, that is a real defect on the
+    // funding path and this leg is the one that catches it.
+    const quoteScheme = (quote as { settlement_scheme?: string }).settlement_scheme
+    if (quoteScheme === 'erc7710' || (!quote.payload_hash && quote.status === undefined)) {
+      return fail(
+        `hosted quote selected ${JSON.stringify(quoteScheme ?? 'a no-funding-leg scheme')} for ` +
+          `plan '${FUNDING_LEG_PLAN}', which advertises eip3009 ONLY — scheme selection ignored the ` +
+          "merchant's advertised methods, or the dev merchant no longer serves the 3009-only product",
+      )
     }
 
     if (quote.status === 'pending_approval' || !quote.payload_hash) {
@@ -281,7 +344,7 @@ export const x402HostedMcpSigner: Scenario = {
         signature,
         merchant_url: mcpUrl,
         tool_name: 'buy_vpn',
-        arguments: { plan: 'basic' },
+        arguments: { plan: FUNDING_LEG_PLAN },
         payment_header: paymentHeader,
         ...(quote.mcp_transport ? { mcp_transport: quote.mcp_transport } : {}),
       })

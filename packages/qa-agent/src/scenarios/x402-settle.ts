@@ -11,6 +11,8 @@
  */
 
 import { HavenClient } from '@haven_ai/sdk'
+import { merchant402Reason } from '../lib/merchant-402.js'
+import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 
 const BASE_SEPOLIA_RPC = 'https://sepolia.base.org'
@@ -48,13 +50,24 @@ export const x402Settle: Scenario = {
       params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
     })
 
-    const res = await client.fetch(mcpUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-      body,
-    })
+    const res = await client.fetch(
+      mcpUrl,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+        body,
+      },
+      // A distinct purchase, not a retry of a previous one (#1520). Without
+      // this the SDK's 5-minute idempotency bucket collapses the workflow's
+      // second attempt into the first — replaying an already-spent payment.
+      { idempotencyKey: freshPurchaseIdempotencyKey('x402-settle') },
+    )
 
-    if (res.status === 402) return fail('still HTTP 402 after payment — settlement did not complete')
+    if (res.status === 402) {
+      return fail(
+        `still HTTP 402 after payment — settlement did not complete${await merchant402Reason(res)}`,
+      )
+    }
     if (!res.ok) return fail(`merchant returned HTTP ${res.status} after payment`)
 
     const text = await res.text()

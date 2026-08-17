@@ -356,3 +356,101 @@ describe('hosted tool refusals are reported as such', () => {
     expect(r.detail).toMatch(/OVER_BUDGET/)
   })
 })
+
+describe('an erc7710 quote is now a REGRESSION, not an out-of-scope skip (#1441)', () => {
+  // The leg buys `vpn_legacy`, the one product advertising eip3009 ALONE, so
+  // the funding-leg topology is reachable. #1450's preference rule has no
+  // erc7710 option to prefer here — if a quote comes back erc7710 anyway,
+  // scheme selection ignored the merchant's advertised methods, or the dev
+  // merchant stopped serving the 3009-only product. Either is a real defect.
+  //
+  // This used to SKIP, which under QA_REQUIRE_ALL_LEGS=1 meant the suite could
+  // never report green.
+  const erc7710Quote = {
+    payment_id: 'pay_7710',
+    settlement_scheme: 'erc7710',
+    settlement: { scheme: 'erc7710', funding_leg: false, merchant_pay_to: '0x' + 'cc'.repeat(20) },
+    // Deliberately absent, as on the real erc7710 branch: no status, no
+    // payload_hash. The old code read those and reported 'unknown'.
+  }
+
+  it('FAILS on an erc7710 quote instead of skipping', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_pay_mcp_tool' ? erc7710Quote : settled(),
+    )
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.skipped).toBeFalsy()
+    expect(r.detail).toMatch(/erc7710/)
+  })
+
+  it('names the plan and what it advertises, so the failure is actionable', async () => {
+    // A bare "wrong scheme" would send a triager to scheme selection when the
+    // likelier cause is that the merchant stopped serving the 3009-only
+    // product. The message has to distinguish those.
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_pay_mcp_tool' ? erc7710Quote : settled(),
+    )
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.detail).toMatch(/legacy/)
+    expect(r.detail).toMatch(/eip3009 ONLY/)
+  })
+
+  it('still SIGNS nothing and settles nothing on that path', async () => {
+    // A failure that had already signed would leave a live intent behind.
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_pay_mcp_tool' ? erc7710Quote : settled(),
+    )
+    await x402HostedMcpSigner.run(ctx())
+    expect(mockSignX402).not.toHaveBeenCalled()
+    expect(mockCallTool.mock.calls.some(([t]) => t === 'haven_settle_mcp_tool')).toBe(false)
+  })
+
+  it('a 3009 quote is UNAFFECTED — the funding path still runs and passes', async () => {
+    // The guard must key on the erc7710 shape only. If it caught the 3009 shape
+    // too, this leg would skip forever and the regression would be invisible.
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.skipped).toBeFalsy()
+    expect(r.pass).toBe(true)
+  })
+})
+
+describe('the request this leg actually sends (#1441)', () => {
+  // This leg went red for three nights on `INVALID_INPUT — A spending cap is
+  // REQUIRED`, and every test above stayed green through it, because they all
+  // stub `callTool` by TOOL NAME and never look at the arguments. So the leg
+  // could stop satisfying the tool's input contract without one assertion
+  // moving. #1351 made the cap mandatory on haven_pay_mcp_tool; this leg was
+  // written before that and was never updated.
+  //
+  // The refusal happens BEFORE the merchant is contacted, which is what makes
+  // it worth pinning here rather than leaving to the live run: an uncapped call
+  // never reaches the hosted-topology seam this whole scenario exists to cover,
+  // so the leg is not merely failing, it is measuring nothing.
+  it('sends a spending cap on the hosted quote — uncapped is refused by #1351', async () => {
+    await x402HostedMcpSigner.run(ctx())
+
+    const payCall = mockCallTool.mock.calls.find(([tool]) => tool === 'haven_pay_mcp_tool')
+    expect(payCall, 'the leg never called haven_pay_mcp_tool').toBeDefined()
+
+    const args = payCall![1] as Record<string, unknown>
+    const hasCap = args.max_amount_human !== undefined || args.max_amount !== undefined
+    expect(hasCap, 'haven_pay_mcp_tool requires a cap (#1351) — this call carries neither max_amount_human nor max_amount').toBe(true)
+
+    // Exactly one spelling: both together is AMBIGUOUS_MAX_AMOUNT, refused
+    // before any network call, which would be the same silent-red outcome in a
+    // different costume.
+    expect(args.max_amount_human !== undefined && args.max_amount !== undefined).toBe(false)
+  })
+
+  it('caps above the purchase price, so the cap never masks a real regression', async () => {
+    // A cap that BINDS would turn a genuine over-budget regression into a
+    // cap refusal and vice versa. The buy is 0.001 USDC; the cap is whole
+    // tokens and must leave headroom.
+    await x402HostedMcpSigner.run(ctx())
+    const payCall = mockCallTool.mock.calls.find(([tool]) => tool === 'haven_pay_mcp_tool')
+    const human = (payCall![1] as Record<string, unknown>).max_amount_human
+    expect(typeof human).toBe('string')
+    expect(Number(human)).toBeGreaterThanOrEqual(1)
+  })
+})

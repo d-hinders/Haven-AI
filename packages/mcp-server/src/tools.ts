@@ -1332,6 +1332,11 @@ export function createToolHandlers(
             // No funding tx to confirm — passing one would make the delivery
             // helper wait for a transaction that will never exist.
             undefined,
+            // #1508: and `undefined` alone is NOT enough. The helper still read
+            // the payment status unconditionally, which is a 409 here because
+            // the settle above already moved the intent to 'submitted'. Say
+            // "there is no funding leg" explicitly instead of implying it.
+            { noFundingLeg: true },
           )
           const summary7710 = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
           return {
@@ -2519,6 +2524,9 @@ async function deliverMerchantPayment(
   // Funding tx hash from haven_submit when known (settle path); the wait falls
   // back to the payment status when omitted (complete path).
   fundingTxHash?: string,
+  // #1508: a scheme with NO funding leg (erc7710) must skip the funding wait
+  // ENTIRELY. Omitting fundingTxHash above does NOT achieve that — see below.
+  options?: { noFundingLeg?: boolean },
 ): Promise<{ status: number; ok: boolean; result: unknown; settlement_tx_hash: string | null }> {
   // #1307: resolve merchant_url/tool_name/arguments/mcp_transport BEFORE
   // waiting on funding confirmation — a version-skew refusal (no stored
@@ -2529,7 +2537,19 @@ async function deliverMerchantPayment(
   // verifies the X-PAYMENT header — otherwise its balanceOf(delegate) check
   // races the not-yet-mined funding tx and returns "Payment verification
   // failed". No-op if BASE_RPC_URL isn't configured (chainRpcs unset).
-  await haven.ensureFundingConfirmed(args.payment_id, fundingTxHash)
+  //
+  // #1508: on a no-funding-leg scheme this must not run AT ALL, and passing
+  // `undefined` for fundingTxHash is not the same thing — the bug this fixes.
+  // `ensureFundingConfirmed` reads GET /payments/:id UNCONDITIONALLY before it
+  // ever looks at the hash, and by this point an erc7710 settle has already
+  // flipped the intent to 'submitted', which the backend maps to HTTP 409
+  // (`agentPaymentStatusHttpCode`). The SDK turns that into a throw, so a
+  // payment whose settlement SUCCEEDED was reported to the agent as a failure —
+  // deterministically, on every hosted erc7710 call, with the merchant never
+  // contacted.
+  if (!options?.noFundingLeg) {
+    await haven.ensureFundingConfirmed(args.payment_id, fundingTxHash)
+  }
 
   const envelope = {
     jsonrpc: '2.0',
@@ -2549,6 +2569,9 @@ async function deliverMerchantPayment(
       paymentId: args.payment_id,
       paymentHeader: args.payment_header,
       mcpTransport: parseMcpTransport(context.mcpTransportRaw),
+      // #1508: the same flag that skips the funding wait above also has to
+      // reach the SDK's completion gate, which is where the real refusal was.
+      noFundingLeg: options?.noFundingLeg === true,
     })
   } catch (err) {
     // #1300 review finding: at this point funding is CONFIRMED on-chain, so a

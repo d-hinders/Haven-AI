@@ -16,9 +16,11 @@ import {
   DEFAULT_SETTLEMENT_METHOD,
   HOSTED_DEMO_MERCHANT_URLS,
   PRODUCTS,
+  SUPPORTED_SETTLEMENT_METHODS,
   formatUsdc,
   isSettlementMethod,
   merchantEnvironmentForChain,
+  settlementMethodsForProduct,
   type ProductId,
   type SettlementMethod,
 } from './products.js'
@@ -154,6 +156,15 @@ async function handlePaymentGate(
     resource: `${options.baseUrl}${options.path}`,
     description,
     settlementMethod,
+    // The PRODUCT's methods, intersected with what this merchant has enabled
+    // (#1441). Without this the challenge fell back to the merchant-wide set,
+    // so a product restricting its settlement methods was honoured in the
+    // catalogue metadata and IGNORED in the 402 it actually served — the two
+    // disagreed, and the 402 is the one that decides.
+    settlementMethods: settlementMethodsForProduct(
+      product,
+      options.settlementMethods ?? SUPPORTED_SETTLEMENT_METHODS,
+    ),
   })
   const paymentHeader = getPaymentHeader(req)
 
@@ -171,10 +182,35 @@ async function handlePaymentGate(
       paymentRequired,
     })
   } catch (err) {
+    // A PaymentError is a DECISION: the merchant looked at the payment and
+    // refused it, and its message is the reason. Anything else is a FAULT —
+    // an RPC failure, a viem error, a bug — and the two must not be reported
+    // the same way (#1517).
+    //
+    // Until now they were. Every fault collapsed to the string "Payment
+    // failed" and was never logged, so a broken merchant was indistinguishable
+    // from a strict one both to the client AND in the server's own logs. That
+    // silence cost a day of QA triage on 2026-08-17: six red legs whose only
+    // evidence was a generic 402.
+    if (err instanceof PaymentError) {
+      writePaymentRequired(res, options, withReason(paymentRequired, err.message))
+      return null
+    }
+
+    // Faults get logged in full, server-side, where the stack is safe to keep.
+    console.error('[x402] payment verification/settlement FAULT (not a policy rejection)', {
+      productId,
+      settlementMethod,
+      error: err,
+    })
+    // The client gets the error's CLASS, not its message: enough to tell a
+    // fault from a rejection and to say which kind, without putting internal
+    // detail or addresses in a response any payer can read.
+    const faultName = err instanceof Error && err.name ? err.name : 'UnknownError'
     writePaymentRequired(
       res,
       options,
-      { ...paymentRequired, error: err instanceof PaymentError ? err.message : 'Payment failed' },
+      withReason(paymentRequired, `Payment failed — merchant-side fault (${faultName}); see merchant logs`),
     )
     return null
   }
@@ -226,6 +262,23 @@ function getPaymentHeader(req: IncomingMessage): string | undefined {
     firstHeader(req.headers[PAYMENT_SIGNATURE_HEADER.toLowerCase()]) ??
     firstHeader(req.headers[LEGACY_PAYMENT_SIGNATURE_HEADER.toLowerCase()])
   )
+}
+
+/**
+ * Replace the challenge's default `error` ("Payment required") with a real
+ * reason, keeping the reason as the FIRST key (#1517).
+ *
+ * Both halves matter. `buildPaymentRequired` always sets `error: 'Payment
+ * required'`, so a naive `{ error: reason, ...paymentRequired }` puts the
+ * default back and silently discards the reason. And a naive
+ * `{ ...paymentRequired, error: reason }` keeps the reason but strands it
+ * behind `accepts`, which is long enough that clients echoing a truncated body
+ * quote a payload that never says why — how the hosted QA legs reported a
+ * rejection they could not explain.
+ */
+function withReason<T extends { error?: string }>(paymentRequired: T, reason: string): T {
+  const { error: _default, ...rest } = paymentRequired
+  return { error: reason, ...rest } as T
 }
 
 function writePaymentRequired(
@@ -303,7 +356,8 @@ function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
 
   if (toolName === 'buy_vpn') {
     const plan = args.plan as string | undefined
-    if (plan === 'basic' || plan === 'pro' || plan === 'ultra') {
+    // `legacy` is the EIP-3009-only plan (#1441) — see PRODUCTS.vpn_legacy.
+    if (plan === 'basic' || plan === 'pro' || plan === 'ultra' || plan === 'legacy') {
       productId = `vpn_${plan}` as ProductId
     }
   } else if (toolName === 'buy_cloud_storage') {

@@ -207,6 +207,13 @@ export const x402HostedMcpSigner: Scenario = {
         merchant_url: mcpUrl,
         tool_name: 'buy_vpn',
         arguments: { plan: 'basic' },
+        // #1351 made a spending cap MANDATORY on haven_pay_mcp_tool; this leg
+        // predates that and went uncapped, so the hosted tool refused with
+        // INVALID_INPUT before contacting the merchant — the leg never reached
+        // the topology it exists to cover. Whole tokens (max_amount_human) is
+        // the preferred spelling and matches x402-erc7710-hosted; the purchase
+        // is 0.001 USDC, so 1 USDC is a real ceiling that never binds.
+        max_amount_human: '1',
         // Fresh per attempt: a reused key would resume the previous run's
         // intent, and a resumed intent proves nothing about this run.
         idempotency_key: `qa-hosted-${Date.now()}`,

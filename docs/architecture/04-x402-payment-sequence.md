@@ -914,6 +914,29 @@ can never be valid); and the per-agent hourly x402 cap now guards the delegation
 branch too — placed after the replay lookup (replays are never rate-limited) but
 before any sponsored prepare, making it sponsorship-cost protection as well.
 
+**What a replayed `confirmed` intent means on the client**
+([#1521](https://github.com/d-hinders/Haven-AI/issues/1521)). The replay above
+is correct on the backend, but `status: 'confirmed'` is **ambiguous** by the
+time the SDK reads it: it says the FUNDING leg confirmed, and is equally true
+of a payment whose merchant leg never ran (delegate still holds the money —
+resume) and one whose merchant leg completed (delegate spent — nothing left to
+authorize). Only the delegate's on-chain balance separates them; Haven's own
+merchant-settlement evidence cannot, because the SDK writes that record
+*after* the merchant call, so a client that dies in between leaves the backend
+believing the merchant was never paid.
+
+The SDK therefore checks `balanceOf(delegate)` before minting an EIP-3009
+authorization on this branch, and mints **nothing** until the branch is
+decided — the authorization used to be created before the authorize call, so a
+replay handed back a fresh unfundable header paired with the ORIGINAL payment's
+`tx_hash`, and the caller learned what had happened only from a merchant
+balance error indistinguishable from a broken rail. A verified-empty delegate
+now raises `X402AlreadySettledError` carrying the original receipt; an
+*unverifiable* balance (no `chainRpcs` entry) refuses on the accidental-replay
+path and proceeds on the explicit `resumeAuthorizedX402` path, where the caller
+named the payment. This is a funding-leg concern only — erc7710 has no delegate
+balance to exhaust.
+
 Further hardening with #1061: a non-numeric `maxTimeoutSeconds` is a `400` at
 the top of authorize rather than a `NaN` that clamps through into a `502`; and
 `delegationRailBundlerUrl()` asserts that a chain-scoped bundler URL names the

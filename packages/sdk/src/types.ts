@@ -1537,6 +1537,40 @@ export class X402UnexpectedStatusError extends HavenApiError {
   }
 }
 
+/**
+ * #1521: the idempotency key resolved to a payment that has already settled,
+ * and the delegate can no longer fund a fresh authorization for it.
+ *
+ * This is the typed form of "you already bought this". It exists because the
+ * alternative was indefensible: the SDK used to mint a new EIP-3009
+ * authorization against the spent delegate and hand it back paired with the
+ * ORIGINAL payment's `txHash`, so the caller learned what had happened only
+ * from a merchant-side balance error that reads identically to a broken
+ * payment rail.
+ *
+ * `receipt` is the ORIGINAL payment — a real receipt for real settled funds,
+ * deliberately carrying no `paymentHeader`, because any header minted here
+ * would be exactly the unfundable artifact this error replaces.
+ */
+export class X402AlreadySettledError extends HavenApiError {
+  readonly x402ErrorCode = 'already_settled' as const
+  constructor(
+    message: string,
+    public readonly receipt: X402Receipt,
+    /**
+     * `settled` — the delegate was checked on-chain and cannot fund a fresh
+     * authorization, so this payment demonstrably completed.
+     * `unverifiable` — no `chainRpcs` entry for the chain, so fundability
+     * could not be established either way. Same refusal, weaker claim; say
+     * which, rather than assert what was not checked.
+     */
+    public readonly basis: 'settled' | 'unverifiable',
+  ) {
+    super(message, 409, undefined, receipt.paymentId)
+    this.name = 'X402AlreadySettledError'
+  }
+}
+
 export class HavenPaymentStateError extends HavenApiError {
   resumeState?: X402ResumeState
 

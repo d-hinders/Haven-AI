@@ -357,10 +357,12 @@ describe('hosted tool refusals are reported as such', () => {
   })
 })
 
-describe('an erc7710 quote is out of scope, not a failure (#1441)', () => {
-  // #1450's preference rule makes the hosted tool pick erc7710 whenever the
-  // merchant advertises it. This leg's invariant is the FUNDING-LEG one, so
-  // against such a merchant it is unreachable rather than broken.
+describe('an erc7710 quote means the FIXTURE regressed (#1441)', () => {
+  // This leg buys the demo merchant's EIP-3009-ONLY product (vpn_pro), because
+  // #1450 makes Haven prefer erc7710 wherever it is advertised. So an erc7710
+  // quote here is not "out of scope" — it means vpn_pro started advertising
+  // erc7710 again, or the leg was repointed. The skip is the diagnosis; under
+  // QA_REQUIRE_ALL_LEGS=1 it fails the run, which is intended.
   const erc7710Quote = {
     payment_id: 'pay_7710',
     settlement_scheme: 'erc7710',
@@ -369,7 +371,7 @@ describe('an erc7710 quote is out of scope, not a failure (#1441)', () => {
     // payload_hash. The old code read those and reported 'unknown'.
   }
 
-  it('SKIPS on an erc7710 quote rather than failing', async () => {
+  it('SKIPS with a fixture-pointing reason rather than a confusing assertion error', async () => {
     mockCallTool.mockImplementation(async (tool: string) =>
       tool === 'haven_pay_mcp_tool' ? erc7710Quote : settled(),
     )
@@ -379,17 +381,16 @@ describe('an erc7710 quote is out of scope, not a failure (#1441)', () => {
     expect(r.detail).toMatch(/erc7710/)
   })
 
-  it('names where the coverage actually lives, so the skip is not a silent hole', async () => {
-    // The point of the skip is that nothing goes uncovered — hosted erc7710 by
-    // x402-erc7710-hosted, hosted 3009 by x402-catalog-guided-purchase (same
-    // topology, both on-chain legs, zero residual). If someone later deletes
-    // one of those, this assertion is the breadcrumb back.
+  it('names the fixture to check, so the next reader is not left guessing', async () => {
+    // The failure this produces is "a leg stopped running", which is easy to
+    // misread as flake. The reason string has to point at the exact file and
+    // field that controls it.
     mockCallTool.mockImplementation(async (tool: string) =>
       tool === 'haven_pay_mcp_tool' ? erc7710Quote : settled(),
     )
     const r = await x402HostedMcpSigner.run(ctx())
-    expect(r.detail).toMatch(/x402-erc7710-hosted/)
-    expect(r.detail).toMatch(/x402-catalog-guided-purchase/)
+    expect(r.detail).toMatch(/settlementMethods/)
+    expect(r.detail).toMatch(/demo-merchant/)
   })
 
   it('still SIGNS nothing and settles nothing on that path', async () => {
@@ -437,6 +438,17 @@ describe('the request this leg actually sends (#1441)', () => {
     // before any network call, which would be the same silent-red outcome in a
     // different costume.
     expect(args.max_amount_human !== undefined && args.max_amount !== undefined).toBe(false)
+  })
+
+  it('buys the EIP-3009-only product, not the shared one', async () => {
+    // #1441: the whole reason this leg can run at all. 'basic' advertises
+    // erc7710 and Haven would prefer it, leaving no funding leg to assert.
+    await x402HostedMcpSigner.run(ctx())
+    const payCall = mockCallTool.mock.calls.find(([tool]) => tool === 'haven_pay_mcp_tool')!
+    expect((payCall[1] as Record<string, any>).arguments).toEqual({ plan: 'pro' })
+    // And the settle must buy the same thing it authorized.
+    const settleCall = mockCallTool.mock.calls.find(([tool]) => tool === 'haven_settle_mcp_tool')!
+    expect((settleCall[1] as Record<string, any>).arguments).toEqual({ plan: 'pro' })
   })
 
   it('caps above the purchase price, so the cap never masks a real regression', async () => {

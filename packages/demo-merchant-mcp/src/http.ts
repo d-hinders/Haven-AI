@@ -171,10 +171,35 @@ async function handlePaymentGate(
       paymentRequired,
     })
   } catch (err) {
+    // A PaymentError is a DECISION: the merchant looked at the payment and
+    // refused it, and its message is the reason. Anything else is a FAULT —
+    // an RPC failure, a viem error, a bug — and the two must not be reported
+    // the same way (#1517).
+    //
+    // Until now they were. Every fault collapsed to the string "Payment
+    // failed" and was never logged, so a broken merchant was indistinguishable
+    // from a strict one both to the client AND in the server's own logs. That
+    // silence cost a day of QA triage on 2026-08-17: six red legs whose only
+    // evidence was a generic 402.
+    if (err instanceof PaymentError) {
+      writePaymentRequired(res, options, withReason(paymentRequired, err.message))
+      return null
+    }
+
+    // Faults get logged in full, server-side, where the stack is safe to keep.
+    console.error('[x402] payment verification/settlement FAULT (not a policy rejection)', {
+      productId,
+      settlementMethod,
+      error: err,
+    })
+    // The client gets the error's CLASS, not its message: enough to tell a
+    // fault from a rejection and to say which kind, without putting internal
+    // detail or addresses in a response any payer can read.
+    const faultName = err instanceof Error && err.name ? err.name : 'UnknownError'
     writePaymentRequired(
       res,
       options,
-      { ...paymentRequired, error: err instanceof PaymentError ? err.message : 'Payment failed' },
+      withReason(paymentRequired, `Payment failed — merchant-side fault (${faultName}); see merchant logs`),
     )
     return null
   }
@@ -226,6 +251,23 @@ function getPaymentHeader(req: IncomingMessage): string | undefined {
     firstHeader(req.headers[PAYMENT_SIGNATURE_HEADER.toLowerCase()]) ??
     firstHeader(req.headers[LEGACY_PAYMENT_SIGNATURE_HEADER.toLowerCase()])
   )
+}
+
+/**
+ * Replace the challenge's default `error` ("Payment required") with a real
+ * reason, keeping the reason as the FIRST key (#1517).
+ *
+ * Both halves matter. `buildPaymentRequired` always sets `error: 'Payment
+ * required'`, so a naive `{ error: reason, ...paymentRequired }` puts the
+ * default back and silently discards the reason. And a naive
+ * `{ ...paymentRequired, error: reason }` keeps the reason but strands it
+ * behind `accepts`, which is long enough that clients echoing a truncated body
+ * quote a payload that never says why — how the hosted QA legs reported a
+ * rejection they could not explain.
+ */
+function withReason<T extends { error?: string }>(paymentRequired: T, reason: string): T {
+  const { error: _default, ...rest } = paymentRequired
+  return { error: reason, ...rest } as T
 }
 
 function writePaymentRequired(

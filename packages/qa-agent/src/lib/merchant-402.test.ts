@@ -19,11 +19,33 @@ describe('merchant402Reason', () => {
   })
 
   it('distinguishes a bare re-challenge from a rejection', async () => {
-    // No `error` key — the merchant did not reject anything, it re-issued the
-    // challenge as though no payment had been presented.
-    const reason = await merchant402Reason(json({ accepts: [{ scheme: 'exact' }] }))
+    // The x402 default. The merchant did not reject anything — it re-issued the
+    // challenge as though no payment had been presented. This is the shape a
+    // real merchant sends, so it, not an absent key, is the load-bearing case.
+    const reason = await merchant402Reason(
+      json({ accepts: [{ scheme: 'exact' }], error: 'Payment required' }),
+    )
     expect(reason).toContain('never associated the X-PAYMENT header')
     expect(reason).not.toContain('merchant said')
+  })
+
+  it('treats an absent error key as a bare challenge too', async () => {
+    const reason = await merchant402Reason(json({ accepts: [{ scheme: 'exact' }] }))
+    expect(reason).toContain('never associated the X-PAYMENT header')
+  })
+
+  it('flags a merchant-side fault as distinct from a policy rejection', async () => {
+    const reason = await merchant402Reason(
+      json({ error: 'Payment failed — merchant-side fault (HttpRequestError); see merchant logs' }),
+    )
+    expect(reason).toContain('HttpRequestError')
+    expect(reason).toContain('not a policy rejection')
+  })
+
+  it('does not flag an ordinary rejection as a fault', async () => {
+    const reason = await merchant402Reason(json({ error: 'Payment payer address is invalid' }))
+    expect(reason).toContain('Payment payer address is invalid')
+    expect(reason).not.toContain('not a policy rejection')
   })
 
   it('reports an unparseable body instead of hiding it', async () => {

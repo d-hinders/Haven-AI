@@ -213,6 +213,118 @@ describe('#1521 — replayed settled payment', () => {
     expect(mockCreatePaymentHeader).not.toHaveBeenCalled()
   })
 
+  // ── The legacy (AllowanceModule) rail's approval-queue replay ──────────
+  //
+  // A SECOND response shape means the same thing. `legacy-authorize.ts`
+  // returns `getAgentPaymentStatus`'s body when an approval row exists and is
+  // no longer pending — that body has no `success` field at all, so a guard
+  // written against `raw.success && raw.tx_hash` misses it entirely and mints
+  // a header anyway. Found in review; it is the identical defect reached
+  // through the other rail.
+  describe('approval-queue replay (legacy rail)', () => {
+    function approvalExecutedResponse(): Response {
+      return new Response(JSON.stringify({
+        payment_id: 'apr_first',
+        status: 'executed',
+        phase: 'funding_sent',
+        next_action: 'retry_original_x402_request',
+        message: 'The user completed the funding payment. Retry the original x402 request.',
+        tx_hash: '0xapprovalfunding',
+        chain_id: 8453,
+        token: 'USDC',
+        amount: '0.001',
+        to: delegateAddress,
+        resource_url: paymentRequired.resource.url,
+        explorer_url: 'https://basescan.org/tx/0xapprovalfunding',
+      }), { status: 200 })
+    }
+
+    it('refuses when the delegate is verifiably empty', async () => {
+      mockBalanceOf.mockResolvedValue(0n)
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(approvalExecutedResponse())
+
+      const error = await client(true).authorizeX402(paymentRequired).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(X402AlreadySettledError)
+      expect((error as X402AlreadySettledError).basis).toBe('settled')
+      expect((error as X402AlreadySettledError).receipt.paymentHeader).toBeUndefined()
+      expect(mockCreatePaymentHeader).not.toHaveBeenCalled()
+    })
+
+    it('proceeds on an unverifiable balance — this IS the documented retry loop', async () => {
+      // Opposite default to the idempotency-collision shape, deliberately.
+      // Refusing here would break every post-approval resume for an
+      // integrator who has not configured `chainRpcs`.
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(approvalExecutedResponse())
+
+      const receipt = await client(false).authorizeX402(paymentRequired)
+
+      expect(receipt.paymentHeader).toBeDefined()
+      expect(mockBalanceOf).not.toHaveBeenCalled()
+    })
+
+    it('proceeds when the delegate is funded', async () => {
+      mockBalanceOf.mockResolvedValue(5000n)
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(approvalExecutedResponse())
+
+      const receipt = await client(true).authorizeX402(paymentRequired)
+
+      expect(receipt.paymentHeader).toBeDefined()
+    })
+  })
+
+  // ── The explicit resume-by-payment-id path ────────────────────────────
+  describe('resumeAuthorizedX402', () => {
+    // Same shape as the pre-existing resume test in `x402.test.ts` — the
+    // approval-request status body `assertCanResumeX402` accepts.
+    function statusResponse(): Response {
+      return new Response(JSON.stringify({
+        payment_id: 'apr_first',
+        kind: 'approval_request',
+        rail: 'x402',
+        status: 'executed',
+        phase: 'funding_sent',
+        next_action: 'retry_original_x402_request',
+        amount: '0.001',
+        token: 'USDC',
+        resource_url: paymentRequired.resource.url,
+        merchant_address: accepted.payTo,
+        tx_hash: '0xapprovalfunding',
+        expires_at: '2027-05-10T20:00:00.000Z',
+        chain_id: 8453,
+        message: 'Retry the original x402 request.',
+      }), { status: 200 })
+    }
+
+    it('refuses a resume whose funds are verifiably gone', async () => {
+      mockBalanceOf.mockResolvedValue(0n)
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse())
+
+      const error = await client(true).resumeAuthorizedX402({
+        paymentId: 'apr_first',
+        paymentRequired,
+        idempotencyKey: 'explicit-resume',
+      }).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(X402AlreadySettledError)
+      expect((error as X402AlreadySettledError).basis).toBe('settled')
+      expect(mockCreatePaymentHeader).not.toHaveBeenCalled()
+    })
+
+    it('resumes when the delegate is still funded', async () => {
+      mockBalanceOf.mockResolvedValue(5000n)
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse())
+
+      const receipt = await client(true).resumeAuthorizedX402({
+        paymentId: 'apr_first',
+        paymentRequired,
+        idempotencyKey: 'explicit-resume-2',
+      })
+
+      expect(receipt.paymentHeader).toBeDefined()
+    })
+  })
+
   it('makes two same-product purchases in one bucket distinct when the caller says so', async () => {
     // The supported way to buy the same thing twice: distinct explicit keys.
     // Each gets its own intent, so neither takes the already-settled branch.

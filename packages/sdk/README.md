@@ -167,9 +167,16 @@ await haven.fetch(url, init, { idempotencyKey: `vpn-renewal:${orderId}` })
 ```
 
 Configure `chainRpcs` for your chain. Without it the SDK cannot check the
-delegate's balance, so it refuses a replayed settled payment on the weaker
-`unverifiable` basis rather than risk issuing an authorization it cannot
-vouch for.
+delegate's balance, so an accidental key collision refuses on the weaker
+`unverifiable` basis rather than risk issuing an authorization it cannot vouch
+for.
+
+**Resuming is not affected by that.** When you are following the documented
+approval flow — re-calling after a queued payment is approved, or calling
+`resumeAuthorizedX402({ paymentId })` — you named the payment, so an
+unverifiable balance lets the resume proceed as before. Only a balance
+verified *absent* refuses there. The stricter default applies solely to the
+case where two purchases collided on a key you did not choose.
 
 This applies to the **EIP-3009 funding-leg** scheme, which routes money
 through the delegate EOA. **erc7710 direct settlement is unaffected**: it has

@@ -931,11 +931,22 @@ decided — the authorization used to be created before the authorize call, so a
 replay handed back a fresh unfundable header paired with the ORIGINAL payment's
 `tx_hash`, and the caller learned what had happened only from a merchant
 balance error indistinguishable from a broken rail. A verified-empty delegate
-now raises `X402AlreadySettledError` carrying the original receipt; an
-*unverifiable* balance (no `chainRpcs` entry) refuses on the accidental-replay
-path and proceeds on the explicit `resumeAuthorizedX402` path, where the caller
-named the payment. This is a funding-leg concern only — erc7710 has no delegate
-balance to exhaust.
+raises `X402AlreadySettledError` carrying the original receipt.
+
+**Two response shapes mean "already executed", one per rail**, and a guard
+written against either one alone misses the other:
+
+| Shape | Produced by | Caller intent | Unverifiable balance |
+|---|---|---|---|
+| `success` + `tx_hash` | delegation rail's confirmed-intent replay (`modules/x402/replay.ts`) | idempotency **accident** — the caller did not ask for this payment | **refuse** |
+| `next_action: retry_original_x402_request` (no `success` field) | legacy rail's approval-queue replay (`modules/x402/legacy-authorize.ts` returns `getAgentPaymentStatus`'s body) | the **documented** post-approval retry loop | **proceed**; only a verified-absent balance refuses |
+
+The explicit `resumeAuthorizedX402` path follows the second row's rule for the
+same reason: the caller named the payment. Refusing on "cannot tell" there
+would break every approval resume for an integrator without a `chainRpcs`
+entry — turning a money-safety fix into an availability regression on a live
+rail. This is a funding-leg concern only; erc7710 has no delegate balance to
+exhaust.
 
 Further hardening with #1061: a non-numeric `maxTimeoutSeconds` is a `400` at
 the top of authorize rather than a `NaN` that clamps through into a `502`; and

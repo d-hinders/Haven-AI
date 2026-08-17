@@ -135,29 +135,6 @@ export const x402Erc7710Hosted: Scenario = {
       usdc.balanceOf(delegateAddress),
     ])) as [bigint, bigint, bigint]
 
-    // ── DIAGNOSTIC (#1508, temporary) ────────────────────────────────────────
-    // This leg fails at settle with "The payment was submitted and is waiting
-    // for confirmation", i.e. the intent is ALREADY 'submitted' when settle
-    // runs. Static reading says that cannot happen: the hosted quote only
-    // PREPARES, the signer's fetch is a read-only GET /x402/:id/sign-context,
-    // and POST /x402/:id/settle is the only caller of
-    // markIntentSubmittedForSettlement. So one of those three claims is false
-    // in the deployed system, and reading more code will not say which.
-    //
-    // Sampling the status at each boundary localises the flip to a single step.
-    // Read-only (GET /payments/:id) and never fails the leg on its own — a
-    // probe that could fail the run would be a second failure mode layered on
-    // the one under investigation.
-    const probeStatus = async (label: string): Promise<string> => {
-      try {
-        const r = await api.getPayment(quote.payment_id)
-        return `${label}=${r.ok ? (r.data?.status ?? 'no-status') : `read-failed(${r.status})`}`
-      } catch (err) {
-        return `${label}=probe-threw(${err instanceof Error ? err.message.slice(0, 40) : 'unknown'})`
-      }
-    }
-    const probes: string[] = [await probeStatus('after_quote')]
-
     // ── 2. LOCAL signing by payment_id — the key never crosses the boundary ──
     // Not haven_sign_x402: that builds an EIP-3009 header locally, which this
     // scheme has no use for. Here the signer verifies the settlement child's
@@ -168,12 +145,9 @@ export const x402Erc7710Hosted: Scenario = {
     if (!signed.success) {
       return fail(
         `local edge signer REFUSED the hosted erc7710 quote: ${signed.code} — ` +
-          `${signed.message.slice(0, 220)} [#1508 ${probes.join(' ')}]`,
+          `${signed.message.slice(0, 220)}`,
       )
     }
-    // #1508: the signer's fetch is the step most likely to be lying about being
-    // read-only, so sample immediately after it and before settle is called.
-    probes.push(await probeStatus('after_sign'))
 
     // ── 3. Hosted settle — Haven assembles the header and calls the merchant ─
     let settle: HostedSettleMcpToolResult & { settlement_scheme?: string }
@@ -190,13 +164,8 @@ export const x402Erc7710Hosted: Scenario = {
       })
     } catch (err) {
       if (err instanceof HostedMcpToolError) {
-        // #1508: carry the probe trail INTO the failure detail — the run report
-        // is the only artefact that survives the runner, so a diagnostic that
-        // only reaches stdout is a diagnostic we cannot read afterwards.
-        probes.push(await probeStatus('after_settle_refused'))
         return fail(
-          `hosted haven_settle_mcp_tool refused: ${err.code} — ${err.message.slice(0, 180)} ` +
-            `[#1508 payment_id=${quote.payment_id} ${probes.join(' ')}]`,
+          `hosted haven_settle_mcp_tool refused: ${err.code} — ${err.message.slice(0, 180)}`,
         )
       }
       throw err

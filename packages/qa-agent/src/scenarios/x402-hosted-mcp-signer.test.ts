@@ -357,6 +357,60 @@ describe('hosted tool refusals are reported as such', () => {
   })
 })
 
+describe('an erc7710 quote is out of scope, not a failure (#1441)', () => {
+  // #1450's preference rule makes the hosted tool pick erc7710 whenever the
+  // merchant advertises it. This leg's invariant is the FUNDING-LEG one, so
+  // against such a merchant it is unreachable rather than broken.
+  const erc7710Quote = {
+    payment_id: 'pay_7710',
+    settlement_scheme: 'erc7710',
+    settlement: { scheme: 'erc7710', funding_leg: false, merchant_pay_to: '0x' + 'cc'.repeat(20) },
+    // Deliberately absent, as on the real erc7710 branch: no status, no
+    // payload_hash. The old code read those and reported 'unknown'.
+  }
+
+  it('SKIPS on an erc7710 quote rather than failing', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_pay_mcp_tool' ? erc7710Quote : settled(),
+    )
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.skipped).toBe(true)
+    expect(r.pass).toBe(true)
+    expect(r.detail).toMatch(/erc7710/)
+  })
+
+  it('names where the coverage actually lives, so the skip is not a silent hole', async () => {
+    // The point of the skip is that nothing goes uncovered — hosted erc7710 by
+    // x402-erc7710-hosted, hosted 3009 by x402-catalog-guided-purchase (same
+    // topology, both on-chain legs, zero residual). If someone later deletes
+    // one of those, this assertion is the breadcrumb back.
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_pay_mcp_tool' ? erc7710Quote : settled(),
+    )
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.detail).toMatch(/x402-erc7710-hosted/)
+    expect(r.detail).toMatch(/x402-catalog-guided-purchase/)
+  })
+
+  it('still SIGNS nothing and settles nothing on that path', async () => {
+    // A skip that had already signed would leave a live intent behind.
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_pay_mcp_tool' ? erc7710Quote : settled(),
+    )
+    await x402HostedMcpSigner.run(ctx())
+    expect(mockSignX402).not.toHaveBeenCalled()
+    expect(mockCallTool.mock.calls.some(([t]) => t === 'haven_settle_mcp_tool')).toBe(false)
+  })
+
+  it('a 3009 quote is UNAFFECTED — the funding path still runs and passes', async () => {
+    // The guard must key on the erc7710 shape only. If it caught the 3009 shape
+    // too, this leg would skip forever and the regression would be invisible.
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.skipped).toBeFalsy()
+    expect(r.pass).toBe(true)
+  })
+})
+
 describe('the request this leg actually sends (#1441)', () => {
   // This leg went red for three nights on `INVALID_INPUT — A spending cap is
   // REQUIRED`, and every test above stayed green through it, because they all

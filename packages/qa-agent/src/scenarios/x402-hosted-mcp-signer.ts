@@ -225,6 +225,40 @@ export const x402HostedMcpSigner: Scenario = {
       throw err
     }
 
+    // #1441: this leg's invariant is the FUNDING-LEG topology — "both on-chain
+    // legs succeed, delegate left with zero residual". #1450 made the hosted
+    // tool prefer erc7710 whenever the merchant advertises it, and erc7710 has
+    // no funding leg at all, so against such a merchant the invariant is not
+    // merely failing, it is unreachable: the quote comes back in the erc7710
+    // shape (payment_id + settlement_scheme, no status/payload_hash) and the
+    // checks below have nothing to read.
+    //
+    // Skip rather than fail, and NOT because failing is inconvenient — nothing
+    // here goes uncovered:
+    //   - hosted erc7710 → `x402-erc7710-hosted` (settles, asserts the delegate
+    //     EOA is untouched),
+    //   - hosted 3009 → `x402-catalog-guided-purchase`, which drives the SAME
+    //     hosted MCP + local signer topology through
+    //     `haven_prepare_catalog_purchase` and proves both on-chain legs plus a
+    //     zero delegate residual.
+    // What this leg alone still covers is the `haven_pay_mcp_tool` ENTRY POINT
+    // on the funding path, which is why it stays rather than being deleted.
+    //
+    // Under QA_REQUIRE_ALL_LEGS=1 the runner turns this skip into a run
+    // failure, which is the intended escalation for an operator who wants the
+    // funding path exercised from this entry point (point it at a merchant that
+    // does not advertise erc7710).
+    const quoteScheme = (quote as { settlement_scheme?: string }).settlement_scheme
+    if (quoteScheme === 'erc7710' || (!quote.payload_hash && quote.status === undefined)) {
+      return skip(
+        `hosted quote selected ${JSON.stringify(quoteScheme ?? 'a no-funding-leg scheme')} — the ` +
+          "#1450 preference rule picks erc7710 whenever the merchant advertises it, and this leg's " +
+          'invariant (two on-chain legs, zero delegate residual) has no funding leg to assert. ' +
+          'Covered elsewhere: x402-erc7710-hosted (hosted erc7710) and x402-catalog-guided-purchase ' +
+          '(hosted 3009, same topology). Point this at a 3009-only merchant to exercise it here.',
+      )
+    }
+
     if (quote.status === 'pending_approval' || !quote.payload_hash) {
       return fail(
         `hosted quote returned status '${quote.status ?? 'unknown'}' with no payload_hash — the ` +

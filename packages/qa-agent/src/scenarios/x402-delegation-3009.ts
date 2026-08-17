@@ -81,6 +81,7 @@
 import { HavenClient } from '@haven_ai/sdk'
 import { ethers } from 'ethers'
 import { HavenApi, type MachinePaymentReceipt } from '../lib/haven-api.js'
+import { merchant402Reason } from '../lib/merchant-402.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 
 const BASE_SEPOLIA_RPC = 'https://sepolia.base.org'
@@ -212,7 +213,11 @@ export const x402Delegation3009: Scenario = {
       }),
     })
 
-    if (res.status === 402) return fail('still HTTP 402 after payment — 3009 settlement did not complete')
+    if (res.status === 402) {
+      return fail(
+        `still HTTP 402 after payment — 3009 settlement did not complete${await merchant402Reason(res)}`,
+      )
+    }
     if (!res.ok) return fail(`merchant returned HTTP ${res.status} after payment`)
 
     const text = await res.text()

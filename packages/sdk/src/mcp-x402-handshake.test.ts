@@ -703,4 +703,91 @@ describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  /**
+   * #1508: the no-funding-leg (erc7710) completion path.
+   *
+   * This method encoded the EIP-3009 lifecycle in two gates — `confirmed` plus
+   * a mandatory Haven tx hash — and #1456 reused it for erc7710 unadapted. On
+   * that scheme the intent sits at `submitted` BY DESIGN after a successful
+   * settle (the merchant redeems the [child, budget] chain), and there is no
+   * Haven-submitted transaction at all, so both gates rejected a perfectly good
+   * payment. The refusal surfaced as `status.message` — "The payment was
+   * submitted and is waiting for confirmation" — AFTER settlement had already
+   * succeeded, with the merchant never contacted.
+   */
+  function paymentStatusSubmittedNoFundingLeg(resourceUrl: string = genericUrl): Response {
+    return new Response(JSON.stringify({
+      payment_id: 'pay_123',
+      kind: 'payment_intent',
+      rail: 'x402',
+      status: 'submitted',
+      phase: 'payment_submitted',
+      next_action: 'check_status_later',
+      amount: '0.001',
+      token: 'USDC',
+      resource_url: resourceUrl,
+      merchant_address: accepted.payTo,
+      // No tx_hash — the defining property of this scheme.
+      expires_at: '2099-01-01T00:00:00.000Z',
+      chain_id: 8453,
+      message: 'The payment was submitted and is waiting for confirmation.',
+      // 200, not 409: GET /payments/:id returns the status body plainly.
+      // agentPaymentStatusHttpCode's 409 belongs to the idempotent-replay path
+      // on POST /payments, not this read — which is exactly why the SDK's read
+      // SUCCEEDS and the readiness gate below is what refuses.
+    }), { status: 200 })
+  }
+
+  it('#1508: completes the merchant call on a submitted, tx-hash-less erc7710 intent', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(paymentStatusSubmittedNoFundingLeg())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: 'goods' }] } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+
+    const result = await newClient().completeX402MerchantCall({
+      url: genericUrl,
+      init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      paymentId: 'pay_123',
+      paymentHeader: 'PAYMENT_HEADER_7710',
+      noFundingLeg: true,
+    })
+
+    expect(result.ok).toBe(true)
+    // The merchant WAS contacted — the whole point. Under the bug this threw
+    // before reaching it.
+    const paidCall = fetchMock.mock.calls.find((c) => c[0] === genericUrl)!
+    expect(paidCall).toBeDefined()
+    expect(new Headers((paidCall[1] as RequestInit).headers).get('X-PAYMENT')).toBe('PAYMENT_HEADER_7710')
+
+    // Exactly two calls: the status read and the merchant retry. No evidence
+    // POST — it requires a txHash the backend would 400 on, and the SDK
+    // swallows that, so a row would vanish silently (owner decision 2026-08-17
+    // to skip rather than write one that cannot be written).
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/evidence'))).toBe(false)
+  })
+
+  it('#1508: still refuses a submitted intent WITHOUT the no-funding-leg flag', async () => {
+    // The relaxation must be opt-in. A 3009 payment sitting at 'submitted' is
+    // genuinely not ready, and this is the assertion that stops the fix from
+    // quietly widening the gate for every scheme.
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(paymentStatusSubmittedNoFundingLeg())
+
+    await expect(newClient().completeX402MerchantCall({
+      url: genericUrl,
+      init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      paymentId: 'pay_123',
+      paymentHeader: 'PAYMENT_HEADER_3009',
+    })).rejects.toThrow('waiting for confirmation')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

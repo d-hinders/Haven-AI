@@ -2569,6 +2569,9 @@ async function deliverMerchantPayment(
       paymentId: args.payment_id,
       paymentHeader: args.payment_header,
       mcpTransport: parseMcpTransport(context.mcpTransportRaw),
+      // #1508: the same flag that skips the funding wait above also has to
+      // reach the SDK's completion gate, which is where the real refusal was.
+      noFundingLeg: options?.noFundingLeg === true,
     })
   } catch (err) {
     // #1300 review finding: at this point funding is CONFIRMED on-chain, so a

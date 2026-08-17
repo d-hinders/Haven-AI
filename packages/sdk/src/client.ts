@@ -2089,8 +2089,18 @@ export class HavenClient {
    * balance — otherwise it rejects with "Payment verification failed". The
    * SDK's local path already does this (see authorizeStandardX402); the hosted
    * split flow regressed when the 5→3 collapse removed the incidental
-   * inter-call latency that used to mask it. No-op when the funding tx hash or
-   * a chain RPC (chainRpcs[chainId]) is unavailable.
+   * inter-call latency that used to mask it.
+   *
+   * **NOT a no-op when the funding tx hash is absent** (#1508). The WAIT is
+   * skipped without a hash or a chain RPC, but the `GET /payments/:id` read
+   * below runs UNCONDITIONALLY — it is how the fallback hash and the chainId
+   * are obtained. That distinction is load-bearing: this method must never be
+   * called on a scheme with no funding leg, because the read itself fails once
+   * the intent reaches a status the backend maps to a non-2xx (`submitted` is a
+   * 409), turning a settled payment into a reported error. The previous wording
+   * here said "No-op when the funding tx hash ... is unavailable", and the
+   * hosted erc7710 path was written against that promise — see
+   * `deliverMerchantPayment`'s `noFundingLeg` option.
    */
   async ensureFundingConfirmed(paymentId: string, fundingTxHash?: string): Promise<void> {
     const status = await this.getPaymentStatus(paymentId)

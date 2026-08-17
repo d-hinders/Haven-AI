@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-15" # #1469: haven_pay_x402_quote normalizes payment_required — malformed accepts entries now refuse with guidance instead of erroring; valid callers unchanged. #1476: haven_sign now refuses a Delegation-shaped typed_data with no expected context; callers using { payment_id } or haven_sign_x402 are unaffected, and the #1254 direct-payment UserOp path is unchanged. #1456: haven_settle_mcp_tool accepts an OPTIONAL payment_header — its absence selects erc7710. Older callers always send one, so their behaviour is unchanged. #1455 re-verify: the signer gained local caveat verification for erc7710 settlement children — a REFUSAL added, no capability/version surface changed, so nothing here about runtime compatibility or the version-skew contract moves. #1426 re-verify: the connector celebration line now phrases reset periods in the dashboard voice (per week/per month/in total) — output wording only, the completion-handoff ordering and no-secret boundaries here are untouched. #1332: guidance-surface parity — setup installs the canonical skill via each runtime's documented instruction mechanism (Hermes skills dir, Codex global AGENTS.md managed section); Claude Code unchanged. Prior: #1397 hosted-only quote tools.
+last-verified: "2026-08-17" # Release 0.1.24-alpha.0 (PR #1503): the Supported Runtime Manifest table is re-pinned to match packages/connect/src/runtime-manifest.ts. A version bump only — no tool, capability, or skew-contract surface moves, and the version-skew rules below are unchanged. Prior: #1469: haven_pay_x402_quote normalizes payment_required — malformed accepts entries now refuse with guidance instead of erroring; valid callers unchanged. #1476: haven_sign now refuses a Delegation-shaped typed_data with no expected context; callers using { payment_id } or haven_sign_x402 are unaffected, and the #1254 direct-payment UserOp path is unchanged. #1456: haven_settle_mcp_tool accepts an OPTIONAL payment_header — its absence selects erc7710. Older callers always send one, so their behaviour is unchanged. #1455 re-verify: the signer gained local caveat verification for erc7710 settlement children — a REFUSAL added, no capability/version surface changed, so nothing here about runtime compatibility or the version-skew contract moves. #1426 re-verify: the connector celebration line now phrases reset periods in the dashboard voice (per week/per month/in total) — output wording only, the completion-handoff ordering and no-secret boundaries here are untouched. #1332: guidance-surface parity — setup installs the canonical skill via each runtime's documented instruction mechanism (Hermes skills dir, Codex global AGENTS.md managed section); Claude Code unchanged. Prior: #1397 hosted-only quote tools.
 ---
 
 # MCP Runtime Compatibility
@@ -68,10 +68,10 @@ Keep this table in sync with that file.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.1.23-alpha.2` |
-| `@haven_ai/mcp` | `0.1.23-alpha.2` |
-| `@haven_ai/sdk` | `0.1.23-alpha.2` |
-| `@haven_ai/signer` | `0.1.23-alpha.2` |
+| `@haven_ai/connect` | `0.1.24-alpha.0` |
+| `@haven_ai/mcp` | `0.1.24-alpha.0` |
+| `@haven_ai/sdk` | `0.1.24-alpha.0` |
+| `@haven_ai/signer` | `0.1.24-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

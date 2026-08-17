@@ -66,6 +66,7 @@ import {
   HavenPaymentStateError,
   MerchantTimeoutError,
   X402UnexpectedStatusError,
+  X402AlreadySettledError,
   HavenSigningError,
   HavenTimeoutError,
 } from './types.js'
@@ -1388,9 +1389,14 @@ export class HavenClient {
     // transfer signed by the agent key and constrained by the user's on-chain
     // allowance. Haven's backend relays that signed top-up; it is not the source
     // of payment authority.
-    // Sign before funding so retries reuse one EIP-3009 nonce. If funding fails,
-    // the unused authorization simply expires via validBefore.
-    const paymentHeader = await this.createStandardX402Header(paymentRequired, option)
+    // #1521: the authorization is minted AFTER the backend's answer is
+    // classified, never before. Signing first meant that when the idempotency
+    // key resolved to an already-settled payment, a brand-new authorization
+    // had already been created against a delegate whose USDC was gone — and
+    // it was handed back paired with the FIRST payment's tx_hash. Within one
+    // authorize call the header is still created once and reused, which is
+    // all the original "reuse one EIP-3009 nonce" note ever meant. If funding
+    // fails later, the unused authorization simply expires via validBefore.
     const raw = await this.post<RawX402AuthorizeResponse>('/x402', {
       url: paymentRequired.resource.url,
       payTo: this.delegateAddress,
@@ -1406,14 +1412,78 @@ export class HavenClient {
       settlementScheme: 'eip3009',
     })
 
-    // If the backend already executed (shouldn't happen without sig), return
+    // The backend can report an ALREADY-EXECUTED payment in two different
+    // shapes, and #1521 is reachable through both — the guard is therefore on
+    // the meaning, not on one response shape:
+    //
+    //   1. `success` + `tx_hash` — the delegation rail's confirmed-intent
+    //      replay (`modules/x402/replay.ts`). Reached only by an idempotency
+    //      collision; the caller did not ask for THIS payment.
+    //   2. `nextAction: retry_original_x402_request` — the legacy rail's
+    //      approval-queue replay (`modules/x402/legacy-authorize.ts` returns
+    //      `getAgentPaymentStatus`'s body, which carries no `success` field
+    //      at all). This is the DOCUMENTED post-approval retry loop, so the
+    //      caller is deliberately resuming a payment they know about.
+    //
+    // In both, "executed" means the FUNDING leg executed, which is ambiguous:
+    //
+    //   (a) funding confirmed, merchant never paid  → the delegate still
+    //       holds the money and minting a header is correct;
+    //   (b) funding confirmed, merchant already paid → the delegate is
+    //       empty and any authorization minted here is unfundable.
+    //
+    // Only the delegate's on-chain balance separates them. The two shapes
+    // differ in what an UNVERIFIABLE balance should mean, and they differ for
+    // the same reason the explicit `resumeAuthorizedX402` path does: shape 1
+    // is an accident, so "can't tell" refuses rather than mint a header we
+    // cannot vouch for; shape 2 is the caller following documented steps, so
+    // "can't tell" proceeds and only a balance verified ABSENT refuses —
+    // otherwise every approval resume without a `chainRpcs` entry would break.
+    const state = this.paymentStateFromRaw('x402 payment', raw)
+    const executedReplay = raw.success && raw.tx_hash
+      ? 'idempotency-collision' as const
+      : state?.nextAction === AgentPaymentNextAction.RetryOriginalX402Request
+        ? 'approval-resume' as const
+        : null
+
+    if (executedReplay) {
+      const canFund = await this.delegateCanFund(
+        raw.chain_id ?? state?.chainId ?? chainIdFromNetwork(option.network),
+        option.asset,
+        x402AuthorizationAmount(option),
+      )
+      const refuse = executedReplay === 'idempotency-collision'
+        ? canFund !== true
+        : canFund === false
+      if (refuse) {
+        const settledReceipt = state && executedReplay === 'approval-resume'
+          ? this.mapX402ReceiptFromStatus(paymentRequired, option, undefined, state)
+          : this.mapX402ReceiptFromAuthorization(paymentRequired, option, undefined, raw)
+        throw new X402AlreadySettledError(
+          canFund === false
+            ? 'This x402 payment already settled — the delegate no longer holds the funds to ' +
+              'authorize it again. To buy the same item a second time, pass a distinct ' +
+              '`idempotencyKey`; the synthesised key intentionally collapses repeat calls for ' +
+              'the same product within a 5-minute window so a retried request cannot pay twice.'
+            : 'This x402 payment already settled, and whether the delegate can still fund a new ' +
+              'authorization could not be verified (no `chainRpcs` entry for this chain). Refusing ' +
+              'rather than issue an authorization that may be unfundable. To buy the same item a ' +
+              'second time, pass a distinct `idempotencyKey`; to finish an interrupted payment, ' +
+              'resume it by `paymentId`.',
+          settledReceipt,
+          canFund === false ? 'settled' : 'unverifiable',
+        )
+      }
+    }
+
+    const paymentHeader = await this.createStandardX402Header(paymentRequired, option)
+
     if (raw.success && raw.tx_hash) {
       const receipt = this.mapX402ReceiptFromAuthorization(paymentRequired, option, paymentHeader, raw)
       this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
       return receipt
     }
 
-    const state = this.paymentStateFromRaw('x402 payment', raw)
     if (state?.nextAction === AgentPaymentNextAction.RetryOriginalX402Request) {
       const receipt = this.mapX402ReceiptFromStatus(paymentRequired, option, paymentHeader, state)
       this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
@@ -1666,6 +1736,25 @@ export class HavenClient {
 
     const status = await this.getPaymentStatus(input.paymentId)
     this.assertCanResumeX402(status, input.paymentRequired, option)
+
+    // #1521: the same fundability question as the authorize path, with the
+    // opposite default. Here the caller NAMED this payment, so an
+    // unverifiable balance is not grounds to refuse the thing they asked for
+    // — only a balance verified ABSENT is, because then the authorization
+    // this would mint is known to be unfundable.
+    const canFund = await this.delegateCanFund(
+      status.chainId ?? chainIdFromNetwork(option.network),
+      option.asset,
+      x402AuthorizationAmount(option),
+    )
+    if (canFund === false) {
+      throw new X402AlreadySettledError(
+        `x402 payment ${status.paymentId} has already settled — the delegate no longer holds the ` +
+        'funds to authorize it again, so there is nothing left to resume.',
+        this.mapX402ReceiptFromStatus(input.paymentRequired, option, undefined, status),
+        'settled',
+      )
+    }
 
     const paymentHeader = await this.createStandardX402Header(input.paymentRequired, option)
     const receipt = this.mapX402ReceiptFromStatus(input.paymentRequired, option, paymentHeader, status)
@@ -2423,7 +2512,10 @@ export class HavenClient {
   private mapX402ReceiptFromAuthorization(
     paymentRequired: X402PaymentRequired,
     option: X402PaymentOption,
-    paymentHeader: string,
+    // #1521: `undefined` builds the receipt for a payment that already
+    // settled. A settled payment has no live authorization to carry, and
+    // minting one to fill this slot is precisely the defect that issue names.
+    paymentHeader: string | undefined,
     raw: RawX402AuthorizeResponse,
     execResult?: RawSignResponse,
   ): X402Receipt {
@@ -2455,7 +2547,8 @@ export class HavenClient {
   private mapX402ReceiptFromStatus(
     paymentRequired: X402PaymentRequired,
     option: X402PaymentOption,
-    paymentHeader: string,
+    // See `mapX402ReceiptFromAuthorization` — `undefined` is the settled case.
+    paymentHeader: string | undefined,
     status: PaymentStatusResult,
   ): X402Receipt {
     if (!status.txHash) {
@@ -2492,7 +2585,10 @@ export class HavenClient {
     resourceUrl: string
     explorerUrl: string
     accepted: X402PaymentOption
-    paymentHeader: string
+    // #1521: absent for a receipt describing an ALREADY-SETTLED payment,
+    // which has no live authorization to carry. `X402Receipt.paymentHeader`
+    // was already optional; only these builders assumed otherwise.
+    paymentHeader: string | undefined
     merchantTo?: string | null
     payer?: string
     chainId?: number
@@ -2656,6 +2752,59 @@ export class HavenClient {
         500,
         { txHash, chainId },
       )
+    }
+  }
+
+  /**
+   * Can the delegate EOA still fund an authorization for `amountAtomic`?
+   *
+   * #1521: the only question that separates a legitimate resume (funding
+   * confirmed, merchant never paid — the delegate still holds the money) from
+   * a replayed settled payment (funding confirmed, merchant paid, delegate
+   * spent). The intent's own `status: 'confirmed'` is identical in both.
+   *
+   * The balance is asked of the CHAIN rather than of Haven's bookkeeping on
+   * purpose: the merchant-settlement evidence record is written by this SDK
+   * *after* the merchant call, so a client that dies between the two leaves
+   * the backend believing the merchant was never paid — the exact case the
+   * discriminator has to get right. The chain cannot be behind in that way.
+   *
+   * Returns `null` — never a guess — when `chainRpcs` has no entry for the
+   * chain or the read fails. Callers must treat that as "unverifiable", not
+   * as "funded".
+   */
+  private async delegateCanFund(
+    chainId: number | undefined,
+    tokenAddress: string,
+    amountAtomic: string,
+    timeoutMs = 10_000,
+  ): Promise<boolean | null> {
+    if (!chainId || !this.delegateAddress) return null
+    const rpcUrl = this.chainRpcs[chainId]
+    if (!rpcUrl) return null
+    try {
+      const provider = createJsonRpcProvider(rpcUrl)
+      const token = createErc20Contract(
+        tokenAddress,
+        ['function balanceOf(address) view returns (uint256)'] as const,
+        provider,
+      )
+      // Bounded like `waitForFundingTx` below. This sits on a money
+      // authorization path with no way for a caller to route around a stall,
+      // so an unresponsive RPC must degrade to "unverifiable" rather than
+      // hang the payment: a slow answer is worth less than a prompt refusal.
+      const balance = await Promise.race([
+        token.balanceOf(this.delegateAddress) as Promise<bigint>,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref?.()),
+      ])
+      if (balance === null) return null
+      return balance >= BigInt(amountAtomic)
+    } catch {
+      // An RPC that is down, or an amount that will not parse, tells us
+      // nothing about the delegate's balance. Saying so is the whole point of
+      // the tri-state — and on the accidental-replay path it fails toward
+      // refusing, never toward minting.
+      return null
     }
   }
 

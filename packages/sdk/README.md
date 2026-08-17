@@ -122,6 +122,66 @@ if (apiResponse.status === 402) {
 }
 ```
 
+### Idempotency: what the key guarantees, and what it costs
+
+**Omit `idempotencyKey` and the SDK synthesises one** from the merchant's
+resource URL and description, the payee, asset, amount, network, and a
+**5-minute time bucket**. Every one of those inputs except the bucket
+describes *the product*, so the guarantee is:
+
+> Repeated calls for the same product, at the same price, within the same
+> 5-minute bucket are **one payment**.
+
+That is what makes a retried HTTP request safe by default — a dropped
+connection or a re-run tool call cannot pay twice.
+
+**The cost is the flip side of the same rule.** The SDK cannot tell a retry
+from a *deliberate* second purchase of the same item: both re-fetch the 402
+and produce identical key material. So a genuine second purchase inside the
+window collapses onto the first payment. When that happens the SDK does not
+hand you a fresh authorization — the funds are already spent, and any
+authorization it minted would be unfundable. It throws
+`X402AlreadySettledError`, carrying the original receipt:
+
+```typescript
+import { X402AlreadySettledError } from '@haven_ai/sdk'
+
+try {
+  await haven.fetch('https://paid-api.example.com/data')
+} catch (err) {
+  if (err instanceof X402AlreadySettledError) {
+    // The FIRST payment's receipt — real, settled funds.
+    console.log(err.receipt.paymentId, err.receipt.txHash)
+    // 'settled'      — the delegate was checked on-chain and cannot fund again.
+    // 'unverifiable' — no chainRpcs entry for the chain, so it was not checked.
+    console.log(err.basis)
+  }
+}
+```
+
+**To buy the same item twice, pass distinct keys** — that is the supported
+way to say "this is a new purchase, not a retry":
+
+```typescript
+await haven.fetch(url, init, { idempotencyKey: `vpn-renewal:${orderId}` })
+```
+
+Configure `chainRpcs` for your chain. Without it the SDK cannot check the
+delegate's balance, so an accidental key collision refuses on the weaker
+`unverifiable` basis rather than risk issuing an authorization it cannot vouch
+for.
+
+**Resuming is not affected by that.** When you are following the documented
+approval flow — re-calling after a queued payment is approved, or calling
+`resumeAuthorizedX402({ paymentId })` — you named the payment, so an
+unverifiable balance lets the resume proceed as before. Only a balance
+verified *absent* refuses there. The stricter default applies solely to the
+case where two purchases collided on a key you did not choose.
+
+This applies to the **EIP-3009 funding-leg** scheme, which routes money
+through the delegate EOA. **erc7710 direct settlement is unaffected**: it has
+no funding leg and no delegate balance to exhaust.
+
 For agents that need to inspect the price before paying, use the quote-first
 path. `quoteX402()` probes the merchant and parses the HTTP 402 response, but it
 does not create a Haven payment, approval request, signature, or on-chain
@@ -444,6 +504,12 @@ try {
   }
 }
 ```
+
+`X402AlreadySettledError` extends `HavenApiError` (status 409) and is the one
+error above that is **not** a failure to pay — it reports that the payment it
+describes *succeeded*, earlier. Handle it before the generic `HavenApiError`
+branch, and treat `err.receipt` as proof of purchase rather than retrying. See
+[Idempotency](#idempotency-what-the-key-guarantees-and-what-it-costs).
 
 ## License
 

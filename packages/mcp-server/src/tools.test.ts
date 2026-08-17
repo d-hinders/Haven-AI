@@ -4073,12 +4073,15 @@ describe('hosted erc7710 (#1456)', () => {
   it('#1508: settles even though the payment read 409s on the submitted intent', async () => {
     stubFetch({
       'POST /x402/pay_7710/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
-      // What the backend actually returns once settle has flipped the intent.
+      // What the backend actually returns once settle has flipped the intent:
+      // 409, status 'submitted', and — the part the old fixture also got wrong
+      // — NO tx_hash, because erc7710 has no Haven-submitted transaction.
       'GET /payments/pay_7710': {
-        status: 409,
+        status: 200,
         body: {
           payment_id: 'pay_7710',
           status: 'submitted',
+          rail: 'x402',
           message: 'The payment was submitted and is waiting for confirmation.',
         },
       },

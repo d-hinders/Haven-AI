@@ -146,7 +146,7 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
       'On success, report the purchase to the user from the structured `summary` object (status, product_name, amount, ' +
       'settlement_tx_hash) rather than parsing the confirmation text or invoice.',
     {
-      plan: z.enum(['basic', 'pro', 'ultra']).describe('VPN-plan att köpa'),
+      plan: z.enum(['basic', 'legacy', 'pro', 'ultra']).describe('VPN-plan att köpa'),
       settlement_method: z.enum(SUPPORTED_SETTLEMENT_METHODS).optional().describe('Valfri x402 settlement method'),
     },
     async ({ plan, settlement_method }) => {

@@ -75,6 +75,7 @@ export function isTrustedDelegationManagerForChain(value: unknown, chainId = CHA
 
 export type ProductId =
   | 'vpn_basic'
+  | 'vpn_legacy'
   | 'vpn_pro'
   | 'vpn_ultra'
   | 'storage_50gb'
@@ -102,6 +103,29 @@ export const PRODUCTS: Record<ProductId, Product> = {
     price_usdc: 1_000n,
     category: 'vpn',
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
+  },
+  /**
+   * The ONLY EIP-3009-only product (#1441). Everything else advertises both
+   * methods, and the #1450 preference rule then picks erc7710 — which has no
+   * funding leg, so it makes the funding-leg topology unreachable from the
+   * `haven_pay_mcp_tool` entry point that `x402-hosted-mcp-signer` exists to
+   * cover. That leg had no merchant it could assert against and skipped
+   * permanently.
+   *
+   * A dedicated product rather than narrowing an existing one: an earlier
+   * attempt (#1513) made `vpn_pro` 3009-only and had to be reverted, because
+   * mutating a shared fixture changes what every other leg is buying. This one
+   * is bought by exactly one scenario, and its settlement methods are the
+   * point of it — do not "tidy" it back to SUPPORTED_SETTLEMENT_METHODS.
+   */
+  vpn_legacy: {
+    id: 'vpn_legacy',
+    name: 'NordShield VPN Legacy',
+    description:
+      'VPN-abonnemang som endast stöder EIP-3009-betalning. Avsett för klienter utan ERC-7710-stöd.',
+    price_usdc: 1_000n,
+    category: 'vpn',
+    x402: { settlementMethods: ['eip3009'], defaultSettlementMethod: 'eip3009' },
   },
   vpn_pro: {
     id: 'vpn_pro',
@@ -158,7 +182,7 @@ export function isSettlementMethod(value: unknown): value is SettlementMethod {
 // no-boot-crash-on-missing-config) from whoever resolved that list upstream
 // (`index.ts` / `http.ts`).
 
-const VPN_PLAN_VALUES = ['basic', 'pro', 'ultra'] as const
+const VPN_PLAN_VALUES = ['basic', 'legacy', 'pro', 'ultra'] as const
 const STORAGE_TIER_VALUES = ['50gb', '200gb', '1tb'] as const
 
 interface ProductToolArgs {

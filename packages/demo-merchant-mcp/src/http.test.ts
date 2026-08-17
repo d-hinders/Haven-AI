@@ -11,6 +11,7 @@ import {
   PAYMENT_REQUIRED_HEADER,
   PAYMENT_RESPONSE_HEADER,
   PAYMENT_SIGNATURE_HEADER,
+  SettlementRevertedError,
   USDC_ADDRESS,
   createX402PaymentProcessor,
   type Eip3009Authorization,
@@ -433,5 +434,78 @@ describe('demo merchant MCP x402 flow', () => {
     expect(products.status).toBe(200)
     expect(products.headers.get('mcp-session-id')).toBeNull()
     expect(text).toContain('vpn_basic')
+  })
+
+  /**
+   * A refusal and a breakage both leave the payer with a 402, but they are
+   * opposite events: one is the merchant working, the other is the merchant
+   * broken. #1517 — before this, every fault collapsed to the bare string
+   * "Payment failed" and was never logged, so a merchant whose RPC had died
+   * was indistinguishable from one enforcing policy, in the response AND in
+   * its own logs.
+   */
+  describe('a merchant-side fault is not reported as a payment rejection (#1517)', () => {
+    async function payAndCaptureError(client: Partial<SettlementClient>) {
+      const { url } = await startServer(client)
+      const init = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+      })
+      const sessionId = init.headers.get('mcp-session-id')!
+      const unpaid = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      }, { 'mcp-session-id': sessionId })
+      const paymentRequired = await unpaid.json() as PaymentRequired
+      const paid = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      }, { 'mcp-session-id': sessionId, [PAYMENT_SIGNATURE_HEADER]: await signedHeader(paymentRequired) })
+      return { status: paid.status, body: await paid.json() as PaymentRequired & { error?: string } }
+    }
+
+    it('names the fault class and points at the logs, instead of "Payment failed"', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const rpcDown = Object.assign(new Error('fetch failed: ECONNREFUSED'), { name: 'HttpRequestError' })
+      const { status, body } = await payAndCaptureError({
+        submit: vi.fn<SettlementClient['submit']>().mockRejectedValue(rpcDown),
+      })
+
+      expect(status).toBe(402)
+      // The old behaviour, which said nothing at all:
+      expect(body.error).not.toBe('Payment failed')
+      // The fault CLASS reaches the client — enough to tell a broken merchant
+      // from a strict one — while the message and stack stay server-side.
+      expect(body.error).toContain('merchant-side fault')
+      expect(body.error).toContain('HttpRequestError')
+      expect(body.error).not.toContain('ECONNREFUSED')
+
+      // And it is no longer silent in the merchant's own logs.
+      expect(consoleError).toHaveBeenCalledTimes(1)
+      const [message, context] = consoleError.mock.calls[0]
+      expect(String(message)).toContain('FAULT')
+      expect(context).toMatchObject({ productId: 'vpn_basic', error: rpcDown })
+    })
+
+    it('still reports a genuine policy rejection by its own reason, unlogged', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      // SettlementRevertedError extends PaymentError — a DECISION, so its
+      // message must survive verbatim and must not be treated as a fault.
+      const reverted = new SettlementRevertedError('USDC settlement transaction reverted on-chain: 0xdead')
+      const { status, body } = await payAndCaptureError({
+        submit: vi.fn<SettlementClient['submit']>().mockRejectedValue(reverted),
+      })
+
+      expect(status).toBe(402)
+      expect(body.error).toBe('USDC settlement transaction reverted on-chain: 0xdead')
+      expect(body.error).not.toContain('merchant-side fault')
+      expect(consoleError).not.toHaveBeenCalled()
+    })
   })
 })

@@ -20,7 +20,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-08-17" # #1516: x402 legs now append the merchant's own 402 reason instead of a fixed string, and Troubleshooting explains the two 402 shapes (rejection vs lost session, #1515). Prior: #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
+last-verified: "2026-08-17" # #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -775,13 +775,26 @@ distinguishes have opposite causes:
   finding (a reverted settlement tx, an unusable `assetTransferMethod`, an
   invalid payer address). Its settlement wallet and RPC are the usual suspects
   when the reason mentions the chain.
-- **`— merchant re-issued a bare challenge with no error field`** — the merchant
-  **rejected nothing**. It never associated the `X-PAYMENT` header with the
-  request, which means it lost the session or pending-payment record between
-  the challenge and the paid retry. That state is in memory
+- **`… merchant-side fault (<Class>) … [not a policy rejection]`** — the merchant
+  **broke**, it did not refuse. Something that is not a `PaymentError` escaped
+  verification or settlement: an RPC failure, a viem error, a bug. The class
+  name is the only detail that crosses to the client on purpose; the message
+  and stack are in the merchant's own logs, which is where to look next
+  ([#1517](https://github.com/d-hinders/Haven-AI/issues/1517)). Nothing about
+  the payment is wrong — do not go looking at budgets, delegations or
+  signatures until the merchant is healthy.
+- **`— merchant re-issued a bare challenge`** — the merchant **rejected
+  nothing**. It never associated the `X-PAYMENT` header with the request, which
+  means it lost the session or pending-payment record between the challenge and
+  the paid retry. That state is in memory
   ([#1515](https://github.com/d-hinders/Haven-AI/issues/1515)), so any container
   restart between the two produces exactly this — including a Railway redeploy,
   which fires on **every push to `dev`**.
+
+  Note this is detected by the challenge's `error` reading the x402 default
+  `"Payment required"`, **not** by the key being absent: the `PaymentRequired`
+  shape always carries an `error`, so a merchant response with no `error` key
+  never occurs in practice.
 
 A run that overlaps a dev merge can therefore go red without anything being
 wrong with the code. Re-dispatch once the deploy settles before investigating

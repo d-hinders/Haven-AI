@@ -35,6 +35,19 @@ interface PaymentRequired402Body {
 const MAX_REASON = 300
 
 /**
+ * The x402 `PaymentRequired` shape ALWAYS carries an `error`, and an untouched
+ * challenge carries this exact default (`demo-merchant-mcp/src/x402.ts`
+ * `buildPaymentRequired`). So "no payment was presented" is signalled by this
+ * literal, NOT by the key being absent (#1517).
+ *
+ * The first cut of this helper tested for an absent key, which no merchant
+ * response ever has — the bare-challenge branch was unreachable and a lost
+ * session would have been reported as an ordinary rejection reading "merchant
+ * said: Payment required".
+ */
+const BARE_CHALLENGE_ERROR = 'Payment required'
+
+/**
  * Extract the merchant's stated reason from a 402 response.
  *
  * Consumes the response body, so call it once and only on a response no other
@@ -57,19 +70,25 @@ export async function merchant402Reason(res: Response): Promise<string> {
     return ` — merchant 402 body (unparseable): ${text.slice(0, MAX_REASON)}`
   }
 
-  if (typeof body.error === 'string' && body.error.trim()) {
-    return ` — merchant said: ${body.error.slice(0, MAX_REASON)}`
-  }
-  if (body.error !== undefined) {
-    return ` — merchant said: ${JSON.stringify(body.error).slice(0, MAX_REASON)}`
+  // The untouched default, or no reason at all: the plain challenge. On a retry
+  // that carried X-PAYMENT this is the interesting case — the merchant did not
+  // reject the payment, it never saw one, which points at lost session/payment
+  // state rather than at policy.
+  if (body.error === undefined || body.error === BARE_CHALLENGE_ERROR) {
+    return (
+      ' — merchant re-issued a bare challenge, so it did not reject the payment; it never ' +
+      'associated the X-PAYMENT header with the request (lost session or payment state)'
+    )
   }
 
-  // No `error` key: the plain challenge. On a retry that carried X-PAYMENT this
-  // is the interesting case — the merchant did not reject the payment, it never
-  // saw one, which points at lost session/payment state rather than at policy.
-  return (
-    ' — merchant re-issued a bare challenge with no error field, so it did not reject the ' +
-    'payment; it never associated the X-PAYMENT header with the request (lost session or ' +
-    'payment state)'
-  )
+  if (typeof body.error === 'string' && body.error.trim()) {
+    // A merchant-side FAULT says so in its own text (#1517) — an RPC failure or
+    // a bug, not a policy decision. Call that out rather than letting it read
+    // like a refusal the payment earned.
+    const fault = body.error.includes('merchant-side fault')
+      ? ' [merchant FAULT, not a policy rejection — check the merchant logs]'
+      : ''
+    return ` — merchant said: ${body.error.slice(0, MAX_REASON)}${fault}`
+  }
+  return ` — merchant said: ${JSON.stringify(body.error).slice(0, MAX_REASON)}`
 }

@@ -84,7 +84,12 @@ function erc7710Header(
   return encodePaymentSignatureHeader(payload)
 }
 
-async function postBuyVpn(url: string, headers: Record<string, string> = {}, id = 1) {
+async function postBuyVpn(
+  url: string,
+  headers: Record<string, string> = {},
+  id = 1,
+  plan: 'basic' | 'legacy' = 'basic',
+) {
   return fetch(url, {
     method: 'POST',
     headers: {
@@ -96,7 +101,7 @@ async function postBuyVpn(url: string, headers: Record<string, string> = {}, id 
       jsonrpc: '2.0',
       id,
       method: 'tools/call',
-      params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      params: { name: 'buy_vpn', arguments: { plan } },
     }),
   })
 }
@@ -370,5 +375,44 @@ describe('demo merchant experimental erc7710 rail', () => {
 
     expect(rejected.status).toBe(402)
     expect(body.error).toContain('not configured')
+  })
+})
+
+describe("a product's own settlement methods bind the 402 it serves (#1441)", () => {
+  /**
+   * The catalogue said one thing and the challenge served another. `vpn_legacy`
+   * advertises eip3009 alone, but the 402 was built from the MERCHANT-wide
+   * enabled set — so it offered erc7710, a delegation-rail client preferred it
+   * per #1450, and the funding-leg topology stayed unreachable even after the
+   * product existed to make it reachable.
+   *
+   * Caught by a live `qa-dev` run, not by any test: the leg failed with
+   * `hosted quote selected "erc7710" for plan 'legacy', which advertises
+   * eip3009 ONLY`. The 402 is what decides, so it is what must be asserted.
+   */
+  it('serves a 3009-ONLY challenge for a 3009-only product, even with erc7710 enabled', async () => {
+    const { url } = await startServer({
+      erc7710Client: mockErc7710Client(),
+      options: { erc7710: { delegationManager: DELEGATION_MANAGER } },
+    })
+
+    const unpaid = await postBuyVpn(url, {}, 1, 'legacy')
+    const paymentRequired = await unpaid.json() as PaymentRequired
+
+    expect(unpaid.status).toBe(402)
+    expect(paymentRequired.accepts).toHaveLength(1)
+    expect(paymentRequired.accepts[0]?.extra?.assetTransferMethod).not.toBe(ERC7710_TRANSFER_METHOD)
+  })
+
+  it('still serves both for a product that advertises both, so the gate only narrows', async () => {
+    const { url } = await startServer({
+      erc7710Client: mockErc7710Client(),
+      options: { erc7710: { delegationManager: DELEGATION_MANAGER } },
+    })
+
+    const unpaid = await postBuyVpn(url, {}, 1, 'basic')
+    const paymentRequired = await unpaid.json() as PaymentRequired
+
+    expect(paymentRequired.accepts).toHaveLength(2)
   })
 })

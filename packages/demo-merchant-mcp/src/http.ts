@@ -16,9 +16,11 @@ import {
   DEFAULT_SETTLEMENT_METHOD,
   HOSTED_DEMO_MERCHANT_URLS,
   PRODUCTS,
+  SUPPORTED_SETTLEMENT_METHODS,
   formatUsdc,
   isSettlementMethod,
   merchantEnvironmentForChain,
+  settlementMethodsForProduct,
   type ProductId,
   type SettlementMethod,
 } from './products.js'
@@ -154,6 +156,15 @@ async function handlePaymentGate(
     resource: `${options.baseUrl}${options.path}`,
     description,
     settlementMethod,
+    // The PRODUCT's methods, intersected with what this merchant has enabled
+    // (#1441). Without this the challenge fell back to the merchant-wide set,
+    // so a product restricting its settlement methods was honoured in the
+    // catalogue metadata and IGNORED in the 402 it actually served — the two
+    // disagreed, and the 402 is the one that decides.
+    settlementMethods: settlementMethodsForProduct(
+      product,
+      options.settlementMethods ?? SUPPORTED_SETTLEMENT_METHODS,
+    ),
   })
   const paymentHeader = getPaymentHeader(req)
 

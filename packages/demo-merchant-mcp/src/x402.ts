@@ -256,6 +256,14 @@ export interface X402PaymentProcessor {
     resource: string
     description: string
     settlementMethod?: SettlementMethod
+    /**
+     * The PRODUCT's advertised methods (#1441), already intersected with what
+     * this merchant has enabled. Omitting it falls back to the merchant-wide
+     * set — which is what the challenge did before, so a product restricting
+     * its settlement methods was honoured in the catalogue metadata and
+     * IGNORED in the 402 it actually served. The 402 is the one that decides.
+     */
+    settlementMethods?: readonly SettlementMethod[]
   }): PaymentRequired
   paymentRequiredHeader(paymentRequired: PaymentRequired): string
   paymentResponseHeader(response: SettleResponse): string
@@ -513,7 +521,20 @@ export function createX402PaymentProcessor(
     buildPaymentRequired: (params) =>
       buildPaymentRequired({
         ...params,
-        settlementMethods,
+        // INTERSECTION, not precedence (#1441). The two lists mean different
+        // things and neither may simply win:
+        //   - the merchant-wide set is a HARD GATE — erc7710 absent here means
+        //     it is unconfigured, and must never be advertised whatever a
+        //     product claims;
+        //   - the caller's list is the PRODUCT's own restriction, which may
+        //     narrow the gate further but never widen it.
+        // Written as `...params, settlementMethods` this sat after the spread
+        // and silently discarded the product's list, so a 3009-only product
+        // still advertised erc7710 in its 402 — the catalogue and the
+        // challenge disagreed, and the challenge is the one that decides.
+        settlementMethods: params.settlementMethods
+          ? settlementMethods.filter((method) => params.settlementMethods?.includes(method))
+          : settlementMethods,
         facilitatorAddresses: settlementClient.erc7710?.redeemerAddress
           ? [settlementClient.erc7710.redeemerAddress]
           : undefined,

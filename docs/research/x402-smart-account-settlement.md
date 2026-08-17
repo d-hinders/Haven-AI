@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/rails/allowance-module.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/modules/mpp/**
-last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-08-15" # #1451: §1's "keep EIP-3009 as the production default" is superseded on the delegation rail by the #1450 owner decision (prefer erc7710 when the merchant advertises it); marked in the Outcome block rather than rewriting the historical investigation. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Research — Smart-account-native x402 settlement (removing the funding leg)
@@ -28,8 +28,22 @@ last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: pa
 > AllowanceModule rail (import-only); a delegation-metered **EIP-3009 fallback
 > on the delegation rail** (for merchant reach) is **built** (per-payment scheme
 > selection; pinned budgets stay erc7710-only) —
-> RFC #791 §18 / [#946](https://github.com/d-hinders/Haven-AI/issues/946). The
-> sections below are the original investigation, kept as a decision record.
+> RFC #791 §18 / [#946](https://github.com/d-hinders/Haven-AI/issues/946).
+>
+> **Superseded on one point (2026-08-15, #1450):** §1 below recommends keeping
+> EIP-3009/delegate as the production default "until a replacement is mature +
+> audited + facilitator-supported". On the **delegation rail** that condition is
+> now met **for the merchants that advertise it** — the mechanism is mature and
+> audited; what remains thin is how many facilitators have implemented it. The
+> owner decision reverses the default on that basis: prefer erc7710 whenever
+> the merchant advertises `extra.assetTransferMethod: "erc7710"`, with the 3009
+> bridge as the merchant-reach fallback. The legacy AllowanceModule rail is
+> unchanged — EIP-3009 is not a preference there, it is the only scheme.
+> Facilitator adoption is still thin, which is why the fallback stays; §1's
+> reasoning about the funding leg being the source of the worst structural
+> properties is exactly the reasoning that carried the decision.
+>
+> The sections below are the original investigation, kept as a decision record.
 
 ## 1. TL;DR / recommendation
 

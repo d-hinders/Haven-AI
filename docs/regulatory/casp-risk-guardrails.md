@@ -51,7 +51,7 @@ covers:
   - packages/demo-merchant-mcp/src/**
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-12" # #1366: verification entries move to docs/regulatory/casp-changelog/ shards (satisfied-by); this date now tracks re-verification of the BODY claims only. EOF log below frozen as of 2026-08-12
+last-verified: "2026-08-16" # #1496: this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails

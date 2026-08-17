@@ -1,18 +1,18 @@
 import { readFile } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import Fastify from 'fastify'
 import openapiRoutes from '../routes/openapi.js'
 import { openapiSpec } from './spec.js'
+// #1443: the extractor and the allowlist moved to shared modules so the wider
+// route-coverage gate reads the same ones instead of a second copy.
+import { ROUTES_DIR, extractRoutes, fastifyPathToOpenApi } from './route-inventory.js'
+import { KNOWN_UNDOCUMENTED_ROUTES } from './route-coverage.js'
 import {
   AgentPaymentNextAction,
   AgentPaymentPhase,
   AgentPaymentRail,
 } from '../domain/agent-payment-taxonomy.js'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const ROUTES_DIR = join(__dirname, '..', 'routes')
 
 /**
  * The route files that publish the agent payment surface. Adding a new route
@@ -23,6 +23,12 @@ const ROUTES_DIR = join(__dirname, '..', 'routes')
  * Auth, dashboard, balances, contacts, etc. are deliberately out of scope —
  * they are not part of the agent payment surface and not in the published
  * spec.
+ *
+ * #1443: this list is no longer the whole story, and must not be read as it.
+ * It scopes THIS test to the agent-payment surface on purpose; the repo-wide
+ * property — every registered module is documented, justified or explicitly
+ * deferred — lives in `route-coverage.test.ts`, which derives its scope from
+ * the app's registration table so a new module cannot hide by not being listed.
  */
 const AGENT_PAYMENT_ROUTE_FILES: Array<{ file: string; prefix: string }> = [
   { file: 'agents.ts', prefix: '/agents' },
@@ -34,157 +40,10 @@ const AGENT_PAYMENT_ROUTE_FILES: Array<{ file: string; prefix: string }> = [
   { file: 'catalog.ts', prefix: '/catalog' },
 ]
 
-/**
- * Routes declared in the above files that are intentionally NOT part of the
- * public agent payment surface and therefore not in `openapiSpec`. Each
- * entry needs an explicit `because:` justification — auditors and future
- * contributors must understand why a route exists but is undocumented.
- *
- * When a new route is added, it should EITHER be documented in
- * `openapi/spec.ts` OR added here with a clear reason. The default must be
- * "document it"; the allowlist exists for genuinely-internal routes.
- */
-const KNOWN_UNDOCUMENTED_ROUTES: Array<{
-  method: string
-  path: string
-  because: string
-}> = [
-  // ── agents.ts ──
-  {
-    method: 'PUT',
-    path: '/agents/{id}',
-    because:
-      'Dashboard-only mutation that uses dashboard JWT auth, not the agent API key. ' +
-      'Could be documented when the dashboard surface is folded into a separate dashboard spec.',
-  },
-  {
-    method: 'DELETE',
-    path: '/agents/{id}',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/pause',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/resume',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/rotate-key',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'DELETE',
-    path: '/agents/{id}/allowances/{tokenAddress}',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/allowances',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  // ── transactions.ts ──
-  {
-    method: 'GET',
-    path: '/transactions/payment-intents/{paymentId}/evidence',
-    because: 'Dashboard-only audit view using dashboard JWT auth.',
-  },
-  {
-    method: 'POST',
-    path: '/x402/{id}/settle',
-    because:
-      'Delegation-rail x402 settlement (#830, epic #821). Behind the /x402 ' +
-      'darkened rail; documented in the OpenAPI spec in the epic docs sweep (#834).',
-  },
-]
-
 function isKnownUndocumented(method: string, path: string): boolean {
   return KNOWN_UNDOCUMENTED_ROUTES.some(
     (entry) => entry.method === method && entry.path === path,
   )
-}
-
-const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const
-
-/**
- * Extract Fastify route registrations from a route file's source text.
- *
- * Matches `<identifier>.<method>(<optional generic>)(<path>` for the standard
- * HTTP methods. The optional generic is consumed by `[^'"\`(]*` — anything
- * that is not a string quote or an opening paren — so nested type parameters
- * like `Record<K,V>` or multi-line `{\n  Body: ...\n}` work without a regex
- * brace-balancer. Quote-aware for single/double/backtick string literals.
- * Strips comments before matching so example snippets in JSDoc don't appear
- * as live registrations.
- */
-function extractRoutes(source: string): Array<{ method: string; path: string }> {
-  // Strip comments outside string literals so we don't (a) match example
-  // routes inside JSDoc, (b) eat `://` inside a URL string literal.
-  const noComments = stripCommentsOutsideStrings(source)
-  const re = new RegExp(
-    `\\b[A-Za-z_$][A-Za-z0-9_$]*\\.(${HTTP_METHODS.join('|')})[^'"\`(]*\\(\\s*(['"\`])([^'"\`]+)\\2`,
-    'g',
-  )
-  const routes: Array<{ method: string; path: string }> = []
-  let match: RegExpExecArray | null
-  while ((match = re.exec(noComments)) !== null) {
-    routes.push({ method: match[1].toUpperCase(), path: match[3] })
-  }
-  return routes
-}
-
-// Strip JS line and block comments from `source`, leaving content inside
-// string literals untouched. A naive `source.replace(/\/\/[^\n]*/g, '')`
-// would eat the rest of any line that contains `://` inside a URL string,
-// dropping route registrations on that line. This walks the text
-// character-by-character with a small state machine instead.
-function stripCommentsOutsideStrings(source: string): string {
-  let out = ''
-  let i = 0
-  // States: 'code' | 'line-comment' | 'block-comment' | 'single' | 'double' | 'template'
-  let state: 'code' | 'line-comment' | 'block-comment' | 'single' | 'double' | 'template' = 'code'
-  while (i < source.length) {
-    const c = source[i]
-    const next = source[i + 1]
-    if (state === 'code') {
-      if (c === '/' && next === '/') { state = 'line-comment'; i += 2; continue }
-      if (c === '/' && next === '*') { state = 'block-comment'; i += 2; continue }
-      if (c === "'") { state = 'single'; out += c; i++; continue }
-      if (c === '"') { state = 'double'; out += c; i++; continue }
-      if (c === '`') { state = 'template'; out += c; i++; continue }
-      out += c; i++; continue
-    }
-    if (state === 'line-comment') {
-      if (c === '\n') { state = 'code'; out += c; i++; continue }
-      i++; continue
-    }
-    if (state === 'block-comment') {
-      if (c === '*' && next === '/') { state = 'code'; i += 2; continue }
-      i++; continue
-    }
-    // Inside a string literal — preserve content as-is, honor backslash escapes.
-    if (c === '\\' && i + 1 < source.length) {
-      out += c + source[i + 1]; i += 2; continue
-    }
-    if (state === 'single' && c === "'") { state = 'code'; out += c; i++; continue }
-    if (state === 'double' && c === '"') { state = 'code'; out += c; i++; continue }
-    if (state === 'template' && c === '`') { state = 'code'; out += c; i++; continue }
-    out += c; i++
-  }
-  return out
-}
-
-/**
- * Fastify path syntax `:id` → OpenAPI path syntax `{id}`. Both inside the
- * same path string.
- */
-function fastifyPathToOpenApi(prefix: string, path: string): string {
-  const full = (prefix + (path === '/' ? '' : path)).replace(/\/+/g, '/')
-  return full.replace(/:([A-Za-z0-9_]+)/g, '{$1}')
 }
 
 describe('openapiSpec', () => {

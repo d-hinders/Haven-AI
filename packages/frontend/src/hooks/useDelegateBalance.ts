@@ -2,18 +2,16 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
+import type { ApiSchema } from '@haven_ai/core'
 
-/** On-chain USDC + ETH balance of an agent's delegate EOA. */
-export interface DelegateBalance {
-  delegate_address: string
-  safe_address: string | null
-  chain_id: number
-  eth: string
-  eth_atomic: string
-  usdc: string
-  usdc_atomic: string
-  usdc_address: string | null
-}
+/**
+ * On-chain USDC + ETH balance of an agent's delegate EOA.
+ *
+ * #1445: the spec described this response inline, which generates an anonymous
+ * type — so the frontend hand-wrote a matching copy. The schema is named
+ * (`DelegateBalance`) now, and this is the generated type.
+ */
+export type DelegateBalance = ApiSchema<'DelegateBalance'>
 
 export interface UseDelegateBalanceResult {
   balance: DelegateBalance | null

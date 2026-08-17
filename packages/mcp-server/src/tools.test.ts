@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  AgentPaymentPhase,
   HavenApiError,
   HavenClient,
   MerchantTimeoutError,
@@ -10,6 +11,7 @@ import {
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 
 const DELEGATE_KEY = '0x' + 'a'.repeat(64)
+const HEADER_SIGNING_KEY = '0x' + '12'.repeat(32)
 const X402_EXPECTED_AUTH = {
   version: 1 as const,
   message: 'Haven x402 expected context v1\n{}',
@@ -82,7 +84,11 @@ function stubFetch(routes: Record<string, RouteDefinition>) {
     }
     const status = route?.status ?? 200
     const responseHeaders = new Headers(route?.responseHeaders ?? {})
-    const bodySnapshot = route?.body
+    const bodySnapshot = route?.body ?? (
+      method === 'GET' && /^\/machine-payments\/[^/]+\/status$/.test(path)
+        ? x402PreflightStatus()
+        : undefined
+    )
     const response = {
       ok: status >= 200 && status < 300,
       status,
@@ -290,10 +296,67 @@ const PAYMENT_REQUIRED = {
       maxAmountRequired: '1500000',
       // Base USDC — selectStandardPaymentOption only accepts this asset.
       asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-      payTo: '0xMerchant',
+      payTo: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
       maxTimeoutSeconds: 60,
+      extra: { name: 'USD Coin', version: '2' },
     },
   ],
+}
+
+const headerSigner = new HavenClient({
+  apiKey: 'sk_agent_test',
+  delegateKey: HEADER_SIGNING_KEY,
+  baseUrl: 'http://haven.test',
+})
+let VALID_PAYMENT_HEADER = ''
+let VALID_PAYMENT_HEADER_V2 = ''
+
+beforeAll(async () => {
+  VALID_PAYMENT_HEADER = await (headerSigner as unknown as {
+    createStandardX402Header(
+      paymentRequired: typeof PAYMENT_REQUIRED,
+      option: (typeof PAYMENT_REQUIRED.accepts)[number],
+    ): Promise<string>
+  }).createStandardX402Header(PAYMENT_REQUIRED, PAYMENT_REQUIRED.accepts[0])
+  VALID_PAYMENT_HEADER_V2 = await (headerSigner as unknown as {
+    createStandardX402Header(
+      paymentRequired: typeof PAYMENT_REQUIRED,
+      option: (typeof PAYMENT_REQUIRED.accepts)[number],
+    ): Promise<string>
+  }).createStandardX402Header({ ...PAYMENT_REQUIRED, x402Version: 2 }, PAYMENT_REQUIRED.accepts[0])
+})
+
+function x402PreflightStatus(overrides: Record<string, unknown> = {}) {
+  return {
+    payment_id: 'pay_x402',
+    kind: 'payment_intent',
+    rail: 'x402',
+    status: 'pending_signature',
+    phase: 'awaiting_agent_signature',
+    next_action: 'sign_and_submit',
+    amount: '1.50',
+    token: 'USDC',
+    resource_url: PAYMENT_REQUIRED.resource.url,
+    merchant_address: PAYMENT_REQUIRED.accepts[0].payTo,
+    payer_address: headerSigner.delegateAddress,
+    tx_hash: null,
+    expires_at: '2099-01-01T00:00:00.000Z',
+    chain_id: 8453,
+    message: 'Ready to sign.',
+    amount_atomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+    asset: PAYMENT_REQUIRED.accepts[0].asset,
+    network: PAYMENT_REQUIRED.accepts[0].network,
+    ...overrides,
+  }
+}
+
+function mutateHeader(
+  paymentHeader: string,
+  mutate: (header: Record<string, unknown>) => void,
+): string {
+  const header = JSON.parse(Buffer.from(paymentHeader, 'base64').toString('utf8')) as Record<string, unknown>
+  mutate(header)
+  return Buffer.from(JSON.stringify(header), 'utf8').toString('base64')
 }
 
 // ── haven_sweep_delegate (phase 1 mapping) ────────────────────────────────────
@@ -539,7 +602,7 @@ describe('haven_pay_x402_quote', () => {
     const x402Call = calls.find((c) => c.url.endsWith('/x402'))
     expect(x402Call?.body).toMatchObject({
       payTo: '0xDelegate',
-      merchantPayTo: '0xMerchant',
+      merchantPayTo: PAYMENT_REQUIRED.accepts[0].payTo,
       amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
     })
     expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
@@ -913,6 +976,64 @@ describe('haven_send', () => {
 
 // ── haven_pay_mcp_tool ────────────────────────────────────────────────────────
 
+describe('haven_quote_mcp_tool', () => {
+  const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+
+  it('returns a compact live MCP quote without creating a Haven payment or reading allowance state', async () => {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+    })
+
+    const result = ok<{
+      rail: string
+      merchant_url: string
+      tool_name: string
+      arguments: Record<string, unknown>
+      amount_atomic: string
+      amount: string
+      token: string
+      decimals: number | null
+      resource_url: string
+      merchant_address: string
+      mcp_transport?: { handshake_required: boolean; source: string }
+      quote_is_informational: boolean
+      payment_required?: unknown
+      payment_id?: unknown
+    }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
+      }),
+    )
+
+    expect(result.data).toMatchObject({
+      rail: 'x402',
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      amount_atomic: '1500000',
+      amount: '1.5',
+      token: 'USDC',
+      decimals: 6,
+      resource_url: 'https://merchant.test/paid',
+      merchant_address: PAYMENT_REQUIRED.accepts[0].payTo,
+      mcp_transport: { handshake_required: true, source: 'path' },
+      quote_is_informational: true,
+    })
+    // The raw 402 is intentionally not a resumable payment input; a later
+    // paid call must obtain a fresh quote and enforce its explicit cap.
+    expect(result.data.payment_required).toBeUndefined()
+    expect(result.data.payment_id).toBeUndefined()
+    expect(calls.find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
+    // The MCP lifecycle needs the existing public delegate address for
+    // x402-wallet. It must not read allowances, create an intent, or write.
+    expect(calls.filter((call) => new URL(call.url).pathname.endsWith('/machine-payments/agent'))).toHaveLength(1)
+    expect(calls.find((call) => new URL(call.url).pathname.includes('/machine-payments/allowances'))).toBeUndefined()
+  })
+})
+
 describe('haven_pay_mcp_tool', () => {
   const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
 
@@ -987,6 +1108,7 @@ describe('haven_pay_mcp_tool', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
       }),
     )
 
@@ -1031,6 +1153,7 @@ describe('haven_pay_mcp_tool', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
       }),
     )
 
@@ -1148,6 +1271,7 @@ describe('haven_pay_mcp_tool', () => {
         merchant_url: 'http://merchant.test/paid',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
       }),
     )
 
@@ -1401,6 +1525,7 @@ describe('haven_pay_mcp_tool', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: {},
+        max_amount: '2000000',
       }),
     )
 
@@ -1420,6 +1545,74 @@ describe('haven_pay_mcp_tool', () => {
 })
 
 // ── haven_prepare_catalog_purchase (#1306) ────────────────────────────────────
+
+describe('haven_quote_catalog_purchase', () => {
+  const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+  const catalogEntry = {
+    id: 'cat_1',
+    name: 'CloudNest 50GB',
+    description: 'Cloud storage tier',
+    category: 'compute',
+    resource_url: 'http://merchant.test/mcp',
+    rail: 'x402',
+    protocol: 'mcp',
+    tool_name: 'create_text',
+    tool_arguments: { prompt: 'Hello' },
+    price_display: '$1.50 USDC',
+    price_atomic: '1500000',
+    asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+    network: 'eip155:8453',
+    status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+
+  it('wraps the catalog lookup and live quote without allowance reads or intent creation', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': { status: 200, body: catalogEntry },
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+    })
+
+    const result = ok<{
+      catalog_id: string
+      catalog_name: string
+      catalog_price_atomic: string | null
+      catalog_price_is_indicative: boolean
+      catalog_price_differs: boolean
+      amount_atomic: string
+      tool_name: string
+      arguments: Record<string, unknown>
+      quote_is_informational: boolean
+    }>(await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_1' }))
+
+    expect(result.data).toMatchObject({
+      catalog_id: 'cat_1',
+      catalog_name: 'CloudNest 50GB',
+      catalog_price_atomic: '1500000',
+      catalog_price_is_indicative: true,
+      catalog_price_differs: false,
+      amount_atomic: '1500000',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      quote_is_informational: true,
+    })
+    expect(calls.find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
+    expect(calls.filter((call) => new URL(call.url).pathname.endsWith('/machine-payments/agent'))).toHaveLength(1)
+    expect(calls.find((call) => new URL(call.url).pathname.includes('/machine-payments/allowances'))).toBeUndefined()
+  })
+
+  it('preserves the catalog preflight refusal when a row cannot produce a live MCP quote', async () => {
+    stubFetch({
+      'GET /catalog/cat_missing': { status: 404, body: { error: 'Catalog entry not found' } },
+    })
+
+    const payload = await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_missing' })
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('CATALOG_ENTRY_NOT_FOUND')
+    expect(payload.suggested_tool).toBe('haven_discover_tools')
+    expect(calls).toHaveLength(1)
+  })
+})
 
 describe('haven_prepare_catalog_purchase', () => {
   const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
@@ -1973,7 +2166,8 @@ describe('haven_settle_mcp_tool', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
-        payment_header: 'eyJ4IjoxfQ==',
+        max_amount: '2000000',
+        payment_header: VALID_PAYMENT_HEADER,
       }),
     )
 
@@ -1982,13 +2176,62 @@ describe('haven_settle_mcp_tool', () => {
     expect(signCall?.body).toEqual({ signature: SIG })
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy.mock.calls[0][0].paymentId).toBe('pay_x402')
-    expect(spy.mock.calls[0][0].paymentHeader).toBe('eyJ4IjoxfQ==')
+    expect(spy.mock.calls[0][0].paymentHeader).toBe(VALID_PAYMENT_HEADER)
     // payment_id is echoed so the agent can reconcile without retaining it.
     expect(result.data.payment_id).toBe('pay_x402')
     expect(result.data.funding_tx_hash).toBe('0xfund')
     expect(result.data.settled).toBe(true)
     expect(result.data.settlement_tx_hash).toBe('0xsettle')
     expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
+  })
+
+  it('accepts the current v2 payment-header envelope before funding', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({ status: 200, ok: true, body: {} })
+
+    const result = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402', signature: SIG, merchant_url: 'http://merchant.test/mcp', tool_name: 'create_text',
+      payment_header: VALID_PAYMENT_HEADER_V2,
+    })
+
+    expect(result.success).toBe(true)
+    expect(calls.some((call) => call.url.endsWith('/payments/pay_x402/sign'))).toBe(true)
+  })
+
+  it.each([
+    ['malformed base64', 'not-a-payment-header'],
+    ['oversized header', 'A'.repeat(65_540)],
+    ['unsupported version', (header: string) => mutateHeader(header, (value) => { value.x402Version = 99 })],
+    ['merchant', (header: string) => mutateHeader(header, (value) => { (value.accepted as Record<string, unknown>).payTo = '0x0000000000000000000000000000000000000001' })],
+    ['asset', (header: string) => mutateHeader(header, (value) => { (value.accepted as Record<string, unknown>).asset = '0x0000000000000000000000000000000000000001' })],
+    ['network', (header: string) => mutateHeader(header, (value) => { (value.accepted as Record<string, unknown>).network = 'eip155:84532' })],
+    ['amount', (header: string) => mutateHeader(header, (value) => { (value.accepted as Record<string, unknown>).maxAmountRequired = '1' })],
+    ['payer', (header: string) => mutateHeader(header, (value) => { ((value.payload as Record<string, any>).authorization).from = '0x0000000000000000000000000000000000000001' })],
+    ['expiry', (header: string) => mutateHeader(header, (value) => { ((value.payload as Record<string, any>).authorization).validBefore = '1' })],
+    ['nonce', (header: string) => mutateHeader(header, (value) => { ((value.payload as Record<string, any>).authorization).nonce = '0x01' })],
+    ['resource', (header: string) => mutateHeader(header, (value) => { (value.accepted as Record<string, unknown>).resource = 'https://merchant.test/substituted' })],
+  ])('rejects a %s mutation before funding or merchant delivery', async (_name, mutation) => {
+    const paymentHeader = typeof mutation === 'string' ? mutation : mutation(VALID_PAYMENT_HEADER_V2)
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+    const result = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402', signature: SIG, merchant_url: 'http://merchant.test/mcp', tool_name: 'create_text',
+      payment_header: paymentHeader,
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected payment-header preflight failure')
+    expect(result.code).toBe('INVALID_PAYMENT_HEADER')
+    expect(result.message).toContain('No funding was relayed')
+    expect(calls.some((call) => call.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
+    expect(merchant).not.toHaveBeenCalled()
+    expect(JSON.stringify(result)).not.toContain(paymentHeader)
   })
 
   it('does NOT contact the merchant when funding does not confirm', async () => {
@@ -2004,7 +2247,7 @@ describe('haven_settle_mcp_tool', () => {
         signature: SIG,
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
-        payment_header: 'eyJ4IjoxfQ==',
+        payment_header: VALID_PAYMENT_HEADER,
       }),
     )
 
@@ -2031,7 +2274,7 @@ describe('haven_settle_mcp_tool', () => {
         signature: SIG,
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
-        payment_header: 'eyJ4IjoxfQ==',
+        payment_header: VALID_PAYMENT_HEADER,
       }),
     )
 
@@ -2055,7 +2298,7 @@ describe('haven_settle_mcp_tool', () => {
       signature: SIG,
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'create_text',
-      payment_header: 'eyJ4IjoxfQ==',
+      payment_header: VALID_PAYMENT_HEADER,
     })
 
     if (payload.success) throw new Error('expected a failure payload')
@@ -2079,7 +2322,7 @@ describe('haven_settle_mcp_tool', () => {
       signature: SIG,
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'create_text',
-      payment_header: 'eyJ4IjoxfQ==',
+      payment_header: VALID_PAYMENT_HEADER,
     })
 
     if (payload.success) throw new Error('expected a failure payload')
@@ -2130,13 +2373,16 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
       next_action: 'none',
       amount: '1.50',
       token: 'USDC',
-      resource_url: 'http://merchant.test/mcp',
-      merchant_address: '0xMerchant',
+      resource_url: PAYMENT_REQUIRED.resource.url,
+      merchant_address: PAYMENT_REQUIRED.accepts[0].payTo,
+      payer_address: headerSigner.delegateAddress,
       tx_hash: '0xfund',
       expires_at: '2099-01-01T00:00:00.000Z',
       chain_id: 8453,
       message: 'The payment is confirmed.',
+      amount_atomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
       asset: USDC,
+      network: PAYMENT_REQUIRED.accepts[0].network,
       ...overrides,
     }
   }
@@ -2148,7 +2394,7 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'create_text',
       arguments: { prompt: 'Hello' },
-      payment_header: 'eyJ4IjoxfQ==',
+      payment_header: VALID_PAYMENT_HEADER,
     }
   }
 
@@ -2239,28 +2485,41 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
         status: 'settled',
         product: 'NordShield VPN Basic',
         amount: '1.50',
-        amount_atomic: null,
+        amount_atomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
         asset: USDC,
-        network: 'eip155:8453',
-        merchant: { address: '0xMerchant', resource_url: 'http://merchant.test/mcp' },
+        network: PAYMENT_REQUIRED.accepts[0].network,
+        merchant: { address: PAYMENT_REQUIRED.accepts[0].payTo, resource_url: PAYMENT_REQUIRED.resource.url },
         invoice_id: 'INV-123',
         funding_tx_hash: '0xfund',
         settlement_tx_hash: '0xsettle',
         allowance: { remaining_atomic: '3500000' },
       },
     })
-    expect(calls.filter((call) => call.method === 'GET' && call.url.endsWith('/machine-payments/pay_x402/status'))).toHaveLength(1)
+    expect(calls.filter((call) => call.method === 'GET' && call.url.endsWith('/machine-payments/pay_x402/status'))).toHaveLength(2)
   })
 
   it('does not infer settlement or metadata from a merchant result that merely claims payment', async () => {
     const haven = havenSettled({
-      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture({
-        amount: '2.00', token: 'DAI', asset: null, network: null, merchant_address: null, resource_url: null,
-      }) },
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
       'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000') },
     })
     const merchantResult = { paid: true, status: 'confirmed', invoice_id: 'UNTRUSTED' }
+    vi.spyOn(haven, 'getPaymentStatus')
+      .mockResolvedValueOnce({
+        paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'pending_signature',
+        phase: AgentPaymentPhase.AgentSignatureRequired, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, amount: '1.50', token: 'USDC',
+        resourceUrl: PAYMENT_REQUIRED.resource.url, merchantAddress: PAYMENT_REQUIRED.accepts[0].payTo,
+        payerAddress: headerSigner.delegateAddress, txHash: null, expiresAt: '2099-01-01T00:00:00.000Z',
+        chainId: 8453, message: 'Ready', amountAtomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+        asset: USDC, network: PAYMENT_REQUIRED.accepts[0].network,
+      })
+      .mockResolvedValueOnce({
+        paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'confirmed',
+        phase: 'payment_confirmed', nextAction: 'none', amount: '2.00', token: 'DAI',
+        resourceUrl: null, merchantAddress: null, txHash: '0xfund', expiresAt: '2099-01-01T00:00:00.000Z',
+        chainId: 8453, message: 'Confirmed', asset: null, network: null,
+      })
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({ status: 200, ok: true, body: merchantResult })
 
     const result = ok<{ result: unknown; agent_summary: { purchase_summary: Record<string, unknown> } }>(
@@ -2370,16 +2629,26 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     expect(result.data.agent_summary.purchase_summary).toMatchObject({
       amount: '1.50',
       asset: USDC,
-      network: 'eip155:8453',
-      merchant: { address: '0xMerchant', resource_url: 'http://merchant.test/mcp' },
+      network: PAYMENT_REQUIRED.accepts[0].network,
+      merchant: { address: PAYMENT_REQUIRED.accepts[0].payTo, resource_url: PAYMENT_REQUIRED.resource.url },
       allowance: null,
     })
   })
 
   it('a failed payment-status lookup (token resolution) ALSO never converts settled:true into failure', async () => {
     const haven = havenSettled({
-      'GET /machine-payments/pay_x402/status': { status: 502, body: { error: 'boom' } },
+      'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
     })
+    vi.spyOn(haven, 'getPaymentStatus')
+      .mockResolvedValueOnce({
+        paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'pending_signature',
+        phase: AgentPaymentPhase.AgentSignatureRequired, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, amount: '1.50', token: 'USDC',
+        resourceUrl: PAYMENT_REQUIRED.resource.url, merchantAddress: PAYMENT_REQUIRED.accepts[0].payTo,
+        payerAddress: headerSigner.delegateAddress, txHash: null, expiresAt: '2099-01-01T00:00:00.000Z',
+        chainId: 8453, message: 'Ready', amountAtomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+        asset: USDC, network: PAYMENT_REQUIRED.accepts[0].network,
+      })
+      .mockRejectedValueOnce(new HavenApiError('boom', 502))
 
     const result = ok<{ settled: boolean; allowance: unknown; warnings: Array<{ code: string }> }>(
       await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()),
@@ -2500,7 +2769,7 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
       payment_id: 'pay_x402',
       merchant_url: 'http://merchant.test/mcp',
       // tool_name omitted — an agent that supplied merchant_url expects it used
-      payment_header: 'eyJ4IjoxfQ==',
+      payment_header: VALID_PAYMENT_HEADER,
     })
 
     if (payload.success) throw new Error('expected a failure payload')
@@ -2584,7 +2853,7 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
       await createToolHandlers(haven).haven_settle_mcp_tool({
         payment_id: 'pay_x402',
         signature: SIG,
-        payment_header: 'eyJ4IjoxfQ==',
+        payment_header: VALID_PAYMENT_HEADER,
       }),
     )
 
@@ -2787,6 +3056,7 @@ describe('compact x402 signing payload (#1272)', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
       }),
     )
     expect('typed_data_b64' in compact.data).toBe(false)
@@ -2798,6 +3068,7 @@ describe('compact x402 signing payload (#1272)', () => {
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
         include_signing_payload: true,
       }),
     )
@@ -2817,6 +3088,33 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     'POST /x402': { status: 201 as const, body: X402_INTENT_RESPONSE },
   })
 
+  it('uses the same bounded discovery for a read-only generic quote without creating an intent', async () => {
+    stubFetch({
+      'POST /': { status: 404, body: { error: 'Not found' } },
+      'GET /.well-known/haven-demo-merchant': { status: 200, body: DISCOVERY_DOC },
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+      },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+    })
+
+    const result = ok<{ merchant_url: string; merchant_url_was_discovered: boolean }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      }),
+    )
+
+    expect(result.data).toEqual(expect.objectContaining({
+      merchant_url: 'http://merchant.test/mcp',
+      merchant_url_was_discovered: true,
+    }))
+    expect(calls.find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
+    expect(calls.find((call) => new URL(call.url).pathname.includes('/allowances'))).toBeUndefined()
+  })
+
   it('resolves a base URL through /.well-known and returns the RESOLVED merchant_url', async () => {
     stubFetch({
       // The base URL is not the MCP endpoint: POST / misses.
@@ -2834,6 +3132,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
         merchant_url: 'http://merchant.test/',
         tool_name: 'buy_vpn',
         arguments: { plan: 'basic' },
+        max_amount: '2000000',
       }),
     )
 
@@ -2919,6 +3218,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
       await handlers().haven_pay_mcp_tool({
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'buy_vpn',
+        max_amount: '2000000',
       }),
     )
 
@@ -2937,6 +3237,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     const result = await handlers().haven_pay_mcp_tool({
       merchant_url: 'http://merchant.test/',
       tool_name: 'buy_vpn',
+      max_amount: '2000000',
     })
 
     expect(result.success).toBe(false)
@@ -2959,6 +3260,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     const result = await handlers().haven_pay_mcp_tool({
       merchant_url: 'http://merchant.test/',
       tool_name: 'buy_vpn',
+      max_amount: '2000000',
     })
 
     expect(result.success).toBe(false)
@@ -2974,6 +3276,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     const result = await handlers().haven_pay_mcp_tool({
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'buy_vpn',
+      max_amount: '2000000',
     })
 
     expect(result.success).toBe(false)
@@ -3005,6 +3308,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     const result = await handlers().haven_pay_mcp_tool({
       merchant_url: 'http://merchant.test/',
       tool_name: 'buy_vpn',
+      max_amount: '2000000',
     })
 
     expect(result.success).toBe(false)
@@ -3027,6 +3331,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     const result = await handlers().haven_pay_mcp_tool({
       merchant_url: 'http://merchant.test/',
       tool_name: 'buy_vpn',
+      max_amount: '2000000',
     })
 
     expect(result.success).toBe(false)
@@ -3054,6 +3359,7 @@ describe('structured agent guidance (#1308)', () => {
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'buy_vpn',
       arguments: { plan: 'basic' },
+      max_amount: '2000000',
     })
 
   it('a signable quote tells the agent EXACTLY what to do next — from the existing taxonomy', async () => {
@@ -3074,12 +3380,19 @@ describe('structured agent guidance (#1308)', () => {
     expect(result.data.agent_summary).toMatchObject({ payment_id: 'pay_x402', status: 'pending_signature' })
   })
 
-  it('warnings absorb the cap nudge as MISSING_MAX_AMOUNT while cap_warning stays for compat', async () => {
+  it('refuses an uncapped paid MCP call before contacting the merchant', async () => {
     stubFetch(stubs())
-    const result = ok<{ cap_warning?: string; warnings: Array<{ code: string }> }>(await pay())
+    const payload = await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+      arguments: { plan: 'basic' },
+    })
 
-    expect(result.data.cap_warning).toBeDefined()
-    expect(result.data.warnings.some((w) => w.code === 'MISSING_MAX_AMOUNT')).toBe(true)
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('INVALID_INPUT')
+    expect(payload.message).toContain('REQUIRED')
+    expect(calls).toHaveLength(0)
   })
 
   it('passing max_amount clears BOTH the legacy field and the structured warning', async () => {
@@ -3277,18 +3590,16 @@ describe('human-unit spending caps (#1351)', () => {
       }
     })
 
-    it('an uncapped call still warns in both spellings, naming the human field first', async () => {
-      stubFetch(payRoutes)
+  it('refuses an uncapped paid MCP call before the merchant probe', async () => {
+    stubFetch(payRoutes)
 
-      const result = ok<{ cap_warning: string; warnings: Array<{ code: string; message: string }> }>(
-        await payMcpTool({}),
-      )
+      const payload = await payMcpTool({})
 
-      expect(result.data.cap_warning).toContain('max_amount_human')
-      // #1275's legacy field kept its substance — still names max_amount too.
-      expect(result.data.cap_warning).toContain('max_amount')
-      const missing = result.data.warnings.find((w) => w.code === 'MISSING_MAX_AMOUNT')
-      expect(missing?.message).toContain('max_amount_human')
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('expected failure')
+      expect(payload.code).toBe('INVALID_INPUT')
+      expect(payload.message).toContain('max_amount_human')
+      expect(calls).toHaveLength(0)
     })
   })
 
@@ -3609,5 +3920,245 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.code).toBe('DELEGATION_BUDGET_EXCEEDED')
       expect(fundingCall()).toBeUndefined()
     })
+  })
+})
+
+/**
+ * #1456 — erc7710 through the hosted tool surface.
+ *
+ * The negatives carry this suite. A selector that always answered "erc7710"
+ * would pass a happy-path-only file, so both halves of the #1450 rule are
+ * tested for the case where they must NOT fire.
+ */
+describe('hosted erc7710 (#1456)', () => {
+  const SIG7710 = '0x' + '22'.repeat(65)
+  const ERC7710_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      ...PAYMENT_REQUIRED.accepts,
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        extra: {
+          assetTransferMethod: 'erc7710',
+          facilitatorAddresses: ['0x4444444444444444444444444444444444444444'],
+        },
+      },
+    ],
+  }
+  const erc7710Header = btoa(JSON.stringify(ERC7710_PR))
+  const plainHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const CHILD = {
+    payment_id: 'pay_7710',
+    status: 'pending_signature',
+    sign_data: {
+      hash: '0x' + '11'.repeat(32),
+      signature_scheme: 'eip712_delegation',
+      typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+    },
+  }
+
+  // The intent body is chosen by the EXPECTED scheme, not by the challenge —
+  // a legacy account meeting a 7710-advertising merchant must still get the
+  // 3009 intent, which is exactly the case this helper got wrong at first.
+  async function pay(header: string, agent: Record<string, unknown>, expectErc7710 = false) {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': header } },
+      'GET /machine-payments/agent': { status: 200, body: agent },
+      'POST /x402': { status: 201, body: expectErc7710 ? CHILD : X402_INTENT_RESPONSE },
+    })
+    return ok(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
+      }),
+    ) as { data: Record<string, any> }
+  }
+
+  it('selects erc7710, reports it structurally, and shapes the request for direct settlement', async () => {
+    const res = await pay(erc7710Header, DELEGATION_AGENT, true)
+    expect(res.data.settlement_scheme).toBe('erc7710')
+    expect(res.data.settlement.funding_leg).toBe(false)
+    expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign')
+
+    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
+    // payTo = the MERCHANT is what selects direct settlement server-side.
+    expect(body.settlementScheme).toBe('erc7710')
+    expect(body.payTo).toBe(PAYMENT_REQUIRED.accepts[0].payTo)
+    expect(body).not.toHaveProperty('merchantPayTo')
+  })
+
+  it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
+    const res = await pay(erc7710Header, { ...AGENT_RESPONSE, execution_rail: 'legacy' })
+    expect(res.data.settlement_scheme).toBeUndefined()
+    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
+    expect(body.settlementScheme).toBe('eip3009')
+  })
+
+  it('a 3009-only merchant stays on the bridge, even on a delegation account', async () => {
+    const res = await pay(plainHeader, DELEGATION_AGENT)
+    expect(res.data.settlement_scheme).toBeUndefined()
+    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
+    expect(body.settlementScheme).toBe('eip3009')
+  })
+
+  it('keeps #1348 round-trip budget: still exactly ONE agent fetch', async () => {
+    await pay(erc7710Header, DELEGATION_AGENT, true)
+    expect(
+      calls.filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent')).length,
+    ).toBe(1)
+  })
+
+  it('settle exchanges the signature for the header, with NO funding relay and NO preflight', async () => {
+    // The sequence inversion this issue turns on: on 3009 the signature funds
+    // the delegate; here it IS the settlement child.
+    stubFetch({
+      'POST /x402/pay_7710/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+      'GET /payments/pay_7710': { status: 200, body: { payment_id: 'pay_7710', status: 'settled' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const spy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } },
+      settlementTxHash: undefined,
+    })
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null,
+      warnings: [],
+      payment: { status: 'settled' },
+    } as never)
+
+    const res = ok(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: SIG7710,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.settlement_scheme).toBe('erc7710')
+    expect(res.data.funding_tx_hash).toBeNull()
+    expect(spy.mock.calls[0][0].paymentHeader).toBe('HEADER_FROM_HAVEN')
+    // The signature went to settle, NOT to the funding relay.
+    expect(calls.find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG7710 })
+    expect(calls.find((c) => c.url.includes('/payments/pay_7710/sign'))).toBeUndefined()
+  })
+})
+
+/**
+ * #1456 review: the code comment claims "a prefetch FAILURE deliberately
+ * yields the 3009 path", and nothing pinned it. Mutating the rail test from
+ * `=== 'delegation'` to `!== 'legacy'` — which makes an UNKNOWN rail
+ * erc7710-eligible — passed all 151 tests. A guarantee stated in a comment and
+ * checked by nothing is the failure mode this repo keeps naming.
+ */
+describe('hosted erc7710 rail fallback (#1456 review)', () => {
+  const ERC7710_PR2 = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      ...PAYMENT_REQUIRED.accepts,
+      { ...PAYMENT_REQUIRED.accepts[0], extra: { assetTransferMethod: 'erc7710' } },
+    ],
+  }
+  const header2 = btoa(JSON.stringify(ERC7710_PR2))
+
+  async function payWithAgent(agentStub: Record<string, unknown>) {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': header2 } },
+      'GET /machine-payments/agent': agentStub,
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+    return ok(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        max_amount: '2000000',
+      }),
+    ) as { data: Record<string, any> }
+  }
+
+  function scheme() {
+    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
+    return body.settlementScheme
+  }
+
+  it('an agent record with NO rail field falls back to 3009, not erc7710', async () => {
+    // The mutation the review used: an unknown rail must never be treated as
+    // delegation-eligible just because it is not the string 'legacy'.
+    const res = await payWithAgent({ status: 200, body: AGENT_RESPONSE })
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(scheme()).toBe('eip3009')
+  })
+
+  it('an unrecognised rail value falls back to 3009', async () => {
+    const res = await payWithAgent({ status: 200, body: { ...AGENT_RESPONSE, execution_rail: 'session_key' } })
+    expect(res.data.settlement_scheme).toBeUndefined()
+    expect(scheme()).toBe('eip3009')
+  })
+
+  it('a FAILED agent read never constructs an erc7710 request', async () => {
+    // The case the two above cannot reach: getAgent() normalises any unknown
+    // rail to 'legacy', so only an outright prefetch REJECTION yields
+    // undefined — which is exactly what the review's `!== 'legacy'` mutant
+    // treats as delegation-eligible. The call itself fails (createX402Intent
+    // re-fetches and hits the same 500), so the assertion is about the SHAPE
+    // that was or was not built, not about success.
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': header2 } },
+      'GET /machine-payments/agent': { status: 500, body: { error: 'boom' } },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+    await handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      max_amount: '2000000',
+    })
+    const authorize = calls.find((c) => new URL(c.url).pathname === '/x402')
+    if (authorize) {
+      const raw = authorize.body
+      const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
+      expect(body.settlementScheme).not.toBe('erc7710')
+    }
+    // Whatever else happened, no settlement child was requested.
+    expect(calls.find((c) => new URL(c.url).pathname.endsWith('/settle'))).toBeUndefined()
+  })
+})
+
+/**
+ * #1469 — a null hole in agent-supplied accepts[] gets the clean refusal,
+ * not a 500. The Zod schema only guarantees a string-keyed record; the raw
+ * cast this fixes let the hole reach the selectors and throw.
+ */
+describe('null-holed payment_required (#1469)', () => {
+  it('haven_pay_x402_quote survives a null accepts entry and still selects the valid one', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+    const result = await handlers().haven_pay_x402_quote({
+      payment_required: { ...PAYMENT_REQUIRED, accepts: [null, ...PAYMENT_REQUIRED.accepts] },
+    })
+    // Whatever else this stub run yields, it must NOT be the crash shape.
+    expect(JSON.stringify(result)).not.toMatch(/Cannot read properties of null/)
+  })
+
+  it('an accepts of ONLY garbage entries refuses cleanly with the wrong-tool guidance', async () => {
+    const result = await handlers().haven_pay_x402_quote({
+      payment_required: { ...PAYMENT_REQUIRED, accepts: [null, 'garbage', 42] },
+    })
+    const text = JSON.stringify(result)
+    expect(text).not.toMatch(/Cannot read properties/)
+    expect(text).toMatch(/No compatible payment option|not a valid x402 PaymentRequired/)
   })
 })

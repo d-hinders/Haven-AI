@@ -11,9 +11,11 @@
  */
 
 import { createHash } from 'node:crypto'
+import { recoverTypedDataAddress } from 'viem'
 import type { X402ExpectedContext, X402PaymentRequired, X402PaymentOption } from './types.js'
 import type { PaymentRequirements } from 'x402/types'
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
+import { buildSweepTypedData } from './sweep.js'
 
 const BASE_USDC_ADDRESS = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
 const BASE_SEPOLIA_USDC_ADDRESS = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
@@ -21,6 +23,34 @@ const BASE_SEPOLIA_USDC_ADDRESS = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const STANDARD_X402_USDC_ADDRESSES = new Set([BASE_USDC_ADDRESS, BASE_SEPOLIA_USDC_ADDRESS])
 const X402_IDEMPOTENCY_BUCKET_MS = 300_000
 const DECIMAL_ATOMIC_AMOUNT_RE = /^[0-9]+$/
+const X402_PAYMENT_HEADER_MAX_LENGTH = 65_536
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+const SIGNATURE_RE = /^0x[0-9a-fA-F]{130}$/
+const NONCE_RE = /^0x[0-9a-fA-F]{64}$/
+
+/**
+ * Persisted, agent-scoped facts used to preflight a signed standard x402
+ * payment header. This is an integrity comparison only: it never rebuilds,
+ * modifies, persists, or submits the supplied authorization.
+ */
+export interface X402PaymentHeaderContext {
+  merchantTo: string
+  amountAtomic: string
+  asset: string
+  network: string
+  resourceUrl: string
+  payer: string
+  chainId: number
+}
+
+/** A deliberately value-free refusal for untrusted payment-header input. */
+export class X402PaymentHeaderValidationError extends Error {
+  constructor() {
+    super('Invalid X-PAYMENT header.')
+    this.name = 'X402PaymentHeaderValidationError'
+  }
+}
 
 function isPositiveDecimalAtomicAmount(value: string): boolean {
   return DECIMAL_ATOMIC_AMOUNT_RE.test(value) && BigInt(value) > 0n
@@ -114,7 +144,7 @@ function normalizePaymentOption(value: unknown): X402PaymentOption | null {
   }
 }
 
-function normalizePaymentRequired(value: unknown): X402PaymentRequired | null {
+export function normalizePaymentRequired(value: unknown): X402PaymentRequired | null {
   const candidate = value as Partial<X402PaymentRequired> | null
   if (
     !candidate ||
@@ -127,7 +157,7 @@ function normalizePaymentRequired(value: unknown): X402PaymentRequired | null {
 
   const accepts = candidate.accepts
     .map((option) => normalizePaymentOption(option))
-    .filter((option): option is X402PaymentOption => !!option)
+    .filter((option): option is X402PaymentOption => !!option && typeof option === 'object')
 
   if (accepts.length === 0) return null
 
@@ -308,10 +338,74 @@ export function selectPaymentOption(
   return null
 }
 
+/** The `extra.assetTransferMethod` value that marks an erc7710-settleable entry. */
+export const ERC7710_ASSET_TRANSFER_METHOD = 'erc7710'
+
+/**
+ * Read `extra.assetTransferMethod` defensively. `extra` is the merchant's own
+ * object, so it is untrusted shape: anything that is not the exact string is
+ * treated as "not erc7710" rather than coerced.
+ */
+export function x402AssetTransferMethod(option: X402PaymentOption): string | null {
+  const raw = option.extra?.assetTransferMethod
+  return typeof raw === 'string' ? raw : null
+}
+
+/** True when the merchant advertises this entry as erc7710-settleable. */
+export function isErc7710Option(option: X402PaymentOption): boolean {
+  return x402AssetTransferMethod(option) === ERC7710_ASSET_TRANSFER_METHOD
+}
+
+/**
+ * The facilitator addresses a merchant advertises for an erc7710 entry, for
+ * the #1058 redeemer pin — or `null` when it pins nothing.
+ *
+ * **An EMPTY array is `null`, not `[]`.** The backend rejects an empty
+ * `redeemers` list with a 400 (`routes/x402.ts`), and the QA scenario already
+ * treats empty as absent. Returning `[]` here would hand callers a value that
+ * means "pin to nobody" — which is not a narrower pin, it is an unbuildable
+ * delegation.
+ *
+ * Malformed entries are DROPPED rather than failing the whole option, and that
+ * asymmetry is deliberate. A pin narrowed by a merchant's typo means the
+ * facilitator that actually tries to redeem is not on the list, so redemption
+ * reverts — and erc7710 has no funding leg, so nothing moved and nothing is
+ * stranded. Refusing the option outright would instead deny a payment the
+ * remaining valid facilitators could have settled. Losing the payment is the
+ * worse outcome, precisely because the failure this issue closes (#1453) is the
+ * one where funds move BEFORE the rejection.
+ */
+export function x402FacilitatorAddresses(option: X402PaymentOption): string[] | null {
+  const raw = option.extra?.facilitatorAddresses
+  if (!Array.isArray(raw)) return null
+  const addresses = raw.filter((a): a is string => typeof a === 'string' && ADDRESS_RE.test(a))
+  return addresses.length > 0 ? addresses : null
+}
+
+/** Shared shape test: scheme/network/asset/amount, ignoring settlement scheme. */
+function isPayableStandardOption(opt: X402PaymentOption): boolean {
+  return (
+    opt.scheme === 'exact' &&
+    opt.network in STANDARD_X402_NETWORKS &&
+    STANDARD_X402_USDC_ADDRESSES.has(opt.asset.toLowerCase()) &&
+    isPositiveDecimalAtomicAmount(optionAuthorizationAmount(opt))
+  )
+}
+
 /**
  * Select an option that can be paid with the official x402 EIP-3009 exact
  * scheme. Haven's older tx-hash proof path can describe more networks; the
  * merchant-verified path currently needs Base USDC.
+ *
+ * **Skips erc7710-tagged entries (#1453).** It used to return the first
+ * positional match and never look at `extra.assetTransferMethod`, so a merchant
+ * that listed its erc7710 entry first made a Haven client echo that option
+ * while signing a standard EIP-3009 authorization. The merchant rejects the
+ * mismatch cleanly — but on the legacy two-leg the Safe→delegate funding
+ * transfer has already executed, so the visible result is a stranded delegate
+ * balance for the sweep to reclaim. Only our own demo merchant's ordering was
+ * holding that shut, and that pin binds our merchant, not the ones we do not
+ * control.
  */
 export function selectStandardPaymentOption(
   accepts: X402PaymentOption[],
@@ -319,15 +413,82 @@ export function selectStandardPaymentOption(
   if (!accepts || accepts.length === 0) return null
 
   for (const opt of accepts) {
-    if (
-      opt.scheme === 'exact' &&
-      opt.network in STANDARD_X402_NETWORKS &&
-      STANDARD_X402_USDC_ADDRESSES.has(opt.asset.toLowerCase()) &&
-      isPositiveDecimalAtomicAmount(optionAuthorizationAmount(opt))
-    ) {
-      return opt
+    // #1469: a null hole in accepts[] is unpayable data, not a crash. The
+    // parsed-Response path filters these in normalizePaymentRequired, but at
+    // least one caller (mcp-server, agent-supplied payment_required) reaches
+    // here unsanitized — and a throw there became a 500 where every other
+    // caller gets the clean no-compatible-option refusal.
+    if (opt === null || typeof opt !== 'object') continue
+    if (!isErc7710Option(opt) && isPayableStandardOption(opt)) return opt
+  }
+
+  return null
+}
+
+/**
+ * Select the erc7710-settleable option, if the merchant advertises one.
+ */
+export function selectErc7710PaymentOption(
+  accepts: X402PaymentOption[],
+): X402PaymentOption | null {
+  if (!accepts || accepts.length === 0) return null
+
+  for (const opt of accepts) {
+    // #1469: a null hole in accepts[] is unpayable data, not a crash. The
+    // parsed-Response path filters these in normalizePaymentRequired, but at
+    // least one caller (mcp-server, agent-supplied payment_required) reaches
+    // here unsanitized — and a throw there became a 500 where every other
+    // caller gets the clean no-compatible-option refusal.
+    if (opt === null || typeof opt !== 'object') continue
+    if (isErc7710Option(opt) && isPayableStandardOption(opt)) return opt
+  }
+
+  return null
+}
+
+/** What a settlement-scheme decision resolved to. */
+export interface X402SchemeSelection {
+  scheme: 'erc7710' | 'eip3009'
+  option: X402PaymentOption
+  /** Redeemer pin for the settlement child; only ever set on erc7710. */
+  facilitatorAddresses: string[] | null
+}
+
+/**
+ * THE preference rule, in one place (#1450 owner decision, #1453).
+ *
+ *   Prefer erc7710 whenever the account is on the delegation rail and the
+ *   merchant advertises `extra.assetTransferMethod: "erc7710"`; fall back to
+ *   the EIP-3009 bridge otherwise.
+ *
+ * Both halves of that condition are required, and the rail half is the
+ * caller's to supply — the SDK cannot see which rail an account is on from a
+ * 402 response alone. A legacy AllowanceModule account passing
+ * `delegationRail: true` would select a scheme its account cannot settle; the
+ * backend refuses that at authorize (`validateGenericSchemeRail`), which is
+ * where a rail mismatch SHOULD fail, on-chain-adjacent rather than in a client
+ * that could be lying to itself.
+ *
+ * Returns `null` when neither scheme has a payable entry — the caller decides
+ * whether that is an error or a reason to look elsewhere.
+ */
+export function selectX402SettlementScheme(
+  accepts: X402PaymentOption[],
+  opts: { delegationRail: boolean },
+): X402SchemeSelection | null {
+  if (opts.delegationRail) {
+    const preferred = selectErc7710PaymentOption(accepts)
+    if (preferred) {
+      return {
+        scheme: 'erc7710',
+        option: preferred,
+        facilitatorAddresses: x402FacilitatorAddresses(preferred),
+      }
     }
   }
+
+  const fallback = selectStandardPaymentOption(accepts)
+  if (fallback) return { scheme: 'eip3009', option: fallback, facilitatorAddresses: null }
 
   return null
 }
@@ -419,6 +580,137 @@ export function toStandardPaymentRequirements(
       X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
     extra: option.extra,
   }
+}
+
+/**
+ * Strictly validate an edge-signed EIP-3009 X-PAYMENT header against the
+ * persisted x402 intent context before a hosted relay can submit funding.
+ *
+ * The merchant/facilitator remains the final protocol verifier. This closes a
+ * separate hosted-relay integrity gap: malformed or context-mismatched input
+ * must never cause Haven to relay the funding signature first.
+ */
+export async function validateStandardX402PaymentHeader(
+  paymentHeader: string,
+  context: X402PaymentHeaderContext,
+): Promise<void> {
+  try {
+    if (
+      typeof paymentHeader !== 'string' ||
+      paymentHeader.length === 0 ||
+      paymentHeader.length > X402_PAYMENT_HEADER_MAX_LENGTH ||
+      paymentHeader.length % 4 !== 0 ||
+      !BASE64_RE.test(paymentHeader)
+    ) {
+      throw new Error('wire')
+    }
+
+    const decoded = decodeBase64Json<Record<string, unknown>>(paymentHeader)
+    if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) throw new Error('shape')
+    const version = decoded.x402Version
+    const payload = decoded.payload
+    if ((version !== 1 && version !== 2) || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('shape')
+    }
+
+    if (version === 1) {
+      if (!hasOnlyKeys(decoded, ['x402Version', 'scheme', 'network', 'payload'])) throw new Error('shape')
+      if (decoded.scheme !== 'exact' || decoded.network !== standardX402WireNetwork(context.network)) {
+        throw new Error('context')
+      }
+    } else {
+      if (!hasOnlyKeys(decoded, ['x402Version', 'accepted', 'payload'])) throw new Error('shape')
+      const accepted = selectStandardPaymentOption([decoded.accepted as X402PaymentOption])
+      if (!accepted || !matchesHeaderContext(accepted, context)) throw new Error('context')
+    }
+
+    const record = payload as Record<string, unknown>
+    if (!hasOnlyKeys(record, ['signature', 'authorization'])) throw new Error('shape')
+    if (typeof record.signature !== 'string' || !SIGNATURE_RE.test(record.signature)) throw new Error('shape')
+    const authorization = record.authorization
+    if (!authorization || typeof authorization !== 'object' || Array.isArray(authorization)) throw new Error('shape')
+    const auth = authorization as Record<string, unknown>
+    if (!hasOnlyKeys(auth, ['from', 'to', 'value', 'validAfter', 'validBefore', 'nonce'])) throw new Error('shape')
+    if (
+      typeof auth.from !== 'string' || !ADDRESS_RE.test(auth.from) ||
+      typeof auth.to !== 'string' || !ADDRESS_RE.test(auth.to) ||
+      typeof auth.value !== 'string' || !isPositiveDecimalAtomicAmount(auth.value) ||
+      typeof auth.validAfter !== 'string' || !DECIMAL_ATOMIC_AMOUNT_RE.test(auth.validAfter) ||
+      typeof auth.validBefore !== 'string' || !DECIMAL_ATOMIC_AMOUNT_RE.test(auth.validBefore) ||
+      typeof auth.nonce !== 'string' || !NONCE_RE.test(auth.nonce)
+    ) {
+      throw new Error('shape')
+    }
+    if (!sameAddress(auth.from, context.payer) || !sameAddress(auth.to, context.merchantTo) || auth.value !== context.amountAtomic) {
+      throw new Error('context')
+    }
+
+    const validAfter = BigInt(auth.validAfter)
+    const validBefore = BigInt(auth.validBefore)
+    const now = BigInt(Math.floor(Date.now() / 1000))
+    if (validBefore <= now || validAfter > validBefore) throw new Error('expired')
+
+    // `buildSweepTypedData` pins the correct USDC EIP-712 domain for the
+    // persisted chain + asset pair. Successful recovery makes the nonce and
+    // every authorization field cryptographically covered by the delegate.
+    const typedData = buildSweepTypedData({
+      from: auth.from,
+      to: auth.to,
+      value: auth.value,
+      validAfter: auth.validAfter,
+      validBefore: auth.validBefore,
+      nonce: auth.nonce,
+      token: context.asset,
+      chainId: context.chainId,
+    })
+    const recovered = await recoverTypedDataAddress({
+      ...typedData,
+      // `buildSweepTypedData` keeps the public domain framework-neutral;
+      // viem brands contract addresses at this crypto call boundary only.
+      domain: {
+        ...typedData.domain,
+        verifyingContract: typedData.domain.verifyingContract as `0x${string}`,
+      },
+      message: {
+        ...typedData.message,
+        from: typedData.message.from as `0x${string}`,
+        to: typedData.message.to as `0x${string}`,
+        nonce: typedData.message.nonce as `0x${string}`,
+      },
+      signature: record.signature as `0x${string}`,
+    })
+    if (!sameAddress(recovered, context.payer)) throw new Error('recovery')
+  } catch {
+    // Header values are attacker-controlled and may include merchant data.
+    // Never propagate them into hosted errors, logs, or serialized telemetry.
+    throw new X402PaymentHeaderValidationError()
+  }
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key)) &&
+    allowed.every((key) => key in value)
+}
+
+function sameAddress(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase()
+}
+
+function standardX402WireNetwork(network: string): PaymentRequirements['network'] | null {
+  return STANDARD_X402_NETWORKS[network] ?? null
+}
+
+function matchesHeaderContext(option: X402PaymentOption, context: X402PaymentHeaderContext): boolean {
+  if (
+    option.scheme !== 'exact' ||
+    !sameAddress(option.payTo, context.merchantTo) ||
+    !sameAddress(option.asset, context.asset) ||
+    option.network !== context.network ||
+    x402AuthorizationAmount(option) !== context.amountAtomic
+  ) return false
+  // x402 v2 may scope an accepted option to a resource. When it does, that
+  // resource is part of the header context and must match the intent.
+  return option.resource === undefined || option.resource === context.resourceUrl
 }
 
 export function buildX402IdempotencyKey(

@@ -1,14 +1,11 @@
 'use client'
 
-import { X } from 'lucide-react'
-import { useRef } from 'react'
-import { Icon } from '@/components/ui/Icon'
-import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useAgentConnectionSetup } from '@/hooks/useAgentConnectionSetup'
 import { ConnectStep } from './connect-agent/ConnectStep'
 import { DetailsStep } from './connect-agent/DetailsStep'
 import { PolicyStep } from './connect-agent/PolicyStep'
 import { ReviewStep } from './connect-agent/ReviewStep'
+import { Modal } from './ui/Modal'
 import { StepProgress } from './ui/StepProgress'
 
 interface Props {
@@ -49,9 +46,6 @@ export default function ConnectAgentModal({
   onSetupUpdated,
   starterAllowance = false,
 }: Props) {
-  const panelRef = useRef<HTMLDivElement>(null)
-  useFocusTrap(panelRef, open)
-
   const flow = useAgentConnectionSetup({
     open,
     onClose,
@@ -64,44 +58,50 @@ export default function ConnectAgentModal({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 v2-modal-backdrop">
-      <div className="absolute inset-0" onClick={flow.busy ? undefined : flow.handleClose} />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Connect agent"
-        className="relative w-full max-w-xl max-h-[calc(100vh-24px)] overflow-y-auto overflow-x-hidden rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]"
-      >
-        <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Connect agent</h2>
-            </div>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{flow.headerSubtitleText}</p>
-          </div>
-          <button
-            type="button"
-            onClick={flow.handleClose}
-            disabled={flow.busy}
-            aria-label="Close"
-            className="p-1 -mr-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface-2)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
-          >
-            <Icon icon={X} className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="border-b border-[var(--v2-border)] px-5 py-3">
+    <Modal
+      open
+      onClose={flow.handleClose}
+      title="Connect agent"
+      subtitle={flow.headerSubtitleText}
+      headerAccessory={
+        // #1418: ONE status voice. On steps 1-3 the wizard band is the only
+        // status signal. On step 4 the shell ticker (Waiting — Connected —
+        // Approved) takes over as the single voice — the epic's rule 2 —
+        // so the wizard band does not render there: two stacked trackers in
+        // the same dot/line language made the user decode which meant what,
+        // on the screen whose whole job is calm. The ticker also carries the
+        // remaining journey, so "step 4 of 4" loses no information.
+        flow.step !== 'connect' ? (
           <StepProgress totalSteps={flow.setupStepCount} currentStep={Math.max(flow.currentStepIndex, 0)} />
-        </div>
-
-        <div className="p-5">
+        ) : undefined
+      }
+      showCloseButton
+      closeButtonDisabled={flow.busy}
+      width="xl"
+      maxHeight="tight"
+      closeOnBackdrop={!flow.busy}
+      closeOnEscape={false}
+      bodyClassName="p-5"
+    >
+      {/*
+       * #1411: steps 1-3 share ONE 20px rhythm — the same `flex flex-col
+       * gap-5` step 4's shell body carries (ConnectStepShell) — instead of
+       * each setting its own `space-y-*` (DetailsStep/ReviewStep used 5,
+       * PolicyStep used 4). Hoisted here rather than left inside each step
+       * so no step can silently reintroduce a local rhythm. Keyed by
+       * `flow.step` so the entrance animation retriggers on every step
+       * change, the same way ConnectStepShell keys its body by `stateKey`.
+       * Step 4 stays OUTSIDE this wrapper and keeps its own shell/rhythm —
+       * changing it is explicitly out of scope for #1411.
+       */}
+      {flow.step !== 'connect' && (
+        <div key={flow.step} className="v2-animate-step-rise flex flex-col gap-5">
           {flow.step === 'details' && <DetailsStep flow={flow} />}
           {flow.step === 'policy' && <PolicyStep flow={flow} />}
           {flow.step === 'review' && <ReviewStep flow={flow} />}
-          {flow.step === 'connect' && <ConnectStep flow={flow} />}
         </div>
-      </div>
-    </div>
+      )}
+      {flow.step === 'connect' && <ConnectStep flow={flow} />}
+    </Modal>
   )
 }

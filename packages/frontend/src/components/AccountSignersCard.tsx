@@ -22,6 +22,7 @@ import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Modal } from './ui/Modal'
+import ConfirmDialog from './ConfirmDialog'
 import { Icon } from './ui/Icon'
 import { useToast } from './ui/Toast'
 import { truncateAddress } from '@/components/haven'
@@ -50,6 +51,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
   const [showWallet, setShowWallet] = useState(false)
   const [showRecoveryHelp, setShowRecoveryHelp] = useState(false)
   const [showRemoveOwnerConfirm, setShowRemoveOwnerConfirm] = useState(false)
+  const [passkeyToRemove, setPasskeyToRemove] = useState<string | null>(null)
 
   const wayCount = useMemo(
     () => (signers ? signers.passkeys.length + (signers.owner_address ? 1 : 0) : 0),
@@ -62,6 +64,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
   // Only the drop-to-one case gets the confirmation; removing a wallet that
   // still leaves a backup passkey is ordinary maintenance.
   const removingOwnerLeavesOneSigner = wayCount === 2
+  const removingPasskeyLeavesOneSigner = wayCount === 2
 
   const handle = useCallback(
     async (result: Promise<{ ok: boolean; reason?: string; message?: string }>, okMsg: string) => {
@@ -148,7 +151,11 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
                   size="sm"
                   variant="ghost"
                   disabled={busy || !ready || wayCount < 2}
-                  onClick={() => void handle(removePasskey(pk.key_id), 'Removed.')}
+                  onClick={() =>
+                    removingPasskeyLeavesOneSigner
+                      ? setPasskeyToRemove(pk.key_id)
+                      : void handle(removePasskey(pk.key_id), 'Removed.')
+                  }
                 >
                   Remove
                 </Button>
@@ -253,29 +260,18 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
         </div>
       </Modal>
 
-      <Modal
+      <ConfirmDialog
         open={showRemoveOwnerConfirm}
-        onClose={() => setShowRemoveOwnerConfirm(false)}
+        onCancel={() => setShowRemoveOwnerConfirm(false)}
         title="Remove this wallet?"
-        footer={
-          <div className="flex items-center justify-end gap-3">
-            <Button variant="tertiary" onClick={() => setShowRemoveOwnerConfirm(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="danger"
-              disabled={busy || !ready}
-              onClick={() => {
-                setShowRemoveOwnerConfirm(false)
-                void handle(removeOwner(), 'Wallet removed.')
-              }}
-            >
-              Remove anyway
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-3">
+        onConfirm={() => {
+          setShowRemoveOwnerConfirm(false)
+          void handle(removeOwner(), 'Wallet removed.')
+        }}
+        confirmLabel="Remove anyway"
+        confirmDisabled={busy || !ready}
+        body={
+          <div className="space-y-3">
           <p>
             This is the last backup on this account. Removing it leaves a single Face ID / Touch ID
             as the only way to approve anything — this account will have no recovery.
@@ -284,8 +280,35 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
             If you lose that device, you lose access to this account and everything in it. Haven
             can&apos;t get it back for you, and neither can anyone else.
           </p>
-        </div>
-      </Modal>
+          </div>
+        }
+      />
+
+      <ConfirmDialog
+        open={passkeyToRemove !== null}
+        onCancel={() => setPasskeyToRemove(null)}
+        title="Remove this approval?"
+        onConfirm={() => {
+          if (!passkeyToRemove) return
+          const keyId = passkeyToRemove
+          setPasskeyToRemove(null)
+          void handle(removePasskey(keyId), 'Removed.')
+        }}
+        confirmLabel="Remove anyway"
+        confirmDisabled={busy || !ready}
+        body={
+          <div className="space-y-3">
+          <p>
+            Removing this Face ID / Touch ID leaves this account with one way to approve. If that
+            remaining way is lost, this account will have no recovery.
+          </p>
+          <p>
+            Haven cannot restore access to this account for you. Make sure you still control the
+            remaining way to approve before continuing.
+          </p>
+          </div>
+        }
+      />
     </Card>
   )
 }

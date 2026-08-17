@@ -129,7 +129,7 @@ More than one agent session works this repo (different users, different machines
 
 **Before building an issue** (any session, any agent):
 
-1. Check the issue's assignee and latest comments for a live claim.
+1. Check the issue's latest comments for a live `🔒 CLAIM`. An assignee records ownership, not a live build — treat it as context, never as a claim on its own.
 2. Check for existing work: `gh pr list --search "<issue-nr>"` and `git ls-remote --heads origin | grep <issue-nr>`.
 3. Check the tail of #1289 for claims or FYIs touching the same surfaces.
 4. A live claim (posted < 24h ago, no contrary signal since) means: pick something else, or coordinate in #1289 first. Never silently duplicate a claimed build.

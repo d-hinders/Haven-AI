@@ -18,10 +18,51 @@ Turn a freeform request into a loop-ready GitHub issue without implementing it.
    - **Files**: best-effort ownership.
    - **Surface**: checked surface labels.
    - **Money-path?**: explicit Yes or No.
+
+   Take the template's **body shape and its sizing rule** — "keep it small and
+   self-contained, one PR's worth of work"; anything larger is an epic, below.
+   Do **not** take its `labels:` default. The template auto-applies
+   `code-quality` because a human opening it through GitHub's UI is queueing work
+   deliberately; this skill files to the backlog unless shipping was asked for,
+   per *Backlog And Shipping*. Same template, opposite default, and only the
+   filer knows which one applies.
 5. Check GitHub for a materially duplicate open issue.
 6. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
-7. Apply every inferred `area:*` label and `money-path` when applicable. Assign the requester when their GitHub identity is discoverable.
+7. Apply every inferred `area:*` label and `money-path` when applicable. **Leave the issue unassigned** unless the requester asks to own it — both issue templates ship `assignees: []`, and a queue of unassigned issues is what the loop expects to read. Assignment records ownership; a `🔒 CLAIM` comment, never an assignee, records that someone is building right now.
 8. Return the issue link and applied labels.
+
+## Epics
+
+A request whose remedy spans several disjoint pull requests is an **epic**: file
+one tracking issue plus one issue per slice. A [quality-scan](../quality-scan/SKILL.md)
+finding always arrives in this shape.
+
+The canonical shape is the repository's own epic template,
+`.github/ISSUE_TEMPLATE/loop-epic.md` — read it and follow it rather than
+inventing a layout. Filing through the API bypasses the template, so the rules it
+encodes have to be applied by hand; that is what the rest of this section is for.
+
+- **Label the tracking issue `epic`**, in addition to its `area:*` labels. An
+  epic without the label is invisible to every epic-scoped query, including the
+  one a reader uses to ask what epics are open.
+- **Attach each slice as a GitHub sub-issue of the tracking issue**, not only as
+  a checklist line in its body. [ship-next](../ship-next/SKILL.md)'s `epic=#<n>`
+  selects the lowest-numbered open **sub-issue**; slices tracked only as prose
+  resolve to nothing, so the epic cannot be shipped from the queue at all.
+- **Attach each slice as you create it, not in a pass at the end.** The attachment
+  is keyed on the issue's internal identifier — which is *not* its number, is
+  returned when the issue is created, and is absent from the listing and search
+  results you can get afterwards. Link while you still hold it; recovering it
+  later means decoding pagination cursors to read an id the API will not name.
+- **Keep the build-order list in the body as well.** Sub-issue links carry
+  membership but not sequencing, and `ship-next` reads that list to decide what
+  is blocked.
+- File slices in build order where possible, so lowest-numbered-open matches the
+  intended sequence.
+- **Do not put `code-quality` on the slices** — the epic's open sub-issues already
+  are the queue for `epic=#<n>`, and that label is for the standalone queue
+  (`loop-epic.md` states this; it is the one rule most easily lost when filing
+  through the API). Backlog-only still applies to the epic itself.
 
 ## Backlog And Shipping
 

@@ -6,8 +6,7 @@ import {
   type CreateSetupResponse,
 } from '@/hooks/useAgentConnectionSetup'
 import type { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
-import { formatAllowanceForToken } from '@/lib/allowance-format'
-import { budgetPeriodLabel } from '@/lib/budget-period'
+import { describeBudgetGrant } from '@/lib/budget-period'
 import WalletButton from '../WalletButton'
 import { Button } from '../ui/Button'
 import { AgentRulesSummary } from '../haven'
@@ -66,11 +65,11 @@ export function LocalConnectionReady({
   // footer below.
   const install = status?.install_status
   const budgets = status?.agent_budget ?? []
+  // #1394: the same describer the approved screen uses, so the grant a user
+  // reads BEFORE approving and the one they read after are worded identically.
   const displayBudgets = budgets.map((budget) => ({
     id: budget.id ?? budget.token_symbol,
-    tokenSymbol: budget.token_symbol,
-    amount: formatAllowanceForToken(budget.allowance_amount, chainId, budget.token_symbol),
-    period: budgetPeriodLabel(budget.reset_period_min),
+    text: describeBudgetGrant(budget, chainId),
   }))
   const agentName = status?.agent.name ?? 'this agent'
   const approvalBlocked = approvalBlockReason(
@@ -91,11 +90,11 @@ export function LocalConnectionReady({
         density="compact"
         items={[
           {
-            label: 'Agent',
+            label: 'Agent name',
             value: status?.agent.name ?? 'New agent',
             helper: status?.agent.description?.trim() || undefined,
           },
-          { label: 'From', value: walletName },
+          { label: 'Spend from', value: walletName },
           {
             label: 'Budget',
             value: (
@@ -103,11 +102,7 @@ export function LocalConnectionReady({
                 {displayBudgets.length === 0 ? (
                   <span className="text-[var(--v2-ink-3)]">Waiting for budget</span>
                 ) : (
-                  displayBudgets.map((budget) => (
-                    <div key={budget.id}>
-                      {budget.amount} {budget.tokenSymbol} {budget.period}
-                    </div>
-                  ))
+                  displayBudgets.map((budget) => <div key={budget.id}>{budget.text}</div>)
                 )}
               </div>
             ),

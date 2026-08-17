@@ -25,11 +25,13 @@ import {
   agentExistsForUser,
   createAgentWithAllowances,
   deleteAgentAllowance,
-  deleteRevokedAgent,
+  agentHasLiveDelegations,
+  archiveAgent,
+  unarchiveAgent,
   findAgentForUserAllStatuses,
   findAgentIdStatusForUser,
   findDefaultUserSafeId,
-  findDelegateAgentForUserExcludingRevoked,
+  findDelegateAgentForUser,
   findNonRevokedAgentIdByDelegate,
   findUserSafeIdForUser,
   listAgentsForUserAllStatuses,
@@ -147,8 +149,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
 
-    // Excludes revoked — the one status-scoped agent read (see the repository).
-    const agent = await findDelegateAgentForUserExcludingRevoked(id, sub)
+    // Status-agnostic since #1403: revoked and archived agents resolve like
+    // any other — the delegate EOA can hold stranded funds precisely AFTER a
+    // revoke, and this read backs the sweep page that recovers them.
+    const agent = await findDelegateAgentForUser(id, sub)
     if (!agent) {
       return reply.code(404).send({ error: 'Agent not found' })
     }
@@ -324,19 +328,70 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  // DELETE /agents/:id
-  app.delete<{ Params: { id: string } }>('/:id', async (request, reply) => {
+  // DELETE /agents/:id — RETIRED (#1401). Hard deletion both failed on any
+  // agent with payment history (FK NO ACTION on payment_intents /
+  // approval_requests → 23503 → 500) and, where it succeeded, cascaded away
+  // seven tables of money-path audit trail. The typed route stays as a 410
+  // tombstone for reversibility, in the same spirit as the session-rail
+  // retirement (#834). Nothing is written on this path any more.
+  app.delete<{ Params: { id: string } }>('/:id', async (_request, reply) => {
+    return reply.code(410).send({
+      error:
+        'Deleting agents is retired: removal is an archive, and history is kept. Use POST /agents/:id/archive on a revoked agent instead.',
+    })
+  })
+
+  // POST /agents/:id/archive — soft-archive a REVOKED agent (#1401). A filing
+  // action only: requires status='revoked' so archiving is never the thing
+  // that stops spending, keeps every dependent audit row, and is idempotent
+  // (re-archiving keeps the original archived_at, no timestamp churn).
+  //
+  // #1436: it also requires DEAD BUDGETS. Revoking only flips the agent's
+  // status, so revoke+archive without revoke-all used to file an agent under
+  // "Removed" while its delegation was still redeemable on-chain. The Remove
+  // dialog always killed budgets first, but that ordering was frontend
+  // convention, not an invariant — and "Removed" is a promise about spending.
+  app.post<{ Params: { id: string } }>('/:id/archive', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
 
-    const deleted = await deleteRevokedAgent(id, sub)
-
-    if (!deleted) {
+    const archived = await archiveAgent(id, sub)
+    if (!archived) {
       const exists = await agentExistsForUser(id, sub)
       if (!exists) {
         return reply.code(404).send({ error: 'Agent not found' })
       }
-      return reply.code(409).send({ error: 'Only revoked agents can be deleted' })
+      // Name the actual blocker: live budgets and a live credential need
+      // different remedies, and a caller told the wrong one is stuck.
+      if (await agentHasLiveDelegations(id)) {
+        return reply.code(409).send({
+          error:
+            'This agent still holds budget delegations, so archiving would hide an agent that can still spend. Stop them first with POST /agents/:id/delegations/revoke-all, then archive.',
+        })
+      }
+      return reply.code(409).send({
+        error: 'Only revoked agents can be archived. Revoke the agent first — archiving never stops spending by itself.',
+      })
+    }
+
+    return { success: true, archived_at: archived.archived_at }
+  })
+
+  // POST /agents/:id/unarchive — return the agent to the primary list. The
+  // status stays exactly as it was (revoked): un-archiving restores no
+  // authority of any kind.
+  app.post<{ Params: { id: string } }>('/:id/unarchive', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const { id } = request.params
+
+    const unarchived = await unarchiveAgent(id, sub)
+    if (!unarchived) {
+      const exists = await agentExistsForUser(id, sub)
+      if (!exists) {
+        return reply.code(404).send({ error: 'Agent not found' })
+      }
+      // Not archived — nothing to do; treat as success for idempotency.
+      return { success: true }
     }
 
     return { success: true }

@@ -249,6 +249,7 @@ async function main() {
     })
   }
 
+  const docsByPath = new Map(docs.map((d) => [d.doc, d]))
   const findings = implicatedDocs(changed, docs, undefined, { strict })
   const hasFindings = findings.length > 0
   const contractFindings = findings.filter((f) => f.contract)
@@ -288,7 +289,18 @@ async function main() {
       `\nBLOCKING: ${contractFindings.length} contract doc(s) cover changed code ` +
       'but were not touched in this PR:',
     )
-    for (const f of contractFindings) console.error(`  - ${f.doc}`)
+    // #1496: name the satisfied-by path when the doc declares one. The old
+    // message said only "update each doc", so every PR dutifully edited the
+    // same last-verified line — three merge conflicts in one day between PRs
+    // that had ALREADY written the shard that would have satisfied the gate.
+    // A gate whose error message hides the intended remedy trains people into
+    // the failure mode it was built to prevent.
+    for (const f of contractFindings) {
+      const viaShard = docsByPath?.get(f.doc)?.satisfiedBy?.length
+        ? ` — or add a verification shard matching \`satisfied-by\` (${docsByPath.get(f.doc).satisfiedBy.join(', ')}); the doc itself then needs NO edit`
+        : ''
+      console.error(`  - ${f.doc}${viaShard}`)
+    }
     console.error('Update each doc (or re-verify it and bump `last-verified`) and push again.')
     process.exit(1)
   }

@@ -130,16 +130,44 @@ describe('GET /agents — the #1069 pin: pending_approval agents are SURFACED', 
 })
 
 describe('GET /agents/:id/delegate-balance', () => {
-  it('excludes revoked agents in SQL — the one status-scoped agent read', async () => {
+  it('resolves agents status-agnostically (#1403) — revoked/archived still get their balance', async () => {
+    // The regression the issue names: revoke an agent, delegate-balance must
+    // still answer. The old `a.status != 'revoked'` filter 404'd exactly when
+    // stranded delegate funds needed the sweep page.
     const app = await makeApp()
     mockQuery.mockResolvedValueOnce({ rows: [] })
 
     const res = await app.inject({ method: 'GET', url: '/agents/agent-1/delegate-balance' })
-    expect(res.statusCode).toBe(404)
+    expect(res.statusCode).toBe(404) // truly missing agent still 404s
 
     const sql = String(mockQuery.mock.calls[0][0])
-    expect(sql).toContain("a.status != 'revoked'")
+    expect(sql).not.toContain('status')
     expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', 'agent-1'])
+    await app.close()
+  })
+
+  it('regression (#1403): a REVOKED agent returns 200 with its balance', async () => {
+    const app = await makeApp()
+    // The row a revoked-and-archived agent produces from the status-agnostic
+    // read — resolution must proceed to the balance fetch. (SQL-dispatched,
+    // not positional, per the #1227 ratchet.)
+    mockQuery.mockImplementation(async (sql: unknown) =>
+      String(sql).includes('a.delegate_address')
+        ? {
+            rows: [{
+              delegate_address: '0x1111111111111111111111111111111111111111',
+              safe_chain_id: 84532,
+              safe_address: '0x2222222222222222222222222222222222222222',
+              account_type: 'delegator_hybrid',
+            }],
+          }
+        : { rows: [] },
+    )
+    mockGetTokenBalance.mockResolvedValue(0n)
+
+    const res = await app.inject({ method: 'GET', url: '/agents/agent-1/delegate-balance' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().delegate_address).toBe('0x1111111111111111111111111111111111111111')
     await app.close()
   })
 
@@ -341,39 +369,19 @@ describe('PUT /agents/:id', () => {
   })
 })
 
-describe('DELETE /agents/:id', () => {
-  it('deletes a revoked agent', async () => {
+describe('DELETE /agents/:id — retired (#1401)', () => {
+  it('is a 410 tombstone regardless of agent state, and touches the database not at all', async () => {
+    // The old contract (delete revoked / 409 / 404) is GONE by design: hard
+    // deletion 500'd on any agent with payment history and cascaded away
+    // seven tables of audit trail where it succeeded. Removal is an archive
+    // now — POST /agents/:id/archive.
     const app = await makeApp()
-    mockQuery.mockResolvedValueOnce({ rows: [{ id: 'agent-1' }] })
+    mockQuery.mockClear()
 
     const res = await app.inject({ method: 'DELETE', url: '/agents/agent-1' })
-    expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ success: true })
-    expect(String(mockQuery.mock.calls[0][0])).toContain("status = 'revoked'")
-    expect(mockQuery.mock.calls[0][1]).toEqual(['agent-1', 'user-1'])
-    await app.close()
-  })
-
-  it('409s for an agent that exists but is not revoked', async () => {
-    const app = await makeApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [] }) // guarded DELETE matched nothing
-      .mockResolvedValueOnce({ rows: [{ id: 'agent-1' }] }) // …but the agent exists
-
-    const res = await app.inject({ method: 'DELETE', url: '/agents/agent-1' })
-    expect(res.statusCode).toBe(409)
-    expect(res.json().error).toMatch(/Only revoked agents/)
-    await app.close()
-  })
-
-  it('404s for an agent that does not exist', async () => {
-    const app = await makeApp()
-    mockQuery
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-
-    const res = await app.inject({ method: 'DELETE', url: '/agents/agent-x' })
-    expect(res.statusCode).toBe(404)
+    expect(res.statusCode).toBe(410)
+    expect(res.json().error).toMatch(/archive/)
+    expect(mockQuery).not.toHaveBeenCalled()
     await app.close()
   })
 })

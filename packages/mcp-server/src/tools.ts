@@ -19,6 +19,8 @@ import {
   resolveTokenFromAddress,
   sameUrl,
   selectStandardPaymentOption,
+  validateStandardX402PaymentHeader,
+  X402PaymentHeaderValidationError,
   toolDescriptions as sharedDescriptions,
   verifyPaymentReceipt,
   x402AuthorizationAmount,
@@ -27,6 +29,8 @@ import {
   type SweepAuthorization,
   type X402McpTransport,
   type X402PaymentRequired,
+  selectX402SettlementScheme,
+  normalizePaymentRequired,
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
@@ -55,7 +59,9 @@ export type HostedToolName =
   | 'haven_pay'
   | 'haven_submit'
   | 'haven_pay_mcp_tool'
+  | 'haven_quote_mcp_tool'
   | 'haven_prepare_catalog_purchase'
+  | 'haven_quote_catalog_purchase'
   | 'haven_complete_mcp_tool'
   | 'haven_settle_mcp_tool'
   | 'haven_quote_x402'
@@ -123,7 +129,7 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     merchant_url: z.string().url(),
     tool_name: z.string().min(1),
     arguments: z.record(z.string(), z.unknown()).optional(),
-    // Optional pre-funding price cap, atomic units of the merchant's asset
+    // Required pre-funding price cap, atomic units of the merchant's asset
     // (same unit as payment_required.accepts[].amount). If the live merchant
     // price exceeds this, the call is rejected before any funding transfer.
     max_amount: z
@@ -149,13 +155,22 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     // contract returns the ORIGINAL sign_data, so the bytes never change.
     include_signing_payload: z.boolean().optional(),
   },
+  haven_quote_mcp_tool: {
+    // The read-only counterpart to haven_pay_mcp_tool. It establishes the
+    // merchant's MCP session and obtains its live 402, but deliberately takes
+    // no cap/idempotency argument: a quote is informational only, never a
+    // reservation or a payment input.
+    merchant_url: z.string().url(),
+    tool_name: z.string().min(1),
+    arguments: z.record(z.string(), z.unknown()).optional(),
+  },
   haven_prepare_catalog_purchase: {
     // #1306: the guided path — starts from a curated catalog row instead of a
     // hand-copied merchant_url/tool_name/tool_arguments. Chain-scoped to this
     // agent for free by the backend's /catalog/:id SQL (#1299).
     catalog_id: z.string().min(1),
-    // A cap is REQUIRED on this tool (unlike haven_pay_mcp_tool's optional
-    // one) — this IS the guided path, so there is no cap_warning softness
+    // A cap is REQUIRED on this tool, as on haven_pay_mcp_tool — this is the
+    // guided path, so there is no cap_warning softness
     // here. Give it in EITHER spelling; both are enforced against the LIVE
     // quote before any funding intent is created. #1351: the requirement moved
     // out of the schema into readMaxAmountCap (which accepts either field and
@@ -178,6 +193,12 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     // #1272: same contract as haven_pay_mcp_tool — see there.
     include_signing_payload: z.boolean().optional(),
   },
+  haven_quote_catalog_purchase: {
+    // The catalog convenience wrapper over haven_quote_mcp_tool. Unlike the
+    // guided purchase, it must never inspect allowance, construct an intent,
+    // or ask the local signer for anything.
+    catalog_id: z.string().min(1),
+  },
   haven_complete_mcp_tool: {
     payment_id: z.string().min(1),
     // #1307: OPTIONAL — omit merchant_url/tool_name and Haven rehydrates the
@@ -192,7 +213,9 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
       source: z.enum(['path', 'bazaar']),
     }).optional(),
     // The X-PAYMENT header built by the local signer (haven_x402_sign_header).
-    payment_header: z.string().min(1),
+    // #1456: OPTIONAL — its absence selects erc7710, where Haven assembles the
+    // header at settle instead of the signer building it locally.
+    payment_header: z.string().min(1).optional(),
   },
   haven_settle_mcp_tool: {
     // Fast-path settle: fund (relay signature) AND deliver the merchant header
@@ -211,7 +234,9 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
       source: z.enum(['path', 'bazaar']),
     }).optional(),
     // The X-PAYMENT header built by the local signer (haven_sign_x402).
-    payment_header: z.string().min(1),
+    // #1456: OPTIONAL — its absence selects erc7710, where Haven assembles the
+    // header at settle instead of the signer building it locally.
+    payment_header: z.string().min(1).optional(),
   },
   haven_quote_x402: {
     url: z.string().url(),
@@ -356,7 +381,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'ALWAYS cap paid merchant calls (#1275) — the cap is the user-intent ceiling for THIS purchase, compared against the LIVE quote before any funding moves, separate from and additional to the agent\'s on-chain budget. ' +
     'PREFER max_amount_human (#1351): whole tokens, exactly as the user says it — "no more than 1 USDC" is max_amount_human: "1". Decimals come from the live quote\'s own asset, so you never convert. ' +
     'max_amount is the ATOMIC-unit form and stays supported for callers that already hold an exact atomic figure: max_amount "500" is 0.0005 USDC, NOT 500 USDC. Passing BOTH is refused (AMBIGUOUS_MAX_AMOUNT) before the merchant is contacted. ' +
-    'Without either, the quoted price is accepted as-is (the response carries cap_warning) and a changed merchant quote can exceed what the user meant to spend. ' +
+    'Send exactly one cap on every paid MCP call; omitting both is refused before the merchant is contacted. ' +
     'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. Haven never receives the signing key. ' +
     'Protocol notes: builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. merchant_url may be the exact MCP endpoint or a BASE merchant URL (#1271): a non-402 miss triggers one bounded same-origin discovery pass of the merchant discovery document and one retry; the returned merchant_url is the resolved endpoint — pass THAT to settle/complete. ' +
     'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, signer_compatibility, merchant_url, tool_name, arguments, mcp_transport }. ' +
@@ -367,6 +392,18 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Fallback for an older signer/backend, or for diagnostics: re-run THIS tool with the SAME idempotency_key plus include_signing_payload=true — the replay returns the ORIGINAL sign_data with typed_data_b64 — then pass payload_hash, x402_expected (the nested x402.expected context, including expires_at), payment_required, and typed_data_b64 through UNCHANGED, one opaque string, never re-typed (#1255). Returns { signature, payment_header }. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response.',
+})
+
+const QUOTE_MCP_TOOL_DESCRIPTION = composeDescription({
+  summary:
+    'Read the live x402 price for a named MCP merchant tool without creating a Haven payment, approval request, signing request, funding operation, or paid merchant retry.',
+  behavior:
+    'Use this when you need to tell the user the current merchant price before choosing a per-purchase cap. ' +
+    'The result is INFORMATIONAL ONLY: it does not reserve a price or create payment authority. ' +
+    'To buy, call haven_pay_mcp_tool afterwards with the returned merchant_url/tool_name/arguments and an explicit cap; that paid call always obtains a fresh live quote and checks the cap before it constructs any funding intent. ' +
+    'merchant_url may be an exact MCP endpoint or a base merchant URL. A non-402 miss gets one bounded same-origin discovery attempt; merchant_url in the response is the resolved endpoint.',
+  nextActionGuidance:
+    'Next: tell the user the quoted maximum or choose an explicit cap, then call haven_pay_mcp_tool. Do not treat this quote as a price reservation or payment approval.',
 })
 
 const PREPARE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
@@ -381,7 +418,7 @@ const PREPARE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
     'Use this instead of haven_pay_mcp_tool when you already have a catalog_id from haven_discover_tools and a spending cap in mind. Do NOT use for read-only allowance or budget questions — use haven_get_allowances. If the catalog row is degraded or missing tool metadata, this refuses and names haven_pay_mcp_tool as the manual fallback.',
   behavior:
     'FOLLOW THE STRUCTURED FIELDS FIRST (#1308): the response carries next_action, next_tool, next_arguments, agent_summary and warnings — act on those; the prose below is fallback and debugging detail. ' +
-    'A spending cap is REQUIRED on this tool (unlike haven_pay_mcp_tool\'s optional cap) and is enforced against the LIVE quote BEFORE any funding intent is created — this IS the guided path, so there is no cap_warning fallback. ' +
+    'A spending cap is REQUIRED on this tool, as on haven_pay_mcp_tool, and is enforced against the LIVE quote BEFORE any funding intent is created — this is the guided path, so there is no cap_warning fallback. ' +
     'Give it as max_amount_human (#1351, PREFERRED): whole tokens, so "no more than 1 USDC" is max_amount_human: "1", with decimals taken from the live quote\'s asset. max_amount is the atomic-unit alternative ("1" there means 0.000001 USDC). Send exactly one — both together is refused with AMBIGUOUS_MAX_AMOUNT, neither is refused with INVALID_INPUT, and both refusals happen before any network call. ' +
     'Returns a rail-aware allowance block { rail, sufficient, remaining_atomic, source }: on the legacy AllowanceModule rail an insufficient amount still proceeds and the resulting funding intent queues for wallet-owner approval, same as haven_pay_mcp_tool; on the delegation rail an over-budget quote REFUSES right here, before any funding intent exists, because that rail has no approval queue — an over-budget redemption would simply revert on-chain later. ' +
     'The ready-to-sign object returned on success is the SAME compact quote shape as haven_pay_mcp_tool/haven_pay_x402_quote (#1272: payment_id, payload_hash, expires_at, signer_compatibility, x402) plus catalog_id/catalog_name/catalog_price_* and the allowance block — never a separate signing surface. COMPACT by default; pass include_signing_payload=true only for diagnostics or an older signer. ' +
@@ -392,6 +429,19 @@ const PREPARE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
   nextActionGuidance:
     'Next: call mcp__haven-signer__haven_sign_x402 with { payment_id } — the signer fetches the exact signing payload itself (#1263), so you never copy bulky bytes. Then call mcp__haven__haven_settle_mcp_tool with the returned signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport from THIS response; from there the flow is identical to haven_pay_mcp_tool. ' +
     'If the response carries status "pending_approval" (legacy rail, over the remaining allowance), tell the user and poll haven_get_payment_status — do not re-quote or re-pay while pending.',
+})
+
+const QUOTE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
+  summary:
+    'Read the live x402 price for one curated MCP catalog entry without creating a Haven payment, approval request, signing request, funding operation, or paid merchant retry.',
+  behavior:
+    'Use this before haven_prepare_catalog_purchase when the user needs the live price before choosing a cap. ' +
+    'The catalog price is indicative only; amount/amount_atomic in this response are the live merchant quote. ' +
+    'This result is INFORMATIONAL ONLY and does not reserve a price or create payment authority. ' +
+    'To buy, call haven_prepare_catalog_purchase afterwards with catalog_id and exactly one explicit cap; it obtains a fresh live quote and checks that cap before constructing any funding intent. ' +
+    'If the catalog row is degraded or lacks MCP metadata, use haven_pay_mcp_tool with an explicit merchant_url and tool_name instead.',
+  nextActionGuidance:
+    'Next: tell the user the quoted maximum or choose an explicit cap, then call haven_prepare_catalog_purchase. Do not treat this quote as a price reservation or payment approval.',
 })
 
 const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -538,7 +588,9 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
   haven_pay_mcp_tool: PAY_MCP_TOOL_DESCRIPTION,
+  haven_quote_mcp_tool: QUOTE_MCP_TOOL_DESCRIPTION,
   haven_prepare_catalog_purchase: PREPARE_CATALOG_PURCHASE_DESCRIPTION,
+  haven_quote_catalog_purchase: QUOTE_CATALOG_PURCHASE_DESCRIPTION,
   haven_complete_mcp_tool: COMPLETE_MCP_TOOL_DESCRIPTION,
   haven_settle_mcp_tool: SETTLE_MCP_TOOL_DESCRIPTION,
   haven_quote_x402: QUOTE_X402_DESCRIPTION,
@@ -782,7 +834,7 @@ export function createToolHandlers(
         const args = parse('haven_pay_mcp_tool', input)
         // #1351: shape-check the cap FIRST — a contradictory cap is refused
         // here, before the merchant is even contacted.
-        const cap = readMaxAmountCap(args, { required: false })
+        const cap = readMaxAmountCap(args, { required: true })
         try {
           // #1271: a base merchant URL is accepted. The probe runs against the
           // URL as given first; only a non-402 miss triggers one bounded
@@ -793,8 +845,12 @@ export function createToolHandlers(
           // prefetch failure is IGNORED here — createX402Intent then runs its
           // own internal fetch and fails exactly as it always did, so error
           // shape and ordering are unchanged.
+          // #1456: yields the AGENT, not just its delegate address — the
+          // settlement-scheme rule needs the account's rail, and #1348 pins
+          // this path to exactly ONE agent round-trip. A second GET for one
+          // field would break that budget (its test caught precisely that).
           const agentPrefetch = haven.getAgent().then(
-            (a) => a.delegateAddress,
+            (a) => a,
             () => undefined,
           )
           const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
@@ -803,12 +859,86 @@ export function createToolHandlers(
             toolArguments: (args.arguments as Record<string, unknown> | undefined) ?? {},
             idempotencyKey: args.idempotency_key as string | undefined,
           })
-          // Enforce the optional price cap against the LIVE merchant price,
+          // Enforce the required price cap against the LIVE merchant price,
           // before creating the funding intent. The catalog price is only a hint.
           // #1351: a human cap binds to the LIVE quote's own asset/decimals here.
           const capAtomic = resolveCapAtomic(cap, quote)
           assertWithinMaxAmount(quote.amountAtomic, capAtomic.atomic, quote.token, capAtomic.label)
-          const prefetchedDelegate = await agentPrefetch
+          const prefetchedAgent = await agentPrefetch
+          const prefetchedDelegate = prefetchedAgent?.delegateAddress
+
+          // Both halves of the #1450 rule: the merchant must advertise erc7710
+          // AND the account must be on the delegation rail. #1453's selector is
+          // the single place that rule lives. A prefetch FAILURE deliberately
+          // yields the 3009 path — guessing 'delegation' would build a request
+          // the backend then refuses, and this tool's pre-#1456 behaviour was
+          // 3009 anyway.
+          const paySelection = selectX402SettlementScheme(
+            (quote.paymentRequired as X402PaymentRequired).accepts,
+            { delegationRail: prefetchedAgent?.executionRail === 'delegation' },
+          )
+
+          if (paySelection?.scheme === 'erc7710') {
+            const prepared = await haven.prepareX402Erc7710(
+              quote.paymentRequired as X402PaymentRequired,
+              { resourceUrl: merchantUrl, delegationRail: true },
+            )
+            return {
+              payment_id: prepared.paymentId,
+              settlement_scheme: 'erc7710',
+              settlement: {
+                scheme: 'erc7710',
+                funding_leg: false,
+                merchant_pay_to: prepared.settlement.merchantPayTo,
+                facilitator_addresses: prepared.settlement.facilitatorAddresses,
+              },
+              amount_atomic: quote.amountAtomic,
+              amount: quote.amount,
+              token: quote.token,
+              merchant_url: merchantUrl,
+              ...(merchantUrl !== args.merchant_url
+                ? { merchant_url_discovered_from: args.merchant_url }
+                : {}),
+              tool_name: args.tool_name,
+              arguments: args.arguments ?? {},
+              ...(quote.mcpTransport
+                ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) }
+                : {}),
+              ...buildAgentGuidance({
+                nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+                nextTool: 'mcp__haven-signer__haven_sign',
+                nextArguments: { payment_id: prepared.paymentId },
+                safeToContinue: true,
+                reason:
+                  'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
+                  "fetches the settlement child itself and verifies its caveats against Haven's " +
+                  'signed context (#1455) before signing. Then call haven_settle_mcp_tool with the ' +
+                  'returned signature and the merchant_url/tool_name/arguments from this response. ' +
+                  'Do NOT pass payment_header: on this scheme Haven assembles it at settle, so ' +
+                  'there is nothing to build locally and no funding transaction to wait for.',
+                summary: {
+                  payment_id: prepared.paymentId,
+                  status: 'pending_signature',
+                  amount: quote.amount,
+                  amount_atomic: quote.amountAtomic,
+                  token: quote.token,
+                  network: prepared.settlement.network,
+                  expires_at: undefined,
+                  product: args.tool_name,
+                },
+                warnings: quoteWarnings({
+                  capped: cap.kind !== 'none',
+                  // The child's own short expiry is the binding window here,
+                  // not the intent's — no quote-expiry warning applies.
+                  expiresAt: undefined,
+                  ...(merchantUrl !== args.merchant_url
+                    ? { discoveredFrom: args.merchant_url }
+                    : {}),
+                }),
+              }),
+            }
+          }
+
           const intent = await haven.createX402Intent(
             quote.paymentRequired as X402PaymentRequired,
             {
@@ -827,11 +957,6 @@ export function createToolHandlers(
           )
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
-            // #1275: the cap is the normal path; its absence is worth a word,
-            // not a refusal (compatibility) — a soft field the agent can relay.
-            // #1351: EITHER spelling clears it — the warning is about being
-            // uncapped, not about which field was used.
-            ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
             // The raw merchant 402 PaymentRequired — the local signer needs this
             // verbatim in haven_x402_sign_header to build the EIP-3009 header.
             payment_required: quote.paymentRequired,
@@ -906,6 +1031,24 @@ export function createToolHandlers(
         }
       }),
 
+    haven_quote_mcp_tool: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_quote_mcp_tool', input)
+        const toolArguments = (args.arguments as Record<string, unknown> | undefined) ?? {}
+        const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
+          merchantUrl: args.merchant_url as string,
+          toolName: args.tool_name as string,
+          toolArguments,
+        })
+        return buildMcpToolQuoteResponse({
+          quote,
+          merchantUrl,
+          toolName: args.tool_name as string,
+          toolArguments,
+          requestedMerchantUrl: args.merchant_url as string,
+        })
+      }),
+
     haven_prepare_catalog_purchase: async (input) =>
       runTool(async () => {
         const args = parse('haven_prepare_catalog_purchase', input)
@@ -914,52 +1057,14 @@ export function createToolHandlers(
         // makes zero network calls.
         const cap = readMaxAmountCap(args, { required: true })
         try {
-          // 1. Load the catalog entry. Chain-scoped to this agent for FREE by
-          // the backend's /catalog/:id SQL (#1299) — an id that does not
-          // exist and an id curated for a DIFFERENT chain than this agent's
-          // both 404 identically here. Deliberately not re-filtered in JS.
-          let entry: HavenCatalogEntry
-          try {
-            entry = await haven.getCatalogEntry(args.catalog_id as string)
-          } catch (err) {
-            if (err instanceof HavenApiError && err.statusCode === 404) {
-              throw new HostedToolError({
-                code: 'CATALOG_ENTRY_NOT_FOUND',
-                message:
-                  `No catalog entry "${args.catalog_id}" is visible to this agent. It may not exist, ` +
-                  'be delisted, or be curated for a different chain than this agent\'s. Call ' +
-                  'haven_discover_tools to see entries available on this chain.',
-                statusCode: 404,
-                nextAction: AgentPaymentNextAction.StopAndTellUser,
-                suggestedTool: 'haven_discover_tools',
-              })
-            }
-            throw err
-          }
+          // 1. Load a chain-scoped, usable MCP catalog row. The quote and
+          // paid-preflight paths intentionally share this refusal contract.
+          const entry = await getUsableCatalogMcpEntry(haven, args.catalog_id as string)
 
-          // 2. Refuse a row this preflight cannot compose a live quote from —
-          // degraded (the periodic probe has been failing) or missing the MCP
-          // tool metadata #1299 carries. haven_pay_mcp_tool remains available
-          // as a manual fallback with an explicit merchant_url/tool_name.
-          if (entry.status === 'degraded' || entry.protocol !== 'mcp' || !entry.toolName) {
-            throw new HostedToolError({
-              code: 'CATALOG_ENTRY_UNUSABLE',
-              message:
-                `Catalog entry "${entry.id}" (${entry.name}) is ` +
-                (entry.status === 'degraded'
-                  ? 'marked degraded — Haven has not been able to verify its live price recently. '
-                  : 'missing the MCP tool metadata (protocol/tool_name) this guided preflight needs. ') +
-                'Use haven_pay_mcp_tool directly with an explicit merchant_url and tool_name instead.',
-              statusCode: 409,
-              nextAction: AgentPaymentNextAction.StopAndTellUser,
-              suggestedTool: 'haven_pay_mcp_tool',
-            })
-          }
-
-          // 3. Run the LIVE quote against the catalog entry's own merchant —
+          // 2. Run the LIVE quote against the catalog entry's own merchant —
           // the SAME probe haven_pay_mcp_tool uses, shared rather than
           // duplicated (#1306 review requirement). #1348: the two Haven reads
-          // steps 5-6 need (agent, allowances) are independent of the merchant
+          // steps 4-5 need (agent, allowances) are independent of the merchant
           // probe, so they START here and overlap its latency — the slowest
           // leg of this preflight. Failure semantics are unchanged by design:
           // the quote is AWAITED first, so its error still wins when several
@@ -982,7 +1087,7 @@ export function createToolHandlers(
             idempotencyKey: args.idempotency_key as string | undefined,
           })
 
-          // 4. A cap is REQUIRED on this guided path (readMaxAmountCap above,
+          // 3. A cap is REQUIRED on this guided path (readMaxAmountCap above,
           // before any network call) — no cap_warning softness. Enforced
           // against the LIVE quote BEFORE any funding intent is created
           // (mutation-tested: reordering this after createX402Intent below
@@ -991,7 +1096,7 @@ export function createToolHandlers(
           const capAtomic = resolveCapAtomic(cap, quote)
           assertWithinMaxAmount(quote.amountAtomic, capAtomic.atomic, quote.token, capAtomic.label)
 
-          // 5. Rail-aware allowance/budget report. A failed read NEVER fails
+          // 4. Rail-aware allowance/budget report. A failed read NEVER fails
           // this preflight — sufficient degrades to null with a warning, and
           // the on-chain policy remains the actual gate either way.
           const agent = await agentPromise
@@ -1009,7 +1114,7 @@ export function createToolHandlers(
             // allowances view and GET /machine-payments/allowances use — this
             // NEVER reads agent_allowances on the delegation rail, which is a
             // frozen onboarding mirror there (mutation-tested). #1348: the
-            // read itself started back at step 3 (overlapping the merchant
+            // read itself started back at step 2 (overlapping the merchant
             // probe); a rejection was captured there and is re-thrown here so
             // this catch block degrades it exactly as before.
             const allowancesResult = await allowancesPromise
@@ -1057,7 +1162,7 @@ export function createToolHandlers(
             })
           }
 
-          // 6. Delegation rail: over-budget REVERTS at prepare, no approval
+          // 5. Delegation rail: over-budget REVERTS at prepare, no approval
           // queue exists on that rail (#1090) — refuse BEFORE any funding
           // intent (mutation-tested: reading agent_allowances here instead of
           // the derived budgets must fail a test).
@@ -1075,7 +1180,7 @@ export function createToolHandlers(
             })
           }
 
-          // 7. Create the funding intent — IDENTICAL machinery to
+          // 6. Create the funding intent — IDENTICAL machinery to
           // haven_pay_mcp_tool (mcpCallContext persisted per #1307), so the
           // signer flow from here is IDENTICAL to today's:
           // haven_sign_x402 with payment_id + payment_required, then
@@ -1088,12 +1193,12 @@ export function createToolHandlers(
               arguments: entry.toolArguments ?? {},
               ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
             },
-            // #1348: the agent was already fetched at step 5 — skip the
+            // #1348: the agent was already fetched at step 4 — skip the
             // intent call's internal duplicate fetch.
             delegateAddress: agent.delegateAddress,
           })
 
-          // 8. Catalog price is indicative; the live quote above is
+          // 7. Catalog price is indicative; the live quote above is
           // authoritative — warn (never refuse) when they disagree.
           if (entry.priceAtomic && entry.priceAtomic !== quote.amountAtomic) {
             warnings.push({
@@ -1203,6 +1308,59 @@ export function createToolHandlers(
         // Fast path: fund (relay the signature) then deliver the merchant header
         // in one hosted call. The signature and X-PAYMENT header are both signed
         // by the local edge signer — Haven relays them but never holds the key.
+        //
+        // This MUST precede submitSignature: a malformed or substituted merchant
+        // header is never a reason to fund the delegate balance. It is an
+        // integrity preflight, not a merchant/facilitator verification or a
+        // replacement for the local signer's expected-context binding.
+        // #1456: erc7710 direct settlement inverts this whole sequence, so it
+        // branches HERE rather than deeper — an earlier attempt put the branch
+        // inside deliverMerchantPayment and the signature had already been
+        // relayed as a FUNDING signature by then.
+        //
+        // On this scheme the signature IS the settlement child, not a funding
+        // authorization: it goes to POST /x402/:id/settle, which returns the
+        // merchant header Haven assembles. There is no funding leg to relay and
+        // no agent-supplied header to preflight — the absence of
+        // `payment_header` is what tells the two schemes apart, because the
+        // 3009 path always carries one built by the local signer.
+        if (!args.payment_header) {
+          const paymentHeader = await haven.submitX402Erc7710(args.payment_id, args.signature)
+          const merchant7710 = await deliverMerchantPayment(
+            haven,
+            { ...args, payment_header: paymentHeader },
+            // No funding tx to confirm — passing one would make the delivery
+            // helper wait for a transaction that will never exist.
+            undefined,
+          )
+          const summary7710 = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
+          return {
+            payment_id: args.payment_id,
+            settlement_scheme: 'erc7710',
+            funding_tx_hash: null,
+            settled: merchant7710.ok,
+            settlement_tx_hash: merchant7710.settlement_tx_hash,
+            result: merchant7710.result,
+            allowance: summary7710.allowance,
+            ...buildAgentGuidance({
+              // Same terminal value the 3009 success path uses (#1308) — one
+              // vocabulary, not a parallel one per scheme.
+              nextAction: AgentPaymentNextAction.None,
+              safeToContinue: true,
+              reason:
+                'Settled directly from the treasury through the budget delegation — no funding ' +
+                'leg, so the delegate wallet never held these funds and there is nothing to sweep.',
+              summary: {
+                payment_id: args.payment_id,
+                status: summary7710.payment?.status ?? 'settled',
+                product: args.tool_name,
+              },
+              warnings: summary7710.warnings,
+            }),
+          }
+        }
+
+        await preflightMcpPaymentHeader(haven, args)
         const funding = await submitSignatureWithExpiryMapping(haven, args.payment_id, args.signature)
         if (funding.status !== 'confirmed') {
           // Funding did not confirm (e.g. queued for approval). Do not deliver the
@@ -1278,6 +1436,26 @@ export function createToolHandlers(
         }
       }),
 
+    haven_quote_catalog_purchase: async (input) =>
+      runTool(async () => {
+        const args = parse('haven_quote_catalog_purchase', input)
+        const entry = await getUsableCatalogMcpEntry(haven, args.catalog_id as string)
+        const toolArguments = entry.toolArguments ?? {}
+        const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
+          merchantUrl: entry.resourceUrl,
+          toolName: entry.toolName,
+          toolArguments,
+        })
+        return buildMcpToolQuoteResponse({
+          quote,
+          merchantUrl,
+          toolName: entry.toolName,
+          toolArguments,
+          requestedMerchantUrl: entry.resourceUrl,
+          catalog: entry,
+        })
+      }),
+
     haven_quote_x402: async (input) => {
       const args = parse('haven_quote_x402', input)
       const init: RequestInit = {}
@@ -1318,8 +1496,13 @@ export function createToolHandlers(
 
     haven_pay_x402_quote: async (input) => {
       const args = parse('haven_pay_x402_quote', coerceJsonField(input, 'payment_required'))
-      const payReq = args.payment_required as Record<string, unknown> | null | undefined
-      if (!payReq || typeof payReq !== 'object') {
+      // #1469: agent-supplied shape, sanitized through the SAME normalizer the
+      // parsed-Response path uses — it drops null/non-object accepts[] entries
+      // and validates the envelope. The raw cast this replaced let a null hole
+      // reach the selectors and 500 where every other caller gets a clean
+      // refusal; the Zod schema only guarantees a string-keyed record.
+      const payReq = normalizePaymentRequired(args.payment_required)
+      if (!payReq) {
         return wrongTool(
           'WRONG_TOOL',
           'The payment_required argument is missing or is not a valid x402 PaymentRequired object. Call haven_quote_x402 first to obtain the payment_required, or use haven_pay_mcp_tool for a full round trip.',
@@ -1333,9 +1516,7 @@ export function createToolHandlers(
         try {
           // Enforce the optional price cap against the merchant-authoritative
           // selected option, before creating the funding intent.
-          const option = selectStandardPaymentOption(
-            (args.payment_required as X402PaymentRequired).accepts,
-          )
+          const option = selectStandardPaymentOption(payReq.accepts)
           if (option) {
             // #1351: this path holds a payment OPTION rather than a built
             // quote, so decimals come from the same address→token binding
@@ -1377,13 +1558,12 @@ export function createToolHandlers(
               suggestedTool: 'haven_quote_x402',
             })
           }
-          const intent = await haven.createX402Intent(
-            args.payment_required as X402PaymentRequired,
-            { idempotencyKey: args.idempotency_key },
-          )
+          const intent = await haven.createX402Intent(payReq, {
+            idempotencyKey: args.idempotency_key,
+          })
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
-            // #1275: same soft nudge as haven_pay_mcp_tool — see there.
+            // #1275: optional-cap soft nudge for this generic x402 flow.
             // #1351: either spelling of the cap clears it.
             ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
             // #1308: decomposed-path next step.
@@ -1675,12 +1855,105 @@ function withDiscoveryGuidance(err: unknown, merchantUrl: string, discovered: st
 }
 
 /**
+ * Build the compact, non-authorizing response shared by the generic and
+ * catalog MCP quote tools. Deliberately omit payment_required, idempotency,
+ * and every signing/funding field: callers must start a fresh paid flow after
+ * the user chooses a cap, and that flow obtains its own live quote.
+ */
+function buildMcpToolQuoteResponse(input: {
+  quote: X402Quote
+  merchantUrl: string
+  requestedMerchantUrl: string
+  toolName: string
+  toolArguments: Record<string, unknown>
+  catalog?: HavenCatalogEntry
+}) {
+  const { quote, merchantUrl, requestedMerchantUrl, toolName, toolArguments, catalog } = input
+  return {
+    rail: quote.rail,
+    merchant_url: merchantUrl,
+    merchant_url_was_discovered: merchantUrl !== requestedMerchantUrl,
+    tool_name: toolName,
+    arguments: toolArguments,
+    resource_url: quote.resourceUrl,
+    description: quote.description,
+    mime_type: quote.mimeType,
+    amount_atomic: quote.amountAtomic,
+    amount: quote.amount,
+    token: quote.token,
+    decimals: quote.decimals,
+    asset: quote.asset,
+    network: quote.network,
+    chain_id: quote.chainId,
+    merchant_address: quote.merchantAddress,
+    max_timeout_seconds: quote.maxTimeoutSeconds,
+    ...(quote.mcpTransport ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) } : {}),
+    ...(catalog
+      ? {
+          catalog_id: catalog.id,
+          catalog_name: catalog.name,
+          catalog_price_atomic: catalog.priceAtomic,
+          catalog_price_display: catalog.priceDisplay,
+          catalog_price_is_indicative: true,
+          catalog_price_differs: catalog.priceAtomic !== null && catalog.priceAtomic !== quote.amountAtomic,
+        }
+      : {}),
+    quote_is_informational: true,
+  }
+}
+
+/**
+ * The catalog wrappers must refuse rows that cannot produce a live MCP quote.
+ * Keep the existing manual fallback and error shape identical across the quote
+ * and paid-preflight paths rather than teaching agents two catalog semantics.
+ */
+async function getUsableCatalogMcpEntry(
+  haven: HavenClient,
+  catalogId: string,
+): Promise<HavenCatalogEntry & { toolName: string }> {
+  let entry: HavenCatalogEntry
+  try {
+    entry = await haven.getCatalogEntry(catalogId)
+  } catch (err) {
+    if (err instanceof HavenApiError && err.statusCode === 404) {
+      throw new HostedToolError({
+        code: 'CATALOG_ENTRY_NOT_FOUND',
+        message:
+          `No catalog entry "${catalogId}" is visible to this agent. It may not exist, ` +
+          'be delisted, or be curated for a different chain than this agent\'s. Call ' +
+          'haven_discover_tools to see entries available on this chain.',
+        statusCode: 404,
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        suggestedTool: 'haven_discover_tools',
+      })
+    }
+    throw err
+  }
+
+  if (entry.status === 'degraded' || entry.protocol !== 'mcp' || !entry.toolName) {
+    throw new HostedToolError({
+      code: 'CATALOG_ENTRY_UNUSABLE',
+      message:
+        `Catalog entry "${entry.id}" (${entry.name}) is ` +
+        (entry.status === 'degraded'
+          ? 'marked degraded — Haven has not been able to verify its live price recently. '
+          : 'missing the MCP tool metadata (protocol/tool_name) this guided preflight needs. ') +
+        'Use haven_pay_mcp_tool directly with an explicit merchant_url and tool_name instead.',
+      statusCode: 409,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      suggestedTool: 'haven_pay_mcp_tool',
+    })
+  }
+
+  return entry as HavenCatalogEntry & { toolName: string }
+}
+
+/**
  * Build the MCP tools/call envelope, probe the merchant, and run the #1271
  * bounded same-origin discovery fallback on a non-402 miss (one retry, at
- * the discovered endpoint only). Shared by haven_pay_mcp_tool and
- * haven_prepare_catalog_purchase (#1306 review requirement: extract, don't
- * duplicate) — the two callers differ only in WHERE merchantUrl/toolName/
- * toolArguments come from (agent-supplied vs. a catalog row).
+ * the discovered endpoint only). Shared by the generic/catalog quote and pay
+ * tools — the callers differ only in whether they construct an intent after
+ * this read and where merchantUrl/toolName/toolArguments came from.
  */
 async function quoteMcpToolCall(
   haven: HavenClient,
@@ -1939,7 +2212,7 @@ function wrongTool(code: string, message: string, suggested_tool?: string): Tool
  * authorize for the call — the ceiling the merchant can settle at
  * (`maxAmountRequired ?? amount`), i.e. the user's worst-case spend, which is
  * the right figure to cap. Throws a typed PRICE_EXCEEDS_MAX (preserved by
- * normalizeError) when it exceeds the agent's optional cap, so the call fails
+ * normalizeError) when it exceeds the agent's cap, so the call fails
  * BEFORE any funding transfer. The on-chain allowance is still the hard gate;
  * this is an extra agent affordance against surprise overcharges within budget.
  * Compared in atomic BigInt units.
@@ -2032,7 +2305,7 @@ function readMaxAmountCap(
     throw new HostedToolError({
       code: 'INVALID_INPUT',
       message:
-        'A spending cap is REQUIRED on the guided purchase path. Pass max_amount_human ' +
+        'A spending cap is REQUIRED before a paid merchant call. Pass max_amount_human ' +
         '(whole tokens, e.g. "1" for 1 USDC — recommended) or max_amount (atomic units). ' +
         'No merchant was contacted and no funds were moved.',
       statusCode: 400,
@@ -2345,6 +2618,53 @@ async function submitSignatureWithExpiryMapping(
     const mapped = await paymentWindowExpiredErrorFor(haven, paymentId, err)
     if (mapped) throw mapped
     throw err
+  }
+}
+
+/**
+ * Hosted fast-path preflight (#1398). The status read is agent-scoped and
+ * exposes the intent's captured delegate, unlike getAgent() which may have
+ * changed after the intent was created. Never include an untrusted header in a
+ * thrown error: MCP error payloads and observability consumers serialize it.
+ */
+async function preflightMcpPaymentHeader(haven: HavenClient, args: Record<string, any>): Promise<void> {
+  const status = await haven.getPaymentStatus(args.payment_id)
+  try {
+    if (
+      status.rail !== 'x402' ||
+      !status.merchantAddress ||
+      !status.amountAtomic ||
+      !status.asset ||
+      !status.network ||
+      !status.resourceUrl ||
+      !status.payerAddress
+    ) {
+      throw new X402PaymentHeaderValidationError()
+    }
+    await validateStandardX402PaymentHeader(args.payment_header, {
+      merchantTo: status.merchantAddress,
+      amountAtomic: status.amountAtomic,
+      asset: status.asset,
+      network: status.network,
+      resourceUrl: status.resourceUrl,
+      payer: status.payerAddress,
+      chainId: status.chainId,
+    })
+  } catch (err) {
+    if (!(err instanceof X402PaymentHeaderValidationError)) throw err
+    throw new HostedToolError({
+      code: 'INVALID_PAYMENT_HEADER',
+      message:
+        'The X-PAYMENT header did not match the funded x402 intent. No funding was relayed. ' +
+        'Recreate the header with the local signer from this payment_id, then retry.',
+      statusCode: 400,
+      paymentId: args.payment_id,
+      status: 'invalid_payment_header',
+      phase: 'not_started',
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      rail: 'x402',
+      suggestedTool: 'mcp__haven-signer__haven_sign_x402',
+    })
   }
 }
 

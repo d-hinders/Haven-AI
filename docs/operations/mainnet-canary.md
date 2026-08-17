@@ -5,7 +5,7 @@ covers:
   - packages/backend/scripts/check-mainnet-reconciliation.ts
   - packages/backend/scripts/check-bundler.ts
   - packages/backend/scripts/check-delegation-contracts.ts
-last-verified: "2026-08-10" # §4.1 run log added — canary completed on the 0.1.20 train; §§1-3 re-read, probe guidance unchanged
+last-verified: "2026-08-15" # #1458: §4.2 added — the erc7710 merchant canary, prepared but NOT run; prod baseline measured (eip3009 only, chain 8453) and the pinned Base DelegationManager verified against the kit. The variable change and the mainnet payment are owner steps. Prior: §4.1 run log added — canary completed on the 0.1.20 train; §§1-3 re-read, probe guidance unchanged
 ---
 
 # Mainnet (8453) canary & reconciliation runbook (#1067)
@@ -189,6 +189,96 @@ margin — the header showed ~10 min forward validity against the merchant's
 300 s requirement). Outstanding non-blockers: an Anchor re-test on the
 decomposed HTTP flow (its two failures predate #1256), and the #1269
 below-minimum sweep mapping reaching prod on the next promotion.
+
+## 4.2 The erc7710 merchant canary (#1458) — NOT YET RUN
+
+A **separate** canary from §3's. That one proved a delegation-rail agent can
+pay on mainnet at all; this one proves the **erc7710 settlement scheme** works
+against the production demo merchant, where the money moves treasury→merchant
+directly and no delegate ever holds it.
+
+**Two steps here are the owner's, not an agent's:** changing production Railway
+variables, and completing a real Base-mainnet payment. Everything else below is
+prepared so those two are short.
+
+### Baseline, measured 2026-08-15 (AC 1 — done)
+
+`GET https://enthusiastic-blessing-production-171f.up.railway.app/.well-known/haven-demo-merchant`
+
+```json
+{ "settlement_methods": ["eip3009"], "chain_id": 8453 }
+```
+
+So prod advertises **EIP-3009 only** today. Nothing to roll back from yet, and
+no agent can currently reach erc7710 in production regardless of client
+support. (The issue filer could not reach this endpoint; it responds fine.)
+
+### The variable change (owner)
+
+On the **prod** demo-merchant Railway service:
+
+```
+MERCHANT_X402_SETTLEMENT_METHODS=eip3009,erc7710
+MERCHANT_ERC7710_DELEGATION_MANAGER=0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3
+```
+
+**EIP-3009 stays first, deliberately.** Generic x402 clients infer the scheme
+from `accepts[0]`, and `packages/demo-merchant-mcp/src/erc7710.test.ts` pins
+that ordering. Haven's own clients no longer depend on it (#1453 reads
+`assetTransferMethod` instead of taking the first entry), but the merchant
+serves more than Haven.
+
+**The manager address is the pinned one**, from
+`packages/backend/src/rails/delegation-contracts.ts` (8453 block) — verified
+2026-08-15 to equal what `@metamask/smart-accounts-kit` reports for 8453. Do
+not copy it from MetaMask's published deployments page: the address is
+version-specific to the kit, and a mismatch fails *every* Haven-agent payment
+with `Payment delegationManager is not the delegation manager trusted by this
+merchant`. If the pin and the kit ever disagree, that is
+`rails/delegation-policy.ts`'s cross-check failing and it must be resolved
+before this canary, not worked around here.
+
+Code deploys automatically on merge to `main`; **variables do not**. This is a
+deliberate Railway change.
+
+### Verify the advertisement before paying
+
+```bash
+curl -s https://enthusiastic-blessing-production-171f.up.railway.app/.well-known/haven-demo-merchant | jq .settlement_methods
+```
+
+Then take a real 402 and confirm the erc7710 entry carries
+`extra.facilitatorAddresses`, and that the settlement key named there is
+**gas-funded on mainnet** — it is the redeemer, and an unfunded one turns a
+correct delegation into a payment nobody can complete.
+
+### The canary payment (owner)
+
+Tiny value, matching §3's discipline. A green configuration is **not** the
+acceptance bar — a settled payment is. Record here: tx hash, treasury delta,
+merchant delta, and the delegate EOA balance **before and after**.
+
+That last one is the whole point of the scheme: a silent reroute to the
+EIP-3009 bridge would still deliver the goods and still debit the treasury
+correctly, and would only be visible in the delegate's balance.
+
+### Rollback
+
+Set `MERCHANT_X402_SETTLEMENT_METHODS=eip3009` and leave
+`MERCHANT_ERC7710_DELEGATION_MANAGER` in place — without erc7710 in the
+effective method list the merchant advertises 3009 only, and the manager
+variable is inert. No code change, no redeploy needed beyond the variable
+restart.
+
+### What is proven elsewhere, so this canary does not have to re-prove it
+
+- The settlement mechanics, nightly on Base Sepolia (`x402-erc7710-settle`).
+- The SDK path, live on 2026-08-15 (tx `0x101e26dc…`: treasury −0.001, merchant
+  +0.001, delegate untouched at 0) and continuously by `x402-erc7710-sdk`.
+- The local signer's independent caveat verification (#1455).
+
+What this canary adds that none of those can: **mainnet**, the production
+merchant's own configuration, and real funds.
 
 ## 5. Widening
 

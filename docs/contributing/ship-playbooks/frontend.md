@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-07-27"
+last-verified: "2026-08-15" # #1447: wire-type ratchet is a blocking frontend gate — import ApiSchema types rather than hand-rolling wire shapes
 ---
 
 # Frontend playbook
@@ -39,7 +39,34 @@ Verify the change in the **browser**, or — when the browser path is unavailabl
 
 **Rendered-screen evidence is REQUIRED** for any diff that touches a rendered route or a shared UI primitive (`components/ui/*`, `components/haven/*`). Run `npm run screenshot -w packages/frontend -- <routes>` (see [#896](https://github.com/d-hinders/Haven-AI/issues/896)); it captures desktop (1280) + mobile (390) PNGs of `/design-system` plus the routes you pass, using a known auth/data fixture and the pre-installed browser. The fixture serves a deterministic **populated** dataset (a funded account, agents on both rails, transactions, a pending approval, contacts, agent activity and spend stats) so lists, tables and amounts render realistically — set `SCREENSHOT_FIXTURE=empty` when you specifically want empty states. The script also summarises any **console errors** per route; a red console means a fixture-shape gap or a real client bug — fix it before trusting the PNGs. **Attach the PNGs to the PR, or reference them in the Browser Verification section** — "browser or headless equivalent" is no longer sufficient on its own for a visual surface. A primitive change means shooting `/design-system` (where it's documented) *and* a route that consumes it. Screenshots live in the gitignored `.screenshots/`; the fixture is documented at the top of `scripts/screenshot.mjs`.
 
+**Surfaces no URL can reach — use a scenario ([#1409](https://github.com/d-hinders/Haven-AI/issues/1409)).** Route capture cannot see a screen that lives behind a multi-step dialog or a state machine that only advances on a timer; the connect-agent modal is both, which is why [#1399](https://github.com/d-hinders/Haven-AI/issues/1399) shipped with its rendered-evidence criterion unmet and its two review passes disagreeing about a layout question neither could see. A **scenario** drives the UI there and holds it at each state:
+
+```
+npm run screenshot -w packages/frontend -- --scenario=connect-agent   # one scenario
+npm run screenshot -w packages/frontend -- --scenario=all             # every scenario
+```
+
+`connect-agent` captures step 4 at all three connection stages (`starting` → `slow` → `recovery`) at both viewports, writing `connect-agent-waiting-<stage>-<viewport>.png`. It pins the setup at `awaiting_connection` and drives Playwright's virtual clock past the staging bounds, so a three-minute state is reached in milliseconds. A scenario that cannot reach its state **fails the command** rather than writing fewer PNGs — a missing stage is the evidence gap, not a smaller run. Add new scenarios to the `SCENARIOS` registry in `scripts/screenshot.mjs`; their fixture contract is pinned by `src/__tests__/screenshot-fixture.test.ts`.
+
+**Two PNGs when a dialog scrolls.** An element screenshot captures only the visible box, so a dialog that caps its own height drops everything below the fold — and its rounded bottom edge makes the clipped capture look complete, which would have a reviewer judge a screen they have only partly seen. When a capture overflows, the run says so (`⚠ … had content BELOW THE FOLD`, with the pixel shortfall) and writes a second `…-full.png` at a viewport tall enough to show all of it. **Judge the content from the `-full` PNG; judge what is reachable without scrolling from the other** — the fold itself is often the finding.
+
+**If Chromium fails to launch** with an error naming a `chromium_headless_shell-<n>` path that does not exist, the cached browser build does not match the pinned Playwright version. Point `PLAYWRIGHT_CHROMIUM_PATH` at the Chromium that *is* installed rather than running `playwright install`:
+
+```
+PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome \
+  npm run screenshot -w packages/frontend -- --scenario=connect-agent
+```
+
 **Visual regression (blocking CI, #897).** `/design-system` is pixel-compared against committed Linux baselines on every frontend PR (the *Design visual regression* job). An unintended pixel change in a shared primitive fails the PR with a downloadable diff artifact (`visual-regression-diffs`). **Updating baselines for an intended change — in the SAME PR:** dispatch the **Update visual baselines** workflow on your PR branch (Actions → Update visual baselines → Run workflow → pick the branch) — it regenerates the Linux-rendered baselines and commits them to the branch, where they appear as a reviewable image diff. Caveat: without the `BASELINE_PUSH_TOKEN` secret (a PAT with contents:write), the bot pushes with `GITHUB_TOKEN`, whose commits do **not** trigger PR workflows — on an already-open PR the new head gets zero check runs and every required check waits forever; the workflow warns about this, and the fix is a manual empty commit (`git commit --allow-empty && git push`) or setting the secret. Any PR that intentionally changes what `/design-system` renders (including its prose) without carrying new baselines leaves the job red for every PR after it. Never commit locally-rendered (macOS) baselines; fonts differ and CI will reject them. Run the spec locally only inside a Linux container with `VISUAL_REGRESSION=1`. Note: the job gates auto-merge only while it's listed in the "Haven automerge rules" ruleset's required checks — see [`autonomous-pr-loop.md`](../autonomous-pr-loop.md) §One-time setup. **Before reporting a frontend PR shipped, confirm this job's conclusion on the head SHA** — merged-state alone doesn't prove it ran green.
+
+**Wire shapes come from the spec, not from you (#1447).** `npm run lint:wire-types` is a **blocking CI job** on the frontend surface. It counts hand-written types in `hooks/` and `types/` that declare a snake_case property — the API's convention — against a shrink-only baseline (`packages/frontend/wire-type-baseline.json`, frozen at 18 after #1445's migration). If the route is in the spec, import the type instead of restating it:
+
+```
+import type { ApiSchema } from '@haven_ai/core'
+export type Thing = ApiSchema<'Thing'>
+```
+
+If the route is not in the spec yet, document it there first — [#1446](https://github.com/d-hinders/Haven-AI/issues/1446) tracks that backfill, and the 18 baselined shapes are waiting on it. If a type is genuinely UI-side and merely happens to carry a snake_case field, mark it `// ui-local: <reason, at least 20 chars>` on the line above; a bare marker does not exempt. After removing shapes, tighten with `npm run lint:wire-types:update` (it refuses to ratchet upward). The gate reads casing, so it does **not** see a wire shape that uses camelCase, and it cannot see an anonymous inline shape (`useState<{ tx_hash: string }>`) because there is no declaration to find. Both holes are stated in the script's header with live examples; review is the backstop.
 
 ## 5. Review (two passes: code + rendered)
 

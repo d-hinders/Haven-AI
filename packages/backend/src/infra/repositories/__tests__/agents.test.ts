@@ -4,17 +4,19 @@ import {
   FIND_AGENT_ID_FOR_USER_SQL,
   FIND_AGENT_ID_STATUS_FOR_USER_SQL,
   FIND_DEFAULT_USER_SAFE_ID_SQL,
-  FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL,
+  FIND_DELEGATE_AGENT_FOR_USER_SQL,
   FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
   FIND_USER_SAFE_ID_FOR_USER_SQL,
   LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
   UPDATE_AGENT_PROFILE_SQL,
   agentExistsForUser,
-  deleteRevokedAgent,
+  agentHasLiveDelegations,
+  archiveAgent,
+  unarchiveAgent,
   findAgentForUserAllStatuses,
   findAgentIdStatusForUser,
   findDefaultUserSafeId,
-  findDelegateAgentForUserExcludingRevoked,
+  findDelegateAgentForUser,
   findNonRevokedAgentIdByDelegate,
   findUserSafeIdForUser,
   listAgentsForUserAllStatuses,
@@ -52,18 +54,17 @@ describe('the #1069 status-scoping asymmetry, pinned in SQL and in names', () =>
     }
   })
 
-  it('the delegate-balance read is the ONE status-scoped read: it excludes revoked', () => {
-    expect(FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL).toContain("a.status != 'revoked'")
+  it('the delegate-balance read is status-AGNOSTIC (#1403) — sweep must work post-revoke', () => {
+    // The old `a.status != 'revoked'` filter removed the sweep page exactly
+    // when stranded delegate funds need recovering. Re-adding ANY status
+    // filter here must be a conscious act that fails this test first.
+    expect(FIND_DELEGATE_AGENT_FOR_USER_SQL).not.toContain('status')
   })
 
-  it('the asymmetry is named: AllStatuses vs ExcludingRevoked', () => {
-    // A rename that collapses these into one "find agent" function loses the
-    // distinction #1069 was — this tripwire makes that a conscious act.
+  it('the naming stays honest: AllStatuses reads + the narrow delegate read', () => {
     expect(listAgentsForUserAllStatuses.name).toBe('listAgentsForUserAllStatuses')
     expect(findAgentForUserAllStatuses.name).toBe('findAgentForUserAllStatuses')
-    expect(findDelegateAgentForUserExcludingRevoked.name).toBe(
-      'findDelegateAgentForUserExcludingRevoked',
-    )
+    expect(findDelegateAgentForUser.name).toBe('findDelegateAgentForUser')
   })
 })
 
@@ -72,7 +73,7 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     for (const sql of [
       LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
       FIND_AGENT_FOR_USER_ALL_STATUSES_SQL,
-      FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL,
+      FIND_DELEGATE_AGENT_FOR_USER_SQL,
       FIND_USER_SAFE_ID_FOR_USER_SQL,
       FIND_DEFAULT_USER_SAFE_ID_SQL,
       FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
@@ -96,10 +97,10 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     expect(await findAgentForUserAllStatuses('agent-1', OWNER, db)).not.toBeNull()
   })
 
-  it('findDelegateAgentForUserExcludingRevoked: another tenant gets null', async () => {
+  it('findDelegateAgentForUser: another tenant gets null', async () => {
     const db = tenantExecutor({ delegate_address: '0xdead' })
-    expect(await findDelegateAgentForUserExcludingRevoked('agent-1', ATTACKER, db)).toBeNull()
-    expect(await findDelegateAgentForUserExcludingRevoked('agent-1', OWNER, db)).not.toBeNull()
+    expect(await findDelegateAgentForUser('agent-1', ATTACKER, db)).toBeNull()
+    expect(await findDelegateAgentForUser('agent-1', OWNER, db)).not.toBeNull()
   })
 
   it('findUserSafeIdForUser: another tenant cannot claim the safe', async () => {
@@ -138,8 +139,14 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     expect(await updateAgentProfile('agent-1', OWNER, 'X', null, db)).not.toBeNull()
   })
 
+  it('archiveAgent: another tenant archives nothing (null) — #1401', async () => {
+    const db = tenantExecutor({ id: 'agent-1', archived_at: new Date() })
+    expect(await archiveAgent('agent-1', ATTACKER, db)).toBeNull()
+    expect(await archiveAgent('agent-1', OWNER, db)).not.toBeNull()
+  })
+
   it.each([
-    ['deleteRevokedAgent', deleteRevokedAgent],
+    ['unarchiveAgent', unarchiveAgent],
     ['revokeAgent', revokeAgent],
     ['pauseAgent', pauseAgent],
     ['resumeAgent', resumeAgent],
@@ -153,5 +160,167 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     const db = tenantExecutor({ id: 'agent-1' })
     expect(await rotateAgentApiKey('hash', 'sk_agent_abcd', 'agent-1', ATTACKER, db)).toBe(false)
     expect(await rotateAgentApiKey('hash', 'sk_agent_abcd', 'agent-1', OWNER, db)).toBe(true)
+  })
+})
+
+/**
+ * #1401 real-DB proof: archive is a soft filing action. What Postgres must
+ * guarantee — status gating, idempotency WITHOUT timestamp churn, unarchive
+ * leaving status untouched, and the whole point: dependent audit rows
+ * SURVIVE archiving (the old DELETE cascaded seven tables away).
+ */
+import db from '../../../db.js'
+import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
+import { beforeAll, beforeEach } from 'vitest'
+
+describeDb('agents archive (#1401, real DB)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  let seq = 0
+  async function seedAgent(status: string): Promise<{ userId: string; agentId: string }> {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`archive-u${++seq}-${Date.now()}@test.example`],
+    )
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, name, status) VALUES ($1, 'Archive test', $2) RETURNING id`,
+      [user.rows[0].id, status],
+    )
+    return { userId: user.rows[0].id, agentId: agent.rows[0].id }
+  }
+
+  it('archives only revoked agents; active/paused/pending_approval refuse', async () => {
+    for (const status of ['active', 'paused', 'pending_approval']) {
+      const { userId, agentId } = await seedAgent(status)
+      expect(await archiveAgent(agentId, userId)).toBeNull()
+    }
+    const { userId, agentId } = await seedAgent('revoked')
+    const archived = await archiveAgent(agentId, userId)
+    expect(archived).not.toBeNull()
+    expect(archived!.archived_at).toBeInstanceOf(Date)
+  })
+
+  // #1436: revoking flips only agents.status — it never touches
+  // agent_delegations. So "revoked" alone was never proof that the agent had
+  // stopped spending, and archiving on that basis filed an agent under
+  // "Removed" while its budget stayed redeemable on-chain. The invariant lives
+  // here now, not in the dashboard's call ordering.
+  async function seedDelegation(agentId: string, status: string): Promise<void> {
+    await db.query(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, delegation_hash, delegation_json, version, token_address,
+          status, budget_atomic, period_seconds, start_date, expires_at)
+       VALUES ($1, 84532, $2, '{}', 1, '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+               $3, '1000000', 86400, 0, 0)`,
+      [agentId, `0x${(++seq).toString(16).padStart(2, '0').repeat(32)}`, status],
+    )
+  }
+
+  it.each(['pending', 'active'])(
+    'REFUSES to archive a revoked agent that still holds a %s delegation (#1436)',
+    async (delegationStatus) => {
+      const { userId, agentId } = await seedAgent('revoked')
+      await seedDelegation(agentId, delegationStatus)
+
+      expect(await archiveAgent(agentId, userId)).toBeNull()
+      const row = await db.query<{ archived_at: Date | null }>(
+        `SELECT archived_at FROM agents WHERE id = $1`,
+        [agentId],
+      )
+      expect(row.rows[0].archived_at).toBeNull()
+      expect(await agentHasLiveDelegations(agentId)).toBe(true)
+    },
+  )
+
+  it('archives once the delegations are revoked — the documented remedy works (#1436)', async () => {
+    const { userId, agentId } = await seedAgent('revoked')
+    await seedDelegation(agentId, 'active')
+    expect(await archiveAgent(agentId, userId)).toBeNull()
+
+    // What revoke-all does to the rows:
+    await db.query(`UPDATE agent_delegations SET status = 'revoked' WHERE agent_id = $1`, [agentId])
+
+    expect(await agentHasLiveDelegations(agentId)).toBe(false)
+    expect(await archiveAgent(agentId, userId)).not.toBeNull()
+  })
+
+  it('already-revoked delegations never block archiving (#1436)', async () => {
+    const { userId, agentId } = await seedAgent('revoked')
+    await seedDelegation(agentId, 'revoked')
+    expect(await archiveAgent(agentId, userId)).not.toBeNull()
+  })
+
+  it('re-archiving is idempotent and keeps the ORIGINAL archived_at', async () => {
+    const { userId, agentId } = await seedAgent('revoked')
+    const first = await archiveAgent(agentId, userId)
+    const second = await archiveAgent(agentId, userId)
+    expect(second).not.toBeNull()
+    expect(second!.archived_at.toISOString()).toBe(first!.archived_at.toISOString())
+  })
+
+  it('unarchive clears archived_at and leaves status = revoked untouched', async () => {
+    const { userId, agentId } = await seedAgent('revoked')
+    await archiveAgent(agentId, userId)
+    expect(await unarchiveAgent(agentId, userId)).toBe(true)
+    const row = await db.query<{ status: string; archived_at: Date | null }>(
+      `SELECT status, archived_at FROM agents WHERE id = $1`,
+      [agentId],
+    )
+    expect(row.rows[0]).toEqual({ status: 'revoked', archived_at: null })
+    // Unarchiving a non-archived agent matches nothing (idempotent no-op).
+    expect(await unarchiveAgent(agentId, userId)).toBe(false)
+  })
+
+  it('THE POINT: payment history and audit rows survive archiving', async () => {
+    const { userId, agentId } = await seedAgent('revoked')
+    await db.query(
+      `INSERT INTO payment_intents
+         (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+          amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash, status, expires_at)
+       VALUES ($1, $2, '0x00000000000000000000000000000000000000s1', 'USDC',
+               '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+               '0x00000000000000000000000000000000000000aa',
+               '1000', '0.001', '0x00000000000000000000000000000000000000de',
+               0, '0x' || repeat('11', 32), 'confirmed', NOW() + interval '1 hour')`,
+      [agentId, userId],
+    )
+    await db.query(
+      `INSERT INTO approval_requests
+         (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+          amount_raw, amount_human, status, expires_at)
+       VALUES ($1, $2, '0x00000000000000000000000000000000000000s1', 'USDC',
+               '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+               '0x00000000000000000000000000000000000000aa',
+               '1000', '0.001', 'pending', NOW() + interval '1 hour')`,
+      [agentId, userId],
+    )
+
+    expect(await archiveAgent(agentId, userId)).not.toBeNull()
+
+    const intents = await db.query(`SELECT id FROM payment_intents WHERE agent_id = $1`, [agentId])
+    const approvals = await db.query(`SELECT id FROM approval_requests WHERE agent_id = $1`, [agentId])
+    expect(intents.rows).toHaveLength(1)
+    expect(approvals.rows).toHaveLength(1)
+    // And the agent row itself still exists, archived — not deleted.
+    const agent = await db.query<{ archived_at: Date | null }>(
+      `SELECT archived_at FROM agents WHERE id = $1`,
+      [agentId],
+    )
+    expect(agent.rows[0].archived_at).not.toBeNull()
+  })
+
+  it('list/by-id reads expose archived_at (no agent disappears)', async () => {
+    const { userId, agentId } = await seedAgent('revoked')
+    await archiveAgent(agentId, userId)
+    const listed = await listAgentsForUserAllStatuses(userId)
+    expect(listed).toHaveLength(1)
+    expect(listed[0].archived_at).not.toBeNull()
+    const single = await findAgentForUserAllStatuses(userId, agentId)
+    expect(single?.archived_at).not.toBeNull()
   })
 })

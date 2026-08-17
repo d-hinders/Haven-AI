@@ -133,6 +133,7 @@ const agentPaymentStatus = {
     token: { type: 'string' },
     resource_url: { type: ['string', 'null'], format: 'uri' },
     merchant_address: { anyOf: [address, { type: 'null' }] },
+    payer_address: { anyOf: [address, { type: 'null' }], description: 'Delegate EOA captured on a payment intent.' },
     tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
     expires_at: isoDateTime,
     chain_id: { type: 'integer' },
@@ -307,6 +308,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Agent details.',
             content: {
@@ -332,30 +336,86 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Delegate balance.',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address'],
-                  properties: {
-                    delegate_address: { type: 'string' },
-                    safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-                    chain_id: { type: 'integer' },
-                    eth: { type: 'string' },
-                    eth_atomic: { type: 'string' },
-                    usdc: { type: 'string' },
-                    usdc_atomic: { type: 'string' },
-                    usdc_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/DelegateBalance' },
               },
             },
           },
           '401': errorResponse,
           '404': errorResponse,
           '422': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/archive': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'archiveAgent',
+        summary: 'Archive a revoked agent (soft removal — history is kept).',
+        description:
+          'Replaces agent deletion (#1401). Requires status=revoked — archiving is a filing action and never the thing that stops spending. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
+          '200': {
+            description: 'Archived (or already archived).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['success', 'archived_at'],
+                  properties: {
+                    success: { type: 'boolean' },
+                    archived_at: isoDateTime,
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/unarchive': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'unarchiveAgent',
+        summary: 'Return an archived agent to the primary list.',
+        description:
+          'Clears archived_at and nothing else — the agent remains revoked; un-archiving restores no authority of any kind. Idempotent on a non-archived agent.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
+          '200': {
+            description: 'No longer archived (or was not archived).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['success'],
+                  properties: { success: { type: 'boolean' } },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
         },
       },
     },
@@ -369,6 +429,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Agent revoked.',
             content: {
@@ -484,6 +547,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Recoverable setup status for the Haven UI.',
             content: {
@@ -539,6 +605,9 @@ export const openapiSpec = {
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Current setup status for the polling connector.',
             content: {
@@ -604,6 +673,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'The budget was confirmed and the setup status was returned.',
             content: {
@@ -629,6 +701,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Setup cancelled.',
             content: {
@@ -719,6 +794,9 @@ export const openapiSpec = {
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Payment intent status.',
             content: {
@@ -785,6 +863,9 @@ export const openapiSpec = {
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Receipt bundle and verification result.',
             content: {
@@ -815,6 +896,9 @@ export const openapiSpec = {
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Serializable x402 or MPP resume state.',
             content: {
@@ -894,6 +978,9 @@ export const openapiSpec = {
           },
         ],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description:
               'The rebuilt sign_data + complete snake_case x402_expected context (field-for-field as signed).',
@@ -926,6 +1013,9 @@ export const openapiSpec = {
           },
         ],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'The stored merchant call context.',
             content: {
@@ -1057,6 +1147,9 @@ export const openapiSpec = {
         security: [{ AgentApiKey: [] }],
         parameters: [{ $ref: '#/components/parameters/PaymentId' }],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Agent payment status.',
             content: {
@@ -1498,6 +1591,9 @@ export const openapiSpec = {
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
         ],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Available filter options.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/TransactionFilterOptionsResponse' } } },
@@ -1608,6 +1704,128 @@ export const openapiSpec = {
         },
       },
     },
+    '/contacts': {
+      get: {
+        tags: ['Contacts'],
+        operationId: 'listContacts',
+        summary: "List the user's saved address-book entries.",
+        description:
+          'Dashboard address book: a name for an address, scoped to the user. Naming an address changes nothing on-chain and grants no authority — it is presentation only, so a transfer to a named contact is exactly as constrained as a transfer to a raw address.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Contacts, alphabetical by name (LIST_CONTACTS_FOR_USER_SQL orders by name ASC).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['contacts'],
+                  properties: {
+                    contacts: { type: 'array', items: { $ref: '#/components/schemas/Contact' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      post: {
+        tags: ['Contacts'],
+        operationId: 'createContact',
+        summary: 'Save a new address-book entry.',
+        description:
+          'The address must be a valid EVM address and unique per user — a second entry for the same address is a 409, not a silent overwrite, so an existing name is never replaced by accident.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name', 'address'],
+                properties: {
+                  name: { type: 'string', minLength: 1, description: 'Trimmed before storage; blank after trimming is a 400.' },
+                  address: address,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Contact created.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Contact' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/contacts/{id}': {
+      put: {
+        tags: ['Contacts'],
+        operationId: 'renameContact',
+        summary: 'Rename an address-book entry.',
+        description: 'Only the name is mutable; an address is never re-pointed under an existing name. To point a name at a different address, delete and re-create.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: uuid },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name'],
+                properties: { name: { type: 'string', minLength: 1 } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated contact.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Contact' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Contacts'],
+        operationId: 'deleteContact',
+        summary: 'Delete an address-book entry.',
+        description:
+          'Hard delete of a label, not of history: transactions to that address remain, and simply stop rendering a name. A contact belonging to another user is a 404, never a 403 — the route does not confirm that an id exists.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: uuid },
+        ],
+        responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
+          '200': {
+            description: 'Deleted.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['success'],
+                  properties: { success: { type: 'boolean' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     '/catalog': {
       get: {
         tags: ['Catalog'],
@@ -1661,6 +1879,9 @@ export const openapiSpec = {
           { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
         ],
         responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
           '200': {
             description: 'Catalog entry.',
             content: {
@@ -1718,9 +1939,36 @@ export const openapiSpec = {
       },
     },
     schemas: {
+      /**
+       * #1446: an address-book label. `LIST_CONTACTS_FOR_USER_SQL` and both
+       * RETURNING clauses in `infra/repositories/contacts.ts` select exactly
+       * these five columns, so every one is required.
+       */
+      Contact: {
+        type: 'object',
+        required: ['id', 'name', 'address', 'created_at', 'updated_at'],
+        properties: {
+          id: uuid,
+          name: { type: 'string' },
+          address: address,
+          created_at: isoDateTime,
+          updated_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
       CatalogEntry: {
         type: 'object',
-        required: ['id', 'name', 'description', 'category', 'resource_url', 'rail', 'protocol', 'status'],
+        /**
+         * #1445: `catalog.ts`'s `serialize()` emits every one of these keys on
+         * every row — nullable ones as null, never absent. The old list named
+         * only 8, so the generated type made the other 9 optional and the UI
+         * had to defend against a shape the route does not produce.
+         */
+        required: [
+          'id', 'name', 'description', 'category', 'resource_url', 'rail', 'protocol', 'status',
+          'tool_name', 'tool_arguments', 'price_display', 'price_atomic', 'asset', 'network',
+          'asset_transfer_methods', 'verified_at',
+        ],
         properties: {
           id: { type: 'string', format: 'uuid' },
           name: { type: 'string' },
@@ -1916,6 +2164,14 @@ export const openapiSpec = {
           signer_acknowledged: { type: 'boolean' },
           local_mcp_acknowledged: { type: 'boolean' },
           activation_command_available: { type: 'boolean' },
+          /**
+           * #1445: the connector reports this and the backend persists it
+           * (`agent-connection-setup.ts`), but the schema omitted it — and this
+           * schema is `additionalProperties: false`, so the spec actively
+           * FORBADE a field the API sends. A strict generated client would have
+           * rejected a valid response.
+           */
+          skill_installed: { type: 'boolean' },
           probe_result: { type: 'string' },
           restart_required: { type: 'boolean' },
           next_user_action: { type: 'string' },
@@ -2207,9 +2463,22 @@ export const openapiSpec = {
           api_key_prefix: { type: ['string', 'null'] },
           status: { type: 'string', enum: ['active', 'paused', 'pending_approval', 'revoked'] },
           created_at: isoDateTime,
+          /**
+           * #1401: non-null when the agent is archived (soft removal — the row
+           * and its full audit history remain; the agent leaves the primary
+           * list client-side). Archiving requires status='revoked'.
+           */
+          archived_at: { anyOf: [isoDateTime, { type: 'null' }] },
           allowances: { type: 'array', items: { $ref: '#/components/schemas/AgentAllowance' } },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
+          /**
+           * True when open reconciliation events indicate stranded delegate
+           * funds (#1445). Derived by the list and detail reads, so it is NOT
+           * required: the creation response is built from the freshly inserted
+           * row and omits it — a brand-new agent cannot have stranded funds.
+           */
+          has_stranded_funds: { type: 'boolean' },
         },
         additionalProperties: true,
       },
@@ -2238,14 +2507,41 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      /**
+       * #1445: lifted out of the inline `/agents/{id}/delegate-balance`
+       * response so consumers can name it. An inline schema generates an
+       * anonymous type, which is why the frontend hand-wrote this one instead
+       * of importing it — identical shape, no behaviour change.
+       */
+      DelegateBalance: {
+        type: 'object',
+        required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address'],
+        properties: {
+          delegate_address: { type: 'string' },
+          safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          chain_id: { type: 'integer' },
+          eth: { type: 'string' },
+          eth_atomic: { type: 'string' },
+          usdc: { type: 'string' },
+          usdc_atomic: { type: 'string' },
+          usdc_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        },
+      },
       CreateAgentResponse: {
         allOf: [
           { $ref: '#/components/schemas/Agent' },
           {
             type: 'object',
-            required: ['api_key'],
+            required: ['api_key', 'passport_requested'],
             properties: {
               api_key: { type: 'string', pattern: '^sk_agent_' },
+              /**
+               * #1445: whether an Agent Passport attestation was requested for
+               * this agent (#970). Always present on creation — false when the
+               * caller did not opt in, or the chain has no passport support.
+               * Governance metadata, never spend authority.
+               */
+              passport_requested: { type: 'boolean' },
             },
           },
         ],
@@ -2684,13 +2980,21 @@ export const openapiSpec = {
       },
       MachinePaymentAgent: {
         type: 'object',
-        required: ['id', 'name', 'status', 'safe_address', 'delegate_address', 'chain_id', 'execution_rail'],
+        required: ['id', 'name', 'status', 'safe_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail'],
         properties: {
           id: uuid,
           name: { type: 'string' },
           status: { type: 'string' },
           safe_address: address,
           delegate_address: address,
+          /**
+           * #1472: the counterfactual Hybrid account the signing EOA owns —
+           * what an erc7710 merchant sees as the X-PAYMENT header's delegator
+           * and may print as "payer". Derived per request; null on the legacy
+           * rail, and null when the derivation fails (reconciliation metadata,
+           * never authority).
+           */
+          delegate_account_address: { anyOf: [address, { type: 'null' }] },
           chain_id: { type: 'integer' },
           execution_rail: {
             type: 'string',

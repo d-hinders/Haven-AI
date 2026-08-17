@@ -52,6 +52,7 @@ import {
 import { tryRecordMachinePaymentEvidenceBaseById, mppDemoRetired } from '../modules/mpp/index.js'
 import {
   deserializeUserOp,
+  isSettlementChainState,
   loadExecutionRailState,
   redactVendorSecrets,
   resolveExecutionRail,
@@ -806,6 +807,34 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
             recovered: recoveredAddress,
           })
         }
+      }
+
+      // #1482: refuse a MISDIRECTED erc7710 intent before anything is claimed.
+      //
+      // `prepared_user_op` is a SHARED column meaning different things per
+      // settlement scheme — a UserOp on the 3009 bridge, a `{ child, budget }`
+      // delegation chain on erc7710 (#946/#1454) — and both also set
+      // `delegation_hash`, so the presence checks below cannot tell them apart.
+      //
+      // ORDER IS THE POINT, and the first draft of this guard got it wrong:
+      // placed after `claimIntentForSubmission`, the throw landed in the catch
+      // that calls `failSubmittedIntent`, so a misdirected call BURNED the
+      // intent. `POST /x402/:id/settle` requires `pending_signature`, so a
+      // burned intent could never be retried on the endpoint that would have
+      // worked — a refusal that destroys the thing it refuses. The sibling #946
+      // guard in `modules/x402/settle.ts` gets this right for the mirror case:
+      // check before mutating, answer 409, let the client retry correctly.
+      if (
+        intent.execution_rail === 'delegation' &&
+        intent.prepared_user_op != null &&
+        isSettlementChainState(deserializeUserOp(intent.prepared_user_op))
+      ) {
+        return reply.code(409).send({
+          error:
+            'This intent settles via erc7710 direct settlement, not a UserOperation. Its signed ' +
+            `child belongs to POST /x402/${id}/settle, which assembles the merchant header. ` +
+            'Nothing was claimed — the intent is still signable there.',
+        })
       }
 
       // 3. Atomically claim the pending intent before any on-chain execution.

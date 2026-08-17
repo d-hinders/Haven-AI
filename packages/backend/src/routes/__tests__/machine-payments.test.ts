@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
+// #1444: validate the real payload against the spec's own schema.
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { authorizeMachinePayment } from '../../modules/mpp/index.js'
 
 const { mockQuery, allowanceMocks, fiatMocks, reportingMocks } = vi.hoisted(() => ({
@@ -286,6 +288,7 @@ describe('machine payment routes', () => {
       to_address: RECIPIENT.toLowerCase(),
       amount_raw: '10000',
       amount_human: '0.01',
+      delegate_address: AGENT.delegate_address,
       tx_hash: TX_HASH,
       status: 'confirmed',
       payment_rail: 'mpp_demo',
@@ -350,12 +353,16 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(200)
+    expectMatchesSpec('GET', '/machine-payments/agent', response.json())
     expect(response.json()).toEqual({
       id: AGENT.id,
       name: AGENT.name,
       status: AGENT.status,
       safe_address: AGENT.safe_address,
       delegate_address: AGENT.delegate_address,
+      // #1472: null here BECAUSE the fixture buckets into legacy — the
+      // delegate account only exists on the delegation rail.
+      delegate_account_address: null,
       chain_id: AGENT.chain_id,
       // #1306: AGENT fixture carries no execution_rail — buckets into legacy,
       // same as handleGetAllowances' own branch below.
@@ -1169,6 +1176,7 @@ describe('machine payment routes', () => {
       tx_hash: TX_HASH,
       resource_url: challenge.resource,
       merchant_address: RECIPIENT.toLowerCase(),
+      payer_address: AGENT.delegate_address,
       amount_atomic: '10000',
       asset: USDC,
       network: challenge.network.name,

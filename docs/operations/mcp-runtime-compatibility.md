@@ -8,7 +8,7 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - .github/workflows/publish.yml
-last-verified: "2026-08-13" # release 0.1.23-alpha.2: manifest table follows the atomic prerelease bump; no runtime compatibility or Node-floor claim changed
+last-verified: "2026-08-17" # Release 0.1.24-alpha.0 (PR #1503): the Supported Runtime Manifest table is re-pinned to match packages/connect/src/runtime-manifest.ts. A version bump only — no tool, capability, or skew-contract surface moves, and the version-skew rules below are unchanged. Prior: #1469: haven_pay_x402_quote normalizes payment_required — malformed accepts entries now refuse with guidance instead of erroring; valid callers unchanged. #1476: haven_sign now refuses a Delegation-shaped typed_data with no expected context; callers using { payment_id } or haven_sign_x402 are unaffected, and the #1254 direct-payment UserOp path is unchanged. #1456: haven_settle_mcp_tool accepts an OPTIONAL payment_header — its absence selects erc7710. Older callers always send one, so their behaviour is unchanged. #1455 re-verify: the signer gained local caveat verification for erc7710 settlement children — a REFUSAL added, no capability/version surface changed, so nothing here about runtime compatibility or the version-skew contract moves. #1426 re-verify: the connector celebration line now phrases reset periods in the dashboard voice (per week/per month/in total) — output wording only, the completion-handoff ordering and no-secret boundaries here are untouched. #1332: guidance-surface parity — setup installs the canonical skill via each runtime's documented instruction mechanism (Hermes skills dir, Codex global AGENTS.md managed section); Claude Code unchanged. Prior: #1397 hosted-only quote tools.
 ---
 
 # MCP Runtime Compatibility
@@ -44,6 +44,17 @@ matching is case-insensitive after trim, `search` matches catalog `name`,
 request shape exactly. The result is still read-only discovery metadata:
 catalog prices are indicative hints, never payment authority.
 
+The default hosted MCP + local signer topology additionally exposes
+`haven_quote_mcp_tool` and `haven_quote_catalog_purchase` (#1397). They are
+read-only live-price probes for an arbitrary MCP merchant or a curated catalog
+entry: no payment intent, approval, signing context, allowance check, funding,
+or paid retry is created. Their response is informational only; a later hosted
+`haven_pay_mcp_tool` or `haven_prepare_catalog_purchase` always obtains a fresh
+quote and enforces its own cap before creating an intent. The local stdio MCP
+intentionally does **not** expose these tools yet: its current one-shot payment
+path cannot honor that quote-then-pay cap/re-quote contract, so publishing the
+same names there would imply a safety guarantee it cannot make.
+
 ```text
 ~/.haven/agents/<agent-id>/bin/haven-mcp
 ```
@@ -57,14 +68,22 @@ Keep this table in sync with that file.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.1.23-alpha.2` |
-| `@haven_ai/mcp` | `0.1.23-alpha.2` |
-| `@haven_ai/sdk` | `0.1.23-alpha.2` |
-| `@haven_ai/signer` | `0.1.23-alpha.2` |
+| `@haven_ai/connect` | `0.1.24-alpha.0` |
+| `@haven_ai/mcp` | `0.1.24-alpha.0` |
+| `@haven_ai/sdk` | `0.1.24-alpha.0` |
+| `@haven_ai/signer` | `0.1.24-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
 ## Hosted-runtime connector profiles
+
+For the hosted fast-settle path, the local signer may produce either the
+supported legacy x402 v1 envelope or the current v2 `{ x402Version, accepted,
+payload }` envelope. Hosted MCP validates either recognizable form against the
+persisted intent before it relays funding. A malformed, unsupported, expired,
+or mismatched header returns `INVALID_PAYMENT_HEADER` with no funding relay;
+recreate it through the local signer from the same `payment_id`. This preflight
+does not replace merchant or facilitator verification.
 
 The default Connect topology writes a keyless hosted Haven MCP entry plus a
 separate local `haven-signer` stdio entry; it is distinct from the local-stdio
@@ -77,6 +96,32 @@ the `mcp_servers.haven` and `mcp_servers.haven-signer` entries.
 Hermes discovers MCP servers at process startup, so start a new session (or run
 `/restart` for a gateway). Hermes also needs its Python MCP SDK installed (`pip
 install mcp`) to load MCP tools.
+
+## Guidance surfaces (skill parity, #1332)
+
+Setup also installs the generic, secret-free payment skill wherever the
+runtime has a documented instruction mechanism. The substance is the single
+canonical string in `packages/sdk/src/skill-content.ts` on every runtime —
+only the wrapper differs, never the content:
+
+- **Claude Code** — `~/.claude/skills/haven-pay/SKILL.md` (canonical bytes).
+- **Hermes** — `$HERMES_HOME/skills/haven-pay/SKILL.md` (default
+  `~/.hermes/skills/…`); Hermes auto-discovers SKILL.md skills in the same
+  front-matter format, so the file is byte-identical to the Claude install.
+- **Codex CLI / Codex Desktop** — a marker-delimited managed section in the
+  global `~/.codex/AGENTS.md` (Codex's documented global-guidance file, shared
+  by both). The section carries the skill body without front matter
+  (`HAVEN_SKILL_BODY_MD`); re-runs replace the section in place, everything
+  outside the markers is preserved byte-for-byte, and a damaged marker pair
+  makes the write fail closed with the file untouched. `AGENTS.override.md` is
+  never written.
+- **Every other runtime** (Cursor, VS Code, Claude Desktop, `other`) — no
+  documented instruction file; the MCP server-level initialize instructions
+  carry the baseline guidance and nothing is written.
+
+A guidance write happens only when the runtime config write itself succeeded,
+and a failed skill install never fails the setup — the messages point at the
+dashboard download instead.
 
 ## Completion handoff after Connect
 
@@ -109,12 +154,30 @@ own. A flaky poll is retried inside the same bound, never treated as a verdict.
 `--json` automation runs skip the wait entirely so the structured outcome is
 emitted promptly.
 
-Before registration, the dashboard remains neutral about a missing connection:
-after one minute of a confirmed `awaiting_connection` status, it says only that
-Haven has not received a connection yet. It asks the user not to approve agent
-rules, offers the same local command for copying, and lets them cancel the
-one-time setup before creating a fresh prompt. A status-read error remains an
-error state, not evidence that the connector succeeded or failed.
+Before registration, the dashboard stages what it says about a missing
+connection over three periods, in one status slot that is never empty (#1399).
+On arrival it says only that it is waiting for the agent to run the setup
+command. After one minute of a confirmed `awaiting_connection` it acknowledges
+that a first run downloads the connector before it can register — an
+observation, not a warning: it offers no recovery actions and does not suggest
+anything is wrong. After **three minutes** of confirmed `awaiting_connection`
+it says Haven has not received a connection yet, asks the user not to approve
+agent rules, offers the same local command for copying, and lets them cancel
+the one-time setup before creating a fresh prompt. A status-read error resets
+the clock rather than advancing it: it remains an error state, not evidence
+that the connector succeeded or failed.
+
+That three-minute bound is sized against a cold `npx` download on a poor
+network — the case that most often strands this screen — and is not tied to
+anything else. It happens to equal the connector's approval wait described
+above, but the two are **not** coupled and must not be reasoned about as a
+pair: `waitForBudgetApproval` only starts once `registerSetup` has succeeded,
+and a successful register moves the setup to `connected_local`, which is
+precisely the transition that ends the dashboard's `awaiting_connection` clock.
+The two govern disjoint phases and can never run concurrently, so either can be
+retuned on its own evidence. They live in `AWAITING_CONNECTION_RECOVERY_MS`
+(`packages/frontend/src/hooks/useAgentConnectionSetupStatus.ts`) and
+`waitForBudgetApproval`'s `timeoutMs` default (`packages/connect/src/runtime.ts`).
 
 Automation can pass `--json`: Connect keeps progress and recovery prose on
 stderr and emits one parseable, versioned object on stdout. `schema_version: 1`

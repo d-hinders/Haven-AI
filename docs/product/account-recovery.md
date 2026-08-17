@@ -13,7 +13,7 @@ covers:
   - packages/frontend/src/lib/passkey-approver.ts
   - packages/backend/src/routes/passkeys.ts
   - packages/backend/src/routes/safe-exec.ts
-last-verified: "2026-08-09"
+last-verified: "2026-08-14" # #1199: both signer-removal paths permit an informed two-to-one transition
 ---
 
 # Account recovery (delegation-rail accounts)
@@ -42,11 +42,11 @@ enroll a replacement.
   funds in it, are unreachable — by you *and* by Haven. This is not a policy we
   can override; it is how self-custody works.
 
-Removing a **backup passkey** still requires keeping two ways to approve ("add
-a backup first" — a clear message rather than a failed transaction). Removing a
-**wallet** down to a single passkey is allowed, after Haven shows you what it
-costs. And the account itself refuses on-chain to remove its *last* signer, so
-that floor holds even outside Haven.
+Removing either a **backup passkey** or a **wallet** down to one remaining way
+to approve is allowed only after Haven clearly shows what it costs: the account
+will have no recovery if that remaining device or wallet is lost. The account
+itself still refuses on-chain to remove its *last* signer, so that floor holds
+even outside Haven.
 
 Because a fresh single-passkey account starts with exactly one way to approve,
 **A backup is strongly recommended — and it is your choice.** Haven used to

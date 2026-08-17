@@ -1,6 +1,6 @@
 {
   "name": "@haven_ai/signer",
-  "version": "0.1.23-alpha.2",
+  "version": "0.1.24-alpha.0",
   "description": "Haven edge signer — holds the delegate key locally and signs payment hashes + x402 headers. Pairs with the hosted, keyless @haven_ai/mcp-server.",
   "engines": {
     "node": ">=22"
@@ -47,7 +47,7 @@
     "directory": "packages/signer"
   },
   "dependencies": {
-    "@haven_ai/sdk": "0.1.23-alpha.2",
+    "@haven_ai/sdk": "0.1.24-alpha.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "viem": "^2.51.0",
     "x402": "^1.2.0",
@@ -57,6 +57,7 @@
     "@types/node": "^20.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "@metamask/smart-accounts-kit": "^1.6.0"
   }
 }

@@ -84,7 +84,10 @@ export default function BudgetGrantAction({
       onGranted?.()
       return
     }
-    setOutcome(result.reason)
+    // `too_many` is a revoke-ALL refusal (#1437) and cannot arise from a
+    // grant; this surface has no batch. Fold it into the generic failure
+    // rather than teaching a grant screen a word it can never mean.
+    setOutcome(result.reason === 'too_many' ? 'failed' : result.reason)
   }
 
   // Explanations come BEFORE the action row — the same order the legacy

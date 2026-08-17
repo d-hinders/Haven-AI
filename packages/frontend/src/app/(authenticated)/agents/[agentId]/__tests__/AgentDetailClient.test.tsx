@@ -30,6 +30,11 @@ vi.mock('wagmi', () => ({
   usePublicClient: (...args: unknown[]) => mockUsePublicClient(...args),
 }))
 
+// #1402: the component navigates to /agents after a completed remove.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+}))
+
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }))
@@ -474,6 +479,24 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByTestId('edit-agent-modal')).toHaveTextContent('budget')
   })
 
+  it('reads the delegate balance for REVOKED agents too — the recovery banner must reach them (#1403)', () => {
+    // The old gate skipped the read for revoked agents ("the endpoint 404s
+    // anyway") — false since #1403, and exactly backwards: the sequence that
+    // strands delegate funds is revoke-mid-x402. The hook must be called with
+    // the agentId regardless of status.
+    const base = mockUseAgents()
+    mockUseAgents.mockReturnValue({
+      ...base,
+      agents: base.agents.map((a: { id: string }) =>
+        a.id === 'agent-1' ? { ...a, status: 'revoked' } : a,
+      ),
+    })
+    render(<AgentDetailClient agentId="agent-1" />)
+    const calls = mockUseDelegateBalance.mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    expect(calls[calls.length - 1][0]).toBe('agent-1')
+  })
+
   it('hides the Safe revoke control on a delegation agent, keeps it on a legacy agent', () => {
     mockDelegationAgent()
     const { unmount } = render(<AgentDetailClient agentId="agent-1" />)
@@ -505,5 +528,78 @@ describe('AgentDetailClient last-activity metadata', () => {
     })
     render(<AgentDetailClient agentId="agent-1" />)
     expect(screen.getByRole('button', { name: 'Revoke agent budget' })).toBeInTheDocument()
+  })
+
+  // #1402: the Remove/Restore visibility gates on the detail footer.
+  function mockAgentWith(overrides: Record<string, unknown>) {
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Delegation agent',
+          description: null,
+          delegate_address: '0x2222222222222222222222222222222222222222',
+          safe_id: 'safe-1',
+          safe_address: SAFE.safe_address,
+          safe_name: 'Main account',
+          status: 'active',
+          created_at: '2026-05-01T00:00:00Z',
+          mcp_last_seen_at: null,
+          allowances: [],
+          account_type: 'delegator_hybrid',
+          ...overrides,
+        },
+      ],
+      loading: false,
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      revokeAgent: vi.fn(),
+      archiveAgent: vi.fn(),
+      unarchiveAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+  }
+
+  it('shows Remove agent for an operational delegation agent, never Restore (#1402)', () => {
+    mockAgentWith({})
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('button', { name: 'Remove agent' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Restore to list' })).not.toBeInTheDocument()
+  })
+
+  it('hides Remove on an operational LEGACY agent — Revoke stays its shutdown (#1402)', () => {
+    mockAgentWith({ account_type: undefined })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Revoke agent budget' })).toBeInTheDocument()
+  })
+
+  it('offers Remove (archive leg) on a revoked legacy agent (#1402)', () => {
+    mockAgentWith({ account_type: undefined, status: 'revoked' })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('button', { name: 'Remove agent' })).toBeInTheDocument()
+  })
+
+  it('an archived agent gets Restore to list and no Remove (#1402)', () => {
+    mockAgentWith({ status: 'revoked', archived_at: '2026-06-01T00:00:00Z' })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Restore to list' })).toBeInTheDocument()
+  })
+
+  it('double-clicking Restore fires unarchive ONCE — pendingAction guards it (#1402)', async () => {
+    let release!: () => void
+    const unarchiveAgent = vi.fn(
+      () => new Promise<void>((resolve) => { release = resolve }),
+    )
+    mockAgentWith({ status: 'revoked', archived_at: '2026-06-01T00:00:00Z' })
+    mockUseAgents.mockReturnValue({ ...mockUseAgents(), unarchiveAgent })
+    render(<AgentDetailClient agentId="agent-1" />)
+    const restore = screen.getByRole('button', { name: 'Restore to list' })
+    fireEvent.click(restore)
+    fireEvent.click(restore)
+    release()
+    await Promise.resolve()
+    expect(unarchiveAgent).toHaveBeenCalledTimes(1)
   })
 })

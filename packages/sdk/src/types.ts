@@ -219,6 +219,21 @@ export interface X402PaymentOption {
   asset: string              // Token contract address
   payTo: string              // Recipient address
   maxTimeoutSeconds: number
+  /**
+   * Merchant-supplied scheme metadata. Two keys are load-bearing for Haven
+   * (#1453), both from MetaMask's erc7710 x402 shape:
+   *
+   *   assetTransferMethod  — 'erc7710' marks this entry as settleable by
+   *                          redeeming a delegation chain. Absent/other means
+   *                          the standard EIP-3009 authorization.
+   *   facilitatorAddresses — who may redeem it, pinned into the settlement
+   *                          child's redeemer caveat (#1058).
+   *
+   * Left as an open record on purpose: the field is the merchant's, and
+   * narrowing it to Haven's two keys would silently drop everything else a
+   * merchant sends. Read it through `x402AssetTransferMethod` /
+   * `x402FacilitatorAddresses` rather than indexing it raw.
+   */
   extra?: Record<string, unknown>
 }
 
@@ -1106,6 +1121,8 @@ export interface PaymentStatusResult {
   token: string
   resourceUrl: string | null
   merchantAddress: string | null
+  /** Delegate EOA captured on the payment intent when it was created. */
+  payerAddress?: string | null
   txHash: string | null
   expiresAt: string
   chainId: number
@@ -1183,6 +1200,38 @@ export interface RawX402AuthorizeResponse {
   expires_at?: string
   sign_data?: SignData
   error?: string
+}
+
+/** @internal Response of `POST /x402/:id/settle` (erc7710 direct settlement). */
+export interface RawX402SettleResponse {
+  success?: boolean
+  payment_id?: string
+  /** The backend-assembled MetaMask erc7710 X-PAYMENT header. */
+  payment_header?: string
+  status?: string
+  error?: string
+}
+
+/**
+ * Result of an erc7710 direct settlement (#1454).
+ *
+ * Deliberately NOT an `X402Receipt`. A 3009 receipt describes a completed
+ * two-leg payment — funding tx included — whereas here nothing has settled yet
+ * when this returns: the merchant redeems the delegation chain when the caller
+ * retries with the header. Reusing the receipt type would let a caller read
+ * `txHash` as "paid" on a payment that has not moved a cent.
+ */
+export interface X402Erc7710Settlement {
+  paymentId: string
+  /** Pass verbatim as the `X-PAYMENT` header on the merchant retry. */
+  paymentHeader: string
+  /** The merchant address the child delegation is pinned to. */
+  merchantPayTo: string
+  amountAtomic: string
+  asset: string
+  network: string
+  /** Facilitators the child is redeemable by, when the merchant advertised any. */
+  facilitatorAddresses: string[] | null
 }
 
 // ── API Response Shapes (raw, snake_case from server) ────────────
@@ -1281,6 +1330,7 @@ export interface RawPaymentStatusResult {
   token: string
   resource_url: string | null
   merchant_address: string | null
+  payer_address?: string | null
   tx_hash: string | null
   expires_at: string
   chain_id: number

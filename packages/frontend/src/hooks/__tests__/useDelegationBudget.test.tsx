@@ -225,3 +225,100 @@ describe('multi-signer accounts (the Daniel regression)', () => {
     expect(signTypedData).toHaveBeenCalled()
   })
 })
+
+describe('revokeAll (#1402 remove step 1)', () => {
+  const HASHES = ['0x' + 'ab'.repeat(32), '0x' + 'cd'.repeat(32)]
+
+  it('one ceremony; submit carries the prepared delegation_hashes verbatim', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    const userOp = { sender: '0xa', nonce: '7n' }
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke-all')) {
+        return Promise.resolve({
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: '0xh',
+          user_operation: userOp,
+          delegation_hashes: HASHES,
+        })
+      }
+      return Promise.resolve({ revoked: true })
+    })
+    mockSignUserOp.mockResolvedValue('0x' + 'ef'.repeat(200))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.revokeAll()
+      expect(res.ok).toBe(true)
+    })
+    expect(mockSignUserOp).toHaveBeenCalledTimes(1)
+    const submit = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/revoke-all/submit'))!
+    expect(submit[1]).toMatchObject({
+      signature: '0x' + 'ef'.repeat(200),
+      user_operation: userOp,
+      delegation_hashes: HASHES,
+    })
+  })
+
+  it("409 'Nothing to revoke' is SUCCESS — step 1 already satisfied, no ceremony", async () => {
+    // The remove flow's retry semantics hinge on this: after a partial remove
+    // (budgets dead, filing unfinished) the retry must sail through step 1.
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke-all')) {
+        return Promise.reject(new Error('Nothing to revoke'))
+      }
+      return Promise.resolve({})
+    })
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.revokeAll()
+      expect(res).toEqual({ ok: true })
+    })
+    expect(mockSignUserOp).not.toHaveBeenCalled()
+    expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/submit'))).toBe(false)
+  })
+
+  it('a cancelled signature reports cancelled and never submits', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke-all')) {
+        return Promise.resolve({
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: '0xh',
+          user_operation: {},
+          delegation_hashes: HASHES,
+        })
+      }
+      return Promise.resolve({})
+    })
+    mockSignUserOp.mockRejectedValue(new Error('User rejected the request'))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.revokeAll()
+      expect(res).toEqual({ ok: false, reason: 'cancelled' })
+    })
+    expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/submit'))).toBe(false)
+  })
+
+  it('any other prepare failure is a real failure, not silently ok', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke-all')) {
+        return Promise.reject(new Error('Internal server error'))
+      }
+      return Promise.resolve({})
+    })
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.revokeAll()
+      expect(res).toEqual({ ok: false, reason: 'failed' })
+    })
+  })
+})

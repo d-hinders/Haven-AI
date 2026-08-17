@@ -3,6 +3,7 @@
 import { ArrowRight, EllipsisVertical } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { usePublicClient } from 'wagmi'
 import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
@@ -36,6 +37,7 @@ import DelegationBudgetCard, { DELEGATION_BUDGET_CARD_ID } from '@/components/De
 import AgentPassportCard from '@/components/AgentPassportCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -242,12 +244,14 @@ interface Props {
   agentId: string
 }
 
-type PendingAction = 'pause' | 'resume' | 'revoke' | null
+type PendingAction = 'pause' | 'resume' | 'revoke' | 'restore' | null
 type ConfirmAction = 'revoke' | null
 
 export default function AgentDetailClient({ agentId }: Props) {
   const { user } = useAuth()
-  const { agents, loading, pauseAgent, resumeAgent, revokeAgent, refetch } = useAgents()
+  const router = useRouter()
+  const { agents, loading, pauseAgent, resumeAgent, revokeAgent, archiveAgent, unarchiveAgent, refetch } =
+    useAgents()
   const agent = agents.find((item) => item.id === agentId) ?? null
   const safe = useMemo(
     () => user?.safes.find((item) => item.id === agent?.safe_id) ?? null,
@@ -272,10 +276,14 @@ export default function AgentDetailClient({ agentId }: Props) {
   )
   // Gate recovery UI on the delegate EOA actually holding *recoverable* funds — not
   // on a funded-but-unsettled payment record (which can linger after a sweep), and
-  // specifically on USDC, since the gasless recovery path is USDC-only. Skip the
-  // read for revoked agents (the endpoint 404s anyway).
+  // specifically on USDC, since the gasless recovery path is USDC-only. #1403:
+  // the read is status-agnostic now — revoked agents resolve too, and that is
+  // the POINT: the sequence that strands delegate funds (agent misbehaving
+  // mid-x402 → revoke) is the one that needs the recovery banner. The hook's
+  // catch treats errors as "nothing to recover", so a failing read degrades
+  // silently rather than blocking.
   const { balance: delegateBalance, hasRecoverableUsdc } = useDelegateBalance(
-    agent && agent.status !== 'revoked' ? agentId : null,
+    agent ? agentId : null,
   )
   // #1098: the human field can be absent while atomic is set (a partial API
   // response mid-load) — "Recover undefined USDC" is worse than the generic
@@ -341,11 +349,13 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
+  const [removeOpen, setRemoveOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const isActive = agent?.status === 'active'
   const isPaused = agent?.status === 'paused'
   const isRevoked = agent?.status === 'revoked'
+  const isArchived = Boolean(agent?.archived_at)
 
   if (loading) {
     return (
@@ -431,6 +441,21 @@ export default function AgentDetailClient({ agentId }: Props) {
       await resumeAgent(currentAgent.id)
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Resume failed')
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  // #1402: restores list placement only — the agent stays revoked. Runs
+  // under pendingAction so a double-click can't fire unarchive twice and
+  // paint a false failure over a restore that already succeeded.
+  async function handleRestore() {
+    setPendingAction('restore')
+    setErrorMessage(null)
+    try {
+      await unarchiveAgent(currentAgent.id)
+    } catch {
+      setErrorMessage('The agent could not be restored to the list')
     } finally {
       setPendingAction(null)
     }
@@ -637,12 +662,12 @@ export default function AgentDetailClient({ agentId }: Props) {
             description="What this agent can spend, where the money comes from, and how you stay in control."
             items={[
               {
-                label: 'Who can spend',
+                label: 'Agent name',
                 value: currentAgent.name,
                 helper: currentAgent.description || undefined,
               },
               {
-                label: 'From account',
+                label: 'Spend from',
                 value: `${walletName} on ${networkName}`,
                 helper: 'Payments come from this Haven account only.',
               },
@@ -702,8 +727,8 @@ export default function AgentDetailClient({ agentId }: Props) {
                     </Button>
                   ) : null}
                   {/* Safe revoke is an AllowanceModule teardown; on delegation
-                      agents the real path is DelegationBudgetCard's per-budget
-                      stop (#1079), so the Safe control is hidden there. */}
+                      agents the whole shutdown is Remove below (#1402), so the
+                      Safe control is hidden there. */}
                   {!isRevoked && !isDelegationAgent ? (
                     <Button
                       onClick={() => setConfirmAction('revoke')}
@@ -712,6 +737,28 @@ export default function AgentDetailClient({ agentId }: Props) {
                       size="sm"
                     >
                       Revoke agent budget
+                    </Button>
+                  ) : null}
+                  {/* #1402: Remove — delegation agents any time while not yet
+                      archived; legacy agents once revoked (archive-only leg). */}
+                  {!isArchived && (isDelegationAgent || isRevoked) ? (
+                    <Button
+                      onClick={() => setRemoveOpen(true)}
+                      disabled={pendingAction !== null}
+                      variant="danger"
+                      size="sm"
+                    >
+                      Remove agent
+                    </Button>
+                  ) : null}
+                  {isArchived ? (
+                    <Button
+                      onClick={() => void handleRestore()}
+                      disabled={pendingAction !== null}
+                      variant="ghost"
+                      size="sm"
+                    >
+                      {pendingAction === 'restore' ? 'Restoring…' : 'Restore to list'}
                     </Button>
                   ) : null}
                 </div>
@@ -791,6 +838,21 @@ export default function AgentDetailClient({ agentId }: Props) {
           </OnchainActionGate>
         )}
       />
+
+      {removeOpen && currentAgent ? (
+        <RemoveAgentDialog
+          agent={currentAgent}
+          chainId={chainId}
+          onRevokeCredential={() => revokeAgent(currentAgent.id)}
+          onArchive={async () => {
+            await archiveAgent(currentAgent.id)
+            // The agent now lives under Removed on the list — land the user
+            // there rather than on a page whose actions just disappeared.
+            router.push('/agents')
+          }}
+          onClose={() => setRemoveOpen(false)}
+        />
+      ) : null}
 
       {!isRevoked ? (
         <EditAgentModal

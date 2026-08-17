@@ -21,7 +21,12 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
-last-verified: "2026-08-12" # #1328 mpp_demo retirement re-verified: the x402 sequences here are UNTOUCHED (mpp_demo was the legacy MPP demo path, not x402; its routes/tools deleted, generic /machine-payments/* preserved); prior same-day: #1360: SDK 3009-shape writers always declare settlementScheme (stale-delegate payTo now fails the shape check loudly; old-SDK shape-only selection characterization-tested) + prior same-day: #1351: the guided path's required cap accepts either spelling — max_amount_human (whole tokens, converted with the LIVE quote's decimals) or the unchanged atomic max_amount; both-sent, neither-sent and unconvertible are pre-funding refusals. Prior same-day: #1349: settled reporting contract sourced from Haven state, merchant raw result evidence-only. #1348: preflight round-trip budget (reads overlap the probe, getAgent in-flight coalescing, delegateAddress option; failure semantics + refusal order unchanged) + prior same-day: #1355: true payment_id-only signing — authorize persists payment_required into machine_metadata (the #1307 pattern), sign-context re-serves it, haven_sign_x402 accepts { payment_id } alone; verification against the Haven-signed expected context unchanged. Same day #1350: catalog discovery now documents case-insensitive category matching plus read-only search over name/description/category; results remain deterministic and indicative only. Prior #1319: ALLOWANCE_READ_OPTIMISTIC provenance; #1321: MCP session before the unpaid tools/call. Prior #1311: scan-first description reorder, no sequence/field semantics changed.
+# #1496: a casp-changelog shard satisfies this doc too — every money-path PR
+# already writes one, and mandatory note-prepends to last-verified caused three
+# merge conflicts in one day between PRs that were not otherwise in conflict.
+satisfied-by:
+  - docs/regulatory/casp-changelog/**
+last-verified: "2026-08-16" # #1496: verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -77,9 +82,13 @@ header, and a JSON-body fallback. When the delegate address is known, probes
 also send `x402-wallet`. The paid retry uses `X-PAYMENT`; a successful merchant
 response may include `PAYMENT-RESPONSE` evidence.
 
-`quoteX402()` and `haven_quote_x402` are read-only. They parse the challenge but
-do not create a Haven payment, approval request, signature, or on-chain
-transaction.
+`quoteX402()`, `haven_quote_x402`, `haven_quote_mcp_tool`, and
+`haven_quote_catalog_purchase` are read-only. The MCP variants establish the
+merchant session and send an unpaid `tools/call` probe (and may read the public
+agent delegate address to send `x402-wallet`), but none creates a Haven payment,
+approval request, signature, funding operation, paid merchant retry, or
+on-chain transaction. Every quote is informational rather than a price
+reservation or payment authority.
 
 Every merchant-facing SDK fetch (probes, MCP handshakes, paid retries,
 resume retries) is bounded since #1300: `config.merchantTimeout` (default
@@ -294,6 +303,17 @@ boundary (owner decision, 2026-08-06), not a sequencing preference.
 
 ## Hosted Paid-MCP-Tool Flow
 
+Before the paid flow, `haven_quote_mcp_tool({ merchant_url, tool_name,
+arguments? })` can return the live merchant/resource identity, amount in atomic
+and display form, token/decimals, network/chain, timeout, and session transport
+without creating an intent. It runs the same bounded, same-origin endpoint
+discovery as the paid tool, and returns the resolved `merchant_url` when a base
+URL was supplied. It deliberately returns no `payment_required`, `payment_id`,
+signing context, cap/allowance guidance, or persisted call context. A later
+`haven_pay_mcp_tool` must re-run the live quote and apply its own explicit cap
+before creating any funding intent; the informational result cannot be reused as
+a paid authorization.
+
 The recommended three-call fast path for an x402-protected MCP tool is:
 
 1. `haven_pay_mcp_tool` — hosted MCP establishes an MCP session (`initialize`,
@@ -306,6 +326,17 @@ The recommended three-call fast path for an x402-protected MCP tool is:
    confirmation, performs a fresh merchant MCP handshake, delivers the signed
    header, and returns `agent_summary.purchase_summary` as the default report;
    raw `result` remains optional merchant evidence.
+
+**Hosted header preflight (#1398).** Before step 3 relays the funding
+signature, hosted MCP validates the bounded, signed `X-PAYMENT` header against
+the agent-scoped persisted intent: payee, asset, network, atomic amount,
+resource when the x402 version carries it, captured delegate payer, valid
+authorization window, nonce shape, and EIP-712 recovery. A malformed,
+unsupported, expired, or mismatched header fails closed with
+`INVALID_PAYMENT_HEADER`; no funding is relayed, no merchant retry occurs, and
+header values are not included in the error. This is an integrity preflight
+only: it never rebuilds or alters the signature/header, persists it, or claims
+merchant settlement. The merchant/facilitator remains the final verifier.
 
 **Settle by `payment_id` (#1307).** `haven_settle_mcp_tool` and
 `haven_complete_mcp_tool` accept `merchant_url` / `tool_name` / `arguments` /
@@ -356,6 +387,16 @@ existing `rail` plus agent-chain scoping still apply. Results stay
 deterministically ordered and may be empty or multi-row; they never authorize
 payment, and any catalog price remains indicative until the live quote below.
 
+`haven_quote_catalog_purchase({ catalog_id })` is the read-only catalog wrapper:
+it performs the same chain-scoped catalog lookup and usable-MCP-row guard, then
+runs the same live merchant probe as `haven_quote_mcp_tool`. It returns the
+generic quote fields plus the catalog identity and its price, explicitly marked
+indicative. It creates no intent, approval, signing context, allowance check, or
+price reservation. An unknown/degraded/non-MCP catalog row keeps the existing
+manual fallback: use `haven_pay_mcp_tool` with an explicit merchant URL and
+tool name. When ready to buy, call `haven_prepare_catalog_purchase` with a cap;
+that paid preflight obtains a fresh live quote and checks the cap independently.
+
 `haven_prepare_catalog_purchase({ catalog_id, max_amount_human | max_amount, idempotency_key? })`
 starts a paid-MCP-tool purchase from a curated `merchant_catalog` row instead
 of a hand-copied `merchant_url` / `tool_name` / `tool_arguments`. It is a
@@ -400,8 +441,8 @@ Sequence:
    agent, allowances, `POST /x402` — enforced by round-trip-count unit tests
    (deterministic, unlike wall-clock); per-step wall-clock telemetry rides the
    promotion-gating QA scenario's pass detail.
-4. A spending cap is **required** on this tool (unlike `haven_pay_mcp_tool`'s
-   optional cap) — this IS the guided path, so there is no `cap_warning`
+4. A spending cap is **required** on this tool, as on `haven_pay_mcp_tool` —
+   this IS the guided path, so there is no `cap_warning`
    softness. Enforced against the LIVE quote via the SAME
    `assertWithinMaxAmount` guard, before any funding intent exists
    (`PRICE_EXCEEDS_MAX`).
@@ -564,6 +605,25 @@ request bodies, tool names, and tool arguments may still need to be preserved or
 reconstructed. SDK and hosted MCP tool completion establish a fresh MCP
 transport session; callers do not need to preserve the old session id.
 
+## Which Address A Merchant Sees, And Mapping It Back (#1472)
+
+On erc7710 the merchant-visible payer is **the agent's delegate account** — the
+`delegator` of the settlement child in the `X-PAYMENT` header. It is neither
+the treasury (where the funds provably leave: the ERC-20 `Transfer.from` is the
+owner's account) nor the signing EOA. All three are distinct addresses, and a
+receipt or dispute will usually carry the middle one.
+
+To map a merchant-visible payer back to a Haven agent:
+`GET /machine-payments/agent` returns `delegate_account_address` for
+delegation-rail agents — a pure derivation (the counterfactual Hybrid address
+of the signing EOA), `null` on the legacy rail. Match the receipt's payer
+against it; no delegation-chain reading required.
+
+The demo merchant's own receipt labels the address for what it is
+(`delegatkonto — betalningen dras från ägarens treasury`) rather than implying
+custody it does not have. Third-party merchants will print whatever they
+print — which is exactly why the API-side mapping exists.
+
 ## Differences From Direct Payments
 
 | Concern | Direct `/payments` | x402 |
@@ -678,10 +738,69 @@ merchants — so the rail now selects a settlement scheme **per payment**
 live-proven 2026-07-18; design of record: RFC
 [#791](https://github.com/d-hinders/Haven-AI/issues/791) §18 "B4-D").
 
-**How the scheme is chosen.** The `modules/x402/` authorize orchestration
-(`scheme-selection.ts`, since #996) keys on the authorize request's
-`payTo` shape — which is exactly the standard-x402 SDK contract, so existing
-SDKs gained delegation-rail merchant reach with no client change:
+**Which scheme a client should PREFER (#1450, owner decision 2026-08-15).**
+Read this before the mechanism below, because the table describes how a client
+*says* what it wants, not what it *should* want:
+
+> Prefer erc7710 whenever the account is on the delegation rail and the merchant
+> advertises `extra.assetTransferMethod: "erc7710"`; fall back to the EIP-3009
+> bridge otherwise.
+
+The reason is structural: erc7710 has no funding leg, so the stranded-delegate-
+funds class ([#713](https://github.com/d-hinders/Haven-AI/issues/713) — hot
+balances, sweeps, the delegate-balance monitor) is **absent** on the preferred
+path rather than reconciled. Recipient-pinned budgets were already erc7710-only
+(`modules/x402/delegation-authorize.ts`), so they become the ordinary case
+instead of a special one.
+
+This is a preference, not a merchant-reach claim: the adoption paragraph above
+stands, which is precisely why the bridge stays. Epic
+[#1450](https://github.com/d-hinders/Haven-AI/issues/1450) is making it
+reachable from Haven's own clients, one step at a time — as of
+[#1452](https://github.com/d-hinders/Haven-AI/issues/1452) the SDK **can sign**
+the settlement child (`sign_data.signature_scheme: 'eip712_delegation'`, signed
+verbatim via `signSettlementDelegationTypedData`), and as of
+[#1453](https://github.com/d-hinders/Haven-AI/issues/1453) it **can choose**
+the scheme: `selectX402SettlementScheme` is the single place the preference
+rule lives, and `selectStandardPaymentOption` now skips erc7710-tagged entries
+instead of returning them positionally. [#1454](https://github.com/d-hinders/Haven-AI/issues/1454)
+joins them into `HavenClient.settleX402Erc7710()` — authorize (`payTo` = the
+merchant) → sign the child → settle → the backend-assembled `X-PAYMENT` header,
+which the caller replays on the merchant retry. As of
+[#1456](https://github.com/d-hinders/Haven-AI/issues/1456) the same flow is
+reachable from the **hosted MCP tool surface**, which is the topology a normal
+agent uses: `haven_pay_mcp_tool` selects the scheme server-side (rail from the
+account, capability from the merchant's `accepts[]`) and reports it, and
+`haven_settle_mcp_tool` exchanges the signed child for the header. Note the
+sequence inversion, because it is the whole substance of that wiring: on the
+3009 path the agent's signature FUNDS the delegate and the header is built by
+the local signer; on erc7710 the signature IS the settlement child and the
+header comes back from Haven. So the settle tool branches before the funding
+relay, not after it. Note what the SDK does NOT do
+on this path: it builds no header locally and touches no funds, because the
+backend assembles the MetaMask payload in `assembleSettlementPayload`.
+
+**Still unproven end to end, and worth stating rather than assuming.** The
+nightly `x402-erc7710-settle` QA leg exercises the RAW API and deliberately
+excludes the SDK, so nothing yet demonstrates a full purchase through
+`HavenClient` — including the property the path exists for, that the delegate
+EOA's balance is unchanged across the flow. #1454 pins the request shapes;
+[#1457](https://github.com/d-hinders/Haven-AI/issues/1457) is where the
+topology gets proven with balances.
+
+**#1453 also closed a live footgun on the EIP-3009 path**, worth recording
+because it cost real funds to reason about rather than being hypothetical:
+because the old selector ignored `extra.assetTransferMethod`, a merchant that
+listed its erc7710 entry first made a client echo THAT option while signing a
+standard 3009 authorization. The merchant rejects the mismatch cleanly — but on
+the legacy two-leg the Safe→delegate funding transfer has already executed, so
+the result is a stranded delegate balance for the sweep. Only our own demo
+merchant's `accepts[]` ordering was holding it shut.
+
+**How the scheme is chosen (the mechanism).** The `modules/x402/` authorize
+orchestration (`scheme-selection.ts`, since #996) keys on the authorize
+request's `payTo` shape — which is exactly the standard-x402 SDK contract, so
+existing SDKs gained delegation-rail merchant reach with no client change:
 
 | `payTo` | Scheme | Merchant sees |
 |---|---|---|

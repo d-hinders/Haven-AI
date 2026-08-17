@@ -61,6 +61,8 @@ export interface AgentPaymentStatus {
   token: string
   resource_url: string | null
   merchant_address: string | null
+  /** Delegate captured with this intent; never inferred from a later agent rotation. */
+  payer_address?: string | null
   tx_hash: string | null
   expires_at: string
   chain_id: number
@@ -666,6 +668,7 @@ export async function getAgentPaymentStatus(
       token: payment.token_symbol,
       resource_url: resourceUrl,
       merchant_address: merchantAddress,
+      payer_address: payment.delegate_address,
       tx_hash: payment.tx_hash,
       expires_at: payment.expires_at,
       chain_id: payment.chain_id,

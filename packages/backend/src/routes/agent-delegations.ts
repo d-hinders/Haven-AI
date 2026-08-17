@@ -44,7 +44,15 @@ import {
   delegationSigningPayload,
   type HavenBudgetPolicy,
 } from '../rails/delegation-policy.js'
-import { createTreasuryOps, delegationRailBundlerUrl } from '../rails/delegation-rail.js'
+import {
+  createTreasuryOps,
+  delegationRailBundlerUrl,
+  readDisabledDelegationHashes,
+} from '../rails/delegation-rail.js'
+import {
+  listNonRevokedDelegationsForAgent,
+  revokeDelegationsByHashes,
+} from '../infra/repositories/delegation-budgets.js'
 import { redactVendorSecrets } from '../rails/execution-rail.js'
 // Signer management is shared with the account-scoped routes (#1081) — one
 // copy of the authority rules, reached two ways.
@@ -63,6 +71,16 @@ function safeDetails(err: unknown): string {
 
 const MAX_UINT96 = (1n << 96n) - 1n
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/
+
+// #1423: revoke-all bundles one disableDelegation call per delegation into a
+// single UserOp. Unbounded, a pathological agent could blow gas/payload
+// limits (a loud 502 — availability, not safety). Real agents hold a handful
+// of budgets; past this, per-hash revocation is the escape hatch.
+const MAX_REVOKE_ALL_BATCH = 25
+// Coarse pre-read ceiling: past this we refuse BEFORE spending any RPC budget
+// on the reconciliation reads. Sits well above the batch cap so healed
+// orphans can never push a legitimately-sized batch into this refusal.
+const RECONCILE_READ_CEILING = 100
 
 interface AgentAccountRow {
   agent_id: string
@@ -138,9 +156,9 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   // Enroll a backup passkey/EOA, or remove a passkey — as ACCOUNT ops
   // (addKey / removeKey / transferOwnership) prepared here and signed by an
   // EXISTING signer. Haven prepares, never signs (#824 invariant 12). The
-  // ≥2-signers rule mirrors the chain's CannotRemoveLastSigner guard (#884
-  // finding: a pure-passkey Hybrid refuses to drop below two keys) so the
-  // user gets a clean 409 instead of an opaque revert.
+  // The shared guard mirrors only the chain's CannotRemoveLastSigner rule
+  // (#884), so an attempted final-signer removal gets a clear 409 instead of
+  // an opaque revert. An informed two-to-one transition is permitted (#1199).
   app.post<{ Params: { id: string }; Body: SignerActionBody }>(
     '/:id/account-signers/prepare',
     async (request, reply) => {
@@ -428,6 +446,183 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     },
   )
 
+  // ── POST /:id/delegations/revoke-all — #1400: ONE signature kills every
+  // non-revoked budget delegation. Step 1 of #1402's Remove-agent action.
+  // Mirrors the per-hash prepare exactly; the only new mechanics is the
+  // batched UserOp (prepareCalls) — no second copy of the authority rules.
+  app.post<{ Params: { id: string } }>('/:id/delegations/revoke-all', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const agent = await loadOwnedDelegationAgent(request.params.id, sub)
+    if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+    if (agent.account_type !== 'delegator_hybrid') {
+      return reply.code(409).send({
+        error:
+          'Batch revocation is a delegation-rail operation. This agent is on the AllowanceModule rail — remove its allowances via the wallet-approval teardown instead.',
+      })
+    }
+
+    let targets = await listNonRevokedDelegationsForAgent(request.params.id)
+    if (targets.length === 0) {
+      return reply.code(409).send({ error: 'Nothing to revoke — the agent has no pending or active budget delegations.' })
+    }
+
+    if (targets.length > RECONCILE_READ_CEILING) {
+      // Cite the ceiling this actually gated on — quoting the batch cap here
+      // told an agent with 150 delegations "150 > 25", a true refusal with a
+      // wrong number.
+      return reply.code(422).send({
+        error: `Too many delegations to reconcile in one request (${targets.length} > ${RECONCILE_READ_CEILING}). Revoke individually via POST /agents/:id/delegations/:hash/revoke, then retry.`,
+      })
+    }
+
+    // #1423: disableDelegation is NOT idempotent (AlreadyDisabled revert), and
+    // the batch is atomic — one already-disabled entry would revert the whole
+    // op. A row can be stale-active while disabled on-chain (the #1400 crash
+    // window: UserOp landed, process died before the UPDATE). Heal those rows
+    // to `revoked` here and drop them from the batch. A failed read degrades
+    // to the pre-#1423 behavior (full batch) rather than blocking revocation —
+    // availability over a rare bundled revert, which still fails loudly (502).
+    // Heals are marked-without-a-signature, so the read is double-confirmed at
+    // `finalized` (see readDisabledDelegationHashes) and every heal is logged
+    // distinctly from an owner-signed revoke.
+    try {
+      const disabled = await readDisabledDelegationHashes(
+        agent.chain_id,
+        getChain(agent.chain_id).rpcUrl,
+        targets.map((t) => t.delegation_hash as Hex),
+      )
+      if (disabled.size > 0) {
+        const healed = await revokeDelegationsByHashes(request.params.id, [...disabled])
+        request.log.warn(
+          { agentId: request.params.id, healed },
+          'revoke-all reconciled on-chain-disabled delegations to revoked (no signature — chain state was already disabled)',
+        )
+        targets = targets.filter((t) => !disabled.has(t.delegation_hash as Hex))
+      }
+    } catch (err) {
+      request.log.warn({ err }, 'disabled-delegations read failed; proceeding with the full batch')
+    }
+    if (targets.length === 0) {
+      // Everything was already disabled on-chain — the rows are now healed,
+      // so this is the same "step already done" signal the retry flow expects.
+      return reply.code(409).send({ error: 'Nothing to revoke — every delegation was already disabled on-chain (records reconciled).' })
+    }
+    if (targets.length > MAX_REVOKE_ALL_BATCH) {
+      return reply.code(422).send({
+        error: `Too many delegations for one batch (${targets.length} > ${MAX_REVOKE_ALL_BATCH}). Revoke individually via POST /agents/:id/delegations/:hash/revoke, then retry.`,
+      })
+    }
+
+    const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
+    if (!owner) {
+      return reply.code(409).send({
+        error: 'Account signer configuration unknown — revoke via the exit path (docs)',
+      })
+    }
+
+    try {
+      const calls = targets.map((target) => {
+        const revocation = buildRevocation(JSON.parse(target.delegation_json), agent.chain_id)
+        return { to: revocation.to, data: revocation.data }
+      })
+      const resolved = resolveSignatureScheme(
+        (request.body as { signature_scheme?: string } | undefined)?.signature_scheme,
+        owner.config,
+      )
+      if ('error' in resolved) return reply.code(409).send({ error: resolved.error })
+      const treasury = await createTreasuryOps({
+        ownerAddress: owner.config.ownerAddress,
+        passkeys: owner.config.passkeys,
+        accountAddress: agent.treasury_address as Address,
+        chainId: agent.chain_id,
+        bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
+        rpcUrl: getChain(agent.chain_id).rpcUrl,
+        sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
+        signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
+      })
+      const prepared = await treasury.prepareCalls(calls)
+      const user_operation = JSON.parse(
+        JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
+      )
+      const delegation_hashes = targets.map((target) => target.delegation_hash)
+      if (resolved.scheme === 'webauthn_userop') {
+        return {
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: prepared.userOpHash,
+          user_operation,
+          treasury_address: prepared.treasuryAddress,
+          delegation_hashes,
+          instructions:
+            'Sign user_op_hash with the account passkey (WebAuthn), then POST /revoke-all/submit',
+        }
+      }
+      return {
+        signature_scheme: 'eip712_userop',
+        signing_payload: prepared.signingTypedData,
+        user_operation,
+        treasury_address: prepared.treasuryAddress,
+        delegation_hashes,
+        instructions:
+          'Sign signing_payload (EIP-712) with the treasury owner key, then POST /revoke-all/submit',
+      }
+    } catch (err) {
+      return reply.code(502).send({ error: 'Could not prepare the batch revocation', details: safeDetails(err) })
+    }
+  })
+
+  // ── POST /:id/delegations/revoke-all/submit — step 2 ─────────────────────
+  app.post<{
+    Params: { id: string }
+    Body: { signature?: string; user_operation?: unknown; delegation_hashes?: unknown }
+  }>('/:id/delegations/revoke-all/submit', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const agent = await loadOwnedDelegationAgent(request.params.id, sub)
+    if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+    const { signature, user_operation, delegation_hashes } = request.body ?? {}
+    if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
+      return reply.code(400).send({ error: 'signature is required' })
+    }
+    if (!user_operation || typeof user_operation !== 'object') {
+      return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
+    }
+    if (
+      !Array.isArray(delegation_hashes) ||
+      delegation_hashes.length === 0 ||
+      !delegation_hashes.every((h) => typeof h === 'string' && HASH_RE.test(h))
+    ) {
+      return reply.code(400).send({ error: 'delegation_hashes (from the prepare step) is required' })
+    }
+    const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
+    if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
+
+    try {
+      const treasury = await createTreasuryOps({
+        ownerAddress: owner.config.ownerAddress,
+        passkeys: owner.config.passkeys,
+        accountAddress: agent.treasury_address as Address,
+        chainId: agent.chain_id,
+        bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
+        rpcUrl: getChain(agent.chain_id).rpcUrl,
+        sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
+      })
+      const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>
+        typeof v === 'string' && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v,
+      )
+      const result = await treasury.submitCall(
+        { userOperation: revived, userOpHash: '0x' as Hex, signingTypedData: null, treasuryAddress: treasury.treasuryAddress },
+        signature as Hex,
+      )
+      // DB write ONLY after the UserOp landed — a failed submit leaves every
+      // row untouched (no optimistic revocation). Scoped to this agent, so a
+      // stray hash flips nothing foreign; the response reports what actually
+      // flipped rather than echoing the request.
+      const revoked = await revokeDelegationsByHashes(request.params.id, delegation_hashes as string[])
+      return { revoked: true, tx_hash: result.txHash, delegation_hashes: revoked }
+    } catch (err) {
+      return reply.code(502).send({ error: 'Batch revocation failed', details: safeDetails(err) })
+    }
+  })
+
   // ── POST /:id/delegations/:hash/revoke — step 1: prepare (one signature) ──
   app.post<{ Params: { id: string; hash: string } }>(
     '/:id/delegations/:hash/revoke',
@@ -447,6 +642,28 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       if (!target) return reply.code(404).send({ error: 'Delegation not found' })
       if (target.status === 'revoked') {
         return reply.code(409).send({ error: 'Already revoked' })
+      }
+
+      // #1423: same crash-window hardening as revoke-all — disableDelegation
+      // REVERTS on an already-disabled delegation, so an orphaned row here
+      // would 502 on prepare forever. Heal it and answer with the same
+      // already-done signal; a failed read degrades to the normal prepare.
+      try {
+        const disabled = await readDisabledDelegationHashes(
+          agent.chain_id,
+          getChain(agent.chain_id).rpcUrl,
+          [request.params.hash as Hex],
+        )
+        if (disabled.size > 0) {
+          const healed = await revokeDelegationsByHashes(request.params.id, [request.params.hash])
+          request.log.warn(
+            { agentId: request.params.id, healed },
+            'per-hash revoke reconciled an on-chain-disabled delegation to revoked (no signature — chain state was already disabled)',
+          )
+          return reply.code(409).send({ error: 'Already revoked — the delegation was disabled on-chain and the record has been reconciled.' })
+        }
+      } catch (err) {
+        request.log.warn({ err }, 'disabled-delegation read failed; proceeding with the normal prepare')
       }
 
       // Reconstruct the treasury's owner config (#885): an EOA account signs

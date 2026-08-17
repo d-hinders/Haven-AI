@@ -608,6 +608,38 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     expect(output).toContain('Budget approved 🎉 — I can now spend up to 25 USDC per day from your Haven wallet.')
   })
 
+  // #1426: the celebration line must phrase every period the DASHBOARD offers
+  // with the dashboard's own sentence words — "per 10080 minutes" next to
+  // "per week" made the user do arithmetic on a reassurance message. One
+  // voice, dashboard's sentence form wins ("in total" for one-time, not
+  // "with no automatic reset"). One case per RESET_PERIODS value + the
+  // legacy-only hourly + the arbitrary fallback.
+  it.each([
+    [1440, 'per day'],
+    [10080, 'per week'],
+    [43200, 'per month'],
+    [0, 'in total'],
+    [60, 'per hour'],
+    [90, 'every 90 minutes'],
+  ])('phrases a %i-minute reset as "%s" — matching the dashboard voice (#1426)', async (resetPeriodMin, phrase) => {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn(async () => ({
+      status: 'active' as const,
+      approved_budget: { token_symbol: 'USDC', token_address: BASE_USDC, amount: '25000000', reset_period_min: resetPeriodMin },
+    }))
+
+    await waitForBudgetApproval(
+      { getConnectorStatus }, 'setup-1', 'sk_agent_supersecret',
+      (message) => logs.push(message), { sleep: noSleep },
+    )
+
+    expect(logs.join('\n')).toContain(`I can now spend up to 25 USDC ${phrase} from your Haven wallet.`)
+    // The raw-minutes shape must never resurface for a dashboard-offered period.
+    if ([0, 1440, 10080, 43200].includes(resetPeriodMin)) {
+      expect(logs.join('\n')).not.toMatch(/\d+ minutes/)
+    }
+  })
+
   it('always terminates on its own: exits pending with guidance at the timeout bound', async () => {
     const logs: string[] = []
     const getConnectorStatus = vi.fn(async () => ({ status: 'pending_approval', approved_budget: null }))
@@ -657,7 +689,8 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     )
 
     expect(outcome).toBe('approved')
-    expect(logs.join('\n')).toContain('10 USDC with no automatic reset')
+    // #1426: one voice with the dashboard — its sentence form says "in total".
+    expect(logs.join('\n')).toContain('10 USDC in total')
   })
 
   it('falls back to atomic units without crashing when the token is not in the registry', async () => {

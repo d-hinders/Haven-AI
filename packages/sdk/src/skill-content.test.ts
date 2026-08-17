@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HAVEN_SKILL_MD, SKILL_FOLDER_NAME } from './skill-content.js'
+import { HAVEN_SKILL_MD, HAVEN_SKILL_BODY_MD, SKILL_FOLDER_NAME } from './skill-content.js'
 
 describe('generic skill content', () => {
   it('contains no secrets and no per-agent values', () => {
@@ -20,6 +20,8 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('mcp_transport')
     expect(HAVEN_SKILL_MD).toContain('expires_at')
     expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_pay_mcp_tool')
+    expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_quote_mcp_tool')
+    expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_quote_catalog_purchase')
     expect(HAVEN_SKILL_MD).toContain('mcp__haven-signer__haven_sign_x402')
     expect(HAVEN_SKILL_MD).toContain('mcp__haven__haven_settle_mcp_tool')
     expect(HAVEN_SKILL_MD).toContain('x402_expected')
@@ -65,6 +67,12 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toMatch(/0\.000001 USDC/)
   })
 
+  it('teaches read-only MCP quotes before an explicit capped purchase (#1397)', () => {
+    expect(HAVEN_SKILL_MD).toMatch(/haven_quote_catalog_purchase[\s\S]*?informational only/i)
+    expect(HAVEN_SKILL_MD).toMatch(/haven_quote_mcp_tool[\s\S]*?fresh quote/i)
+    expect(HAVEN_SKILL_MD).toMatch(/never reserves a price/i)
+  })
+
   it('tells the agent to follow the response guidance fields first (#1308)', () => {
     expect(HAVEN_SKILL_MD).toContain('next_action')
     expect(HAVEN_SKILL_MD).toContain('next_tool')
@@ -99,5 +107,20 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toMatch(/result[\s\S]*never use[\s\S]*whether[\s\S]*paid/i)
     expect(HAVEN_SKILL_MD).toMatch(/remaining post-purchase allowance/)
     expect(HAVEN_SKILL_MD).toMatch(/Do not\s+call[\s\S]*?again just to\s+report/)
+  })
+
+  // #1332: the body derivation is a regex over the canonical string; these pin
+  // the invariants that make it safe, LOUDLY at the source. If a future edit
+  // reformats the front matter so the strip stops matching, the first
+  // assertion fails here rather than the Codex AGENTS.md write silently
+  // carrying raw YAML as prose; if the front matter ever grows a block scalar
+  // containing a literal `---` line, the truncated match leaks front-matter
+  // fragments and the starts-with assertion fails.
+  it('HAVEN_SKILL_BODY_MD is the canonical skill minus exactly the front matter (#1332)', () => {
+    expect(HAVEN_SKILL_BODY_MD).not.toBe(HAVEN_SKILL_MD) // the strip DID something
+    expect(HAVEN_SKILL_MD.endsWith(HAVEN_SKILL_BODY_MD)).toBe(true) // a pure prefix removal
+    expect(HAVEN_SKILL_BODY_MD.startsWith('# Haven: pay from a Haven wallet')).toBe(true)
+    expect(HAVEN_SKILL_BODY_MD).not.toContain('name: haven-pay')
+    expect(HAVEN_SKILL_BODY_MD).not.toMatch(/^---/m) // no front-matter fragments leaked
   })
 })

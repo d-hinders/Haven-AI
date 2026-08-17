@@ -7,7 +7,7 @@ covers:
   - packages/frontend/src/hooks/useAccountSigners.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/backend/src/rails/hybrid-signer-actions.ts
-last-verified: "2026-08-09" # stale-claims sweep: #1153 posture (no code gate), #980 path moves
+last-verified: "2026-08-14" # #1199: two-to-one passkey removal matches the existing one-signer posture
 ---
 
 # Dev testing with a wallet signer

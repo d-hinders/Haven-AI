@@ -21,6 +21,8 @@ import { x402Sweep } from './scenarios/x402-sweep.js'
 import { x402Delegation3009 } from './scenarios/x402-delegation-3009.js'
 import { x402Delegation3009Sweep } from './scenarios/x402-delegation-3009-sweep.js'
 import { x402Erc7710Settle } from './scenarios/x402-erc7710-settle.js'
+import { x402Erc7710Sdk } from './scenarios/x402-erc7710-sdk.js'
+import { x402Erc7710Hosted } from './scenarios/x402-erc7710-hosted.js'
 import { x402HostedMcpSigner } from './scenarios/x402-hosted-mcp-signer.js'
 import { x402CatalogGuidedPurchase } from './scenarios/x402-catalog-guided-purchase.js'
 import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
@@ -57,7 +59,14 @@ const SCENARIOS: Scenario[] = [
   x402Delegation3009,
   x402Delegation3009Sweep,
   x402Erc7710Settle,
+  // #1457: the SDK topology, after the raw-API leg so a failure here is
+  // diagnosable against a surface the sibling leg has already shown healthy.
+  x402Erc7710Sdk,
   x402HostedMcpSigner,
+  // #1457: the DEFAULT topology (hosted MCP + local signer), placed straight
+  // after the hosted leg so a failure here is diagnosable against a topology
+  // the sibling has already shown healthy.
+  x402Erc7710Hosted,
   x402CatalogGuidedPurchase,
   delegationLifecycle,
 ]

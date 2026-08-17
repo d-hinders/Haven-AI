@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
   - packages/backend/src/modules/fee/fee-module.ts
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-14" # #1199: re-verified after signer-removal recovery clarification; architecture index unchanged
 ---
 
 # Haven — Architecture

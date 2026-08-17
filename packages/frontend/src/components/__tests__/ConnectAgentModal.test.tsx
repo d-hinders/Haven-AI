@@ -521,13 +521,15 @@ describe('ConnectAgentModal', () => {
     fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '10' } })
 
     // Unchecked by default — review step must say so, not stay silent.
+    // #1411: the row restates the choice only ("Yes"/"No"), no longer a
+    // sentence explaining what issuing means — that stays on the policy step.
     fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
-    expect(screen.getByText('Not requested')).toBeInTheDocument()
+    expect(screen.getByText('No')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     fireEvent.click(screen.getByRole('checkbox', { name: /issue an agent passport/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
-    expect(screen.getByText('Issue on approval')).toBeInTheDocument()
+    expect(screen.getByText('Yes')).toBeInTheDocument()
   })
 
   it('exposes local MCP only as an Advanced opt-in and sends local_mcp when chosen', async () => {
@@ -563,6 +565,66 @@ describe('ConnectAgentModal', () => {
     await waitFor(() => expect(mockApiPost).toHaveBeenCalled())
     const body = mockApiPost.mock.calls[0][1] as Record<string, unknown>
     expect(body.local_mcp).toBeUndefined()
+  })
+
+  it('produces a byte-identical create-setup payload for fixed inputs across steps 1-3 (#1411)', async () => {
+    // #1411 acceptance criterion: the design pass over Details/Policy/Review
+    // must not change the setup payload for the same inputs. This walks all
+    // three steps with one fixed set of inputs — every field the payload
+    // carries (name, description, runtime, wallet, token, atomic amount,
+    // reset_period_min, passport opt-in, local MCP flag) — and asserts the
+    // EXACT request body (not `objectContaining`), so any future step-level
+    // markup change that quietly drops or renames a field fails here.
+    renderModal()
+
+    fireEvent.change(screen.getByLabelText('Agent name'), {
+      target: { value: 'Research Agent' },
+    })
+    fireEvent.change(screen.getByLabelText('Description (optional)'), {
+      target: { value: 'Handles vendor invoices' },
+    })
+    fireEvent.change(screen.getByLabelText('Where will this agent run?'), {
+      target: { value: 'codex-cli' },
+    })
+    fireEvent.click(screen.getByText('Advanced'))
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: 'Set agent budget' }))
+
+    fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '42.50' } })
+    fireEvent.change(screen.getByLabelText('Budget reset period'), { target: { value: '10080' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /issue an agent passport/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+
+    // Review restates the exact choices made above — Runtime and Budget rows
+    // in particular are new to this pass (#1411); assert them here too so a
+    // silently-dropped row and a silently-changed payload are both caught.
+    expect(screen.getByText('Codex CLI')).toBeInTheDocument()
+    expect(screen.getByText(/42\.50 USDC\.e per week/)).toBeInTheDocument()
+    expect(screen.getByText('Yes')).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create setup prompt' }))
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/agent-connection-setups', expect.any(Object)))
+    const body = mockApiPost.mock.calls[0][1] as Record<string, unknown>
+    expect(body).toEqual({
+      name: 'Research Agent',
+      description: 'Handles vendor invoices',
+      safe_id: SAFE.id,
+      runtime: 'codex-cli',
+      local_mcp: true,
+      allowances: [
+        {
+          token_address: '0x9999999999999999999999999999999999999999',
+          token_symbol: 'USDC.e',
+          allowance_amount: '42500000',
+          reset_period_min: 10080,
+        },
+      ],
+      issue_passport: true,
+    })
   })
 
   it('defaults the wallet picker to a supported-chain wallet and does not offer the legacy Gnosis one', () => {
@@ -652,6 +714,9 @@ describe('ConnectAgentModal', () => {
     expect(await screen.findByText('Approve agent rules')).toBeInTheDocument()
     // #1377 C: the legacy approval renders inside the one step-4 shell.
     expect(screen.getByLabelText('Connection progress')).toBeInTheDocument()
+    // #1418: ONE status voice on step 4 — the shell ticker above is the only
+    // progress chrome; the wizard band must NOT stack on top of it.
+    expect(screen.queryByLabelText(/^Step \d+ of \d+$/)).not.toBeInTheDocument()
     expect(screen.getByText(/Local connection verified/i)).toBeInTheDocument()
     expect(screen.getByText(/You sign to give Research Agent authority to spend/i)).toBeInTheDocument()
     expect(screen.queryByText('Connected locally')).not.toBeInTheDocument()
@@ -855,13 +920,17 @@ describe('ConnectAgentModal', () => {
     })
     useDelegationAccount()
     renderModal()
-    await fillAndCreateSetup()
 
+    // The stepper mock reports "Step {current} of {total}": the TOTAL is 4 on
+    // this rail exactly as on the legacy one — the rail changes the
+    // instrument, never the shape of the flow. Asserted on step 1 because
+    // since #1418 the wizard band no longer renders on step 4 at all (the
+    // shell ticker is the one status voice there).
+    expect(screen.getByLabelText('Step 1 of 4')).toBeInTheDocument()
+
+    await fillAndCreateSetup()
     await screen.findByText('Approve agent rules')
-    // The stepper mock reports "Step {current} of {total}": approval is the
-    // 4th of 4 on this rail exactly as it is on the legacy one — the rail
-    // changes the instrument, never the shape of the flow.
-    expect(screen.getByLabelText('Step 4 of 4')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Step \d+ of \d+$/)).not.toBeInTheDocument()
   })
 
   it('delegation setup takes ONE budget — further tokens are added later (#1073)', async () => {
@@ -903,7 +972,7 @@ describe('ConnectAgentModal', () => {
     expect(screenText).not.toContain('Return to Haven and approve')
   })
 
-  it('shows post-approval restart hint and "Agent rules approved" headline on success', async () => {
+  it('names the granted authority on the approved screen, and states status once (#1394)', async () => {
     mockUseAgentConnectionSetupStatus.mockReturnValue({
       data: connectedSetupStatus({ status: 'active' }),
       loading: false,
@@ -913,16 +982,63 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    // The restart guidance moved from the pre-approval screen to here — it's
-    // only actionable now that approval has landed. "Agent rules approved"
-    // appears in both the StatusBadge title and the header subtitle.
-    const approvedMatches = await screen.findAllByText('Agent rules approved')
-    expect(approvedMatches.length).toBeGreaterThan(0)
+    // The success line names what the user just granted, in the same shape the
+    // connector prints in the agent's own terminal ("I can now spend up to
+    // 25 USDC per day from your Haven wallet"). The fixture grants 10000000
+    // atomic USDC.e (6 decimals) per 1440 minutes from "Operating wallet", so
+    // every part of this sentence is derived, not hardcoded prose: a decimals
+    // bug or a period-label regression breaks it.
+    const grantLine = 'Research Agent can now spend up to 10.00 USDC.e per day from Operating wallet.'
+    // Matched on the whole paragraph: the amount is wrapped in a .v2-tabular
+    // span (design-system.md wants tabular numerals on every amount), and
+    // getByText's default only joins an element's DIRECT text-node children,
+    // so a plain string query would no longer see the sentence.
+    expect(
+      await screen.findByText(
+        (_content, element) => element?.tagName === 'P' && element.textContent === grantLine,
+      ),
+    ).toBeInTheDocument()
+    // The amount itself carries the tabular class, not the whole sentence.
+    expect(document.querySelector('.v2-tabular')?.textContent).toBe('10.00 USDC.e per day')
+    // Stated once, not once per render path.
+    expect(countOccurrences(document.body.textContent ?? '', grantLine)).toBe(1)
+    // ...and it leads with a heading rather than a badge, so the ending reads
+    // as a conclusion instead of a fragment.
+    expect(screen.getByText('Research Agent is ready to spend')).toBeInTheDocument()
+
+    // ONE status voice. "Agent rules approved" used to appear twice in this
+    // viewport — a success StatusBadge and the header subtitle — on top of the
+    // shell ticker's "Approved". The ticker owns status now; nothing else may
+    // restate it.
+    expect(screen.queryByText('Agent rules approved')).not.toBeInTheDocument()
+    expect(countOccurrences(document.body.textContent ?? '', 'Approved')).toBe(1)
+    // The subtitle's job on this flow is to say what to DO; on the ending it
+    // orients rather than restating the ticker. Asserted positively, not just
+    // by the absence of the old string.
+    expect(screen.getByText('What your agent can do now')).toBeInTheDocument()
+
     // Runtime-specific restart copy: Claude Code (the default) is a session
     // runtime, so users are not told to restart needlessly.
     expect(screen.getByText(/next Claude Code message/i)).toBeInTheDocument()
     expect(screen.getByText(/Haven tools wired/i)).toBeInTheDocument()
     expect(screen.queryByText('Agent restart prepared')).not.toBeInTheDocument()
+  })
+
+  it('falls back to the generic success line when no budget is available (#1394)', async () => {
+    // A half-named authority ("can spend up to  from ") would read worse than
+    // the abstract line, so an absent budget degrades rather than interpolates.
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus({ status: 'active', agent_budget: [] }),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    renderModal()
+    await fillAndCreateSetup()
+
+    expect(await screen.findByText('Your agent is ready to spend')).toBeInTheDocument()
+    expect(screen.getByText('Your agent can now spend within budget.')).toBeInTheDocument()
+    expect(screen.queryByText(/can now spend up to/)).not.toBeInTheDocument()
   })
 
   it('hides verification details behind a disclosure on the approval screen', async () => {
@@ -1565,7 +1681,9 @@ describe('ConnectAgentModal', () => {
   it.each([
     ['approval_in_progress', 'Approval in progress'],
     ['proposed', 'Waiting for more approvals'],
-    ['active', 'Agent rules approved'],
+    // #1394: this row carries `agent_budget: []`, so `active` renders the
+    // generic heading — the same graceful-degradation path asserted above.
+    ['active', 'Your agent is ready to spend'],
   ])('renders %s setup status without a blank connect step', async (status, title) => {
     mockUseAgentConnectionSetupStatus.mockReturnValue({
       data: {
@@ -1594,9 +1712,8 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    // "Agent rules approved" also appears in the header subtitle for the
-    // `active` state, so multiple matches are valid — we just need at
-    // least one (the StatusBadge title).
+    // findAllByText, not findByText: the non-`active` rows still render their
+    // title in both a StatusBadge and the header subtitle.
     const matches = await screen.findAllByText(title)
     expect(matches.length).toBeGreaterThan(0)
   })

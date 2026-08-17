@@ -159,6 +159,21 @@ export function deserializeUserOp(stored: unknown): unknown {
   )
 }
 
+/**
+ * True when a deserialized `prepared_user_op` is an erc7710 SETTLEMENT CHAIN
+ * (`{ child, budget }`) rather than a UserOperation (#1482).
+ *
+ * The column is shared by two settlement schemes that store different things
+ * in it, and both also set `delegation_hash` — so presence checks cannot tell
+ * them apart. This lives here, beside `deserializeUserOp`, because the caller
+ * that deserializes is the caller that needs to know what it got.
+ */
+export function isSettlementChainState(state: unknown): boolean {
+  if (state === null || typeof state !== 'object') return false
+  const s = state as Record<string, unknown>
+  return s.child != null && s.budget != null
+}
+
 // ── Error-surface hygiene ───────────────────────────────────────────────────
 
 /**

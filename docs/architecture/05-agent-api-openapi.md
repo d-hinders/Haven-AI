@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-08-12" # #1328: POST /machine-payments/authorize (mpp_demo) retired to an unconditional 410; prior #1319: GET /machine-payments/allowances gained an additive optional remaining_is_from_chain (delegation-rail onchain rows only) — provenance for #1145's fallback, reporting only, no authority change + same-day dev: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected) and #1350 (GET /catalog now documents additive read-only `search` plus case-insensitive `category`; generated API types must move with the spec). Prior #1319: GET /machine-payments/allowances gained an additive optional remaining_is_from_chain (delegation-rail onchain rows only) — provenance for #1145's fallback, reporting only, no authority change
+last-verified: "2026-08-16" # #1464: malformed uuid params are a documented 400 via central 22P02 mapping (infra/http-error-handler.ts); premise + 404-boundary proven on the real-PG harness; 8 spec operations gained 400. Entry in casp-changelog/2026-08-16-1464.md. #1446: backfill started — contacts.ts documented and off the deferral list; ceilings lowered 18/90 → 17/86. #1445: four spec corrections found by making the generated types load-bearing in the frontend (has_stranded_funds, passport_requested, skill_installed, CatalogEntry.required), plus a named DelegateBalance schema. #1444: adds `expectMatchesSpec` — real responses validated against the spec's own schema (4 routes), with the mutation proofs and the `additionalProperties: true` limit recorded. #1443: the drift check no longer scopes itself to seven hand-listed route files — route-coverage.test.ts derives its scope from the app registration table; records that 89 of 136 registered routes are undocumented, deferred to #1446 under a shrink-only ceiling
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -139,6 +139,14 @@ dedicated `OpenAPI drift check` step in
   `machine-payments.ts`, `transactions.ts`, and `catalog.ts`) is either
   documented in the spec or listed on an explicit
   `KNOWN_UNDOCUMENTED_ROUTES` allowlist with a justification
+- **(#1443)** every route module the server *registers* — not a hand-listed
+  subset — is documented, individually justified, or explicitly deferred to the
+  #1446 backfill, and the deferred surface is **shrink-only**
+  (`route-coverage.test.ts`)
+- **(#1444)** selected route tests hand their REAL response payload to
+  `expectMatchesSpec` (`openapi/response-shape.ts`), which validates it against
+  the spec's own schema with ajv — see *What the response-shape assertion can
+  and cannot catch* below
 - the security scheme states the authority boundary
 - `/openapi.json` serves the same spec object the tests inspect
 
@@ -157,6 +165,70 @@ via `scripts/generate-api-types.mjs`), and a blocking CI drift check
 regenerating. Editing the spec now changes the dashboard's compile-time types
 — an inaccurate spec entry fails the frontend typecheck, which is exactly the
 pressure that keeps the contract honest.
+
+### What The Response-Shape Assertion Can And Cannot Catch (#1444)
+
+`check:api-types` compares the spec to types generated FROM that spec. Both
+sides derive from one file, so they agree by construction — including when the
+spec describes a shape no route returns. Nothing compared the spec to an actual
+response until `expectMatchesSpec(method, path, payload)`.
+
+It catches, proven by mutation on `GET /agents/{id}`:
+
+| Mutation applied to the route | Result |
+|---|---|
+| `status` dropped from the response | fails — `must have required property 'status'` |
+| `status` set to a value outside the enum | fails — `must be equal to one of the allowed values` |
+| an id that is not a uuid | fails — `must match format "uuid"` |
+
+The uuid case was not hypothetical: wiring `ajv-formats` failed the agents
+route test immediately, because its fixture returned `'agent-1'` where the spec
+promises a uuid and the database delivers one. Fixtures now use realistic uuids
+on the asserted paths.
+
+It does **not** catch an undeclared extra field on a schema that sets
+`additionalProperties: true` — `Agent` is one. The helper injects
+`additionalProperties: false` only where the schema states no preference, so an
+explicitly open schema stays open. That is the spec's decision; tightening it
+is a separate contract change, not something a test helper should do behind the
+spec's back.
+
+A schema composed with `allOf` is also left open, on purpose. `additionalProperties`
+only sees the properties declared at its own level, so closing one `allOf` member
+makes it reject the properties its siblings contribute — a valid payload would be
+reported as a spec violation. The spec has such shapes (`mpp`,
+`AgentConnectionAllowance`); none is on an asserted route yet, which is exactly why
+this is guarded by a test now rather than rediscovered as a baffling false failure
+during the #1446 backfill.
+
+Coverage is deliberately partial: four assertions today (`GET /agents`,
+`GET /agents/{id}`, `POST /agents/{id}/archive`,
+`GET /machine-payments/agent`). Widening it is per-route work that belongs with
+the #1446 backfill rather than a big-bang sweep.
+
+### Four Contract Corrections The Type Migration Surfaced (#1445)
+
+Making the generated types load-bearing in the frontend is a type-level change
+with no runtime effect — but `tsc` acts as a differ between what the spec says
+and what the UI had assumed, and it found four places where the spec was wrong
+about routes that had shipped long ago:
+
+| Correction | What was wrong |
+|---|---|
+| `Agent.has_stranded_funds` added | The list and detail reads derive it in SQL and return it; the spec never declared it. Not required — the creation response is built from the inserted row and omits it. |
+| `CreateAgentResponse.passport_requested` added | Returned by `POST /agents` on every creation, undeclared. |
+| `AgentConnectionInstallStatus.skill_installed` added | The connector reports it and the backend persists it — and that schema is `additionalProperties: false`, so the spec **forbade** a field the API sends. A strict generated client would have rejected a valid response. |
+| `CatalogEntry.required` widened from 8 keys to 16 | `serialize()` emits all 16 on every row, nullable ones as `null`. The narrow list made 8 fields optional in the generated type, so the UI defended against a shape the route does not produce. |
+
+The first two went unnoticed because `Agent` sets `additionalProperties: true` —
+the same limit recorded above. An open schema is a deliberate choice, but it
+means undeclared fields accumulate silently, and consumers generating clients
+from the spec never learn the fields exist.
+
+`DelegateBalance` was also lifted out of the inline
+`/agents/{id}/delegate-balance` response into a named component. An inline
+schema generates an anonymous type, which is precisely why the frontend
+hand-wrote a copy instead of importing one.
 
 ## Authentication And Authority Boundaries
 
@@ -224,3 +296,15 @@ Not all delegation-rail routes are in the OpenAPI spec yet: the x402 settlement
 route `POST /x402/{id}/settle` (#830) currently sits on the drift check's
 `KNOWN_UNDOCUMENTED_ROUTES` allowlist pending the epic docs sweep (#834). Deep
 model: [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
+
+**How much of the API the spec actually describes (#1443, measured 2026-08-15):**
+138 registered routes, **86 of them undocumented** across 17 deferred modules —
+the whole `agent-delegations.ts` lifecycle among them. (#1446 has started the
+backfill: `contacts.ts` came off the list first, taking the ceilings from
+18 modules / 90 routes to 17 / 86.) That was invisible until the
+coverage gate widened its scope beyond the seven hand-listed files above, which
+is the finding epic #1442 was opened on. The gap is now *recorded* rather than
+absent: `route-coverage.ts` carries a per-module deferral list with a reason per
+entry and a shrink-only ceiling, and #1446 documents the modules one domain at a
+time. Read the numbers there as the current truth; this paragraph is a pointer,
+not a second copy.

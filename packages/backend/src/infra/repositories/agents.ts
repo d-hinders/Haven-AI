@@ -11,12 +11,11 @@
  *   agents are deliberately SURFACED (an abandoned connect setup used to leave
  *   the user with "Agents 0" and no route back — #1069). The function names
  *   say so: `...AllStatuses`.
- * - The DELEGATE-BALANCE read is the one status-scoped read: it excludes
- *   `revoked` (`...ExcludingRevoked`), because a revoked agent's delegate is
- *   no longer the user's hot key to inspect.
- *
- * Collapsing these into one "find agent" query silently changes what each
- * caller sees. Keep the distinction, keep it named.
+ * - The DELEGATE-BALANCE read is status-agnostic too since #1403: the old
+ *   `ExcludingRevoked` filter removed the sweep page exactly when stranded
+ *   delegate funds need recovering (post-revoke). It stays a separate, narrow
+ *   projection (delegate + chain only) — do not collapse it into the full
+ *   reads, but do not re-add a status filter either.
  *
  * **The SQL here is verbatim from the route.** Anything that looked improvable
  * was left alone and reported in the pull request instead.
@@ -43,6 +42,7 @@ export interface AgentRow {
   api_key_prefix: string | null
   status: string
   created_at: string
+  archived_at: string | null
   mcp_last_seen_at: string | null
   has_stranded_funds: boolean
 }
@@ -81,7 +81,7 @@ export interface AgentIdStatusRow {
 export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               us.account_type,
-              a.api_key_prefix, a.status, a.created_at,
+              a.api_key_prefix, a.status, a.created_at, a.archived_at,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -101,7 +101,7 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
 export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               us.account_type,
-              a.api_key_prefix, a.status, a.created_at,
+              a.api_key_prefix, a.status, a.created_at, a.archived_at,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -116,13 +116,17 @@ export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.desc
        LIMIT 1`
 
 /**
- * The one status-scoped agent read: excludes `revoked` — a revoked agent's
- * delegate EOA is no longer a hot key the dashboard should inspect.
+ * #1403 retired the old status filter (`a.status != 'revoked'`): this is an
+ * owner-scoped read of a PUBLIC on-chain balance, and the exact sequence that
+ * strands funds on the delegate EOA — agent misbehaving mid-x402, user
+ * revokes it — is the sequence that needs the read to keep working. The old
+ * exclusion made sweep reachable only while the agent was healthy, which is
+ * when nobody needs it.
  */
-export const FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL = `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.safe_address, us.account_type
+export const FIND_DELEGATE_AGENT_FOR_USER_SQL = `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.safe_address, us.account_type
        FROM agents a
        LEFT JOIN user_safes us ON a.safe_id = us.id
-       WHERE a.user_id = $1 AND a.id = $2 AND a.status != 'revoked'
+       WHERE a.user_id = $1 AND a.id = $2
        LIMIT 1`
 
 export const LIST_ALLOWANCES_FOR_AGENTS_SQL = `SELECT id, agent_id, token_address, token_symbol, allowance_amount, reset_period_min
@@ -215,13 +219,13 @@ export async function findAgentForUserAllStatuses(
   return result.rows[0] ?? null
 }
 
-/** `userId` is REQUIRED. Excludes revoked agents — see the header invariant. */
-export async function findDelegateAgentForUserExcludingRevoked(
+/** `userId` is REQUIRED. Status-agnostic since #1403 — see the SQL's note. */
+export async function findDelegateAgentForUser(
   agentId: string,
   userId: string,
   db: Executor = pool,
 ): Promise<DelegateAgentRow | null> {
-  const result = await db.query<DelegateAgentRow>(FIND_DELEGATE_AGENT_EXCLUDING_REVOKED_SQL, [
+  const result = await db.query<DelegateAgentRow>(FIND_DELEGATE_AGENT_FOR_USER_SQL, [
     userId,
     agentId,
   ])
@@ -477,17 +481,83 @@ export async function updateAgentProfile(
   return result.rows[0] ?? null
 }
 
-export const DELETE_REVOKED_AGENT_SQL = `DELETE FROM agents
+/**
+ * #1401: archive replaces deletion. The row and every dependent audit row
+ * stay; the agent just leaves the primary list. Requires `revoked` — archiving
+ * is a filing action and must never be what stops spending. Idempotent
+ * without timestamp churn: re-archiving keeps the ORIGINAL archived_at
+ * (COALESCE keeps the first value; the WHERE still matches so the call
+ * reports success).
+ */
+/**
+ * #1436: archiving requires BOTH a revoked credential and dead budgets.
+ *
+ * `status = 'revoked'` alone was not enough. Revoking an agent only flips this
+ * table's status — it never touches `agent_delegations` — so revoke+archive
+ * through the API (no dashboard, no revoke-all) filed an agent under "Removed"
+ * while its delegation stayed `active` and redeemable on-chain by whoever held
+ * the delegate key. The Remove dialog's ordering (revoke-all first) made that
+ * unreachable from the dashboard, but a safety property that lives only in
+ * frontend orchestration is not enforced; "Removed" promises the agent cannot
+ * spend, so the database is where that promise belongs.
+ *
+ * Legacy AllowanceModule agents have no rows here, so the NOT EXISTS passes
+ * for them — their authority is torn down by the on-chain revoke path instead.
+ * Crash-window orphans (#1423: disabled on-chain, still `active` here) DO
+ * block archiving, correctly: revoke-all heals them, and that is the same
+ * remedy this refusal names.
+ */
+export const ARCHIVE_AGENT_SQL = `UPDATE agents
+       SET archived_at = COALESCE(archived_at, NOW()), updated_at = NOW()
        WHERE id = $1 AND user_id = $2 AND status = 'revoked'
+         AND NOT EXISTS (
+           SELECT 1 FROM agent_delegations ad
+           WHERE ad.agent_id = agents.id AND ad.status IN ('pending', 'active')
+         )
+       RETURNING id, archived_at`
+
+/** True when the agent still holds budget authority that archiving must not hide. */
+export const AGENT_HAS_LIVE_DELEGATIONS_SQL = `SELECT EXISTS (
+         SELECT 1 FROM agent_delegations
+         WHERE agent_id = $1 AND status IN ('pending', 'active')
+       ) AS live`
+
+export async function agentHasLiveDelegations(
+  agentId: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query<{ live: boolean }>(AGENT_HAS_LIVE_DELEGATIONS_SQL, [agentId])
+  return result.rows[0]?.live === true
+}
+
+/** Returns null when nothing matched (missing, foreign, not revoked, or still holding live delegations). */
+export async function archiveAgent(
+  agentId: string,
+  userId: string,
+  db: Executor = pool,
+): Promise<{ id: string; archived_at: Date } | null> {
+  const result = await db.query<{ id: string; archived_at: Date }>(ARCHIVE_AGENT_SQL, [
+    agentId,
+    userId,
+  ])
+  return result.rows[0] ?? null
+}
+
+/**
+ * Clears archived_at and nothing else — the agent returns to the primary
+ * list still `revoked`. Un-archiving restores no authority of any kind.
+ */
+export const UNARCHIVE_AGENT_SQL = `UPDATE agents
+       SET archived_at = NULL, updated_at = NOW()
+       WHERE id = $1 AND user_id = $2 AND archived_at IS NOT NULL
        RETURNING id`
 
-/** Returns false when nothing matched (missing, foreign, or not revoked). */
-export async function deleteRevokedAgent(
+export async function unarchiveAgent(
   agentId: string,
   userId: string,
   db: Executor = pool,
 ): Promise<boolean> {
-  const result = await db.query<{ id: string }>(DELETE_REVOKED_AGENT_SQL, [agentId, userId])
+  const result = await db.query<{ id: string }>(UNARCHIVE_AGENT_SQL, [agentId, userId])
   return result.rows.length > 0
 }
 

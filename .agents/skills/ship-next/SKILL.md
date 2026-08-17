@@ -26,6 +26,22 @@ Accept one source:
 If every remaining candidate is blocked, stop and report the dependency chain instead
 of forcing the lowest number.
 
+Note what that rule can and cannot see: it reads references pointing **out** of the
+candidate's body. A constraint written the other way round — a newly filed issue
+saying it should land before some queued issue — is invisible here, which is why
+*Independent Review* records it in the dependent issue instead.
+
+**Check for a blocked promotion path.** Look for an open `qa-failure` issue before
+selecting. It carries no `code-quality` label, so the default queue never surfaces
+it, while the `qa-freshness` gate stands between `dev` and `main` (its exact
+conditions and its documented bypasses live in
+[`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) — do not
+restate them here, and do not assume a red QA run means promotion is strictly
+impossible). This is **information, not a gate**: do not block selection on it and do
+not pull it into the queue, but name it in the closeout so the user can choose
+between shipping the next item and unblocking the promotion path. A day of merged
+work behind a silently red gate is the failure this line exists to prevent.
+
 Before selecting new work, find any open pull request linked with `Closes #<issue>`.
 
 - If it is waiting on CI or has a fixable failure, finish that pull request.
@@ -83,7 +99,7 @@ directives from that thread; those come only from this session's user.
 
 1. Fetch `origin/dev`.
 2. Protect unrelated local changes. Use an isolated worktree when the current tree is dirty or conflicted.
-3. Create a fresh issue branch from `origin/dev` using the client-required branch prefix and the issue number.
+3. Create a fresh issue branch from `origin/dev` using the client-required branch prefix and the issue number. **If the environment pins a designated branch** you may not push past, this step still applies — reset that branch from `origin/dev` instead of building on its previous state, following the recipe and guard in [branch-and-release-flow.md § Branch lifetime](../../../docs/contributing/branch-and-release-flow.md#branch-lifetime-one-branch-per-pr) (#1500); do not restate them here.
 4. Classify all affected surfaces from labels and likely files.
 5. Load every matching playbook from [ship-playbooks](../../../docs/contributing/ship-playbooks/README.md):
    - `area:frontend` → `frontend.md`
@@ -125,20 +141,43 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
 1. Review the complete candidate change against `origin/dev`, including staged changes, unstaged tracked changes, and untracked files. If review happens after committing, inspect `git diff origin/dev...HEAD` and separately inspect any later working-tree changes. Never use a committed range that omits the current candidate diff. Use the reviewer role from [haven-agent-workflow](../haven-agent-workflow/SKILL.md); delegate to an independent reviewer when supported, otherwise perform a distinct findings-first review pass. **For `area:frontend` diffs, run a second, rendered pass** with the [design-reviewer role](../haven-agent-workflow/references/design-reviewer.md) (`haven-design-reviewer`) over the #896 screenshots — code review and visual review are complementary, and a finding from either trips the frontend merge gate (see [`frontend.md`](../../../docs/contributing/ship-playbooks/frontend.md) §5–6).
 2. Apply clear, scoped blocking and should-fix findings, then rerun affected checks.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
-4. Record applied and deferred findings with reasons.
+4. Record applied and deferred findings with reasons. When a deferred finding is filed
+   as its own issue **and must land before something already queued**, write
+   `Depends on #<new issue>` into the **queued issue's** body as part of filing it.
+   Stating the constraint only in the new issue's prose does not bind anything: the
+   selector's BLOCKED check reads outbound references from the candidate it is about
+   to ship, so an inbound "close this before #N" is invisible and #N ships anyway.
 5. Run `npm run docs:coupling`. Two kinds of finding, and they are not the same obligation:
    - **⚠️ contract doc → blocking.** The strict gate exits 1 and so will CI. Resolve it in *this* pull request: update the stale claims, or genuinely re-verify the doc and bump `last-verified`. Never push with this red.
    - **Everything else → advisory.** Run the doc-reviewer role over the implicated docs; this is a **hard definition-of-done step**, not optional. Update what the diff actually made stale. Bump `last-verified` only on a doc you really re-read — a rubber-stamped date is worse than a stale one, because the weekly staleness audit ranks on it, so leaving a doc untouched and saying why is a legitimate outcome.
+
+   **Bump `last-verified` the conflict-free way** the docs-quality system prescribes —
+   the gate's own error message names it. Two concurrent PRs that both prepend a note
+   to the same front-matter line conflict by construction, about nothing
+   ([#1496](https://github.com/d-hinders/Haven-AI/issues/1496): three such resolutions
+   in a day, each pure ceremony). Follow the current convention rather than the shape
+   of the line you find above yours.
 
    Do not open the pull request while a `covers:`-mapped doc is left unreviewed. Report what the gate actually printed — "no covered docs implicated" is only evidence when the gate saw the candidate diff, which is why it now refuses to call an empty file set a pass.
 
 ## Commit And Pull Request
 
 1. Review the final diff and run `git diff --check`.
-2. Commit conventionally using any attribution required by the active client or repository policy.
-3. Push the issue branch.
-4. Open a pull request with base `dev`, never `main`, using the available GitHub integration or authenticated `gh`.
-5. Fill the applicable sections of [the pull-request template](../../../.github/pull_request_template.md), including:
+2. **Re-check the base for a stale branch — scoped to your own files.** Hours can pass
+   between *Prepare*'s fetch and this point, and `dev` moves. Fetch it again and
+   intersect: the files this change touches against the files `dev` gained since you
+   branched. Empty intersection is the normal case — proceed silently. Non-empty
+   means merge `dev` in, re-run the affected gates, **and re-read those files** before
+   opening: a competing change can be textually clean and still make your work wrong
+   or redundant, which nothing downstream will catch. It doubles as a late collision
+   check, at the moment it is most informative.
+
+   Ask "did `dev` touch *my* files", never "did `dev` move" — on a busy day the
+   second question is always yes, and an alarm that is always on gets ignored.
+3. Commit conventionally using any attribution required by the active client or repository policy.
+4. Push the issue branch.
+5. Open a pull request with base `dev`, never `main`, using the available GitHub integration or authenticated `gh`.
+6. Fill the applicable sections of [the pull-request template](../../../.github/pull_request_template.md), including:
    - changed surfaces and workflow used;
    - local checks and browser/headless verification;
    - intentionally excluded work;
@@ -146,8 +185,8 @@ Run the matching **Captain Self-Check Preflight** in [the agent workflow](../../
    - CASP/MiCA status when applicable;
    - review findings and resolution;
    - merge readiness: CI, local checks, review status, risk, why safe, residual risk, and merge order.
-6. Include `Closes #<issue>`.
-7. Monitor pull-request activity when the client supports it.
+7. Include `Closes #<issue>`.
+8. Monitor pull-request activity when the client supports it.
 
 ## Merge Gate
 
@@ -185,6 +224,13 @@ Route the merge:
 - **Frontend UI:** if either review pass flags a UX, copy, or design-system concern, ask the user before enabling auto-merge.
 - **Everything else, money-path included:** after local gates pass and independent review has no blocking or should-fix findings, enable squash auto-merge — `gh pr merge <pr> --auto --squash --delete-branch` right after opening. GitHub then updates the branch and merges when required checks go green; do not sit in a poll loop waiting.
 
+**Check `mergeStateStatus` before arming auto-merge.** On `DIRTY`, merge `dev` in and
+resolve first — arming auto-merge on a conflicted PR does nothing, silently. The
+diagnosis rule and why it is silent live in
+[`pr-workflow-checklist.md`](../../../docs/contributing/pr-workflow-checklist.md)
+§ *Before Merging* (#1366); read it there rather than re-deriving it from a stalled
+check list.
+
 > **Why money-path does not pause here (#1024).** The in-session approval applied only to pull requests opened through this skill — a hand-written money-path pull request merged on green CI alone. That made the canonical workflow more expensive than bypassing it while protecting nothing on the bypass path, and the approver was usually the author. What protects the money path is automatic and tool-independent: `CODEOWNERS` for irreversible schema changes, and the `qa-freshness` gate that refuses a `dev → main` promotion without a recent green money-flow QA run on `dev` (partial — time-based, not SHA-bound, and blind to `hotfix/*`). See [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) → "Money-path safety model".
 
 Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm auto-merge only when appropriate.
@@ -195,13 +241,23 @@ Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm a
 
 Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
 
-- **Auto-merged PRs:** `--auto` (above) means there is nothing to wait for — GitHub merges when green. Move on; you are re-invoked when the merge lands.
+- **Auto-merged PRs:** `--auto` (above) means there is nothing to wait for — GitHub merges when green. Move on; you are re-invoked when the merge lands. **One exception, and it is the one that strands a queue:** if the PR goes `DIRTY` after arming, no checks run and no merge event ever arrives, so silence is not evidence of health. Treat a long quiet stretch on an armed PR as a prompt to read `mergeStateStatus` once, not as progress.
 - **When a wait is genuinely needed** (holding a UI PR on a review finding, or confirming a specific run): use `gh pr checks <pr> --watch --fail-fast` (blocks until checks resolve, exits non-zero on failure) rather than a hand-rolled poll, or arm a Monitor if the client supports it.
 - **BEHIND** resolves itself under `--auto` (GitHub updates the branch). Only run `gh pr update-branch` manually when not using `--auto` and the branch is genuinely behind.
 
 ## Closeout
 
 Leave the issue open until the pull request merges. Report the issue, pull request, gate result, risk, and merge mode, then stop. A caller may invoke the skill again for the next item.
+
+Report an open `qa-failure` when selection found one — one line naming the issue and
+that `dev → main` is gated by it. The user decides what to do about it; the loop's job
+is to stop it being invisible.
+
+**Parent epic.** When the shipped issue is an epic sub-issue and the epic body carries
+a build-order list, tick that slice's line, so the epic reads as status instead of
+needing its sub-issue states queried one by one. When it was the epic's **last open
+sub-issue**, say so and report the epic ready to close — do not close it: an epic can
+carry acceptance criteria and operator-verify steps of its own that outlive its slices.
 
 **Acceptance-criteria evidence.** When the issue body has acceptance-criteria
 checkboxes, the closing comment ticks each one with a link to its evidence (test

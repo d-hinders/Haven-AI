@@ -104,11 +104,11 @@ export function DelegationApprovalStep({
         density="compact"
         items={[
           {
-            label: 'Agent',
+            label: 'Agent name',
             value: status.agent.name ?? 'New agent',
             helper: status.agent.description?.trim() || undefined,
           },
-          { label: 'From', value: walletName },
+          { label: 'Spend from', value: walletName },
           {
             label: 'Budget',
             value: displayAmount ? (

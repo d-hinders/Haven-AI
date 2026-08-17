@@ -26,6 +26,7 @@ import { x402Erc7710Hosted } from './scenarios/x402-erc7710-hosted.js'
 import { x402HostedMcpSigner } from './scenarios/x402-hosted-mcp-signer.js'
 import { x402CatalogGuidedPurchase } from './scenarios/x402-catalog-guided-purchase.js'
 import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
+import { thrownErrorDetail } from './lib/thrown-error-detail.js'
 
 // Deterministic, no-LLM scenarios run in order — seven money-flow invariants:
 // within-budget settle, over-budget queue, x402 over-budget reject, x402 settle,
@@ -100,7 +101,9 @@ async function main(): Promise<void> {
     try {
       result = await scenario.run(ctx)
     } catch (e) {
-      result = { pass: false, detail: e instanceof Error ? e.message : String(e) }
+      // Not just e.message: the SDK's errors carry structured context (#1518)
+      // and the message alone is generic by construction.
+      result = { pass: false, detail: thrownErrorDetail(e) }
     }
     const tag = result.skipped ? 'SKIP' : result.pass ? 'PASS' : 'FAIL'
     console.log(`${tag} — ${result.detail}`)

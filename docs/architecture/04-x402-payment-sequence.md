@@ -26,7 +26,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-16" # #1496: verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-17" # #1496: verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -752,6 +752,21 @@ balances, sweeps, the delegate-balance monitor) is **absent** on the preferred
 path rather than reconciled. Recipient-pinned budgets were already erc7710-only
 (`modules/x402/delegation-authorize.ts`), so they become the ordinary case
 instead of a special one.
+
+**A testing consequence worth stating, because it cost a QA leg
+([#1441](https://github.com/d-hinders/Haven-AI/issues/1441)).** The rule is
+unconditional on the merchant side: if a merchant advertises erc7710 at all, a
+delegation-rail client takes it, and the **funding leg never runs**. So a
+scenario whose invariant is the funding-leg topology cannot be exercised
+against a merchant that offers both — not because anything is broken, but
+because the path is unreachable. `x402-hosted-mcp-signer` skipped permanently
+for exactly this reason, and under `QA_REQUIRE_ALL_LEGS=1` that blocked the
+whole suite from reporting green.
+
+Testing the funding leg therefore requires a merchant product advertising
+**eip3009 alone**. The demo merchant carries one for this purpose
+(`PRODUCTS.vpn_legacy`, `settlementMethods: ['eip3009']`); it exists to keep
+that path reachable and must not be widened to both methods.
 
 This is a preference, not a merchant-reach claim: the adoption paragraph above
 stands, which is precisely why the bridge stays. Epic

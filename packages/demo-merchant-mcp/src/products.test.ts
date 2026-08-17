@@ -25,7 +25,7 @@ describe('productToolArgs (#1274)', () => {
       toolName: 'buy_vpn',
       argumentName: 'plan',
       argumentValue: 'pro',
-      argumentEnum: ['basic', 'pro', 'ultra'],
+      argumentEnum: ['basic', 'legacy', 'pro', 'ultra'],
     })
   })
 })
@@ -121,5 +121,39 @@ describe('buildProductMetadata (#1274) — machine-readable product contract', (
     })
     expect(reordered.supported_settlement_methods[0]).toBe('eip3009')
     expect(reordered.default_settlement_method).toBe('eip3009')
+  })
+})
+
+describe('vpn_legacy is the EIP-3009-only product (#1441)', () => {
+  /**
+   * `x402-hosted-mcp-signer` covers the funding-leg topology from the
+   * `haven_pay_mcp_tool` entry point, and that topology only exists on
+   * eip3009. Every other product also advertises erc7710, and #1450's
+   * preference rule then picks it — which has no funding leg, so the leg had
+   * nothing to assert and skipped permanently, which under
+   * QA_REQUIRE_ALL_LEGS=1 meant the suite could never report green.
+   *
+   * A prose comment on the product said "do not tidy this back to
+   * SUPPORTED_SETTLEMENT_METHODS". Nothing enforced it — verified by mutation:
+   * widening it broke no test. This is the guard.
+   */
+  it('advertises eip3009 alone, so the funding-leg topology stays reachable', () => {
+    expect(PRODUCTS.vpn_legacy.x402.settlementMethods).toEqual(['eip3009'])
+    expect(PRODUCTS.vpn_legacy.x402.defaultSettlementMethod).toBe('eip3009')
+  })
+
+  it('stays 3009-only even when the merchant has erc7710 enabled', () => {
+    // The merchant intersects the product's methods with the enabled set, so a
+    // product offering only eip3009 must survive erc7710 being switched on.
+    expect(settlementMethodsForProduct(PRODUCTS.vpn_legacy, ['eip3009', 'erc7710'])).toEqual([
+      'eip3009',
+    ])
+  })
+
+  it('is the ONLY product with that property, so the leg has one unambiguous target', () => {
+    const threeThousandNineOnly = Object.values(PRODUCTS)
+      .filter((p) => p.x402.settlementMethods.length === 1 && p.x402.settlementMethods[0] === 'eip3009')
+      .map((p) => p.id)
+    expect(threeThousandNineOnly).toEqual(['vpn_legacy'])
   })
 })

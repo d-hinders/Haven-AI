@@ -357,10 +357,15 @@ describe('hosted tool refusals are reported as such', () => {
   })
 })
 
-describe('an erc7710 quote is out of scope, not a failure (#1441)', () => {
-  // #1450's preference rule makes the hosted tool pick erc7710 whenever the
-  // merchant advertises it. This leg's invariant is the FUNDING-LEG one, so
-  // against such a merchant it is unreachable rather than broken.
+describe('an erc7710 quote is now a REGRESSION, not an out-of-scope skip (#1441)', () => {
+  // The leg buys `vpn_legacy`, the one product advertising eip3009 ALONE, so
+  // the funding-leg topology is reachable. #1450's preference rule has no
+  // erc7710 option to prefer here — if a quote comes back erc7710 anyway,
+  // scheme selection ignored the merchant's advertised methods, or the dev
+  // merchant stopped serving the 3009-only product. Either is a real defect.
+  //
+  // This used to SKIP, which under QA_REQUIRE_ALL_LEGS=1 meant the suite could
+  // never report green.
   const erc7710Quote = {
     payment_id: 'pay_7710',
     settlement_scheme: 'erc7710',
@@ -369,31 +374,30 @@ describe('an erc7710 quote is out of scope, not a failure (#1441)', () => {
     // payload_hash. The old code read those and reported 'unknown'.
   }
 
-  it('SKIPS on an erc7710 quote rather than failing', async () => {
+  it('FAILS on an erc7710 quote instead of skipping', async () => {
     mockCallTool.mockImplementation(async (tool: string) =>
       tool === 'haven_pay_mcp_tool' ? erc7710Quote : settled(),
     )
     const r = await x402HostedMcpSigner.run(ctx())
-    expect(r.skipped).toBe(true)
-    expect(r.pass).toBe(true)
+    expect(r.pass).toBe(false)
+    expect(r.skipped).toBeFalsy()
     expect(r.detail).toMatch(/erc7710/)
   })
 
-  it('names where the coverage actually lives, so the skip is not a silent hole', async () => {
-    // The point of the skip is that nothing goes uncovered — hosted erc7710 by
-    // x402-erc7710-hosted, hosted 3009 by x402-catalog-guided-purchase (same
-    // topology, both on-chain legs, zero residual). If someone later deletes
-    // one of those, this assertion is the breadcrumb back.
+  it('names the plan and what it advertises, so the failure is actionable', async () => {
+    // A bare "wrong scheme" would send a triager to scheme selection when the
+    // likelier cause is that the merchant stopped serving the 3009-only
+    // product. The message has to distinguish those.
     mockCallTool.mockImplementation(async (tool: string) =>
       tool === 'haven_pay_mcp_tool' ? erc7710Quote : settled(),
     )
     const r = await x402HostedMcpSigner.run(ctx())
-    expect(r.detail).toMatch(/x402-erc7710-hosted/)
-    expect(r.detail).toMatch(/x402-catalog-guided-purchase/)
+    expect(r.detail).toMatch(/legacy/)
+    expect(r.detail).toMatch(/eip3009 ONLY/)
   })
 
   it('still SIGNS nothing and settles nothing on that path', async () => {
-    // A skip that had already signed would leave a live intent behind.
+    // A failure that had already signed would leave a live intent behind.
     mockCallTool.mockImplementation(async (tool: string) =>
       tool === 'haven_pay_mcp_tool' ? erc7710Quote : settled(),
     )

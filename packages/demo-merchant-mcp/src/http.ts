@@ -345,7 +345,8 @@ function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
 
   if (toolName === 'buy_vpn') {
     const plan = args.plan as string | undefined
-    if (plan === 'basic' || plan === 'pro' || plan === 'ultra') {
+    // `legacy` is the EIP-3009-only plan (#1441) — see PRODUCTS.vpn_legacy.
+    if (plan === 'basic' || plan === 'pro' || plan === 'ultra' || plan === 'legacy') {
       productId = `vpn_${plan}` as ProductId
     }
   } else if (toolName === 'buy_cloud_storage') {

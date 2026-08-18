@@ -29,6 +29,8 @@ export const LEADER_LOCK_KEYS = {
   relayerBalanceMonitor: 811004,
   /** L0 passport anchor sweep — issuance retries + revocation reconciliation (#973). */
   passportSweep: 811005,
+  /** Outbound-tx bump/replacement worker (#1558, epic #1554). */
+  outboundBump: 811006,
 } as const
 
 export interface QueryableClientLike {

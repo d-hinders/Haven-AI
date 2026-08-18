@@ -20,7 +20,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-08-18" # #1533/#1534: the legacy-rail `x402-settle` and `x402-sweep-recovery` legs removed — x402 coverage is delegation-rail only; the scenario table is now eleven legs (matching the count the prose already claimed). Reviewer correction: this is an ACCEPTED COVERAGE LOSS, not a deduplication — the legacy x402 execute branch now has no live leg; the "sixth scenario" ordinal is replaced by the scenario name so it cannot drift again. Prior: #1530: the preflight now reports every consumable resource before the first leg and refuses to run when one is below floor; the demo-merchant settlement wallet is added to the funding table it was missing from, and its balance is read from the merchant's own /healthz because the address derives from SETTLEMENT_PRIVATE_KEY in the merchant env. No harness credential, target, or scenario semantics change. Prior: #1519: merchant checks authorizationState/balanceOf before submitting, so an already-settled purchase serves the goods instead of 402ing a paid buyer; Troubleshooting gains "a merchant 402 that the chain says was paid". Prior: #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
+last-verified: "2026-08-18" # #1531: adds "What this session cannot see, and what to ask for" — the out-of-reach table and the ordered ask-for list, linked from Troubleshooting. Documentation only, deliberately not a gate: the fixable gap was that the request list did not exist. Prior: #1533/#1534: the legacy-rail `x402-settle` and `x402-sweep-recovery` legs removed — x402 coverage is delegation-rail only; the scenario table is now eleven legs (matching the count the prose already claimed). Reviewer correction: this is an ACCEPTED COVERAGE LOSS, not a deduplication — the legacy x402 execute branch now has no live leg; the "sixth scenario" ordinal is replaced by the scenario name so it cannot drift again. Prior: #1530: the preflight now reports every consumable resource before the first leg and refuses to run when one is below floor; the demo-merchant settlement wallet is added to the funding table it was missing from, and its balance is read from the merchant's own /healthz because the address derives from SETTLEMENT_PRIVATE_KEY in the merchant env. No harness credential, target, or scenario semantics change. Prior: #1519: merchant checks authorizationState/balanceOf before submitting, so an already-settled purchase serves the goods instead of 402ing a paid buyer; Troubleshooting gains "a merchant 402 that the chain says was paid". Prior: #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -727,7 +727,65 @@ though the harness can exit zero. Copy the generated table into the full report
 template and file a GitHub issue for a reproducible failure. Include the Actions
 run URL and transaction/payment identifiers, but never API or private keys.
 
+## What this session cannot see, and what to ask for
+
+An agent session running this harness sees the harness. It does not see the
+places most money-flow causes actually live — and it cannot ask for a list it
+does not know exists. This section is that list.
+
+It is guidance, not a gate. "Don't state a theory as a diagnosis" is not
+checkable, and a gate for it would be ceremony satisfiable without the
+thinking ([`autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md);
+CLAUDE.md, *enforce outcomes, never tooling*). What was fixable is that the
+request list did not exist.
+
+### Out of reach from an agent session
+
+| Not visible | Lives in |
+|---|---|
+| Service runtime + deploy logs (backend, demo merchant) | Railway dashboard |
+| On-chain transaction and token-transfer history | Basescan |
+| Deployed services' env vars, and the addresses they derive to | Railway → Variables |
+| Dev wallet balances (settlement, relayer, treasury) | Basescan, or the operator |
+
+A red leg whose cause sits in that column cannot be diagnosed by reading the
+harness harder. On 2026-08-17 four mechanisms were proposed in sequence —
+serverless sleep, gas drained twice, funding never delivered, a merchant
+restart wiping in-memory state — and every one was consistent with part of the
+evidence and disproved by an artifact nobody had asked for. A transfer-history
+export then settled in minutes what hours of theorising had not.
+
+### Ask for these first, before proposing a mechanism
+
+For a money-flow failure, roughly in this order:
+
+1. **The failing `qa-dev` job log** — the run URL is enough.
+2. **The delegate EOA's token-transfer history for the window.** Ask for an
+   export, not a screenshot: timestamps and ordering are the evidence, and a
+   screenshot usually crops exactly the row that decides between two theories.
+3. **The demo merchant's deploy + runtime logs for the same window.** Deploys
+   matter as much as runtime lines — the merchant redeploys on every push to
+   `dev`, so "did a deploy land mid-run" is a question about the deploy list.
+4. **The merchant settlement wallet's address and native balance** — see the
+   key rule below. Since [#1530](https://github.com/d-hinders/Haven-AI/issues/1530)
+   the preflight reports this before the first leg and refuses to run when it
+   is below floor, so for a *fresh* run this is usually already answered in the
+   log from item 1; ask when diagnosing an older run, or when the preflight
+   itself is what looks wrong.
+
+**The address, never the key.** Ask for the settlement wallet's *address* and
+balance; never its `SETTLEMENT_PRIVATE_KEY`. Why disclosing the address costs
+nothing is set out under [the preflight](#preflight-resources-every-run-consumes-1530)
+and not repeated here. The rule generalises to every secret this harness
+touches: names and derived addresses are shareable, values are not (see
+[Create the seed environment file](#2-create-the-seed-environment-file)). An
+agent must never ask for a key, and an operator must never paste one.
+
 ## Troubleshooting
+
+If nothing below matches, the cause may simply be somewhere this session
+cannot look — see [What this session cannot see, and what to ask for](#what-this-session-cannot-see-and-what-to-ask-for) for the artifacts to
+request before proposing a mechanism.
 
 ### `ERR_MODULE_NOT_FOUND ... @haven_ai/sdk/dist/index.js`
 

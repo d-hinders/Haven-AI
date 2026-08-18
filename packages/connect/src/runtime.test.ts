@@ -822,6 +822,85 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     expect(getConnectorStatus).toHaveBeenCalledTimes(2)
   })
 
+  // #1544 re-run characterization: re-running an already-consumed setup
+  // command fails CLEANLY before any credential write or runtime-config
+  // change, so a re-run can never clobber, rotate, or orphan the workspace's
+  // existing local state. The backend gates BOTH resolve and register on
+  // `awaiting_connection` (routes/agent-connection-setups.ts), so the common
+  // re-run refusal lands at RESOLVE; the register-side refusal only occurs in
+  // a concurrent-run race. Both shapes are pinned. (A fresh key pair is
+  // minted in memory for a rejected register attempt; on refusal it is
+  // discarded, never persisted.)
+  it('a re-run of a consumed setup is refused at resolve, before any local write', async () => {
+    const writeCredentials = vi.fn()
+    const installRuntime = vi.fn()
+    const registerSetup = vi.fn()
+    await expect(runConnect({
+      setupToken: 'hv_setup_test_rerun',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-rerun',
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => {
+          throw new ConnectRequestError('Haven setup request failed: setup is not awaiting connection', 409)
+        }),
+        registerSetup,
+        updateInstallStatus: vi.fn(),
+        getConnectorStatus: vi.fn(),
+      },
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_rerunkey',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-rerun'),
+      writeCredentials,
+      installRuntime,
+      log: () => undefined,
+    })).rejects.toThrow(/not awaiting connection/)
+
+    expect(registerSetup).not.toHaveBeenCalled()
+    expect(writeCredentials).not.toHaveBeenCalled()
+    expect(installRuntime).not.toHaveBeenCalled()
+  })
+
+  it('a registration race on a still-pending setup also fails before any local write', async () => {
+    const writeCredentials = vi.fn()
+    const installRuntime = vi.fn()
+    await expect(runConnect({
+      setupToken: 'hv_setup_test_rerun_race',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-rerun-race',
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-7',
+          status: 'awaiting_connection',
+          agent: { name: 'Rerun Agent' },
+          haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 8453, network: 'Base' },
+          agent_budget: [],
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-7', message: 'Haven Connect Agent 2\nsetup_id: setup-7\nchallenge: stu', expires_at: '2099-01-01T00:00:00.000Z' },
+        })),
+        registerSetup: vi.fn(async () => {
+          throw new ConnectRequestError('Haven setup request failed: setup already connected', 409)
+        }),
+        updateInstallStatus: vi.fn(),
+        getConnectorStatus: vi.fn(),
+      },
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_rerunkey2',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-rerun-race'),
+      writeCredentials,
+      installRuntime,
+      log: () => undefined,
+    })).rejects.toThrow(/already connected/)
+
+    expect(writeCredentials).not.toHaveBeenCalled()
+    expect(installRuntime).not.toHaveBeenCalled()
+  })
+
   // #1543: runConnect wires installRuntime's early config-written hook to a
   // best-effort install-status report, so the dashboard can unlock approval
   // before probes and skill install finish. The final report still follows

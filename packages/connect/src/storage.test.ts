@@ -100,6 +100,44 @@ describe('writeCredentialFiles', () => {
     await expect(writeCredentialFiles(input)).rejects.toThrow(/EEXIST|exist/i)
   })
 
+  // #1544 re-run characterization: a second setup on an already-configured
+  // machine is a NEW agent id, and credential storage is per-agent — the new
+  // write lands in a sibling directory and the previous agent's files stay
+  // byte-identical. Nothing revokes or rewrites the old credentials locally.
+  it('writes a second agent alongside the first without touching the first', async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), 'haven-connect-second-agent-'))
+    const first = await writeCredentialFiles({
+      baseDir,
+      agentId: 'agent-1',
+      apiKey: 'sk_agent_firstsecret',
+      delegateKey: `0x${'11'.repeat(32)}`,
+      delegateAddress: '0x1111111111111111111111111111111111111111',
+      apiUrl: 'https://api.haven.example',
+      hostedMcpUrl: 'https://mcp.haven.example/v1',
+    })
+    const firstIdentity = await readFile(first.identityPath, 'utf8')
+    const firstSigner = await readFile(first.signerPath, 'utf8')
+
+    const second = await writeCredentialFiles({
+      baseDir,
+      agentId: 'agent-2',
+      apiKey: 'sk_agent_secondsecret',
+      delegateKey: `0x${'22'.repeat(32)}`,
+      delegateAddress: '0x2222222222222222222222222222222222222222',
+      apiUrl: 'https://api.haven.example',
+      hostedMcpUrl: 'https://mcp.haven.example/v1',
+    })
+
+    expect(second.directory).not.toBe(first.directory)
+    // The old agent's key material is exactly as it was — present and unrotated.
+    expect(await readFile(first.identityPath, 'utf8')).toBe(firstIdentity)
+    expect(await readFile(first.signerPath, 'utf8')).toBe(firstSigner)
+    // The new agent's files carry only the new agent's material.
+    const secondSigner = await readFile(second.signerPath, 'utf8')
+    expect(secondSigner).toContain('agent-2')
+    expect(secondSigner).not.toContain(`0x${'11'.repeat(32)}`)
+  })
+
   it('preflights credential storage before setup registration', async () => {
     const baseDir = await mkdtemp(join(tmpdir(), 'haven-connect-preflight-'))
     const directory = await preflightCredentialStorage({ baseDir })

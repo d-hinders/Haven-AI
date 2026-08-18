@@ -60,9 +60,10 @@ export const ENQUEUE_OUTBOUND_TX_SQL = `INSERT INTO outbound_txs
    RETURNING *`
 
 /**
- * Oldest-first per chain, skipping rows another claimant holds. The inner
- * SELECT takes the row lock; SKIP LOCKED is what turns "two claimants, one
- * row" into "two claimants, two rows".
+ * Oldest-first per chain (id as tiebreaker — NOW() can collide within a
+ * millisecond and an unstable order is untestable), skipping rows another
+ * claimant holds. The inner SELECT takes the row lock; SKIP LOCKED is what
+ * turns "two claimants, one row" into "two claimants, two rows".
  */
 export const CLAIM_NEXT_OUTBOUND_TX_SQL = `UPDATE outbound_txs
      SET claimed_at = NOW(), updated_at = NOW()
@@ -71,7 +72,7 @@ export const CLAIM_NEXT_OUTBOUND_TX_SQL = `UPDATE outbound_txs
       WHERE chain_id = $1
         AND status = 'queued'
         AND (claimed_at IS NULL OR claimed_at < NOW() - INTERVAL '${CLAIM_LEASE_INTERVAL}')
-      ORDER BY created_at
+      ORDER BY created_at, id
       LIMIT 1
       FOR UPDATE SKIP LOCKED
    )
@@ -102,7 +103,7 @@ export const MARK_OUTBOUND_TX_REPLACED_SQL = `UPDATE outbound_txs
 export const LIST_UNMINED_OUTBOUND_TXS_SQL = `SELECT * FROM outbound_txs
    WHERE chain_id = $1 AND status = 'broadcast'
      AND updated_at < NOW() - ($2 * INTERVAL '1 second')
-   ORDER BY created_at`
+   ORDER BY created_at, id`
 
 export async function enqueueOutboundTx(
   params: {

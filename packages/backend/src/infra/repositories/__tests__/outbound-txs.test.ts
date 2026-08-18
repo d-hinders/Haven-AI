@@ -19,7 +19,11 @@ import {
   markOutboundTxReplaced,
 } from '../outbound-txs.js'
 
-const CHAIN = 84532
+// A UNIQUE chain id per test: claim-next is chain-scoped, so this makes each
+// test hermetic against any row another test (or an unsettled async tail)
+// leaves behind — the CI-only failure this fixed was exactly such a leak.
+let chainCounter = 84_532_000
+let CHAIN = 0
 const TO = '0xDB9B1e94B5b69Df7e401DDbedE43491141047dB3'
 const DATA = '0x' + 'ab'.repeat(200)
 const TX = '0x' + 'cd'.repeat(32)
@@ -30,7 +34,10 @@ function enqueue(submitter = 'test') {
 
 describeDb('outbound-txs repository (#1555)', () => {
   initDbHarness()
-  beforeEach(resetDb)
+  beforeEach(async () => {
+    CHAIN = ++chainCounter
+    await resetDb()
+  })
 
   it('enqueues queued with addresses lower-cased, and claim returns oldest-first', async () => {
     const first = await enqueue('a')

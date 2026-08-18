@@ -832,6 +832,19 @@ distinguishes have opposite causes:
   restart between the two produces exactly this — including a Railway redeploy,
   which fires on **every push to `dev`**.
 
+  Since #1519 (EIP-3009) and #1515 (erc7710), a restart no longer turns a PAID
+  retry into a refusal: the merchant re-derives settle state from the chain —
+  `authorizationState` for a 3009 nonce; for erc7710, the settlement child's
+  `spentMap` counter read from the **pinned** transfer-amount enforcer, and
+  only when that caveat's committed cap equals the price — and serves the goods
+  with no second submit when the money already moved. A restart mid-flow now
+  costs at most one extra retry; a buyer-charged-and-402'd outcome from this
+  cause is a regression, not a known mode.
+
+  The bare-challenge shape above is still reachable, for the OTHER half of the
+  lost state: an unknown MCP **session id**. That is a plain re-challenge with
+  no money moved, so re-dispatching is the whole remedy.
+
   Note this is detected by the challenge's `error` reading the x402 default
   `"Payment required"`, **not** by the key being absent: the `PaymentRequired`
   shape always carries an `error`, so a merchant response with no `error` key

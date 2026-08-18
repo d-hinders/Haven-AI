@@ -135,6 +135,7 @@ import {
 } from '../lib/hosted-mcp.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
+import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
 
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 
@@ -328,7 +329,7 @@ export const x402CatalogGuidedPurchase: Scenario = {
           max_amount: MAX_AMOUNT,
           // Fresh per attempt: a reused key would resume the previous run's
           // intent, and a resumed intent proves nothing about this run.
-          idempotency_key: `qa-catalog-${Date.now()}`,
+          idempotency_key: freshPurchaseIdempotencyKey('x402-catalog-guided-purchase'),
         }),
       )
     } catch (err) {

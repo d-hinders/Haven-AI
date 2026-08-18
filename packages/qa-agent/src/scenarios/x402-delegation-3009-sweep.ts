@@ -36,6 +36,7 @@ import { HavenClient, buildSweepTypedData } from '@haven_ai/sdk'
 import { ethers } from 'ethers'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
+import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
 
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 
@@ -96,7 +97,13 @@ export const x402Delegation3009Sweep: Scenario = {
         method: 'tools/call',
         params: { name: 'buy_cloud_storage', arguments: { tier: '50gb' } },
       }),
-    })
+    },
+    // #1534: this leg sent NO key, so the SDK synthesised one from its
+    // 5-minute bucket — and `qa-dev.yml` retries the whole suite ~30s after a
+    // failure, inside that window. Attempt 2 then collapsed onto attempt 1's
+    // settled payment and was correctly refused by the #1521 guard. The leg
+    // was never wrong; the retry was asking for a replay of a spent payment.
+    { idempotencyKey: freshPurchaseIdempotencyKey('x402-delegation-3009-sweep') })
     if (!res.ok) return fail(`verify-without-settle call failed: HTTP ${res.status}`)
 
     const stranded = await waitForStranded(provider, delegateAddress)

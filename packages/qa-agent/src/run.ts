@@ -16,8 +16,6 @@ import type { Scenario, ScenarioContext, ScenarioResult } from './scenarios/type
 import { withinBudgetSettle } from './scenarios/within-budget-settle.js'
 import { overBudgetQueue } from './scenarios/over-budget-queue.js'
 import { x402OverBudgetRejected } from './scenarios/x402-over-budget-rejected.js'
-import { x402Settle } from './scenarios/x402-settle.js'
-import { x402Sweep } from './scenarios/x402-sweep.js'
 import { x402Delegation3009 } from './scenarios/x402-delegation-3009.js'
 import { x402Delegation3009Sweep } from './scenarios/x402-delegation-3009-sweep.js'
 import { x402Erc7710Settle } from './scenarios/x402-erc7710-settle.js'
@@ -29,15 +27,28 @@ import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
 import { thrownErrorDetail } from './lib/thrown-error-detail.js'
 import { runPreflight, formatPreflight } from './lib/preflight.js'
 
-// Deterministic, no-LLM scenarios run in order — seven money-flow invariants:
-// within-budget settle, over-budget queue, x402 over-budget reject, x402 settle,
-// delegate sweep recovery (#603/#684), and the delegation-rail EIP-3009 bridge
-// in both halves (#946) — settle, and verify-without-settle → sweep.
+// Deterministic, no-LLM scenarios run in order.
 //
-// The last two run a SECOND, delegation-rail identity: the rail is a property
-// of the account, so the seeded legacy-rail agent cannot exercise it. They are
-// ordered settle-then-sweep so a settle failure is diagnosed against a clean
-// delegate rather than one the sweep case has already left money on.
+// The first three run the seeded LEGACY-rail identity and are the only legs
+// that still do. They are kept because their invariants have no delegation-rail
+// counterpart: the approval QUEUE does not exist on the delegation rail at all
+// (over-budget reverts on-chain during gas estimation, and there is nothing to
+// queue), and the pre-intent rejection path differs per rail.
+//
+// x402 coverage is DELEGATION-RAIL ONLY. The legacy `x402-settle` and
+// `x402-sweep-recovery` legs were removed: the delegation rail is the base for
+// every new account, the legacy AllowanceModule rail is import-only for
+// existing dev-pilot Safes, and both legs were fully duplicated by
+// `x402-delegation-3009` and `x402-delegation-3009-sweep` — same EIP-3009
+// merchant-facing shape, same verify-without-settle → sweep proof, different
+// funding source. They were also the only x402 legs that submitted through the
+// relayer's shared nonce lane, which is a live infrastructure defect (#1533)
+// rather than anything the money-flow invariants were written to catch.
+//
+// The delegation-rail legs run a SECOND identity: the rail is a property of the
+// account, so the seeded legacy-rail agent cannot exercise it. They are ordered
+// settle-then-sweep so a settle failure is diagnosed against a clean delegate
+// rather than one the sweep case has already left money on.
 //
 // `x402-hosted-mcp-signer` (#1154) is the DEFAULT user topology — hosted MCP
 // plus a local edge signer — and shares that delegation-rail identity. It runs
@@ -56,8 +67,6 @@ const SCENARIOS: Scenario[] = [
   withinBudgetSettle,
   overBudgetQueue,
   x402OverBudgetRejected,
-  x402Settle,
-  x402Sweep,
   x402Delegation3009,
   x402Delegation3009Sweep,
   x402Erc7710Settle,

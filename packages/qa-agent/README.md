@@ -35,22 +35,33 @@ report, and **exits non-zero on any failure**. It reads the `QA_*` env (see
 ([`.github/workflows/qa-dev.yml`](../../.github/workflows/qa-dev.yml)) runs it in
 CI from the `QA_*` Actions secrets.
 
-Scenarios (`src/scenarios/`):
+Scenarios (`src/scenarios/`) — the **legacy-rail** legs, which are the only ones
+that still run the seeded AllowanceModule identity:
 
 | Scenario | #420 invariant | Status |
 |---|---|---|
 | `within-budget-settle` | A payment inside the allowance settles on-chain + is logged | live |
 | `over-budget-queue` | A payment over the allowance is queued (`pending_approval`), never auto-executed | live |
 | `x402-over-budget-rejected` | A priced x402 call above the allowance is rejected (`insufficient_funds`), never a signable intent | live |
-| `x402-settle` | A within-budget x402 call settles end-to-end via the demo-merchant round-trip (fund delegate → EIP-3009 → settle) | live |
-| `x402-sweep-recovery` | A verify-without-settle balance is reclaimed from the delegate to the Safe | live; requires merchant skip-settle config + delegate gas |
+
+**x402 settlement is covered on the delegation rail only.** The legacy
+`x402-settle` and `x402-sweep-recovery` legs were removed — the delegation rail
+is the base for every new account and both legs were duplicated by
+`x402-delegation-3009` / `x402-delegation-3009-sweep`. The three legs above stay
+because their invariants have no delegation-rail counterpart (that rail has no
+approval queue at all — over-budget reverts on-chain).
+
+The delegation-rail legs are the majority of the suite and are documented, with
+their env requirements and skip conditions, in the canonical table in
+[`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md).
 
 > **Infra dependency:** `within-budget-settle` moves real testnet USDC, so the
 > dev **relayer** (`RELAYER_PRIVATE_KEY`) must hold Base Sepolia **ETH** for gas —
 > it submits the AllowanceModule transfer. A gas-empty relayer surfaces as
 > `execution failed: insufficient funds …` (the harness reports the on-chain
-> reason, not just a 502). The direct-transfer sweep also requires the delegate
-> EOA to hold a small amount of Base Sepolia ETH.
+> reason, not just a 502). Note the relayer's nonce lane is a known dev
+> infrastructure defect (#1533) — a `NONCE_EXPIRED` failure on this leg is that,
+> not a money-path regression.
 
 For a clean local checkout, build the workspace SDK before the harness:
 

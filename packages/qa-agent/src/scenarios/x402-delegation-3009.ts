@@ -7,7 +7,8 @@
  * The reviewer promoted it to an acceptance criterion on #946 rather than
  * leaving it as follow-up, and named the gap exactly: *"today's x402-sweep
  * scenario only exercises the legacy rail."* That was still true — the daily
- * matrix ran five scenarios, all of them legacy AllowanceModule or erc7710,
+ * matrix then ran five scenarios, all of them legacy AllowanceModule or
+ * erc7710,
  * while the 3009 bridge is the path with real merchant reach and the one that
  * deliberately reintroduces a hot balance. The rail with the most exposure had
  * the least live coverage.
@@ -199,7 +200,7 @@ export const x402Delegation3009: Scenario = {
     }
     const treasuryBefore = (await usdc.balanceOf(treasury)) as bigint
 
-    // buy_vpn basic (0.001 USDC) — the settling product, same as x402-settle.
+    // buy_vpn basic (0.001 USDC) — the settling product.
     // storage_50gb is the merchant's verify-without-settle product and belongs
     // to the sweep scenario, not this one.
     const res = await client.fetch(

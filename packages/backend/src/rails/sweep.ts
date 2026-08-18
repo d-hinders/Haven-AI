@@ -10,6 +10,7 @@ import {
 } from '@haven_ai/sdk'
 import { getRelayerWallet } from './allowance-module.js'
 import { withRelayerSendLock } from '../infra/relayer.js'
+import { openOutboundRecord } from '../infra/outbound-queue.js'
 
 /**
  * Gasless delegate-sweep helpers (EIP-3009 `transferWithAuthorization`).
@@ -129,19 +130,40 @@ export async function relaySweepAuthorization(
   })
   const relayer = getRelayerWallet(auth.chainId)
   const usdc = new ethers.Contract(auth.token, USDC_TRANSFER_WITH_AUTHORIZATION_ABI, relayer)
+  const callArgs = [
+    auth.from,
+    auth.to,
+    BigInt(auth.value),
+    BigInt(auth.validAfter),
+    BigInt(auth.validBefore),
+    auth.nonce,
+    signature,
+  ] as const
+  // #1557: durable record opened BEFORE the broadcast (epic #1554). This is
+  // the funding leg's recovery path — a crash between here and the send used
+  // to leave a transaction only this process's memory knew about. The record
+  // carries the exact transferWithAuthorization calldata; the EIP-3009 nonce
+  // keeps any re-broadcast idempotent on-chain.
+  const record = await openOutboundRecord({
+    chainId: auth.chainId,
+    submitter: 'sweep',
+    to: auth.token,
+    data: new ethers.Interface(USDC_TRANSFER_WITH_AUTHORIZATION_ABI).encodeFunctionData(
+      'transferWithAuthorization',
+      [...callArgs],
+    ),
+  })
   // Serialise the broadcast with every other relayer submission on this chain
   // so the sweep can't race a payment for the same EOA nonce (#692/#718).
   const tx = await withRelayerSendLock(auth.chainId, () =>
-    usdc.transferWithAuthorization(
-      auth.from,
-      auth.to,
-      BigInt(auth.value),
-      BigInt(auth.validAfter),
-      BigInt(auth.validBefore),
-      auth.nonce,
-      signature,
-    ),
+    usdc.transferWithAuthorization(...callArgs),
   )
+  await record.broadcast({
+    hash: tx.hash,
+    nonce: tx.nonce,
+    maxFeePerGas: tx.maxFeePerGas,
+    maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
+  })
   // `tx.wait()` can return null (or race) on a lagging RPC even when the tx has
   // landed — which previously surfaced as a spurious "Sweep relay failed" while
   // the funds had actually moved. Poll for the receipt by hash with a timeout,
@@ -158,10 +180,18 @@ export async function relaySweepAuthorization(
     effectiveGasPrice: receipt?.gasPrice != null ? BigInt(receipt.gasPrice.toString()) : null,
   })
   if (!receipt) {
+    // Timeout is NOT failure: the tx is broadcast and may still land, so the
+    // record stays at `broadcast` for the #1558 unmined scan — closing it
+    // failed here would tell the bump worker to act on a tx that often mines
+    // seconds later.
     throw new Error(`Sweep tx ${tx.hash} not confirmed within 90s`)
   }
   if (receipt.status === 0) {
+    // waitForTransaction RESOLVES a reverted receipt (unlike tx.wait, which
+    // throws) — this branch is live, and is where the record closes failed.
+    await record.failed(`Sweep tx ${tx.hash} reverted`)
     throw new Error(`Sweep tx ${tx.hash} reverted`)
   }
+  await record.mined()
   return { txHash: tx.hash }
 }

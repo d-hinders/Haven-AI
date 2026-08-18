@@ -48,8 +48,10 @@ describe('runConnect', () => {
   ] as const)('prints the approval, activation, and read-only verification handoff for %s', (runtime, activation) => {
     const output = completionHandoffLines(completedInstall(runtime)).join('\n')
 
-    expect(output).toContain('1. Return to Haven and approve the agent rules.')
+    expect(output).toContain('1. Return to Haven and approve the budget.')
     expect(output).toContain('Approval — not restarting — unlocks Haven tools.')
+    // #1542: one name for the one gate — "agent rules" never appears here.
+    expect(output).not.toContain('agent rules')
     expect(output).toContain(activation)
     expect(output).toContain('haven_get_agent')
     expect(output).toContain('haven_get_allowances')
@@ -67,7 +69,53 @@ describe('runConnect', () => {
     expect(output).toContain('return to Haven for a fresh connection')
     expect(output).toContain('Do not manually edit runtime config')
     expect(output).toContain('paste credentials into prompts, logs, or config')
-    expect(output).not.toContain('approve the agent rules')
+    expect(output).not.toContain('approve the budget')
+  })
+
+  // #1542: the handoff reflects what the approval wait observed — the connector
+  // must never celebrate the approval and then instruct the user to perform it.
+  it('confirms instead of re-requesting approval when the budget was approved during the wait', () => {
+    const output = completionHandoffLines(completedInstall('claude-code'), 'approved').join('\n')
+
+    expect(output).toContain('the budget is already approved')
+    expect(output).not.toContain('Return to Haven')
+    expect(output).not.toContain('approve the budget')
+    // The remaining steps renumber from 1 and stay actionable.
+    expect(output).toContain('1. Start a new Claude Code session')
+    expect(output).toContain('haven_get_agent')
+  })
+
+  it('keeps the full approve instruction when the wait timed out still pending', () => {
+    const output = completionHandoffLines(completedInstall('claude-code'), 'pending').join('\n')
+
+    expect(output).toContain('1. Return to Haven and approve the budget.')
+  })
+
+  it('does not ask the user to approve a setup that already ended in Haven', () => {
+    const output = completionHandoffLines(completedInstall('claude-code'), 'ended').join('\n')
+
+    expect(output).not.toContain('approve the budget')
+    expect(output).toContain('start a fresh connection from the dashboard')
+  })
+
+  // #1542: the restart step explains why it survives the connector's own
+  // verification — but only where a restart is genuinely required. Hot-reload
+  // runtimes keep their registry copy, which already says no restart is needed.
+  it.each([
+    ['claude-code', 'only reads MCP config when a session starts'],
+    ['claude-desktop', 'only reads MCP config at app launch'],
+  ] as const)('says why %s still needs a restart after in-process verification', (runtime, why) => {
+    const output = completionHandoffLines(completedInstall(runtime)).join('\n')
+
+    expect(output).toContain('already written and verified')
+    expect(output).toContain(why)
+  })
+
+  it('adds no restart rationale on hot-reload runtimes', () => {
+    const output = completionHandoffLines(completedInstall('cursor')).join('\n')
+
+    expect(output).toContain('no app restart is required')
+    expect(output).not.toContain('already written and verified')
   })
 
   it('keeps the manual runtime path actionable after credential setup', () => {
@@ -567,8 +615,10 @@ describe('runConnect', () => {
     expect(result.agentId).toBe('agent-3')
     const output = logs.join('\n')
     // Completion + next-steps still printed despite the telemetry failure…
+    // (the mock approves on the first poll, so the handoff takes its #1542
+    // approved shape: confirmation, not an approve instruction)
     expect(output).toContain('Haven setup on this machine is complete')
-    expect(output).toContain('Approval — not restarting — unlocks Haven tools')
+    expect(output).toContain('the budget is already approved')
     // …and the failure is surfaced quietly rather than thrown.
     expect(output).toContain('Could not report install status to Haven')
     // A failed readiness report is non-authoritative and must not leave the
@@ -638,6 +688,32 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     if ([0, 1440, 10080, 43200].includes(resetPeriodMin)) {
       expect(logs.join('\n')).not.toMatch(/\d+ minutes/)
     }
+  })
+
+  // #1542: users routinely approve while the runtime install is still running.
+  // The first check is immediate and precedes the announcement, so an
+  // already-approved budget never produces the contradictory adjacent pair
+  // "waiting for you to approve… / Budget approved 🎉".
+  it('never prints the waiting line when the budget is already approved at poll start', async () => {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn(async () => ({
+      status: 'active' as const,
+      approved_budget: { token_symbol: 'USDC', token_address: BASE_USDC, amount: '3000000', reset_period_min: 1440 },
+    }))
+    const sleep = vi.fn(async () => {})
+
+    const outcome = await waitForBudgetApproval(
+      { getConnectorStatus }, 'setup-1', 'sk_agent_key',
+      (message) => logs.push(message), { sleep },
+    )
+
+    expect(outcome).toBe('approved')
+    expect(getConnectorStatus).toHaveBeenCalledTimes(1)
+    // Immediate first check: no pacing sleep before it, no waiting line.
+    expect(sleep).not.toHaveBeenCalled()
+    const output = logs.join('\n')
+    expect(output).not.toContain('waiting for you to approve')
+    expect(output).toContain('Budget approved 🎉 — I can now spend up to 3 USDC per day from your Haven wallet.')
   })
 
   it('always terminates on its own: exits pending with guidance at the timeout bound', async () => {
@@ -809,6 +885,13 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     // must settle before the connector's first approval poll, or both sides
     // wait on each other until the bounded poll window ends (#1386).
     expect(lifecycleCalls).toEqual(['report-install-status', 'poll-budget-approval'])
-    expect(logs.join('\n')).toContain('Budget approved 🎉')
+    const output = logs.join('\n')
+    expect(output).toContain('Budget approved 🎉')
+    // #1542 end to end: the approval observed by the wait shapes the printed
+    // next steps — an approved budget is confirmed, never re-requested, and
+    // the already-over wait is never announced.
+    expect(output).not.toContain('waiting for you to approve')
+    expect(output).not.toContain('Return to Haven')
+    expect(output).toContain('the budget is already approved')
   })
 })

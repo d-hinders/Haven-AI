@@ -19,7 +19,7 @@ import {
   supportsLocalMcp,
   type RuntimeInstallResult,
 } from './runtime-install.js'
-import { normalizeRuntime, runtimeProfile, runtimeVerificationInstruction } from './runtime-registry.js'
+import { normalizeRuntime, runtimeProfile, runtimeVerificationInstruction, type RuntimeProfile } from './runtime-registry.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
@@ -283,12 +283,15 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   // #1377 D: stay alive through the approval instead of going dead exactly
   // while the user acts. Skipped in structured/automation mode
   // (waitForApproval: false — the --json contract emits promptly) and when
-  // the install itself needs manual completion first.
+  // the install itself needs manual completion first. The observed outcome
+  // shapes the printed next steps (#1542): an approval the wait just
+  // celebrated must not be requested again two lines later.
+  let approval: BudgetApprovalOutcome | undefined
   if (options.waitForApproval !== false && !runtimeInstall.errorCode) {
-    await waitForBudgetApproval(api, registration.setup_id, localApiKey, log, options.approvalWait)
+    approval = await waitForBudgetApproval(api, registration.setup_id, localApiKey, log, options.approvalWait)
   }
 
-  printNextSteps(runtimeInstall, log)
+  printNextSteps(runtimeInstall, log, approval)
 
   return {
     setupId: registration.setup_id,
@@ -448,8 +451,16 @@ function printRuntimeInstall(result: RuntimeInstallResult, log: (message: string
  * (agent-API-key auth, works during `setup_pending`) and narrates progress in
  * the flow's voice, ending in a concrete celebration naming the granted
  * authority. Bounds (stated per the issue): poll every 5 s, give up after
- * 3 minutes — the connector ALWAYS terminates on its own; a timeout is a
- * clean exit with guidance, never a hang. Injectable clock/cadence for tests.
+ * 3 minutes (36 polls; with the immediate first check below the last one
+ * lands at ~175 s) — the connector ALWAYS terminates on its own; a timeout
+ * is a clean exit with guidance, never a hang. Injectable clock/cadence for
+ * tests.
+ *
+ * #1542: the first check happens BEFORE the "waiting for you to approve" line
+ * is printed. Users routinely approve in the dashboard while the runtime
+ * install is still running, and announcing a wait that is already over made
+ * the very next line ("Budget approved 🎉") read as a contradiction — the
+ * field-test agent relayed the pair verbatim as a bug.
  */
 export interface ApprovalWaitOptions {
   intervalMs?: number
@@ -502,22 +513,33 @@ function describeApprovedBudget(budget: {
   return `${amount} ${describeResetPeriod(budget.reset_period_min)}`
 }
 
+export type BudgetApprovalOutcome = 'approved' | 'pending' | 'ended'
+
 export async function waitForBudgetApproval(
   api: Pick<ConnectApiClient, 'getConnectorStatus'>,
   setupId: string,
   apiKey: string,
   log: (message: string) => void,
   options: ApprovalWaitOptions = {},
-): Promise<'approved' | 'pending' | 'ended'> {
+): Promise<BudgetApprovalOutcome> {
   const intervalMs = options.intervalMs ?? 5_000
   const timeoutMs = options.timeoutMs ?? 180_000
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
   const maxPolls = Math.max(1, Math.floor(timeoutMs / intervalMs))
   const remindEvery = Math.max(1, Math.floor(30_000 / intervalMs))
 
-  log('Registered with Haven — waiting for you to approve the budget in the dashboard…')
+  // Announced only once a check has actually observed a pending (or unknown)
+  // state — never ahead of a first check that may find the wait already over.
+  let waitingAnnounced = false
+  const announceWaiting = () => {
+    if (waitingAnnounced) return
+    waitingAnnounced = true
+    log('Registered with Haven — waiting for you to approve the budget in the dashboard…')
+  }
+
   for (let i = 0; i < maxPolls; i++) {
-    await sleep(intervalMs)
+    // The first check is immediate (#1542); only the retries pace themselves.
+    if (i > 0) await sleep(intervalMs)
     let status: Awaited<ReturnType<ConnectApiClient['getConnectorStatus']>>
     try {
       status = await api.getConnectorStatus(setupId, apiKey)
@@ -530,7 +552,9 @@ export async function waitForBudgetApproval(
         log('This setup ended in Haven — start a fresh connection from the dashboard when ready.')
         return 'ended'
       }
-      // A flaky poll is not a verdict — keep waiting inside the same bound.
+      // A flaky poll is not a verdict — keep waiting inside the same bound,
+      // and say so, rather than sitting silent until a check succeeds.
+      announceWaiting()
       continue
     }
     if (status.status === 'active') {
@@ -545,7 +569,8 @@ export async function waitForBudgetApproval(
       log(`This setup ended in Haven (${status.status}) — start a fresh connection from the dashboard when ready.`)
       return 'ended'
     }
-    if ((i + 1) % remindEvery === 0) {
+    announceWaiting()
+    if (i > 0 && i % remindEvery === 0) {
       log('Still waiting for budget approval in Haven…')
     }
   }
@@ -557,18 +582,33 @@ export async function waitForBudgetApproval(
 }
 
 /**
- * The two remaining gates after the local connector finishes: approve the rules
- * in Haven, then (for most runtimes) restart so the freshly-written MCP config
- * is loaded. The approval line states the dependency explicitly — tools never
- * appear before approval, restart or not — because an agent that had already
- * approved still couldn't tell whether missing tools meant "not approved" or
- * "needs restart."
+ * The two remaining gates after the local connector finishes: approve the
+ * budget in Haven, then (for most runtimes) restart so the freshly-written MCP
+ * config is loaded. The approval line states the dependency explicitly — tools
+ * never appear before approval, restart or not — because an agent that had
+ * already approved still couldn't tell whether missing tools meant "not
+ * approved" or "needs restart."
+ *
+ * #1542, from the field test:
+ * - The lines are shaped by what the approval wait observed. `'approved'`
+ *   replaces the approve instruction with a confirmation — the connector must
+ *   never celebrate the approval and then instruct the user to go perform it.
+ *   `undefined` (wait skipped: --json mode, or an install errorCode) keeps the
+ *   full instruction.
+ * - One name for the gate throughout this file: the BUDGET — the word the wait
+ *   loop, the celebration, and the dashboard's grant screen already use.
+ *   "Agent rules" here made one gate read as two.
+ * - The restart step says WHY it survives the connector's own verification:
+ *   session/app-scoped runtimes only read MCP config at start-up.
  */
-export function completionHandoffLines(result: RuntimeInstallResult): string[] {
+export function completionHandoffLines(
+  result: RuntimeInstallResult,
+  approval?: BudgetApprovalOutcome,
+): string[] {
   if (result.errorCode === 'manual_runtime_setup_required') {
     return [
       'Next steps:',
-      '1. Return to Haven and approve the agent rules. Approval — not restarting — unlocks Haven tools.',
+      '1. Return to Haven and approve the budget. Approval — not restarting — unlocks Haven tools.',
       '2. Finish the manual MCP setup using the secret-free file references printed above, then start a fresh session in your runtime.',
       `3. ${runtimeVerificationInstruction(result.runtime)}`,
     ]
@@ -579,15 +619,51 @@ export function completionHandoffLines(result: RuntimeInstallResult): string[] {
     ]
   }
 
+  if (approval === 'ended') {
+    return [
+      'Next step: this setup ended in Haven before the budget was approved, so there is nothing left to approve on it — start a fresh connection from the dashboard when ready.',
+    ]
+  }
+
   const profile = runtimeProfile(result.runtime)
+  const activation = activationInstructionWithWhy(profile)
+  if (approval === 'approved') {
+    return [
+      'Next steps — the budget is already approved, so there is nothing more to do in Haven:',
+      `1. ${activation}`,
+      `2. ${runtimeVerificationInstruction(result.runtime)}`,
+    ]
+  }
   return [
     'Next steps:',
-    '1. Return to Haven and approve the agent rules. Approval — not restarting — unlocks Haven tools.',
-    `2. ${profile.activationInstruction}`,
+    '1. Return to Haven and approve the budget. Approval — not restarting — unlocks Haven tools.',
+    `2. ${activation}`,
     `3. ${runtimeVerificationInstruction(result.runtime)}`,
   ]
 }
 
-function printNextSteps(result: RuntimeInstallResult, log: (message: string) => void): void {
-  for (const line of completionHandoffLines(result)) log(line)
+/**
+ * The field-test agent had just watched the connector print "Verified Claude
+ * Code MCP entry" and reasonably asked why a restart was still demanded. Say
+ * the reason in the instruction itself: verification ran in the connector's
+ * process, but the runtime only reads MCP config at session start (or app
+ * launch). Hot-reload and manual runtimes keep their registry copy untouched —
+ * their instructions already carry their own activation story.
+ */
+function activationInstructionWithWhy(profile: RuntimeProfile): string {
+  if (profile.restartMode === 'restart-session') {
+    return `${profile.activationInstruction} (The entries are already written and verified — ${profile.label} only reads MCP config when a session starts, which is why this step is still needed.)`
+  }
+  if (profile.restartMode === 'restart-app') {
+    return `${profile.activationInstruction} (The entries are already written and verified — ${profile.label} only reads MCP config at app launch, which is why this step is still needed.)`
+  }
+  return profile.activationInstruction
+}
+
+function printNextSteps(
+  result: RuntimeInstallResult,
+  log: (message: string) => void,
+  approval?: BudgetApprovalOutcome,
+): void {
+  for (const line of completionHandoffLines(result, approval)) log(line)
 }

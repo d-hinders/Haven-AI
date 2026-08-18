@@ -20,7 +20,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-08-17" # #1530: the preflight now reports every consumable resource before the first leg and refuses to run when one is below floor; the demo-merchant settlement wallet is added to the funding table it was missing from, and its balance is read from the merchant's own /healthz because the address derives from SETTLEMENT_PRIVATE_KEY in the merchant env. No harness credential, target, or scenario semantics change. Prior:1519: merchant checks authorizationState/balanceOf before submitting, so an already-settled purchase serves the goods instead of 402ing a paid buyer; Troubleshooting gains "a merchant 402 that the chain says was paid". Prior: #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
+last-verified: "2026-08-18" # #1533/#1534: the legacy-rail `x402-settle` and `x402-sweep-recovery` legs removed — x402 coverage is delegation-rail only; the scenario table is now eleven legs (matching the count the prose already claimed). Reviewer correction: this is an ACCEPTED COVERAGE LOSS, not a deduplication — the legacy x402 execute branch now has no live leg; the "sixth scenario" ordinal is replaced by the scenario name so it cannot drift again. Prior: #1530: the preflight now reports every consumable resource before the first leg and refuses to run when one is below floor; the demo-merchant settlement wallet is added to the funding table it was missing from, and its balance is read from the merchant's own /healthz because the address derives from SETTLEMENT_PRIVATE_KEY in the merchant env. No harness credential, target, or scenario semantics change. Prior: #1519: merchant checks authorizationState/balanceOf before submitting, so an already-settled purchase serves the goods instead of 402ing a paid buyer; Troubleshooting gains "a merchant 402 that the chain says was paid". Prior: #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -213,8 +213,6 @@ The deterministic harness runs eleven scenarios in order:
 | `within-budget-settle` | A 0.1 USDC payment settles on-chain and has a receipt |
 | `over-budget-queue` | An over-budget payment queues for approval and does not execute |
 | `x402-over-budget-rejected` | An unaffordable x402 request is rejected before a signable intent |
-| `x402-settle` | A small x402 payment settles through the dev demo merchant |
-| `x402-sweep-recovery` | Verify-without-settle strands a small USDC balance; with the dev sweep floor at 0 (`SWEEP_MIN_USDC=0`) a gasless sweep returns it to the Safe |
 | `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and no residual may sit at or above the 1 USDC sweep floor. **Skips** without `QA_DELEGATION_*` |
 | `delegation-lifecycle` | Authority can be TAKEN AWAY: on a **throwaway per-run identity** (funded ~0.006 USDC from the standing delegation identity, then abandoned) — grant → activate (relayer-deploys) → within-budget payment settles → replace leaves **exactly one** active row (the #1053-finding-4 transactional-activate regression) → owner-signed revoke → the same payment shape is refused **403 "no active budget delegation"**, never a 502 (a 502 would mean authority was still offered to the chain). Ephemeral keys, all signing client-side |
 | `x402-erc7710-settle` | The delegation rail's PRIMARY x402 path: authorize (payTo = merchant) builds a narrowed child delegation, the delegate signs it, `POST /x402/:id/settle` wraps the header, and the MERCHANT redeems `[child, budget]` on-chain — treasury pays the merchant **directly**, budget metered by the settlement itself (treasury −amount exactly), **delegate EOA untouched** (no funding leg — the #713 stranded-funds class structurally absent). Needs `MERCHANT_X402_ERC7710=1` + `MERCHANT_ERC7710_DELEGATION_MANAGER` on the dev merchant; skips (→ run FAILS under #1066) with that exact remedy when the merchant is 3009-only |
@@ -276,8 +274,8 @@ variable; do not write `# QA_AGENT_API_KEY=...`.
 
 #### Seeding the delegation-rail identity (`x402-delegation-3009`)
 
-The sixth scenario needs a **second agent**, because the execution rail is a
-property of the account: no header makes the seeded legacy AllowanceModule agent
+The `x402-delegation-3009` scenario needs a **second agent**, because the
+execution rail is a property of the account: no header makes the seeded legacy AllowanceModule agent
 exercise the delegation rail. Without the two `QA_DELEGATION_*` values the
 scenario **skips** — it never fails the run for being unconfigured.
 
@@ -739,7 +737,7 @@ Build the workspace SDK:
 npm run build -w packages/sdk
 ```
 
-### `No compatible payment option found in x402 requirements` (x402-settle / x402-sweep-recovery)
+### `No compatible payment option found in x402 requirements` (any x402 leg)
 
 First suspect the **SDK resolution**, not the merchant. `packages/qa-agent`
 must depend on `"@haven_ai/sdk": "*"` so npm links the **workspace** SDK — an
@@ -851,7 +849,8 @@ merchant and a deliberately non-settling one look identical to them.
 ### A merchant 402 that the chain says was paid
 
 Before treating an x402 failure as a money-path defect, **check the chain**. On
-2026-08-17 `x402-settle` and `x402-delegation-3009` failed for hours while the
+2026-08-17 `x402-settle` (since removed — see below) and
+`x402-delegation-3009` failed for hours while the
 money moved correctly end to end: funding Safe→delegate, then settlement
 delegate→merchant, both `Success`, delegate left at zero. Only the merchant's
 HTTP status was wrong.

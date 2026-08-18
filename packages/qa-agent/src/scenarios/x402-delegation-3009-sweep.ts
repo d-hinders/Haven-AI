@@ -11,7 +11,9 @@
  * transient hot balance — and the failure mode that turns "transient" into
  * "stuck" is exactly this: the merchant verifies, never settles, and the budget
  * is already spent because it was metered at the FUNDING hop rather than at
- * settlement. `x402-sweep` covers this shape on the legacy rail only.
+ * settlement. This is now the ONLY leg covering that shape: the legacy-rail
+ * `x402-sweep-recovery` was removed once the delegation rail became the base
+ * for every new account.
  *
  * ## Why it is a separate scenario rather than a branch of the other one
  *
@@ -27,7 +29,7 @@
  * the floor and exercises a real sweep. Neither is this scenario's to assert:
  * a merchant that settles normally is an unmet precondition, not a sweep
  * regression, and reporting it as a failure would train operators to ignore
- * this line. Same classification `x402-sweep` already uses.
+ * this line.
  */
 
 import { HavenClient, buildSweepTypedData } from '@haven_ai/sdk'

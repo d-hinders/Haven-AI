@@ -14,10 +14,10 @@ dev stack (which the mocked Playwright suite structurally can't):
 
 Implemented: the shared **config contract** (`src/config.ts`), the **dev seed**
 (`src/seed.ts`, #574 item 1), and the **money-flow harness** (`src/run.ts`, #575)
-with all five scenarios registered: within-budget settle, over-budget queue,
-x402 over-budget rejection, x402 settle, and delegate sweep recovery. The sweep
-scenario waits for the stranded balance to become visible and reports whether
-the merchant precondition was missing or recovery actually failed (#684).
+with the scenarios registered in `SCENARIOS` — three legacy-rail legs plus the
+delegation-rail suite. `run.ts` is the source of truth for the list and its
+order; the canonical per-scenario table lives in
+[`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md).
 
 ⚠️ The seed's **on-chain steps are not exercised in CI** (no funded testnet
 wallets there). Run it locally against funded Base Sepolia accounts. The
@@ -35,22 +35,45 @@ report, and **exits non-zero on any failure**. It reads the `QA_*` env (see
 ([`.github/workflows/qa-dev.yml`](../../.github/workflows/qa-dev.yml)) runs it in
 CI from the `QA_*` Actions secrets.
 
-Scenarios (`src/scenarios/`):
+Scenarios (`src/scenarios/`) — the **legacy-rail** legs, which are the only ones
+that still run the seeded AllowanceModule identity:
 
 | Scenario | #420 invariant | Status |
 |---|---|---|
 | `within-budget-settle` | A payment inside the allowance settles on-chain + is logged | live |
 | `over-budget-queue` | A payment over the allowance is queued (`pending_approval`), never auto-executed | live |
 | `x402-over-budget-rejected` | A priced x402 call above the allowance is rejected (`insufficient_funds`), never a signable intent | live |
-| `x402-settle` | A within-budget x402 call settles end-to-end via the demo-merchant round-trip (fund delegate → EIP-3009 → settle) | live |
-| `x402-sweep-recovery` | A verify-without-settle balance is reclaimed from the delegate to the Safe | live; requires merchant skip-settle config + delegate gas |
+
+**x402 settlement is covered on the delegation rail only.** The legacy
+`x402-settle` and `x402-sweep-recovery` legs were removed by owner decision —
+the delegation rail is the base for every new account, and the legacy rail is
+import-only for existing dev-pilot Safes.
+
+This is an **accepted coverage loss, not a deduplication.**
+`x402-delegation-3009` / `x402-delegation-3009-sweep` assert the same
+merchant-facing invariants but execute different code — `modules/x402/authorize.ts`
+dispatches on the rail — so the legacy x402 *execute* branch
+(`recordX402Signature` → `executeAllowanceTransfer` → `confirmX402Intent`) now
+has no live coverage, only mocked unit tests. Neither kept legacy leg closes
+that gap: `within-budget-settle` drives `/payments`, and
+`x402-over-budget-rejected` sends no signature so never enters the branch.
+Revisit if dev-pilot legacy Safes start carrying real x402 volume.
+
+The three legs above stay because their invariants have no delegation-rail
+counterpart (that rail has no approval queue at all — over-budget reverts
+on-chain).
+
+The delegation-rail legs are the majority of the suite and are documented, with
+their env requirements and skip conditions, in the canonical table in
+[`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md).
 
 > **Infra dependency:** `within-budget-settle` moves real testnet USDC, so the
 > dev **relayer** (`RELAYER_PRIVATE_KEY`) must hold Base Sepolia **ETH** for gas —
 > it submits the AllowanceModule transfer. A gas-empty relayer surfaces as
 > `execution failed: insufficient funds …` (the harness reports the on-chain
-> reason, not just a 502). The direct-transfer sweep also requires the delegate
-> EOA to hold a small amount of Base Sepolia ETH.
+> reason, not just a 502). Note the relayer's nonce lane is a known dev
+> infrastructure defect (#1533) — a `NONCE_EXPIRED` failure on this leg is that,
+> not a money-path regression.
 
 For a clean local checkout, build the workspace SDK before the harness:
 
@@ -97,7 +120,7 @@ single source of truth for the `QA_*` env (all **testnet/dev-only**):
 | `QA_AGENT_API_KEY` | QA agent identity (`sk_agent_*`) |
 | `QA_DELEGATE_PRIVATE_KEY` | QA delegate EOA key — signs locally, testnet-only |
 | `QA_PAYMENT_TO` | Recipient for direct-send scenarios |
-| `QA_DEMO_MERCHANT_URL` | Dev demo-merchant base URL; required for the full five-scenario run |
+| `QA_DEMO_MERCHANT_URL` | Dev demo-merchant base URL; required for every merchant round-trip leg |
 
 `loadQaConfig()` fails fast with a clear error listing every missing var.
 

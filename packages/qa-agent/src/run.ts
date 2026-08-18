@@ -36,14 +36,32 @@ import { runPreflight, formatPreflight } from './lib/preflight.js'
 // queue), and the pre-intent rejection path differs per rail.
 //
 // x402 coverage is DELEGATION-RAIL ONLY. The legacy `x402-settle` and
-// `x402-sweep-recovery` legs were removed: the delegation rail is the base for
-// every new account, the legacy AllowanceModule rail is import-only for
-// existing dev-pilot Safes, and both legs were fully duplicated by
-// `x402-delegation-3009` and `x402-delegation-3009-sweep` — same EIP-3009
-// merchant-facing shape, same verify-without-settle → sweep proof, different
-// funding source. They were also the only x402 legs that submitted through the
-// relayer's shared nonce lane, which is a live infrastructure defect (#1533)
-// rather than anything the money-flow invariants were written to catch.
+// `x402-sweep-recovery` legs were removed by owner decision: the delegation
+// rail is the base for every new account, and the legacy AllowanceModule rail
+// is import-only for existing dev-pilot Safes.
+//
+// STATE THE TRADE HONESTLY — this is a COVERAGE LOSS, not a deduplication.
+// `x402-delegation-3009` and `x402-delegation-3009-sweep` cover the same
+// merchant-facing INVARIANTS, but they do not execute the same code:
+// `modules/x402/authorize.ts` dispatches on the rail, so they drive
+// `runDelegationAuthorize` while the removed legs drove `runLegacyAuthorize`.
+// After this removal NO live leg reaches `legacy-authorize.ts`'s execute
+// branch — `recordX402Signature` → `executeAllowanceTransfer` (the x402
+// funding call, distinct from the direct-payment one in `routes/payments.ts`)
+// → `confirmX402Intent`. The kept legacy legs do not close that:
+// `within-budget-settle` drives `/payments`, and `x402-over-budget-rejected`
+// sends no signature and so never enters the execute branch at all. The
+// removed sweep leg also carried retry logic for a real shipped bug class on
+// that funding leg (#692 stale allowance nonce, #684 cross-RPC lag), which now
+// has live coverage nowhere. That path keeps only mocked unit-test coverage
+// (`routes/__tests__/x402.test.ts`) — which is precisely what this harness
+// exists to not rely on.
+//
+// Accepted because no new account can be created on that rail and the legs
+// were the only x402 legs submitting through the relayer's shared nonce lane —
+// a live infrastructure defect (#1533), not something the money-flow
+// invariants were written to catch. Revisit if dev-pilot legacy Safes start
+// carrying meaningful x402 volume.
 //
 // The delegation-rail legs run a SECOND identity: the rail is a property of the
 // account, so the seeded legacy-rail agent cannot exercise it. They are ordered

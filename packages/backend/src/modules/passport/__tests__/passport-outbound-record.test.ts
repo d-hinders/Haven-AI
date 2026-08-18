@@ -30,7 +30,29 @@ const openSpy = vi.fn(async (params: OpenParams) => {
   return { id: 'rec-1', broadcast: broadcastSpy, mined: minedSpy, failed: failedSpy }
 })
 
-vi.mock('../../../infra/outbound-queue.js', () => ({ openOutboundRecord: openSpy }))
+// The pipeline is mocked here: its real lock/sign/stamp behaviour is proven
+// in passport-relayer-lock.test.ts and infra tests; THIS file pins the call
+// sites' ordering and fence wiring (recordId passed through).
+const submitSpy = vi.fn(async (params: { recordId: string | null }) => {
+  trace.push('broadcast')
+  void params
+  return {
+    hash: TX_HASH,
+    nonce: 77,
+    wait: async () => {
+      if (waitReverts) {
+        const err = new Error('transaction execution reverted') as Error & { code: string }
+        err.code = 'CALL_EXCEPTION'
+        throw err
+      }
+      return { status: 1 }
+    },
+  }
+})
+vi.mock('../../../infra/outbound-queue.js', () => ({
+  openOutboundRecord: openSpy,
+  submitRecorded: submitSpy,
+}))
 
 vi.mock('../../../infra/relayer.js', async () => {
   const actual = await vi.importActual<typeof import('../../../infra/relayer.js')>(
@@ -40,37 +62,20 @@ vi.mock('../../../infra/relayer.js', async () => {
 })
 
 // Faithful to ethers v6: a mined-and-reverted tx makes wait() THROW a
-// CALL_EXCEPTION — it never resolves `{ status: 0 }` (#1556 review: a mock
-// that returned status 0 made the revert branch look covered while the real
-// path was dead code).
+// CALL_EXCEPTION — it never resolves `{ status: 0 }` (#1556 review). The
+// throw lives in submitSpy's returned wait above.
 let waitReverts = false
-const wait = async () => {
-  if (waitReverts) {
-    const err = new Error('transaction execution reverted') as Error & { code: string }
-    err.code = 'CALL_EXCEPTION'
-    throw err
-  }
-  return { status: 1 }
-}
 vi.mock('ethers', async () => {
   const actual = await vi.importActual<typeof import('ethers')>('ethers')
   class FakeContract {
     attest = Object.assign(
       async () => {
-        trace.push('broadcast')
-        return {
-          hash: TX_HASH,
-          nonce: 77,
-          maxFeePerGas: 2_000_000_000n,
-          maxPriorityFeePerGas: 1_000_000n,
-          wait,
-        }
+        throw new Error('direct contract broadcast — must go through submitRecorded (#1559)')
       },
       { staticCall: async () => UID },
     )
     revoke = async () => {
-      trace.push('broadcast')
-      return { hash: TX_HASH, nonce: 78, wait }
+      throw new Error('direct contract broadcast — must go through submitRecorded (#1559)')
     }
   }
   return { ...actual, Contract: FakeContract }
@@ -96,15 +101,15 @@ beforeEach(() => {
 })
 
 describe('passport anchor outbound record (#1556)', () => {
-  it('attest: opens the record BEFORE broadcasting, stamps the hash, closes mined', async () => {
+  it('attest: opens the record BEFORE submitting, hands the pipeline the fence id, closes mined', async () => {
     const result = await anchorOnChain(84532, CLAIM)
 
     expect(result.txHash).toBe(TX_HASH)
-    expect(trace).toEqual(['record:open', 'broadcast', 'record:broadcast', 'record:mined'])
+    // The stamp now lives INSIDE the pipeline (#1559) — the site's job is the
+    // ordering and the fence wiring.
+    expect(trace).toEqual(['record:open', 'broadcast', 'record:mined'])
     expect(openSpy.mock.calls[0][0]).toMatchObject({ chainId: 84532, submitter: 'passport_attest' })
-    // The stamp carries the broadcast's own identifiers — what the unmined
-    // scan (#1558) keys on.
-    expect(broadcastSpy.mock.calls[0][0]).toMatchObject({ hash: TX_HASH, nonce: 77 })
+    expect(submitSpy.mock.calls[0][0]).toMatchObject({ recordId: 'rec-1', chainId: 84532 })
     // The record's calldata is the exact bytes a bump would re-broadcast.
     expect((openSpy.mock.calls[0][0] as { data: string }).data.length).toBeGreaterThan(200)
   })
@@ -112,13 +117,14 @@ describe('passport anchor outbound record (#1556)', () => {
   it('attest: a REVERT (wait throws, per real ethers v6) closes the record as failed', async () => {
     waitReverts = true
     await expect(anchorOnChain(84532, CLAIM)).rejects.toThrow('reverted')
-    expect(trace).toEqual(['record:open', 'broadcast', 'record:broadcast', 'record:failed'])
+    expect(trace).toEqual(['record:open', 'broadcast', 'record:failed'])
     expect(minedSpy).not.toHaveBeenCalled()
   })
 
-  it('revoke: same shape — open before broadcast, mined on success', async () => {
+  it('revoke: same shape — open before submit, fence id through, mined on success', async () => {
     await revokeOnChain(84532, UID)
-    expect(trace).toEqual(['record:open', 'broadcast', 'record:broadcast', 'record:mined'])
+    expect(trace).toEqual(['record:open', 'broadcast', 'record:mined'])
     expect(openSpy.mock.calls[0][0]).toMatchObject({ submitter: 'passport_revoke' })
+    expect(submitSpy.mock.calls[0][0]).toMatchObject({ recordId: 'rec-1' })
   })
 })

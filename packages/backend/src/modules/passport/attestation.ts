@@ -19,8 +19,8 @@
  */
 
 import { AbiCoder, Contract, Interface } from 'ethers'
-import { getRelayer, withRelayerSendLock } from '../../infra/relayer.js'
-import { openOutboundRecord } from '../../infra/outbound-queue.js'
+import { getRelayer } from '../../infra/relayer.js'
+import { openOutboundRecord, submitRecorded } from '../../infra/outbound-queue.js'
 import { getEasDeployment, getPassportSchemaUid } from './schema.js'
 import type { Anchor, AnchorResult, PassportClaim } from './issuance.js'
 import type { Revoker } from './revocation.js'
@@ -122,20 +122,16 @@ export const anchorOnChain: Anchor = async (
     data: buildAttestCall(chainId, claim).data,
   })
 
-  // Serialised on the relayer's nonce lane (#1546). This module was the only
-  // write-shaped `getRelayer` consumer that submitted without the lock, and the
-  // transaction it loses is not necessarily its own: an unlocked broadcast can
-  // land inside another path's nonce-read→broadcast window and fail THAT
-  // submission — a payment funding, a gasless sweep, a delegation-rail
-  // activation. Only the broadcast is exclusive; `staticCall` above is a read,
-  // and the receipt wait below stays outside so anchors and payments still
-  // confirm in parallel.
-  const tx = await withRelayerSendLock(chainId, () => contract.attest(request))
-  await record.broadcast({
-    hash: tx.hash,
-    nonce: tx.nonce,
-    maxFeePerGas: tx.maxFeePerGas,
-    maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
+  // #1559: sign → stamp → broadcast through the outbound pipeline. The stamp
+  // (inside submitRecorded, under the relayer send lock) is both the durable
+  // record and the fence — see outbound-queue.ts. The receipt wait below
+  // stays outside the exclusive window so anchors and payments still confirm
+  // in parallel (#1546).
+  const tx = await submitRecorded({
+    chainId,
+    recordId: record.id,
+    to: eas,
+    data: buildAttestCall(chainId, claim).data,
   })
   // Persist the hash BEFORE waiting (#1043): if the wait times out or the
   // process dies here, the retry recovers this attestation from its receipt
@@ -222,8 +218,6 @@ export function buildRevokeCall(
  */
 export const revokeOnChain: Revoker = async (chainId: number, attestationUid: string) => {
   const { eas } = getEasDeployment(chainId)
-  const contract = new Contract(eas, EAS_ABI, getRelayer(chainId))
-  const request = buildRevokeRequest(chainId, attestationUid)
   // #1556: same durable-record shape as `anchorOnChain`, opened pre-broadcast.
   const record = await openOutboundRecord({
     chainId,
@@ -231,13 +225,13 @@ export const revokeOnChain: Revoker = async (chainId: number, attestationUid: st
     to: eas,
     data: buildRevokeCall(chainId, attestationUid).data,
   })
-  // Same nonce-lane serialisation as `anchorOnChain` (#1546); wait outside.
-  const tx = await withRelayerSendLock(chainId, () => contract.revoke(request))
-  await record.broadcast({
-    hash: tx.hash,
-    nonce: tx.nonce,
-    maxFeePerGas: tx.maxFeePerGas,
-    maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
+  // #1559: same sign → stamp → broadcast pipeline as `anchorOnChain`; the
+  // receipt wait stays outside the exclusive window (#1546).
+  const tx = await submitRecorded({
+    chainId,
+    recordId: record.id,
+    to: eas,
+    data: buildRevokeCall(chainId, attestationUid).data,
   })
   let receipt
   try {

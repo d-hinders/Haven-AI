@@ -32,7 +32,15 @@ const openSpy = vi.fn(async (params: { submitter: string; to: string; data: stri
   void params
   return { id: 'rec-1', broadcast: broadcastSpy, mined: minedSpy, failed: failedSpy }
 })
-vi.mock('../../infra/outbound-queue.js', () => ({ openOutboundRecord: openSpy }))
+const submitSpy = vi.fn(async (params: { recordId: string | null }) => {
+  trace.push('broadcast')
+  void params
+  return { hash: TX_HASH, nonce: 11 }
+})
+vi.mock('../../infra/outbound-queue.js', () => ({
+  openOutboundRecord: openSpy,
+  submitRecorded: submitSpy,
+}))
 
 const finishSpy = vi.fn(async () => {
   trace.push('spend:finish')
@@ -50,17 +58,6 @@ const waitForTransaction = vi.fn(async () => receiptOutcome)
 vi.mock('../allowance-module.js', () => ({
   getRelayerWallet: () => ({ provider: { waitForTransaction } }),
 }))
-
-vi.mock('ethers', async () => {
-  const actual = await vi.importActual<typeof import('ethers')>('ethers')
-  class FakeContract {
-    transferWithAuthorization = async () => {
-      trace.push('broadcast')
-      return { hash: TX_HASH, nonce: 11, maxFeePerGas: 4n, maxPriorityFeePerGas: 2n }
-    }
-  }
-  return { ...actual, ethers: { ...actual.ethers, Contract: FakeContract } }
-})
 
 const { relaySweepAuthorization } = await import('../sweep.js')
 
@@ -106,26 +103,29 @@ describe('relaySweepAuthorization — characterization (#1557)', () => {
 describe('relaySweepAuthorization — outbound record (#1557)', () => {
   it('opens the record BEFORE broadcasting, stamps it, closes mined on success', async () => {
     await relaySweepAuthorization(AUTH, '0x' + 'ab'.repeat(65))
-    expect(trace).toEqual(['record:open', 'broadcast', 'record:broadcast', 'spend:finish', 'record:mined'])
+    expect(trace).toEqual(['record:open', 'broadcast', 'spend:finish', 'record:mined'])
     const opened = openSpy.mock.calls[0][0]
     expect(opened).toMatchObject({ submitter: 'sweep', to: AUTH.token })
     // The record carries the exact transferWithAuthorization calldata a bump
     // would re-broadcast — selector included (0xcf092995: the bytes-signature EIP-3009 variant this relay uses).
     expect(opened.data.startsWith('0xcf092995')).toBe(true)
-    expect(broadcastSpy.mock.calls[0][0]).toMatchObject({ hash: TX_HASH, nonce: 11 })
+    // Fence wiring: the pipeline gets the record id and the same calldata.
+    const submitted = submitSpy.mock.calls[0][0] as { recordId: string; data: string }
+    expect(submitted.recordId).toBe('rec-1')
+    expect(submitted.data.startsWith('0xcf092995')).toBe(true)
   })
 
   it('a resolved status-0 receipt closes the record FAILED', async () => {
     receiptOutcome = { status: 0, gasUsed: 90_000n, gasPrice: 7n }
     await expect(relaySweepAuthorization(AUTH, '0x' + 'ab'.repeat(65))).rejects.toThrow('reverted')
-    expect(trace).toEqual(['record:open', 'broadcast', 'record:broadcast', 'spend:finish', 'record:failed'])
+    expect(trace).toEqual(['record:open', 'broadcast', 'spend:finish', 'record:failed'])
     expect(minedSpy).not.toHaveBeenCalled()
   })
 
   it('a TIMEOUT leaves the record at broadcast — the tx may still land; the unmined scan owns it', async () => {
     receiptOutcome = null
     await expect(relaySweepAuthorization(AUTH, '0x' + 'ab'.repeat(65))).rejects.toThrow('not confirmed')
-    expect(trace).toEqual(['record:open', 'broadcast', 'record:broadcast', 'spend:finish'])
+    expect(trace).toEqual(['record:open', 'broadcast', 'spend:finish'])
     expect(minedSpy).not.toHaveBeenCalled()
     expect(failedSpy).not.toHaveBeenCalled()
   })

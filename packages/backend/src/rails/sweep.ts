@@ -9,8 +9,7 @@ import {
   type SweepExpectedAuth,
 } from '@haven_ai/sdk'
 import { getRelayerWallet } from './allowance-module.js'
-import { withRelayerSendLock } from '../infra/relayer.js'
-import { openOutboundRecord } from '../infra/outbound-queue.js'
+import { openOutboundRecord, submitRecorded } from '../infra/outbound-queue.js'
 
 /**
  * Gasless delegate-sweep helpers (EIP-3009 `transferWithAuthorization`).
@@ -129,7 +128,6 @@ export async function relaySweepAuthorization(
     userId: attribution?.userId,
   })
   const relayer = getRelayerWallet(auth.chainId)
-  const usdc = new ethers.Contract(auth.token, USDC_TRANSFER_WITH_AUTHORIZATION_ABI, relayer)
   const callArgs = [
     auth.from,
     auth.to,
@@ -153,16 +151,18 @@ export async function relaySweepAuthorization(
       [...callArgs],
     ),
   })
-  // Serialise the broadcast with every other relayer submission on this chain
-  // so the sweep can't race a payment for the same EOA nonce (#692/#718).
-  const tx = await withRelayerSendLock(auth.chainId, () =>
-    usdc.transferWithAuthorization(...callArgs),
-  )
-  await record.broadcast({
-    hash: tx.hash,
-    nonce: tx.nonce,
-    maxFeePerGas: tx.maxFeePerGas,
-    maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
+  // #1559: sign → stamp → broadcast; the stamp (under the relayer send lock,
+  // inside submitRecorded) both records the sweep durably and fences it —
+  // the sweep can't race a payment for the same EOA nonce (#692/#718), on
+  // this replica or any other.
+  const tx = await submitRecorded({
+    chainId: auth.chainId,
+    recordId: record.id,
+    to: auth.token,
+    data: new ethers.Interface(USDC_TRANSFER_WITH_AUTHORIZATION_ABI).encodeFunctionData(
+      'transferWithAuthorization',
+      [...callArgs],
+    ),
   })
   // `tx.wait()` can return null (or race) on a lagging RPC even when the tx has
   // landed — which previously surfaced as a spurious "Sweep relay failed" while

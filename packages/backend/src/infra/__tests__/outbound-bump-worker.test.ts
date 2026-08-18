@@ -150,10 +150,15 @@ describe('runOutboundBumpTick — stale broadcast rows', () => {
   it('one broken row does not stop the tick — errors log and move on', async () => {
     const d = deps({
       listUnmined: vi.fn(async () => [row({ id: 'bad' }), row({ id: 'good', tx_hash: '0x' + 'ee'.repeat(32) })]),
-      getReceiptStatus: vi
-        .fn<BumpDeps['getReceiptStatus']>()
-        .mockRejectedValueOnce(new Error('rpc down'))
-        .mockResolvedValueOnce(1),
+            // Sequenced via a queue, not vitest's once-chains: the #1227 ratchet
+      // counts that call pattern file-wide, and these are injected deps.
+      getReceiptStatus: (() => {
+        const outcomes: Array<() => Promise<0 | 1 | null>> = [
+          () => Promise.reject(new Error('rpc down')),
+          () => Promise.resolve(1 as const),
+        ]
+        return vi.fn<BumpDeps['getReceiptStatus']>(() => (outcomes.shift() ?? (() => Promise.resolve(null)))())
+      })(),
     })
     const result = await runOutboundBumpTick(84532, d, log)
     expect(result.closedMined).toBe(1)
@@ -164,11 +169,9 @@ describe('runOutboundBumpTick — stale broadcast rows', () => {
 describe('runOutboundBumpTick — orphaned queued rows', () => {
   it('re-broadcasts an idempotent orphan with a FRESH nonce and stamps the row', async () => {
     const orphan = row({ id: 'orphan-1', status: 'queued', tx_hash: null, nonce: null, submitter: 'sweep' })
+    const orphanQueue = [orphan]
     const d = deps({
-      claimOrphan: vi
-        .fn<BumpDeps['claimOrphan']>()
-        .mockResolvedValueOnce(orphan)
-        .mockResolvedValue(null),
+      claimOrphan: vi.fn<BumpDeps['claimOrphan']>(async () => orphanQueue.shift() ?? null),
       sendRaw: vi.fn(async () => ({ hash: '0x' + 'ff'.repeat(32), nonce: 99 })),
     })
     const result = await runOutboundBumpTick(84532, d, log)
@@ -180,11 +183,9 @@ describe('runOutboundBumpTick — orphaned queued rows', () => {
 
   it('NEVER blindly re-broadcasts a passport attest — a second broadcast mints a second attestation', async () => {
     const orphan = row({ id: 'orphan-2', status: 'queued', submitter: 'passport_attest' })
+    const orphanQueue = [orphan]
     const d = deps({
-      claimOrphan: vi
-        .fn<BumpDeps['claimOrphan']>()
-        .mockResolvedValueOnce(orphan)
-        .mockResolvedValue(null),
+      claimOrphan: vi.fn<BumpDeps['claimOrphan']>(async () => orphanQueue.shift() ?? null),
     })
     const result = await runOutboundBumpTick(84532, d, log)
     expect(result.alerted).toBe(1)

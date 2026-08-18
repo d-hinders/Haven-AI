@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - .agents/skills/quality-scan/SKILL.md
-last-verified: "2026-08-14" # 2026-08-14 full-repo run appended: the API-contract finding (epic #1442, approved); prior real-DB finding re-checked and excluded as improved
+last-verified: "2026-08-18" # 2026-08-18 full-repo run appended: the outbound-tx-queue finding (epic #1554, approved); both prior findings re-checked and excluded per their dispositions
 ---
 
 # Quality-Scan Ledger
@@ -83,3 +83,46 @@ Becomes `shipped` when the epic closes.
 **Excluded this run:** the 2026-07 real-DB finding — its ratchet reads 62
 mocks / 465 calls against the 1,059 recorded above, i.e. materially improved,
 so it does not qualify for re-surfacing.
+
+---
+
+## 2026-08-18 — full repo
+
+**Finding: outbound relayer transactions have no lifecycle — the "interim"
+in-process serialisation from July is permanent in practice.**
+
+- Evidence: **9 files** share the relayer nonce lane
+  (`rg -ln withRelayerSendLock packages/backend/src -g '!*.test.ts'`), of which
+  **4 survive the Safe-rail retirement #1440** (hybrid-provisioning, sweep,
+  passport attestation, relayer itself) — so the class does not die with the
+  legacy rail. **6 issues in the class in 7 weeks**: #692 (2026-06-30), #718,
+  #814 (phase-0 hardening, landed the lock 2026-07-07), #1533, #1537, #1546.
+  The code names its own gaps twice: `infra/relayer.ts:16` ("Interim until the
+  durable outbound-tx queue lands; in-process only") and `infra/relayer.ts:39`
+  ("no bump path (yet) — the stuck tx blocks the relayer's nonce lane").
+- Demonstrated cost: #1533 was a live incident four days before this scan —
+  the relayer went backwards 5 nonces in 0.6s, both QA attempts red, a full
+  diagnosis day (#1529 → #1533 → #1537). #1546 (the day before the scan) was
+  the same class from another direction. The stuck-tx gap has no fix at all;
+  the only defence is doubled fee headroom, which is a guess.
+- Why #718's closure does not cover this: it closed as "solved for the session
+  rail, stays for legacy until Stage 3 retires it" — but the 4 surviving
+  submitters are delegation-rail and cross-rail, not legacy.
+- Slicing: durable `outbound_txs` record (#1555, blocks the rest) →
+  submit-through-queue for the non-money pair (#1556) → sweep, money-path
+  (#1557) → leader-locked bump/replacement worker (#1558) → cross-replica
+  leasing + retire the lock + re-point the #1546 scan (#1559).
+
+**Second finding deliberately absent.** Probed and refused under the bar:
+`any` density (≈10 hits repo-wide), local/hosted MCP tool mirroring (already
+parity-tested), frontend source/test ratio (142/102, healthy), core's thin
+tests (6,168 of 6,618 lines are generated `api-types.ts`), and the
+merchant/QA-flakiness wave (eight fixes landed the same week — filing would be
+nagging, not scanning).
+
+**Disposition: approved by the owner 2026-08-18 → epic #1554** (backlog; drive
+with `ship-next epic=#1554`). Becomes `shipped` when the epic closes.
+
+**Excluded this run:** the 2026-07 real-DB finding (`shipped`, ratchet holds)
+and the 2026-08-14 API-contract finding (epic #1442 approved; #1446 still
+open — in progress, not re-surfaceable).

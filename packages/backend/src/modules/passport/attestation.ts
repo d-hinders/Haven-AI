@@ -19,7 +19,7 @@
  */
 
 import { AbiCoder, Contract, Interface } from 'ethers'
-import { getRelayer } from '../../infra/relayer.js'
+import { getRelayer, withRelayerSendLock } from '../../infra/relayer.js'
 import { getEasDeployment, getPassportSchemaUid } from './schema.js'
 import type { Anchor, AnchorResult, PassportClaim } from './issuance.js'
 import type { Revoker } from './revocation.js'
@@ -113,7 +113,15 @@ export const anchorOnChain: Anchor = async (
   // the payload is wrong, instead of burning gas on a failing transaction.
   const attestationUid: string = await contract.attest.staticCall(request)
 
-  const tx = await contract.attest(request)
+  // Serialised on the relayer's nonce lane (#1546). This module was the only
+  // write-shaped `getRelayer` consumer that submitted without the lock, and the
+  // transaction it loses is not necessarily its own: an unlocked broadcast can
+  // land inside another path's nonce-read→broadcast window and fail THAT
+  // submission — a payment funding, a gasless sweep, a delegation-rail
+  // activation. Only the broadcast is exclusive; `staticCall` above is a read,
+  // and the receipt wait below stays outside so anchors and payments still
+  // confirm in parallel.
+  const tx = await withRelayerSendLock(chainId, () => contract.attest(request))
   // Persist the hash BEFORE waiting (#1043): if the wait times out or the
   // process dies here, the retry recovers this attestation from its receipt
   // instead of minting a second one.
@@ -190,7 +198,8 @@ export const revokeOnChain: Revoker = async (chainId: number, attestationUid: st
     schema: getPassportSchemaUid(chainId),
     data: { uid: attestationUid, value: 0n },
   }
-  const tx = await contract.revoke(request)
+  // Same nonce-lane serialisation as `anchorOnChain` (#1546); wait outside.
+  const tx = await withRelayerSendLock(chainId, () => contract.revoke(request))
   const receipt = await tx.wait()
   if (!receipt || receipt.status !== 1) {
     throw new Error(`passport revocation reverted (tx ${tx.hash})`)

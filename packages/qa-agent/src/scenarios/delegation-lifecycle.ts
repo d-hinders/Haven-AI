@@ -22,8 +22,8 @@
 import { ethers } from 'ethers'
 import { signUserOpTypedDataForDelegation } from '@haven_ai/sdk'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
+import { SEPOLIA_USDC } from '../lib/chain.js'
 
-const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const CHAIN_ID = 84532
 
 /** Small enough to be cheap, big enough for two 0.002 payments. */

@@ -963,6 +963,18 @@ error instead of quietly routing a payment at the wrong chain's bundler.
   the #961 stale-replay refresh, the settle flip) is PREPARE-checked against the
   real schema in CI via `db-schema-smoke`.
 - Keep x402 budgets small and reset-bound.
+- **The settling party needs native gas, and its exhaustion looks like a payment
+  bug** ([#1530](https://github.com/d-hinders/Haven-AI/issues/1530)). Every
+  merchant-facing settlement above — `transferWithAuthorization` on the EIP-3009
+  path, `redeemDelegations` on erc7710 — is submitted by a wallet that pays gas.
+  That wallet is the merchant's or facilitator's, not Haven's, and Haven cannot
+  observe it. When the dev demo-merchant's settlement wallet ran to 255 gwei on
+  2026-08-17, every settlement-requiring leg failed with a merchant-side error
+  that named nothing about gas; the shape is indistinguishable from a broken
+  payment path until someone reads the wallet. Haven's own legs were correct
+  throughout. The QA harness now checks it in preflight, and the demo merchant
+  reports it on `/healthz`; a third-party merchant offers no such signal, which
+  is worth remembering before concluding that a settlement failure is Haven's.
 - Treat the delegate key as a hot payment key for x402.
 - Reconcile or sweep stranded delegate balances before scaling.
 - Do not describe demo x402 endpoints as production merchant settlement,

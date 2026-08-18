@@ -324,6 +324,33 @@ const start = async () => {
     void runRelayerMonitor()
     setInterval(runRelayerMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
 
+    // Outbound-tx bump/replacement worker (#1558, epic #1554): per served
+    // chain, close broadcast rows the chain has already decided, replace the
+    // truly stuck ones with bumped fees, and adopt orphaned queued rows from
+    // a submitter that died mid-flight. Leader-locked: replacements are
+    // same-nonce broadcasts, and two replicas bumping the same lane would
+    // race each other's replacements.
+    const OUTBOUND_BUMP_INTERVAL_MS = 60_000
+    const runOutboundBump = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.outboundBump, async () => {
+          const { runOutboundBumpTick, productionBumpDeps } = await import('./infra/outbound-bump-worker.js')
+          const deps = await productionBumpDeps()
+          const chains = deployableChainIds()
+          for (const chainId of chains) {
+            const tick = await runOutboundBumpTick(chainId, deps, app.log)
+            if (tick.bumped || tick.closedMined || tick.closedFailed || tick.rebroadcastOrphans || tick.alerted) {
+              app.log.info({ chainId, ...tick }, 'Outbound bump tick acted')
+            }
+          }
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Outbound bump tick failed')
+      }
+    }
+    void runOutboundBump()
+    setInterval(runOutboundBump, OUTBOUND_BUMP_INTERVAL_MS).unref()
+
     // L0 passport anchor sweep (#972 / #973). Both halves of issuance are
     // fire-and-forget by design — an EAS write must never block agent creation
     // or an owner's revoke — which only holds because something later retries

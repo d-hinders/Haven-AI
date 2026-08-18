@@ -31,6 +31,8 @@ import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-sign
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
 import {
   CLAIM_NEXT_OUTBOUND_TX_SQL,
+  CLAIM_ORPHANED_OUTBOUND_TX_SQL,
+  COUNT_LANE_ATTEMPTS_AT_NONCE_SQL,
   ENQUEUE_OUTBOUND_TX_SQL,
   LIST_UNMINED_OUTBOUND_TXS_SQL,
   MARK_OUTBOUND_TX_BROADCAST_SQL,
@@ -427,6 +429,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'outbound: mark failed', sql: MARK_OUTBOUND_TX_FAILED_SQL },
   { name: 'outbound: mark replaced', sql: MARK_OUTBOUND_TX_REPLACED_SQL },
   { name: 'outbound: list unmined for the bump worker', sql: LIST_UNMINED_OUTBOUND_TXS_SQL },
+  { name: 'outbound: claim an orphaned queued row (#1558)', sql: CLAIM_ORPHANED_OUTBOUND_TX_SQL },
+  { name: 'outbound: count lane attempts at a nonce (#1558)', sql: COUNT_LANE_ATTEMPTS_AT_NONCE_SQL },
   // Owner-alias aggregate (#1167). IMPORTED — verbatim from routes/user.ts.
   { name: 'owner-aliases: list for confirmed owners', sql: LIST_OWNER_ALIASES_SQL },
   { name: 'owner-aliases: upsert', sql: UPSERT_OWNER_ALIAS_SQL },

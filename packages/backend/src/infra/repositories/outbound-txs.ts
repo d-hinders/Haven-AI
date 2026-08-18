@@ -90,7 +90,7 @@ export const MARK_OUTBOUND_TX_MINED_SQL = `UPDATE outbound_txs
    RETURNING *`
 
 export const MARK_OUTBOUND_TX_FAILED_SQL = `UPDATE outbound_txs
-     SET status = 'failed', error = $2, updated_at = NOW()
+     SET status = 'failed', error = $2, nonce = COALESCE($3, nonce), updated_at = NOW()
    WHERE id = $1 AND status IN ('queued', 'broadcast')
    RETURNING *`
 
@@ -104,6 +104,38 @@ export const LIST_UNMINED_OUTBOUND_TXS_SQL = `SELECT * FROM outbound_txs
    WHERE chain_id = $1 AND status = 'broadcast'
      AND updated_at < NOW() - ($2 * INTERVAL '1 second')
    ORDER BY created_at, id`
+
+/**
+ * Claim ONE orphaned queued row (#1558): queued, past the orphan age, lease
+ * free or stale. The age predicate is what separates an orphan from an
+ * in-flight inline submission — slice-2 sites broadcast within seconds of
+ * enqueueing without ever claiming, so a young unclaimed row is NOT ours to
+ * take. Same lease + SKIP LOCKED shape as the ordinary claim.
+ */
+export const CLAIM_ORPHANED_OUTBOUND_TX_SQL = `UPDATE outbound_txs
+     SET claimed_at = NOW(), updated_at = NOW()
+   WHERE id = (
+     SELECT id FROM outbound_txs
+      WHERE chain_id = $1
+        AND status = 'queued'
+        AND created_at < NOW() - ($2 * INTERVAL '1 second')
+        AND (claimed_at IS NULL OR claimed_at < NOW() - INTERVAL '${CLAIM_LEASE_INTERVAL}')
+      ORDER BY created_at, id
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+   )
+   RETURNING *`
+
+/**
+ * How many replacement ATTEMPTS a (chain, nonce) lane has burned (#1558).
+ * Counts successful bumps (`replaced`) AND failed ones (`failed` rows that
+ * carry the nonce they tried to replace) — review finding: counting only
+ * successes let a lane whose bump broadcasts kept THROWING retry forever
+ * without ever tripping the incident cap, the exact loop the cap exists to
+ * stop.
+ */
+export const COUNT_LANE_ATTEMPTS_AT_NONCE_SQL = `SELECT COUNT(*)::int AS n FROM outbound_txs
+   WHERE chain_id = $1 AND nonce = $2 AND status IN ('replaced', 'failed')`
 
 export async function enqueueOutboundTx(
   params: {
@@ -165,8 +197,14 @@ export async function markOutboundTxFailed(
   id: string,
   error: string,
   db: Executor = pool,
+  /** Set for a failed same-nonce bump ATTEMPT, so the lane cap counts it. */
+  nonce?: bigint,
 ): Promise<OutboundTxRow | null> {
-  const { rows } = await db.query<OutboundTxRow>(MARK_OUTBOUND_TX_FAILED_SQL, [id, error])
+  const { rows } = await db.query<OutboundTxRow>(MARK_OUTBOUND_TX_FAILED_SQL, [
+    id,
+    error,
+    nonce?.toString() ?? null,
+  ])
   return rows[0] ?? null
 }
 
@@ -177,6 +215,30 @@ export async function markOutboundTxReplaced(
 ): Promise<OutboundTxRow | null> {
   const { rows } = await db.query<OutboundTxRow>(MARK_OUTBOUND_TX_REPLACED_SQL, [id, replacedById])
   return rows[0] ?? null
+}
+
+export async function claimOrphanedOutboundTx(
+  chainId: number,
+  olderThanSeconds: number,
+  db: Executor = pool,
+): Promise<OutboundTxRow | null> {
+  const { rows } = await db.query<OutboundTxRow>(CLAIM_ORPHANED_OUTBOUND_TX_SQL, [
+    chainId,
+    olderThanSeconds,
+  ])
+  return rows[0] ?? null
+}
+
+export async function countLaneAttemptsAtNonce(
+  chainId: number,
+  nonce: bigint,
+  db: Executor = pool,
+): Promise<number> {
+  const { rows } = await db.query<{ n: number }>(COUNT_LANE_ATTEMPTS_AT_NONCE_SQL, [
+    chainId,
+    nonce.toString(),
+  ])
+  return rows[0]?.n ?? 0
 }
 
 export async function listUnminedOutboundTxs(

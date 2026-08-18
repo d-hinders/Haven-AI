@@ -22,7 +22,11 @@ import {
 // A UNIQUE chain id per test: claim-next is chain-scoped, so this makes each
 // test hermetic against any row another test (or an unsettled async tail)
 // leaves behind — the CI-only failure this fixed was exactly such a leak.
-let chainCounter = 84_532_000
+// Randomised base per module load: unqualified table names resolve via
+// `search_path = test_wN,public`, so a worker whose schema predates this
+// table silently reads/writes the SHARED public one, where rows survive
+// across runs — a fixed base then collides with a previous run's rows.
+let chainCounter = 84_532_000 + Math.floor(Math.random() * 900_000)
 let CHAIN = 0
 const TO = '0xDB9B1e94B5b69Df7e401DDbedE43491141047dB3'
 const DATA = '0x' + 'ab'.repeat(200)

@@ -56,11 +56,11 @@ vi.mock('ethers', async () => {
         await new Promise((resolve) => setTimeout(resolve, 20))
         trace.push('broadcast:end')
         inFlight -= 1
-        return { hash: TX_HASH, wait: async () => ({ status: 1 }) }
+        return { hash: TX_HASH, nonce: 1, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n, wait: async () => ({ status: 1 }) }
       },
       { staticCall: async () => UID },
     )
-    revoke = async () => ({ hash: TX_HASH, wait: async () => ({ status: 1 }) })
+    revoke = async () => ({ hash: TX_HASH, nonce: 2, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n, wait: async () => ({ status: 1 }) })
   }
   return { ...actual, Contract: FakeContract }
 })

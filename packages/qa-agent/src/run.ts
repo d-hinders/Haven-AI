@@ -27,6 +27,7 @@ import { x402HostedMcpSigner } from './scenarios/x402-hosted-mcp-signer.js'
 import { x402CatalogGuidedPurchase } from './scenarios/x402-catalog-guided-purchase.js'
 import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
 import { thrownErrorDetail } from './lib/thrown-error-detail.js'
+import { runPreflight, formatPreflight } from './lib/preflight.js'
 
 // Deterministic, no-LLM scenarios run in order — seven money-flow invariants:
 // within-budget settle, over-budget queue, x402 over-budget reject, x402 settle,
@@ -93,6 +94,25 @@ async function main(): Promise<void> {
 
   console.log(`Haven money-flow QA → ${cfg.apiUrl}`)
   console.log(`  delegate ${ctx.delegateAddress}\n`)
+
+  // #1530: state the preconditions BEFORE the first leg. The harness used to
+  // assert only what happened during a run, so an exhausted merchant
+  // settlement wallet presented as an unexplained payment failure and cost a
+  // day of diagnosis. Printed unconditionally — a slow drain is only visible
+  // as a trend, and the number is most useful in the log of the run that was
+  // chasing something else.
+  const preflight = await runPreflight(cfg)
+  console.log(formatPreflight(preflight))
+  if (preflight.blocked) {
+    // Refuse rather than run: every leg downstream would fail for this reason
+    // and report it as its own, which is exactly the masking #1530 describes.
+    console.error(
+      '\n✗ preflight: a resource this run consumes is below its floor. ' +
+        'Fix it before reading anything below — the legs cannot pass without it.',
+    )
+    process.exit(1)
+  }
+  console.log('')
 
   const results: { scenario: Scenario; result: ScenarioResult }[] = []
   for (const scenario of SCENARIOS) {

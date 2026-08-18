@@ -33,9 +33,8 @@
 import { HavenClient, buildSweepTypedData } from '@haven_ai/sdk'
 import { ethers } from 'ethers'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
+import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
 
-const BASE_SEPOLIA_RPC = 'https://sepolia.base.org'
-const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 
 /** Mutable purely as a TEST SEAM — see the note in `x402-delegation-3009.ts`. */

@@ -20,7 +20,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-08-17" # #1519: merchant checks authorizationState/balanceOf before submitting, so an already-settled purchase serves the goods instead of 402ing a paid buyer; Troubleshooting gains "a merchant 402 that the chain says was paid". Prior: #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
+last-verified: "2026-08-17" # #1530: the preflight now reports every consumable resource before the first leg and refuses to run when one is below floor; the demo-merchant settlement wallet is added to the funding table it was missing from, and its balance is read from the merchant's own /healthz because the address derives from SETTLEMENT_PRIVATE_KEY in the merchant env. No harness credential, target, or scenario semantics change. Prior:1519: merchant checks authorizationState/balanceOf before submitting, so an already-settled purchase serves the goods instead of 402ing a paid buyer; Troubleshooting gains "a merchant 402 that the chain says was paid". Prior: #1517: merchant faults are reported (and logged) as faults rather than collapsing to "Payment failed"; Troubleshooting now covers three 402 shapes — rejection, fault, bare challenge. Prior: #1516 added the merchant-reason surfacing; #1457: x402-erc7710-hosted added (default topology, hosted MCP + local signer) alongside the SDK leg — the same settlement through HavenClient, asserting the delegate EOA stays unchanged; hosted-topology variant waits on #1456. Prior: re-verified for #1312 (guided catalog purchase QA leg added)
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -123,10 +123,20 @@ receive or store the owner or delegate private key.
 | Safe | Base Sepolia test USDC | Source of the QA agent allowance and payments |
 | Dev relayer | Base Sepolia ETH | Submits Allowance Module transfers and gasless sweep recovery |
 | Delegate EOA | No on-chain funding required | Signs payment and EIP-3009 sweep authorizations off-chain |
+| **Demo-merchant settlement wallet** | **Base Sepolia ETH** | **Submits `transferWithAuthorization` / `redeemDelegations`. Derived from the merchant's `SETTLEMENT_PRIVATE_KEY`; NOT the receiving wallet** |
 
 Ordinary payments and sweep recovery do not require delegate gas. The delegate
 signs off-chain; the relayer submits both constrained Safe transfers and the
 gasless EIP-3009 USDC sweep. Keep the dev relayer funded with Base Sepolia ETH.
+
+> **The settlement wallet was missing from this table until
+> [#1530](https://github.com/d-hinders/Haven-AI/issues/1530).** On 2026-08-17 it
+> ran down to 255 gwei and every x402 leg needing a merchant-side settlement
+> failed — with a merchant error that named nothing about gas. It was the first
+> link in a five-deep chain and masked four defects behind it; the day went into
+> diagnosing the symptom. **The preflight below now checks it on every run**, so
+> this row and the enforced check are the same fact rather than two that can
+> drift.
 
 The demo merchant must also be configured with:
 
@@ -137,6 +147,39 @@ MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb
 
 The second setting creates the deterministic stranded-balance condition used by
 the sweep-recovery scenario.
+
+### Preflight: resources every run consumes (#1530)
+
+Before the first leg, the harness reports every consumable resource and refuses
+to run when one is definitively below its floor:
+
+```text
+preflight — resources this run consumes:
+  ✗ merchant settlement wallet (gas) 0xC03F…22c1: 0.000000255 ETH (0 settlement(s))
+      only 0 settlement(s) of gas left — top this wallet up, or every x402 leg
+      needing a merchant-side settlement will fail with a merchant error that
+      does not name gas (the 2026-08-17 outage)
+  ✓ legacy delegate residual (USDC) 0x1a64…14F1: 0.0 USDC
+```
+
+Three properties worth knowing, because each was a deliberate choice:
+
+- **It prints on every run, pass or fail.** A balance that is fine today and
+  empty next week is visible only as a trend — and the number is most useful in
+  the log of a run that was chasing something else.
+- **Headroom is stated in units of work**, not wei. `255 gwei` reads as a
+  number; `0 settlements` reads as a cause.
+- **Unknown is not failure.** An unreachable RPC, or a merchant deployed before
+  the readiness endpoint, reports `?` and does not block. A preflight that
+  failed the run on its own blind spots would be worse than the silence it
+  replaced.
+
+The settlement wallet's balance comes from the **merchant's own `/healthz`**,
+because the merchant is the only component that can answer: the address derives
+from `SETTLEMENT_PRIVATE_KEY` in the merchant's environment. Nothing is
+disclosed by reporting it — the address is already advertised as
+`redeemerAddress` in erc7710 challenges, and balances are public on-chain. The
+key is never exposed, and never needs to be.
 
 ### 4. Run the seed locally
 

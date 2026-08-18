@@ -18,10 +18,9 @@
 import { HavenClient, buildSweepTypedData } from '@haven_ai/sdk'
 import { ethers } from 'ethers'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
+import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
 
-const BASE_SEPOLIA_RPC = 'https://sepolia.base.org'
 // Circle's canonical Base Sepolia USDC (matches the SDK's CHAIN_USDC[84532]).
-const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 
 // Wait for the Safe → delegate funding tx to become visible on the RPC before

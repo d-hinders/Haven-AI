@@ -26,6 +26,7 @@ import {
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
 import type { Address } from 'viem'
+import type { SettlementClient } from './x402.js'
 
 export interface DemoMerchantServerOptions {
   merchantAddress: Address
@@ -33,6 +34,13 @@ export interface DemoMerchantServerOptions {
   paymentProcessor: X402PaymentProcessor
   path?: string
   settlementMethods?: readonly SettlementMethod[]
+  /**
+   * #1530: lets `/healthz` report whether the wallet that PAYS for settlement
+   * can still afford to. Optional so a test double or a merchant without a
+   * settlement rail still constructs; absent, `/healthz` omits the block
+   * rather than guessing.
+   */
+  settlementClient?: Pick<SettlementClient, 'readiness'>
 }
 
 interface MerchantSession {
@@ -80,6 +88,26 @@ async function handle(
   }
 
   if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/healthz') {
+    // #1530: `status` answers "is the process up", which was already true on
+    // 2026-08-17 while every settlement failed for want of gas. `settlement`
+    // answers the question that actually predicts whether a payment can
+    // complete. A readiness read that throws must not take health down with
+    // it — an unreachable RPC is a reason to say "unknown", not "unhealthy".
+    let settlement: Record<string, unknown> | undefined
+    try {
+      const ready = await options.settlementClient?.readiness?.()
+      if (ready) {
+        settlement = {
+          address: ready.address,
+          native_balance_wei: ready.balanceWei.toString(),
+          cost_per_settlement_wei: ready.costPerSettlementWei.toString(),
+          settlements_remaining: ready.settlementsRemaining,
+          ok: ready.ok,
+        }
+      }
+    } catch (error) {
+      settlement = { ok: null, error: error instanceof Error ? error.message : 'readiness check failed' }
+    }
     writeJson(res, 200, {
       status: 'ok',
       merchant: options.merchantAddress,
@@ -87,6 +115,7 @@ async function handle(
       chain_id: CHAIN_ID,
       network: `eip155:${CHAIN_ID}`,
       mcp_url: `${options.baseUrl}${options.path}`,
+      ...(settlement ? { settlement } : {}),
     })
     return
   }

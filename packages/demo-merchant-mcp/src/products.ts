@@ -16,6 +16,17 @@ interface MerchantChainConfig {
   usdcDomainVersion: string
   /** Pinned to the same in-repo DelegationManager registry as the backend. */
   delegationManager: Address
+  /**
+   * The `ERC20TransferAmountEnforcer` this merchant will trust as the on-chain
+   * record of "how much has this settlement child spent" (#1515). Pinned, not
+   * read from the attacker-supplied payment: the enforcer address in a
+   * `permissionContext` caveat is chosen by whoever built the delegation, so
+   * trusting `spentMap` from an arbitrary caveat address lets a forged
+   * enforcer return any number. Deterministically deployed, so Base and Base
+   * Sepolia share it — the same address the signer pins
+   * (`packages/signer/src/settlement-child.ts`).
+   */
+  erc20TransferAmountEnforcer: Address
 }
 
 const CHAINS: Record<number, MerchantChainConfig> = {
@@ -24,12 +35,14 @@ const CHAINS: Record<number, MerchantChainConfig> = {
     usdcDomainName: 'USD Coin',
     usdcDomainVersion: '2',
     delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+    erc20TransferAmountEnforcer: '0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc',
   },
   84532: {
     usdcAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     usdcDomainName: 'USDC',
     usdcDomainVersion: '2',
     delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+    erc20TransferAmountEnforcer: '0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc',
   },
 }
 
@@ -46,6 +59,7 @@ export const USDC_ADDRESS = chain.usdcAddress
 export const USDC_DOMAIN_NAME = chain.usdcDomainName
 export const USDC_DOMAIN_VERSION = chain.usdcDomainVersion
 export const TRUSTED_DELEGATION_MANAGER = chain.delegationManager
+export const TRUSTED_ERC20_TRANSFER_AMOUNT_ENFORCER = chain.erc20TransferAmountEnforcer
 export const SUPPORTED_SETTLEMENT_METHODS = ['eip3009', 'erc7710'] as const
 export type SettlementMethod = (typeof SUPPORTED_SETTLEMENT_METHODS)[number]
 export const DEFAULT_SETTLEMENT_METHOD: SettlementMethod = 'eip3009'

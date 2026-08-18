@@ -822,6 +822,156 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     expect(getConnectorStatus).toHaveBeenCalledTimes(2)
   })
 
+  // #1543: runConnect wires installRuntime's early config-written hook to a
+  // best-effort install-status report, so the dashboard can unlock approval
+  // before probes and skill install finish. The final report still follows
+  // and remains authoritative.
+  it('runConnect sends an early install-status report when the runtime config write settles', async () => {
+    const reports: UpdateInstallStatusInput[] = []
+    const updateInstallStatus = vi.fn(async (_setupId: string, _apiKey: string, input: UpdateInstallStatusInput) => {
+      reports.push(input)
+    })
+    await runConnect({
+      setupToken: 'hv_setup_test_early',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-early',
+      waitForApproval: false,
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-5',
+          status: 'awaiting_connection',
+          agent: { name: 'Early Agent' },
+          haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 8453, network: 'Base' },
+          agent_budget: [],
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-5', message: 'Haven Connect Agent 2\nsetup_id: setup-5\nchallenge: mno', expires_at: '2099-01-01T00:00:00.000Z' },
+        })),
+        registerSetup: vi.fn(async (input) => ({
+          setup_id: 'setup-5',
+          agent_id: 'agent-5',
+          status: 'connected_local',
+          agent_status: 'pending_approval',
+          api_key_prefix: input.apiKeyPrefix,
+          api_key_scope: 'setup_pending',
+          delegate_address: input.delegateAddress.toLowerCase(),
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          next_action: 'return_to_haven_for_wallet_approval',
+        })),
+        updateInstallStatus,
+        getConnectorStatus: vi.fn(),
+      },
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_earlykey',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-early'),
+      writeCredentials: vi.fn(async () => ({
+        directory: '/tmp/haven-connect-test-early/agent-5',
+        identityPath: '/tmp/haven-connect-test-early/agent-5/identity.json',
+        signerPath: '/tmp/haven-connect-test-early/agent-5/signer.json',
+        agentPath: '/tmp/haven-connect-test-early/agent-5/agent.json',
+      })),
+      installRuntime: vi.fn(async (_input, deps) => {
+        // Simulate the config write settling mid-install (#1543).
+        await deps?.onRuntimeConfigured?.({
+          runtime: 'claude-code',
+          runtimeMcpMode: 'hosted_plus_signer',
+          hostedMcpConfigured: true,
+          localSignerConfigured: true,
+          localMcpConfigured: false,
+          signerAcknowledged: true,
+          restartRequired: true,
+          nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
+        })
+        return completedInstall('claude-code')
+      }),
+      log: () => undefined,
+    })
+
+    expect(updateInstallStatus).toHaveBeenCalledTimes(2)
+    // The early report carries the config-write facts and the unlock keys…
+    expect(reports[0]).toMatchObject({
+      hostedMcpConfigured: true,
+      localSignerConfigured: true,
+      credentialFilesWritten: true,
+      errorCode: null,
+    })
+    // …but no probe verdict or skill state, which do not exist yet.
+    expect(reports[0].probeResult).toBeUndefined()
+    expect(reports[0].skillInstalled).toBeUndefined()
+    // The final report follows and is the complete, authoritative one.
+    expect(reports[1].probeResult).toBeDefined()
+  })
+
+  it('runConnect survives an early install-status report failure', async () => {
+    const updateInstallStatus = vi.fn()
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValue(undefined)
+    const logs: string[] = []
+    const result = await runConnect({
+      setupToken: 'hv_setup_test_early_fail',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-early-fail',
+      waitForApproval: false,
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-6',
+          status: 'awaiting_connection',
+          agent: { name: 'Early Fail Agent' },
+          haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 8453, network: 'Base' },
+          agent_budget: [],
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-6', message: 'Haven Connect Agent 2\nsetup_id: setup-6\nchallenge: pqr', expires_at: '2099-01-01T00:00:00.000Z' },
+        })),
+        registerSetup: vi.fn(async (input) => ({
+          setup_id: 'setup-6',
+          agent_id: 'agent-6',
+          status: 'connected_local',
+          agent_status: 'pending_approval',
+          api_key_prefix: input.apiKeyPrefix,
+          api_key_scope: 'setup_pending',
+          delegate_address: input.delegateAddress.toLowerCase(),
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          next_action: 'return_to_haven_for_wallet_approval',
+        })),
+        updateInstallStatus,
+        getConnectorStatus: vi.fn(),
+      },
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_earlyfail',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-early-fail'),
+      writeCredentials: vi.fn(async () => ({
+        directory: '/tmp/haven-connect-test-early-fail/agent-6',
+        identityPath: '/tmp/haven-connect-test-early-fail/agent-6/identity.json',
+        signerPath: '/tmp/haven-connect-test-early-fail/agent-6/signer.json',
+        agentPath: '/tmp/haven-connect-test-early-fail/agent-6/agent.json',
+      })),
+      installRuntime: vi.fn(async (_input, deps) => {
+        await deps?.onRuntimeConfigured?.({
+          runtime: 'claude-code',
+          runtimeMcpMode: 'hosted_plus_signer',
+          hostedMcpConfigured: true,
+          localSignerConfigured: true,
+          localMcpConfigured: false,
+          restartRequired: true,
+          nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
+        })
+        return completedInstall('claude-code')
+      }),
+      log: (message) => logs.push(message),
+    })
+
+    // A failed early report is silent (no user action exists for it), never
+    // fatal, and the final report still goes out.
+    expect(result.agentId).toBe('agent-6')
+    expect(updateInstallStatus).toHaveBeenCalledTimes(2)
+    expect(logs.join('\n')).not.toContain('network down')
+  })
+
   it('runConnect polls after registering by default and forwards approvalWait overrides', async () => {
     const logs: string[] = []
     const lifecycleCalls: string[] = []

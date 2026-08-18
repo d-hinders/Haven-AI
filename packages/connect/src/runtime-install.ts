@@ -79,6 +79,28 @@ export interface RuntimeInstallResult {
   messages: string[]
 }
 
+/**
+ * The config-write snapshot handed to `onRuntimeConfigured` (#1543). The
+ * booleans mirror the semantics of the FINAL report's unlock keys minus the
+ * probe verdicts: "configured" here means the config write succeeded, the
+ * required consent is acknowledged, and the signer credential exists on disk
+ * (a local fs check) — not that a handshake has verified it. A later probe
+ * failure refines the final report and sets its errorCode; the dashboard's
+ * unlock condition accepts either state.
+ */
+export interface EarlyRuntimeConfigReport {
+  runtime: RuntimeId
+  runtimeMcpMode: RuntimeMcpMode
+  hostedMcpConfigured: boolean
+  localSignerConfigured: boolean
+  localMcpConfigured: boolean
+  signerAcknowledged?: boolean
+  localMcpAcknowledged?: boolean
+  restartRequired: boolean
+  nextUserAction: string
+  errorCode?: string
+}
+
 export interface RuntimeInstallDeps {
   env?: NodeJS.ProcessEnv
   homeDir?: string
@@ -91,6 +113,18 @@ export interface RuntimeInstallDeps {
    * When provided, a few lightweight heartbeat lines are emitted as they run.
    */
   onProgress?: (message: string) => void
+  /**
+   * #1543: invoked once, the moment the runtime MCP config write has settled —
+   * BEFORE the network probes and the skill install. The dashboard withholds
+   * its budget-approval controls until an install-status report shows the
+   * runtime configured, and the final report only lands after the entire
+   * install; gating approval on that tail made the user wait on work approval
+   * does not depend on. The snapshot carries the config-write facts (no probe
+   * verdicts, no skill state); the caller's complete report remains
+   * authoritative and overwrites these keys. Best-effort by contract: a
+   * throwing callback is swallowed and never fails the install.
+   */
+  onRuntimeConfigured?: (report: EarlyRuntimeConfigReport) => Promise<void> | void
   runCommand?: (command: string, args: string[]) => Promise<void>
   prepareLocalMcpRuntime?: (input: PrepareLocalMcpRuntimeInput) => Promise<PreparedLocalMcpRuntime>
   prepareSignerRuntime?: (input: PrepareSignerRuntimeInput) => Promise<PreparedSignerRuntime>
@@ -218,6 +252,39 @@ export async function installRuntime(
         homeDir: deps.homeDir,
         mode: localRuntime ? 'local' : 'hosted',
       })
+
+  // #1543: the config write has settled — everything the dashboard's approval
+  // unlock reads is now known, so report it before the probes and skill
+  // install run. The signer-credential check is a local fs stat, cheap enough
+  // to make the early booleans carry the final report's semantics (minus the
+  // network probe verdicts, which only refine — never gate — the unlock).
+  if (deps.onRuntimeConfigured) {
+    const signerCredentialOnDisk = await probeLocalSignerCredential(input.signerPath)
+    const earlyLocalMcpOk = configResult.runtimeMcpMode === 'local_stdio' &&
+      configResult.localMcpConfigured &&
+      signerCredentialOnDisk &&
+      Boolean(localMcpConsent?.acknowledged)
+    const earlySignerOk = configResult.runtimeMcpMode === 'local_stdio'
+      ? earlyLocalMcpOk
+      : configResult.signerConfigured && signerCredentialOnDisk && Boolean(signerConsent?.acknowledged)
+    try {
+      await deps.onRuntimeConfigured({
+        runtime,
+        runtimeMcpMode: configResult.runtimeMcpMode,
+        hostedMcpConfigured: configResult.hostedConfigured,
+        localSignerConfigured: earlySignerOk,
+        localMcpConfigured: earlyLocalMcpOk,
+        signerAcknowledged: signerConsent?.acknowledged,
+        localMcpAcknowledged: localMcpConsent?.acknowledged,
+        restartRequired: configResult.restartRequired || restartRequiredForRuntime(runtime, deps.env),
+        nextUserAction: nextAction(runtime, profile.restartMode, configResult.errorCode),
+        errorCode: configResult.errorCode,
+      })
+    } catch {
+      // Best-effort by contract: early reporting must never fail the install —
+      // the caller's complete report follows either way.
+    }
+  }
 
   progress('Almost there — just confirming everything connects…')
   const localProbePromise = configResult.runtimeMcpMode === 'local_stdio' && localRuntimeInstall

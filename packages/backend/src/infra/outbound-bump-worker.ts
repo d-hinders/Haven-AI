@@ -211,13 +211,19 @@ export async function runOutboundBumpTick(
         )
         throw err
       }
+      // ORDER MATTERS (#1559 review, reproduced on real Postgres): the
+      // original must leave 'broadcast' BEFORE the replacement is stamped at
+      // the same nonce, or the partial UNIQUE live-nonce index — correctly —
+      // rejects the stamp and every bump fails forever. A crash between the
+      // two marks leaves the replacement as a queued orphan whose tx is in
+      // flight: the documented residual the orphan path + cap bound.
+      await deps.markReplaced(row.id, replacement.id)
       await deps.markBroadcast(replacement.id, {
         txHash: sent.hash,
         nonce,
         maxFeePerGas: fees.maxFeePerGas,
         maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
       })
-      await deps.markReplaced(row.id, replacement.id)
       result.bumped += 1
       log.info(
         { chainId, nonce: row.nonce, from: row.tx_hash, to: sent.hash },
@@ -272,7 +278,7 @@ export async function runOutboundBumpTick(
 /** Wire the worker to the real repositories, relayer and chain. */
 export async function productionBumpDeps(): Promise<BumpDeps> {
   const repo = await import('./repositories/outbound-txs.js')
-  const { getRelayer, withRelayerSendLock } = await import('./relayer.js')
+  const { getRelayer } = await import('./relayer.js')
   return {
     listUnmined: repo.listUnminedOutboundTxs,
     claimOrphan: repo.claimOrphanedOutboundTx,
@@ -301,19 +307,23 @@ export async function productionBumpDeps(): Promise<BumpDeps> {
     },
 
     async sendRaw(chainId, tx) {
-      const relayer = getRelayer(chainId)
-      const sent = await withRelayerSendLock(chainId, () =>
-        relayer.sendTransaction({
-          to: tx.to,
-          data: tx.data,
-          value: tx.value,
-          ...(tx.nonce !== undefined ? { nonce: tx.nonce } : {}),
-          ...(tx.maxFeePerGas !== undefined ? { maxFeePerGas: tx.maxFeePerGas } : {}),
-          ...(tx.maxPriorityFeePerGas !== undefined
-            ? { maxPriorityFeePerGas: tx.maxPriorityFeePerGas }
-            : {}),
-        }),
-      )
+      // Through the shared sign→broadcast pipeline (#1559) with recordId null:
+      // the worker stamps its own rows (replacement bookkeeping differs from
+      // the inline sites'), and its serialisation is the leader lock + the
+      // in-process belt inside submitRecorded.
+      const { submitRecorded } = await import('./outbound-queue.js')
+      const sent = await submitRecorded({
+        chainId,
+        recordId: null,
+        to: tx.to,
+        data: tx.data,
+        valueAtomic: tx.value,
+        ...(tx.nonce !== undefined ? { nonce: tx.nonce } : {}),
+        ...(tx.maxFeePerGas !== undefined ? { maxFeePerGas: tx.maxFeePerGas } : {}),
+        ...(tx.maxPriorityFeePerGas !== undefined
+          ? { maxPriorityFeePerGas: tx.maxPriorityFeePerGas }
+          : {}),
+      })
       return { hash: sent.hash, nonce: sent.nonce }
     },
   }

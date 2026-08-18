@@ -7,11 +7,18 @@
  * probing the database at the moment the "broadcast" would run — not by
  * trusting call order in a mock.
  */
+import { Wallet } from 'ethers'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from './helpers/db-harness.js'
-import { openOutboundRecord, type OutboundQueueRepo } from '../outbound-queue.js'
-import type { OutboundTxRow } from '../repositories/outbound-txs.js'
+import {
+  OutboundFencedError,
+  openOutboundRecord,
+  submitRecorded,
+  type OutboundQueueRepo,
+  type SubmitChainDeps,
+} from '../outbound-queue.js'
+import { markOutboundTxBroadcast, type OutboundTxRow } from '../repositories/outbound-txs.js'
 
 const TO = '0xdb9b1e94b5b69df7e401ddbede43491141047db3'
 const DATA = '0x' + 'ab'.repeat(80)
@@ -73,6 +80,98 @@ describeDb('openOutboundRecord (#1556)', () => {
     const [row] = await rowsFor(CHAIN)
     expect(row.status).toBe('failed')
     expect(row.error).toContain('reverted')
+  })
+
+  it('CROSS-REPLICA (#1559): the unique live-nonce index arbitrates — the stale replica retries onto the next lane', async () => {
+    // Two "replicas" = two submits with pass-through locks (each real replica
+    // has its OWN in-process lock; across replicas only Postgres is shared).
+    // Replica B's provider view of the pending nonce is deliberately STALE:
+    // it still says 5 after A broadcast at 5. The partial UNIQUE
+    // (chain_id, nonce) WHERE status='broadcast' index — real Postgres, not a
+    // mock — must reject B's stamp and force the retry that re-reads.
+    let pendingNonce = 5
+    const broadcasts: number[] = []
+    const provider = {
+      getNetwork: async () => ({ chainId: BigInt(CHAIN), name: 'test' }),
+      getFeeData: async () => ({ maxFeePerGas: 200n, maxPriorityFeePerGas: 10n, gasPrice: 200n }),
+      estimateGas: async () => 60_000n,
+      getTransactionCount: async () => pendingNonce,
+      broadcastTransaction: async (raw: string) => {
+        const { Transaction } = await import('ethers')
+        const parsed = Transaction.from(raw)
+        broadcasts.push(parsed.nonce)
+        return { hash: parsed.hash, nonce: parsed.nonce } as never
+      },
+    }
+    const wallet = new Wallet('0x' + '22'.repeat(32), provider as never)
+    const chain: SubmitChainDeps = {
+      getRelayer: (() => wallet) as never,
+      withRelayerSendLock: async (_chainId, fn) => fn(),
+    }
+
+    const rowA = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    const rowB = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+
+    const sentA = await submitRecorded(
+      { chainId: CHAIN, recordId: rowA.id, to: TO, data: DATA },
+      undefined,
+      chain,
+    )
+    expect(sentA.nonce).toBe(5)
+
+    // B's replica still believes 5; when the stamp collides, the retry
+    // re-reads — and by then the view has advanced.
+    const staleReads: number[] = []
+    provider.getTransactionCount = async () => {
+      staleReads.push(pendingNonce)
+      const value = pendingNonce
+      pendingNonce = 6
+      return value
+    }
+    const sentB = await submitRecorded(
+      { chainId: CHAIN, recordId: rowB.id, to: TO, data: DATA },
+      undefined,
+      chain,
+    )
+    expect(sentB.nonce).toBe(6)
+    expect(broadcasts).toEqual([5, 6])
+    // The collision really happened: B read twice — once stale, once fresh.
+    expect(staleReads).toEqual([5, 6])
+
+    const rows = await rowsFor(CHAIN)
+    expect(rows.map((r) => [r.nonce, r.status]).sort()).toEqual([
+      ['5', 'broadcast'],
+      ['6', 'broadcast'],
+    ])
+  })
+
+  it('FENCE (#1559): a claimant whose row was re-adopted gets OutboundFencedError and never broadcasts', async () => {
+    const slow = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    // Someone else (a re-adopter) already stamped the row.
+    await markOutboundTxBroadcast(slow.id!, { txHash: TX, nonce: 40n })
+
+    let broadcastCalls = 0
+    const provider = {
+      getNetwork: async () => ({ chainId: BigInt(CHAIN), name: 'test' }),
+      getFeeData: async () => ({ maxFeePerGas: 200n, maxPriorityFeePerGas: 10n, gasPrice: 200n }),
+      estimateGas: async () => 60_000n,
+      getTransactionCount: async () => 41,
+      broadcastTransaction: async () => {
+        broadcastCalls += 1
+        return {} as never
+      },
+    }
+    const wallet = new Wallet('0x' + '33'.repeat(32), provider as never)
+    const chain: SubmitChainDeps = {
+      getRelayer: (() => wallet) as never,
+      withRelayerSendLock: async (_chainId, fn) => fn(),
+    }
+
+    await expect(
+      submitRecorded({ chainId: CHAIN, recordId: slow.id, to: TO, data: DATA }, undefined, chain),
+    ).rejects.toThrow(OutboundFencedError)
+    // Whoever stamps, sends. The fenced loser sent NOTHING.
+    expect(broadcastCalls).toBe(0)
   })
 
   it('FAIL-OPEN: a repository error never reaches the caller, and later calls are no-ops', async () => {

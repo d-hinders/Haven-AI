@@ -227,3 +227,78 @@ describeDb('outbound-txs repository (#1555)', () => {
     ).rejects.toThrow(/check constraint/i)
   })
 })
+
+describeDb('bump replacement sequence against the live-nonce index (#1559 review)', () => {
+  initDbHarness()
+  beforeEach(async () => {
+    CHAIN = ++chainCounter
+    await resetDb()
+  })
+
+  it('replace-then-stamp succeeds; stamp-while-original-live is what the index rejects', async () => {
+    // The reproduced CRITICAL: stamping the replacement while the original
+    // still holds 'broadcast' at the nonce violates idx_outbound_txs_live_nonce.
+    // The worker must demote the original FIRST — this pins that sequence
+    // against real Postgres so the ordering cannot silently regress.
+    const original = await enqueueOutboundTx({ chainId: CHAIN, submitter: 'sweep', toAddress: TO, data: DATA })
+    await markOutboundTxBroadcast(original.id, { txHash: TX, nonce: 21n })
+    const replacement = await enqueueOutboundTx({ chainId: CHAIN, submitter: 'sweep', toAddress: TO, data: DATA })
+
+    // The buggy order — mutation shape, proven to fail:
+    await expect(
+      markOutboundTxBroadcast(replacement.id, { txHash: '0x' + 'ee'.repeat(32), nonce: 21n }),
+    ).rejects.toThrow(/duplicate key|unique/i)
+
+    // The correct order: demote, then stamp.
+    await markOutboundTxReplaced(original.id, replacement.id)
+    const stamped = await markOutboundTxBroadcast(replacement.id, { txHash: '0x' + 'ee'.repeat(32), nonce: 21n })
+    expect(stamped?.status).toBe('broadcast')
+    expect(stamped?.nonce).toBe('21')
+  })
+})
+
+describeDb('bump tick end-to-end over the REAL repository (#1559 review)', () => {
+  initDbHarness()
+  beforeEach(async () => {
+    CHAIN = ++chainCounter
+    await resetDb()
+  })
+
+  it('a stuck broadcast is replaced through real Postgres — the sequence the mocked worker test cannot prove', async () => {
+    const { runOutboundBumpTick } = await import('../../outbound-bump-worker.js')
+    const repo = await import('../outbound-txs.js')
+
+    const stuck = await enqueueOutboundTx({ chainId: CHAIN, submitter: 'sweep', toAddress: TO, data: DATA })
+    await markOutboundTxBroadcast(stuck.id, { txHash: TX, nonce: 33n, maxFeePerGas: 1_000n, maxPriorityFeePerGas: 100n })
+    await db.query(`UPDATE outbound_txs SET updated_at = NOW() - INTERVAL '10 minutes' WHERE id = $1`, [stuck.id])
+
+    const log = { info: () => undefined, warn: () => undefined, error: () => undefined }
+    const result = await runOutboundBumpTick(
+      CHAIN,
+      {
+        listUnmined: repo.listUnminedOutboundTxs,
+        claimOrphan: repo.claimOrphanedOutboundTx,
+        enqueue: repo.enqueueOutboundTx,
+        markBroadcast: repo.markOutboundTxBroadcast,
+        markMined: repo.markOutboundTxMined,
+        markFailed: (id, reason, nonce) => repo.markOutboundTxFailed(id, reason, undefined, nonce),
+        markReplaced: repo.markOutboundTxReplaced,
+        countLaneAttempts: repo.countLaneAttemptsAtNonce,
+        getReceiptStatus: async () => null, // truly unmined
+        currentFees: async () => ({ maxFeePerGas: 900n, maxPriorityFeePerGas: 90n }),
+        sendRaw: async () => ({ hash: '0x' + 'ee'.repeat(32), nonce: 33 }),
+      },
+      log,
+    )
+
+    expect(result.bumped).toBe(1)
+    const rows = await db.query<{ id: string; status: string; nonce: string | null; replaced_by: string | null }>(
+      `SELECT id, status, nonce, replaced_by FROM outbound_txs WHERE chain_id = $1 ORDER BY created_at`,
+      [CHAIN],
+    )
+    expect(rows.rows).toHaveLength(2)
+    expect(rows.rows[0]).toMatchObject({ id: stuck.id, status: 'replaced' })
+    expect(rows.rows[0].replaced_by).toBe(rows.rows[1].id)
+    expect(rows.rows[1]).toMatchObject({ status: 'broadcast', nonce: '33' })
+  })
+})

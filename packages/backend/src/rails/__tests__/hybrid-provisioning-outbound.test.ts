@@ -31,7 +31,26 @@ const openSpy = vi.fn(async (params: { submitter: string; to: string; data: stri
   void params
   return { id: 'rec-1', broadcast: broadcastSpy, mined: minedSpy, failed: failedSpy }
 })
-vi.mock('../../infra/outbound-queue.js', () => ({ openOutboundRecord: openSpy }))
+const submitSpy = vi.fn(async (params: { recordId: string | null }) => {
+  trace.push('broadcast')
+  void params
+  return {
+    hash: TX_HASH,
+    nonce: 9,
+    wait: async () => {
+      if (waitReverts) {
+        const err = new Error('transaction execution reverted') as Error & { code: string }
+        err.code = 'CALL_EXCEPTION'
+        throw err
+      }
+      return { status: 1, gasUsed: 100n, gasPrice: 5n }
+    },
+  }
+})
+vi.mock('../../infra/outbound-queue.js', () => ({
+  openOutboundRecord: openSpy,
+  submitRecorded: submitSpy,
+}))
 
 const finishSpy = vi.fn(async () => {
   trace.push('spend:finish')
@@ -46,27 +65,8 @@ vi.mock('../../infra/relayer.js', async () => {
   const actual = await vi.importActual<typeof import('../../infra/relayer.js')>('../../infra/relayer.js')
   return {
     ...actual,
-    getRelayerFeeOverrides: async () => ({}),
-    getRelayer: () => ({
-      provider: {},
-      sendTransaction: async () => {
-        trace.push('broadcast')
-        return {
-          hash: TX_HASH,
-          nonce: 9,
-          maxFeePerGas: 3n,
-          maxPriorityFeePerGas: 1n,
-          wait: async () => {
-            if (waitReverts) {
-              const err = new Error('transaction execution reverted') as Error & { code: string }
-              err.code = 'CALL_EXCEPTION'
-              throw err
-            }
-            return { status: 1, gasUsed: 100n, gasPrice: 5n }
-          },
-        }
-      },
-    }),
+    getRelayerFeeOverrides: async () => ({ maxFeePerGas: 3n }),
+    getRelayer: () => ({ provider: {} }),
   }
 })
 
@@ -104,19 +104,20 @@ describe('hybrid deploy outbound record (#1556)', () => {
     const result = await ensureHybridDeployed(84532, OWNER)
 
     expect(result.txHash).toBe(TX_HASH)
-    expect(trace).toEqual(['record:open', 'broadcast', 'record:broadcast', 'spend:finish', 'record:mined'])
+    expect(trace).toEqual(['record:open', 'broadcast', 'spend:finish', 'record:mined'])
     expect(openSpy.mock.calls[0][0]).toMatchObject({
       submitter: 'hybrid_deploy',
       to: FACTORY,
       data: FACTORY_DATA,
     })
-    expect(broadcastSpy.mock.calls[0][0]).toMatchObject({ hash: TX_HASH, nonce: 9 })
+    // Fence wiring + the deploy's fee headroom rides through the pipeline.
+    expect(submitSpy.mock.calls[0][0]).toMatchObject({ recordId: 'rec-1', to: FACTORY, maxFeePerGas: 3n })
   })
 
   it('a REVERT (wait throws, real ethers v6) closes the record failed — and the #717 spend stamp still runs', async () => {
     waitReverts = true
     await expect(ensureHybridDeployed(84532, OWNER)).rejects.toThrow('reverted')
-    expect(trace).toEqual(['record:open', 'broadcast', 'record:broadcast', 'spend:finish', 'record:failed'])
+    expect(trace).toEqual(['record:open', 'broadcast', 'spend:finish', 'record:failed'])
     expect(minedSpy).not.toHaveBeenCalled()
     expect(finishSpy).toHaveBeenCalledTimes(1)
   })

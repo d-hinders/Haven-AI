@@ -163,7 +163,7 @@ export async function ensureHybridDeployed(
 
   // Lazy import: the relayer wiring pulls ethers + env config; keep the pure
   // derivation path (compute…) free of it for tests and scripts.
-  const { getRelayer, getRelayerFeeOverrides, withRelayerSendLock } = await import('../infra/relayer.js')
+  const { getRelayer, getRelayerFeeOverrides } = await import('../infra/relayer.js')
   const relayer = getRelayer(chainId)
   if (!relayer.provider) {
     throw new Error('hybrid provisioning: relayer has no provider')
@@ -171,22 +171,22 @@ export async function ensureHybridDeployed(
   // #1556: durable record opened BEFORE the broadcast — a crash between here
   // and the send leaves a queued row the bump worker (#1558) can adopt. The
   // record carries the exact factory calldata a bump would re-broadcast.
-  const { openOutboundRecord } = await import('../infra/outbound-queue.js')
+  const { openOutboundRecord, submitRecorded } = await import('../infra/outbound-queue.js')
   const record = await openOutboundRecord({
     chainId,
     submitter: 'hybrid_deploy',
     to: factory,
     data: factoryData,
   })
+  // #1559: sign → stamp → broadcast; the stamp inside submitRecorded is the
+  // durable record and the fence. The deploy keeps its doubled fee headroom.
   const overrides = await getRelayerFeeOverrides(relayer.provider)
-  const tx = await withRelayerSendLock(chainId, () =>
-    relayer.sendTransaction({ to: factory, data: factoryData, ...overrides }),
-  )
-  await record.broadcast({
-    hash: tx.hash,
-    nonce: tx.nonce,
-    maxFeePerGas: tx.maxFeePerGas,
-    maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
+  const tx = await submitRecorded({
+    chainId,
+    recordId: record.id,
+    to: factory,
+    data: factoryData,
+    ...overrides,
   })
   let receipt
   let waitError: unknown

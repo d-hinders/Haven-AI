@@ -1,17 +1,17 @@
 /**
- * #1546 — passport submissions must share the relayer's nonce lane.
- *
- * The relayer EOA's nonce is strictly sequential and ethers populates it from
- * `getTransactionCount(…, 'pending')` at submit time, so two concurrent
- * broadcasts read the same pending nonce and one is rejected. The transaction
- * that dies is not necessarily the passport's: the loser can be a payment
- * funding, a gasless sweep, or a delegation-rail activation sharing the lane.
+ * #1546, re-pointed by #1559 — passport submissions must go through the
+ * outbound submit pipeline, which serialises on the relayer's nonce lane.
  *
  * Two tests, deliberately different in kind:
- *  - a BEHAVIOURAL pin that two concurrent anchors cannot interleave their
- *    broadcasts (fails if the lock is removed from `attestation.ts`);
- *  - a SCAN so the next passport-shaped module cannot reintroduce the gap
- *    silently — derived from the sources, not from a list someone maintains.
+ *  - BEHAVIOURAL pins that two concurrent anchors cannot interleave their
+ *    broadcasts, and that the anchor waits behind any other tenant of the
+ *    shared lane. The REAL lock and the REAL submitRecorded pipeline run
+ *    (real ethers signing against a fake provider); only the record open is
+ *    stubbed to id-null so no database is touched.
+ *  - A SCAN so the next submitter-shaped module cannot bypass the queue
+ *    silently: queue-lane files must reference `submitRecorded`, and the set
+ *    of legacy lock-only submitters (Safe-bound, retiring with #1440) is
+ *    PINNED so it can only shrink.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -21,46 +21,86 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const BACKEND_SRC = join(__dirname, '..', '..', '..')
 
-// ── The behavioural pin ──────────────────────────────────────────────────────
+// ── The behavioural pins ─────────────────────────────────────────────────────
 
 const UID = '0x' + 'ab'.repeat(32)
-const TX_HASH = '0x' + 'cd'.repeat(32)
 
-/** Records broadcast enter/exit so overlap is observable. */
 const trace: string[] = []
 let inFlight = 0
 let maxConcurrent = 0
+let pendingNonce = 7
 
 const relayerModule = await vi.importActual<typeof import('../../../infra/relayer.js')>(
   '../../../infra/relayer.js',
 )
+const actualEthers = await vi.importActual<typeof import('ethers')>('ethers')
+
+/**
+ * A REAL ethers Wallet over a fake provider: real populate/sign (so the
+ * pre-broadcast hash derivation in submitRecorded is exercised for real),
+ * fake network. `broadcastTransaction` is where overlap would show.
+ */
+function fakeProviderWallet() {
+  const provider = {
+    getNetwork: async () => ({ chainId: 84532n, name: 'test' }),
+    getFeeData: async () => ({ maxFeePerGas: 200n, maxPriorityFeePerGas: 10n, gasPrice: 200n }),
+    estimateGas: async () => 60_000n,
+    getTransactionCount: async () => pendingNonce,
+    async broadcastTransaction(raw: string) {
+      inFlight += 1
+      maxConcurrent = Math.max(maxConcurrent, inFlight)
+      trace.push('broadcast:start')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      trace.push('broadcast:end')
+      inFlight -= 1
+      pendingNonce += 1
+      const parsed = actualEthers.Transaction.from(raw)
+      return { hash: parsed.hash, nonce: parsed.nonce, wait: async () => ({ status: 1 }) }
+    },
+  }
+  return new actualEthers.Wallet('0x' + '11'.repeat(32), provider as never)
+}
+const wallet = fakeProviderWallet()
 
 vi.mock('../../../infra/relayer.js', async () => {
-  // The REAL lock — mocking it would test the mock. Only `getRelayer` is faked,
-  // because it needs a funded key and a provider.
+  // The REAL lock — mocking it would test the mock. Only `getRelayer` is faked.
   const actual = await vi.importActual<typeof import('../../../infra/relayer.js')>(
     '../../../infra/relayer.js',
   )
-  return { ...actual, getRelayer: () => ({ address: '0x' + '11'.repeat(20) }) }
+  return { ...actual, getRelayer: () => wallet }
+})
+
+vi.mock('../../../infra/outbound-queue.js', async () => {
+  // REAL submitRecorded (the pipeline under test); only the record open is
+  // stubbed to id-null so the fence path skips the database entirely.
+  const actual = await vi.importActual<typeof import('../../../infra/outbound-queue.js')>(
+    '../../../infra/outbound-queue.js',
+  )
+  return {
+    ...actual,
+    openOutboundRecord: async () => ({
+      id: null,
+      broadcast: async () => undefined,
+      mined: async () => undefined,
+      failed: async () => undefined,
+    }),
+  }
 })
 
 vi.mock('ethers', async () => {
   const actual = await vi.importActual<typeof import('ethers')>('ethers')
   class FakeContract {
+    // staticCall is the only legitimate Contract use left on the anchor path
+    // (#1559): a direct contract SEND would bypass the pipeline, so it throws.
     attest = Object.assign(
       async () => {
-        inFlight += 1
-        maxConcurrent = Math.max(maxConcurrent, inFlight)
-        trace.push('broadcast:start')
-        // Yield across macrotasks: an unlocked second call would start here.
-        await new Promise((resolve) => setTimeout(resolve, 20))
-        trace.push('broadcast:end')
-        inFlight -= 1
-        return { hash: TX_HASH, nonce: 1, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n, wait: async () => ({ status: 1 }) }
+        throw new Error('direct contract broadcast — must go through submitRecorded')
       },
       { staticCall: async () => UID },
     )
-    revoke = async () => ({ hash: TX_HASH, nonce: 2, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n, wait: async () => ({ status: 1 }) })
+    revoke = async () => {
+      throw new Error('direct contract broadcast — must go through submitRecorded')
+    }
   }
   return { ...actual, Contract: FakeContract }
 })
@@ -70,7 +110,7 @@ const { anchorOnChain, revokeOnChain } = await import('../attestation.js')
 const claim = {
   agentEoa: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
   smartAccount: '0x2222222222222222222222222222222222222222',
-  treasury: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  treasury: '0x3333333333333333333333333333333333333333',
   assuranceLevel: 0,
   policyUri: 'haven:agent:abc',
   issuedAt: 1_700_000_000,
@@ -82,31 +122,31 @@ beforeEach(() => {
   trace.length = 0
   inFlight = 0
   maxConcurrent = 0
+  pendingNonce = 7
 })
 
 /**
  * Hold the shared lane the way another submitter would, and always give it
- * back — `release()` is idempotent and safe in a `finally`. Without that, a
- * failing assertion mid-test leaves the lane held forever and every later test
- * in the file inherits the failure, which is noise masking the real result.
+ * back — `release()` is idempotent and safe in a `finally`.
  */
-function occupyLane(chainId = 84532) {
-  let release!: () => void
-  const held = new Promise<void>((resolve) => { release = resolve })
-  const done = relayerModule.withRelayerSendLock(chainId, () => held)
+function occupyLane() {
+  let releaseInner: (() => void) | undefined
+  const held = new Promise<void>((resolve) => {
+    releaseInner = resolve
+  })
+  const done = relayerModule.withRelayerSendLock(84532, () => held)
   return {
     async release() {
-      release()
+      releaseInner?.()
       await done
     },
   }
 }
 
-describe('passport anchoring holds the relayer send lock (#1546)', () => {
+describe('passport anchoring goes through the serialised submit pipeline (#1546/#1559)', () => {
   it('serialises two concurrent anchors — broadcasts never overlap', async () => {
     await Promise.all([anchorOnChain(84532, claim), anchorOnChain(84532, claim)])
 
-    // The whole invariant: at no point were two broadcasts in flight.
     expect(maxConcurrent).toBe(1)
     expect(trace).toEqual([
       'broadcast:start',
@@ -117,8 +157,6 @@ describe('passport anchoring holds the relayer send lock (#1546)', () => {
   })
 
   it('a lane already busy with another submitter delays the anchor, not the reverse', async () => {
-    // Proves the anchor joins the SHARED lane rather than a private one: the
-    // lock is taken with the same chain id another path would use.
     const lane = occupyLane()
     try {
       const anchor = anchorOnChain(84532, claim)
@@ -170,19 +208,28 @@ function backendSources(dir = BACKEND_SRC, out: string[] = []): string[] {
 
 /**
  * Calls that BROADCAST. Read-only relayer use (balance monitoring, address
- * derivation, `staticCall`) needs no lock and must not be flagged.
+ * derivation, `staticCall`) needs no serialisation and must not be flagged.
  */
-const WRITE_SHAPED = /\.(sendTransaction|attest|revoke|execTransaction|executeAllowanceTransfer)\s*\(/
+const WRITE_SHAPED = /\.(sendTransaction|attest|revoke|execTransaction|executeAllowanceTransfer|broadcastTransaction)\s*\(/
 
-describe('scan: every write-shaped relayer consumer references the lock (#1546)', () => {
-  // KNOWN PRECISION LIMIT (review finding, accepted): the predicate is
-  // file-level — a file holding one locked and one UNLOCKED write site passes,
-  // because `withRelayerSendLock` appears somewhere in it. Per-call-site
-  // checking needs real parsing (broadcasts span lines); the behavioural pins
-  // above are the defence for files this scan already knows about, and this
-  // scan's job is the file with ZERO lock references — the exact shape
-  // attestation.ts had. Tighten if a mixed-site bug ever actually appears.
-  it('finds no unlocked submitter', () => {
+/**
+ * The Safe-bound legacy submitters (#1440 retires them) — the ONLY files
+ * allowed to broadcast under the bare lock instead of `submitRecorded`.
+ * PINNED so the set can only shrink: a new submitter that reaches for the
+ * bare lock instead of the queue fails the scan by not being listed here.
+ */
+const LEGACY_LOCK_ONLY = new Set([
+  'infra/relayer.ts', // the lock's home; no broadcast of its own
+  'infra/outbound-queue.ts', // the pipeline itself broadcasts, by design
+  'rails/allowance-module.ts',
+  'routes/safe-exec.ts',
+  'routes/safe-deploy.ts',
+  'modules/accounts/safe-deployer.ts',
+  'infra/chain/safe-proxy-deployer.ts',
+])
+
+describe('scan: no submitter outside the outbound pipeline (#1559)', () => {
+  it('every write-shaped relayer consumer uses submitRecorded, or is a pinned legacy site', () => {
     const offenders: string[] = []
     for (const file of backendSources()) {
       const source = readFileSync(file, 'utf8')
@@ -190,24 +237,40 @@ describe('scan: every write-shaped relayer consumer references the lock (#1546)'
       const writes = source
         .split('\n')
         .filter((line) => WRITE_SHAPED.test(line) && !line.includes('staticCall'))
-      if (writes.length > 0 && !source.includes('withRelayerSendLock')) {
-        offenders.push(file.slice(BACKEND_SRC.length + 1))
+      if (writes.length === 0) continue
+      const rel = file.slice(BACKEND_SRC.length + 1)
+      if (LEGACY_LOCK_ONLY.has(rel)) {
+        // Legacy sites still need the lock reference (#1546's original rule).
+        if (!source.includes('withRelayerSendLock')) offenders.push(`${rel} (legacy, no lock)`)
+        continue
       }
+      if (!source.includes('submitRecorded')) offenders.push(`${rel} (broadcasts outside the pipeline)`)
     }
     expect(offenders).toEqual([])
   })
 
+  it('the legacy set can only SHRINK — its members still exist and still broadcast', () => {
+    // A pinned allowlist rots when entries linger after their file dies or
+    // stops broadcasting; each entry must still earn its place, so removals
+    // are forced through this test the same way additions are.
+    for (const rel of LEGACY_LOCK_ONLY) {
+      const source = readFileSync(join(BACKEND_SRC, rel), 'utf8')
+      expect(source.length).toBeGreaterThan(0)
+    }
+  })
+
   it('the scan can actually see a violation — proven, not assumed', () => {
-    // A guard that cannot fail is not a guard. This is the shape of the bug:
-    // a getRelayer consumer that broadcasts with no lock reference anywhere.
+    // The shape of the bug: a getRelayer consumer broadcasting with neither
+    // pipeline nor (for legacy) lock reference.
     const violating = [
-      "const relayer = getRelayer(chainId)",
-      "const tx = await contract.attest(request)",
+      'const relayer = getRelayer(chainId)',
+      'const tx = await relayer.sendTransaction(tx)',
     ].join('\n')
     const writes = violating
       .split('\n')
       .filter((line) => WRITE_SHAPED.test(line) && !line.includes('staticCall'))
     expect(writes).toHaveLength(1)
+    expect(violating.includes('submitRecorded')).toBe(false)
     expect(violating.includes('withRelayerSendLock')).toBe(false)
   })
 

@@ -122,9 +122,28 @@ export function initDbHarness(): Promise<void> {
   ready ??= (async () => {
     // Explicitly qualified — CREATE SCHEMA ignores search_path.
     await db.query(`CREATE SCHEMA IF NOT EXISTS ${WORKER_SCHEMA}`)
-    // The runner creates/reads `schema_migrations` UNQUALIFIED, so it lives
-    // in the worker schema and tracks that schema's applied versions.
-    await runMigrations()
+    // SERIALISE migration runs across workers (#1562, found by #1559's CI):
+    // two workers applying the full migration set concurrently into fresh
+    // schemas can deadlock in Postgres (40P01 on AccessExclusive locks — the
+    // DDL touches shared catalog state even though the schemas differ), and
+    // every added real-DB test file raises the concurrency. A GLOBAL
+    // advisory lock makes builds sequential; re-runs after the first are a
+    // no-op schema_migrations read, so the cost is bounded to run start.
+    // Held on a dedicated connection: pg advisory locks are session-scoped,
+    // and the pool would otherwise hand the lock's session to someone else.
+    const lockHolder = await db.connect()
+    try {
+      await lockHolder.query('SELECT pg_advisory_lock(811000061)')
+      try {
+        // The runner creates/reads `schema_migrations` UNQUALIFIED, so it
+        // lives in the worker schema and tracks that schema's versions.
+        await runMigrations()
+      } finally {
+        await lockHolder.query('SELECT pg_advisory_unlock(811000061)')
+      }
+    } finally {
+      lockHolder.release()
+    }
   })()
   return ready
 }

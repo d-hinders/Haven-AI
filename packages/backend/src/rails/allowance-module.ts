@@ -9,10 +9,15 @@
 
 import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, type RelayerAttribution } from '../infra/relayer-spend-guard.js'
 import { ethers } from 'ethers'
-import { config, relayerPrivateKeyForChain } from '../config.js'
+import { config } from '../config.js'
 import { getChain } from '../domain/chains.js'
 import { recordAllowanceNonce } from './allowance-nonce-coordinator.js'
-import { withRelayerSendLock, getRelayerFeeOverrides } from '../infra/relayer.js'
+import {
+  withRelayerSendLock,
+  getRelayerFeeOverrides,
+  getRelayer,
+  getProvider as getRelayerProvider,
+} from '../infra/relayer.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -49,36 +54,26 @@ export interface EffectiveAllowance {
   isResetPending: boolean
 }
 
-// ── Provider / Relayer Setup (per-chain, cached) ──────────────────
-
-const providers = new Map<number, ethers.JsonRpcProvider>()
-const relayerWallets = new Map<number, ethers.Wallet>()
+// ── Provider / Relayer Setup — DELEGATED, deliberately (#1533) ────
+//
+// This module used to keep its own `Map` of providers and relayer wallets,
+// parallel to `infra/relayer.ts`'s. Same key, same EOA — two provider
+// instances, each with an independent view of that EOA's pending nonce.
+// `withRelayerSendLock` (shared) serialises submissions, but ethers takes
+// each transaction's nonce from the provider its signing wallet is bound to,
+// so the wallet bound to the less-trafficked provider submitted a nonce six
+// behind the chain on 2026-08-18 (`nonce too low: next nonce 781, tx nonce
+// 775` — the on-chain sequence was strictly sequential, so the stale view
+// was ours, not the RPC's). The exports stay because eight modules import
+// them; the instances they return are now the ONLY ones per chain.
 
 export function getProvider(chainId: number): ethers.JsonRpcProvider {
-  let provider = providers.get(chainId)
-  if (!provider) {
-    const chain = getChain(chainId)
-    provider = new ethers.JsonRpcProvider(chain.rpcUrl)
-    providers.set(chainId, provider)
-  }
-  return provider
+  return getRelayerProvider(chainId)
 }
 
+/** The same instance `infra/relayer.ts` signs with — one nonce view per chain. */
 export function getRelayerWallet(chainId: number): ethers.Wallet {
-  let wallet = relayerWallets.get(chainId)
-  if (!wallet) {
-    // Per-chain key (RELAYER_PRIVATE_KEY_<chainId>) with global fallback, so a
-    // single backend can run isolated relayers per chain (#640).
-    const key = relayerPrivateKeyForChain(chainId)
-    if (!key) {
-      throw new Error(
-        `No relayer key for chain ${chainId} — set RELAYER_PRIVATE_KEY_${chainId} or RELAYER_PRIVATE_KEY`,
-      )
-    }
-    wallet = new ethers.Wallet(key, getProvider(chainId))
-    relayerWallets.set(chainId, wallet)
-  }
-  return wallet
+  return getRelayer(chainId)
 }
 
 function getContract(chainId: number, signerOrProvider?: ethers.Signer | ethers.Provider) {

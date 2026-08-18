@@ -113,11 +113,16 @@ if (!SETTLEMENT_PRIVATE_KEY) {
   process.exit(1)
 }
 
+// #1530: held in a local so `/healthz` can ask the same client that settles.
+// Checking a DIFFERENT client's balance would report on a wallet that is not
+// the one paying, which is the class of near-miss this whole issue is about.
+const settlementClient = createViemSettlementClient({
+  baseRpcUrl: BASE_RPC_URL,
+  settlementPrivateKey: SETTLEMENT_PRIVATE_KEY,
+})
+
 const paymentProcessor = createX402PaymentProcessor(
-  createViemSettlementClient({
-    baseRpcUrl: BASE_RPC_URL,
-    settlementPrivateKey: SETTLEMENT_PRIVATE_KEY,
-  }),
+  settlementClient,
   ERC7710_CONFIG
     ? { erc7710: ERC7710_CONFIG, settlementMethods: SETTLEMENT_METHODS }
     : { settlementMethods: SETTLEMENT_METHODS },
@@ -128,6 +133,7 @@ const server = createDemoMerchantServer({
   baseUrl: BASE_URL,
   paymentProcessor,
   settlementMethods: SETTLEMENT_METHODS,
+  settlementClient,
 })
 
 server.listen(PORT, () => {

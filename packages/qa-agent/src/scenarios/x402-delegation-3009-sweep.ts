@@ -11,7 +11,9 @@
  * transient hot balance — and the failure mode that turns "transient" into
  * "stuck" is exactly this: the merchant verifies, never settles, and the budget
  * is already spent because it was metered at the FUNDING hop rather than at
- * settlement. `x402-sweep` covers this shape on the legacy rail only.
+ * settlement. This is now the ONLY leg covering that shape: the legacy-rail
+ * `x402-sweep-recovery` was removed once the delegation rail became the base
+ * for every new account.
  *
  * ## Why it is a separate scenario rather than a branch of the other one
  *
@@ -27,15 +29,15 @@
  * the floor and exercises a real sweep. Neither is this scenario's to assert:
  * a merchant that settles normally is an unmet precondition, not a sweep
  * regression, and reporting it as a failure would train operators to ignore
- * this line. Same classification `x402-sweep` already uses.
+ * this line.
  */
 
 import { HavenClient, buildSweepTypedData } from '@haven_ai/sdk'
 import { ethers } from 'ethers'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
+import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
+import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
 
-const BASE_SEPOLIA_RPC = 'https://sepolia.base.org'
-const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 
 /** Mutable purely as a TEST SEAM — see the note in `x402-delegation-3009.ts`. */
@@ -95,7 +97,13 @@ export const x402Delegation3009Sweep: Scenario = {
         method: 'tools/call',
         params: { name: 'buy_cloud_storage', arguments: { tier: '50gb' } },
       }),
-    })
+    },
+    // #1534: this leg sent NO key, so the SDK synthesised one from its
+    // 5-minute bucket — and `qa-dev.yml` retries the whole suite ~30s after a
+    // failure, inside that window. Attempt 2 then collapsed onto attempt 1's
+    // settled payment and was correctly refused by the #1521 guard. The leg
+    // was never wrong; the retry was asking for a replay of a spent payment.
+    { idempotencyKey: freshPurchaseIdempotencyKey('x402-delegation-3009-sweep') })
     if (!res.ok) return fail(`verify-without-settle call failed: HTTP ${res.status}`)
 
     const stranded = await waitForStranded(provider, delegateAddress)

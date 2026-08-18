@@ -37,6 +37,8 @@
     "lint:db-mocks:test": "node --test scripts/db-mock-ratchet.test.mjs",
     "lint:deps": "node scripts/dep-lint.mjs",
     "lint:deps:test": "node --test scripts/dep-lint.test.mjs",
+    "lint:workspace-pins": "node scripts/workspace-pin-lint.mjs",
+    "lint:workspace-pins:test": "node --test scripts/workspace-pin-lint.test.mjs",
     "generate:api-types": "node scripts/generate-api-types.mjs",
     "check:api-types": "node scripts/generate-api-types.mjs --check",
     "check:dist": "node scripts/check-dist-freshness.mjs sdk signer mcp"

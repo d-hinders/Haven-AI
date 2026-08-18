@@ -231,6 +231,18 @@ jobs:
       - name: Dist-freshness guard self-test
         run: node --test scripts/check-dist-freshness.test.mjs
 
+      # #1526: internal @haven_ai/* ranges must match how the consuming package
+      # RESOLVES them — published packages pin a concrete version, private
+      # workspace consumers use "*". Belongs on EVERY PR for the same reason as
+      # the steps above: any package.json in the tree can break it, and the
+      # failure mode is silent (npm ci installs a stale registry tarball while
+      # CI stays green against the workspace build). Dependency-free, no npm ci.
+      # Self-tested — a lint nobody tests can start passing vacuously.
+      - name: Workspace pin lint
+        run: |
+          node scripts/workspace-pin-lint.mjs
+          node --test scripts/workspace-pin-lint.test.mjs
+
   sdk_checks:
     name: SDK checks
     needs: changes

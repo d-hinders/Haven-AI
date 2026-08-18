@@ -40,9 +40,8 @@ import {
   type HostedSettleMcpToolResult,
 } from '../lib/hosted-mcp.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
+import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
 
-const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
-const BASE_SEPOLIA_RPC = 'https://sepolia.base.org'
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)']
 const SETTLE_WAIT_MS = 120_000
 const POLL_MS = 3_000

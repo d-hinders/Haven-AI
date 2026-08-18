@@ -56,7 +56,19 @@ export async function getRelayerFeeOverrides(
   }
 }
 
-function getProvider(chainId: number): JsonRpcProvider {
+/**
+ * The ONE provider per chain that backs every relayer submission (#1533).
+ *
+ * Exported so `rails/allowance-module.ts` can delegate instead of keeping a
+ * second `Map` of its own. Two provider instances for one relayer EOA is how
+ * the 2026-08-18 stale-nonce failure happened: `withRelayerSendLock`
+ * serialises SUBMISSIONS, but ethers populates each transaction's nonce from
+ * the provider the signing wallet is bound to — and two providers only ever
+ * observe their own traffic. The wallet bound to one drifted six nonces
+ * behind the chain while the other kept submitting. A lock cannot fix nonce
+ * provenance; a single view can.
+ */
+export function getProvider(chainId: number): JsonRpcProvider {
   let provider = providers.get(chainId)
   if (!provider) {
     provider = new JsonRpcProvider(getChain(chainId).rpcUrl)

@@ -16,8 +16,6 @@ import type { Scenario, ScenarioContext, ScenarioResult } from './scenarios/type
 import { withinBudgetSettle } from './scenarios/within-budget-settle.js'
 import { overBudgetQueue } from './scenarios/over-budget-queue.js'
 import { x402OverBudgetRejected } from './scenarios/x402-over-budget-rejected.js'
-import { x402Settle } from './scenarios/x402-settle.js'
-import { x402Sweep } from './scenarios/x402-sweep.js'
 import { x402Delegation3009 } from './scenarios/x402-delegation-3009.js'
 import { x402Delegation3009Sweep } from './scenarios/x402-delegation-3009-sweep.js'
 import { x402Erc7710Settle } from './scenarios/x402-erc7710-settle.js'
@@ -27,16 +25,48 @@ import { x402HostedMcpSigner } from './scenarios/x402-hosted-mcp-signer.js'
 import { x402CatalogGuidedPurchase } from './scenarios/x402-catalog-guided-purchase.js'
 import { delegationLifecycle } from './scenarios/delegation-lifecycle.js'
 import { thrownErrorDetail } from './lib/thrown-error-detail.js'
+import { runPreflight, formatPreflight } from './lib/preflight.js'
 
-// Deterministic, no-LLM scenarios run in order — seven money-flow invariants:
-// within-budget settle, over-budget queue, x402 over-budget reject, x402 settle,
-// delegate sweep recovery (#603/#684), and the delegation-rail EIP-3009 bridge
-// in both halves (#946) — settle, and verify-without-settle → sweep.
+// Deterministic, no-LLM scenarios run in order.
 //
-// The last two run a SECOND, delegation-rail identity: the rail is a property
-// of the account, so the seeded legacy-rail agent cannot exercise it. They are
-// ordered settle-then-sweep so a settle failure is diagnosed against a clean
-// delegate rather than one the sweep case has already left money on.
+// The first three run the seeded LEGACY-rail identity and are the only legs
+// that still do. They are kept because their invariants have no delegation-rail
+// counterpart: the approval QUEUE does not exist on the delegation rail at all
+// (over-budget reverts on-chain during gas estimation, and there is nothing to
+// queue), and the pre-intent rejection path differs per rail.
+//
+// x402 coverage is DELEGATION-RAIL ONLY. The legacy `x402-settle` and
+// `x402-sweep-recovery` legs were removed by owner decision: the delegation
+// rail is the base for every new account, and the legacy AllowanceModule rail
+// is import-only for existing dev-pilot Safes.
+//
+// STATE THE TRADE HONESTLY — this is a COVERAGE LOSS, not a deduplication.
+// `x402-delegation-3009` and `x402-delegation-3009-sweep` cover the same
+// merchant-facing INVARIANTS, but they do not execute the same code:
+// `modules/x402/authorize.ts` dispatches on the rail, so they drive
+// `runDelegationAuthorize` while the removed legs drove `runLegacyAuthorize`.
+// After this removal NO live leg reaches `legacy-authorize.ts`'s execute
+// branch — `recordX402Signature` → `executeAllowanceTransfer` (the x402
+// funding call, distinct from the direct-payment one in `routes/payments.ts`)
+// → `confirmX402Intent`. The kept legacy legs do not close that:
+// `within-budget-settle` drives `/payments`, and `x402-over-budget-rejected`
+// sends no signature and so never enters the execute branch at all. The
+// removed sweep leg also carried retry logic for a real shipped bug class on
+// that funding leg (#692 stale allowance nonce, #684 cross-RPC lag), which now
+// has live coverage nowhere. That path keeps only mocked unit-test coverage
+// (`routes/__tests__/x402.test.ts`) — which is precisely what this harness
+// exists to not rely on.
+//
+// Accepted because no new account can be created on that rail and the legs
+// were the only x402 legs submitting through the relayer's shared nonce lane —
+// a live infrastructure defect (#1533), not something the money-flow
+// invariants were written to catch. Revisit if dev-pilot legacy Safes start
+// carrying meaningful x402 volume.
+//
+// The delegation-rail legs run a SECOND identity: the rail is a property of the
+// account, so the seeded legacy-rail agent cannot exercise it. They are ordered
+// settle-then-sweep so a settle failure is diagnosed against a clean delegate
+// rather than one the sweep case has already left money on.
 //
 // `x402-hosted-mcp-signer` (#1154) is the DEFAULT user topology — hosted MCP
 // plus a local edge signer — and shares that delegation-rail identity. It runs
@@ -55,8 +85,6 @@ const SCENARIOS: Scenario[] = [
   withinBudgetSettle,
   overBudgetQueue,
   x402OverBudgetRejected,
-  x402Settle,
-  x402Sweep,
   x402Delegation3009,
   x402Delegation3009Sweep,
   x402Erc7710Settle,
@@ -93,6 +121,25 @@ async function main(): Promise<void> {
 
   console.log(`Haven money-flow QA → ${cfg.apiUrl}`)
   console.log(`  delegate ${ctx.delegateAddress}\n`)
+
+  // #1530: state the preconditions BEFORE the first leg. The harness used to
+  // assert only what happened during a run, so an exhausted merchant
+  // settlement wallet presented as an unexplained payment failure and cost a
+  // day of diagnosis. Printed unconditionally — a slow drain is only visible
+  // as a trend, and the number is most useful in the log of the run that was
+  // chasing something else.
+  const preflight = await runPreflight(cfg)
+  console.log(formatPreflight(preflight))
+  if (preflight.blocked) {
+    // Refuse rather than run: every leg downstream would fail for this reason
+    // and report it as its own, which is exactly the masking #1530 describes.
+    console.error(
+      '\n✗ preflight: a resource this run consumes is below its floor. ' +
+        'Fix it before reading anything below — the legs cannot pass without it.',
+    )
+    process.exit(1)
+  }
+  console.log('')
 
   const results: { scenario: Scenario; result: ScenarioResult }[] = []
   for (const scenario of SCENARIOS) {

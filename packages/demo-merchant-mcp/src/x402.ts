@@ -235,6 +235,70 @@ export interface SettlementClient {
   waitForReceipt(txHash: Hex): Promise<void>
   /** Present only when the experimental ERC-7710 rail is configured. */
   erc7710?: Erc7710SettlementClient
+  /**
+   * Operational readiness of the wallet that PAYS for settlement (#1530).
+   *
+   * The merchant is the only component that can answer this: the address
+   * derives from `SETTLEMENT_PRIVATE_KEY`, which lives in the merchant's own
+   * environment and is visible to nothing else. On 2026-08-17 this wallet ran
+   * down to 255 gwei and every settlement-requiring x402 leg failed with a
+   * merchant-side error that named none of it; the QA harness had no way to
+   * see the cause, so a day went into diagnosing the symptom.
+   *
+   * Reporting it is not a disclosure: the address is already public — it is
+   * advertised as `redeemerAddress` in erc7710 challenges — and a balance is
+   * public on-chain by construction. The KEY is never exposed.
+   */
+  readiness?(): Promise<SettlementReadiness>
+}
+
+/**
+ * What the settlement wallet can still pay for, expressed in units of work
+ * rather than raw wei. `255 gwei` reads as a number; `0 settlements of
+ * headroom` reads as a cause.
+ */
+export interface SettlementReadiness {
+  address: Address
+  balanceWei: bigint
+  /** Observed cost of one `redeemDelegations` on Base Sepolia, 2026-08-17. */
+  costPerSettlementWei: bigint
+  /** `balanceWei / costPerSettlementWei`, floored. Zero means the next one fails. */
+  settlementsRemaining: number
+  /** False once `settlementsRemaining` is below {@link MIN_SETTLEMENT_HEADROOM}. */
+  ok: boolean
+}
+
+/**
+ * Observed cost of one settlement, measured from the 2026-08-17 Basescan fee
+ * data: 0.00000216 ETH per `redeemDelegations`. Rounded up, because a floor
+ * that under-estimates is worse than one that nags.
+ */
+export const SETTLEMENT_COST_WEI = 2_500_000_000_000n
+
+/**
+ * How many settlements of headroom the wallet must hold to report `ok`.
+ *
+ * Not 1: a floor of one reports healthy on the run that then exhausts it. This
+ * is a warning threshold for a slow drain, so it is set where a top-up is
+ * still a routine action rather than an incident.
+ */
+export const MIN_SETTLEMENT_HEADROOM = 25
+
+/** Pure, so the threshold logic is testable without a chain. */
+export function settlementReadiness(
+  address: Address,
+  balanceWei: bigint,
+  costPerSettlementWei: bigint = SETTLEMENT_COST_WEI,
+): SettlementReadiness {
+  const settlementsRemaining =
+    costPerSettlementWei > 0n ? Number(balanceWei / costPerSettlementWei) : 0
+  return {
+    address,
+    balanceWei,
+    costPerSettlementWei,
+    settlementsRemaining,
+    ok: settlementsRemaining >= MIN_SETTLEMENT_HEADROOM,
+  }
 }
 
 export interface X402PaymentProcessorOptions {
@@ -589,6 +653,15 @@ export function createViemSettlementClient(params: {
   const walletClient = createWalletClient({ account, chain, transport })
 
   return {
+    // #1530: the settlement wallet's own gas is a consumable resource that
+    // nothing outside this process can observe. Report it.
+    async readiness() {
+      return settlementReadiness(
+        account.address,
+        await publicClient.getBalance({ address: account.address }),
+      )
+    },
+
     async submit(authorization, signature) {
       const parsed = parseSignature(signature)
       if (parsed.v === undefined) {

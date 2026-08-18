@@ -82,9 +82,9 @@ import {
   type HostedSettleMcpToolResult,
 } from '../lib/hosted-mcp.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
+import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
+import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
 
-const BASE_SEPOLIA_RPC = 'https://sepolia.base.org'
-const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 
 /**
@@ -230,7 +230,7 @@ export const x402HostedMcpSigner: Scenario = {
         max_amount_human: '1',
         // Fresh per attempt: a reused key would resume the previous run's
         // intent, and a resumed intent proves nothing about this run.
-        idempotency_key: `qa-hosted-${Date.now()}`,
+        idempotency_key: freshPurchaseIdempotencyKey('x402-hosted-mcp-signer'),
       })
     } catch (err) {
       if (err instanceof HostedMcpToolError) {

@@ -35,13 +35,41 @@ Missing any edit caused bugs in production — e.g. connect shipping a stale run
 
 `release-bump.mjs` atomically applies all of these in one command.
 
-**Private workspace consumers are intentionally NOT in this table.** `backend`
-and `qa-agent` depend on `@haven_ai/*` with `"*"` so npm always links the
-workspace package — they must test dev's code, not a published tarball. Never
-"tidy" them to an exact version: the pin holds only until the next bump moves
-the workspace version past it, after which `npm ci` silently resolves the
-stale npm registry tarball instead (this broke the scheduled money-flow QA on
-2026-07-13).
+**Private workspace consumers are intentionally NOT in this table.** `backend`,
+`qa-agent`, `frontend` and `mcp-server` depend on `@haven_ai/*` with `"*"` so
+npm always links the workspace package — they must test dev's code, not a
+published tarball. Never "tidy" them to an exact version: the pin holds only
+until the next bump moves the workspace version past it, after which `npm ci`
+silently resolves the stale npm registry tarball instead (this broke the
+scheduled money-flow QA on 2026-07-13).
+
+#### Which side of the rule each package is on
+
+The test is **not** "is it on npm" but **"does its artifact resolve
+`@haven_ai/*` from outside this workspace?"** `private` in `package.json` is
+the marker, and `scripts/workspace-pin-lint.mjs` enforces both directions on
+every PR (`npm run lint:workspace-pins`).
+
+| Package | `private` | Internal deps | Why |
+|---|---|---|---|
+| `sdk`, `signer`, `mcp`, `connect`, `cli` | no | **exact pin** | `npx`-installed on someone else's machine; `*` would resolve to whatever the registry serves |
+| `mcp-server` | **yes** | **`"*"`** | Docker-deployed, but its Dockerfile runs `npm ci --workspace=packages/mcp-server --workspace=packages/sdk --include-workspace-root` and builds the SDK from source — it resolves from *inside* the workspace |
+| `backend`, `frontend`, `qa-agent`, `core` | yes | **`"*"`** | never leave the workspace |
+| `demo-merchant-mcp` | yes | — | Railway-deployed test fixture, not published |
+
+`mcp-server` was on the wrong side until [#1526](https://github.com/d-hinders/Haven-AI/issues/1526). It was classified as published purely because it lacked `private: true`, and `release-bump.mjs` rewrote its pins on every release — so resolution was correct only by *coincidence*, holding just as long as every bump touched both, and as long as the Dockerfile kept naming every internal dep in its `--workspace=` list.
+
+**What an out-of-step pin actually costs**, measured on npm 10.9.7 while fixing #1526 rather than taken on faith:
+
+| Situation | Exact pin | `"*"` |
+|---|---|---|
+| dependency's workspace in the install scope | links the workspace (even on a mismatched range) | links the workspace |
+| dependency's workspace **outside** the scope | **not installed at all** | links the workspace |
+| range nothing can satisfy | install fails outright | n/a |
+
+The stronger claim this rule is usually told with — that `npm ci` silently substitutes the stale registry tarball — is what the 2026-07-13 money-flow QA breakage was attributed to, but it **did not reproduce**: npm 10.9.7 links the workspace even when the pinned range does not match. Treat that mechanism as unconfirmed and npm-version-dependent. The scope-sensitivity in the table is the part that reproduces, and it is reason enough — an exact pin on a private consumer buys nothing under any of these outcomes.
+
+`mcp-server`'s **version** is still bumped in lockstep, for coherence with its `HOSTED_SERVER_VERSION` constant; only its dep pins are hands-off.
 
 ### Usage
 

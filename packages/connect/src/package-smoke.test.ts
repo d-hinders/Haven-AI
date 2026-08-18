@@ -27,6 +27,7 @@
  */
 
 import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { readdirSync, readFileSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -134,9 +135,34 @@ describe('MCP_VERSION constant parity', () => {
 // any published package reintroduces a wildcard internal dep, with no packing
 // or network. It mirrors verifyNoWildcardInternalDeps() in scripts/release-bump.mjs.
 describe('published packages pin internal @haven_ai/* deps', () => {
-  // Packages whose published/deployed artifact resolves @haven_ai/* deps from
-  // outside the workspace. Keep in sync with PUBLISHED_PACKAGES in the release script.
-  const PUBLISHED_PACKAGES = ['sdk', 'signer', 'mcp', 'mcp-server', 'connect']
+  // #1526: this list used to be hardcoded, with a comment saying "keep in sync
+  // with PUBLISHED_PACKAGES in the release script" — and it drifted exactly as
+  // that instruction invites. `mcp-server` sat here because it was missing
+  // `private: true`, not because it is published; it is Docker-deployed and
+  // installs its siblings as workspaces, so it belongs on the opposite side of
+  // the rule. It is now derived from each package's own `private` field, which
+  // is the field npm itself uses to decide publishability and therefore cannot
+  // drift from reality.
+  //
+  // The inverse direction (a private consumer must NOT exact-pin) is checked
+  // by `npm run lint:workspace-pins`, which runs on every PR; this stays as a
+  // published-side check close to the packaging concern it protects.
+  // Synchronous on purpose: `it.each` needs the list while the describe body
+  // runs, so this cannot await.
+  const PUBLISHED_PACKAGES = readdirSync(
+    fileURLToPath(new URL('../../', import.meta.url)),
+    { withFileTypes: true },
+  )
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => {
+      try {
+        const raw = readFileSync(fileURLToPath(new URL(`../../${name}/package.json`, import.meta.url)), 'utf8')
+        return (JSON.parse(raw) as { private?: boolean }).private !== true
+      } catch {
+        return false // not a package directory
+      }
+    })
 
   const isWildcardRange = (range: string): boolean =>
     range === '*' ||

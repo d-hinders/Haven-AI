@@ -96,6 +96,7 @@ export {
   AgentPaymentWarningCode,
   MerchantTimeoutError,
   X402UnexpectedStatusError,
+  X402AlreadySettledError,
   HavenPaymentStateError,
   HavenSigningError,
   HavenTimeoutError,

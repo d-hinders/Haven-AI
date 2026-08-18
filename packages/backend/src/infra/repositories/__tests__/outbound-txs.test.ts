@@ -11,6 +11,8 @@ import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
   claimNextOutboundTx,
+  claimOrphanedOutboundTx,
+  countLaneAttemptsAtNonce,
   enqueueOutboundTx,
   listUnminedOutboundTxs,
   markOutboundTxBroadcast,
@@ -185,6 +187,37 @@ describeDb('outbound-txs repository (#1555)', () => {
     })
     expect(row.data).toBe(DATA.toLowerCase())
     expect(row.value_atomic).toBe('123')
+  })
+
+  it('orphan claim (#1558): AGE-GATED — a young unclaimed row is an in-flight inline submission, not an orphan', async () => {
+    const young = await enqueue('sweep')
+    expect(await claimOrphanedOutboundTx(CHAIN, 600)).toBeNull()
+
+    // Age the row past the orphan threshold: now it is adoptable.
+    await db.query(`UPDATE outbound_txs SET created_at = NOW() - INTERVAL '11 minutes' WHERE id = $1`, [young.id])
+    const adopted = await claimOrphanedOutboundTx(CHAIN, 600)
+    expect(adopted?.id).toBe(young.id)
+
+    // And a broadcast row is never an orphan candidate, whatever its age.
+    await markOutboundTxBroadcast(young.id, { txHash: TX, nonce: 1n })
+    expect(await claimOrphanedOutboundTx(CHAIN, 600)).toBeNull()
+  })
+
+  it('countLaneAttemptsAtNonce (#1558): counts replaced AND nonce-stamped failed attempts, per lane', async () => {
+    const a = await enqueue()
+    const b = await enqueue()
+    const c = await enqueue()
+    const failedAttempt = await enqueue()
+    await markOutboundTxBroadcast(a.id, { txHash: TX, nonce: 7n })
+    await markOutboundTxReplaced(a.id, b.id)
+    await markOutboundTxBroadcast(b.id, { txHash: '0x' + 'ee'.repeat(32), nonce: 7n })
+    // A bump attempt whose broadcast THREW: failed, stamped with lane 7.
+    await markOutboundTxFailed(failedAttempt.id, 'bump broadcast failed: nonce too low', undefined, 7n)
+    // A different nonce on the same chain does not count toward lane 7.
+    await markOutboundTxBroadcast(c.id, { txHash: '0x' + 'ef'.repeat(32), nonce: 8n })
+
+    expect(await countLaneAttemptsAtNonce(CHAIN, 7n)).toBe(2)
+    expect(await countLaneAttemptsAtNonce(CHAIN, 8n)).toBe(0)
   })
 
   it('the status CHECK constraint is real — garbage states are rejected by Postgres', async () => {

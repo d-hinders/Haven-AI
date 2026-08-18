@@ -236,7 +236,36 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     ackSigner: options.ackSigner,
     ackLocalTools: options.ackLocalTools,
     localMcp: options.localMcp,
-  }, { onProgress: log })
+  }, {
+    onProgress: log,
+    // #1543: report "runtime configured" the moment the config write settles,
+    // so the dashboard can expose its budget-approval controls without
+    // waiting on the probes and skill install — a tail that approval does not
+    // depend on. Silent and best-effort: the complete report below remains
+    // authoritative (it overwrites these keys, adding the probe verdicts and
+    // skill state), so an early failure costs nothing but the head start.
+    onRuntimeConfigured: async (early) => {
+      try {
+        await api.updateInstallStatus(registration.setup_id, localApiKey, {
+          runtime: early.runtime,
+          connectorVersion,
+          runtimeMcpMode: early.runtimeMcpMode,
+          hostedMcpConfigured: early.hostedMcpConfigured,
+          localSignerConfigured: early.localSignerConfigured,
+          localMcpConfigured: early.localMcpConfigured,
+          credentialFilesWritten: true,
+          signerAcknowledged: early.signerAcknowledged,
+          localMcpAcknowledged: early.localMcpAcknowledged,
+          restartRequired: early.restartRequired,
+          nextUserAction: early.nextUserAction,
+          errorCode: early.errorCode ?? null,
+          environmentLabel: options.environmentLabel ?? 'Local workspace',
+        })
+      } catch {
+        // ignore — the final report follows either way
+      }
+    },
+  })
   printRuntimeInstall(runtimeInstall, log)
 
   // Tell the user they're done and what to do next BEFORE the telemetry call —
@@ -254,9 +283,12 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   // Report the completed runtime state before polling for budget approval.
   // The dashboard intentionally withholds approval controls until it knows the
   // local runtime is configured; polling first would wait on controls the
-  // connector itself has not made available yet. This remains best-effort
-  // readiness metadata only: a failed report cannot activate the agent or
-  // change its budget authority.
+  // connector itself has not made available yet. Since #1543 the unlock
+  // usually happened already, via the early config-written report above —
+  // this complete report refines it with the probe verdicts and skill state,
+  // and stays the fallback unlock path when the early one failed. It remains
+  // best-effort readiness metadata only: a failed report cannot activate the
+  // agent or change its budget authority.
   try {
     await api.updateInstallStatus(registration.setup_id, localApiKey, {
       runtime: runtimeInstall.runtime,

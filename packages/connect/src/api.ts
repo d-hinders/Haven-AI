@@ -57,7 +57,11 @@ export interface UpdateInstallStatusInput {
   localMcpAcknowledged?: boolean
   activationCommandAvailable?: boolean
   skillInstalled?: boolean
-  probeResult: string
+  /**
+   * Omitted on the #1543 early config-written report — no probe has run yet,
+   * and the backend merge keeps the key absent until the final report sets it.
+   */
+  probeResult?: string
   restartRequired: boolean
   nextUserAction: string
   errorCode?: string | null

@@ -597,7 +597,7 @@ export const SCENARIOS = {
       await dialog.getByPlaceholder('Amount').fill('25')
       await shoot(dialog, 'step2-policy')
 
-      await dialog.getByRole('button', { name: 'Review agent rules' }).click()
+      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
       await shoot(dialog, 'step3-review')
 
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
@@ -716,7 +716,7 @@ export const SCENARIOS = {
       await dialog.getByLabel('Agent name').fill('Research agent')
       await dialog.getByRole('button', { name: 'Set agent budget' }).click()
       await dialog.getByPlaceholder('Amount').fill('25')
-      await dialog.getByRole('button', { name: 'Review agent rules' }).click()
+      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
       // Confirmed by the sentence this issue exists to produce, not by a bare

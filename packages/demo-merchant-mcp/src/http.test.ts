@@ -728,5 +728,14 @@ describe('display locale and result detail (#1550)', () => {
     const svText = await sv.text()
     expect(svText).toContain('Tillgängliga produkter')
     expect(svText).toContain('Grundläggande VPN-skydd')
+
+    // DELIBERATE (#1550 review finding): structuredContent is stable machine
+    // metadata and does NOT follow the locale — its description stays English
+    // even on a Swedish call; the localized copy lives in the text block.
+    const svBody = JSON.parse(svText.slice(svText.indexOf('{'))) as {
+      result: { structuredContent: { products: Array<{ product_id: string; description: string }> } }
+    }
+    const svBasic = svBody.result.structuredContent.products.find((p) => p.product_id === 'vpn_basic')
+    expect(svBasic?.description).toContain('Essential VPN protection')
   })
 })

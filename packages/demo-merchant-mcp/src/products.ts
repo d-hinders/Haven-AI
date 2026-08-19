@@ -298,7 +298,9 @@ export type BillingPeriod = 'monthly'
 export interface ProductMetadata {
   product_id: ProductId
   display_name: string
-  /** Localized/freeform prose (Swedish demo copy) — display-only. Agents should
+  /** Freeform prose, display-only — ALWAYS the English copy (#1550), even when
+   *  a tool call passes `locale: 'sv'`: this is stable machine metadata, and the
+   *  localized text lives in the tool's prose output instead. Agents should
    *  select products via `product_id` + `arguments_schema`, never by parsing this. */
   description: string
   /** Price in USDC base units (6 decimals), as a decimal string. */

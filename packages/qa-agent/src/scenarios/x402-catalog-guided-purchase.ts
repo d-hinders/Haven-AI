@@ -56,6 +56,28 @@
  * funds would strand on the delegate by construction, and this leg's
  * zero-residual settle assertions would be asserting a lie.
  *
+ * ## Scheme-aware since #1547
+ *
+ * The guided prepare honours the #1450 settlement-scheme preference (it was
+ * hard-wired to the 3009 funding leg before #1547 wired #1453's selector in).
+ * This leg branches on the preflight's `settlement_scheme`:
+ *
+ *   - **erc7710 (the EXPECTED shape on dev)** — the demo merchant advertises
+ *     erc7710 and the QA agent is delegation-rail. Sign via `haven_sign`
+ *     (payment_id only), settle with payment_id + signature ONLY — no
+ *     payment_header (Haven assembles it at settle) and no merchant context
+ *     (#1307 rehydration, which only this leg proves for this scheme). Money
+ *     proof: ONE direct treasury→merchant hop, amounts equal end to end,
+ *     `funding_tx_hash` PRESENT IS A FAILURE, delegate EOA untouched.
+ *   - **eip3009 (characterized fallback)** — a merchant not advertising
+ *     erc7710, or a hosted deploy predating #1547. The original flow below:
+ *     `haven_sign_x402`, settle with the locally built header, two-leg money
+ *     proof with a REQUIRED funding tx and zero delegate residual.
+ *
+ * Neither proof may be applied to the other scheme — a 3009-shaped
+ * `funding_tx_hash` assertion against a direct settlement reds a correct
+ * change, which is exactly the trap #1547's acceptance criteria named.
+ *
  * ## The discriminators that stop this passing vacuously
  *
  *   - **The catalog entry is resolved via the API, not hardcoded.** Asserts
@@ -346,10 +368,10 @@ export const x402CatalogGuidedPurchase: Scenario = {
       throw err
     }
 
-    if (prep.status === 'pending_approval' || !prep.payload_hash) {
+    if (prep.status === 'pending_approval') {
       return fail(
-        `guided preflight returned status '${prep.status ?? 'unknown'}' with no payload_hash — the ` +
-          'delegation-rail agent should auto-authorize this purchase within its budget (no approval queue exists on that rail)',
+        `guided preflight returned status 'pending_approval' — the delegation-rail agent should ` +
+          'auto-authorize this purchase within its budget (no approval queue exists on that rail)',
       )
     }
 
@@ -361,7 +383,195 @@ export const x402CatalogGuidedPurchase: Scenario = {
       )
     }
 
-    // ── 3. The rail discriminator (#1138), same as x402-hosted-mcp-signer ────
+    // ── 3a. Scheme branch (#1547): the guided path honours the #1450 ─────────
+    //       preference. On dev the demo merchant advertises erc7710 and this
+    //       agent is delegation-rail, so the DIRECT-SETTLEMENT shape is the
+    //       expected one; the eip3009 flow below stays as the characterized
+    //       fallback (a merchant not advertising erc7710, or a hosted deploy
+    //       predating #1547) — its money proof is 3009-shaped BY DESIGN and
+    //       must not be applied to a direct settlement, or vice versa.
+    if (prep.settlement_scheme === 'erc7710') {
+      if (prep.settlement?.funding_leg !== false) {
+        return fail('guided preflight chose erc7710 but did not report settlement.funding_leg: false')
+      }
+      const merchantPayTo = prep.settlement.merchant_pay_to
+      if (!merchantPayTo) {
+        return fail('guided preflight chose erc7710 but reported no settlement.merchant_pay_to')
+      }
+
+      // The #1308 guidance must point at the erc7710 signer tool — an agent
+      // follows next_tool without reading prose, so a stale haven_sign_x402
+      // here would send it down the 3009 signing path against a settlement
+      // child it cannot header-ify.
+      if (prep.next_action !== 'sign_and_submit_payment') {
+        return fail(
+          `guided preflight next_action was ${JSON.stringify(prep.next_action)}, expected sign_and_submit_payment`,
+        )
+      }
+      if (prep.next_tool !== 'mcp__haven-signer__haven_sign') {
+        return fail(
+          `guided erc7710 preflight next_tool was ${JSON.stringify(prep.next_tool)}, expected the signer's haven_sign tool`,
+        )
+      }
+      if (prep.next_arguments?.payment_id !== prep.payment_id) {
+        return fail(
+          `guided preflight next_arguments.payment_id (${JSON.stringify(prep.next_arguments?.payment_id)}) does ` +
+            `not match this response's own payment_id (${prep.payment_id})`,
+        )
+      }
+
+      // The guided-path extras survive the scheme branch (#1306): rail-labeled
+      // allowance, indicative catalog price, and the cap against the live quote.
+      if (!prep.allowance || typeof prep.allowance.rail !== 'string') {
+        return fail('guided erc7710 preflight carried no rail-labeled allowance block')
+      }
+      if (prep.catalog_price_is_indicative !== true) {
+        return fail(
+          'guided erc7710 preflight did not mark catalog_price_atomic as indicative — an agent could mistake it for the live price',
+        )
+      }
+      if (prep.catalog_price_atomic === undefined || prep.amount_atomic === undefined) {
+        return fail('guided erc7710 preflight is missing catalog_price_atomic or the live amount_atomic')
+      }
+      if (BigInt(prep.amount_atomic) > BigInt(MAX_AMOUNT)) {
+        return fail(
+          `live quoted amount ${prep.amount_atomic} exceeds max_amount ${MAX_AMOUNT} — the cap should have refused this at preflight`,
+        )
+      }
+
+      const merchantBefore = (await usdc.balanceOf(merchantPayTo)) as bigint
+
+      // Local signing by payment_id ONLY, via haven_sign — the signer fetches
+      // the settlement child itself and verifies its caveats (#1455). Not
+      // haven_sign_x402: that builds an EIP-3009 header, which this scheme
+      // has no use for.
+      const signed7710 = (await timed('sign', () =>
+        signerTools.haven_sign({ payment_id: prep.payment_id }),
+      )) as
+        | { success: false; code: string; message: string }
+        | { success: true; data: { signature: string } }
+      if (!signed7710.success) {
+        return fail(
+          `local edge signer REFUSED the guided erc7710 quote: ${signed7710.code} — ${signed7710.message.slice(0, 220)}`,
+        )
+      }
+
+      // Settle by payment_id + signature ONLY. No payment_header — its absence
+      // is what selects the erc7710 settle branch, because Haven assembles the
+      // header at settle. And no merchant_url/tool_name/arguments/mcp_transport
+      // — STRICTER than x402-erc7710-hosted, which re-threads them: the guided
+      // prepare persisted the merchant call context (#1307/#1547), and this is
+      // the only leg that proves that rehydration serves the erc7710 scheme.
+      let settle7710: HostedSettleMcpToolResult & { settlement_scheme?: string }
+      try {
+        settle7710 = await timed('settle', () =>
+          hosted.callTool<HostedSettleMcpToolResult & { settlement_scheme?: string }>(
+            'haven_settle_mcp_tool',
+            { payment_id: prep.payment_id, signature: signed7710.data.signature },
+          ),
+        )
+      } catch (err) {
+        if (err instanceof HostedMcpToolError) {
+          return fail(`hosted haven_settle_mcp_tool refused: ${err.code} — ${err.message.slice(0, 600)}`)
+        }
+        throw err
+      }
+
+      if (!settle7710.settled) {
+        return fail('hosted erc7710 settle did not settle — the merchant leg never ran')
+      }
+      if (settle7710.settlement_scheme !== 'erc7710') {
+        return fail(
+          `settle reported scheme ${JSON.stringify(settle7710.settlement_scheme)} — a prepare that chose ` +
+            'erc7710 must not settle as anything else',
+        )
+      }
+      if (settle7710.funding_tx_hash) {
+        return fail(
+          `settle reported a funding tx (${settle7710.funding_tx_hash}) — erc7710 has no funding leg, ` +
+            'so this means the payment took the EIP-3009 bridge',
+        )
+      }
+
+      // The post-purchase allowance block (#1310) — same contract as the 3009
+      // shape, including the null-with-warning degrade (#1320/#1323).
+      if (!('allowance' in settle7710) || settle7710.allowance === undefined) {
+        return fail('settled erc7710 response carried no allowance key at all — the #1310 post-purchase summary regressed')
+      }
+      if (settle7710.allowance === null) {
+        const hasDegradeWarning = (settle7710.warnings ?? []).some(
+          (w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE',
+        )
+        if (!hasDegradeWarning) {
+          return fail(
+            'settled erc7710 response reported allowance: null WITHOUT the ALLOWANCE_CHECK_UNAVAILABLE ' +
+              `warning — the #1310 degrade contract regressed; warnings: ${JSON.stringify(settle7710.warnings ?? [])}`,
+          )
+        }
+      }
+      const allowanceNote7710 =
+        settle7710.allowance === null
+          ? 'allowance read degraded (null + ALLOWANCE_CHECK_UNAVAILABLE, legitimate per #1310/#1320)'
+          : `remaining allowance rail=${settle7710.allowance.rail}`
+
+      // The erc7710 money proof: ONE direct hop, treasury→merchant, delegate
+      // untouched. This replaces the 3009 leg's two-tx funding proof — a
+      // funding_tx_hash here is a FAILURE (asserted above), not missing
+      // evidence.
+      const deadline7710 = Date.now() + TIMING.balanceWaitMs
+      let treasuryAfter7710 = treasuryBefore
+      let merchantAfter = merchantBefore
+      for (;;) {
+        ;[treasuryAfter7710, merchantAfter] = (await Promise.all([
+          usdc.balanceOf(treasury),
+          usdc.balanceOf(merchantPayTo),
+        ])) as [bigint, bigint]
+        if (treasuryAfter7710 !== treasuryBefore || Date.now() >= deadline7710) break
+        await new Promise((resolve) => setTimeout(resolve, TIMING.pollIntervalMs))
+      }
+      const delegateAfter7710 = (await usdc.balanceOf(delegateAddress)) as bigint
+
+      const debited = treasuryBefore - treasuryAfter7710
+      const credited = merchantAfter - merchantBefore
+      if (debited <= 0n) {
+        return fail('treasury was not debited — the direct settlement never landed')
+      }
+      if (debited !== credited) {
+        return fail(
+          `treasury −${fmt(debited)} but merchant +${fmt(credited)} — direct settlement must move ` +
+            'the same amount end to end',
+        )
+      }
+      if (BigInt(prep.amount_atomic) < debited) {
+        return fail(
+          `treasury was debited ${debited} atomic — more than the quoted/authorized ${prep.amount_atomic}`,
+        )
+      }
+      if (delegateAfter7710 !== delegateBefore) {
+        return fail(
+          `delegate EOA balance changed ${fmt(delegateBefore)} → ${fmt(delegateAfter7710)} — erc7710 ` +
+            'has no funding leg, so the payment took the EIP-3009 bridge despite reporting erc7710',
+        )
+      }
+
+      return pass(
+        `guided catalog purchase (${entry.name}, catalog_id ${entry.id}) settled via erc7710 DIRECT ` +
+          `settlement (#1547), payment_id-only continuation with NO merchant context re-sent: treasury ` +
+          `${fmt(treasuryBefore)} → ${fmt(treasuryAfter7710)} paid the merchant exactly ${fmt(credited)} USDC; ` +
+          `no funding leg, delegate EOA untouched (${fmt(delegateAfter7710)}); ${allowanceNote7710}; ` +
+          `intent ${prep.payment_id}; timings ms (#1348 telemetry): prepare=${stepMs.prepare ?? '?'} ` +
+          `sign=${stepMs.sign ?? '?'} settle=${stepMs.settle ?? '?'} total=${Date.now() - scenarioStart}`,
+      )
+    }
+
+    // ── 3b. The eip3009 fallback shape from here down ────────────────────────
+    if (!prep.payload_hash) {
+      return fail(
+        'guided eip3009 preflight carried no payload_hash — there is no funding payload for the signer to bind to',
+      )
+    }
+
+    // The rail discriminator (#1138), same as x402-hosted-mcp-signer.
     const expected = prep.x402?.expected
     if (!expected) {
       return fail('guided preflight carried no x402.expected signing context — the signer has nothing to verify')

@@ -306,9 +306,13 @@ export const legacyToolSchemas: Record<HostedToolNameLegacy, z.ZodRawShape> = {
  */
 const SIGNER_CAPABILITY_KEY = 'haven/signer-compatibility'
 
-/** Where the agent reads the signer's supported set, for use inside prose. */
-const SIGNER_CAPABILITY_SOURCE =
-  `capabilities.experimental["${SIGNER_CAPABILITY_KEY}"]`
+// #1547: the prose that pointed agents at the signer's initialize result
+// (`capabilities.experimental[SIGNER_CAPABILITY_KEY]`) is gone — most agent
+// harnesses cannot read an MCP initialize handshake, so the documented check
+// is now "sign; branch on the signer's machine-readable version-mismatch
+// refusal". The capability key itself stays advertised by the signer and
+// echoed in signer_compatibility.signer_capability for harnesses that CAN
+// read it.
 
 const PAY_DESCRIPTION = [
   'Construct a payment within the agent budget and return the unsigned payload to sign.',
@@ -386,9 +390,8 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Protocol notes: builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. merchant_url may be the exact MCP endpoint or a BASE merchant URL (#1271): a non-402 miss triggers one bounded same-origin discovery pass of the merchant discovery document and one retry; the returned merchant_url is the resolved endpoint — pass THAT to settle/complete. ' +
     'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, signer_compatibility, merchant_url, tool_name, arguments, mcp_transport }. ' +
     'The funding/quote window expires at expires_at; if it expires, re-run haven_pay_mcp_tool with the same idempotency_key before signing again. ' +
-    'Before the signing step, check signer_compatibility.x402_expected_context_version against the versions the haven-signer MCP server advertises at initialize ' +
-    `(${SIGNER_CAPABILITY_SOURCE} and its instructions). If it is not in that set the local signer is out of date: STOP before signing and tell the user to update ` +
-    '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has been spent at that point. ' +
+    'Version compatibility is enforced BY THE SIGNER (#1547): an out-of-date signer refuses to sign with a machine-readable version-mismatch error (code, supported_versions, received_version, fallback) — no pre-check needed, just branch on that refusal. ' +
+    'On it, STOP before signing again and tell the user to update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has been spent at that point. ' +
     'Fallback for an older signer/backend, or for diagnostics: re-run THIS tool with the SAME idempotency_key plus include_signing_payload=true — the replay returns the ORIGINAL sign_data with typed_data_b64 — then pass payload_hash, x402_expected (the nested x402.expected context, including expires_at), payment_required, and typed_data_b64 through UNCHANGED, one opaque string, never re-typed (#1255). Returns { signature, payment_header }. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass payment_required, arguments, and mcp_transport through verbatim from this response.',
@@ -421,13 +424,14 @@ const PREPARE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
     'A spending cap is REQUIRED on this tool, as on haven_pay_mcp_tool, and is enforced against the LIVE quote BEFORE any funding intent is created — this is the guided path, so there is no cap_warning fallback. ' +
     'Give it as max_amount_human (#1351, PREFERRED): whole tokens, so "no more than 1 USDC" is max_amount_human: "1", with decimals taken from the live quote\'s asset. max_amount is the atomic-unit alternative ("1" there means 0.000001 USDC). Send exactly one — both together is refused with AMBIGUOUS_MAX_AMOUNT, neither is refused with INVALID_INPUT, and both refusals happen before any network call. ' +
     'Returns a rail-aware allowance block { rail, sufficient, remaining_atomic, source }: on the legacy AllowanceModule rail an insufficient amount still proceeds and the resulting funding intent queues for wallet-owner approval, same as haven_pay_mcp_tool; on the delegation rail an over-budget quote REFUSES right here, before any funding intent exists, because that rail has no approval queue — an over-budget redemption would simply revert on-chain later. ' +
-    'The ready-to-sign object returned on success is the SAME compact quote shape as haven_pay_mcp_tool/haven_pay_x402_quote (#1272: payment_id, payload_hash, expires_at, signer_compatibility, x402) plus catalog_id/catalog_name/catalog_price_* and the allowance block — never a separate signing surface. COMPACT by default; pass include_signing_payload=true only for diagnostics or an older signer. ' +
+    'Settlement scheme follows the #1450 preference, same as haven_pay_mcp_tool (#1547): when this agent is on the delegation rail AND the merchant advertises assetTransferMethod "erc7710", the response is the direct-settlement shape — settlement_scheme "erc7710", settlement.funding_leg false, plus the same catalog fields and allowance block; no funding leg, and next_tool switches to mcp__haven-signer__haven_sign with settle by payment_id + signature only, NO payment_header. ' +
+    'Otherwise the ready-to-sign object returned on success is the SAME compact quote shape as haven_pay_mcp_tool/haven_pay_x402_quote (#1272: payment_id, payload_hash, expires_at, signer_compatibility, x402) plus catalog_id/catalog_name/catalog_price_* and the allowance block — never a separate signing surface. COMPACT by default; pass include_signing_payload=true only for diagnostics or an older signer. ' +
     'Protocol notes: loads the catalog entry by catalog_id — chain-scoped to this agent automatically (#1299): an unknown id or one curated for a DIFFERENT chain both refuse with a 404, no separate check needed. ' +
     'Runs the LIVE MCP quote against the entry\'s own resource_url/tool_name/tool_arguments — the same probe haven_pay_mcp_tool uses. ' +
     'sufficient is reported as null (with a warning) rather than a guess when the allowance/budget read itself fails — this preflight never hard-fails just because that check could not run; the on-chain policy remains the actual gate either way. ' +
     'The catalog\'s price_atomic/price_display are only ever indicative (catalog_price_is_indicative is always true) — the live quote in this same response (amount/amount_atomic/token) is authoritative, and a CATALOG_PRICE_DIFFERS warning fires when the two disagree.',
   nextActionGuidance:
-    'Next: call mcp__haven-signer__haven_sign_x402 with { payment_id } — the signer fetches the exact signing payload itself (#1263), so you never copy bulky bytes. Then call mcp__haven__haven_settle_mcp_tool with the returned signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport from THIS response; from there the flow is identical to haven_pay_mcp_tool. ' +
+    'Next: follow next_tool/next_arguments from the response. On the EIP-3009 shape that is mcp__haven-signer__haven_sign_x402 with { payment_id } — the signer fetches the exact signing payload itself (#1263), so you never copy bulky bytes — then mcp__haven__haven_settle_mcp_tool with the returned signature + payment_header. On the erc7710 shape it is mcp__haven-signer__haven_sign with { payment_id }, then settle with payment_id + signature and NO payment_header. Either way merchant_url/tool_name/arguments/mcp_transport are OPTIONAL at settle (#1307): Haven rehydrates them by payment_id; from there the flow is identical to haven_pay_mcp_tool. ' +
     'If the response carries status "pending_approval" (legacy rail, over the remaining allowance), tell the user and poll haven_get_payment_status — do not re-quote or re-pay while pending.',
 })
 
@@ -517,9 +521,10 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'to pass through UNCHANGED, one opaque string, never re-typed (#1255).',
   'If expires_at passes before signing, re-quote with the same idempotency_key before signing again.',
   'Also returns signer_compatibility.x402_expected_context_version — the expected-context version',
-  'this result emits. Before signing, check it against the versions the haven-signer MCP server',
-  `advertises at initialize (${SIGNER_CAPABILITY_SOURCE} and its`,
-  'instructions). If it is not in that set the local signer is out of date: STOP before signing and',
+  'this result emits. The signer enforces compatibility itself (#1547): if this version is one it',
+  'does not support, it refuses to sign with a machine-readable version-mismatch error (code,',
+  'supported_versions, received_version, fallback) — branch on that refusal instead of pre-checking.',
+  'On it, STOP before signing again and',
   'tell the user to update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has',
   'been spent yet — funds move only when haven_submit relays a signature.',
 ].join(' ')
@@ -538,14 +543,15 @@ const RESUME_X402_DESCRIPTION = [
   // #1155: resume leads straight back to signing, and the signer restart this
   // description already anticipates is exactly when the INSTALLED signer can
   // have changed since the original quote. There is no version to echo here —
-  // the resume state carries no expected context — so this prompts a re-check
-  // of the one the agent already holds rather than inventing a null to compare.
-  'Protocol notes: this result carries no signer_compatibility of its own. Before signing, re-check the',
-  'x402_expected_context_version from the ORIGINAL quote against the versions the haven-signer',
-  `MCP server advertises at initialize (${SIGNER_CAPABILITY_SOURCE} and its instructions) —`,
-  'a signer restart or reinstall since that quote may have changed which versions it verifies.',
-  'On a mismatch, STOP before signing and tell the user to update @haven_ai/signer by rerunning',
-  '`npx @haven_ai/connect@alpha`.',
+  // the resume state carries no expected context — and no pre-check to run
+  // (#1547): the signer's own signing-time refusal is where an incompatible
+  // version surfaces, machine-readably.
+  'Protocol notes: this result carries no signer_compatibility of its own. A signer restart or',
+  'reinstall since the original quote may have changed which versions it verifies — the signer',
+  'enforces that itself (#1547): an incompatible context is refused at signing with a',
+  'machine-readable version-mismatch error (code, supported_versions, received_version, fallback);',
+  'branch on that refusal. On it, STOP before signing again and tell the user to update',
+  '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`.',
   'Next: call mcp__haven-signer__haven_x402_sign_header when you have the x402_binding, or mcp__haven-signer__haven_sign first to re-derive it.',
 ].join(' ')
 
@@ -738,13 +744,19 @@ export function createToolHandlers(
           status: entry.status,
           verified_at: entry.verifiedAt,
           // Hosted surface is keyless: x402 entries start with the quote half
-          // of the split flow; MCP entries go through haven_pay_mcp_tool.
+          // of the split flow; MCP entries take the GUIDED preflight —
+          // haven_prepare_catalog_purchase runs the live quote, cap, and
+          // rail-aware allowance check from just the catalog_id (#1306), and
+          // the description prose already said to prefer it. #1547: this
+          // structured field said haven_pay_mcp_tool while the prose said
+          // prepare — and structured fields win over prose by this server's
+          // own instructions, so the field steered agents off the guided path.
           // #1328: the 'mpp' rail's only-ever catalog row (the Haven MPP demo
           // resource) is delisted with the mpp_demo retirement, so this
           // fallback is unreachable today; it stays x402 rather than naming a
           // deleted tool in case a future non-demo 'mpp' rail entry appears.
           suggested_tool:
-            entry.protocol === 'mcp' ? 'haven_pay_mcp_tool'
+            entry.protocol === 'mcp' ? 'haven_prepare_catalog_purchase'
             : 'haven_quote_x402',
         }))
       }),
@@ -1180,26 +1192,9 @@ export function createToolHandlers(
             })
           }
 
-          // 6. Create the funding intent — IDENTICAL machinery to
-          // haven_pay_mcp_tool (mcpCallContext persisted per #1307), so the
-          // signer flow from here is IDENTICAL to today's:
-          // haven_sign_x402 with payment_id + payment_required, then
-          // haven_settle_mcp_tool.
-          const intent = await haven.createX402Intent(quote.paymentRequired as X402PaymentRequired, {
-            idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
-            mcpCallContext: {
-              merchantUrl,
-              toolName: entry.toolName,
-              arguments: entry.toolArguments ?? {},
-              ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
-            },
-            // #1348: the agent was already fetched at step 4 — skip the
-            // intent call's internal duplicate fetch.
-            delegateAddress: agent.delegateAddress,
-          })
-
-          // 7. Catalog price is indicative; the live quote above is
-          // authoritative — warn (never refuse) when they disagree.
+          // 6. Catalog price is indicative; the live quote above is
+          // authoritative — warn (never refuse) when they disagree. Computed
+          // BEFORE the scheme branch: both settlement shapes carry it.
           if (entry.priceAtomic && entry.priceAtomic !== quote.amountAtomic) {
             warnings.push({
               code: AgentPaymentWarningCode.CatalogPriceDiffers,
@@ -1208,6 +1203,111 @@ export function createToolHandlers(
                 `merchant quote (${quote.amountAtomic} ${quote.token} atomic). The live quote is authoritative.`,
             })
           }
+
+          // 7. Both halves of the #1450 rule: the merchant must advertise
+          // erc7710 AND the account must be on the delegation rail. #1453's
+          // selector is the single place that rule lives; #1547 wires it into
+          // this guided path, which was hard-wired to the 3009 funding leg —
+          // the recommended catalog route forced the fallback scheme while
+          // haven_pay_mcp_tool got the preferred one. Unlike that tool's
+          // prefetch, the agent read here is a hard pre-intent refusal
+          // (#1319), so the rail is always known by this point.
+          const catalogCallContext = {
+            merchantUrl,
+            toolName: entry.toolName,
+            arguments: entry.toolArguments ?? {},
+            ...(quote.mcpTransport ? { mcpTransport: quote.mcpTransport } : {}),
+          }
+          const catalogSelection = selectX402SettlementScheme(
+            (quote.paymentRequired as X402PaymentRequired).accepts,
+            { delegationRail: rail === 'delegation' },
+          )
+
+          if (catalogSelection?.scheme === 'erc7710') {
+            const prepared = await haven.prepareX402Erc7710(
+              quote.paymentRequired as X402PaymentRequired,
+              {
+                resourceUrl: merchantUrl,
+                delegationRail: true,
+                // #1307/#1547: persisted so settle rehydrates the merchant
+                // call by payment_id — the guided path's no-state-threading
+                // contract (#1305) holds on this scheme too.
+                mcpCallContext: catalogCallContext,
+              },
+            )
+            return {
+              payment_id: prepared.paymentId,
+              settlement_scheme: 'erc7710',
+              settlement: {
+                scheme: 'erc7710',
+                funding_leg: false,
+                merchant_pay_to: prepared.settlement.merchantPayTo,
+                facilitator_addresses: prepared.settlement.facilitatorAddresses,
+              },
+              amount_atomic: quote.amountAtomic,
+              amount: quote.amount,
+              token: quote.token,
+              merchant_url: merchantUrl,
+              tool_name: entry.toolName,
+              arguments: entry.toolArguments ?? {},
+              ...(quote.mcpTransport
+                ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) }
+                : {}),
+              catalog_id: entry.id,
+              catalog_name: entry.name,
+              catalog_price_atomic: entry.priceAtomic,
+              catalog_price_display: entry.priceDisplay,
+              catalog_price_is_indicative: true,
+              allowance: allowanceBlock,
+              ...buildAgentGuidance({
+                nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+                nextTool: 'mcp__haven-signer__haven_sign',
+                nextArguments: { payment_id: prepared.paymentId },
+                safeToContinue: true,
+                reason:
+                  'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
+                  "fetches the settlement child itself and verifies its caveats against Haven's " +
+                  'signed context (#1455) before signing. Then call haven_settle_mcp_tool with ' +
+                  'payment_id and the returned signature — merchant_url/tool_name/arguments are ' +
+                  'OPTIONAL there (#1307): Haven rehydrates them by payment_id. Do NOT pass ' +
+                  'payment_header: on this scheme Haven assembles it at settle, so there is ' +
+                  'nothing to build locally and no funding transaction to wait for.',
+                summary: {
+                  payment_id: prepared.paymentId,
+                  status: 'pending_signature',
+                  amount: quote.amount,
+                  amount_atomic: quote.amountAtomic,
+                  token: quote.token,
+                  network: prepared.settlement.network,
+                  // The child's own short expiry is the binding window here,
+                  // not the intent's — no quote-expiry warning applies.
+                  expires_at: undefined,
+                  product: entry.name,
+                },
+                warnings: [
+                  ...warnings,
+                  ...quoteWarnings({
+                    capped: cap.kind !== 'none',
+                    expiresAt: undefined,
+                  }),
+                ],
+              }),
+            }
+          }
+
+          // 8. EIP-3009 bridge (the merchant does not advertise erc7710, or
+          // the account is not on the delegation rail): create the funding
+          // intent — IDENTICAL machinery to haven_pay_mcp_tool
+          // (mcpCallContext persisted per #1307), so the signer flow from
+          // here is IDENTICAL to today's: haven_sign_x402 with payment_id +
+          // payment_required, then haven_settle_mcp_tool.
+          const intent = await haven.createX402Intent(quote.paymentRequired as X402PaymentRequired, {
+            idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
+            mcpCallContext: catalogCallContext,
+            // #1348: the agent was already fetched at step 4 — skip the
+            // intent call's internal duplicate fetch.
+            delegateAddress: agent.delegateAddress,
+          })
 
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
@@ -2140,11 +2240,12 @@ function signerCompatibilityNotice(emittedVersion: number) {
     x402_expected_context_version: emittedVersion,
     signer_capability: SIGNER_CAPABILITY_KEY,
     check:
-      'Before calling the local signer, compare x402_expected_context_version against ' +
-      'x402_expected_context_versions in the haven-signer MCP server\'s initialize result ' +
-      `(${SIGNER_CAPABILITY_SOURCE}, also stated in its instructions). ` +
-      'If this version is not in that set, the local signer is out of date: STOP before signing ' +
-      'and tell the user to update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`, ' +
+      'The local signer enforces this version itself (#1547): if x402_expected_context_version ' +
+      'is one it does not support, it refuses to sign with a machine-readable version-mismatch ' +
+      'error carrying code, supported_versions, received_version, and fallback — branch on that ' +
+      'refusal; no pre-check against the signer\'s initialize handshake is needed (most agent ' +
+      'harnesses cannot read it). On that refusal, STOP before signing again and tell the user ' +
+      'to update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`, ' +
       'which reinstalls the pinned MCP runtime. Do not edit the version to a supported value — ' +
       'it is part of the Haven-signed binding message, so changing it invalidates the signature. ' +
       'Nothing has been spent at this point; no funds move until haven_submit relays a signature.',

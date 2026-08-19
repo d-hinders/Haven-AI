@@ -194,7 +194,7 @@ export function resolveConnectStepView({
 export function headerSubtitle(step: SetupStep, status: string | undefined, runtimeConfigured?: boolean): string {
   if (step === 'connect') {
     if (status === 'connected_local' && !runtimeConfigured) return 'Finishing local setup'
-    if (status === 'connected_local' || status === 'awaiting_wallet_approval') return 'Approve the agent rules'
+    if (status === 'connected_local' || status === 'awaiting_wallet_approval') return 'Approve the agent budget'
     if (status === 'approval_in_progress' || status === 'proposed') return 'Waiting for approval to land'
     // #1394: NOT "Agent rules approved" — the shell ticker already reads
     // "Approved" and the body names the granted authority. Three statements of
@@ -235,13 +235,13 @@ export function approvalBlockReason(
   if (!status.delegate_address) return 'Haven is waiting for the public signing address from the local connection.'
   if (safeDetailsLoading) return 'Haven is still loading wallet approval details.'
   if (!publicClientReady) return 'Haven is still connecting to the wallet network.'
-  if (gate.kind === 'passkey_on_other_device') return 'Use the device with this Haven wallet passkey to approve agent rules.'
+  if (gate.kind === 'passkey_on_other_device') return 'Use the device with this Haven wallet passkey to approve the agent budget.'
   // Wallet is connected but to the wrong chain — network mismatch, not a missing wallet.
   if (gate.kind === 'no_signer' && wrongChain) {
-    return `Your wallet is connected to the wrong network. Switch to ${approvalChainName} to approve agent rules.`
+    return `Your wallet is connected to the wrong network. Switch to ${approvalChainName} to approve the agent budget.`
   }
-  if (gate.kind === 'no_signer') return 'Connect a wallet or use a passkey on this device to approve agent rules.'
-  if (!signerReady) return 'Connect a wallet or use a passkey on this device to approve agent rules.'
+  if (gate.kind === 'no_signer') return 'Connect a wallet or use a passkey on this device to approve the agent budget.'
+  if (!signerReady) return 'Connect a wallet or use a passkey on this device to approve the agent budget.'
   return null
 }
 

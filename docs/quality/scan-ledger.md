@@ -123,6 +123,15 @@ nagging, not scanning).
 **Disposition: approved by the owner 2026-08-18 → epic #1554** (backlog; drive
 with `ship-next epic=#1554`). Becomes `shipped` when the epic closes.
 
+**2026-08-19: `shipped`** — epic #1554 closed with all five slices merged and
+the live evidence in: a stuck Base Sepolia tx was replaced at the same nonce
+with bumped fees by the real worker and the replacement mined
+(tx `0x48ef59bb…`, #1558's closing comment). The "interim" comment in
+`infra/relayer.ts` is gone because the statement stopped being true; a future
+re-surface must cite the queue lane failing, not the lock's existence —
+multi-replica correctness is now gated only on the Safe-bound legacy sites
+(#1440).
+
 **Excluded this run:** the 2026-07 real-DB finding (`shipped`, ratchet holds)
 and the 2026-08-14 API-contract finding (epic #1442 approved; #1446 still
 open — in progress, not re-surfaceable).

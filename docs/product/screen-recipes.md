@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-08-13" # #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
+last-verified: "2026-08-19" # #1572: the connect flow's approval gate is named `agent budget` end to end (Review/Confirm/Approve agent budget) — recipe titles, primary actions, and a one-gate-one-name rule added to the vocabulary guidance; `agent rules` stays the broader authority concept. Body re-read against the connect-agent components. Prior: #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
 ---
 
 # Haven Screen Recipes
@@ -37,6 +37,11 @@ Use these recipes when designing or refactoring Haven product screens. They tran
 - Use one obvious primary action per screen or step.
 - Lead with what the user controls, not the crypto mechanism underneath.
 - Prefer `Haven account`, `Haven wallet`, `agent rules`, and `agent budget`.
+- One name for one gate: the connect flow's approval gate is the `agent budget`
+  (`Review agent budget` → `Confirm agent budget` → `Approve agent budget`,
+  matching the connector's own "approve the budget" narration, #1572). Keep
+  `agent rules` for the broader authority concept (detail pages, revoke/pause
+  copy) — never name the same gate with both words on one screen.
 - Hide Safe, module, signer, owner, relayer, raw hashes, and raw addresses unless the screen is an advanced/detail surface.
 - Money-moving, agent-authority-changing, or account-security screens need a
   review moment before execution. Show amount/rule, wallet/network, recipient
@@ -86,7 +91,7 @@ Structure:
 2. Primary configuration card for the agent name, Haven wallet, token, amount, and reset period.
 3. Agent rules summary showing the budget in human terms.
 4. Risk explainer that states when Haven will ask for approval.
-5. Primary action: `Review agent rules` for creation or `Review changes` for edits.
+5. Primary action: `Review agent budget` for creation or `Review changes` for edits.
 
 Money and risk clarity:
 - Show the selected Haven wallet before the user reviews.
@@ -101,12 +106,12 @@ States:
 - Error: explain what the user can do next, such as choosing another wallet or trying again.
 - Success: move to the review or ready state rather than showing a dead-end confirmation.
 
-## Review Agent Rules
+## Review Agent Budget
 
 Use immediately before creating or changing an agent's spending authority.
 
 Structure:
-1. Page header: `Review agent rules`.
+1. Page header: `Confirm agent budget` (creation) or `Review changes` (edits).
 2. Summary card answering who can spend, from which Haven wallet, how much, and how often.
 3. Approval note explaining what will happen when a request exceeds the budget.
 4. Secondary technical disclosure only if needed, collapsed or visually subordinate.
@@ -123,7 +128,7 @@ Money and risk clarity:
 
 ## Connect And Approve Agent
 
-Use after the user reviews agent rules and needs to pair a runtime and approve
+Use after the user reviews the agent budget and needs to pair a runtime and approve
 the agent's on-chain authority.
 
 Structure:
@@ -131,7 +136,7 @@ Structure:
 2. Wait for the local connector to generate the signing key and API key, then
    register the public signing address and proof with Haven.
    If Haven still reports no connection after a bounded wait, say only that it
-   has not received one yet; tell the user not to approve rules, offer the same
+   has not received one yet; tell the user not to approve the budget, offer the same
    local command, and let them cancel before creating a fresh one-time prompt.
 3. Show the registered public address and reviewed agent budget before wallet
    approval.

@@ -7,7 +7,7 @@ import { AgentRulesSummary } from '../haven'
 import { InlineErrorNote, WarningCallout } from './SetupNotices'
 
 /**
- * Step 3: confirm the agent rules before creating the setup prompt.
+ * Step 3: confirm the agent budget (and setup details) before creating the setup prompt.
  *
  * #1411: no rhythm of its own — see DetailsStep's note. Root is a Fragment;
  * the shared `flex flex-col gap-5` wrapper in ConnectAgentModal owns the
@@ -25,7 +25,7 @@ export function ReviewStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   return (
     <>
       <AgentRulesSummary
-        title="Confirm agent rules"
+        title="Confirm agent budget"
         description={`Haven creates a pending setup; the agent creates its key locally and Haven receives only the public signing address. Nothing can spend until you approve the budget${flow.isDelegationAccount ? '' : ' with your wallet'} — the signature is the authority.`}
         density="compact"
         items={[

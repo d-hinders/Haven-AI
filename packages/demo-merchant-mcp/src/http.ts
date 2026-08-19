@@ -381,7 +381,9 @@ function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
   const settlementMethod = isSettlementMethod(args.settlement_method) ? args.settlement_method : undefined
 
   let productId: ProductId | null = null
-  let descriptionSuffix = '1 månads abonnemang'
+  // #1550: the 402 challenge's description is merchant metadata shown in Haven
+  // quotes — English default, matching the MCP tool surface.
+  let descriptionSuffix = '1 month subscription'
 
   if (toolName === 'buy_vpn') {
     const plan = args.plan as string | undefined
@@ -393,7 +395,7 @@ function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
     const tier = args.tier as string | undefined
     if (tier === '50gb' || tier === '200gb' || tier === '1tb') {
       productId = `storage_${tier}` as ProductId
-      descriptionSuffix = '1 månads lagring'
+      descriptionSuffix = '1 month of storage'
     }
   }
 

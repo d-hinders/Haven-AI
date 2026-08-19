@@ -271,7 +271,7 @@ describe('demo merchant experimental erc7710 rail', () => {
     // Verification and settlement use the identical redeem call.
     expect(vi.mocked(erc7710Client.simulateRedeemDelegations).mock.calls[0][0]).toEqual(redeemCall)
 
-    expect(text).toContain('Köp bekräftat')
+    expect(text).toContain('Purchase confirmed')
     expect(text).toContain(DELEGATOR)
     expect(text).toContain(TX_HASH)
   })
@@ -518,7 +518,7 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
     // submitted on-chain again. The spent read went to the PINNED enforcer.
     expect(retry.status).toBe(200)
     expect(retry.headers.get(PAYMENT_RESPONSE_HEADER)).toBeTruthy()
-    expect(text).toContain('Köp bekräftat')
+    expect(text).toContain('Purchase confirmed')
     expect(second.submitRedeemDelegations).not.toHaveBeenCalled()
     expect(second.spentOnDelegation).toHaveBeenCalledWith(ENFORCER, DELEGATION_MANAGER, LEAF_HASH)
   })

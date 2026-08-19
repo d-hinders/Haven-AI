@@ -1,6 +1,13 @@
-import type { ProductId } from './products.js'
+import type { MerchantLocale, ProductId } from './products.js'
 import { PRODUCTS, formatUsdc } from './products.js'
 import type { SettledPayment } from './x402.js'
+
+// #1550: the invoice DOCUMENT (`InvoiceJson` + its Swedish text render) is a
+// Swedish bookkeeping artifact by design — it feeds the `x-receipt-json`
+// header and downstream accounting fixtures (Fortnox / receipt-underlag), so
+// the display-locale switch never touches it: keys, values, and `beskrivning`
+// stay Swedish regardless of the buyer-facing locale. Only the human-readable
+// render gains an English variant, via `renderInvoiceText`.
 
 // ── Merchant identity ────────────────────────────────────────────────────────
 const MERCHANT = {
@@ -116,7 +123,9 @@ export function generateInvoice(params: InvoiceParams): Invoice {
   const ocr = generateOcr(params.invoiceNumber)
 
   const row: InvoiceRow = {
-    beskrivning: `${product.name} — ${product.description} (1 månad)`,
+    // Always the SWEDISH description — this is the bookkeeping document, not
+    // the display surface (#1550, see module comment).
+    beskrivning: `${product.name} — ${product.description_sv} (1 månad)`,
     antal: 1,
     apris_exkl_moms: formatUsdc(exklMoms),
     moms_procent: 25,
@@ -196,6 +205,70 @@ BLOCKKEDJEREFERENS
 ════════════════════════════════════════════════════════════
   Tack för ditt köp av ${productName}!
   Frågor: support@haven.xyz
+════════════════════════════════════════════════════════════
+`.trimStart()
+}
+
+/**
+ * Locale-aware human-readable render of the SAME `InvoiceJson` (#1550). The
+ * underlying document stays Swedish (see the module comment); this only
+ * chooses the language of the headings and labels around its values. `en` is
+ * the demo default; `sv` reproduces the classic FAKTURA render byte-for-byte.
+ */
+export function renderInvoiceText(
+  inv: InvoiceJson,
+  productName: string,
+  locale: MerchantLocale,
+): string {
+  return locale === 'sv' ? buildInvoiceText(inv, productName) : buildInvoiceTextEn(inv, productName)
+}
+
+function buildInvoiceTextEn(inv: InvoiceJson, productName: string): string {
+  const row = inv.rader[0]
+  return `
+════════════════════════════════════════════════════════════
+                         INVOICE
+════════════════════════════════════════════════════════════
+
+SELLER
+  ${inv.saljare.name}
+  ${inv.saljare.address}
+  Org. no:      ${inv.saljare.org_nr}
+  VAT reg. no:  ${inv.saljare.moms_nr}
+
+BUYER
+  Blockchain address: ${inv.kopare.identifierare}
+
+────────────────────────────────────────────────────────────
+  Invoice number:  ${inv.fakturanummer}
+  Invoice date:    ${inv.fakturadatum}
+  Due date:        ${inv.forfallodatum}
+  OCR number:      ${inv.ocr_nummer}
+────────────────────────────────────────────────────────────
+
+SERVICES
+
+  ${row.beskrivning}
+  Quantity: ${row.antal}  Unit price excl. VAT: ${row.apris_exkl_moms} USDC
+
+────────────────────────────────────────────────────────────
+  Amount excl. VAT:    ${inv.belopp_exkl_moms} USDC
+  VAT ${inv.moms_procent}%:             ${inv.moms_belopp} USDC
+  TOTAL incl. VAT:     ${inv.totalt_inkl_moms} USDC
+────────────────────────────────────────────────────────────
+
+  Currency:          ${inv.valuta}
+  Payment method:    Cryptocurrency (USDC on Base)
+  Recipient address: ${inv.saljare.crypto_address}
+
+BLOCKCHAIN REFERENCE
+  ${inv.blockkedje_referens}
+
+  Status: Paid
+
+════════════════════════════════════════════════════════════
+  Thank you for purchasing ${productName}!
+  Questions: support@haven.xyz
 ════════════════════════════════════════════════════════════
 `.trimStart()
 }

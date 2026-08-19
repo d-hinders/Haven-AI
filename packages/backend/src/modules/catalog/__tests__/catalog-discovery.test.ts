@@ -70,7 +70,7 @@ describe('ingestDiscoveredCatalog', () => {
       'Per-call forecast data.',
       'api',
       'https://api.weather.example/paid',
-      '$0.02 USDC',
+      '0.02 USDC',
       '20000',
       'USDC',
       'eip155:8453',

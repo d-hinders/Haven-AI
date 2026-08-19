@@ -46,7 +46,20 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
 
+      - name: Restore Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      # #1609: apt-get only on cache miss — see ci.yml for the rationale.
+      # Same cache key as the visual-regression job on purpose: baselines and
+      # comparisons must render with the SAME cached browser build.
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
         working-directory: packages/frontend
 

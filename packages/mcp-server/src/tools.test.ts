@@ -1741,6 +1741,9 @@ describe('haven_prepare_catalog_purchase', () => {
     // #1308 guidance — next step is the SAME signer call as haven_pay_mcp_tool.
     expect(result.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
     expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+    // #1588: the runtime-neutral pair rides along; next_tool stays byte-identical.
+    expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
+    expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign_x402')
     expect(result.data.next_arguments).toEqual({ payment_id: X402_INTENT_RESPONSE.payment_id })
     // Catalog price matched the live quote — no CATALOG_PRICE_DIFFERS warning.
     expect(result.data.warnings.some((w) => w.code === 'CATALOG_PRICE_DIFFERS')).toBe(false)
@@ -2211,6 +2214,8 @@ describe('haven_prepare_catalog_purchase', () => {
       expect(res.data.settlement_scheme).toBe('erc7710')
       expect(res.data.settlement.funding_leg).toBe(false)
       expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign')
+      expect((res.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
+      expect((res.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign')
       expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
       // The guided-path extras survive the scheme branch — this shape is the
       // SAME contract as the 3009 one, minus the funding leg.
@@ -2238,6 +2243,8 @@ describe('haven_prepare_catalog_purchase', () => {
       const res = await prepare(erc7710Header, AGENT_RESPONSE)
       expect(res.data.settlement_scheme).toBeUndefined()
       expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+      expect((res.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
+      expect((res.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign_x402')
       expect(xBody().settlementScheme).toBe('eip3009')
     })
 
@@ -3638,6 +3645,8 @@ describe('structured agent guidance (#1308)', () => {
     expect(result.data.status).toBe('pending_approval')
     expect(result.data.next_action).toBe('wait_for_user_approval')
     expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven')
+    expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_get_payment_status')
     expect(result.data.safe_to_continue).toBe(false)
   })
 })
@@ -4426,5 +4435,47 @@ describe('null-holed payment_required (#1469)', () => {
     const text = JSON.stringify(result)
     expect(text).not.toMatch(/Cannot read properties/)
     expect(text).toMatch(/No compatible payment option|not a valid x402 PaymentRequired/)
+  })
+})
+
+describe('runtime-neutral tool naming (#1588)', () => {
+  it('every tool description that spells mcp__… also carries the runtime-naming hedge', async () => {
+    // Self-enforcing acceptance criterion: no agent-visible description may
+    // assert the Claude-family identifier as THE callable name without the
+    // runtime-neutral resolution alongside it. Registration-derived, so a new
+    // tool description cannot dodge the rule.
+    const { toolDescriptions } = await import('./tools.js')
+    const offenders = Object.entries(toolDescriptions)
+      .filter(([, description]) => description.includes('mcp__'))
+      .filter(([, description]) => !description.includes('next_tool_server'))
+      .map(([name]) => name)
+    expect(offenders).toEqual([])
+  })
+})
+
+describe('next_tool emission literals (#1588 review)', () => {
+  it('every nextTool literal in the source parses into the runtime-neutral pair', async () => {
+    // Source-derived like the description scanner: only 4 of the 9 emission
+    // sites are behaviourally pinned, and a mis-spelled literal on an
+    // unpinned site would silently drop the pair (the derivation omits on
+    // parse failure by design). This closes that hole for every literal,
+    // present and future.
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const source = readFileSync(fileURLToPath(new URL('./tools.ts', import.meta.url)), 'utf8')
+    const literals = [...source.matchAll(/nextTool: '([^']+)'/g)].map((m) => m[1])
+    expect(literals.length).toBeGreaterThanOrEqual(9)
+    const unparseable = literals.filter((l) => !/^mcp__([a-z0-9-]+)__([a-z0-9_]+)$/.test(l))
+    expect(unparseable).toEqual([])
+  })
+
+  it('suggested_tool hints use BARE tool names — the sibling convention, never the prefixed form', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const source = readFileSync(fileURLToPath(new URL('./tools.ts', import.meta.url)), 'utf8')
+    const prefixed = [...source.matchAll(/suggestedTool: '([^']+)'/g)]
+      .map((m) => m[1])
+      .filter((v) => v.startsWith('mcp__'))
+    expect(prefixed).toEqual([])
   })
 })

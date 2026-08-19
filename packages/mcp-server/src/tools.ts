@@ -314,6 +314,14 @@ const SIGNER_CAPABILITY_KEY = 'haven/signer-compatibility'
 // echoed in signer_compatibility.signer_capability for harnesses that CAN
 // read it.
 
+/**
+ * #1588: prose below spells Claude-family tool namespacing; other runtimes
+ * name the servers by their own config keys. Every description that writes
+ * an mcp__… identifier carries this hedge (enforced by a test).
+ */
+const RUNTIME_NAMING_HEDGE =
+  'TOOL NAMES: mcp__haven__… / mcp__haven-signer__… is Claude-family namespacing; your runtime may name these servers differently (Codex config keys: haven, haven_signer). Resolve via next_tool_server + next_tool_name — the bare tool name on that logical server.'
+
 const PAY_DESCRIPTION = [
   'Construct a payment within the agent budget and return the unsigned payload to sign.',
   'For read-only allowance, budget, spend-limit, remaining-amount, or reset-period questions,',
@@ -366,6 +374,7 @@ const SUBMIT_DESCRIPTION = [
   'or a resume tool, and the signature over its payload_hash. Funding relay sends',
   '{ payment_id, signature } to Haven — never the signing key. Returns { status, tx_hash }.',
   'For decomposed x402 flows, next after confirmed funding: call mcp__haven-signer__haven_x402_sign_header.',
+  RUNTIME_NAMING_HEDGE,
 ].join(' ')
 
 const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -398,7 +407,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Fallback for an older signer/backend, or for diagnostics: re-run THIS tool with the SAME idempotency_key plus include_signing_payload=true — the replay returns the ORIGINAL sign_data with typed_data_b64 — then pass payload_hash, x402_expected (the nested x402.expected context, including expires_at), payment_required, and typed_data_b64 through UNCHANGED, one opaque string, never re-typed (#1255). Returns { signature, payment_header }. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
     'Pass arguments and mcp_transport through verbatim from this response; haven_x402_sign_header also needs payment_required — obtain it from the include_signing_payload=true replay (#1549).',
-})
+}) + ' ' + RUNTIME_NAMING_HEDGE
 
 const QUOTE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
@@ -437,7 +446,7 @@ const PREPARE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
   nextActionGuidance:
     'Next: follow next_tool/next_arguments from the response. On the EIP-3009 shape that is mcp__haven-signer__haven_sign_x402 with { payment_id } — the signer fetches the exact signing payload itself (#1263), so you never copy bulky bytes — then mcp__haven__haven_settle_mcp_tool with the returned signature + payment_header. On the erc7710 shape it is mcp__haven-signer__haven_sign with { payment_id }, then settle with payment_id + signature and NO payment_header. Either way merchant_url/tool_name/arguments/mcp_transport are OPTIONAL at settle (#1307): Haven rehydrates them by payment_id; from there the flow is identical to haven_pay_mcp_tool. ' +
     'If the response carries status "pending_approval" (legacy rail, over the remaining allowance), tell the user and poll haven_get_payment_status — do not re-quote or re-pay while pending.',
-})
+}) + ' ' + RUNTIME_NAMING_HEDGE
 
 const QUOTE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
   summary:
@@ -467,7 +476,7 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
     'If the funding window expired first, this returns code PAYMENT_WINDOW_EXPIRED with retry_with_new_quote=true.',
   nextActionGuidance:
     'If the merchant rejects the payment after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with mcp__haven__haven_sweep_delegate.',
-})
+}) + ' ' + RUNTIME_NAMING_HEDGE
 
 const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
   // #1311: same restructuring as COMPLETE_MCP_TOOL_DESCRIPTION above — this
@@ -484,7 +493,7 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
     'Echoes payment_id on both the settled and not-settled responses so you can reconcile against haven_list_receipts / haven_get_payment_status without retaining it from haven_pay_mcp_tool.',
   nextActionGuidance:
     'If the merchant rejects after funding, this returns code MERCHANT_REJECTED_AFTER_FUNDING and the delegate holds stranded funds — reconcile with mcp__haven__haven_sweep_delegate.',
-})
+}) + ' ' + RUNTIME_NAMING_HEDGE
 
 const QUOTE_X402_DESCRIPTION = composeDescription({
   ...sharedDescriptions.quoteX402,
@@ -492,7 +501,7 @@ const QUOTE_X402_DESCRIPTION = composeDescription({
     'Probes the merchant directly from the hosted MCP server and parses the 402 response. ' +
     'Haven is not contacted. Returns the full quote object including payment_required for ' +
     'mcp__haven__haven_pay_x402_quote. Next: call mcp__haven__haven_pay_x402_quote.',
-})
+}) + ' ' + RUNTIME_NAMING_HEDGE
 
 // #1311: sentence 1 = critical-path position; sentence 2 = the
 // structured-fields-first instruction; then the compact must-knows
@@ -531,6 +540,7 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'On it, STOP before signing again and',
   'tell the user to update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has',
   'been spent yet — funds move only when haven_submit relays a signature.',
+  RUNTIME_NAMING_HEDGE,
 ].join(' ')
 
 // #1311: same restructuring pattern — critical-path position first, then
@@ -557,6 +567,7 @@ const RESUME_X402_DESCRIPTION = [
   'branch on that refusal. On it, STOP before signing again and tell the user to update',
   '@haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`.',
   'Next: call mcp__haven-signer__haven_x402_sign_header when you have the x402_binding, or mcp__haven-signer__haven_sign first to re-derive it.',
+  RUNTIME_NAMING_HEDGE,
 ].join(' ')
 
 // #1328: QUOTE_MPP_DESCRIPTION / PAY_MPP_CHALLENGE_DESCRIPTION / RESUME_MPP_DESCRIPTION
@@ -1848,9 +1859,20 @@ function buildAgentGuidance(input: {
   summary: AgentPaymentSummary
   warnings?: AgentPaymentWarning[]
 }) {
+  // #1588: next_tool is Claude-family namespaced (mcp__<server>__<tool>) and
+  // kept byte-identical for existing clients; the pair below is the
+  // runtime-neutral resolution — Codex names servers by config key
+  // (haven, haven_signer), so the prefixed form matches nothing callable
+  // there. Derived, not duplicated: one emission point cannot drift.
+  const parsedNextTool = input.nextTool
+    ? /^mcp__([a-z0-9-]+)__([a-z0-9_]+)$/.exec(input.nextTool)
+    : null
   return {
     next_action: input.nextAction,
     ...(input.nextTool ? { next_tool: input.nextTool } : {}),
+    ...(parsedNextTool
+      ? { next_tool_server: parsedNextTool[1], next_tool_name: parsedNextTool[2] }
+      : {}),
     ...(input.nextArguments ? { next_arguments: input.nextArguments } : {}),
     safe_to_continue: input.safeToContinue,
     reason: input.reason,
@@ -2806,7 +2828,7 @@ async function preflightMcpPaymentHeader(haven: HavenClient, args: Record<string
       phase: 'not_started',
       nextAction: AgentPaymentNextAction.StopAndTellUser,
       rail: 'x402',
-      suggestedTool: 'mcp__haven-signer__haven_sign_x402',
+      suggestedTool: 'haven_sign_x402',
     })
   }
 }

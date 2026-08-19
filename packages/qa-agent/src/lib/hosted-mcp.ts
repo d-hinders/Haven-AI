@@ -304,7 +304,16 @@ export interface HostedCatalogAllowanceBlock {
 export interface HostedPrepareCatalogPurchaseResult {
   payment_id: string
   status?: string
-  payload_hash: string | null
+  /** Absent on the erc7710 shape (#1547) — the settlement child has no funding payload. */
+  payload_hash?: string | null
+  /** #1547: present (as 'erc7710') when the guided path chose direct settlement per #1450. */
+  settlement_scheme?: string
+  settlement?: {
+    scheme?: string
+    funding_leg?: boolean
+    merchant_pay_to?: string
+    facilitator_addresses?: string[] | null
+  }
   expires_at?: string
   signature_scheme?: string
   /** #1272: absent by default — see the module/scenario doc-comments. */

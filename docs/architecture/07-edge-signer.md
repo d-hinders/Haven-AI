@@ -27,7 +27,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-12" # #1355: the #1263 fetch also carries payment_required (persisted at authorize); haven_sign_x402 is { payment_id }-only with verbatim fallback for older backends; verification unchanged. Prior: #1352 Node floor, agent-prompt refresh
+last-verified: "2026-08-19" # #1547: the hosted tool prose stops asking agents to compare against the signer's initialize handshake (unperformable in most harnesses) — the documented default is now the structured signing-time refusal this doc already describes (#1309); the handshake surface itself is unchanged and stays advertised. Prior: #1355: the #1263 fetch also carries payment_required (persisted at authorize); haven_sign_x402 is { payment_id }-only with verbatim fallback for older backends; verification unchanged. Prior: #1352 Node floor, agent-prompt refresh
 ---
 
 # Haven — Edge Signer
@@ -101,8 +101,12 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    detectable *before* a payment: the hosted quote reports the version it will
    emit, the agent compares, and a mismatch is a warning naming the fix — never
    a refusal, which stays at signing time (#1143). Only the agent sees both
-   handshakes, so the comparison is agent-mediated by construction. The
-   handshake carries no key material and no authority.
+   handshakes, so the comparison is agent-mediated by construction. Since
+   #1547 the hosted tool prose no longer ASKS agents to run that compare —
+   most agent harnesses cannot read an MCP `initialize` result, so the
+   documented default is "sign; branch on the structured signing-time refusal
+   below" — but the handshake stays advertised for harnesses and humans that
+   can read it. The handshake carries no key material and no authority.
 
    **Structured signing-time refusal (#1309).** The #1143 refusal itself is
    unchanged — an unsupported expected-context or sweep-binding version still

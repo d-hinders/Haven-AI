@@ -455,7 +455,9 @@ describe('haven_discover_tools', () => {
 
     expect(result.data[0].price_is_indicative).toBe(true)
     expect(result.data[0].price_atomic).toBe('10000')
-    expect(result.data[0].suggested_tool).toBe('haven_pay_mcp_tool')
+    // #1547: the structured field agrees with the description prose — MCP
+    // entries point at the GUIDED preflight, not the manual tool.
+    expect(result.data[0].suggested_tool).toBe('haven_prepare_catalog_purchase')
     expect(result.data[0].tool_arguments).toEqual({ prompt: 'hello' })
   })
 
@@ -2139,6 +2141,128 @@ describe('haven_prepare_catalog_purchase', () => {
 
     const intentCall = calls.find((c) => c.url.endsWith('/x402'))
     expect(intentCall?.body?.idempotencyKey).toBe('catalog-purchase-key-1')
+  })
+
+  /**
+   * #1547 — the guided path honours the #1450 settlement-scheme preference.
+   *
+   * Before this, the catalog handler was hard-wired to createX402Intent (the
+   * 3009 funding leg) while haven_pay_mcp_tool ran #1453's selector — so the
+   * RECOMMENDED guided route forced the fallback scheme and its transient
+   * delegate hot balance. The negatives carry this suite for the same reason
+   * they carry the #1456 one: a selector that always answered "erc7710" would
+   * pass a happy-path-only file.
+   */
+  describe('settlement-scheme preference (#1547)', () => {
+    const ERC7710_PR = {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        ...PAYMENT_REQUIRED.accepts,
+        {
+          ...PAYMENT_REQUIRED.accepts[0],
+          extra: {
+            assetTransferMethod: 'erc7710',
+            facilitatorAddresses: ['0x4444444444444444444444444444444444444444'],
+          },
+        },
+      ],
+    }
+    const erc7710Header = btoa(JSON.stringify(ERC7710_PR))
+    const CHILD = {
+      payment_id: 'pay_7710',
+      status: 'pending_signature',
+      sign_data: {
+        hash: '0x' + '11'.repeat(32),
+        signature_scheme: 'eip712_delegation',
+        typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+      },
+    }
+
+    function xBody() {
+      const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+      return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, any>
+    }
+
+    async function prepare(header: string, agent: Record<string, unknown>, expectErc7710 = false) {
+      stubFetch({
+        'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': header } },
+        'POST /x402': { status: 201, body: expectErc7710 ? CHILD : X402_INTENT_RESPONSE },
+        'GET /machine-payments/agent': { status: 200, body: agent },
+        'GET /machine-payments/allowances': {
+          status: 200,
+          body: allowancesFixture(
+            '5000000',
+            (agent as { execution_rail?: string }).execution_rail === 'delegation' ? 'delegation' : 'legacy',
+          ),
+        },
+      })
+      return ok(
+        await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+      ) as { data: Record<string, any> }
+    }
+
+    it('delegation rail + erc7710 merchant: direct settlement, with the catalog fields and allowance block kept', async () => {
+      const res = await prepare(erc7710Header, DELEGATION_AGENT_RESPONSE, true)
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.settlement.funding_leg).toBe(false)
+      expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign')
+      expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
+      // The guided-path extras survive the scheme branch — this shape is the
+      // SAME contract as the 3009 one, minus the funding leg.
+      expect(res.data.catalog_id).toBe('cat_1')
+      expect(res.data.catalog_price_is_indicative).toBe(true)
+      expect(res.data.allowance).toMatchObject({ rail: 'delegation', sufficient: true })
+
+      const body = xBody()
+      // payTo = the MERCHANT is what selects direct settlement server-side.
+      expect(body.settlementScheme).toBe('erc7710')
+      expect(body.payTo).toBe(PAYMENT_REQUIRED.accepts[0].payTo)
+    })
+
+    it('persists the merchant call context on the erc7710 authorize, so settle rehydrates by payment_id (#1307)', async () => {
+      await prepare(erc7710Header, DELEGATION_AGENT_RESPONSE, true)
+      const body = xBody()
+      expect(body.mcpCallContext).toMatchObject({
+        merchantUrl: 'http://merchant.test/mcp',
+        toolName: 'create_text',
+        arguments: { prompt: 'Hello' },
+      })
+    })
+
+    it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
+      const res = await prepare(erc7710Header, AGENT_RESPONSE)
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+      expect(xBody().settlementScheme).toBe('eip3009')
+    })
+
+    it('a 3009-only merchant stays on the bridge, even on a delegation account', async () => {
+      const res = await prepare(paymentRequiredHeader, DELEGATION_AGENT_RESPONSE)
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(xBody().settlementScheme).toBe('eip3009')
+    })
+
+    it('the CATALOG_PRICE_DIFFERS warning survives the scheme branch (it fires before it)', async () => {
+      stubFetch({
+        'GET /catalog/cat_1': {
+          status: 200,
+          body: { ...CATALOG_ENTRY_RESPONSE, price_atomic: '999' },
+        },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': erc7710Header } },
+        'POST /x402': { status: 201, body: CHILD },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'GET /machine-payments/allowances': {
+          status: 200,
+          body: allowancesFixture('5000000', 'delegation'),
+        },
+      })
+      const res = ok<{ settlement_scheme: string; warnings: Array<{ code: string }> }>(
+        await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.warnings.map((w) => w.code)).toContain('CATALOG_PRICE_DIFFERS')
+    })
   })
 })
 

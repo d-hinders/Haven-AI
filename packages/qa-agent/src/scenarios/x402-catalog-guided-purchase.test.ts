@@ -24,7 +24,7 @@ const FUNDING_TX = '0x' + 'f1'.repeat(32)
 const MERCHANT_TX = '0x' + 'f2'.repeat(32)
 const CATALOG_ID = 'cat_nordshield_vpn_basic'
 
-const { mockCallTool, mockGetAgent, mockGetCatalog, mockBalanceOf, mockGetReceipt, mockSignX402 } = vi.hoisted(
+const { mockCallTool, mockGetAgent, mockGetCatalog, mockBalanceOf, mockGetReceipt, mockSignX402, mockSign } = vi.hoisted(
   () => ({
     mockCallTool: vi.fn(),
     mockGetAgent: vi.fn(),
@@ -32,12 +32,13 @@ const { mockCallTool, mockGetAgent, mockGetCatalog, mockBalanceOf, mockGetReceip
     mockBalanceOf: vi.fn(),
     mockGetReceipt: vi.fn(),
     mockSignX402: vi.fn(),
+    mockSign: vi.fn(),
   }),
 )
 
 vi.mock('@haven_ai/signer', () => ({
   createEdgeSigner: () => ({ delegateAddress: DELEGATE }),
-  createToolHandlers: () => ({ haven_sign_x402: mockSignX402 }),
+  createToolHandlers: () => ({ haven_sign_x402: mockSignX402, haven_sign: mockSign }),
 }))
 vi.mock('../lib/haven-api.js', () => ({
   HavenApi: class {
@@ -585,5 +586,173 @@ describe('hosted tool refusals are reported as such', () => {
     const r = await x402CatalogGuidedPurchase.run(ctx())
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/MERCHANT_REJECTED_AFTER_FUNDING/)
+  })
+})
+
+/**
+ * #1547 — the erc7710 direct-settlement shape of the guided path.
+ *
+ * The catalog prepare now honours the #1450 preference, so on dev (delegation
+ * agent + erc7710-advertising demo merchant) this is the EXPECTED shape. The
+ * money proof INVERTS here: a funding_tx_hash is a FAILURE, not evidence —
+ * asserting the 3009 proof against a direct settlement was exactly the
+ * green-test-asserting-a-lie trap #1547's acceptance criteria named.
+ */
+describe('the erc7710 shape (#1547)', () => {
+  const MERCHANT_PAY_TO = '0x' + 'ce'.repeat(20)
+
+  const prep7710 = (over: Record<string, unknown> = {}) => ({
+    payment_id: 'pay_catalog_7710',
+    settlement_scheme: 'erc7710',
+    settlement: { scheme: 'erc7710', funding_leg: false, merchant_pay_to: MERCHANT_PAY_TO },
+    amount_atomic: '1000',
+    amount: '0.001',
+    token: 'USDC',
+    catalog_id: CATALOG_ID,
+    catalog_name: 'NordShield VPN Basic — demo merchant (Base Sepolia)',
+    catalog_price_atomic: '1000',
+    catalog_price_display: '$0.001 USDC',
+    catalog_price_is_indicative: true,
+    allowance: { rail: 'delegation', sufficient: true, remaining_atomic: '2000000', source: 'active_delegations' },
+    next_action: 'sign_and_submit_payment',
+    next_tool: 'mcp__haven-signer__haven_sign',
+    next_arguments: { payment_id: 'pay_catalog_7710' },
+    ...over,
+  })
+
+  const settled7710 = (over: Record<string, unknown> = {}) => ({
+    payment_id: 'pay_catalog_7710',
+    settlement_scheme: 'erc7710',
+    funding_tx_hash: null,
+    settled: true,
+    settlement_tx_hash: MERCHANT_TX,
+    result: { content: [{ text: 'VPN basic purchased' }] },
+    allowance: {
+      rail: 'delegation',
+      remaining_atomic: '1999000',
+      token_symbol: 'USDC',
+      token_address: '0x' + '99'.repeat(20),
+      source: 'active_delegations',
+    },
+    ...over,
+  })
+
+  /**
+   * The erc7710 read sequence: [treasury, delegate] baseline pair, merchant
+   * baseline, then [treasury, merchant] poll pairs, then one final delegate
+   * read — a DIFFERENT shape from the 3009 helper above.
+   */
+  function balances7710(over: Partial<{
+    treasuryBefore: bigint; delegateBefore: bigint; merchantBefore: bigint
+    treasuryAfter: bigint; merchantAfter: bigint; delegateAfter: bigint
+  }> = {}) {
+    const v = {
+      treasuryBefore: 1_000_000n, delegateBefore: 0n, merchantBefore: 500n,
+      treasuryAfter: 999_000n, merchantAfter: 1_500n, delegateAfter: 0n,
+      ...over,
+    }
+    let call = 0
+    mockBalanceOf.mockReset()
+    mockBalanceOf.mockImplementation(async () => {
+      const index = call++
+      if (index === 0) return v.treasuryBefore
+      if (index === 1) return v.delegateBefore
+      if (index === 2) return v.merchantBefore
+      // Poll pairs: even = treasury, odd = merchant … except the LAST read
+      // after the loop breaks, which is the delegate. The loop breaks on the
+      // first pair when treasuryAfter differs, so: 3=treasury, 4=merchant,
+      // 5=delegate.
+      if (index === 3) return v.treasuryAfter
+      if (index === 4) return v.merchantAfter
+      return v.delegateAfter
+    })
+  }
+
+  beforeEach(() => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_prepare_catalog_purchase' ? prep7710() : settled7710(),
+    )
+    mockSign.mockResolvedValue({ success: true, data: { signature: '0xsig7710' } })
+    balances7710()
+  })
+
+  it('passes, signing via haven_sign with ONLY payment_id and settling with ONLY payment_id + signature', async () => {
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(r.detail).toMatch(/erc7710 DIRECT/)
+    expect(r.detail).toMatch(/delegate EOA untouched/)
+
+    // The signer saw the payment_id and nothing else — and never the 3009 tool.
+    expect(mockSign).toHaveBeenCalledWith({ payment_id: 'pay_catalog_7710' })
+    expect(mockSignX402).not.toHaveBeenCalled()
+
+    // Settle carried NO payment_header (its absence selects the erc7710
+    // branch) and NO merchant context (#1307 rehydration from the persisted
+    // catalog context).
+    const settleCall = mockCallTool.mock.calls.find(([tool]) => tool === 'haven_settle_mcp_tool')
+    expect(settleCall?.[1]).toEqual({ payment_id: 'pay_catalog_7710', signature: '0xsig7710' })
+  })
+
+  it('FAILS when settle reports a funding tx — the 3009 proof inverted', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_prepare_catalog_purchase' ? prep7710() : settled7710({ funding_tx_hash: FUNDING_TX }),
+    )
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/no funding leg/)
+  })
+
+  it('fails when settle reports a different scheme than prepare chose', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_prepare_catalog_purchase' ? prep7710() : settled7710({ settlement_scheme: undefined }),
+    )
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/must not settle as anything else/)
+  })
+
+  it('fails when the delegate EOA moved — a hidden funding leg', async () => {
+    balances7710({ delegateAfter: 7n })
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/delegate EOA balance changed/)
+  })
+
+  it('fails when the treasury debit does not equal the merchant credit', async () => {
+    balances7710({ merchantAfter: 700n })
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/must move the same amount/)
+  })
+
+  it('fails when the erc7710 shape still points next_tool at haven_sign_x402', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_prepare_catalog_purchase'
+        ? prep7710({ next_tool: 'mcp__haven-signer__haven_sign_x402' })
+        : settled7710(),
+    )
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/expected the signer's haven_sign tool/)
+  })
+
+  it('fails when the erc7710 shape omits funding_leg: false or merchant_pay_to', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_prepare_catalog_purchase'
+        ? prep7710({ settlement: { scheme: 'erc7710', funding_leg: false } })
+        : settled7710(),
+    )
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/merchant_pay_to/)
+  })
+
+  it('keeps the guided contract on this shape: allowance block and indicative price still required', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_prepare_catalog_purchase' ? prep7710({ allowance: undefined }) : settled7710(),
+    )
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/rail-labeled allowance/)
   })
 })

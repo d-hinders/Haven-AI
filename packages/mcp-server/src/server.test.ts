@@ -90,11 +90,14 @@ describe('buildHostedMcpServer', () => {
     await server.close()
   })
 
-  it('instructs the agent to compare expected-context versions before signing (#1155)', async () => {
-    // The prompt half of pre-payment skew detection. The quote result carries
-    // the number; the description is what tells the agent to look at it, and to
-    // stop rather than sign when it falls outside what the local signer
-    // advertises at its own initialize handshake.
+  it('instructs the agent to branch on the signer version-mismatch refusal (#1155, #1547)', async () => {
+    // The prompt half of payment skew detection. #1155 told agents to compare
+    // the emitted version against the signer's initialize handshake — which
+    // most agent harnesses cannot read (#1547): the observed behaviour was
+    // agents "checking" by re-reading instruction prose. The signer already
+    // refuses incompatible versions machine-readably (code / supported_versions
+    // / received_version / fallback, #1309), so the documented protocol is now
+    // sign-and-branch-on-refusal, and the descriptions must say so.
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const server = buildHostedMcpServer(haven)
 
@@ -108,18 +111,23 @@ describe('buildHostedMcpServer', () => {
 
     for (const tool of ['haven_pay_x402_quote', 'haven_pay_mcp_tool']) {
       const description = byName.get(tool) ?? ''
-      expect(description).toContain('signer_compatibility.x402_expected_context_version')
-      expect(description).toContain('haven/signer-compatibility')
+      // The refusal is named as the branch point, with its machine fields.
+      expect(description).toContain('version-mismatch')
+      expect(description).toContain('supported_versions')
+      // #1547: no description tells the agent to inspect the signer's MCP
+      // initialize result — most harnesses cannot see it.
+      expect(description).not.toMatch(/advertises at initialize/)
       // Same fix as #1143, so both surfaces tell the user the same thing.
       expect(description).toContain('npx @haven_ai/connect@alpha')
       expect(description).toContain('STOP before signing')
     }
 
-    // Resume re-enters signing and carries no version of its own, so it prompts
-    // a re-check of the original quote's — the signer restart it already
-    // anticipates is exactly when the installed signer can have changed.
+    // Resume re-enters signing and carries no version of its own — the signer
+    // restart it already anticipates is exactly when the installed signer can
+    // have changed, and the signing-time refusal is where that surfaces.
     const resume = byName.get('haven_resume_x402_payment') ?? ''
-    expect(resume).toContain('haven/signer-compatibility')
+    expect(resume).toContain('version-mismatch')
+    expect(resume).not.toMatch(/advertises at initialize/)
     expect(resume).toContain('npx @haven_ai/connect@alpha')
     expect(resume).toContain('STOP before signing')
 

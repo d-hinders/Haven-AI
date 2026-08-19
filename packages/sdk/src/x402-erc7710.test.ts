@@ -144,6 +144,25 @@ describe('settleX402Erc7710 (#1454)', () => {
       expect(posts[0].body.maxTimeoutSeconds).toBe(120)
     })
 
+    it('forwards mcpCallContext so settle can rehydrate by payment_id, and omits it when absent (#1547)', async () => {
+      // #1307's rehydration only works when the authorize persisted a context;
+      // the guided catalog path (#1305) depends on that holding on this scheme.
+      const context = {
+        merchantUrl: 'https://merchant.example/mcp',
+        toolName: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      }
+      const withContext = harness()
+      await withContext.client.prepareX402Erc7710(paymentRequired([erc7710Option()]), {
+        mcpCallContext: context,
+      })
+      expect(withContext.posts[0].body.mcpCallContext).toEqual(context)
+
+      const without = harness()
+      await without.client.prepareX402Erc7710(paymentRequired([erc7710Option()]))
+      expect(without.posts[0].body).not.toHaveProperty('mcpCallContext')
+    })
+
     it('never posts anything when the account is on the legacy rail', async () => {
       const { client, posts } = harness({ rail: 'legacy' })
       await expect(

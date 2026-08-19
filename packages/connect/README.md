@@ -134,3 +134,22 @@ already-configured machine behaves as follows (characterized in
   collide with an existing `identity.json`/`signer.json`/`agent.json` is
   refused outright (and a partially failed write rolls itself back), so a
   re-run cannot corrupt stored key material.
+
+## Diagnosing a stuck setup: `--doctor` / `--repair` (#1589)
+
+```bash
+npx @haven_ai/connect@alpha --doctor --runtime codex-desktop
+npx @haven_ai/connect@alpha --doctor --repair --runtime codex-desktop
+```
+
+`--doctor` is read-only and needs NO setup token: it checks the runtime config,
+the agent credential files, the pinned signer runtime install, the hosted MCP
+(authorized `tools/list`), and starts the local signer for a real stdio
+handshake — reporting its advertised compat versions. Every failing check
+prints one concrete repair action; the exit code is non-zero on any failure.
+Add `--json` for a machine-readable report. No secret material is ever
+printed.
+
+`--repair` re-runs what setup already owns — reinstall the pinned signer
+runtime, rewrite the wrapper + sidecar, and re-write the runtime config from
+the STORED credentials. It never touches keys and never needs a new token.

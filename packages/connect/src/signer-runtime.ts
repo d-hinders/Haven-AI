@@ -165,7 +165,7 @@ async function installRuntimePackages(
   }
 }
 
-async function installedRuntimeMatches(runtimeDirectory: string, cliPath: string): Promise<boolean> {
+export async function installedRuntimeMatches(runtimeDirectory: string, cliPath: string): Promise<boolean> {
   try {
     await assertFileExists(cliPath, 'local Haven signer CLI')
     const [signerPackage, sdkPackage] = await Promise.all([
@@ -209,6 +209,28 @@ async function writeWrapper(input: {
   ].join('\n')
   await writeFile(input.wrapperPath, source, { mode: 0o700 })
   await chmod(input.wrapperPath, 0o700).catch(() => undefined)
+}
+
+/** The sidecar `prepareSignerRuntime` writes next to the credentials (#1589). */
+export interface SignerRuntimeSidecar {
+  signer_package: string
+  signer_version: string
+  sdk_package: string
+  sdk_version: string
+  wrapper_path: string
+  runtime_directory: string
+  npm_cache_directory: string
+  cli_path: string
+}
+
+export async function readRuntimeSidecar(credentialDirectory: string): Promise<SignerRuntimeSidecar | null> {
+  try {
+    return JSON.parse(
+      await readFile(join(credentialDirectory, 'signer-runtime.json'), 'utf8'),
+    ) as SignerRuntimeSidecar
+  } catch {
+    return null
+  }
 }
 
 async function writeRuntimeSidecar(input: {

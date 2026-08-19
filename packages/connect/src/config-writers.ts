@@ -761,6 +761,32 @@ function tomlString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 }
 
+/**
+ * #1589: the doctor needs to READ the config the writers write. One resolver,
+ * next to the path functions themselves so a new runtime cannot be added
+ * without the doctor seeing it (returns null for runtimes without a
+ * file-based config this module owns, e.g. claude-code via the CLI).
+ */
+export function runtimeConfigPathFor(runtime: string, homeDir = homedir()): string | null {
+  switch (runtime) {
+    case 'cursor':
+      return cursorConfigPath(homeDir)
+    case 'codex-cli':
+    case 'codex-desktop':
+      return codexConfigPath(homeDir)
+    case 'vscode':
+      return vscodeConfigPath(homeDir)
+    case 'vscode-insiders':
+      return vscodeInsidersConfigPath(homeDir)
+    case 'claude-desktop':
+      return claudeDesktopConfigPath(homeDir)
+    case 'hermes':
+      return hermesConfigPath(homeDir)
+    default:
+      return null
+  }
+}
+
 function cursorConfigPath(homeDir = homedir()): string {
   return resolve(homeDir, '.cursor', 'mcp.json')
 }

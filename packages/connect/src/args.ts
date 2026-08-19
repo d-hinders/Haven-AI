@@ -4,6 +4,9 @@ export interface ParsedCli {
   options: ConnectOptions
   help: boolean
   json: boolean
+  /** #1589: diagnosis mode — no setup token required. */
+  doctor: boolean
+  repair: boolean
 }
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ParsedCli {
@@ -13,6 +16,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   }
   let help = false
   let json = false
+  let doctor = false
+  let repair = false
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -20,6 +25,10 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       help = true
     } else if (arg === '--json') {
       json = true
+    } else if (arg === '--doctor') {
+      doctor = true
+    } else if (arg === '--repair') {
+      repair = true
     } else if (arg === '--setup' || arg === '--setup-token') {
       options.setupToken = requireValue(argv, ++i, arg)
     } else if (arg === '--api' || arg === '--api-url') {
@@ -46,7 +55,16 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   }
 
   if (help) {
-    return { options: options as ConnectOptions, help, json }
+    return { options: options as ConnectOptions, help, json, doctor, repair }
+  }
+
+  if (doctor || repair) {
+    // Diagnosis/repair reuse STORED credentials — a setup token is exactly
+    // what they exist to avoid needing.
+    if (!options.runtime) {
+      throw new Error('--doctor/--repair need --runtime <runtime> (which config to examine).')
+    }
+    return { options: options as ConnectOptions, help, json, doctor, repair }
   }
 
   if (!options.setupToken) {
@@ -57,7 +75,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   }
 
   options.apiBaseUrl = options.apiBaseUrl.replace(/\/+$/, '')
-  return { options: options as ConnectOptions, help, json }
+  return { options: options as ConnectOptions, help, json, doctor, repair }
 }
 
 export function helpText(): string {
@@ -81,6 +99,11 @@ export function helpText(): string {
     '  --local                    Advanced: install the fully-local Haven MCP (no hosted dependency).',
     '                             Only available for Claude Code and Codex. Default is hosted MCP + local signer.',
     '  --json                     Emit one versioned, secret-free result object on stdout; progress stays on stderr.',
+    '  --doctor                   Diagnose an existing setup (read-only, no token): config, credentials,',
+    '                             signer runtime, hosted MCP, and a live signer handshake. Exits non-zero on any failure.',
+    '  --repair                   Repair, then re-diagnose (implies --doctor): reinstall the pinned signer',
+    '                             runtime, rewrite the wrapper and runtime config from stored credentials.',
+    '                             Hosted topology only (refuses to touch a --local config). No keys, no token.',
     '  --help                     Show this help.',
     '',
     'The connector never prints the private key and never sends it to Haven. JSON output never includes credential contents or full credential paths.',

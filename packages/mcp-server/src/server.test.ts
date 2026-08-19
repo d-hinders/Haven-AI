@@ -82,8 +82,8 @@ describe('buildHostedMcpServer', () => {
 
     expect(allowances?.description?.toLowerCase()).toContain('what can i spend')
     expect(allowances?.description?.toLowerCase()).toContain('remaining budget')
-    expect(pay?.description?.toLowerCase()).toContain('call haven_get_allowances instead')
-    expect(payX402Quote?.description?.toLowerCase()).toContain('call haven_get_allowances')
+    expect(pay?.description?.toLowerCase()).toContain('use haven_get_allowances instead')
+    expect(payX402Quote?.description?.toLowerCase()).toContain('haven_get_allowances')
     expect(receipts?.description?.toLowerCase()).toContain('use the allowance tool instead')
 
     await client.close()
@@ -96,11 +96,15 @@ describe('buildHostedMcpServer', () => {
     // own number (a live run produced ~6x the price from a private
     // heuristic). The convention: quote first, cap at the live quoted amount;
     // a price rise then refuses safely and the agent re-confirms. This test
-    // pins that the convention travels on the instructions AND each
-    // cap-taking tool's description, so an agent that reads either surface
-    // behaves the same way.
+    // pins that the convention lives in FULL on the instructions (the single
+    // home after the slim-descriptions pass), while each cap-taking tool's
+    // description keeps a compact pointer to it, so an agent that reads
+    // either surface behaves the same way.
     expect(HOSTED_INSTRUCTIONS).toContain('When the user stated NO cap')
     expect(HOSTED_INSTRUCTIONS).toContain('cap at the live quoted amount')
+    expect(HOSTED_INSTRUCTIONS).toContain('Never invent headroom')
+    // The failure mode is safe-by-construction, and the instructions say so.
+    expect(HOSTED_INSTRUCTIONS).toMatch(/re-quote and confirm/i)
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const server = buildHostedMcpServer(haven)
@@ -113,10 +117,8 @@ describe('buildHostedMcpServer', () => {
 
     for (const tool of ['haven_prepare_catalog_purchase', 'haven_pay_mcp_tool']) {
       const description = byName.get(tool) ?? ''
-      expect(description).toContain('When the user stated NO cap')
-      expect(description).toContain('never invent headroom')
-      // The failure mode is safe-by-construction, and the description says so.
-      expect(description).toMatch(/re-quote and confirm/i)
+      expect(description).toContain('no user-stated cap')
+      expect(description).toContain('cap at the quoted amount')
     }
     // The quote tool is the convention's first step, so it names its role.
     expect(byName.get('haven_quote_catalog_purchase')).toContain('the user stated no cap')
@@ -132,7 +134,14 @@ describe('buildHostedMcpServer', () => {
     // agents "checking" by re-reading instruction prose. The signer already
     // refuses incompatible versions machine-readably (code / supported_versions
     // / received_version / fallback, #1309), so the documented protocol is now
-    // sign-and-branch-on-refusal, and the descriptions must say so.
+    // sign-and-branch-on-refusal. After the slim-descriptions pass (#1591) the
+    // protocol lives ONCE, on the hosted instructions — descriptions no longer
+    // repeat it, and must never regress to the inspect-initialize advice.
+    expect(HOSTED_INSTRUCTIONS).toContain('version-mismatch')
+    expect(HOSTED_INSTRUCTIONS).toContain('supported_versions')
+    expect(HOSTED_INSTRUCTIONS).toContain('npx @haven_ai/connect@alpha')
+    expect(HOSTED_INSTRUCTIONS).not.toMatch(/advertises at initialize/)
+
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const server = buildHostedMcpServer(haven)
 
@@ -144,33 +153,34 @@ describe('buildHostedMcpServer', () => {
     const { tools } = await client.listTools()
     const byName = new Map(tools.map((tool) => [tool.name, tool.description ?? '']))
 
-    for (const tool of ['haven_pay_x402_quote', 'haven_pay_mcp_tool']) {
-      const description = byName.get(tool) ?? ''
-      // The refusal is named as the branch point, with its machine fields.
-      expect(description).toContain('version-mismatch')
-      expect(description).toContain('supported_versions')
-      // #1547: no description tells the agent to inspect the signer's MCP
-      // initialize result — most harnesses cannot see it.
+    // #1547: no description tells the agent to inspect the signer's MCP
+    // initialize result — most harnesses cannot see it. Scanned across ALL
+    // descriptions so the advice cannot sneak back onto any surface.
+    for (const [, description] of byName) {
       expect(description).not.toMatch(/advertises at initialize/)
-      // Same fix as #1143, so both surfaces tell the user the same thing.
-      expect(description).toContain('npx @haven_ai/connect@alpha')
-      expect(description).toContain('STOP before signing')
     }
 
     // Resume re-enters signing and carries no version of its own — the signer
     // restart it already anticipates is exactly when the installed signer can
     // have changed, and the signing-time refusal is where that surfaces.
     const resume = byName.get('haven_resume_x402_payment') ?? ''
-    expect(resume).toContain('version-mismatch')
-    expect(resume).not.toMatch(/advertises at initialize/)
-    expect(resume).toContain('npx @haven_ai/connect@alpha')
-    expect(resume).toContain('STOP before signing')
+    expect(resume).toContain('an incompatible signer refuses at signing time')
 
     await client.close()
     await server.close()
   })
 
-  it('publishes x402 next-tool guidance with explicit MCP namespaces', async () => {
+  it('keeps x402 next-tool guidance runtime-neutral (bare names in descriptions, naming note on instructions)', async () => {
+    // The slim-descriptions pass (#1591) finished what the runtime-neutral
+    // naming work (#1588) started: descriptions name next tools by their BARE
+    // names (the signer tool comes from the response guidance at run time),
+    // and the one place that explains Claude-family mcp__<server>__<tool>
+    // namespacing — plus the next_tool_server/next_tool_name resolution for
+    // other runtimes — is the hosted instructions.
+    expect(HOSTED_INSTRUCTIONS).toContain('mcp__<server>__<tool>')
+    expect(HOSTED_INSTRUCTIONS).toContain('next_tool_server')
+    expect(HOSTED_INSTRUCTIONS).toContain('next_tool_name')
+
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const server = buildHostedMcpServer(haven)
 
@@ -182,27 +192,25 @@ describe('buildHostedMcpServer', () => {
     const { tools } = await client.listTools()
     const byName = new Map(tools.map((tool) => [tool.name, tool.description ?? '']))
 
-    expect(byName.get('haven_quote_x402')).toContain('Next: call mcp__haven__haven_pay_x402_quote')
-    expect(byName.get('haven_pay_x402_quote')).toContain(
-      'Next: call mcp__haven-signer__haven_sign',
-    )
+    // No description hardcodes a Claude-family namespace — that would be
+    // wrong verbatim on every non-Claude runtime (the #1588 lesson).
+    for (const [name, description] of byName) {
+      expect(description, `description of ${name} hardcodes an mcp__ namespace`).not.toContain(
+        'mcp__',
+      )
+    }
+
+    // The chain itself still travels on the descriptions, by bare name.
+    expect(byName.get('haven_quote_x402')).toContain('haven_pay_x402_quote')
     expect(byName.get('haven_pay_x402_quote')).toContain('expires_at')
-    expect(byName.get('haven_pay_mcp_tool')).toContain(
-      'Next: call mcp__haven-signer__haven_sign_x402',
-    )
-    expect(byName.get('haven_pay_mcp_tool')).toContain('mcp__haven__haven_settle_mcp_tool')
+    expect(byName.get('haven_pay_x402_quote')).toContain('haven_x402_sign_header')
+    expect(byName.get('haven_pay_mcp_tool')).toContain('haven_settle_mcp_tool')
     expect(byName.get('haven_pay_mcp_tool')).toContain('expires_at')
-    expect(byName.get('haven_pay_mcp_tool')).toContain('x402_expected')
-    expect(byName.get('haven_submit')).toContain('mcp__haven-signer__haven_x402_sign_header')
-    expect(byName.get('haven_resume_x402_payment')).toContain(
-      'Next: call mcp__haven-signer__haven_x402_sign_header',
-    )
-    expect(byName.get('haven_settle_mcp_tool')).toContain(
-      'Next: no further Haven tool is needed on success',
-    )
-    expect(byName.get('haven_complete_mcp_tool')).toContain(
-      'Next: no further Haven tool is needed on success',
-    )
+    expect(byName.get('haven_pay_mcp_tool')).toContain('signer_compatibility')
+    expect(byName.get('haven_submit')).toContain('haven_x402_sign_header')
+    expect(byName.get('haven_resume_x402_payment')).toContain('haven_x402_sign_header')
+    expect(byName.get('haven_settle_mcp_tool')).toContain('no further Haven tool is needed')
+    expect(byName.get('haven_complete_mcp_tool')).toContain('no further Haven tool is needed')
 
     await client.close()
     await server.close()

@@ -234,7 +234,9 @@ export async function mockHavenApi(page: Page) {
           '',
           'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
           '',
-          'When the connector finishes, tell me to return to Haven to approve the agent rules.',
+          'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr. Appending --json is the ONLY permitted change to the command above.',
+          '',
+          'When the connector finishes, tell me to return to Haven to approve the budget.',
         ].join('\n'),
       }, 201)
       return

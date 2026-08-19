@@ -351,7 +351,7 @@ export function buildManualCredentialPrompt(input: {
     '- If this credential may have leaked, pause or revoke the agent in Haven.',
     '- Do not commit it, upload it, paste it into shared logs, or send it to Haven.',
     '',
-    'After adding the values, return to Haven and approve the agent rules from the Haven wallet.',
+    'After adding the values, return to Haven and approve the budget from the Haven wallet.',
   ].join('\n')
 }
 

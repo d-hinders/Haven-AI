@@ -318,7 +318,9 @@ const SETUP_PROMPT = [
   '',
   'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
   '',
-  'When the connector finishes, tell me to return to Haven to approve the agent rules.',
+  'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr. Appending --json is the ONLY permitted change to the command above.',
+  '',
+  'When the connector finishes, tell me to return to Haven to approve the budget.',
 ].join('\n')
 
 describe('ConnectAgentModal', () => {
@@ -477,6 +479,13 @@ describe('ConnectAgentModal', () => {
     expect(screen.getAllByText(/public signing address/i).length).toBeGreaterThan(0)
     const modalText = screen.getByRole('dialog').textContent ?? ''
     expect(modalText).not.toMatch(/delegate_key|private_key|privateKey|sk_agent_/)
+    // #1545 rendered-content pin (named headless equivalent — these lines sit
+    // below the prompt block's scroll fold in screenshot evidence): the full
+    // prompt renders the --json discoverability sentence and names the gate
+    // "the budget", never "agent rules".
+    expect(modalText).toContain('Appending --json is the ONLY permitted change to the command above.')
+    expect(modalText).toContain('return to Haven to approve the budget')
+    expect(modalText).not.toContain('approve the agent rules')
   })
 
   it('omits issue_passport by default (#1072)', async () => {

@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - .agents/skills/quality-scan/SKILL.md
-last-verified: "2026-08-18" # 2026-08-18 full-repo run appended: the outbound-tx-queue finding (epic #1554, approved); both prior findings re-checked and excluded per their dispositions
+last-verified: "2026-08-19" # #1602: entry conventions added (measurement blocks `command → number`, mandatory `Probed clean:` baselines); dispositions now appended by ship-next's closeout when a scan-born epic closes. Prior: 2026-08-18 full-repo run appended (epic #1554)
 ---
 
 # Quality-Scan Ledger
@@ -14,6 +14,21 @@ run: date, scope, findings, and each finding's **disposition** — `shipped`,
 BEFORE scanning and excludes prior findings unless it can cite evidence of
 material worsening against the numbers recorded here. Never rewrite an old
 entry; a changed disposition gets a new dated line under the finding.
+
+Entry conventions (#1602, binding for entries from 2026-08-19 on; earlier
+entries predate them and stand as written):
+
+- **Measurement blocks:** every evidence number is written as
+  `command → number`, or names the ratchet/script that produced it (small
+  one-off measurers live under `scripts/quality/`). This is what makes the
+  exclusion rule's delta check a one-command re-measurement.
+- **Probed clean:** every entry ends with a `Probed clean:` section —
+  `dimension → command → number` for each dimension probed without a
+  qualifying finding. These are the next run's diff baselines.
+- **Disposition upkeep:** when a scan-born epic closes, the closer appends
+  the dated disposition line in the same pass — `ship-next`'s closeout names
+  this in its ready-to-close report, so the update is owned by the process,
+  not by memory.
 
 ---
 

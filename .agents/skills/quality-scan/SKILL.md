@@ -42,6 +42,26 @@ with the reason. Before scanning:
 After a run, append the new entry (date, scope, findings, dispositions once
 decided). The ledger is committed history — never rewrite old entries.
 
+Two conventions make an entry re-measurable by a future run (the ledger header
+also records a third — disposition upkeep — owned by
+[ship-next](../ship-next/SKILL.md)'s closeout, not by this skill):
+
+- **Measurement blocks.** Every evidence number is written as
+  `command → number` (or names the script/ratchet that produced it). The bar
+  already requires reproducibility; recording the command is what makes the
+  exclusion rule's "cite the delta against the recorded numbers" a one-command
+  check instead of a reconstruction. The only prior finding that could be
+  re-measured cheaply was the one a ratchet happened to exist for — and the
+  db-mock ratchet's own history shows ad-hoc recounting goes wrong (it once
+  counted the pattern's name inside a comment). A finding whose number no
+  ratchet or script reproduces gets a small script under `scripts/quality/`.
+- **Probed clean.** Every entry ends with a `Probed clean:` section —
+  `dimension → command → number` for each dimension probed that produced no
+  qualifying finding. These are the baselines the next run diffs against, and
+  together they map which dimensions are exhausted (where the next run should
+  dig deeper rather than re-probe from zero). The 2026-08-18 entry did this
+  informally; it is required from now on.
+
 ## The bar (the core of the skill — say no to small things)
 
 A finding qualifies **only if all five hold**:
@@ -71,7 +91,18 @@ scan would otherwise be empty, so the emptiness is explained.
 3. Probe the dimensions where structural problems live: test architecture and
    what is mocked away; validation and contract enforcement; data-layer
    coverage; cross-package duplication; fat controllers; `any` density; CI
-   gate coverage vs. what is actually exercised.
+   gate coverage vs. what is actually exercised; **guard effectiveness** —
+   sample guards and regression tests per layer, mutate what each one claims
+   to pin, and report the survival rate (a test that stays green under the
+   mutation it exists to catch is the one weakness class no comment ever
+   names: the #1586 heartbeat was dead code in production behind a green
+   unit test); **incident clustering** — group the recent issue history by
+   failure class and count recurrence over time (the method the 2026-08-18
+   outbound finding used by hand: 6 issues in the class in 7 weeks); and
+   **workflow archaeology** — rerun frequency per CI check, rerun/flake
+   mentions in commits and PR comments, checks that pass only on retry.
+   Runtime-UX stays out of scope: that class surfaces through external
+   testing (epic #1585's origin), not repo scanning.
 4. Read the comment archaeology: `TODO`s, issue-number references, and
    repeated warning comments are where a codebase names its own recurring
    pain. A warning copy-pasted across files is a structural finding announcing
@@ -81,7 +112,10 @@ scan would otherwise be empty, so the emptiness is explained.
    and a proposed slicing into disjoint sub-issues.
 7. **Stop.** Wait for the human decision. On approval: append the ledger
    entry, then hand off to [new-task](../new-task/SKILL.md) § *Epics* for the
-   tracking issue and its slices.
+   tracking issue and its slices — and end the handoff by stating the exact
+   drive command (`ship-next epic=#<n>`). An approved epic is not in any
+   queue by itself: the 2026-08-14 finding's slices sat approved but
+   undrivable until someone noticed (the ledger records this).
 
 ## Worked example (the run that motivated this skill)
 
@@ -110,3 +144,8 @@ already documented about itself, and a slicing a partner could execute cold.
 Manual only — no cron, no CI wiring, no cadence doc. Findings at this
 altitude do not accumulate weekly, and a schedule would bias the scan toward
 small findings to have something to report.
+
+The natural invocation points, kept as heuristics rather than schedule: when
+the `ship-next` queue runs empty, or when a scan-born epic just closed. Both
+mark a real capacity-and-context moment — the codebase just absorbed a wave of
+change, and there is room to decide what the next one should be.

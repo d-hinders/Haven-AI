@@ -259,6 +259,16 @@ needing its sub-issue states queried one by one. When it was the epic's **last o
 sub-issue**, say so and report the epic ready to close — do not close it: an epic can
 carry acceptance criteria and operator-verify steps of its own that outlive its slices.
 
+**Scan-ledger disposition.** When the epic being reported ready to close (or being
+closed by whoever holds that decision — ship-next itself never closes an epic, per
+the rule above) traces to a [quality-scan](../quality-scan/SKILL.md) finding, the
+epic-close step includes appending the dated disposition line (`shipped`, with the
+closing evidence) to `docs/quality/scan-ledger.md`. Name this explicitly in the
+ready-to-close report so the closer does it in the same pass — the ledger's
+exclusion rule only works if dispositions land when the state changes, not when
+someone happens to remember (#1554's line landed on memory alone, in a separate
+docs PR).
+
 **Acceptance-criteria evidence.** When the issue body has acceptance-criteria
 checkboxes, the closing comment ticks each one with a link to its evidence (test
 name, PR, tx link, doc section). A criterion without evidence stays unticked and

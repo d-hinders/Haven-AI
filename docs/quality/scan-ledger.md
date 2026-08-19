@@ -150,3 +150,65 @@ multi-replica correctness is now gated only on the Safe-bound legacy sites
 **Excluded this run:** the 2026-07 real-DB finding (`shipped`, ratchet holds)
 and the 2026-08-14 API-contract finding (epic #1442 approved; #1446 still
 open — in progress, not re-surfaceable).
+
+---
+
+## 2026-08-19 — full repo (first run under the #1602 conventions)
+
+**No qualifying finding.** Every candidate failed at least one bar criterion —
+recorded here with the refusal reasons so the emptiness is explained, per the
+skill. This is the expected shape after five weeks in which three scan-born
+epics (#1219, #1442 in progress, #1554) and two intensive fix waves (#1541
+connect-flow, #1585 Codex feedback) drained the pool.
+
+**Refused under the bar:**
+
+- **Guard partial-nets** — sampled mutation survival across the guard stock
+  (see Probed clean): 4 of 5 mutations caught; the one survivor
+  (`(x?: number) => x ?? 8453` in a route file, vs the caught
+  `input.chain_id ?? 8453`) falls inside the chain-default guard's own
+  documented limits (LHS must be chain-named; over-matching is recorded there
+  as the guard's founding mistake). No demonstrated cost from the documented
+  gap itself — fails bar 3.
+- **In-memory-state / restart class** — the run's biggest incident cluster:
+  6 issues in 4 weeks (#1515, #1521, #1534, #1544, #1569, #1578), including
+  one genuine double-transfer (#1521). ALL closed by the 2026-08-17..19
+  waves with on-chain-probe fixes; filing a "give the demo merchant a real
+  store" epic on a fixed, demo-surface class fails bars 3 and 4.
+- **Frontend test-depth ratio** — 18,339 test lines against 40,352 source
+  (0.45, vs backend 0.88), but the design-workflow-v2 gates (visual
+  regression, rendered review, structural lint) cover the rendered surface
+  and no frontend incident cluster exists — fails bar 3.
+- **Stale gating comments** — 6 `until #N` references to issues that have
+  since closed (#829, #834, #1443, #1456 among them): one small `new-task`,
+  not an epic — fails the "remedy is one PR" refusal rule.
+
+**Probed clean** (dimension → command → number):
+
+- db-mock ratchet → `npm run lint:db-mocks` → 62 mocks / 465 positional calls
+  / 66 files (unchanged from 2026-08-14's 62/465 — holding).
+- `any` density → `rg -c ": any\b|as any" packages/*/src --type ts -g '!*test*'`
+  → 14 (was ≈10 on 2026-08-18; immaterial).
+- Request validation → `rg -l "from 'zod'" packages/backend/src | wc -l` → 0
+  (unchanged; part of the #1442 record, epic in progress).
+- CI health → `gh api …/actions/runs?per_page=100` → 4/100 runs with
+  attempt > 1, 0/100 concluded failure (window post-dates last week's Azure
+  apt-mirror flake).
+- Sizing → `find packages/*/src -name '*.ts*' | xargs wc -l` per package →
+  backend 44,461 src / 39,167 test; frontend 40,352 / 18,339; largest
+  non-generated files: sdk/client.ts 3,603, openapi/spec.ts 3,470,
+  mcp-server/tools.ts 2,865 (post-#1591).
+- Gate-script self-tests → `ls scripts/*.mjs | wc -l` → 27 gate/utility
+  scripts, 13 with their own test files.
+- Guard mutation sample → 5 hand mutations (chain-default guard ×2, sweep
+  validity-window policy, design-lint structural table rule, skill
+  byte-parity) → 4 caught, 1 survivor within documented guard limits.
+- Incident clustering → `gh issue list --state all` since 2026-07-01 grouped
+  by class → restart/state-loss 6 (all closed), QA-harness brittleness 4
+  (#1529–#1534, all closed), hand-maintained-map drift 3 (#1471/#1478/#1526,
+  all closed); no open cluster.
+- Comment archaeology → `rg "TODO|FIXME|HACK"` → 0 in src; most-repeated
+  warning comment appears 5× and is a benign type-honesty note; 37
+  interim/until mentions of which 6 are the stale refs above.
+
+**Disposition: n/a** — nothing reported for decision.

@@ -14,8 +14,9 @@ export const version = '043_delegation_intents'
  *   delegation's caveats; the enforcers are the authority.
  * - payment_intents.prepared_user_op — the sponsored redemption UserOp whose
  *   hash the agent signs. A separate column from session_user_op on purpose:
- *   the session column keeps its exact meaning until #834 retires that rail,
- *   so neither rail can ever read the other's state.
+ *   the session column kept its exact meaning for as long as the session rail
+ *   lived (#834 has since retired it outright), so neither rail could ever
+ *   read the other's state.
  *
  * Additive; NULL on every existing row.
  */

@@ -13,11 +13,12 @@
  * payTo, sign the settlement child, settle, retry the merchant, and check the
  * money. Keep BOTH legs — they prove different surfaces.
  *
- * NOT the hosted topology. #1457's acceptance criteria ask for hosted MCP +
- * local signer, which cannot exist until #1456 wires erc7710 through the tool
- * surface. A scenario written against that today would skip forever and read
- * like coverage. When #1456 lands, add the hosted variant beside this one
- * rather than converting it — the SDK path stays worth pinning on its own.
+ * NOT the hosted topology. #1457's acceptance criteria asked for hosted MCP +
+ * local signer, which could not exist before #1456 wired erc7710 through the
+ * tool surface — a scenario written against that would have skipped forever
+ * and read like coverage. Both have since shipped, and the hosted variant
+ * lives beside this one (x402-erc7710-hosted.ts) rather than replacing it —
+ * the SDK path stays worth pinning on its own.
  *
  * THE ASSERTION THAT MATTERS is not a 200. It is that the delegate EOA's
  * balance is unchanged: erc7710 has no funding leg, and a silent reroute to

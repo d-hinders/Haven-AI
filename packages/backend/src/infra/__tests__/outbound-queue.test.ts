@@ -8,7 +8,7 @@
  * trusting call order in a mock.
  */
 import { Wallet } from 'ethers'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from './helpers/db-harness.js'
 import {
@@ -32,7 +32,11 @@ let chainCounter = 91_000_000 + Math.floor(Math.random() * 900_000)
 let CHAIN = 0
 
 describeDb('openOutboundRecord (#1556)', () => {
-  initDbHarness()
+  // AWAITED in beforeAll (#1562 follow-up): a bare registration-time call
+  // leaves the returned promise dangling and lets the first tests race the
+  // worker's own migration DDL — the 42P01/40P01 CI flake. resetDb() now
+  // also awaits init as a harness guarantee; this is the readable half.
+  beforeAll(() => initDbHarness())
   beforeEach(async () => {
     CHAIN = ++chainCounter
     await resetDb()

@@ -154,8 +154,22 @@ export function initDbHarness(): Promise<void> {
  * deliberate (#1220): the code under test uses `withTransaction` itself, and
  * an outer wrapper would make real BEGIN/ROLLBACK behaviour untestable —
  * which is precisely a guarantee this epic exists to prove.
+ *
+ * AWAITS `initDbHarness()` first, deliberately. The #1555/#1559 outbound
+ * files called `initDbHarness()` bare at describe-registration time — the
+ * returned promise was never awaited, so whenever a NEW migration had to
+ * apply (fresh CI schema), the first tests ran CONCURRENTLY with their own
+ * worker's migration DDL: 42P01 "relation does not exist" when a table was
+ * not there yet, 40P01 deadlocks when the DDL's AccessExclusive/ShareRow-
+ * Exclusive locks collided with the test's queries (three CI hits on
+ * 2026-08-19, all on unrelated PRs). Awaiting here makes the ordering a
+ * harness GUARANTEE for every file that uses `resetDb` in `beforeEach` —
+ * a forgotten await at a call site degrades to correct, not to a race.
+ * Init is idempotent and memoised, so this costs one resolved-promise await
+ * after the first call.
  */
 export async function resetDb(): Promise<void> {
+  await initDbHarness()
   const { rows } = await db.query<{ tablename: string }>(
     `SELECT tablename FROM pg_tables WHERE schemaname = $1 AND tablename <> 'schema_migrations'`,
     [WORKER_SCHEMA],

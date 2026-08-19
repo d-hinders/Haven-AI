@@ -6,7 +6,7 @@ covers:
   - packages/backend/vitest.setup.ts
   - scripts/db-mock-ratchet.mjs
   - packages/backend/db-mock-baseline.json
-last-verified: "2026-08-09"
+last-verified: "2026-08-19" # resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
 ---
 
 # Backend testing strategy: the real-database rule
@@ -51,7 +51,14 @@ encode query order — not against mocking as such.
 schema per vitest worker (`test_w<id>`), bound through the connection string
 before `config.ts` reads it, so even module-level `pool` imports resolve into
 the worker schema. Migrations apply once per worker (idempotently — cheap on
-re-entry); `resetDb()` truncates between tests. Locally it needs
+re-entry); `resetDb()` truncates between tests — and **awaits harness init
+itself** first, so a file that calls `initDbHarness()` without awaiting it (or
+skips it entirely) still cannot race its own worker's migration DDL. That
+guarantee exists because the #1555/#1559 outbound files DID call it bare at
+describe-registration time, and whenever a new migration had to apply, their
+first tests ran concurrently with the DDL — the intermittent 42P01/40P01 CI
+failures of 2026-08-19. Prefer the explicit `beforeAll` await below anyway; it
+says what happens. Locally the harness needs
 `docker compose up -d postgres`; without a database the suites skip locally
 and **fail in CI** — a green run that skipped every DB test would defeat the
 point.

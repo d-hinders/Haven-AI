@@ -1,4 +1,5 @@
 import { MCP_VERSION, registeredToolNames } from '@haven_ai/mcp'
+import { toolSchemas as signerToolSchemas } from '@haven_ai/signer'
 import { HAVEN_MINIMUM_NODE_VERSION } from '@haven_ai/sdk'
 
 // The required-tools list is derived from `@haven_ai/mcp`'s canonical
@@ -23,6 +24,13 @@ export const MCP_RUNTIME_MANIFEST = {
   minimumNodeVersion: HAVEN_MINIMUM_NODE_VERSION,
   supportedClients: ['codex-cli', 'codex-desktop', 'claude-code'] as const,
   requiredTools: registeredToolNames() as readonly string[],
+  /**
+   * The signer MCP's tool surface, DERIVED from the pinned @haven_ai/signer
+   * package (#1587) — same anti-drift rule as `requiredTools` above: a
+   * literal list here would rot the first time the signer gains a tool.
+   * The handshake probe requires all of them.
+   */
+  requiredSignerTools: Object.keys(signerToolSchemas) as readonly string[],
 } as const
 
 export function mcpPackageSpec(): string {

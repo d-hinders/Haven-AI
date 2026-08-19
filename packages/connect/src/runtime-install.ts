@@ -128,6 +128,11 @@ export interface RuntimeInstallDeps {
   runCommand?: (command: string, args: string[]) => Promise<void>
   prepareLocalMcpRuntime?: (input: PrepareLocalMcpRuntimeInput) => Promise<PreparedLocalMcpRuntime>
   prepareSignerRuntime?: (input: PrepareSignerRuntimeInput) => Promise<PreparedSignerRuntime>
+  probeSignerTools?: (
+    command: string,
+    args: string[],
+    requiredTools: readonly string[],
+  ) => Promise<LocalMcpProbeResult>
   probeLocalMcpTools?: (
     command: string,
     args: string[],
@@ -322,12 +327,27 @@ export async function installRuntime(
   const localProbePromise = configResult.runtimeMcpMode === 'local_stdio' && localRuntimeInstall
     ? runLocalMcpProbe(localRuntimeInstall, deps)
     : Promise.resolve(undefined)
-  const [hostedProbe, signerCredentialReady, localMcpProbe] = await Promise.all([
+  // #1587: in the hosted topology the signer is its own MCP stdio server and
+  // gets the same courtesy as the hosted server — a REAL handshake
+  // (initialize → tools/list → required-tools check) against the registered
+  // command, not a credential-file stat. The 2026-08-18 Codex test is why:
+  // setup exited 0 on a signer that could not start, and the failure
+  // surfaced mid-payment. Cheap and fast now that #1586 guarantees the
+  // command is a prepared wrapper, never a cold npx launch.
+  const signerProbePromise = configResult.runtimeMcpMode !== 'local_stdio' && signerCommand
+    ? (deps.probeSignerTools ?? probeLocalMcpTools)(
+        signerCommand.command,
+        signerCommand.args,
+        MCP_RUNTIME_MANIFEST.requiredSignerTools,
+      )
+    : Promise.resolve(undefined)
+  const [hostedProbe, signerCredentialReady, localMcpProbe, signerProbe] = await Promise.all([
     configResult.hostedConfigured
       ? probeHostedMcpTools(input.apiKey, input.hostedMcpUrl, deps.fetch)
       : Promise.resolve({ status: 'bad_response' as const }),
     probeLocalSignerCredential(input.signerPath),
     localProbePromise,
+    signerProbePromise,
   ])
 
   const hostedOk = configResult.hostedConfigured && hostedProbe.status === 'ok'
@@ -338,17 +358,32 @@ export async function installRuntime(
     localMcpProbe?.status === 'ok'
   const signerOk = configResult.runtimeMcpMode === 'local_stdio'
     ? localMcpOk
-    : configResult.signerConfigured && signerCredentialReady && Boolean(signerConsent?.acknowledged)
+    : configResult.signerConfigured &&
+      signerCredentialReady &&
+      Boolean(signerConsent?.acknowledged) &&
+      // #1587: no handshake, no green. A signer command that was registered
+      // but not probed (manual topology) keeps the old semantics.
+      (signerProbe === undefined || signerProbe.status === 'ok')
   const restartRequired = configResult.restartRequired || restartRequiredForRuntime(runtime, deps.env)
   const errorCode = configResult.errorCode ??
     (configResult.runtimeMcpMode === 'local_stdio'
       ? localMcpErrorCode(signerCredentialReady, localMcpConsent, localMcpProbe?.status)
-      : hostedMcpErrorCode(configResult.hostedConfigured, hostedProbe.status) ?? signerConsentErrorCode(signerCredentialReady, signerConsent))
+      : hostedMcpErrorCode(configResult.hostedConfigured, hostedProbe.status) ??
+        signerConsentErrorCode(signerCredentialReady, signerConsent) ??
+        signerProbeErrorCode(signerProbe))
   const hostedProbeMessages = configResult.hostedConfigured && hostedProbe.status !== 'ok'
     ? [`Hosted Haven MCP probe failed: ${hostedProbe.status}.`]
     : configResult.hostedConfigured
       ? ['Verified hosted Haven MCP tools with a read-only handshake.']
       : []
+  const signerProbeMessages = signerProbe
+    ? signerProbe.status === 'ok'
+      ? ['Verified local Haven signer with a stdio handshake.']
+      : [
+          `Local Haven signer handshake failed: ${signerProbe.status}.`,
+          'Re-run `npx @haven_ai/connect@alpha` to repair the signer setup.',
+        ]
+    : []
   const localProbeMessages = localMcpProbe && localMcpProbe.status !== 'ok'
     ? [`Local Haven MCP handshake failed: ${localMcpProbe.status}.`]
     : localMcpProbe?.status === 'ok'
@@ -380,7 +415,7 @@ export async function installRuntime(
     activationCommand: configResult.activationCommand,
     skillInstalled: skillInstall?.installed,
     signerRuntimePrepared,
-    messages: [...consentMessages, ...(localRuntimeInstall?.messages ?? []), ...configResult.messages, ...hostedProbeMessages, ...localProbeMessages, ...(skillInstall?.messages ?? [])],
+    messages: [...consentMessages, ...(localRuntimeInstall?.messages ?? []), ...configResult.messages, ...hostedProbeMessages, ...signerProbeMessages, ...localProbeMessages, ...(skillInstall?.messages ?? [])],
   }
 }
 
@@ -597,6 +632,11 @@ function signerConsentErrorCode(
   if (!signerCredentialReady) return 'local_signer_credential_unavailable'
   if (!signerConsent?.acknowledged) return 'local_signer_ack_required'
   return undefined
+}
+
+function signerProbeErrorCode(probe: LocalMcpProbeResult | undefined): string | undefined {
+  if (!probe || probe.status === 'ok') return undefined
+  return `local_signer_probe_${probe.status}`
 }
 
 function hostedMcpErrorCode(

@@ -29,6 +29,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: okLocalMcpProbe(),
     })
@@ -83,6 +84,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: okLocalMcpProbe(),
     })
@@ -115,6 +117,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: okLocalMcpProbe(),
     })
@@ -149,6 +152,7 @@ describe('installRuntime', () => {
       homeDir: dir,
       runCommand,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: okLocalMcpProbe(),
     })
@@ -243,6 +247,7 @@ describe('installRuntime', () => {
         homeDir: dir,
         runCommand,
         fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
         prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
         probeLocalMcpTools: okLocalMcpProbe(),
       })
@@ -298,6 +303,7 @@ describe('installRuntime', () => {
       homeDir: dir,
       runCommand,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: okLocalMcpProbe(),
     })
@@ -327,6 +333,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: vi.fn(async () => {
         throw new Error('npm cache could not install package')
       }),
@@ -361,6 +368,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: vi.fn(async () => {
         const err = new Error('Node.js 18.19.0 is not supported. Haven local MCP requires Node.js >=20.0.0.')
         Object.assign(err, { code: 'local_mcp_unsupported_node_version' })
@@ -393,6 +401,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: vi.fn(async () => ({ status: 'missing_tools' as const, toolNames: ['haven_get_agent'] })),
     })
@@ -424,6 +433,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
     })
 
     expect(result.runtime).toBe('other')
@@ -456,6 +466,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
@@ -499,6 +510,104 @@ describe('installRuntime hosted default topology', () => {
     },
   )
 
+  it('#1587: localSignerConfigured goes true ONLY after a real signer handshake', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-probe-ok-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const probe = okSignerProbe()
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      probeSignerTools: probe,
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+    })
+
+    expect(result.localSignerConfigured).toBe(true)
+    expect(result.errorCode).toBeUndefined()
+    // The probe was a REAL handshake against the registered command, with the
+    // signer's derived tool surface as the requirement.
+    expect(probe).toHaveBeenCalledTimes(1)
+    expect(probe.mock.calls[0][2]).toEqual(MCP_RUNTIME_MANIFEST.requiredSignerTools)
+    expect(result.messages.join('\n')).toContain('Verified local Haven signer with a stdio handshake.')
+  })
+
+  it.each([
+    ['process_error' as const, 'local_signer_probe_process_error'],
+    ['timeout' as const, 'local_signer_probe_timeout'],
+    ['missing_tools' as const, 'local_signer_probe_missing_tools'],
+  ])('#1587: a signer that cannot handshake (%s) is NOT reported configured', async (status, expectedCode) => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-probe-fail-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      probeSignerTools: vi.fn(async () => ({ status, toolNames: [] })),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+    })
+
+    // The 2026-08-18 shape, closed: an unstartable signer can no longer ride
+    // a green setup report.
+    expect(result.localSignerConfigured).toBe(false)
+    expect(result.errorCode).toBe(expectedCode)
+    expect(result.probeResult).toContain('local_signer_unavailable')
+    expect(result.messages.join('\n')).toContain(`Local Haven signer handshake failed: ${status}.`)
+    expect(result.messages.join('\n')).toContain('npx @haven_ai/connect@alpha')
+  })
+
+  it('#1587/#1543: a failing signer probe REFINES the final report but never gates the early unlock', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-refine-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    let early: EarlyRuntimeConfigReport | undefined
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      probeSignerTools: vi.fn(async () => ({ status: 'timeout' as const, toolNames: [] })),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+      onRuntimeConfigured: async (report) => {
+        early = report
+      },
+    })
+
+    // The dashboard unlock saw the pre-probe truth; the final report carries
+    // the refinement — the exact #1543 division of labour.
+    expect(early?.localSignerConfigured).toBe(true)
+    expect(early?.errorCode).toBeUndefined()
+    expect(result.localSignerConfigured).toBe(false)
+    expect(result.errorCode).toBe('local_signer_probe_timeout')
+  })
+
   it('#1586: signer prep failure is LOUD and FAIL-CLOSED — no config written, no npx fallback', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-prepfail-'))
     const credentialDirectory = join(dir, 'agent-1')
@@ -516,6 +625,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: vi.fn(async () => {
         throw new Error('npm registry unreachable')
       }),
@@ -577,6 +687,7 @@ describe('installRuntime hosted default topology', () => {
       }, {
         homeDir: dir,
         fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
         runCommand: slowInstall,
         onProgress: (m) => progress.push(m),
       })
@@ -650,6 +761,7 @@ describe('installRuntime hosted default topology', () => {
       homeDir: dir,
       runCommand,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
@@ -710,6 +822,7 @@ describe('installRuntime hosted default topology', () => {
       }, {
         homeDir: dir,
         fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
         runCommand: vi.fn(async () => undefined),
         prepareSignerRuntime: fakePrepareSignerRuntime(),
       })
@@ -751,6 +864,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
@@ -792,6 +906,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: probeFetch,
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
       onRuntimeConfigured,
     })
@@ -837,6 +952,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: okLocalMcpProbe(),
       onRuntimeConfigured,
@@ -875,6 +991,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: vi.fn(async () => {
         throw new Error('npm cache could not install package')
       }),
@@ -904,6 +1021,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
       onRuntimeConfigured: vi.fn(async () => {
         throw new Error('report endpoint down')
@@ -932,6 +1050,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       onRuntimeConfigured,
     })
 
@@ -961,6 +1080,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
@@ -1000,6 +1120,7 @@ describe('installRuntime hosted default topology', () => {
       homeDir: dir,
       env: {},
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
@@ -1028,6 +1149,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
@@ -1072,6 +1194,15 @@ async function writeSignerCredential(directory: string): Promise<string> {
   )
   await chmod(signerPath, 0o600)
   return signerPath
+}
+
+/** #1587: hosted tests stub the signer handshake — the real probe would try
+ *  to SPAWN the fake wrapper command. Failure-path tests override this. */
+function okSignerProbe() {
+  return vi.fn(async (_command: string, _args: string[], required: readonly string[]) => ({
+    status: 'ok' as const,
+    toolNames: [...required],
+  }))
 }
 
 function okToolsFetch(): typeof fetch {

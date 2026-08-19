@@ -10,7 +10,7 @@
  *
  * One Postgres SCHEMA per vitest worker (`test_w<VITEST_WORKER_ID>`), bound
  * via the connection string: `vitest.setup.ts` appends
- * `?options=-c search_path=test_wN,public` to `DATABASE_URL` before anything
+ * `?options=-c search_path=test_wN` to `DATABASE_URL` before anything
  * imports `config.ts`, so EVERY connection the app pool hands out — including
  * the module-level `pool` import repositories use — resolves unqualified
  * table names into the worker's schema. That is what lets this harness change

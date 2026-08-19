@@ -387,11 +387,21 @@ async function configureClaudeCode(
   })
   try {
     if (!localMcpCommand) throw new Error('local MCP wrapper command is required')
+    // Remove stale entries first so re-runs and hosted→local switches are
+    // idempotent — `claude mcp add-json` fails when the name already exists.
+    // #1569: without this, a second setup left the runtime wired to the
+    // PREVIOUS agent's wrapper (the add collided, the old entry survived) —
+    // the hosted sibling below always did it in this order. Deliberate
+    // tradeoff: if the add fails AFTER a successful remove, the runtime ends
+    // with NO haven entry instead of a stale wrong-agent one — fail-closed,
+    // and the claude_code_config_failed recovery (rerun setup) works cleanly
+    // from that state because this sequence is idempotent from any start.
+    await runCommand('claude', ['mcp', 'remove', 'haven']).catch(() => undefined)
+    await runCommand('claude', ['mcp', 'remove', 'haven-signer']).catch(() => undefined)
     await runCommand('claude', ['mcp', 'add-json', 'haven', serverJson, '--scope', 'user'])
       .catch(async () => {
         await runCommand('claude', ['mcp', 'add', 'haven', '--scope', 'user', '--', localMcpCommand])
       })
-    await runCommand('claude', ['mcp', 'remove', 'haven-signer']).catch(() => undefined)
     const verified = await runCommand('claude', ['mcp', 'get', 'haven'])
       .then(() => true)
       .catch(() => false)

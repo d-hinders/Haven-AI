@@ -157,7 +157,18 @@ describe('installRuntime', () => {
     expect(result.localMcpConfigured).toBe(true)
     expect(result.localMcpAcknowledged).toBe(true)
     expect(result.nextUserAction).toBe('return_to_haven_for_wallet_approval_then_restart_claude_code')
+    // #1569: stale entries are removed BEFORE the add, mirroring the hosted
+    // writer — `claude mcp add-json` fails on a name collision, so a re-run
+    // otherwise left the previous agent's entry in place.
     expect(commands[0]).toMatchObject({
+      command: 'claude',
+      args: ['mcp', 'remove', 'haven'],
+    })
+    expect(commands[1]).toMatchObject({
+      command: 'claude',
+      args: ['mcp', 'remove', 'haven-signer'],
+    })
+    expect(commands[2]).toMatchObject({
       command: 'claude',
       args: [
         'mcp',
@@ -173,11 +184,7 @@ describe('installRuntime', () => {
         'user',
       ],
     })
-    expect(commands[1]).toMatchObject({
-      command: 'claude',
-      args: ['mcp', 'remove', 'haven-signer'],
-    })
-    expect(commands[2]).toMatchObject({
+    expect(commands[3]).toMatchObject({
       command: 'claude',
       args: ['mcp', 'get', 'haven'],
     })
@@ -189,6 +196,116 @@ describe('installRuntime', () => {
     expect(JSON.stringify(commands)).not.toContain('Authorization')
     expect(JSON.stringify(commands)).not.toContain(API_KEY)
     expect(JSON.stringify(commands)).not.toContain(PRIVATE_KEY)
+  })
+
+  // #1569 regression: a SECOND local-stdio setup against a config that already
+  // holds a `haven` entry must replace it with the new agent's wrapper. The
+  // fake `claude mcp` below enforces the real CLI's collision semantics —
+  // add/add-json fail when the name exists — which is exactly what stranded
+  // re-runs on the previous agent's wrapper before the remove-first fix.
+  it('replaces the previous agent Claude Code local MCP entry on a re-run', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-claude-rerun-'))
+    const entries = new Map<string, string>()
+    const runCommand = vi.fn(async (command: string, args: string[]) => {
+      if (command !== 'claude') throw new Error(`unexpected command ${command}`)
+      const [, verb, name, payload] = args
+      if (verb === 'remove') {
+        entries.delete(name)
+        return
+      }
+      if (verb === 'add-json' || verb === 'add') {
+        if (entries.has(name)) throw new Error(`MCP server "${name}" already exists`)
+        entries.set(name, payload ?? args.join(' '))
+        return
+      }
+      if (verb === 'get') {
+        if (!entries.has(name)) throw new Error(`No MCP server named "${name}"`)
+        return
+      }
+      throw new Error(`unexpected claude mcp verb ${verb}`)
+    })
+
+    const runSetup = async (agentDir: string) => {
+      const credentialDirectory = join(dir, agentDir)
+      const identityPath = await writeIdentityCredential(credentialDirectory)
+      const signerPath = await writeSignerCredential(credentialDirectory)
+      return installRuntime({
+        runtime: 'claude-code',
+        hostedMcpUrl: HOSTED_URL,
+        apiKey: API_KEY,
+        signerPath,
+        identityPath,
+        credentialDirectory,
+        ackLocalTools: true,
+        localMcp: true,
+      }, {
+        homeDir: dir,
+        runCommand,
+        fetch: okToolsFetch(),
+        prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
+        probeLocalMcpTools: okLocalMcpProbe(),
+      })
+    }
+
+    const first = await runSetup('agent-1')
+    expect(first.localMcpConfigured).toBe(true)
+    expect(entries.get('haven')).toContain(join(dir, 'agent-1', 'bin', 'haven-mcp'))
+
+    const second = await runSetup('agent-2')
+    expect(second.localMcpConfigured).toBe(true)
+    expect(second.errorCode).toBeUndefined()
+    // The entry now points at the NEW agent's wrapper — replaced, not stale.
+    expect(entries.get('haven')).toContain(join(dir, 'agent-2', 'bin', 'haven-mcp'))
+    expect(entries.get('haven')).not.toContain(join(dir, 'agent-1', 'bin', 'haven-mcp'))
+  })
+
+  // #1569 residual: a genuine CLI failure between the remove and the add
+  // leaves NO haven entry — fail-closed, never a stale wrong-agent one — and
+  // the error path reports claude_code_config_failed with rerun guidance,
+  // which works from the no-entry state because the sequence is idempotent.
+  it('fails closed with no stale entry when the add fails after the remove', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-claude-addfail-'))
+    const credentialDirectory = join(dir, 'agent-2')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const entries = new Map<string, string>([['haven', 'previous-agent-wrapper']])
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      const [, verb, name] = args
+      if (verb === 'remove') {
+        entries.delete(name)
+        return
+      }
+      // Both the add-json attempt and the add fallback genuinely fail.
+      if (verb === 'add-json' || verb === 'add') throw new Error('claude CLI unavailable')
+      if (verb === 'get') {
+        if (!entries.has(name)) throw new Error(`No MCP server named "${name}"`)
+        return
+      }
+      throw new Error(`unexpected claude mcp verb ${verb}`)
+    })
+
+    const result = await installRuntime({
+      runtime: 'claude-code',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+      localMcp: true,
+    }, {
+      homeDir: dir,
+      runCommand,
+      fetch: okToolsFetch(),
+      prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
+      probeLocalMcpTools: okLocalMcpProbe(),
+    })
+
+    expect(result.errorCode).toBe('claude_code_config_failed')
+    expect(result.localMcpConfigured).toBe(false)
+    // Fail-closed: the previous agent's entry is gone, not silently kept.
+    expect(entries.has('haven')).toBe(false)
+    expect(result.messages.join('\n')).toContain('Could not update Claude Code MCP config')
   })
 
   it('reports local MCP runtime install failures without marking restart-ready', async () => {

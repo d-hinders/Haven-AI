@@ -109,7 +109,8 @@ MCP tools expose, not a registration gate.)
 Each setup prompt is one-time and each successful run creates a **new** agent
 with its own freshly minted key pair. Re-running Connect on an
 already-configured machine behaves as follows (characterized in
-`storage.test.ts`, `config-writers.test.ts`, and `runtime.test.ts`, #1544):
+`storage.test.ts`, `config-writers.test.ts`, `runtime.test.ts`, and
+`runtime-install.test.ts`, #1544/#1569):
 
 - **Re-running an already-consumed setup command** fails cleanly before any
   credential file or runtime configuration is touched — Haven refuses the
@@ -124,13 +125,7 @@ already-configured machine behaves as follows (characterized in
   `haven` and `haven-signer` entries (and the managed Codex/Hermes
   equivalents) and re-points them at the newest agent's credentials.
   Unrelated MCP servers and configuration are preserved. One runtime is
-  therefore wired to one Haven agent — the newest one. Known exception
-  ([#1569](https://github.com/d-hinders/Haven-AI/issues/1569)): Claude Code's
-  opt-in local-stdio mode (`--local`) does not yet replace a pre-existing
-  `haven` entry on a re-run — the config update fails and the runtime stays
-  wired to the previous agent's local MCP wrapper; run
-  `claude mcp remove haven` and re-run setup. The default hosted topology
-  replaces both entries.
+  therefore wired to one Haven agent — the newest one.
 - **The previous agent is not revoked by a re-run.** Its credentials remain on
   disk and its authority remains whatever its on-chain rules say. Revoke
   agents you no longer use from the Haven dashboard, then delete their

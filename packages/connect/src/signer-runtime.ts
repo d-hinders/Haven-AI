@@ -27,7 +27,20 @@ export interface PreparedSignerRuntime {
 
 export interface SignerRuntimeDeps {
   runCommand?: (command: string, args: string[]) => Promise<void>
+  /** Heartbeats during the (possibly minutes-long) npm install (#1586). */
+  onProgress?: (message: string) => void
 }
+
+/**
+ * Honest budget for a COLD-cache install over a slow link (#1586). The old
+ * 120s budget was exactly what broke the 2026-08-18 Codex Desktop setup: a
+ * 6+ minute cold install was killed at 2 minutes, the failure fell back to
+ * npx silently, and the resulting config structurally could not start.
+ */
+export const SIGNER_INSTALL_TIMEOUT_MS = 600_000
+
+/** How often the console hears from a long install instead of going silent. */
+export const SIGNER_INSTALL_HEARTBEAT_MS = 15_000
 
 /**
  * Pre-install the edge signer into a version-pinned, connector-managed
@@ -62,7 +75,7 @@ export async function prepareSignerRuntime(
   if (await installedRuntimeMatches(runtimeDirectory, cliPath)) {
     messages.push(`Using existing local Haven signer runtime ${signerPackageSpec()}.`)
   } else {
-    await installRuntimePackages(runtimeDirectory, npmCacheDirectory, deps.runCommand)
+    await installRuntimePackages(runtimeDirectory, npmCacheDirectory, deps)
     messages.push(`Installed local Haven signer runtime ${signerPackageSpec()}.`)
   }
 
@@ -98,8 +111,9 @@ export async function prepareSignerRuntime(
 async function installRuntimePackages(
   runtimeDirectory: string,
   npmCacheDirectory: string,
-  runCommand: ((command: string, args: string[]) => Promise<void>) | undefined,
+  deps: SignerRuntimeDeps,
 ): Promise<void> {
+  const { runCommand, onProgress } = deps
   // Fast path: install against the user's default npm cache with
   // `--prefer-offline`. `npx @haven_ai/connect` just downloaded the signer + sdk
   // tarballs (plus their closure) into that cache moments earlier, so this
@@ -117,8 +131,20 @@ async function installRuntimePackages(
     sdkPackageSpec(),
   ]
   const run = async (args: string[]): Promise<void> => {
-    if (runCommand) await runCommand('npm', args)
-    else await execFileAsync('npm', args, { timeout: 120_000, maxBuffer: 1024 * 1024 })
+    // Heartbeat while npm works: a cold install can legitimately take
+    // minutes, and a silent console reads as a hang (#1586).
+    const startedAt = Date.now()
+    const heartbeat = setInterval(() => {
+      const seconds = Math.round((Date.now() - startedAt) / 1000)
+      onProgress?.(`Still installing the local Haven signer runtime… (${seconds}s — a cold cache can take several minutes)`)
+    }, SIGNER_INSTALL_HEARTBEAT_MS)
+    heartbeat.unref?.()
+    try {
+      if (runCommand) await runCommand('npm', args)
+      else await execFileAsync('npm', args, { timeout: SIGNER_INSTALL_TIMEOUT_MS, maxBuffer: 1024 * 1024 })
+    } finally {
+      clearInterval(heartbeat)
+    }
   }
 
   try {

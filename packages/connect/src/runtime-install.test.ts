@@ -2,8 +2,9 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
-import { installRuntime, supportsLocalMcp, type EarlyRuntimeConfigReport } from './runtime-install.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
+import { SIGNER_INSTALL_TIMEOUT_MS, prepareSignerRuntime } from './signer-runtime.js'
+import { installRuntime, supportsLocalMcp, type EarlyRuntimeConfigReport } from './runtime-install.js'
 
 const API_KEY = 'sk_agent_secret_for_runtime_test'
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
@@ -498,7 +499,7 @@ describe('installRuntime hosted default topology', () => {
     },
   )
 
-  it('falls back to npx (non-fatal) and flags signerRuntimePrepared=false when signer prep fails', async () => {
+  it('#1586: signer prep failure is LOUD and FAIL-CLOSED — no config written, no npx fallback', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-prepfail-'))
     const credentialDirectory = join(dir, 'agent-1')
     const identityPath = await writeIdentityCredential(credentialDirectory)
@@ -520,15 +521,111 @@ describe('installRuntime hosted default topology', () => {
       }),
     })
 
-    const codexConfig = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')
-
-    // Degrades gracefully: still hosted+signer, but observably on the npx path.
-    expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
+    // Loud: the exact error surface the AC names.
+    expect(result.errorCode).toBe('signer_runtime_install_failed')
+    expect(result.probeResult).toBe('signer_runtime_install_failed')
+    expect(result.localSignerConfigured).toBe(false)
     expect(result.signerRuntimePrepared).toBe(false)
-    expect(codexConfig).toContain('command = "npx"')
-    expect(codexConfig).toContain(signerPath)
-    expect(result.messages.join('\n')).toContain('falling back to npx launch')
-    expect(codexConfig).not.toContain(PRIVATE_KEY)
+    expect(result.hostedMcpConfigured).toBe(false)
+    // The recovery is named.
+    expect(result.nextUserAction).toContain('npx @haven_ai/connect@alpha')
+    expect(result.messages.join('\n')).toContain('No runtime configuration was written')
+
+    // Fail-CLOSED: nothing was written at all — the old silent npx entry
+    // (Codex startup_timeout_sec=120 vs a multi-minute npx cold install) was
+    // a config that looked wired but structurally could not start. The whole
+    // write is skipped, hosted entry included: quotes-work-but-signing-never-
+    // can is the same looks-fine trap in a different place.
+    await expect(readFile(join(dir, '.codex', 'config.toml'), 'utf8')).rejects.toThrow()
+  })
+
+  it('#1586 review: the heartbeat reaches onProgress THROUGH installRuntime — not only at the unit level', async () => {
+    // The first draft's heartbeat was dead code in production: the unit test
+    // called prepareSignerRuntime directly, and prepareSignerForRuntime never
+    // threaded onProgress. This test goes through the real entry point.
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-heartbeat-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const progress: string[] = []
+
+    vi.useFakeTimers()
+    try {
+      const runtimeDirectory = join(dir, '.haven', 'signer-runtime', MCP_RUNTIME_MANIFEST.signerVersion)
+      const cliDir = join(runtimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist')
+      const slowInstall = vi.fn(async () => {
+        await vi.advanceTimersByTimeAsync(40_000)
+        await mkdir(cliDir, { recursive: true })
+        await writeFile(join(cliDir, 'cli.js'), '// cli')
+        for (const pkg of ['signer', 'sdk']) {
+          const pkgDir = join(runtimeDirectory, 'node_modules', '@haven_ai', pkg)
+          await mkdir(pkgDir, { recursive: true })
+          await writeFile(
+            join(pkgDir, 'package.json'),
+            JSON.stringify({ version: pkg === 'signer' ? MCP_RUNTIME_MANIFEST.signerVersion : MCP_RUNTIME_MANIFEST.sdkVersion }),
+          )
+        }
+      })
+      await installRuntime({
+        runtime: 'codex-cli',
+        hostedMcpUrl: HOSTED_URL,
+        apiKey: API_KEY,
+        signerPath,
+        identityPath,
+        credentialDirectory,
+        ackLocalTools: true,
+      }, {
+        homeDir: dir,
+        fetch: okToolsFetch(),
+        runCommand: slowInstall,
+        onProgress: (m) => progress.push(m),
+      })
+      expect(progress.some((m) => m.includes('Still installing'))).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('#1586: an install slower than the OLD 120s budget still succeeds — prep waits it out', async () => {
+    // Simulated via the injectable runCommand: the run takes (a scaled-down)
+    // longer-than-the-old-budget interval; the point pinned is that prep does
+    // not race a 120s timer of its own — the budget lives in
+    // SIGNER_INSTALL_TIMEOUT_MS (600s), asserted directly.
+    expect(SIGNER_INSTALL_TIMEOUT_MS).toBeGreaterThanOrEqual(600_000)
+
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-slow-'))
+    const runtimeDirectory = join(dir, '.haven', 'signer-runtime', MCP_RUNTIME_MANIFEST.signerVersion)
+    const cliDir = join(runtimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist')
+    const heartbeats: string[] = []
+    vi.useFakeTimers()
+    try {
+      const slowInstall = vi.fn(async () => {
+        // The "install": complete only after 130 virtual seconds — past the
+        // old budget — then materialise what the postcondition checks read.
+        await vi.advanceTimersByTimeAsync(130_000)
+        await mkdir(cliDir, { recursive: true })
+        await writeFile(join(cliDir, 'cli.js'), '// cli')
+        for (const pkg of ['signer', 'sdk']) {
+          const pkgDir = join(runtimeDirectory, 'node_modules', '@haven_ai', pkg)
+          await mkdir(pkgDir, { recursive: true })
+          await writeFile(
+            join(pkgDir, 'package.json'),
+            JSON.stringify({ version: pkg === 'signer' ? MCP_RUNTIME_MANIFEST.signerVersion : MCP_RUNTIME_MANIFEST.sdkVersion }),
+          )
+        }
+      })
+      const prepared = await prepareSignerRuntime(
+        { credentialDirectory: join(dir, 'agent-1'), signerPath: join(dir, 'agent-1', 'signer.json'), homeDir: dir },
+        { runCommand: slowInstall, onProgress: (m) => heartbeats.push(m) },
+      )
+      expect(prepared.cliPath).toContain('cli.js')
+      expect(slowInstall).toHaveBeenCalledTimes(1)
+      // The console heard from the install while it ran (AC: >=1 heartbeat).
+      expect(heartbeats.length).toBeGreaterThanOrEqual(1)
+      expect(heartbeats[0]).toContain('Still installing')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('writes hosted MCP + signer for Claude Code by default (no opt-in)', async () => {

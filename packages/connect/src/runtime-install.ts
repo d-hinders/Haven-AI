@@ -685,8 +685,10 @@ async function prepareRuntimeForLocalMcp(
   input: RuntimeInstallInput,
   deps: RuntimeInstallDeps,
 ): Promise<PreparedLocalMcpRuntime> {
+  // onProgress threaded through on purpose (#1593, the #1586 review lesson):
+  // without it the install heartbeat is dead code in production.
   const prepare = deps.prepareLocalMcpRuntime ?? ((runtimeInput: PrepareLocalMcpRuntimeInput) =>
-    prepareLocalMcpRuntime(runtimeInput, { runCommand: deps.runCommand }))
+    prepareLocalMcpRuntime(runtimeInput, { runCommand: deps.runCommand, onProgress: deps.onProgress }))
   return prepare({
     credentialDirectory: input.credentialDirectory,
     identityPath: input.identityPath,

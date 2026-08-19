@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { SIGNER_INSTALL_TIMEOUT_MS, prepareSignerRuntime } from './signer-runtime.js'
+import { prepareLocalMcpRuntime } from './local-mcp-runtime.js'
 import { installRuntime, supportsLocalMcp, type EarlyRuntimeConfigReport } from './runtime-install.js'
 
 const API_KEY = 'sk_agent_secret_for_runtime_test'
@@ -734,6 +735,100 @@ describe('installRuntime hosted default topology', () => {
       // The console heard from the install while it ran (AC: >=1 heartbeat).
       expect(heartbeats.length).toBeGreaterThanOrEqual(1)
       expect(heartbeats[0]).toContain('Still installing')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('#1593: the LOCAL MCP runtime install heartbeat reaches onProgress THROUGH installRuntime', async () => {
+    // Twin of the #1586 test above, for the local-stdio topology: the local
+    // runtime's heartbeat must be live through the real entry point, not only
+    // when prepareLocalMcpRuntime is called directly — the #1586 lesson was a
+    // heartbeat that unit-tested green while runtime-install never threaded
+    // onProgress. No prepareLocalMcpRuntime fake here on purpose.
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-local-mcp-heartbeat-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const progress: string[] = []
+
+    vi.useFakeTimers()
+    try {
+      // On the local topology the MCP runtime install is the ONLY one that
+      // runs through runCommand (the separate signer preinstall is gated to
+      // the hosted topology, `if (!localRuntime)` in runtime-install.ts), so
+      // the fake materialises the MCP layout at whatever --prefix npm got.
+      const slowInstall = vi.fn(async (_command: string, args: string[]) => {
+        await vi.advanceTimersByTimeAsync(40_000)
+        const prefix = args[args.indexOf('--prefix') + 1]
+        await mkdir(join(prefix, 'node_modules', '@haven_ai', 'mcp', 'dist'), { recursive: true })
+        await writeFile(join(prefix, 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js'), '// cli')
+        for (const [pkg, version] of [['mcp', MCP_RUNTIME_MANIFEST.mcpVersion], ['sdk', MCP_RUNTIME_MANIFEST.sdkVersion]] as const) {
+          const pkgDir = join(prefix, 'node_modules', '@haven_ai', pkg)
+          await mkdir(pkgDir, { recursive: true })
+          await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ version }))
+        }
+      })
+      const result = await installRuntime({
+        runtime: 'codex-cli',
+        hostedMcpUrl: HOSTED_URL,
+        apiKey: API_KEY,
+        signerPath,
+        identityPath,
+        credentialDirectory,
+        ackLocalTools: true,
+        localMcp: true,
+      }, {
+        homeDir: dir,
+        fetch: okToolsFetch(),
+        probeSignerTools: okSignerProbe(),
+        probeLocalMcpTools: okLocalMcpProbe(),
+        runCommand: slowInstall,
+        onProgress: (m) => progress.push(m),
+      })
+      expect(result.localMcpConfigured).toBe(true)
+      expect(progress.some((m) => m.includes('Still installing the local Haven MCP runtime'))).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('#1593: a local MCP install slower than the OLD 120s budget still succeeds', async () => {
+    // The local runtime shares the signer's honest budget — one constant, no
+    // 120s race of its own (SIGNER_INSTALL_TIMEOUT_MS, >=600s asserted in the
+    // #1586 twin above).
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-local-mcp-slow-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const runtimeDirectory = join(dir, '.haven', 'mcp-runtime', MCP_RUNTIME_MANIFEST.mcpVersion)
+    const heartbeats: string[] = []
+    vi.useFakeTimers()
+    try {
+      const slowInstall = vi.fn(async () => {
+        await vi.advanceTimersByTimeAsync(130_000)
+        await mkdir(join(runtimeDirectory, 'node_modules', '@haven_ai', 'mcp', 'dist'), { recursive: true })
+        await writeFile(join(runtimeDirectory, 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js'), '// cli')
+        for (const pkg of ['mcp', 'sdk']) {
+          const pkgDir = join(runtimeDirectory, 'node_modules', '@haven_ai', pkg)
+          await mkdir(pkgDir, { recursive: true })
+          await writeFile(
+            join(pkgDir, 'package.json'),
+            JSON.stringify({ version: pkg === 'mcp' ? MCP_RUNTIME_MANIFEST.mcpVersion : MCP_RUNTIME_MANIFEST.sdkVersion }),
+          )
+        }
+      })
+      const prepared = await prepareLocalMcpRuntime(
+        {
+          credentialDirectory,
+          identityPath: join(credentialDirectory, 'identity.json'),
+          signerPath: join(credentialDirectory, 'signer.json'),
+          homeDir: dir,
+        },
+        { runCommand: slowInstall, onProgress: (m) => heartbeats.push(m) },
+      )
+      expect(prepared.cliPath).toContain('cli.js')
+      expect(slowInstall).toHaveBeenCalledTimes(1)
+      expect(heartbeats.length).toBeGreaterThanOrEqual(1)
+      expect(heartbeats[0]).toContain('Still installing the local Haven MCP runtime')
     } finally {
       vi.useRealTimers()
     }

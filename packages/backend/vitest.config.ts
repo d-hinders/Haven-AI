@@ -6,7 +6,9 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
     // #1372: the real-DB harness (`initDbHarness`, db-harness.ts) brings a
-    // per-worker schema to the migration head inside a `beforeAll`. The FIRST
+    // per-worker schema to the migration head inside a `beforeAll` — or, since
+    // resetDb() awaits init as a guarantee, inside a `beforeEach` for a file
+    // whose first harness call is resetDb; hookTimeout covers both. The FIRST
     // test file scheduled on each worker pays the FULL migration run (61
     // migrations at the time of writing, growing monotonically), and every
     // worker does that concurrently against the single Postgres service

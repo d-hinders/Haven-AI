@@ -842,7 +842,13 @@ export class HavenClient {
       }
     })
 
-    return { ...agent, readiness: deriveReadiness(agent.status, allowances), allowances }
+    const readiness = deriveReadiness(agent.status, allowances)
+    // #1590: same value under the honest name. `readiness` covers hosted
+    // identity + on-chain spend authority ONLY — the hosted side cannot see
+    // the local signer, and the bare name invited exactly that misread
+    // (2026-08-18: an agent took readiness:"ready" as end-to-end payment
+    // readiness while the signer was unstartable).
+    return { ...agent, readiness, spend_authority_readiness: readiness, allowances }
   }
 
   /**

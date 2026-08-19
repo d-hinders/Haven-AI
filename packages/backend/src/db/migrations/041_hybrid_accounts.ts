@@ -14,11 +14,12 @@ export const version = '041_hybrid_accounts'
  * - 'delegator_hybrid' — a Hybrid DeleGator (counterfactual until first op)
  *
  * The execution-rail CHECK widens to admit 'delegation'. FAIL-CLOSED BY
- * CONSTRUCTION: resolveExecutionRail matches 'session_key' explicitly and
- * falls back to the legacy path for everything else, so a 'delegation' row
- * routes nowhere new until #829 lands the payment rail behind its own gate —
- * the value exists so provisioning (#825) and the grant lifecycle (#828) can
- * record state, exactly the #745 dark-launch pattern.
+ * CONSTRUCTION at the time this migration shipped: resolveExecutionRail
+ * matched 'session_key' explicitly and fell back to the legacy path for
+ * everything else, so a 'delegation' row routed nowhere new — the value
+ * existed so provisioning (#825) and the grant lifecycle (#828) could record
+ * state, exactly the #745 dark-launch pattern. #829 later landed the payment
+ * rail behind its own gate, which is when 'delegation' rows started routing.
  *
  * Additive and default-preserving; reversible by flipping values back.
  */

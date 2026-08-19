@@ -6,7 +6,7 @@
  * (`FOR UPDATE SKIP LOCKED`), so it is proven here against real Postgres per
  * the testing strategy, never against a mock that would prove only the mock.
  */
-import { beforeEach, expect, it } from 'vitest'
+import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
@@ -39,7 +39,11 @@ function enqueue(submitter = 'test') {
 }
 
 describeDb('outbound-txs repository (#1555)', () => {
-  initDbHarness()
+  // AWAITED in beforeAll (#1562 follow-up): a bare registration-time call
+  // leaves the returned promise dangling and lets the first tests race the
+  // worker's own migration DDL — the 42P01/40P01 CI flake. resetDb() now
+  // also awaits init as a harness guarantee; this is the readable half.
+  beforeAll(() => initDbHarness())
   beforeEach(async () => {
     CHAIN = ++chainCounter
     await resetDb()
@@ -229,7 +233,11 @@ describeDb('outbound-txs repository (#1555)', () => {
 })
 
 describeDb('bump replacement sequence against the live-nonce index (#1559 review)', () => {
-  initDbHarness()
+  // AWAITED in beforeAll (#1562 follow-up): a bare registration-time call
+  // leaves the returned promise dangling and lets the first tests race the
+  // worker's own migration DDL — the 42P01/40P01 CI flake. resetDb() now
+  // also awaits init as a harness guarantee; this is the readable half.
+  beforeAll(() => initDbHarness())
   beforeEach(async () => {
     CHAIN = ++chainCounter
     await resetDb()
@@ -258,7 +266,11 @@ describeDb('bump replacement sequence against the live-nonce index (#1559 review
 })
 
 describeDb('bump tick end-to-end over the REAL repository (#1559 review)', () => {
-  initDbHarness()
+  // AWAITED in beforeAll (#1562 follow-up): a bare registration-time call
+  // leaves the returned promise dangling and lets the first tests race the
+  // worker's own migration DDL — the 42P01/40P01 CI flake. resetDb() now
+  // also awaits init as a harness guarantee; this is the readable half.
+  beforeAll(() => initDbHarness())
   beforeEach(async () => {
     CHAIN = ++chainCounter
     await resetDb()

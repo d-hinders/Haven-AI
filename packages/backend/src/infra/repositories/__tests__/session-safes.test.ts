@@ -7,7 +7,7 @@
  * `hybrid_account_passkeys` — exactly the "what does the query return" class
  * that belongs on the real database, not on a positional mock.
  */
-import { beforeEach, expect, it } from 'vitest'
+import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import { listSessionSafesForUser } from '../user-safes.js'
@@ -49,7 +49,11 @@ async function seedPasskey(userSafeId: string, keyId: string): Promise<void> {
 }
 
 describeDb('listSessionSafesForUser signer-set projection (#1205)', () => {
-  initDbHarness()
+  // AWAITED in beforeAll (#1562 follow-up): a bare registration-time call
+  // leaves the returned promise dangling and lets the first tests race the
+  // worker's own migration DDL — the 42P01/40P01 CI flake. resetDb() now
+  // also awaits init as a harness guarantee; this is the readable half.
+  beforeAll(() => initDbHarness())
   beforeEach(async () => {
     await resetDb()
   })

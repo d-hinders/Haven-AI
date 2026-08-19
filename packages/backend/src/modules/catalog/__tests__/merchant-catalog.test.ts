@@ -52,7 +52,7 @@ describe('probeCatalogEntry', () => {
     expect(result).toEqual({
       ok: true,
       priceAtomic: '20000',
-      priceDisplay: '$0.02 USDC',
+      priceDisplay: '0.02 USDC',
       asset: 'USDC',
       network: 'eip155:8453',
       // A plain merchant omits assetTransferMethod → EIP-3009 by the exact-EVM default.
@@ -154,7 +154,7 @@ describe('probeCatalogEntry', () => {
     expect(result).toEqual({
       ok: true,
       priceAtomic: '10000',
-      priceDisplay: '$0.01 USDC',
+      priceDisplay: '0.01 USDC',
       asset: 'USDC',
       network: 'eip155:8453',
     })
@@ -213,7 +213,7 @@ describe('refreshCatalog', () => {
     const liveUpdate = queries.find(([sql, v]) => sql.includes(`status = 'active'`) && v?.[0] === 'cat-live')
     expect(liveUpdate?.[0]).toContain('consecutive_failures = 0')
     expect(liveUpdate?.[0]).toContain('asset_transfer_methods = COALESCE($6, asset_transfer_methods)')
-    expect(liveUpdate?.[1]).toEqual(['cat-live', '20000', '$0.02 USDC', 'USDC', 'eip155:8453', 'eip3009'])
+    expect(liveUpdate?.[1]).toEqual(['cat-live', '20000', '0.02 USDC', 'USDC', 'eip155:8453', 'eip3009'])
   })
 
   it('does not degrade an entry on a single transient miss (hysteresis)', async () => {

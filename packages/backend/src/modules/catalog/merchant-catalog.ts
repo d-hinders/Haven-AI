@@ -100,7 +100,9 @@ function formatPriceDisplay(atomic: string, assetSymbol: string): string {
   const padded = atomic.padStart(decimals + 1, '0')
   const intPart = padded.slice(0, padded.length - decimals)
   const frac = padded.slice(padded.length - decimals).replace(/0+$/, '').padEnd(2, '0')
-  return `$${intPart}.${frac} ${assetSymbol}`
+  // #1592: `<human amount> <asset code>`, no `$` prefix — the symbol plus the
+  // code double-states the currency, and no catalog asset is actual USD.
+  return `${intPart}.${frac} ${assetSymbol}`
 }
 
 function parseAccepts(payload: unknown): X402Accept | null {
@@ -171,7 +173,7 @@ export async function probeCatalogEntry(
     return {
       ok: true,
       priceAtomic: challenge.amount.atomic,
-      priceDisplay: challenge.amount.display ? `$${challenge.amount.display} ${symbol}` : formatPriceDisplay(challenge.amount.atomic, symbol),
+      priceDisplay: challenge.amount.display ? `${challenge.amount.display} ${symbol}` : formatPriceDisplay(challenge.amount.atomic, symbol),
       asset: symbol,
       network: challenge.network?.chainId ? `eip155:${challenge.network.chainId}` : undefined,
     }

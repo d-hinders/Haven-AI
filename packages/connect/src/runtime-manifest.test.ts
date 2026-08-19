@@ -29,3 +29,16 @@ describe('MCP_RUNTIME_MANIFEST.requiredTools', () => {
     expect(MCP_RUNTIME_MANIFEST.requiredTools).toContain('haven_pay_x402')
   })
 })
+
+describe('MCP_RUNTIME_MANIFEST.requiredSignerTools (#1587)', () => {
+  it('is DERIVED from @haven_ai/signer, not a literal that can rot', async () => {
+    const { toolSchemas } = await import('@haven_ai/signer')
+    expect([...MCP_RUNTIME_MANIFEST.requiredSignerTools].sort()).toEqual(Object.keys(toolSchemas).sort())
+  })
+
+  it('is non-empty and anchors the signing tools the payment flow depends on', () => {
+    expect(MCP_RUNTIME_MANIFEST.requiredSignerTools.length).toBeGreaterThan(0)
+    expect(MCP_RUNTIME_MANIFEST.requiredSignerTools).toContain('haven_sign_x402')
+    expect(MCP_RUNTIME_MANIFEST.requiredSignerTools).toContain('haven_sign')
+  })
+})

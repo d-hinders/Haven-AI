@@ -5,17 +5,23 @@ import { getChain } from '../domain/chains.js'
 const providers = new Map<number, JsonRpcProvider>()
 const relayers = new Map<number, Wallet>()
 
-// ── Per-chain send serialisation (#692/#718 interim fix) ──────────
+// ── Per-chain send serialisation (#692/#718; role narrowed by #1559) ─────────
 //
-// The relayer EOA's nonce is strictly sequential. Ethers populates it from
-// `getTransactionCount(relayer, 'pending')` at submit time, so two concurrent
-// submissions — even for unrelated Safes — read the same pending nonce and
-// collide ("nonce too low" / "replacement underpriced"), failing one payment.
-// Serialise the populate+broadcast window per chain. Confirmation waits MUST
-// stay outside the lock so payments still confirm in parallel; only the short
-// nonce-read→broadcast section is exclusive. Interim until the durable
-// outbound-tx queue lands; in-process only, so multi-replica deployments
-// still need one relayer key per replica or the queue.
+// The relayer EOA's nonce is strictly sequential; two concurrent submissions
+// reading the same pending nonce collide and fail one of them. This lock
+// serialises the nonce-read→broadcast window per chain, in-process.
+// Confirmation waits MUST stay outside it so payments confirm in parallel.
+//
+// Since #1559 (epic #1554) this is no longer the only — or the main — line of
+// defence. Queue-lane submitters (sweep, hybrid deploy, passport, the bump
+// worker) go through `outbound-queue.ts`'s `submitRecorded`: sign → STAMP the
+// durable row under the partial UNIQUE (chain, nonce) live-broadcast index →
+// broadcast. Postgres arbitrates nonce lanes there, so those submitters are
+// cross-replica safe; this lock remains as the cheap in-process belt inside
+// that pipeline, and as the ONLY serialisation for the Safe-bound legacy
+// sites (safe-deploy/exec, allowance-module, the deployers) — which retire
+// with #1440. Until they do, multi-replica remains gated on THEM, not on the
+// queue lane.
 const sendLocks = new Map<number, Promise<unknown>>()
 
 export async function withRelayerSendLock<T>(

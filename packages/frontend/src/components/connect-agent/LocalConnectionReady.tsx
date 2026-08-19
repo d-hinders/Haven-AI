@@ -85,7 +85,7 @@ export function LocalConnectionReady({
   return (
     <>
       <AgentRulesSummary
-        title="Approve agent rules"
+        title="Approve agent budget"
         description={`You sign to give ${agentName} authority to spend within this budget. Nothing executes outside what you approve here.`}
         density="compact"
         items={[
@@ -156,7 +156,7 @@ export function LocalConnectionReady({
             ? 'Approving...'
             : safeThreshold > 1
               ? 'Submit approval'
-              : 'Approve rules'}
+              : 'Approve budget'}
         </Button>
       </div>
       <span className="sr-only">{fallbackSetup.setup_id}</span>

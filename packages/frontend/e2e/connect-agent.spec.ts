@@ -29,7 +29,7 @@ test.describe('Connect agent setup acceptance', () => {
     await dialog.getByLabel('Agent name').fill('Research Agent')
     await dialog.getByRole('button', { name: 'Set agent budget' }).click()
     await dialog.getByPlaceholder('Amount').fill('10')
-    await dialog.getByRole('button', { name: 'Review agent rules' }).click()
+    await dialog.getByRole('button', { name: 'Review agent budget' }).click()
     await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
 
     await expect(dialog.getByText('Connect your agent')).toBeVisible()
@@ -39,7 +39,7 @@ test.describe('Connect agent setup acceptance', () => {
     // Pre-approval screen collapses to a single anchor Card: heading +
     // verification check inline, no separate green callout / awaiting-approval
     // budget card / "Ready for Haven approval" table / restart banner.
-    await expect(dialog.getByRole('heading', { name: 'Approve agent rules' })).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: 'Approve agent budget' })).toBeVisible()
     await expect(dialog.getByText(/Local connection verified/i)).toBeVisible()
     await expect(dialog.getByText('Approval unavailable')).toBeVisible()
     await expect(dialog.getByText(/Connect a wallet or use a passkey/i)).toBeVisible()

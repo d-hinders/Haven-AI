@@ -6,7 +6,7 @@ covers:
   - packages/backend/src/infra/repositories/allowance-nonce-watermarks.ts
   - packages/backend/src/platform/leader-lock.ts
   - packages/backend/src/infra/relayer.ts
-last-verified: "2026-08-08"
+last-verified: "2026-08-18" # #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
 ---
 
 # Backend Scaling
@@ -68,8 +68,28 @@ they queue behind the same key. Two consequences worth planning around:
 1. **Throughput ceiling.** Adding replicas raises how many requests you can
    accept, not how many transactions you can land. The bottleneck moves to the
    relayer, and past that point new replicas buy latency, not capacity.
-2. **Single point of stall.** One stuck transaction (underpriced, or a nonce gap)
-   blocks every later submission on that chain until it clears or is replaced.
+2. **Single point of stall — now self-healing on the queue lane.** One stuck
+   transaction blocks every later submission on that chain. Since #1558 the
+   leader-locked bump worker replaces a stuck queue-lane tx with bumped fees
+   (and alerts after 3 attempts); the Safe-bound legacy sites have no bump
+   path until they retire (#1440).
+
+### Multi-replica CORRECTNESS: closed for the queue lane (#1559)
+
+The correctness half of the old constraint — two replicas reading the same
+pending nonce and colliding — is **closed for queue-lane submitters** (sweeps,
+Hybrid deploys, passport anchors, the bump worker). They submit through
+`infra/outbound-queue.ts`'s `submitRecorded`: sign → **stamp** the durable
+`outbound_txs` row under the partial UNIQUE (chain, nonce) live-broadcast
+index → broadcast. Postgres arbitrates the nonce lane: the losing replica's
+stamp is rejected, it re-reads and re-signs. The guarded stamp doubles as the
+fence — whoever stamps, sends.
+
+The Safe-bound legacy sites (`safe-deploy`/`safe-exec`, allowance transfers,
+the deployers) still rely on the in-process `withRelayerSendLock` only, so
+**multi-replica remains gated on them** until #1440 retires the rail. The
+throughput ceiling above is unchanged either way — one key is still one
+sequential nonce.
 
 ### Evaluation: a relayer key pool
 

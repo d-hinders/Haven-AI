@@ -115,7 +115,7 @@ export function WaitingForConnector({
           <div className="rounded-[10px] border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] p-3 text-xs text-[var(--v2-ink-2)]">
             <p className="font-semibold text-[var(--v2-ink)]">Haven has not received a connection yet</p>
             <p className="mt-1 leading-relaxed">
-              This setup is still waiting. Do not approve the agent rules yet. Run the same local command again, or cancel it and create a fresh setup prompt.
+              This setup is still waiting. Do not approve the budget yet. Run the same local command again, or cancel it and create a fresh setup prompt.
             </p>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
               <Button

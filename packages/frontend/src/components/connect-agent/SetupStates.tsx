@@ -106,7 +106,7 @@ export function SetupStatusState({
   )
 }
 
-/** Success state after the agent rules are approved. */
+/** Success state after the agent budget is approved. */
 export function SetupDoneState({
   runtime,
   skillInstalled,

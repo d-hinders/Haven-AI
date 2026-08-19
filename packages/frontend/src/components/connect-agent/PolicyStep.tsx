@@ -106,7 +106,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           disabled={flow.allowances.length === 0 || (flow.hasMultipleSafes && !flow.selectedSafeId)}
           className="flex-1"
         >
-          Review agent rules
+          Review agent budget
         </Button>
       </div>
     </>

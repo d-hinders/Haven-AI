@@ -7,6 +7,7 @@ import {
   formatUsdc,
   CHAIN_ID,
   TRUSTED_DELEGATION_MANAGER,
+  TRUSTED_ERC20_TRANSFER_AMOUNT_ENFORCER,
   hostedMerchantBaseUrlForChain,
   isSettlementMethod,
   isTrustedDelegationManagerForChain,
@@ -40,7 +41,9 @@ function resolveBaseUrl(raw: string | undefined): string {
   return raw
 }
 
-function resolveErc7710Config(requestedMethods: readonly SettlementMethod[] | undefined): { delegationManager: Address } | undefined {
+function resolveErc7710Config(
+  requestedMethods: readonly SettlementMethod[] | undefined,
+): { delegationManager: Address; erc20TransferAmountEnforcer: Address } | undefined {
   const raw = process.env.MERCHANT_ERC7710_DELEGATION_MANAGER
   const explicitlyRequested = requestedMethods?.includes('erc7710') ?? false
   if (!raw) {
@@ -60,7 +63,10 @@ function resolveErc7710Config(requestedMethods: readonly SettlementMethod[] | un
     )
     return undefined
   }
-  return { delegationManager: TRUSTED_DELEGATION_MANAGER }
+  return {
+    delegationManager: TRUSTED_DELEGATION_MANAGER,
+    erc20TransferAmountEnforcer: TRUSTED_ERC20_TRANSFER_AMOUNT_ENFORCER,
+  }
 }
 
 function effectiveSettlementMethods(

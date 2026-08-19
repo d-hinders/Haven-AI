@@ -48,8 +48,10 @@ describe('runConnect', () => {
   ] as const)('prints the approval, activation, and read-only verification handoff for %s', (runtime, activation) => {
     const output = completionHandoffLines(completedInstall(runtime)).join('\n')
 
-    expect(output).toContain('1. Return to Haven and approve the agent rules.')
+    expect(output).toContain('1. Return to Haven and approve the budget.')
     expect(output).toContain('Approval — not restarting — unlocks Haven tools.')
+    // #1542: one name for the one gate — "agent rules" never appears here.
+    expect(output).not.toContain('agent rules')
     expect(output).toContain(activation)
     expect(output).toContain('haven_get_agent')
     expect(output).toContain('haven_get_allowances')
@@ -67,7 +69,53 @@ describe('runConnect', () => {
     expect(output).toContain('return to Haven for a fresh connection')
     expect(output).toContain('Do not manually edit runtime config')
     expect(output).toContain('paste credentials into prompts, logs, or config')
-    expect(output).not.toContain('approve the agent rules')
+    expect(output).not.toContain('approve the budget')
+  })
+
+  // #1542: the handoff reflects what the approval wait observed — the connector
+  // must never celebrate the approval and then instruct the user to perform it.
+  it('confirms instead of re-requesting approval when the budget was approved during the wait', () => {
+    const output = completionHandoffLines(completedInstall('claude-code'), 'approved').join('\n')
+
+    expect(output).toContain('the budget is already approved')
+    expect(output).not.toContain('Return to Haven')
+    expect(output).not.toContain('approve the budget')
+    // The remaining steps renumber from 1 and stay actionable.
+    expect(output).toContain('1. Start a new Claude Code session')
+    expect(output).toContain('haven_get_agent')
+  })
+
+  it('keeps the full approve instruction when the wait timed out still pending', () => {
+    const output = completionHandoffLines(completedInstall('claude-code'), 'pending').join('\n')
+
+    expect(output).toContain('1. Return to Haven and approve the budget.')
+  })
+
+  it('does not ask the user to approve a setup that already ended in Haven', () => {
+    const output = completionHandoffLines(completedInstall('claude-code'), 'ended').join('\n')
+
+    expect(output).not.toContain('approve the budget')
+    expect(output).toContain('start a fresh connection from the dashboard')
+  })
+
+  // #1542: the restart step explains why it survives the connector's own
+  // verification — but only where a restart is genuinely required. Hot-reload
+  // runtimes keep their registry copy, which already says no restart is needed.
+  it.each([
+    ['claude-code', 'only reads MCP config when a session starts'],
+    ['claude-desktop', 'only reads MCP config at app launch'],
+  ] as const)('says why %s still needs a restart after in-process verification', (runtime, why) => {
+    const output = completionHandoffLines(completedInstall(runtime)).join('\n')
+
+    expect(output).toContain('already written and verified')
+    expect(output).toContain(why)
+  })
+
+  it('adds no restart rationale on hot-reload runtimes', () => {
+    const output = completionHandoffLines(completedInstall('cursor')).join('\n')
+
+    expect(output).toContain('no app restart is required')
+    expect(output).not.toContain('already written and verified')
   })
 
   it('keeps the manual runtime path actionable after credential setup', () => {
@@ -567,8 +615,10 @@ describe('runConnect', () => {
     expect(result.agentId).toBe('agent-3')
     const output = logs.join('\n')
     // Completion + next-steps still printed despite the telemetry failure…
+    // (the mock approves on the first poll, so the handoff takes its #1542
+    // approved shape: confirmation, not an approve instruction)
     expect(output).toContain('Haven setup on this machine is complete')
-    expect(output).toContain('Approval — not restarting — unlocks Haven tools')
+    expect(output).toContain('the budget is already approved')
     // …and the failure is surfaced quietly rather than thrown.
     expect(output).toContain('Could not report install status to Haven')
     // A failed readiness report is non-authoritative and must not leave the
@@ -638,6 +688,32 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     if ([0, 1440, 10080, 43200].includes(resetPeriodMin)) {
       expect(logs.join('\n')).not.toMatch(/\d+ minutes/)
     }
+  })
+
+  // #1542: users routinely approve while the runtime install is still running.
+  // The first check is immediate and precedes the announcement, so an
+  // already-approved budget never produces the contradictory adjacent pair
+  // "waiting for you to approve… / Budget approved 🎉".
+  it('never prints the waiting line when the budget is already approved at poll start', async () => {
+    const logs: string[] = []
+    const getConnectorStatus = vi.fn(async () => ({
+      status: 'active' as const,
+      approved_budget: { token_symbol: 'USDC', token_address: BASE_USDC, amount: '3000000', reset_period_min: 1440 },
+    }))
+    const sleep = vi.fn(async () => {})
+
+    const outcome = await waitForBudgetApproval(
+      { getConnectorStatus }, 'setup-1', 'sk_agent_key',
+      (message) => logs.push(message), { sleep },
+    )
+
+    expect(outcome).toBe('approved')
+    expect(getConnectorStatus).toHaveBeenCalledTimes(1)
+    // Immediate first check: no pacing sleep before it, no waiting line.
+    expect(sleep).not.toHaveBeenCalled()
+    const output = logs.join('\n')
+    expect(output).not.toContain('waiting for you to approve')
+    expect(output).toContain('Budget approved 🎉 — I can now spend up to 3 USDC per day from your Haven wallet.')
   })
 
   it('always terminates on its own: exits pending with guidance at the timeout bound', async () => {
@@ -746,6 +822,235 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     expect(getConnectorStatus).toHaveBeenCalledTimes(2)
   })
 
+  // #1544 re-run characterization: re-running an already-consumed setup
+  // command fails CLEANLY before any credential write or runtime-config
+  // change, so a re-run can never clobber, rotate, or orphan the workspace's
+  // existing local state. The backend gates BOTH resolve and register on
+  // `awaiting_connection` (routes/agent-connection-setups.ts), so the common
+  // re-run refusal lands at RESOLVE; the register-side refusal only occurs in
+  // a concurrent-run race. Both shapes are pinned. (A fresh key pair is
+  // minted in memory for a rejected register attempt; on refusal it is
+  // discarded, never persisted.)
+  it('a re-run of a consumed setup is refused at resolve, before any local write', async () => {
+    const writeCredentials = vi.fn()
+    const installRuntime = vi.fn()
+    const registerSetup = vi.fn()
+    await expect(runConnect({
+      setupToken: 'hv_setup_test_rerun',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-rerun',
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => {
+          throw new ConnectRequestError('Haven setup request failed: setup is not awaiting connection', 409)
+        }),
+        registerSetup,
+        updateInstallStatus: vi.fn(),
+        getConnectorStatus: vi.fn(),
+      },
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_rerunkey',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-rerun'),
+      writeCredentials,
+      installRuntime,
+      log: () => undefined,
+    })).rejects.toThrow(/not awaiting connection/)
+
+    expect(registerSetup).not.toHaveBeenCalled()
+    expect(writeCredentials).not.toHaveBeenCalled()
+    expect(installRuntime).not.toHaveBeenCalled()
+  })
+
+  it('a registration race on a still-pending setup also fails before any local write', async () => {
+    const writeCredentials = vi.fn()
+    const installRuntime = vi.fn()
+    await expect(runConnect({
+      setupToken: 'hv_setup_test_rerun_race',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-rerun-race',
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-7',
+          status: 'awaiting_connection',
+          agent: { name: 'Rerun Agent' },
+          haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 8453, network: 'Base' },
+          agent_budget: [],
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-7', message: 'Haven Connect Agent 2\nsetup_id: setup-7\nchallenge: stu', expires_at: '2099-01-01T00:00:00.000Z' },
+        })),
+        registerSetup: vi.fn(async () => {
+          throw new ConnectRequestError('Haven setup request failed: setup already connected', 409)
+        }),
+        updateInstallStatus: vi.fn(),
+        getConnectorStatus: vi.fn(),
+      },
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_rerunkey2',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-rerun-race'),
+      writeCredentials,
+      installRuntime,
+      log: () => undefined,
+    })).rejects.toThrow(/already connected/)
+
+    expect(writeCredentials).not.toHaveBeenCalled()
+    expect(installRuntime).not.toHaveBeenCalled()
+  })
+
+  // #1543: runConnect wires installRuntime's early config-written hook to a
+  // best-effort install-status report, so the dashboard can unlock approval
+  // before probes and skill install finish. The final report still follows
+  // and remains authoritative.
+  it('runConnect sends an early install-status report when the runtime config write settles', async () => {
+    const reports: UpdateInstallStatusInput[] = []
+    const updateInstallStatus = vi.fn(async (_setupId: string, _apiKey: string, input: UpdateInstallStatusInput) => {
+      reports.push(input)
+    })
+    await runConnect({
+      setupToken: 'hv_setup_test_early',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-early',
+      waitForApproval: false,
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-5',
+          status: 'awaiting_connection',
+          agent: { name: 'Early Agent' },
+          haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 8453, network: 'Base' },
+          agent_budget: [],
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-5', message: 'Haven Connect Agent 2\nsetup_id: setup-5\nchallenge: mno', expires_at: '2099-01-01T00:00:00.000Z' },
+        })),
+        registerSetup: vi.fn(async (input) => ({
+          setup_id: 'setup-5',
+          agent_id: 'agent-5',
+          status: 'connected_local',
+          agent_status: 'pending_approval',
+          api_key_prefix: input.apiKeyPrefix,
+          api_key_scope: 'setup_pending',
+          delegate_address: input.delegateAddress.toLowerCase(),
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          next_action: 'return_to_haven_for_wallet_approval',
+        })),
+        updateInstallStatus,
+        getConnectorStatus: vi.fn(),
+      },
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_earlykey',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-early'),
+      writeCredentials: vi.fn(async () => ({
+        directory: '/tmp/haven-connect-test-early/agent-5',
+        identityPath: '/tmp/haven-connect-test-early/agent-5/identity.json',
+        signerPath: '/tmp/haven-connect-test-early/agent-5/signer.json',
+        agentPath: '/tmp/haven-connect-test-early/agent-5/agent.json',
+      })),
+      installRuntime: vi.fn(async (_input, deps) => {
+        // Simulate the config write settling mid-install (#1543).
+        await deps?.onRuntimeConfigured?.({
+          runtime: 'claude-code',
+          runtimeMcpMode: 'hosted_plus_signer',
+          hostedMcpConfigured: true,
+          localSignerConfigured: true,
+          localMcpConfigured: false,
+          signerAcknowledged: true,
+          restartRequired: true,
+          nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
+        })
+        return completedInstall('claude-code')
+      }),
+      log: () => undefined,
+    })
+
+    expect(updateInstallStatus).toHaveBeenCalledTimes(2)
+    // The early report carries the config-write facts and the unlock keys…
+    expect(reports[0]).toMatchObject({
+      hostedMcpConfigured: true,
+      localSignerConfigured: true,
+      credentialFilesWritten: true,
+      errorCode: null,
+    })
+    // …but no probe verdict or skill state, which do not exist yet.
+    expect(reports[0].probeResult).toBeUndefined()
+    expect(reports[0].skillInstalled).toBeUndefined()
+    // The final report follows and is the complete, authoritative one.
+    expect(reports[1].probeResult).toBeDefined()
+  })
+
+  it('runConnect survives an early install-status report failure', async () => {
+    const updateInstallStatus = vi.fn()
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValue(undefined)
+    const logs: string[] = []
+    const result = await runConnect({
+      setupToken: 'hv_setup_test_early_fail',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir: '/tmp/haven-connect-test-early-fail',
+      waitForApproval: false,
+    }, {
+      api: {
+        resolveSetup: vi.fn(async () => ({
+          setup_id: 'setup-6',
+          status: 'awaiting_connection',
+          agent: { name: 'Early Fail Agent' },
+          haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 8453, network: 'Base' },
+          agent_budget: [],
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          challenge: { id: 'challenge-6', message: 'Haven Connect Agent 2\nsetup_id: setup-6\nchallenge: pqr', expires_at: '2099-01-01T00:00:00.000Z' },
+        })),
+        registerSetup: vi.fn(async (input) => ({
+          setup_id: 'setup-6',
+          agent_id: 'agent-6',
+          status: 'connected_local',
+          agent_status: 'pending_approval',
+          api_key_prefix: input.apiKeyPrefix,
+          api_key_scope: 'setup_pending',
+          delegate_address: input.delegateAddress.toLowerCase(),
+          hosted_mcp_url: 'https://mcp.haven.example/v1',
+          next_action: 'return_to_haven_for_wallet_approval',
+        })),
+        updateInstallStatus,
+        getConnectorStatus: vi.fn(),
+      },
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_earlyfail',
+      preflightStorage: vi.fn(async () => '/tmp/haven-connect-test-early-fail'),
+      writeCredentials: vi.fn(async () => ({
+        directory: '/tmp/haven-connect-test-early-fail/agent-6',
+        identityPath: '/tmp/haven-connect-test-early-fail/agent-6/identity.json',
+        signerPath: '/tmp/haven-connect-test-early-fail/agent-6/signer.json',
+        agentPath: '/tmp/haven-connect-test-early-fail/agent-6/agent.json',
+      })),
+      installRuntime: vi.fn(async (_input, deps) => {
+        await deps?.onRuntimeConfigured?.({
+          runtime: 'claude-code',
+          runtimeMcpMode: 'hosted_plus_signer',
+          hostedMcpConfigured: true,
+          localSignerConfigured: true,
+          localMcpConfigured: false,
+          restartRequired: true,
+          nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
+        })
+        return completedInstall('claude-code')
+      }),
+      log: (message) => logs.push(message),
+    })
+
+    // A failed early report is silent (no user action exists for it), never
+    // fatal, and the final report still goes out.
+    expect(result.agentId).toBe('agent-6')
+    expect(updateInstallStatus).toHaveBeenCalledTimes(2)
+    expect(logs.join('\n')).not.toContain('network down')
+  })
+
   it('runConnect polls after registering by default and forwards approvalWait overrides', async () => {
     const logs: string[] = []
     const lifecycleCalls: string[] = []
@@ -809,6 +1114,13 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     // must settle before the connector's first approval poll, or both sides
     // wait on each other until the bounded poll window ends (#1386).
     expect(lifecycleCalls).toEqual(['report-install-status', 'poll-budget-approval'])
-    expect(logs.join('\n')).toContain('Budget approved 🎉')
+    const output = logs.join('\n')
+    expect(output).toContain('Budget approved 🎉')
+    // #1542 end to end: the approval observed by the wait shapes the printed
+    // next steps — an approved budget is confirmed, never re-requested, and
+    // the already-over wait is never announced.
+    expect(output).not.toContain('waiting for you to approve')
+    expect(output).not.toContain('Return to Haven')
+    expect(output).toContain('the budget is already approved')
   })
 })

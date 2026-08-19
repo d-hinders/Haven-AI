@@ -1,6 +1,7 @@
 import {
   createPublicClient,
   createWalletClient,
+  decodeAbiParameters,
   encodeFunctionData,
   encodePacked,
   getAddress,
@@ -181,6 +182,51 @@ const DELEGATION_MANAGER_ABI = [
     ],
     outputs: [],
   },
+  // #1515: pure delegation hashing, answered by the manager itself so this
+  // merchant never re-implements the framework's EIP-712 struct hashing.
+  {
+    type: 'function',
+    name: 'getDelegationHash',
+    stateMutability: 'pure',
+    inputs: [
+      {
+        name: '_input',
+        type: 'tuple',
+        components: [
+          { name: 'delegate', type: 'address' },
+          { name: 'delegator', type: 'address' },
+          { name: 'authority', type: 'bytes32' },
+          {
+            name: 'caveats',
+            type: 'tuple[]',
+            components: [
+              { name: 'enforcer', type: 'address' },
+              { name: 'terms', type: 'bytes' },
+              { name: 'args', type: 'bytes' },
+            ],
+          },
+          { name: 'salt', type: 'uint256' },
+          { name: 'signature', type: 'bytes' },
+        ],
+      },
+    ],
+    outputs: [{ type: 'bytes32' }],
+  },
+] as const
+
+// #1515: `spentMap` as exposed by `ERC20TransferAmountEnforcer` — how much an
+// exact delegation hash has already transferred through a given manager.
+const CAVEAT_SPENT_MAP_ABI = [
+  {
+    type: 'function',
+    name: 'spentMap',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'delegationManager', type: 'address' },
+      { name: 'delegationHash', type: 'bytes32' },
+    ],
+    outputs: [{ type: 'uint256' }],
+  },
 ] as const
 
 export interface Eip3009Authorization {
@@ -216,6 +262,93 @@ export interface Erc7710SettlementClient {
    *  advertised as `extra.facilitatorAddresses` (MetaMask's erc7710 shape) so
    *  payers can pin their settlement child's redeemer caveat to it. */
   redeemerAddress?: Address
+  /** #1515: `DelegationManager.getDelegationHash` — pure, so it answers even
+   *  when the redemption simulation reverts. Optional: absent, the
+   *  already-redeemed check is skipped and a post-restart retry is refused
+   *  (the pre-#1515 behaviour) rather than mis-served. */
+  getDelegationHash?(delegationManager: Address, delegation: DecodedDelegation): Promise<Hex>
+  /** #1515: `spentMap(delegationManager, delegationHash)` on a caveat
+   *  enforcer. Resolve `null` for an enforcer that does not expose it —
+   *  only the transfer-amount enforcer does, and which caveat that is can
+   *  only be discovered by asking. */
+  spentOnDelegation?(
+    enforcer: Address,
+    delegationManager: Address,
+    delegationHash: Hex,
+  ): Promise<bigint | null>
+}
+
+/** One decoded ERC-7710 delegation, in the DelegationManager's own struct shape. */
+export interface DecodedDelegation {
+  delegate: Address
+  delegator: Address
+  authority: Hex
+  caveats: readonly { enforcer: Address; terms: Hex; args: Hex }[]
+  salt: bigint
+  signature: Hex
+}
+
+/**
+ * The Delegation struct, mirrored from `@metamask/delegation-abis`'
+ * `DelegationManager.getDelegationHash` input. Mirrored rather than derived at
+ * runtime so the decode parameter is statically typed; the pin test
+ * (`erc7710.test.ts`) fails if the package's struct ever diverges from this
+ * literal.
+ */
+export const DELEGATION_STRUCT_COMPONENTS = [
+  { name: 'delegate', type: 'address' },
+  { name: 'delegator', type: 'address' },
+  { name: 'authority', type: 'bytes32' },
+  {
+    name: 'caveats',
+    type: 'tuple[]',
+    components: [
+      { name: 'enforcer', type: 'address' },
+      { name: 'terms', type: 'bytes' },
+      { name: 'args', type: 'bytes' },
+    ],
+  },
+  { name: 'salt', type: 'uint256' },
+  { name: 'signature', type: 'bytes' },
+] as const
+
+const PERMISSION_CONTEXT_PARAMS = [
+  { name: 'delegations', type: 'tuple[]', components: DELEGATION_STRUCT_COMPONENTS },
+] as const
+
+/**
+ * Decode an erc7710 `permissionContext` (abi-encoded `Delegation[]`, leaf
+ * first) and return the LEAF — the settlement child whose exact-amount caveat
+ * meters the payment. Null when the bytes are not a delegation chain; the
+ * caller falls back to refusing the payment, never to accepting it.
+ */
+export function decodeLeafDelegation(permissionContext: Hex): DecodedDelegation | null {
+  try {
+    const [delegations] = decodeAbiParameters(PERMISSION_CONTEXT_PARAMS, permissionContext)
+    const leaf = delegations[0]
+    return leaf ? (leaf as DecodedDelegation) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The committed spend cap of an `ERC20TransferAmountEnforcer` caveat: its
+ * `terms` are `20-byte token ‖ 32-byte maxTokens` (the same layout the signer
+ * decodes in `settlement-child.ts`). Returns the `maxTokens` word, or null if
+ * the terms are too short to be that shape. Local decode, not an on-chain
+ * `getTermsInfo` call — the layout is stable and this keeps the check to two
+ * reads.
+ */
+export function decodeTransferAmountCap(terms: Hex): bigint | null {
+  const body = terms.startsWith('0x') ? terms.slice(2) : terms
+  // 20-byte token + 32-byte amount = 52 bytes = 104 hex chars.
+  if (body.length < 104) return null
+  try {
+    return BigInt(`0x${body.slice(40, 104)}`)
+  } catch {
+    return null
+  }
 }
 
 export interface SettledPayment {
@@ -309,6 +442,16 @@ export interface X402PaymentProcessorOptions {
      *  without pinning it, a no-op contract at that address would "verify" and
      *  "settle" successfully while moving zero USDC. */
     delegationManager: Address
+    /**
+     * The only `ERC20TransferAmountEnforcer` whose `spentMap` this merchant
+     * trusts as the record of "did this settlement child already spend"
+     * (#1515). MUST be pinned: the caveat enforcer address inside a
+     * `permissionContext` is attacker-chosen, so a forged enforcer returning a
+     * large `spentMap` would otherwise let an UNPAID buyer be served after a
+     * restart. Absent, the already-redeemed check is disabled and a
+     * post-restart retry falls back to the pre-#1515 refusal.
+     */
+    erc20TransferAmountEnforcer?: Address
   }
   settlementMethods?: readonly SettlementMethod[]
 }
@@ -563,21 +706,104 @@ export function createX402PaymentProcessor(
       throw new PaymentError('Payment delegationManager is not the delegation manager trusted by this merchant')
     }
     const redeemCall = buildRedeemCall(payment, params.merchantAddress, params.expectedAmount)
-    try {
-      await erc7710Client.simulateRedeemDelegations(redeemCall)
-    } catch (err) {
-      throw new PaymentError(
-        `ERC-7710 delegation redemption simulation failed: ${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
     const contextHash = keccak256(payment.permissionContext)
-    return {
+    const verified: VerifiedPayment = {
       paymentKey: `erc7710:${payment.delegator.toLowerCase()}:${contextHash.toLowerCase()}`,
       payer: payment.delegator,
       payTo: getAddress(params.merchantAddress),
       nonce: contextHash,
       settlementMethod: ERC7710_TRANSFER_METHOD,
       submit: () => erc7710Client.submitRedeemDelegations(redeemCall),
+    }
+    try {
+      await erc7710Client.simulateRedeemDelegations(redeemCall)
+    } catch (err) {
+      // #1515: an exact-amount settlement child that ALREADY moved the money
+      // fails this simulation too — its transfer-amount caveat is exhausted —
+      // and before this check, a merchant restart between submit and the
+      // buyer's retry turned that into "simulation failed": charged, no goods.
+      // The chain is the store that survives restarts (#1519's move, applied
+      // to this rail): if the leaf delegation's own spent counter covers the
+      // price, this purchase settled. Route it through `settleOnce`'s
+      // already-used branch so the buyer is served, not refused.
+      if (
+        await erc7710AlreadyRedeemed(
+          erc7710Client,
+          options.erc7710?.erc20TransferAmountEnforcer,
+          payment,
+          params.expectedAmount,
+        )
+      ) {
+        return {
+          ...verified,
+          submit: async () => {
+            throw new AuthorizationAlreadyUsedError(
+              `ERC-7710 settlement child ${contextHash} was already redeemed on-chain for ` +
+                `${payment.delegator}. This purchase already settled — do not resubmit it.`,
+            )
+          },
+        }
+      }
+      throw new PaymentError(
+        `ERC-7710 delegation redemption simulation failed: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+    return verified
+  }
+
+  /**
+   * Chain-truth check for a restarted merchant (#1515). Answers "did THIS
+   * settlement child already move THIS payment's amount", reading only trusted,
+   * pinned contracts — never anything the attacker-supplied payload names.
+   *
+   * Three binds, all required, because the payload is unauthenticated here (it
+   * reached this path precisely because the real simulation against the pinned
+   * manager already failed):
+   *
+   *  1. The caveat enforcer must be the PINNED `ERC20TransferAmountEnforcer`.
+   *     A forged enforcer at an attacker address could return any `spentMap`;
+   *     iterating over the payload's caveats and trusting whichever answers was
+   *     a free-goods bypass (the review's finding 1).
+   *  2. That caveat's own committed cap (`getTermsInfo → maxTokens`) must EQUAL
+   *     `expectedAmount`. A settlement child is minted exact-amount per payment,
+   *     so cap == price; without this, a child spent for an expensive product
+   *     satisfies `spent >= price` for any cheaper product after a restart wiped
+   *     the in-memory cross-product guard (the review's finding 2).
+   *  3. The enforcer's `spentMap` for this delegation hash must be at least the
+   *     amount — i.e. the child actually redeemed, not merely authorized.
+   *
+   * Every failure mode resolves false: refusing a genuinely unredeemed payment
+   * stays possible, serving goods against unmoved money must not be.
+   */
+  async function erc7710AlreadyRedeemed(
+    client: Erc7710SettlementClient,
+    trustedEnforcer: Address | undefined,
+    payment: Erc7710Payment,
+    expectedAmount: bigint,
+  ): Promise<boolean> {
+    if (!trustedEnforcer || !client.getDelegationHash || !client.spentOnDelegation) return false
+    const leaf = decodeLeafDelegation(payment.permissionContext)
+    if (!leaf) return false
+
+    // Bind 1 + 2: the child must carry the PINNED transfer-amount caveat, and
+    // its committed cap must be exactly this payment's amount.
+    const caveat = leaf.caveats.find((c) => sameAddress(c.enforcer, trustedEnforcer))
+    if (!caveat) return false
+    const cap = decodeTransferAmountCap(caveat.terms)
+    if (cap === null || cap !== expectedAmount) return false
+
+    // Bind 3: and it must actually have been spent, per the pinned enforcer.
+    let leafHash: Hex
+    try {
+      leafHash = await client.getDelegationHash(payment.delegationManager, leaf)
+    } catch {
+      return false
+    }
+    try {
+      const spent = await client.spentOnDelegation(trustedEnforcer, payment.delegationManager, leafHash)
+      return spent !== null && spent >= expectedAmount
+    } catch {
+      return false
     }
   }
 
@@ -771,6 +997,30 @@ export function createViemSettlementClient(params: {
           functionName: 'redeemDelegations',
           args: [[call.permissionContext], [call.mode], [call.executionCallData]],
         })
+      },
+
+      async getDelegationHash(delegationManager, delegation) {
+        return (await publicClient.readContract({
+          address: delegationManager,
+          abi: DELEGATION_MANAGER_ABI,
+          functionName: 'getDelegationHash',
+          args: [delegation],
+        })) as Hex
+      },
+
+      async spentOnDelegation(enforcer, delegationManager, delegationHash) {
+        try {
+          return (await publicClient.readContract({
+            address: enforcer,
+            abi: CAVEAT_SPENT_MAP_ABI,
+            functionName: 'spentMap',
+            args: [delegationManager, delegationHash],
+          })) as bigint
+        } catch {
+          // Not every caveat enforcer keeps a spent counter; only the
+          // transfer-amount one answers, and the caller tries each caveat.
+          return null
+        }
       },
     },
   }
@@ -1067,8 +1317,11 @@ export class PaymentError extends Error {
 export class SettlementRevertedError extends PaymentError {}
 
 /**
- * The EIP-3009 authorization was ALREADY consumed on-chain (#1519) — the
- * purchase settled, and this is a duplicate submission of it.
+ * The payment's on-chain authority was ALREADY consumed — the purchase
+ * settled, and this is a duplicate submission of it. Raised for a used
+ * EIP-3009 nonce (#1519) and for an exhausted ERC-7710 settlement child
+ * (#1515); both are the chain remembering what the merchant's in-memory maps
+ * forget across a restart.
  *
  * A `PaymentError` subclass so it is reported as a decision rather than a
  * merchant fault, and distinct so `settleOnce` can treat it as the success it

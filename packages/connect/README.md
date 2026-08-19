@@ -45,7 +45,7 @@ spending authority.
 
 ## After setup
 
-1. Return to Haven and approve the agent rules. Approval — not restarting —
+1. Return to Haven and approve the budget. Approval — not restarting —
    unlocks the Haven tools.
 2. Activate the runtime using the table above.
 3. In the activated runtime, run the read-only `haven_get_agent` and
@@ -57,7 +57,10 @@ spending authority.
 Pass `--json` when a launcher needs a machine-readable completion record. Connect
 writes progress and human recovery notes to stderr and exactly one JSON object
 to stdout, with `schema_version: 1` and `outcome` set to `complete`,
-`action_required`, or `failed`. The object includes runtime/topology status,
+`action_required`, or `failed`. Structured runs skip the interactive
+budget-approval wait so the record is emitted promptly; approve in the Haven
+dashboard whenever ready and verify later with the read-only `haven_get_agent`
+tool. The object includes runtime/topology status,
 probe result, activation and next-action guidance, approval state/expiry (null
 when the backend does not provide an approval expiry), and the two
 read-only verification tools. It contains no API key, private key, credential
@@ -87,3 +90,47 @@ For Hermes, Connect stores the hosted-MCP API key in the matching owner-only
 Hermes requires its Python MCP SDK support to be installed. If Haven tools do
 not appear after restart, run `pip install mcp` in the Hermes environment, then
 restart Hermes and check `hermes mcp list`.
+
+## Why there is no pre-registration confirmation prompt
+
+Connect mints a signing key and registers the agent as soon as it runs, without
+an extra "about to create agent X, proceed?" gate. That is deliberate: the
+consent already happened when the user minted the one-time setup prompt in the
+Haven dashboard, which enumerates exactly what the command may do. The setup
+stays cancellable from the dashboard throughout, and the registered agent
+starts `pending_approval` with zero spend authority — nothing can move funds
+until the user approves the budget in Haven. A CLI-side confirmation would add
+friction without adding a security boundary. (The local-signer tool-exposure
+acknowledgement is a separate, machine-checkable consent about what the local
+MCP tools expose, not a registration gate.)
+
+## Running setup again
+
+Each setup prompt is one-time and each successful run creates a **new** agent
+with its own freshly minted key pair. Re-running Connect on an
+already-configured machine behaves as follows (characterized in
+`storage.test.ts`, `config-writers.test.ts`, `runtime.test.ts`, and
+`runtime-install.test.ts`, #1544/#1569):
+
+- **Re-running an already-consumed setup command** fails cleanly before any
+  credential file or runtime configuration is touched — Haven refuses the
+  consumed setup when Connect resolves it (or, in a rare concurrent-run race,
+  at registration). The key pair minted for the attempt exists only in memory
+  and is discarded. Start a fresh connection from the Haven dashboard instead.
+- **Running a fresh setup on a configured machine** writes the new agent's
+  credentials into its own directory under `~/.haven/agents/<agent-id>/`,
+  alongside the previous agent's directory, which stays byte-identical.
+  Nothing is rotated, revoked, or deleted locally.
+- **Runtime MCP entries are replaced, not duplicated**: Connect owns the
+  `haven` and `haven-signer` entries (and the managed Codex/Hermes
+  equivalents) and re-points them at the newest agent's credentials.
+  Unrelated MCP servers and configuration are preserved. One runtime is
+  therefore wired to one Haven agent — the newest one.
+- **The previous agent is not revoked by a re-run.** Its credentials remain on
+  disk and its authority remains whatever its on-chain rules say. Revoke
+  agents you no longer use from the Haven dashboard, then delete their
+  credential directories.
+- **Connect never overwrites an existing credential file.** A write that would
+  collide with an existing `identity.json`/`signer.json`/`agent.json` is
+  refused outright (and a partially failed write rolls itself back), so a
+  re-run cannot corrupt stored key material.

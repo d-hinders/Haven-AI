@@ -163,18 +163,40 @@ export async function ensureHybridDeployed(
 
   // Lazy import: the relayer wiring pulls ethers + env config; keep the pure
   // derivation path (compute…) free of it for tests and scripts.
-  const { getRelayer, getRelayerFeeOverrides, withRelayerSendLock } = await import('../infra/relayer.js')
+  const { getRelayer, getRelayerFeeOverrides } = await import('../infra/relayer.js')
   const relayer = getRelayer(chainId)
   if (!relayer.provider) {
     throw new Error('hybrid provisioning: relayer has no provider')
   }
+  // #1556: durable record opened BEFORE the broadcast — a crash between here
+  // and the send leaves a queued row the bump worker (#1558) can adopt. The
+  // record carries the exact factory calldata a bump would re-broadcast.
+  const { openOutboundRecord, submitRecorded } = await import('../infra/outbound-queue.js')
+  const record = await openOutboundRecord({
+    chainId,
+    submitter: 'hybrid_deploy',
+    to: factory,
+    data: factoryData,
+  })
+  // #1559: sign → stamp → broadcast; the stamp inside submitRecorded is the
+  // durable record and the fence. The deploy keeps its doubled fee headroom.
   const overrides = await getRelayerFeeOverrides(relayer.provider)
-  const tx = await withRelayerSendLock(chainId, () =>
-    relayer.sendTransaction({ to: factory, data: factoryData, ...overrides }),
-  )
+  const tx = await submitRecorded({
+    chainId,
+    recordId: record.id,
+    to: factory,
+    data: factoryData,
+    ...overrides,
+  })
   let receipt
+  let waitError: unknown
   try {
     receipt = await tx.wait()
+  } catch (err) {
+    // ethers v6 throws out of wait() on a mined-and-reverted tx — this catch,
+    // not the status check below, is where a real revert closes the record
+    // (#1556 review; same reason the spend-guard stamp sits in a finally).
+    waitError = err
   } finally {
     // Stamp the hash whatever happened — a reverting deploy burned gas too,
     // and ethers v6 throws out of wait() on revert.
@@ -184,8 +206,11 @@ export async function ensureHybridDeployed(
       effectiveGasPrice: receipt?.gasPrice != null ? BigInt(receipt.gasPrice.toString()) : null,
     })
   }
-  if (!receipt || receipt.status !== 1) {
+  if (waitError || !receipt || receipt.status !== 1) {
+    await record.failed(`hybrid deploy transaction reverted (${tx.hash})`)
+    if (waitError) throw waitError
     throw new Error(`hybrid deploy transaction reverted (${tx.hash})`)
   }
+  await record.mined()
   return { address: account.address, alreadyDeployed: false, txHash: tx.hash }
 }

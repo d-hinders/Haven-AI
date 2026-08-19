@@ -389,13 +389,14 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'When the user stated NO cap (#1548): quote first (haven_quote_mcp_tool) and set max_amount_human to the live quoted amount — never invent headroom. A later price rise then refuses safely at the cap check: re-quote and confirm with the user. A user-stated cap always wins. ' +
     'The returned amount/amount_atomic is the amount Haven authorizes for this call — a ceiling the merchant settles at or below — so show it to the user as the maximum, not any catalog/discovery price. Haven never receives the signing key. ' +
     'Protocol notes: builds the JSON-RPC tools/call envelope and probes the merchant to obtain the x402 payment_required. merchant_url may be the exact MCP endpoint or a BASE merchant URL (#1271): a non-402 miss triggers one bounded same-origin discovery pass of the merchant discovery document and one retry; the returned merchant_url is the resolved endpoint — pass THAT to settle/complete. ' +
-    'Creates a funding intent and returns { payment_id, payload_hash, expires_at, payment_required, x402, signer_compatibility, merchant_url, tool_name, arguments, mcp_transport }. ' +
+    'Creates a funding intent and returns { payment_id, payload_hash, expires_at, x402, signer_compatibility, merchant_url, tool_name, arguments, mcp_transport }. ' +
+    'COMPACT by default (#1549): the raw 402 payment_required is NOT echoed — Haven persists it at authorize (#1355) and the signer fetches it by payment_id; re-run with the SAME idempotency_key plus include_signing_payload=true when you need it inline (older signer/backend, or the step-by-step path below). ' +
     'The funding/quote window expires at expires_at; if it expires, re-run haven_pay_mcp_tool with the same idempotency_key before signing again. ' +
     'Version compatibility is enforced BY THE SIGNER (#1547): an out-of-date signer refuses to sign with a machine-readable version-mismatch error (code, supported_versions, received_version, fallback) — no pre-check needed, just branch on that refusal. ' +
     'On it, STOP before signing again and tell the user to update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`. Nothing has been spent at that point. ' +
     'Fallback for an older signer/backend, or for diagnostics: re-run THIS tool with the SAME idempotency_key plus include_signing_payload=true — the replay returns the ORIGINAL sign_data with typed_data_b64 — then pass payload_hash, x402_expected (the nested x402.expected context, including expires_at), payment_required, and typed_data_b64 through UNCHANGED, one opaque string, never re-typed (#1255). Returns { signature, payment_header }. ' +
     'Step-by-step alternative (also key-safe): mcp__haven-signer__haven_sign → mcp__haven__haven_submit → mcp__haven-signer__haven_x402_sign_header → mcp__haven__haven_complete_mcp_tool. ' +
-    'Pass payment_required, arguments, and mcp_transport through verbatim from this response.',
+    'Pass arguments and mcp_transport through verbatim from this response; haven_x402_sign_header also needs payment_required — obtain it from the include_signing_payload=true replay (#1549).',
 })
 
 const QUOTE_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -971,9 +972,18 @@ export function createToolHandlers(
           )
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
-            // The raw merchant 402 PaymentRequired — the local signer needs this
-            // verbatim in haven_x402_sign_header to build the EIP-3009 header.
-            payment_required: quote.paymentRequired,
+            // #1549: the raw merchant 402 PaymentRequired is COMPACT-trimmed.
+            // The fast path never reads it from here — #1355 persists it at
+            // authorize and the signer fetches it by payment_id — so on every
+            // purchase it was pure token cost (the largest block, repeating
+            // the accepts[] the x402 block already summarises). It returns
+            // under include_signing_payload=true (same #1272 escape as
+            // typed_data: re-run with the SAME idempotency_key), which is what
+            // an older signer/backend or the step-by-step
+            // haven_x402_sign_header path uses.
+            ...(args.include_signing_payload === true
+              ? { payment_required: quote.paymentRequired }
+              : {}),
             // Authorized amount for this call — a ceiling the merchant settles
             // at or below (maxAmountRequired ?? amount). Show THIS to the user
             // as the maximum, not any catalog price (which is indicative/stale).
@@ -1000,7 +1010,9 @@ export function createToolHandlers(
               reason:
                 'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
                 'signer fetches payment_required itself; only if it reports the context carried ' +
-                'none, re-call with payment_required added VERBATIM from this response), then ' +
+                'none, re-run this tool with the SAME idempotency_key plus ' +
+                'include_signing_payload=true and re-call the signer with its payment_required ' +
+                'added VERBATIM, #1549), then ' +
                 'haven_settle_mcp_tool with the returned ' +
                 'signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport ' +
                 'from this response.',
@@ -1319,9 +1331,11 @@ export function createToolHandlers(
             // protocol is implicit like every other success shape.
             network: intent.network,
             asset: intent.asset,
-            // The raw merchant 402 PaymentRequired — the local signer needs this
-            // verbatim in haven_x402_sign_header to build the EIP-3009 header.
-            payment_required: quote.paymentRequired,
+            // #1549: payment_required is compact-trimmed here exactly as on
+            // haven_pay_mcp_tool above — one contract, see that comment.
+            ...(args.include_signing_payload === true
+              ? { payment_required: quote.paymentRequired }
+              : {}),
             amount_atomic: quote.amountAtomic,
             amount: quote.amount,
             token: quote.token,
@@ -1347,7 +1361,9 @@ export function createToolHandlers(
               reason:
                 'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
                 'signer fetches payment_required itself; only if it reports the context carried ' +
-                'none, re-call with payment_required added VERBATIM from this response), then ' +
+                'none, re-run this tool with the SAME idempotency_key plus ' +
+                'include_signing_payload=true and re-call the signer with its payment_required ' +
+                'added VERBATIM, #1549), then ' +
                 'haven_settle_mcp_tool with the returned ' +
                 'signature + payment_header and the merchant_url/tool_name/arguments/mcp_transport ' +
                 'from this response.',
@@ -1682,7 +1698,7 @@ export function createToolHandlers(
               reason:
                 'Sign locally: call next_tool with next_arguments EXACTLY as given (#1355: the ' +
                 'signer fetches payment_required itself; only if it reports the context carried ' +
-                'none, re-call with payment_required added VERBATIM from this response). Then ' +
+                'none, re-call with the payment_required you passed to this tool added VERBATIM). Then ' +
                 'relay via haven_submit and finish with ' +
                 'haven_x402_sign_header + the original merchant retry.',
               summary: {
@@ -2241,16 +2257,16 @@ function signerCompatibilityNotice(emittedVersion: number) {
   return {
     x402_expected_context_version: emittedVersion,
     signer_capability: SIGNER_CAPABILITY_KEY,
+    // #1549: one compact statement instead of the former essay — this notice
+    // rides EVERY quote/prepare result, so its prose is per-purchase token
+    // cost. The machine fields above/below are the contract (#1309); the
+    // enforcement story lives in the tool descriptions and the signer's own
+    // structured refusal.
     check:
-      'The local signer enforces this version itself (#1547): if x402_expected_context_version ' +
-      'is one it does not support, it refuses to sign with a machine-readable version-mismatch ' +
-      'error carrying code, supported_versions, received_version, and fallback — branch on that ' +
-      'refusal; no pre-check against the signer\'s initialize handshake is needed (most agent ' +
-      'harnesses cannot read it). On that refusal, STOP before signing again and tell the user ' +
-      'to update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`, ' +
-      'which reinstalls the pinned MCP runtime. Do not edit the version to a supported value — ' +
-      'it is part of the Haven-signed binding message, so changing it invalidates the signature. ' +
-      'Nothing has been spent at this point; no funds move until haven_submit relays a signature.',
+      'The signer enforces this version itself (#1547): on its version-mismatch refusal ' +
+      '(code/supported_versions/fallback), STOP before signing again and update @haven_ai/signer ' +
+      'by rerunning `npx @haven_ai/connect@alpha`. Never edit the version — it is Haven-signed, ' +
+      'so changing it invalidates the signature. Nothing has been spent at this point.',
     // #1309: the SAME recovery guidance as `check` above, as structured data
     // instead of prose to parse — and the SAME string
     // `assertSupportedBindingVersion` in `@haven_ai/signer` puts on its

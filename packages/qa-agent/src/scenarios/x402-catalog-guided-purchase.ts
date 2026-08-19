@@ -98,11 +98,13 @@
  *     is explicitly marked indicative alongside the LIVE authoritative
  *     amount — a preflight that silently dropped either field would put a
  *     coding agent back to guessing which number is real.
- *   - **The signer call carries ONLY `payment_id` + `payment_required`.**
- *     This is the epic's thesis (#1305): if the scenario had to re-thread
- *     `merchant_url` / `tool_name` / `arguments` / `mcp_transport` to make
- *     signing work, the guided path FAILED — regardless of whether a payment
- *     eventually went through.
+ *   - **The signer call carries ONLY `payment_id`** (#1549 tightened this
+ *     from payment_id + payment_required: the compact preflight no longer
+ *     echoes the raw 402, and the leg FAILS if it reappears — the signer
+ *     fetches it by payment_id, #1355). This is the epic's thesis (#1305):
+ *     if the scenario had to re-thread `merchant_url` / `tool_name` /
+ *     `arguments` / `mcp_transport` to make signing work, the guided path
+ *     FAILED — regardless of whether a payment eventually went through.
  *   - **The settle call carries ONLY `payment_id` + `signature` +
  *     `payment_header`.** Stricter than `x402-hosted-mcp-signer`, which
  *     still passes `merchant_url` / `tool_name` / `arguments` explicitly
@@ -637,11 +639,20 @@ export const x402CatalogGuidedPurchase: Scenario = {
       )
     }
 
-    // ── 6. Local signing — payment_id + payment_required ONLY (#1305's thesis) ─
+    // #1549: the compact preflight no longer echoes the raw 402 — the signer
+    // fetches payment_required by payment_id (#1355). Its presence here would
+    // mean the compaction regressed.
+    if (prep.payment_required !== undefined) {
+      return fail(
+        'guided preflight carried payment_required without include_signing_payload — the #1549 ' +
+          'compact contract regressed',
+      )
+    }
+
+    // ── 6. Local signing — payment_id ONLY (#1305's thesis, tightened by #1549) ─
     const signed = await timed('sign', () =>
       signerTools.haven_sign_x402({
         payment_id: prep.payment_id,
-        payment_required: prep.payment_required,
       }),
     )
     if (!signed.success) {

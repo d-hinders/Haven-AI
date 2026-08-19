@@ -318,15 +318,27 @@ export const x402HostedMcpSigner: Scenario = {
       )
     }
 
+    // #1549: the compact quote no longer echoes the raw 402 — the signer
+    // fetches payment_required (with payload_hash, typed data, and the
+    // expected context) from Haven by payment_id (#1355). A quote that still
+    // ships it is the compaction regressing, and this leg would be the last
+    // place to notice.
+    if (quote.payment_required !== undefined) {
+      return fail(
+        'hosted quote carried payment_required without include_signing_payload — the #1549 compact ' +
+          'contract regressed and every purchase is shipping the raw 402 again',
+      )
+    }
+
     // ── 3. Local signing. The key never leaves this process, and the tool ────
     //      handler puts the LIVE quote through the signer's Zod schema first.
     // The preferred #1263 form, and the ONLY form a compact quote supports:
-    // payment_id + payment_required. The signer fetches payload_hash, the
-    // typed data, and the expected context from Haven itself and runs the
-    // same binding verification + digest re-derivation on the fetched bytes.
+    // payment_id alone (#1549). The signer fetches payload_hash, the
+    // typed data, the expected context, AND payment_required from Haven
+    // itself and runs the same binding verification + digest re-derivation
+    // on the fetched bytes.
     const signed = await signerTools.haven_sign_x402({
       payment_id: quote.payment_id,
-      payment_required: quote.payment_required,
     })
     if (!signed.success) {
       return fail(

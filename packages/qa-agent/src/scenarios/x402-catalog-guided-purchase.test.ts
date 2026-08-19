@@ -102,7 +102,6 @@ const prep = (over: Record<string, unknown> = {}) => ({
   payload_hash: '0x' + 'cd'.repeat(32),
   signature_scheme: 'eip712_userop',
   // #1272: the production default is COMPACT — no typed_data/typed_data_b64.
-  payment_required: { x402Version: 2, accepts: [] },
   amount_atomic: '1000',
   amount: '0.001',
   token: 'USDC',
@@ -386,12 +385,25 @@ describe('the allowance block and indicative catalog price (#1306)', () => {
   })
 })
 
-describe('the local signer is consulted with ONLY payment_id + payment_required — #1305 thesis', () => {
+describe('the local signer is consulted with ONLY payment_id — #1305 thesis, tightened by #1549', () => {
+  it('FAILS when the preflight echoes payment_required again — the #1549 compact contract', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_prepare_catalog_purchase'
+        ? prep({ payment_required: { x402Version: 2, accepts: [] } })
+        : settled(),
+    )
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/#1549.*compact.*regressed/s)
+  })
+
   it('never carries merchant_url, tool_name, arguments, or mcp_transport', async () => {
     await x402CatalogGuidedPurchase.run(ctx())
     const args = mockSignX402.mock.calls[0][0] as Record<string, unknown>
     expect(args.payment_id).toBe('pay_catalog_1')
-    expect(args.payment_required).toBeDefined()
+    // #1549: the compact preflight carries no payment_required, so the sign
+    // call cannot relay one — the signer fetches it by payment_id.
+    expect(args.payment_required).toBeUndefined()
     expect(args.merchant_url).toBeUndefined()
     expect(args.tool_name).toBeUndefined()
     expect(args.arguments).toBeUndefined()

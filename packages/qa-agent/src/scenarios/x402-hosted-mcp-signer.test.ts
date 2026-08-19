@@ -84,7 +84,6 @@ const quote = (over: Record<string, unknown> = {}) => ({
   payload_hash: '0x' + 'cd'.repeat(32),
   signature_scheme: 'eip712_userop',
   // #1272: the production default is COMPACT — no typed_data/typed_data_b64.
-  payment_required: { x402Version: 2, accepts: [] },
   x402: {
     expected: {
       payment_id: 'pay_hosted_1',
@@ -222,14 +221,26 @@ describe('the rail discriminator — a v1 quote means the #1138 seam went untouc
 })
 
 describe('the local signer is really consulted', () => {
-  it('signs via the preferred #1263 form: payment_id + payment_required, no relayed bytes', async () => {
+  it('FAILS when the quote echoes payment_required again — the #1549 compact contract', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_pay_mcp_tool'
+        ? quote({ payment_required: { x402Version: 2, accepts: [] } })
+        : settled(),
+    )
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/#1549 compact/)
+  })
+
+  it('signs via the preferred #1263/#1549 form: payment_id alone, no relayed bytes', async () => {
     // The compact quote (#1272) leaves the signer exactly one byte source —
     // its own authenticated fetch from Haven — so the handler call must be
     // the production-default shape and carry no agent-relayed payload.
     await x402HostedMcpSigner.run(ctx())
     const args = mockSignX402.mock.calls[0][0] as Record<string, unknown>
     expect(args.payment_id).toBe('pay_hosted_1')
-    expect(args.payment_required).toBeDefined()
+    // #1549: no payment_required relay — the signer's fetch is the one source.
+    expect(args.payment_required).toBeUndefined()
     expect(args.typed_data).toBeUndefined()
     expect(args.typed_data_b64).toBeUndefined()
     expect(args.x402_expected).toBeUndefined()

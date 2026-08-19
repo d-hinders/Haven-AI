@@ -662,7 +662,21 @@ export interface HavenAgentAllowanceSummary {
  * from a single call at session start. Superset of {@link HavenAgent}.
  */
 export interface HavenAgentSummary extends HavenAgent {
+  /**
+   * @deprecated Use {@link HavenAgentSummary.spend_authority_readiness} —
+   * same value, honest name. This signal covers hosted identity + on-chain
+   * spend authority ONLY; it says nothing about the LOCAL signer, which the
+   * hosted side cannot see (verify via a signer tool or connect --doctor).
+   * Kept as an alias; removal earliest after the next release train (#1590).
+   */
   readiness: HavenAgentReadiness
+  /**
+   * Spend-authority readiness: hosted identity + on-chain remaining spend
+   * authority. Deliberately named for what it covers — the LOCAL signer's
+   * availability is NOT included and must be verified separately (a signer
+   * tool call, or `npx @haven_ai/connect@alpha --doctor`).
+   */
+  spend_authority_readiness: HavenAgentReadiness
   allowances: HavenAgentAllowanceSummary[]
 }
 

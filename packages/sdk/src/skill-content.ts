@@ -64,8 +64,10 @@ Before any payment, confirm the *live remaining* budget with the tools —
 spending:
 
 - \`mcp__haven__haven_get_agent\` — the recommended first call: identity
-  (wallet, network) plus a readiness signal (\`ready\` / \`needs_approval\` /
-  \`revoked\`) and live remaining per-token allowance, in one shot.
+  (wallet, network) plus \`spend_authority_readiness\` (\`ready\` / \`needs_approval\` /
+  \`revoked\`) and live remaining per-token allowance, in one shot. That signal
+  covers hosted identity and on-chain spend authority only — it cannot see the
+  local signer; the signer is verified by calling any signer tool.
 - \`mcp__haven__haven_get_allowances\` — detailed per-token breakdown
   (configured, spent, reset window) when you need more than the summary.
 

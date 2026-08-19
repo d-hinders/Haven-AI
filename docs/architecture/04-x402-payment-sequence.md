@@ -396,6 +396,12 @@ price reservation. An unknown/degraded/non-MCP catalog row keeps the existing
 manual fallback: use `haven_pay_mcp_tool` with an explicit merchant URL and
 tool name. When ready to buy, call `haven_prepare_catalog_purchase` with a cap;
 that paid preflight obtains a fresh live quote and checks the cap independently.
+When the user stated no cap, the documented convention
+([#1548](https://github.com/d-hinders/Haven-AI/issues/1548)) is quote first and
+cap at the live quoted amount — never invented headroom; a price rise between
+the two then refuses safely at the cap check and the agent re-confirms with
+the user. Guidance only: the cap stays required and its enforcement is
+unchanged.
 
 `haven_prepare_catalog_purchase({ catalog_id, max_amount_human | max_amount, idempotency_key? })`
 starts a paid-MCP-tool purchase from a curated `merchant_catalog` row instead

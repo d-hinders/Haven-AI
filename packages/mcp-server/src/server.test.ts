@@ -90,6 +90,41 @@ describe('buildHostedMcpServer', () => {
     await server.close()
   })
 
+  it('states the no-user-cap convention on every cap-taking surface (#1548)', async () => {
+    // "Buy X" with no stated ceiling is the COMMON case, and the cap is
+    // required — without a documented convention every agent improvises its
+    // own number (a live run produced ~6x the price from a private
+    // heuristic). The convention: quote first, cap at the live quoted amount;
+    // a price rise then refuses safely and the agent re-confirms. This test
+    // pins that the convention travels on the instructions AND each
+    // cap-taking tool's description, so an agent that reads either surface
+    // behaves the same way.
+    expect(HOSTED_INSTRUCTIONS).toContain('When the user stated NO cap')
+    expect(HOSTED_INSTRUCTIONS).toContain('cap at the live quoted amount')
+
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    const server = buildHostedMcpServer(haven)
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test-client', version: '0.0.0' })
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+
+    const { tools } = await client.listTools()
+    const byName = new Map(tools.map((tool) => [tool.name, tool.description ?? '']))
+
+    for (const tool of ['haven_prepare_catalog_purchase', 'haven_pay_mcp_tool']) {
+      const description = byName.get(tool) ?? ''
+      expect(description).toContain('When the user stated NO cap')
+      expect(description).toContain('never invent headroom')
+      // The failure mode is safe-by-construction, and the description says so.
+      expect(description).toMatch(/re-quote and confirm/i)
+    }
+    // The quote tool is the convention's first step, so it names its role.
+    expect(byName.get('haven_quote_catalog_purchase')).toContain('the user stated no cap')
+
+    await client.close()
+    await server.close()
+  })
+
   it('instructs the agent to branch on the signer version-mismatch refusal (#1155, #1547)', async () => {
     // The prompt half of payment skew detection. #1155 told agents to compare
     // the emitted version against the signer's initialize handshake — which

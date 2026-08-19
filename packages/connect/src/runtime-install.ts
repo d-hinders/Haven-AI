@@ -219,7 +219,18 @@ export async function installRuntime(
   // Hosted topology launches the local signer as its own MCP stdio server.
   // Pre-install it and register an absolute wrapper instead of a runtime
   // `npx -y` invocation, which is fragile in the agent runtime's MCP-spawn
-  // environment. Prep failure is non-fatal: fall back to the npx command.
+  // environment.
+  //
+  // #1586: prep failure is FATAL for this setup run — loud and fail-closed,
+  // never a silent npx fallback. The 2026-08-18 Codex Desktop test showed
+  // why: with Codex's startup_timeout_sec = 120, an npx first-launch is a
+  // multi-minute npm install killed at 2 minutes, leaving corrupted _npx
+  // dirs and a config that LOOKS wired but structurally cannot connect —
+  // strictly worse than a clear error. Fail-closed here means NO config is
+  // written at all (not even the hosted `haven` entry): a half-wired setup
+  // where quotes work but signing never can is the same looks-fine trap in
+  // a different place. The recovery is a re-run once the cause (network,
+  // npm cache) is addressed.
   let signerCommand: { command: string; args: string[] } | undefined
   if (!localRuntime) {
     progress('Getting the signer ready…')
@@ -228,9 +239,30 @@ export async function installRuntime(
       signerCommand = { command: signerRuntime.command, args: signerRuntime.args }
       consentMessages.push(...signerRuntime.messages)
     } catch (err) {
-      consentMessages.push(
-        `Could not pre-install the local Haven signer; falling back to npx launch: ${err instanceof Error ? err.message : String(err)}`,
-      )
+      return {
+        runtime,
+        runtimeMcpMode: 'hosted_plus_signer',
+        hostedMcpConfigured: false,
+        localSignerConfigured: false,
+        localMcpConfigured: false,
+        probeResult: 'signer_runtime_install_failed',
+        restartRequired: false,
+        nextUserAction:
+          'The local Haven signer runtime could not be installed, so no configuration was written. ' +
+          'Check your network (a cold install downloads the signer package set) and re-run: npx @haven_ai/connect@alpha',
+        errorCode: 'signer_runtime_install_failed',
+        configTarget: profile.label,
+        signerAcknowledged: signerConsent?.acknowledged,
+        localMcpAcknowledged: localMcpConsent?.acknowledged,
+        activationCommand: undefined,
+        signerRuntimePrepared: false,
+        messages: [
+          ...consentMessages,
+          `Could not pre-install the local Haven signer: ${err instanceof Error ? err.message : String(err)}`,
+          'No runtime configuration was written (fail-closed): a config pointing at an uninstalled signer looks wired but cannot start.',
+          'Re-run `npx @haven_ai/connect@alpha` to retry the setup.',
+        ],
+      }
     }
   }
   const signerRuntimePrepared = localRuntime ? undefined : signerCommand !== undefined
@@ -628,7 +660,11 @@ async function prepareSignerForRuntime(
   deps: RuntimeInstallDeps,
 ): Promise<PreparedSignerRuntime> {
   const prepare = deps.prepareSignerRuntime ?? ((runtimeInput: PrepareSignerRuntimeInput) =>
-    prepareSignerRuntime(runtimeInput, { runCommand: deps.runCommand }))
+    // onProgress threaded through on purpose (#1586 review): without it the
+    // install heartbeat was dead code in production and the console still
+    // went silent for the whole cold install — the exact symptom the issue
+    // set out to remove, at a longer timeout.
+    prepareSignerRuntime(runtimeInput, { runCommand: deps.runCommand, onProgress: deps.onProgress }))
   return prepare({
     credentialDirectory: input.credentialDirectory,
     signerPath: input.signerPath,

@@ -624,6 +624,7 @@ jobs:
           path: packages/frontend/.next
 
       - name: Restore Playwright browser cache
+        id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
@@ -631,7 +632,14 @@ jobs:
           restore-keys: |
             playwright-${{ runner.os }}-
 
+      # #1609: only a cache MISS runs the install, and only the install runs
+      # apt-get (--with-deps). On a warm cache no apt process starts at all —
+      # the Azure apt-mirror Ign-loop (four blocked required-check runs on
+      # 2026-08-19 alone) cannot touch this job then. The cache key pins the
+      # browser build to package-lock.json, so a Playwright bump still
+      # reinstalls (and re-baselines deliberately, never as a side effect).
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
         working-directory: packages/frontend
 
@@ -684,6 +692,7 @@ jobs:
           path: packages/frontend/.next
 
       - name: Restore Playwright browser cache
+        id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
@@ -691,7 +700,14 @@ jobs:
           restore-keys: |
             playwright-${{ runner.os }}-
 
+      # #1609: only a cache MISS runs the install, and only the install runs
+      # apt-get (--with-deps). On a warm cache no apt process starts at all —
+      # the Azure apt-mirror Ign-loop (four blocked required-check runs on
+      # 2026-08-19 alone) cannot touch this job then. The cache key pins the
+      # browser build to package-lock.json, so a Playwright bump still
+      # reinstalls (and re-baselines deliberately, never as a side effect).
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
         working-directory: packages/frontend
 

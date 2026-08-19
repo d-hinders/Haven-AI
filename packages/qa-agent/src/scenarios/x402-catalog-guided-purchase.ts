@@ -62,7 +62,9 @@
  * hard-wired to the 3009 funding leg before #1547 wired #1453's selector in).
  * This leg branches on the preflight's `settlement_scheme`:
  *
- *   - **erc7710 (the EXPECTED shape on dev)** — the demo merchant advertises
+ *   - **erc7710 (the expected shape on dev — an environment assumption, not a
+ *     hard assertion: the leg branches at runtime and never REQUIRES this
+ *     shape)** — the demo merchant advertises
  *     erc7710 and the QA agent is delegation-rail. Sign via `haven_sign`
  *     (payment_id only), settle with payment_id + signature ONLY — no
  *     payment_header (Haven assembles it at settle) and no merchant context

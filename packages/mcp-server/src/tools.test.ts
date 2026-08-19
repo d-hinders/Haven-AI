@@ -1124,9 +1124,10 @@ describe('haven_pay_mcp_tool', () => {
     expect(result.data.tool_name).toBe('create_text')
     expect(result.data.arguments).toEqual({ prompt: 'Hello' })
     expect(result.data.mcp_transport).toEqual({ handshake_required: true, source: 'path' })
-    // The raw merchant 402 PaymentRequired must be returned (the signer needs it).
-    expect(result.data.payment_required).toBeDefined()
-    expect(Array.isArray(result.data.payment_required.accepts)).toBe(true)
+    // #1549: the raw merchant 402 PaymentRequired is compact-trimmed — the
+    // signer fetches it by payment_id (#1355), so echoing it was per-purchase
+    // token cost. It returns under include_signing_payload=true (next test).
+    expect(result.data.payment_required).toBeUndefined()
     expect(result.data.x402).toBeDefined()
     const initialize = calls.find((call) => call.body?.method === 'initialize')
     const initialized = calls.find((call) => call.body?.method === 'notifications/initialized')
@@ -1274,6 +1275,9 @@ describe('haven_pay_mcp_tool', () => {
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
         max_amount: '2000000',
+        // #1549: payment_required only rides the full shape now; this test's
+        // subject is the bazaar extension threading THROUGH it, so ask for it.
+        include_signing_payload: true,
       }),
     )
 
@@ -3146,6 +3150,76 @@ describe('compact x402 signing payload (#1272)', () => {
     expect(result.data.signature_scheme).toBe('eip712_userop')
     expect(result.data.signer_compatibility).toBeDefined()
     expect((result.data.x402 as { expected?: unknown }).expected).toBeDefined()
+  })
+
+  /**
+   * #1549 — payment_required joins the compact contract on the MCP tool
+   * surfaces. The signer fetches it by payment_id (#1355); the response echo
+   * was the largest repeated block on every purchase. Same escape as
+   * typed_data: include_signing_payload=true restores it verbatim.
+   */
+  describe('payment_required compaction (#1549)', () => {
+    const mcpStubs = () => ({
+      'POST /mcp': {
+        status: 402 as const,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) },
+      },
+      'GET /machine-payments/agent': { status: 200 as const, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201 as const, body: X402_INTENT_RESPONSE },
+    })
+    const CATALOG_ROUTES = {
+      'GET /catalog/cat_1': {
+        status: 200 as const,
+        body: {
+          id: 'cat_1', name: 'CloudNest 50GB', description: 'Cloud storage tier',
+          category: 'compute', resource_url: 'http://merchant.test/mcp', rail: 'x402',
+          protocol: 'mcp', tool_name: 'create_text', tool_arguments: { prompt: 'Hello' },
+          price_display: '$1.50 USDC', price_atomic: '1500000',
+          asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', network: 'eip155:8453',
+          status: 'active', verified_at: '2026-06-16T08:50:39.772Z',
+        },
+      },
+      'GET /machine-payments/allowances': { status: 404 as const, body: {} },
+    }
+
+    it('haven_pay_mcp_tool: compact omits payment_required; the replay restores it verbatim and is measurably larger', async () => {
+      stubFetch(mcpStubs())
+      const compact = ok<Record<string, unknown>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp', tool_name: 'create_text',
+          arguments: { prompt: 'Hello' }, max_amount: '2000000', idempotency_key: 'k-1549',
+        }),
+      )
+      expect('payment_required' in compact.data).toBe(false)
+
+      stubFetch(mcpStubs())
+      const full = ok<{ payment_required?: unknown }>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp', tool_name: 'create_text',
+          arguments: { prompt: 'Hello' }, max_amount: '2000000', idempotency_key: 'k-1549',
+          include_signing_payload: true,
+        }),
+      )
+      expect(full.data.payment_required).toEqual(PAYMENT_REQUIRED)
+      // The point of the issue: the trim buys real bytes on every purchase.
+      expect(JSON.stringify(compact.data).length).toBeLessThan(JSON.stringify(full.data).length)
+    })
+
+    it('haven_prepare_catalog_purchase: same contract as haven_pay_mcp_tool', async () => {
+      stubFetch({ ...mcpStubs(), ...CATALOG_ROUTES })
+      const compact = ok<Record<string, unknown>>(
+        await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+      )
+      expect('payment_required' in compact.data).toBe(false)
+
+      stubFetch({ ...mcpStubs(), ...CATALOG_ROUTES })
+      const full = ok<{ payment_required?: unknown }>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_1', max_amount: '2000000', include_signing_payload: true,
+        }),
+      )
+      expect(full.data.payment_required).toEqual(PAYMENT_REQUIRED)
+    })
   })
 
   it('haven_pay_x402_quote include_signing_payload=true restores the full payload verbatim', async () => {

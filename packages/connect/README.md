@@ -45,7 +45,7 @@ spending authority.
 
 ## After setup
 
-1. Return to Haven and approve the agent rules. Approval — not restarting —
+1. Return to Haven and approve the budget. Approval — not restarting —
    unlocks the Haven tools.
 2. Activate the runtime using the table above.
 3. In the activated runtime, run the read-only `haven_get_agent` and
@@ -57,7 +57,10 @@ spending authority.
 Pass `--json` when a launcher needs a machine-readable completion record. Connect
 writes progress and human recovery notes to stderr and exactly one JSON object
 to stdout, with `schema_version: 1` and `outcome` set to `complete`,
-`action_required`, or `failed`. The object includes runtime/topology status,
+`action_required`, or `failed`. Structured runs skip the interactive
+budget-approval wait so the record is emitted promptly; approve in the Haven
+dashboard whenever ready and verify later with the read-only `haven_get_agent`
+tool. The object includes runtime/topology status,
 probe result, activation and next-action guidance, approval state/expiry (null
 when the backend does not provide an approval expiry), and the two
 read-only verification tools. It contains no API key, private key, credential
@@ -87,6 +90,19 @@ For Hermes, Connect stores the hosted-MCP API key in the matching owner-only
 Hermes requires its Python MCP SDK support to be installed. If Haven tools do
 not appear after restart, run `pip install mcp` in the Hermes environment, then
 restart Hermes and check `hermes mcp list`.
+
+## Why there is no pre-registration confirmation prompt
+
+Connect mints a signing key and registers the agent as soon as it runs, without
+an extra "about to create agent X, proceed?" gate. That is deliberate: the
+consent already happened when the user minted the one-time setup prompt in the
+Haven dashboard, which enumerates exactly what the command may do. The setup
+stays cancellable from the dashboard throughout, and the registered agent
+starts `pending_approval` with zero spend authority — nothing can move funds
+until the user approves the budget in Haven. A CLI-side confirmation would add
+friction without adding a security boundary. (The local-signer tool-exposure
+acknowledgement is a separate, machine-checkable consent about what the local
+MCP tools expose, not a registration gate.)
 
 ## Running setup again
 

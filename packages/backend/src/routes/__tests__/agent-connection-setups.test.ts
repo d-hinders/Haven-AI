@@ -316,6 +316,12 @@ describe('agent connection setup routes', () => {
     expect(body.setup_prompt).toContain('write local Haven credential files under ~/.haven')
     expect(body.setup_prompt).toContain('update the local agent MCP config when supported')
     expect(body.setup_prompt).toContain('Run this exact command:')
+    // #1545: the backend is the source of truth for the prompt — pin the
+    // --json discoverability sentence and the gate's one name here, not only
+    // in the frontend/e2e mirrors.
+    expect(body.setup_prompt).toContain('Appending --json is the ONLY permitted change to the command above.')
+    expect(body.setup_prompt).toContain('return to Haven to approve the budget')
+    expect(body.setup_prompt).not.toContain('agent rules')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
 
     const insertSetup = mockClientQuery.mock.calls.find(([sql]) =>

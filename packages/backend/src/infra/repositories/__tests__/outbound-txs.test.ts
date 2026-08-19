@@ -24,10 +24,11 @@ import {
 // A UNIQUE chain id per test: claim-next is chain-scoped, so this makes each
 // test hermetic against any row another test (or an unsettled async tail)
 // leaves behind — the CI-only failure this fixed was exactly such a leak.
-// Randomised base per module load: unqualified table names resolve via
-// `search_path = test_wN,public`, so a worker whose schema predates this
-// table silently reads/writes the SHARED public one, where rows survive
-// across runs — a fixed base then collides with a previous run's rows.
+// Randomised base per module load. Historically load-bearing: the old
+// `test_wN,public` search_path let a worker missing this table alias the
+// SHARED public one, where a previous run's rows collided with a fixed
+// base. #1562 closed that fallback (a missing table is now a loud error);
+// the randomisation stays as cheap belt against any future shared state.
 let chainCounter = 84_532_000 + Math.floor(Math.random() * 900_000)
 let CHAIN = 0
 const TO = '0xDB9B1e94B5b69Df7e401DDbedE43491141047dB3'

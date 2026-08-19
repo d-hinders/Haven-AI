@@ -24,10 +24,11 @@ const TO = '0xdb9b1e94b5b69df7e401ddbede43491141047db3'
 const DATA = '0x' + 'ab'.repeat(80)
 const TX = '0x' + 'cd'.repeat(32)
 
-// Randomised base per module load: unqualified table names resolve via
-// `search_path = test_wN,public`, so a worker whose schema predates this
-// table silently reads/writes the SHARED public one, where rows survive
-// across runs — a fixed base then collides with a previous run's rows.
+// Randomised base per module load. Historically load-bearing: the old
+// `test_wN,public` search_path let a worker missing this table alias the
+// SHARED public one, where a previous run's rows collided with a fixed
+// base. #1562 closed that fallback (a missing table is now a loud error);
+// the randomisation stays as cheap belt against any future shared state.
 let chainCounter = 91_000_000 + Math.floor(Math.random() * 900_000)
 let CHAIN = 0
 

@@ -24,6 +24,8 @@ import {
   PROPAGATION_RULES,
   DOC_ONLY_PATTERNS,
   classifyChangedFiles,
+  PACKAGE_JOBS,
+  dependentsOf,
   allSurfaces,
   changedFilesCommand,
   formatGithubOutput,
@@ -166,15 +168,53 @@ describe('list handling', () => {
   })
 })
 
-describe('propagation ordering', () => {
-  test('propagation runs in order — full, then sdk, then connect', () => {
-    // sdk's fan-out reads flags full may have set, and connect's reads flags
-    // sdk may have set. Reordering these silently under-routes. This is
-    // structure, not a routing rule, so it stays here rather than in the matrix.
-    assert.deepEqual(
-      PROPAGATION_RULES.map((r) => r.when.join('|')),
-      ['full', 'sdk', 'mcp|signer'],
-    )
+describe('propagation structure', () => {
+  test('full comes first, and every other rule is one package', () => {
+    // `full` is a directive, not a dependency: it must fan out before the
+    // package rules so they see the flags it set. Everything after it is a
+    // single package's dependents, derived from the table (#1625).
+    assert.deepEqual(PROPAGATION_RULES[0].when, ['full'])
+    for (const rule of PROPAGATION_RULES.slice(1)) {
+      assert.equal(rule.when.length, 1, `expected one package per rule, got ${rule.when.join('|')}`)
+      assert.ok(PACKAGE_JOBS.includes(rule.when[0]), `${rule.when[0]} is not a package job`)
+    }
+  })
+
+  test('every rule is transitively closed', () => {
+    // The property the closure buys, and the one a hand-written fan-out list
+    // loses first: if a rule pulls in a package, it must also pull in whatever
+    // that package drags along. A half-expanded chain (a -> b listed, b -> c
+    // forgotten) reads fine and under-routes silently.
+    for (const rule of PROPAGATION_RULES) {
+      for (const job of rule.then) {
+        for (const downstream of dependentsOf(job)) {
+          assert.ok(
+            rule.then.includes(downstream),
+            `rule ${rule.when.join('|')} pulls in ${job} but not ${downstream}, which depends on it`,
+          )
+        }
+      }
+    }
+  })
+
+  test('applying the rules in any order gives the same answer', () => {
+    // Closure makes each rule self-sufficient, so ordering among the package
+    // rules stops being load-bearing. Asserting it means a future edit that
+    // reintroduces order-dependence fails here rather than in a job that
+    // quietly did not run.
+    const reversed = [PROPAGATION_RULES[0], ...PROPAGATION_RULES.slice(1).reverse()]
+    for (const files of [
+      ['packages/sdk/src/client.ts'],
+      ['packages/signer/src/index.ts'],
+      ['packages/mcp/src/index.ts'],
+      ['packages/signer/src/index.ts', 'packages/frontend/src/app/page.tsx'],
+    ]) {
+      assert.deepEqual(
+        classifyChangedFiles(files, { propagationRules: reversed }),
+        classifyChangedFiles(files),
+        `order changed the result for ${files.join(' + ')}`,
+      )
+    }
   })
 })
 

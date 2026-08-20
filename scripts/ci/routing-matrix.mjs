@@ -146,9 +146,9 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/signer/src/index.ts'],
-    expect: ['code', 'signer', 'connect'],
+    expect: ['code', 'signer', 'connect', 'mcp_server'],
     kind: CONTRACT,
-    why: 'Same reason as mcp: connect bundles the signer.',
+    why: 'connect bundles the signer, and mcp_server consumes it too — its hosted-signer-integration test imports @haven_ai/signer, and mcp_server_checks runs that test. mcp_server was MISSING here until #1625 derived fan-out from the real dependency graph; a signer change could break that test with its job never running.',
   },
   {
     files: ['packages/frontend/src/app/page.tsx', 'packages/cli/src/index.ts'],

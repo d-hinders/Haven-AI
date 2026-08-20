@@ -295,14 +295,16 @@ jobs:
   install_smoke:
     name: Install-path smoke
     needs: changes
-    # Run whenever connect, mcp, or sdk changes — these are the packages that
-    # get packed and installed. Any of them can introduce the class of bugs
-    # the smoke catches (stale MCP_VERSION, nested SDK resolution, broken
-    # wire-format signing).
-    if: >-
-      needs.changes.outputs.connect == 'true' ||
-      needs.changes.outputs.mcp == 'true' ||
-      needs.changes.outputs.sdk == 'true'
+    # Runs whenever connect changes — which, by the dependency table, already
+    # includes every sdk and mcp change, because connect bundles both. This
+    # used to spell out `connect || mcp || sdk`, re-stating in the workflow a
+    # fan-out the classifier already computes (#1625). The two are equivalent
+    # for every input; the OR just had a second, hand-maintained copy of the
+    # dependency graph in it. Those are the packages that get packed and
+    # installed, and any of them can introduce the class of bug the smoke
+    # catches (stale MCP_VERSION, nested SDK resolution, broken wire-format
+    # signing).
+    if: needs.changes.outputs.connect == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -627,11 +629,12 @@ jobs:
             exit 1
           fi
 
-          connect_or_mcp_or_sdk_changed=false
-          if [ "${{ needs.changes.outputs.connect }}" = "true" ] || [ "${{ needs.changes.outputs.mcp }}" = "true" ] || [ "${{ needs.changes.outputs.sdk }}" = "true" ]; then
-            connect_or_mcp_or_sdk_changed=true
-          fi
-          if [ "$connect_or_mcp_or_sdk_changed" = "true" ] && [ "${{ needs.install_smoke.result }}" != "success" ]; then
+          # Gated on `connect` alone, matching install_smoke's own `if:`. This
+          # was a `connect || mcp || sdk` OR — a THIRD copy of a fan-out the
+          # dependency table already encodes, and the one that survived #1625's
+          # first pass because it hides in a run: block where a job-gate scan
+          # cannot see it. connect is true whenever sdk or mcp is.
+          if [ "${{ needs.changes.outputs.connect }}" = "true" ] && [ "${{ needs.install_smoke.result }}" != "success" ]; then
             echo "Install-path smoke result: ${{ needs.install_smoke.result }}"
             exit 1
           fi

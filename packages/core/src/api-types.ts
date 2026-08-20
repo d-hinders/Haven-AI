@@ -1352,7 +1352,7 @@ export type paths = {
         put?: never;
         /**
          * Exchange credentials for a session token.
-         * @description **An unknown email and a wrong password return the SAME 401**, deliberately: distinguishing them would turn this endpoint into an account-enumeration oracle, letting anyone discover which addresses have Haven accounts. Do not make the error message more helpful. Note the honest limit of that protection today: it holds for the STATUS and BODY, but not for timing — the password comparison runs only when an account exists, so response latency still distinguishes the two cases (#1646). The token is valid for 7 days, and the response carries the user's Safes so a client needs no second call to render a session.
+         * @description **An unknown email and a wrong password return the SAME 401**, deliberately: distinguishing them would turn this endpoint into an account-enumeration oracle, letting anyone discover which addresses have Haven accounts. Do not make the error message more helpful. The protection covers timing as well as the status and body (#1646): the password comparison runs on BOTH paths — against an absent-user hash when there is no account — so the answer costs materially the same either way (the remaining difference is the sub-millisecond indexed lookup, far below bcrypt cost). The token is valid for 7 days, and the response carries the user's Safes so a client needs no second call to render a session.
          */
         post: operations["login"];
         delete?: never;

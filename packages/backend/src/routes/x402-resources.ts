@@ -55,6 +55,13 @@ interface ReceiptRow {
   payer_address: string | null
   amount_raw: string
   chain_id: number
+  /**
+   * The resource's token, joined in so amount_human can be formatted with the
+   * RIGHT decimals (#1630). Before this, receipts formatted every token with
+   * 6, which is only correct for USDC-shaped tokens and off by orders of
+   * magnitude for an 18-decimal one.
+   */
+  token_address: string
   verified_at: string
 }
 
@@ -233,7 +240,7 @@ export default async function x402ResourceRoutes(app: FastifyInstance): Promise<
       const result = await pool.query<ReceiptRow>(
         `SELECT rc.id, rc.resource_id, r.name AS resource_name,
                 rc.user_id, rc.tx_hash, rc.payer_address,
-                rc.amount_raw, rc.chain_id, rc.verified_at
+                rc.amount_raw, rc.chain_id, r.token_address, rc.verified_at
          FROM x402_receipts rc
          JOIN x402_resources r ON rc.resource_id = r.id
          WHERE rc.user_id = $1
@@ -250,7 +257,11 @@ export default async function x402ResourceRoutes(app: FastifyInstance): Promise<
           tx_hash: r.tx_hash,
           payer_address: r.payer_address,
           amount_raw: r.amount_raw,
-          amount_human: formatTokenValue(r.amount_raw, 6), // USDC default; best-effort
+          // #1630: the receipt's OWN token decimals, like every sibling route
+          // here already does. _tokenDecimals still falls back to 6 for a
+          // token this deployment does not know, so an unknown token is no
+          // worse off than before — a known 18-decimal one is now right.
+          amount_human: formatTokenValue(r.amount_raw, _tokenDecimals(r.chain_id, r.token_address)),
           chain_id: r.chain_id,
           verified_at: r.verified_at,
         })),

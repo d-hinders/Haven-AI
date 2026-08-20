@@ -1645,7 +1645,7 @@ export const openapiSpec = {
         operationId: 'listX402Receipts',
         summary: 'List payments verified against the caller\'s resources (max 100, newest first).',
         description:
-          'Receipts are written only by the verify endpoint, after on-chain verification. amount_human here is best-effort: it formats with 6 decimals unconditionally, so a non-6-decimal token displays wrong — amount_raw is the authoritative field.',
+          'Receipts are written only by the verify endpoint, after on-chain verification. amount_human formats with the receipt token\u2019s OWN decimals (#1630); a token this deployment does not recognise falls back to 6. amount_raw remains the authoritative field \u2014 amount_human is a display string.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -1668,7 +1668,7 @@ export const openapiSpec = {
                           tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
                           payer_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
                           amount_raw: { type: 'string', pattern: '^[0-9]+$' },
-                          amount_human: { type: 'string', description: 'Formatted with 6 decimals unconditionally (best-effort).' },
+                          amount_human: { type: 'string', description: "Display string, formatted with the token's own decimals (6 for an unrecognised token). Read amount_raw for the authoritative value." },
                           chain_id: { type: 'integer' },
                           verified_at: { type: 'string', format: 'date-time' },
                         },

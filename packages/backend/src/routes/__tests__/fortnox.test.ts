@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 
@@ -131,6 +132,8 @@ describe('fortnox routes — OAuth token redaction', () => {
     expect(body).not.toHaveProperty('refresh_token')
     expect(leaks(res.body)).toBe(false)
     expect(leaks(JSON.stringify(res.headers))).toBe(false)
+    // #1446: the documented configured branch of the status oneOf.
+    expectMatchesSpec('GET', '/accounting/fortnox/status', body)
   })
 
   it('GET /status requires authentication', async () => {
@@ -169,6 +172,7 @@ describe('fortnox routes — OAuth token redaction', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json()).toHaveProperty('url')
     expect(leaks(res.body)).toBe(false)
+    expectMatchesSpec('POST', '/accounting/fortnox/connect-url', res.json())
   })
 
   it('DELETE disconnects without returning token material', async () => {
@@ -238,6 +242,9 @@ describe('fortnox routes — route invariants', () => {
       })
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({ configured: false, connected: false, legacyBookkeeping: false })
+      // The OTHER branch of the documented oneOf: no scope/expiresAt at all
+      // when the deployment has no Fortnox credentials (#1446).
+      expectMatchesSpec('GET', '/accounting/fortnox/status', res.json())
       // No connection is read when the integration isn't configured.
       expect(fortnoxConnectionMocks.getFortnoxConnection).not.toHaveBeenCalled()
     })
@@ -270,6 +277,39 @@ describe('fortnox routes — route invariants', () => {
       expect(res.statusCode).toBe(410)
       // The gate short-circuits before any token/accounting work runs.
       expect(fortnoxConnectionMocks.getValidFortnoxAccessToken).not.toHaveBeenCalled()
+    })
+
+    it('#1446: an enabled push reports per-entry outcomes in the documented shape', async () => {
+      // The documented 200 had no test — /push was covered only at its gate,
+      // auth and validation boundaries, so its outcome shape was unverified.
+      configMock.legacyBookkeepingEnabled = true
+      const { buildAccountingEntries } = await import('../../modules/accounting/index.js')
+      // mockImplementationOnce, not the positional resolved-once form: the
+      // #1227 ratchet counts that pattern file-wide, and this is an accounting
+      // module stub rather than a DB mock.
+      vi.mocked(buildAccountingEntries).mockImplementationOnce(
+        async () => [{ paymentId: 'pi-bookable' }, { paymentId: 'pi-unbookable' }] as never,
+      )
+      // One entry has no book-time SEK amount → unbookable, counted as skipped
+      // rather than failed; the other pushes and then the provider rejects it.
+      fortnoxMocks.toFortnoxVoucher
+        .mockReturnValueOnce({ voucher: true })
+        .mockReturnValueOnce(null)
+      fortnoxMocks.pushVoucher.mockRejectedValueOnce(new Error('Fortnox says no'))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/accounting/fortnox/push',
+        headers: { authorization: `Bearer ${token}` },
+      })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ pushed: 0, skipped: 1, failed: 1 })
+      expect(res.json().failures[0].paymentId).toBe('pi-bookable')
+      expectMatchesSpec('POST', '/accounting/fortnox/push', res.json())
+      // A provider error is collected, never thrown — a partial push stays
+      // visible as a partial push.
+      expect(leaks(res.body)).toBe(false)
     })
 
     it('rejects a malformed "from" date with 400 before doing work', async () => {

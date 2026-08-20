@@ -120,14 +120,6 @@ export interface UndocumentedModule {
 export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
   // ── Agent-facing / money-path — highest priority for #1446 ──
   {
-    file: 'agent-passports.ts',
-    because: 'Agent Passport issuance/status (epic #970). Governance metadata, never spend authority.',
-  },
-  {
-    file: 'passport-verify.ts',
-    because: 'Public passport verification. A natural candidate for the published spec — nobody has written it up.',
-  },
-  {
     file: 'hybrid-accounts.ts',
     because: 'Delegation-rail account provisioning (#886). Dashboard-driven today; agent-facing once onboarding opens up.',
   },
@@ -197,5 +189,5 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
  * `index.ts` — and one of them (`GET /chains`) turned out to be undocumented.
  * That is the gate earning its keep on its first run, not slack being taken.
  */
-export const MAX_UNDOCUMENTED_MODULES = 15
-export const MAX_UNDOCUMENTED_ROUTES = 70
+export const MAX_UNDOCUMENTED_MODULES = 13
+export const MAX_UNDOCUMENTED_ROUTES = 66

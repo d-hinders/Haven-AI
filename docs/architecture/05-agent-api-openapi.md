@@ -26,7 +26,7 @@ covers:
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
   - packages/backend/src/routes/safe-details.ts
-last-verified: "2026-08-20" # #1446 slice 2: agent-delegations.ts documented (10 routes, new Delegations tag + Delegation schema); ceilings 17/86 → 16/76; every documented shape pinned by expectMatchesSpec against the real payloads, both oneOf branches included. Prior: #1464: malformed uuid params are a documented 400 via central 22P02 mapping (infra/http-error-handler.ts); premise + 404-boundary proven on the real-PG harness; 8 spec operations gained 400. Entry in casp-changelog/2026-08-16-1464.md. #1446: backfill started — contacts.ts documented and off the deferral list; ceilings lowered 18/90 → 17/86. #1445: four spec corrections found by making the generated types load-bearing in the frontend (has_stranded_funds, passport_requested, skill_installed, CatalogEntry.required), plus a named DelegateBalance schema. #1444: adds `expectMatchesSpec` — real responses validated against the spec's own schema (4 routes), with the mutation proofs and the `additionalProperties: true` limit recorded. #1443: the drift check no longer scopes itself to seven hand-listed route files — route-coverage.test.ts derives its scope from the app registration table; records that 89 of 136 registered routes are undocumented, deferred to #1446 under a shrink-only ceiling
+last-verified: "2026-08-20" # #1446 slices 3-4: x402-resources.ts (6 routes; 402-as-success on the challenge, 402-as-structured-negative on verify, regulatory framing in the x402 tag description) and the Agent Passport surface (agent-passports.ts + passport-verify.ts, 4 routes); ceilings 16/76 → 13/66. Verification caught two real spec errors: token_address is NOT guaranteed lowercase without a CHECK, and passportStanding returns an OBJECT, not a bare string. Prior: #1446 slice 2: agent-delegations.ts documented (10 routes, new Delegations tag + Delegation schema); ceilings 17/86 → 16/76; every documented shape pinned by expectMatchesSpec against the real payloads, both oneOf branches included. Prior: #1464: malformed uuid params are a documented 400 via central 22P02 mapping (infra/http-error-handler.ts); premise + 404-boundary proven on the real-PG harness; 8 spec operations gained 400. Entry in casp-changelog/2026-08-16-1464.md. #1446: backfill started — contacts.ts documented and off the deferral list; ceilings lowered 18/90 → 17/86. #1445: four spec corrections found by making the generated types load-bearing in the frontend (has_stranded_funds, passport_requested, skill_installed, CatalogEntry.required), plus a named DelegateBalance schema. #1444: adds `expectMatchesSpec` — real responses validated against the spec's own schema (4 routes), with the mutation proofs and the `additionalProperties: true` limit recorded. #1443: the drift check no longer scopes itself to seven hand-listed route files — route-coverage.test.ts derives its scope from the app registration table; records that 89 of 136 registered routes are undocumented, deferred to #1446 under a shrink-only ceiling
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -298,11 +298,12 @@ route `POST /x402/{id}/settle` (#830) currently sits on the drift check's
 model: [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
 **How much of the API the spec actually describes (#1443, measured 2026-08-15):**
-138 registered routes, **76 of them undocumented** across 16 deferred modules.
+138 registered routes, **66 of them undocumented** across 13 deferred modules.
 (#1446 is working the backfill one domain at a time: `contacts.ts` came off the
 list first, then the whole `agent-delegations.ts` lifecycle — grant, activate,
-per-hash and batch revocation, signer management — taking the ceilings from
-18 modules / 90 routes to 16 / 76.) That was invisible until the
+per-hash and batch revocation, signer management — then the x402 demo-resource
+surface and the Agent Passport routes, taking the ceilings from
+18 modules / 90 routes to 13 / 66.) That was invisible until the
 coverage gate widened its scope beyond the seven hand-listed files above, which
 is the finding epic #1442 was opened on. The gap is now *recorded* rather than
 absent: `route-coverage.ts` carries a per-module deferral list with a reason per

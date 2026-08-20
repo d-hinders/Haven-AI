@@ -62,6 +62,114 @@ const agentAuthForbidden = {
   },
 }
 
+
+// ── Delegation-lifecycle building blocks (#1446) ─────────────────────────────
+
+const delegationHash = {
+  type: 'string',
+  pattern: '^0x[0-9a-fA-F]{64}$',
+  description: "The delegation's stable identity (#827) — keccak of the unsigned delegation.",
+} as const
+
+const delegationHashList = {
+  type: 'array',
+  minItems: 1,
+  items: delegationHash,
+} as const
+
+const delegationHashParam = {
+  name: 'hash',
+  in: 'path',
+  required: true,
+  schema: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+  description: 'Delegation hash from the build/list response.',
+} as const
+
+/** Arbitrary-length 0x-hex — an ECDSA signature or an ABI-encoded WebAuthn assertion. */
+const hexBytes = {
+  type: 'string',
+  pattern: '^0x[0-9a-fA-F]+$',
+} as const
+
+/**
+ * A prepared ERC-4337 UserOperation, echoed back verbatim on submit. Fields are
+ * the bundler's concern, not this contract's — bigints travel as '<digits>n'
+ * strings (the prepare step's JSON encoding, revived on submit).
+ */
+const preparedUserOperation = {
+  type: 'object',
+  additionalProperties: true,
+} as const
+
+/** EIP-712 typed data the owner key signs verbatim (domain/types/message). */
+const eip712Payload = {
+  type: 'object',
+  additionalProperties: true,
+} as const
+
+/** A prepared treasury UserOp, branching on how the account signs it. */
+const preparedTreasuryOp = {
+  oneOf: [
+    {
+      type: 'object',
+      required: ['signature_scheme', 'signing_payload', 'user_operation', 'treasury_address', 'instructions'],
+      properties: {
+        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+        signing_payload: eip712Payload,
+        user_operation: preparedUserOperation,
+        treasury_address: address,
+        instructions: { type: 'string' },
+      },
+    },
+    {
+      type: 'object',
+      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'treasury_address', 'instructions'],
+      properties: {
+        signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+        user_op_hash: { type: 'string' },
+        user_operation: preparedUserOperation,
+        treasury_address: address,
+        instructions: { type: 'string' },
+      },
+    },
+  ],
+} as const
+
+/** Optional per-request signature-scheme selector for multi-signer accounts. */
+const signatureSchemeBody = {
+  type: 'object',
+  properties: {
+    signature_scheme: {
+      type: 'string',
+      enum: ['eip712_userop', 'webauthn_userop'],
+      description: 'Multi-signer accounts choose per request; omitted, an EOA owner defaults to eip712_userop.',
+    },
+  },
+} as const
+
+/** A signer-set change (rails/hybrid-signer-actions.ts SignerActionBody). */
+const signerActionBody = {
+  type: 'object',
+  required: ['action'],
+  properties: {
+    action: { type: 'string', enum: ['add_passkey', 'remove_passkey', 'add_owner', 'remove_owner'] },
+    passkey: {
+      type: 'object',
+      description: 'Required for add_passkey/remove_passkey.',
+      properties: {
+        key_id: { type: 'string' },
+        x: { type: 'string' },
+        y: { type: 'string' },
+      },
+    },
+    owner_address: { ...address, description: 'Required for add_owner.' },
+    signature_scheme: {
+      type: 'string',
+      enum: ['eip712_userop', 'webauthn_userop'],
+    },
+  },
+} as const
+
 const errorResponse = {
   description: 'Error response',
   content: {
@@ -193,6 +301,7 @@ export const openapiSpec = {
     { name: 'x402' },
     { name: 'Machine payments' },
     { name: 'Transactions' },
+    { name: 'Delegations' },
   ],
   paths: {
     '/openapi.json': {
@@ -442,6 +551,484 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '404': errorResponse,
+        },
+      },
+    },
+    // ── Delegation lifecycle (#828, documented by #1446) ────────────────────
+    // DESCRIPTIVE ONLY: these shapes document what the routes already return.
+    // Spend authority lives in the signed delegation's on-chain caveat
+    // enforcers, never in this spec — the backend prepares and relays but
+    // signs nothing here (#824 invariants 5/12).
+    '/agents/{id}/delegations': {
+      get: {
+        tags: ['Delegations'],
+        operationId: 'listAgentDelegations',
+        summary: "List an agent's budget delegations with lifecycle status.",
+        description:
+          "Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'Delegations ordered by created_at DESC.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['delegations'],
+                  properties: {
+                    delegations: { type: 'array', items: { $ref: '#/components/schemas/Delegation' } },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/delegations/build': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'buildAgentDelegation',
+        summary: 'Grant step 1: build an unsigned budget delegation for the owner to sign.',
+        description:
+          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827).',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['token_address', 'budget_atomic', 'period_seconds'],
+                properties: {
+                  token_address: address,
+                  recipient_address: {
+                    ...address,
+                    description: 'Optional recipient pin. Omit (or null) for an open budget.',
+                  },
+                  budget_atomic: {
+                    type: 'string',
+                    pattern: '^[0-9]+$',
+                    description: 'Positive atomic token amount; must fit uint96 (the enforcer word size).',
+                  },
+                  period_seconds: { type: 'integer', minimum: 60, description: 'Native refill period; ≥ 60.' },
+                  expires_at: { type: 'integer', description: 'Unix seconds, must be in the future. Default: now + 90 days.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Pending delegation stored; the owner signs signing_payload next.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['delegation_hash', 'version', 'delegate_account_address', 'signing_payload'],
+                  properties: {
+                    delegation_hash: delegationHash,
+                    version: { type: 'integer', description: 'Fresh per (agent, token, recipient) slot — replacement identity (#827).' },
+                    delegate_account_address: address,
+                    signing_payload: {
+                      type: 'object',
+                      description: "EIP-712 typed data (primaryType 'Delegation') the owner signs verbatim.",
+                      additionalProperties: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/delegations/{hash}/activate': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'activateAgentDelegation',
+        summary: 'Grant step 2: attach the owner signature and make the budget live.',
+        description:
+          "Stores the owner's signature on the pending delegation and flips it active, marking any previously active grant in the same (token, recipient) slot replaced — atomically, so the slot never ends up with zero live grants mid-replacement. Deploys the counterfactual delegator account via the relayer first when needed (#860; permissionless factory call, no owner signature). Activating an agent's FIRST budget also activates a pending_approval agent — on this rail the grant signature IS the approval (#1069). Signature validation is a shape check only (65-byte ECDSA or longer WebAuthn assertion); the real validator is EIP-1271 at redemption.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, delegationHashParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature'],
+                properties: {
+                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130,}$' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Budget is live.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['activated', 'delegation_hash'],
+                  properties: {
+                    activated: { type: 'boolean' },
+                    delegation_hash: delegationHash,
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '429': { ...errorResponse, description: 'Relayer gas budget exhausted — retry later.' },
+          '500': { ...errorResponse, description: 'Stored owner config no longer derives the stored account address.' },
+          '502': { ...errorResponse, description: 'Account deploy failed; the grant stays pending and activate can be retried.' },
+        },
+      },
+    },
+    '/agents/{id}/delegations/{hash}/revoke': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'prepareDelegationRevocation',
+        summary: 'Revoke step 1: prepare the disableDelegation UserOp for the owner to sign.',
+        description:
+          'Prepares a sponsored treasury UserOp executing disableDelegation. The response branches on the signature scheme: an EOA owner signs EIP-712 typed data (signing_payload); a pure-passkey account signs the userOpHash via WebAuthn (user_op_hash). Multi-signer accounts pick per request with signature_scheme. A row already disabled on-chain is healed to revoked and answered 409 instead of preparing a doomed op (#1423).',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, delegationHashParam],
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: signatureSchemeBody } },
+        },
+        responses: {
+          '200': {
+            description: 'Prepared revocation, shaped by the signature scheme.',
+            content: { 'application/json': { schema: preparedTreasuryOp } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/delegations/{hash}/revoke/submit': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'submitDelegationRevocation',
+        summary: 'Revoke step 2: submit the signed UserOp; the row flips only after it lands.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, delegationHashParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature', 'user_operation'],
+                properties: {
+                  signature: hexBytes,
+                  user_operation: preparedUserOperation,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Delegation disabled on-chain and marked revoked.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['revoked', 'tx_hash'],
+                  properties: {
+                    revoked: { type: 'boolean' },
+                    tx_hash: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/delegations/revoke-all': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'prepareRevokeAllDelegations',
+        summary: 'Batch revoke step 1: ONE signature kills every non-revoked budget (#1400).',
+        description:
+          'Bundles one disableDelegation call per pending/active delegation into a single sponsored UserOp (capped at 25 per batch; a coarser 100-row ceiling refuses before any reconciliation reads). Rows already disabled on-chain are healed to revoked and dropped from the batch first (#1423). Response shape matches the per-hash prepare, plus the delegation_hashes the batch will kill.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: signatureSchemeBody } },
+        },
+        responses: {
+          '200': {
+            description: 'Prepared batch revocation, shaped by the signature scheme.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'signing_payload', 'user_operation', 'treasury_address', 'delegation_hashes', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        signing_payload: eip712Payload,
+                        user_operation: preparedUserOperation,
+                        treasury_address: address,
+                        delegation_hashes: delegationHashList,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'treasury_address', 'delegation_hashes', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+                        user_op_hash: { type: 'string' },
+                        user_operation: preparedUserOperation,
+                        treasury_address: address,
+                        delegation_hashes: delegationHashList,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '422': { ...errorResponse, description: 'Batch too large — revoke per hash, then retry.' },
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/delegations/revoke-all/submit': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'submitRevokeAllDelegations',
+        summary: 'Batch revoke step 2: submit the signed batch; rows flip only after the UserOp lands.',
+        description:
+          'The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature', 'user_operation', 'delegation_hashes'],
+                properties: {
+                  signature: hexBytes,
+                  user_operation: preparedUserOperation,
+                  delegation_hashes: delegationHashList,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Batch disabled on-chain; the listed rows are marked revoked.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['revoked', 'tx_hash', 'delegation_hashes'],
+                  properties: {
+                    revoked: { type: 'boolean' },
+                    tx_hash: { type: 'string' },
+                    delegation_hashes: delegationHashList,
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/account-signers': {
+      get: {
+        tags: ['Delegations'],
+        operationId: 'getAccountSigners',
+        summary: "Read the treasury account's signer set (public key material only).",
+        description:
+          "The exact owner configuration the account address was derived from (#887) — the dashboard rebuilds the WebAuthn signer from this. Nothing secret: an address and P256 public-key coordinates.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'The signer set.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['account_address', 'chain_id', 'owner_address', 'passkeys'],
+                  properties: {
+                    account_address: address,
+                    chain_id: { type: 'integer' },
+                    owner_address: {
+                      type: ['string', 'null'],
+                      pattern: '^0x[0-9a-fA-F]{40}$',
+                      description: 'Null for a pure-passkey account.',
+                    },
+                    passkeys: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['key_id', 'x', 'y'],
+                        properties: {
+                          key_id: { type: 'string' },
+                          x: { type: 'string', description: '0x-hex P256 public-key x coordinate.' },
+                          y: { type: 'string', description: '0x-hex P256 public-key y coordinate.' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/account-signers/prepare': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'prepareSignerChange',
+        summary: 'Prepare a signer-set change (enroll a backup, remove a key) for an EXISTING signer to sign.',
+        description:
+          "Signer changes are ACCOUNT operations prepared here and signed by an existing signer — Haven prepares, never signs (#824). The chain's CannotRemoveLastSigner rule is mirrored as a clear 409 instead of an opaque revert; an informed two-to-one transition is permitted (#1199). Unlike the revocation prepares, this response carries no treasury_address.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: signerActionBody } },
+        },
+        responses: {
+          '200': {
+            description: 'Prepared signer change, shaped by the signature scheme.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'signing_payload', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        signing_payload: eip712Payload,
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+                        user_op_hash: { type: 'string' },
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/account-signers/submit': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'submitSignerChange',
+        summary: 'Submit the signed signer-set change; storage syncs only after the on-chain op succeeds.',
+        description:
+          'Body precedence is envelope first, config second: a malformed body is a 400 regardless of account state. The DB sync is pinned to the SIGNED calldata — a user_operation that does not match the signed action is refused.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature', 'user_operation'],
+                properties: {
+                  ...signerActionBody.properties,
+                  signature: hexBytes,
+                  user_operation: preparedUserOperation,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Signer set updated on-chain and in storage.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['updated', 'tx_hash'],
+                  properties: {
+                    updated: { type: 'boolean' },
+                    tx_hash: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
         },
       },
     },
@@ -1939,6 +2526,34 @@ export const openapiSpec = {
       },
     },
     schemas: {
+      Delegation: {
+        type: 'object',
+        description:
+          "One budget-delegation row (#828). start_date and expires_at are unix-second BIGINTs and arrive as digit STRINGS (node-postgres decodes int8 as string). The signed delegation object is never included here — the list is lifecycle metadata only.",
+        required: [
+          'id', 'chain_id', 'token_address', 'recipient_address', 'delegation_hash',
+          'version', 'status', 'budget_atomic', 'period_seconds', 'start_date',
+          'expires_at', 'created_at',
+        ],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          chain_id: { type: 'integer' },
+          token_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$', description: 'Stored lowercase (table CHECK).' },
+          recipient_address: {
+            type: ['string', 'null'],
+            pattern: '^0x[0-9a-f]{40}$',
+            description: 'Lowercase recipient pin, or null for an open budget.',
+          },
+          delegation_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+          version: { type: 'integer' },
+          status: { type: 'string', enum: ['pending', 'active', 'replaced', 'revoked'] },
+          budget_atomic: { type: 'string', pattern: '^[0-9]+$' },
+          period_seconds: { type: 'integer' },
+          start_date: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
+          expires_at: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
+          created_at: { type: 'string', format: 'date-time' },
+        },
+      },
       /**
        * #1446: an address-book label. `LIST_CONTACTS_FOR_USER_SQL` and both
        * RETURNING clauses in `infra/repositories/contacts.ts` select exactly

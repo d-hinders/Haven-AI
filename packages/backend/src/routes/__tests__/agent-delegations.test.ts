@@ -5,6 +5,7 @@
  */
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 const { mockQuery, mockCompute, mockTreasury, mockEnsureDeployed, mockReadDisabled } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -54,6 +55,25 @@ const RECIPIENT = '0x' + 'cc'.repeat(20)
 const TREASURY = '0x' + 'aa'.repeat(20)
 const DELEGATE_KEY = '0x' + 'bb'.repeat(20)
 const DELEGATE_ACCOUNT = '0x' + 'dd'.repeat(20)
+/**
+ * A real `agent_delegations` row as the DRIVER returns it (#1446): a uuid id,
+ * lowercase addresses (the table's CHECK), and start_date/expires_at as digit
+ * STRINGS — node-postgres decodes int8 that way, and the spec says so.
+ */
+const DELEGATION_ROW = {
+  id: '9f8a1b62-3c47-4d55-9e10-2b7c4a6d8e30',
+  chain_id: 84532,
+  token_address: USDC.toLowerCase(),
+  recipient_address: RECIPIENT.toLowerCase(),
+  delegation_hash: '0x' + 'ab'.repeat(32),
+  version: 1,
+  status: 'active',
+  budget_atomic: '5000000',
+  period_seconds: 86400,
+  start_date: '1755600000',
+  expires_at: '1763376000',
+  created_at: '2026-08-19T10:00:00.000Z',
+}
 const OWNER = '0x' + 'ee'.repeat(20)
 const HASH = `0x${'ab'.repeat(32)}`
 
@@ -75,6 +95,7 @@ function mockDb(opts: {
   owner?: string | null
   passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string }>
   waiverAt?: string | null
+  list?: Array<Record<string, unknown>>
 } = {}) {
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
@@ -108,7 +129,7 @@ function mockDb(opts: {
         recipient_address: RECIPIENT.toLowerCase(),
       }] })
     }
-    if (/FROM agent_delegations/.test(s)) return Promise.resolve({ rows: [] })
+    if (/FROM agent_delegations/.test(s)) return Promise.resolve({ rows: opts.list ?? [] })
     return Promise.resolve({ rows: [] })
   })
 }
@@ -147,6 +168,8 @@ describe('delegation lifecycle API (#828)', () => {
         getDelegationContracts(84532).delegationManager.toLowerCase(),
       )
       expect(body.delegation_hash).toMatch(/^0x[0-9a-f]{64}$/i)
+      // #1446: the documented 201 shape, checked against the real payload.
+      expectMatchesSpec('POST', '/agents/{id}/delegations/build', body, '201')
       // No signature anywhere in the response — the owner supplies it:
       expect(JSON.stringify(body)).not.toMatch(/"signature":\s*"0x[0-9a-f]{130}/i)
       // Row stored as pending:
@@ -222,6 +245,21 @@ describe('delegation lifecycle API (#828)', () => {
       })
     }
 
+    it('matches the documented signer prepare/submit shapes (#1446)', async () => {
+      mockDb({ owner: null, passkeys: [PK1, PK2] })
+      mockPrepared()
+      const prepared = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/account-signers/prepare`,
+        payload: { action: 'add_passkey', passkey: NEW_PK },
+      })
+      expect(prepared.statusCode).toBe(200)
+      // Unlike the revocation prepares, this response carries NO
+      // treasury_address — the spec documents the difference rather than
+      // pretending the two prepares are one shape.
+      expect(prepared.json().treasury_address).toBeUndefined()
+      expectMatchesSpec('POST', '/agents/{id}/account-signers/prepare', prepared.json())
+    })
+
     it('prepare add_passkey on a passkey account returns the WebAuthn scheme', async () => {
       mockDb({ owner: null, passkeys: [PK1, PK2] })
       mockPrepared()
@@ -254,6 +292,9 @@ describe('delegation lifecycle API (#828)', () => {
       })
       expect(res.statusCode).toBe(200)
       expect(res.json().signature_scheme).toBe('eip712_userop')
+      // The OTHER branch of the documented oneOf — an eip712 owner account.
+      expect(res.json().signature_scheme).toBe('eip712_userop')
+      expectMatchesSpec('POST', '/agents/{id}/account-signers/prepare', res.json())
     })
 
     it('refuses enrolling a duplicate passkey and a second EOA owner', async () => {
@@ -308,10 +349,18 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.json()).toMatchObject({ updated: true })
       const insert = mockQuery.mock.calls.find((c) => /INSERT INTO hybrid_account_passkeys/.test(String(c[0])))!
       expect(insert[1]).toEqual(['safe-1', NEW_PK.key_id, NEW_PK.x, NEW_PK.y])
+      expectMatchesSpec('POST', '/agents/{id}/account-signers/submit', res.json())
     })
   })
 
   describe('GET /:id/account-signers (#887)', () => {
+    it('matches the documented signer-set shape (#1446)', async () => {
+      mockDb({ owner: null, passkeys: [{ key_id: 'kid-1', public_key_x: '0x01', public_key_y: '0x02' }] })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/account-signers` })
+      expect(res.statusCode).toBe(200)
+      expectMatchesSpec('GET', '/agents/{id}/account-signers', res.json())
+    })
+
     it('returns the signer set for a passkey account — public key material only', async () => {
       mockDb({ owner: null, passkeys: [{ key_id: '0x' + '11'.repeat(32), public_key_x: '0xaa', public_key_y: '0xbb' }] })
       const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/account-signers` })
@@ -509,6 +558,16 @@ describe('delegation lifecycle API (#828)', () => {
       expect(mockQuery.mock.calls.some((c) => /SET\s+status = 'active'/.test(String(c[0])))).toBe(false)
     })
 
+    it('matches the documented activate shape (#1446)', async () => {
+      mockDb({})
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${'0x' + 'ab'.repeat(32)}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(200)
+      expectMatchesSpec('POST', '/agents/{id}/delegations/{hash}/activate', res.json())
+    })
+
     it('stores the owner signature and marks the previous grant replaced', async () => {
       mockDb({})
       const res = await app.inject({
@@ -557,6 +616,33 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.json().instructions).toMatch(/Sign signing_payload/)
       // Nothing was submitted, nothing marked revoked yet:
       expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(false)
+    })
+
+    it('matches the documented prepare shape, both schemes (#1446)', async () => {
+      const stored = { stored: { delegation_json: JSON.stringify({ delegate: DELEGATE_ACCOUNT, delegator: TREASURY, authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '1', signature: '0x' + 'cd'.repeat(65) }), status: 'active' } }
+      mockTreasury.mockResolvedValue({
+        treasuryAddress: TREASURY,
+        prepareCall: vi.fn().mockResolvedValue({
+          userOperation: { nonce: 1n, sender: TREASURY },
+          userOpHash: `0x${'ef'.repeat(32)}`,
+          signingTypedData: { domain: { name: 'HybridDeleGator' }, types: {}, primaryType: 'PackedUserOperation', message: {} },
+          treasuryAddress: TREASURY,
+        }),
+        submitCall: vi.fn(),
+      })
+
+      mockDb(stored)
+      const eoa = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke` })
+      expect(eoa.statusCode).toBe(200)
+      expectMatchesSpec('POST', '/agents/{id}/delegations/{hash}/revoke', eoa.json())
+
+      // The passkey branch returns user_op_hash instead of signing_payload —
+      // the spec's oneOf must accept BOTH, or half the accounts are undocumented.
+      mockDb({ ...stored, owner: null, passkeys: [{ key_id: 'kid-1', public_key_x: '0x01', public_key_y: '0x02' }] })
+      const passkey = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke` })
+      expect(passkey.statusCode).toBe(200)
+      expect(passkey.json().signature_scheme).toBe('webauthn_userop')
+      expectMatchesSpec('POST', '/agents/{id}/delegations/{hash}/revoke', passkey.json())
     })
 
     it('prepares a WebAuthn userOpHash for a PURE-PASSKEY account (#885)', async () => {
@@ -639,6 +725,7 @@ describe('delegation lifecycle API (#828)', () => {
         payload: { signature: '0xabcd', user_operation: { nonce: '1n' } },
       })
       expect(res.json()).toMatchObject({ revoked: true, tx_hash: '0xfeed' })
+      expectMatchesSpec('POST', '/agents/{id}/delegations/{hash}/revoke/submit', res.json())
       expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(true)
     })
   })
@@ -650,6 +737,22 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.statusCode).toBe(200)
       const listQuery = mockQuery.mock.calls.find((c) => /FROM agent_delegations/.test(String(c[0])))!
       expect(String(listQuery[0])).not.toContain('delegation_json')
+    })
+
+    it('matches the documented shape for a real row (#1446)', async () => {
+      mockDb({ list: [DELEGATION_ROW] })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().delegations).toHaveLength(1)
+      // #1444: the spec's own schema decides — including that the BIGINT
+      // columns arrive as strings and that delegation_json is absent.
+      expectMatchesSpec('GET', '/agents/{id}/delegations', res.json())
+    })
+
+    it('an open budget documents its null recipient', async () => {
+      mockDb({ list: [{ ...DELEGATION_ROW, recipient_address: null, status: 'pending' }] })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      expectMatchesSpec('GET', '/agents/{id}/delegations', res.json())
     })
   })
 
@@ -838,6 +941,7 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
     // a run longer than any hash, and for the json key itself.
     expect(JSON.stringify(body)).not.toContain('cd'.repeat(50))
     expect(JSON.stringify(body)).not.toContain('delegation_json')
+    expectMatchesSpec('POST', '/agents/{id}/delegations/revoke-all', body)
     // Nothing marked revoked at prepare time:
     expect(mockQuery.mock.calls.some((c) => /SET status = 'revoked'/.test(String(c[0])))).toBe(false)
   })
@@ -851,6 +955,8 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
     expect(res.statusCode).toBe(200)
     expect(res.json().signature_scheme).toBe('webauthn_userop')
     expect(res.json().user_op_hash).toBe(`0x${'ef'.repeat(32)}`)
+    // The webauthn branch of the documented oneOf (#1446).
+    expectMatchesSpec('POST', '/agents/{id}/delegations/revoke-all', res.json())
     expect(mockTreasury.mock.calls[0][0]).toMatchObject({ signWith: 'passkey' })
   })
 
@@ -943,6 +1049,7 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
     })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ revoked: true, tx_hash: `0x${'11'.repeat(32)}`, delegation_hashes: [HASH, HASH2] })
+    expectMatchesSpec('POST', '/agents/{id}/delegations/revoke-all/submit', res.json())
     const update = mockQuery.mock.calls.find((c) => /SET status = 'revoked'/.test(String(c[0])))!
     expect(update).toBeDefined()
     // Batch statement, agent-scoped: ANY($2) with this agent's id first.

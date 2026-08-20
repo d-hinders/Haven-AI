@@ -120,13 +120,6 @@ export interface UndocumentedModule {
 export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
   // ── Agent-facing / money-path — highest priority for #1446 ──
   {
-    file: 'agent-delegations.ts',
-    because:
-      'The delegation rail\'s own lifecycle API (grant/activate/revoke/revoke-all, ' +
-      'signer management). Money-path and agent-facing, so this is the first module ' +
-      '#1446 should document — an external integrator cannot see how budgets are granted.',
-  },
-  {
     file: 'x402-resources.ts',
     because: 'The x402 demo-resource + receipts surface; agent-reachable, undocumented since it shipped.',
   },
@@ -208,5 +201,5 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
  * `index.ts` — and one of them (`GET /chains`) turned out to be undocumented.
  * That is the gate earning its keep on its first run, not slack being taken.
  */
-export const MAX_UNDOCUMENTED_MODULES = 17
-export const MAX_UNDOCUMENTED_ROUTES = 86
+export const MAX_UNDOCUMENTED_MODULES = 16
+export const MAX_UNDOCUMENTED_ROUTES = 76

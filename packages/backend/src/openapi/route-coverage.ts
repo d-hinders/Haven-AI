@@ -121,14 +121,6 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
   // ── Agent-facing / money-path — highest priority for #1446 ──
   // ── Dashboard-session surfaces (JWT auth, not the agent API key) ──
   {
-    file: 'auth.ts',
-    because: 'Login/session for the dashboard. Deliberately outside the agent-facing spec.',
-  },
-  {
-    file: 'passkeys.ts',
-    because: 'WebAuthn enrolment for dashboard sessions; credential handling, no payment surface.',
-  },
-  {
     file: 'agent-activity.ts',
     because: 'Dashboard activity feed for one agent; read-only projection of data already documented elsewhere.',
   },
@@ -161,5 +153,5 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
  * `index.ts` — and one of them (`GET /chains`) turned out to be undocumented.
  * That is the gate earning its keep on its first run, not slack being taken.
  */
-export const MAX_UNDOCUMENTED_MODULES = 6
-export const MAX_UNDOCUMENTED_ROUTES = 21
+export const MAX_UNDOCUMENTED_MODULES = 4
+export const MAX_UNDOCUMENTED_ROUTES = 16

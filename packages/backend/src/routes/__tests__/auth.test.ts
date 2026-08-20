@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { FastifyInstance } from 'fastify'
 import bcrypt from 'bcrypt'
 
@@ -11,6 +12,9 @@ vi.mock('../../db.js', () => ({
 }))
 
 import { buildApp } from '../../__tests__/helpers.js'
+
+/** users.id is a UUID column; fixtures must look like one (#1446). */
+const USER_UUID = '7a3c9e21-4b58-4d06-8f13-2e6a5c9d0b74'
 
 describe('Auth routes', () => {
   let app: FastifyInstance
@@ -34,7 +38,7 @@ describe('Auth routes', () => {
       mockQuery.mockResolvedValueOnce({ rows: [] })
       // Second query: insert user
       mockQuery.mockResolvedValueOnce({
-        rows: [{ id: 'user-1', name: 'Ada Lovelace', email: 'test@example.com', created_at: new Date().toISOString() }],
+        rows: [{ id: USER_UUID, name: 'Ada Lovelace', email: 'test@example.com', created_at: new Date().toISOString() }],
       })
 
       const response = await app.inject({
@@ -46,10 +50,11 @@ describe('Auth routes', () => {
       expect(response.statusCode).toBe(201)
       const body = response.json()
       expect(body.token).toBeDefined()
-      expect(body.user.id).toBe('user-1')
+      expect(body.user.id).toBe(USER_UUID)
       expect(body.user.name).toBe('Ada Lovelace')
       expect(body.user.email).toBe('test@example.com')
       expect(body.user.safes).toEqual([])
+      expectMatchesSpec('POST', '/auth/signup', body, '201')
     })
 
     it('returns 400 for invalid name', async () => {
@@ -148,7 +153,7 @@ describe('Auth routes', () => {
     it('returns 200 with token and user on valid credentials', async () => {
       mockQuery.mockResolvedValueOnce({
         rows: [{
-          id: 'user-1',
+          id: USER_UUID,
           name: 'Ada Lovelace',
           email: 'test@example.com',
           password_hash: testPasswordHash,
@@ -168,13 +173,14 @@ describe('Auth routes', () => {
       const body = response.json()
       expect(body.token).toBeDefined()
       expect(typeof body.token).toBe('string')
-      expect(body.user.id).toBe('user-1')
+      expect(body.user.id).toBe(USER_UUID)
       expect(body.user.name).toBe('Ada Lovelace')
       expect(body.user.email).toBe('test@example.com')
       expect(body.user.wallet_address).toBe('0x1234567890abcdef1234567890abcdef12345678')
       expect(body.user.safes).toEqual([])
       // password_hash should NOT be in the response
       expect(body.user.password_hash).toBeUndefined()
+      expectMatchesSpec('POST', '/auth/login', body)
     })
 
     it('returns 401 for non-existent email', async () => {
@@ -193,7 +199,7 @@ describe('Auth routes', () => {
     it('returns 401 for wrong password', async () => {
       mockQuery.mockResolvedValueOnce({
         rows: [{
-          id: 'user-1',
+          id: USER_UUID,
           name: null,
           email: 'test@example.com',
           password_hash: testPasswordHash,
@@ -220,15 +226,18 @@ describe('Auth routes', () => {
     }
 
     it('returns user data with valid JWT', async () => {
-      const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+      const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
 
       mockQuery.mockResolvedValueOnce({
         rows: [{
-          id: 'user-1',
+          id: USER_UUID,
           name: 'Ada Lovelace',
           email: 'test@example.com',
           wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
           safe_address: null,
+          // FIND_USER_PROFILE_BY_ID_SQL selects currency_preference too, so a
+          // real row always carries it (#1446).
+          currency_preference: 'USD',
           created_at: '2025-01-01T00:00:00.000Z',
         }],
       })
@@ -242,10 +251,11 @@ describe('Auth routes', () => {
 
       expect(response.statusCode).toBe(200)
       const body = response.json()
-      expect(body.id).toBe('user-1')
+      expect(body.id).toBe(USER_UUID)
       expect(body.name).toBe('Ada Lovelace')
       expect(body.email).toBe('test@example.com')
       expect(body.safes).toEqual([])
+      expectMatchesSpec('GET', '/auth/me', body)
     })
 
     it('returns 401 without token', async () => {

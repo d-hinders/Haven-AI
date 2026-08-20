@@ -1,6 +1,4 @@
-import { exact } from 'x402/schemes'
 import { hashTypedData } from 'viem'
-import { privateKeyToAccount } from 'viem/accounts'
 import {
   signHash,
   signUserOpTypedDataForDelegation,
@@ -74,8 +72,7 @@ import type {
   SweepPrepareResponse,
   SweepSubmitResponse,
 } from './sweep.js'
-import { createJsonRpcProvider, createWallet, createErc20Contract } from './provider.js'
-import { decodeBase64Json, encodeBase64Json } from './base64.js'
+import { decodeBase64Json } from './base64.js'
 import { HavenApiTransport } from './haven-api-transport.js'
 import {
   mapPaymentResult,
@@ -93,76 +90,28 @@ import {
 import type { CapturedMerchantResponse } from './mcp-merchant-transport.js'
 import { AccountReads } from './account-reads.js'
 import { DelegateSweepApi } from './delegate-sweep.js'
-
-const CHAIN_EXPLORER_TX: Record<number, string> = {
-  100:  'https://gnosisscan.io/tx',
-  8453: 'https://basescan.org/tx',
-}
-
-function buildExplorerUrl(chainId: number | undefined, txHash: string): string {
-  const base = CHAIN_EXPLORER_TX[chainId ?? 8453] ?? CHAIN_EXPLORER_TX[8453]
-  return `${base}/${txHash}`
-}
-
-function explorerUrlOrEmpty(chainId: number | undefined, txHash: string | null | undefined): string {
-  return txHash ? buildExplorerUrl(chainId, txHash) : ''
-}
+import {
+  assertCanResumeX402,
+  attachResumeState,
+  buildExplorerUrl,
+  buildX402Quote,
+  chainIdFromNetwork,
+  chainIdOrNull,
+  decimalFromUsdcAtomic,
+  explorerUrlOrEmpty,
+  requestInitFromSnapshot,
+  sameAddress,
+  snapshotX402Request,
+  withX402Wallet,
+  x402PayerAddress,
+} from './x402-protocol.js'
+import { X402FundingLeg } from './x402-funding-leg.js'
 
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
 
 /** Cap the merchant body persisted to the reconciliation event (the full body is kept on the thrown error). */
 const MERCHANT_BODY_SNIPPET_LIMIT = 1000
-
-function chainIdFromNetwork(network: string | undefined): number | undefined {
-  if (network === 'base') return 8453
-  // #1471: canonical in the x402 spec's NetworkSchema, and the backend maps
-  // it as of the same change — the #1478 pin test enforces that every copy
-  // widens together, which is exactly how this line got here.
-  if (network === 'base-sepolia') return 84532
-  if (!network?.startsWith('eip155:')) return undefined
-  const chainId = Number(network.slice('eip155:'.length))
-  return Number.isFinite(chainId) ? chainId : undefined
-}
-
-function chainIdOrNull(network: string | undefined): number | null {
-  return chainIdFromNetwork(network) ?? null
-}
-
-function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
-  return Boolean(a && b && a.toLowerCase() === b.toLowerCase())
-}
-
-function decimalFromUsdcAtomic(value: string): string {
-  const amount = BigInt(value)
-  const whole = amount / 1_000_000n
-  const fraction = (amount % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '')
-  return fraction ? `${whole}.${fraction}` : whole.toString()
-}
-
-function normalizeDecimal(value: string): string {
-  if (!value.includes('.')) return value.replace(/^0+(?=\d)/, '') || '0'
-  const [whole, fraction = ''] = value.split('.')
-  const normalizedWhole = whole.replace(/^0+(?=\d)/, '') || '0'
-  const normalizedFraction = fraction.replace(/0+$/, '')
-  return normalizedFraction ? `${normalizedWhole}.${normalizedFraction}` : normalizedWhole
-}
-
-function parseMerchantSettlement(header: string | null): {
-  settlementTxHash?: string | null
-} {
-  if (!header) return {}
-  const parsed = parseProtocolReceiptHeader(header)
-  const tx =
-    typeof parsed?.transaction === 'string'
-      ? parsed.transaction
-      : typeof parsed?.txHash === 'string'
-        ? parsed.txHash
-        : typeof parsed?.tx_hash === 'string'
-          ? parsed.tx_hash
-          : null
-  return { settlementTxHash: tx }
-}
 
 
 /**
@@ -221,7 +170,11 @@ export class HavenClient {
   private readonly pollingInterval: number
   private readonly chainRpcs: Record<number, string>
   private readonly inFlightX402 = new Map<string, Promise<X402Receipt>>()
-  private readonly x402ReceiptCache = new Map<string, { expiresAt: number; receipt: X402Receipt }>()
+  /**
+   * The EIP-3009 funding-leg lifecycle (#1618). The facade holds a reference
+   * and delegates; it does not reimplement any of it.
+   */
+  private readonly fundingLeg: X402FundingLeg
   /** Delegate address derived from the private key (if provided) */
   readonly delegateAddress: string | undefined
 
@@ -247,6 +200,18 @@ export class HavenClient {
     if (this.delegateKey) {
       this.delegateAddress = addressFromKey(this.delegateKey)
     }
+    // Constructed LAST: the funding leg pays into `delegateAddress`, which is
+    // only derived on the line above.
+    this.fundingLeg = new X402FundingLeg({
+      delegateKey: this.delegateKey,
+      delegateAddress: this.delegateAddress,
+      x402Wallet: this.x402Wallet,
+      chainRpcs: this.chainRpcs,
+      post: (path, body) => this.post(path, body),
+      signForData: (signData) => this.signForData(signData),
+      assertSignableAuthorizationState: (label, raw) =>
+        this.throwIfNonSignableAuthorizationState(label, raw),
+    })
   }
 
   /**
@@ -814,19 +779,19 @@ export class HavenClient {
     }
 
     const idempotencyKey = options.idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option)
-    const cached = this.x402ReceiptCache.get(idempotencyKey)
-    if (cached && cached.expiresAt > Date.now()) return cached.receipt
+    const cached = this.fundingLeg.cachedReceipt(idempotencyKey)
+    if (cached) return cached
 
     const inFlight = this.inFlightX402.get(idempotencyKey)
     if (inFlight) return inFlight
 
-    const promise = this.authorizeStandardX402(paymentRequired, option, idempotencyKey)
+    const promise = this.fundingLeg.authorize(paymentRequired, option, idempotencyKey)
     this.inFlightX402.set(idempotencyKey, promise)
 
     try {
       return await promise
     } catch (err) {
-      this.attachResumeState(err, {
+      attachResumeState(err, {
         rail: 'x402',
         paymentRequired,
         accepted: option,
@@ -847,8 +812,8 @@ export class HavenClient {
     init?: RequestInit,
     options: X402AuthorizationOptions = {},
   ): Promise<X402Quote> {
-    const initialInit = this.withX402Wallet(init, this.x402PayerAddress())
-    const request = this.snapshotX402Request(url, initialInit)
+    const initialInit = withX402Wallet(init, x402PayerAddress(this.delegateAddress, this.x402Wallet))
+    const request = snapshotX402Request(url, initialInit)
     const response = await this.merchantTransport.fetch(url, initialInit)
 
     if (response.status !== 402) {
@@ -865,7 +830,7 @@ export class HavenClient {
 
     const paymentRequired = await parsePaymentRequiredResponse(response)
     const mcpTransport = await this.merchantTransport.detect(url, paymentRequired, response)
-    return this.buildX402Quote(paymentRequired, request, options.idempotencyKey, mcpTransport)
+    return buildX402Quote(paymentRequired, request, options.idempotencyKey, mcpTransport)
   }
 
   /**
@@ -893,7 +858,7 @@ export class HavenClient {
       )
     }
 
-    let requestInit = this.withX402Wallet(init, wallet)
+    let requestInit = withX402Wallet(init, wallet)
     requestInit = this.merchantTransport.withSessionHeaders(requestInit, sessionId)
 
     const quote = await this.quoteX402(url, requestInit, options)
@@ -919,12 +884,12 @@ export class HavenClient {
       const receipt = await this.authorizeX402(quote.paymentRequired, { idempotencyKey })
       return this.retryX402Request(
         quote.request.url,
-        this.requestInitFromSnapshot(quote.request),
+        requestInitFromSnapshot(quote.request),
         quote.paymentRequired,
         receipt,
       )
     } catch (err) {
-      this.attachResumeState(err, {
+      attachResumeState(err, {
         rail: 'x402',
         paymentRequired: quote.paymentRequired,
         accepted: quote.accepted,
@@ -933,150 +898,6 @@ export class HavenClient {
       })
       throw err
     }
-  }
-
-  private async authorizeStandardX402(
-    paymentRequired: X402PaymentRequired,
-    option: X402PaymentOption,
-    idempotencyKey: string,
-  ): Promise<X402Receipt> {
-    // 2. Standard x402 settles from an EOA, so the SDK uses the agent-owned
-    // delegate EOA for the merchant-facing EIP-3009 authorization. Haven does
-    // not control this EOA or its private key.
-    //
-    // The only automated funding path is a separate Safe AllowanceModule
-    // transfer signed by the agent key and constrained by the user's on-chain
-    // allowance. Haven's backend relays that signed top-up; it is not the source
-    // of payment authority.
-    // #1521: the authorization is minted AFTER the backend's answer is
-    // classified, never before. Signing first meant that when the idempotency
-    // key resolved to an already-settled payment, a brand-new authorization
-    // had already been created against a delegate whose USDC was gone — and
-    // it was handed back paired with the FIRST payment's tx_hash. Within one
-    // authorize call the header is still created once and reused, which is
-    // all the original "reuse one EIP-3009 nonce" note ever meant. If funding
-    // fails later, the unused authorization simply expires via validBefore.
-    const raw = await this.post<RawX402AuthorizeResponse>('/x402', {
-      url: paymentRequired.resource.url,
-      payTo: this.delegateAddress,
-      merchantPayTo: option.payTo,
-      amount: x402AuthorizationAmount(option),
-      asset: option.asset,
-      network: option.network,
-      description: paymentRequired.resource.description,
-      idempotencyKey,
-      // #1360: same explicit funding-leg declaration as createX402Intent —
-      // this local-key path derives payTo from the key (never stale), but the
-      // declaration keeps both writers of the 3009 shape loud-by-default.
-      settlementScheme: 'eip3009',
-    })
-
-    // The backend can report an ALREADY-EXECUTED payment in two different
-    // shapes, and #1521 is reachable through both — the guard is therefore on
-    // the meaning, not on one response shape:
-    //
-    //   1. `success` + `tx_hash` — the delegation rail's confirmed-intent
-    //      replay (`modules/x402/replay.ts`). Reached only by an idempotency
-    //      collision; the caller did not ask for THIS payment.
-    //   2. `nextAction: retry_original_x402_request` — the legacy rail's
-    //      approval-queue replay (`modules/x402/legacy-authorize.ts` returns
-    //      `getAgentPaymentStatus`'s body, which carries no `success` field
-    //      at all). This is the DOCUMENTED post-approval retry loop, so the
-    //      caller is deliberately resuming a payment they know about.
-    //
-    // In both, "executed" means the FUNDING leg executed, which is ambiguous:
-    //
-    //   (a) funding confirmed, merchant never paid  → the delegate still
-    //       holds the money and minting a header is correct;
-    //   (b) funding confirmed, merchant already paid → the delegate is
-    //       empty and any authorization minted here is unfundable.
-    //
-    // Only the delegate's on-chain balance separates them. The two shapes
-    // differ in what an UNVERIFIABLE balance should mean, and they differ for
-    // the same reason the explicit `resumeAuthorizedX402` path does: shape 1
-    // is an accident, so "can't tell" refuses rather than mint a header we
-    // cannot vouch for; shape 2 is the caller following documented steps, so
-    // "can't tell" proceeds and only a balance verified ABSENT refuses —
-    // otherwise every approval resume without a `chainRpcs` entry would break.
-    const state = paymentStateFromRaw('x402 payment', raw)
-    const executedReplay = raw.success && raw.tx_hash
-      ? 'idempotency-collision' as const
-      : state?.nextAction === AgentPaymentNextAction.RetryOriginalX402Request
-        ? 'approval-resume' as const
-        : null
-
-    if (executedReplay) {
-      const canFund = await this.delegateCanFund(
-        raw.chain_id ?? state?.chainId ?? chainIdFromNetwork(option.network),
-        option.asset,
-        x402AuthorizationAmount(option),
-      )
-      const refuse = executedReplay === 'idempotency-collision'
-        ? canFund !== true
-        : canFund === false
-      if (refuse) {
-        const settledReceipt = state && executedReplay === 'approval-resume'
-          ? this.mapX402ReceiptFromStatus(paymentRequired, option, undefined, state)
-          : this.mapX402ReceiptFromAuthorization(paymentRequired, option, undefined, raw)
-        throw new X402AlreadySettledError(
-          canFund === false
-            ? 'This x402 payment already settled — the delegate no longer holds the funds to ' +
-              'authorize it again. To buy the same item a second time, pass a distinct ' +
-              '`idempotencyKey`; the synthesised key intentionally collapses repeat calls for ' +
-              'the same product within a 5-minute window so a retried request cannot pay twice.'
-            : 'This x402 payment already settled, and whether the delegate can still fund a new ' +
-              'authorization could not be verified (no `chainRpcs` entry for this chain). Refusing ' +
-              'rather than issue an authorization that may be unfundable. To buy the same item a ' +
-              'second time, pass a distinct `idempotencyKey`; to finish an interrupted payment, ' +
-              'resume it by `paymentId`.',
-          settledReceipt,
-          canFund === false ? 'settled' : 'unverifiable',
-        )
-      }
-    }
-
-    const paymentHeader = await this.createStandardX402Header(paymentRequired, option)
-
-    if (raw.success && raw.tx_hash) {
-      const receipt = this.mapX402ReceiptFromAuthorization(paymentRequired, option, paymentHeader, raw)
-      this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
-      return receipt
-    }
-
-    if (state?.nextAction === AgentPaymentNextAction.RetryOriginalX402Request) {
-      const receipt = this.mapX402ReceiptFromStatus(paymentRequired, option, paymentHeader, state)
-      this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
-      return receipt
-    }
-
-    this.throwIfNonSignableAuthorizationState('x402 payment', raw)
-
-    // 3. Sign the hash
-    if (!raw.sign_data?.hash) {
-      throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
-    }
-    const sig = await this.signForData(raw.sign_data)
-
-    // 4. Submit signature (reuse existing payments/:id/sign endpoint)
-    const execResult = await this.post<RawSignResponse>(
-      `/payments/${raw.payment_id}/sign`,
-      { signature: sig },
-    )
-
-    if (execResult.status !== 'confirmed') {
-      throwPaymentStateError('x402 payment', execResult)
-    }
-
-    // Wait for ≥1 on-chain confirmation before retrying the merchant so the
-    // merchant's balanceOf(delegate) check sees the funded balance.
-    await this.waitForFundingTx(
-      execResult.tx_hash,
-      execResult.chain_id ?? chainIdFromNetwork(option.network),
-    )
-
-    const receipt = this.mapX402ReceiptFromAuthorization(paymentRequired, option, paymentHeader, raw, execResult)
-    this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
-    return receipt
   }
 
   /**
@@ -1301,18 +1122,18 @@ export class HavenClient {
     }
 
     const idempotencyKey = input.idempotencyKey ?? buildX402IdempotencyKey(input.paymentRequired, option)
-    const cached = this.x402ReceiptCache.get(idempotencyKey)
-    if (cached && cached.expiresAt > Date.now()) return cached.receipt
+    const cached = this.fundingLeg.cachedReceipt(idempotencyKey)
+    if (cached) return cached
 
     const status = await this.getPaymentStatus(input.paymentId)
-    this.assertCanResumeX402(status, input.paymentRequired, option)
+    assertCanResumeX402(status, input.paymentRequired, option)
 
     // #1521: the same fundability question as the authorize path, with the
     // opposite default. Here the caller NAMED this payment, so an
     // unverifiable balance is not grounds to refuse the thing they asked for
     // — only a balance verified ABSENT is, because then the authorization
     // this would mint is known to be unfundable.
-    const canFund = await this.delegateCanFund(
+    const canFund = await this.fundingLeg.delegateCanFund(
       status.chainId ?? chainIdFromNetwork(option.network),
       option.asset,
       x402AuthorizationAmount(option),
@@ -1321,22 +1142,22 @@ export class HavenClient {
       throw new X402AlreadySettledError(
         `x402 payment ${status.paymentId} has already settled — the delegate no longer holds the ` +
         'funds to authorize it again, so there is nothing left to resume.',
-        this.mapX402ReceiptFromStatus(input.paymentRequired, option, undefined, status),
+        this.fundingLeg.receiptFromStatus(input.paymentRequired, option, undefined, status),
         'settled',
       )
     }
 
-    const paymentHeader = await this.createStandardX402Header(input.paymentRequired, option)
-    const receipt = this.mapX402ReceiptFromStatus(input.paymentRequired, option, paymentHeader, status)
-    this.cacheX402Receipt(idempotencyKey, paymentHeader, receipt)
+    const paymentHeader = await this.fundingLeg.createPaymentHeader(input.paymentRequired, option)
+    const receipt = this.fundingLeg.receiptFromStatus(input.paymentRequired, option, paymentHeader, status)
+    this.fundingLeg.cacheReceipt(idempotencyKey, paymentHeader, receipt)
     return receipt
   }
 
   async resumeX402Payment(input: ResumeX402PaymentInput | X402ResumeState): Promise<Response> {
     const inputInit = 'init' in input ? input.init : undefined
-    const initialInit = this.withX402Wallet(
-      inputInit ?? (input.request ? this.requestInitFromSnapshot(input.request) : undefined),
-      this.x402PayerAddress(),
+    const initialInit = withX402Wallet(
+      inputInit ?? (input.request ? requestInitFromSnapshot(input.request) : undefined),
+      x402PayerAddress(this.delegateAddress, this.x402Wallet),
     )
     let paymentRequired = input.paymentRequired
     const url = input.url ?? input.request?.url
@@ -1397,7 +1218,7 @@ export class HavenClient {
       mcpSessionId = await this.merchantTransport.initialize(url, init)
     }
 
-    let requestInit = this.withX402Wallet(init, this.x402PayerAddress())
+    let requestInit = withX402Wallet(init, x402PayerAddress(this.delegateAddress, this.x402Wallet))
     if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
 
     // 1. Make the original request
@@ -1431,7 +1252,7 @@ export class HavenClient {
     }
 
     // 4. Pay through Haven
-    const request = this.snapshotX402Request(url, requestInit)
+    const request = snapshotX402Request(url, requestInit)
     const option = selectStandardPaymentOption(paymentRequired.accepts)
     const idempotencyKey = options.idempotencyKey ?? (option ? buildX402IdempotencyKey(paymentRequired, option) : undefined)
     let receipt: X402Receipt
@@ -1439,7 +1260,7 @@ export class HavenClient {
       receipt = await this.authorizeX402(paymentRequired, options)
     } catch (err) {
       if (option && idempotencyKey) {
-        this.attachResumeState(err, {
+        attachResumeState(err, {
           rail: 'x402',
           paymentRequired,
           accepted: option,
@@ -1590,7 +1411,7 @@ export class HavenClient {
    * and before delivering the X-PAYMENT header, so the merchant's
    * balanceOf(delegate) / transferWithAuthorization verification sees the funded
    * balance — otherwise it rejects with "Payment verification failed". The
-   * SDK's local path already does this (see authorizeStandardX402); the hosted
+   * SDK's local path already does this (see `X402FundingLeg.authorize`); the hosted
    * split flow regressed when the 5→3 collapse removed the incidental
    * inter-call latency that used to mask it.
    *
@@ -1607,7 +1428,7 @@ export class HavenClient {
    */
   async ensureFundingConfirmed(paymentId: string, fundingTxHash?: string): Promise<void> {
     const status = await this.getPaymentStatus(paymentId)
-    await this.waitForFundingTx(fundingTxHash ?? status.txHash ?? undefined, status.chainId)
+    await this.fundingLeg.waitForFundingTx(fundingTxHash ?? status.txHash ?? undefined, status.chainId)
   }
 
   async completeX402MerchantCall(input: {
@@ -1639,13 +1460,13 @@ export class HavenClient {
     const shouldHandshakeMcp =
       this.merchantTransport.isMcpUrl(input.url) ||
       input.mcpTransport?.handshakeRequired === true
-    const x402Wallet = shouldHandshakeMcp ? await this.resolveX402WalletForMerchantCall() : this.x402PayerAddress()
+    const x402Wallet = shouldHandshakeMcp ? await this.resolveX402WalletForMerchantCall() : x402PayerAddress(this.delegateAddress, this.x402Wallet)
     let mcpSessionId: string | undefined
     if (shouldHandshakeMcp) {
       mcpSessionId = await this.merchantTransport.initialize(input.url, input.init, x402Wallet)
     }
 
-    let requestInit: RequestInit = this.withX402Wallet(input.init, x402Wallet) ?? {}
+    let requestInit: RequestInit = withX402Wallet(input.init, x402Wallet) ?? {}
     if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
 
     const response = await this.merchantTransport.deliverPayment(input.url, requestInit, input.paymentHeader)
@@ -1825,7 +1646,7 @@ export class HavenClient {
   }
 
   private async resolveX402WalletForMerchantCall(): Promise<string | undefined> {
-    const localWallet = this.x402PayerAddress()
+    const localWallet = x402PayerAddress(this.delegateAddress, this.x402Wallet)
     if (localWallet) return localWallet
 
     try {
@@ -1843,237 +1664,6 @@ export class HavenClient {
   // and MACHINE-PAYMENT-CHALLENGE was never produced by any other Haven
   // surface. Use the x402 flow (authorizeX402 / fetch / quoteX402 / payX402Quote)
   // for agent-to-merchant payments.
-
-  private assertCanResumeX402(
-    status: PaymentStatusResult,
-    paymentRequired: X402PaymentRequired,
-    option: X402PaymentOption,
-  ): void {
-    if (status.rail !== 'x402') {
-      throw new HavenPaymentStateError(
-        `Payment ${status.paymentId} is ${status.rail}, not x402.`,
-        409,
-        status,
-      )
-    }
-
-    if (status.nextAction !== AgentPaymentNextAction.RetryOriginalX402Request) {
-      throw new HavenPaymentStateError(status.message, paymentStateStatusCode(status.status, 409), status)
-    }
-
-    if (!status.txHash) {
-      throw new HavenApiError(
-        `x402 payment ${status.paymentId} is ready to retry but has no Haven transaction hash.`,
-        502,
-        status,
-        status.paymentId,
-      )
-    }
-
-    if (status.resourceUrl && status.resourceUrl !== paymentRequired.resource.url) {
-      throw new HavenApiError(
-        'x402 resume request does not match the approved resource URL.',
-        409,
-        { status, paymentRequired },
-        status.paymentId,
-      )
-    }
-
-    if (status.merchantAddress && !sameAddress(status.merchantAddress, option.payTo)) {
-      throw new HavenApiError(
-        'x402 resume request does not match the approved merchant.',
-        409,
-        { status, selectedPayment: option },
-        status.paymentId,
-      )
-    }
-
-    const optionChainId = chainIdFromNetwork(option.network)
-    if (status.chainId && optionChainId && status.chainId !== optionChainId) {
-      throw new HavenApiError(
-        'x402 resume request does not match the approved network.',
-        409,
-        { status, selectedPayment: option },
-        status.paymentId,
-      )
-    }
-
-    if (status.token && status.token !== 'USDC') {
-      throw new HavenApiError(
-        'x402 resume request does not match the approved token.',
-        409,
-        { status, selectedPayment: option },
-        status.paymentId,
-      )
-    }
-
-    const approvedAmount = status.amount ? normalizeDecimal(status.amount) : ''
-    const requestedAmount = normalizeDecimal(decimalFromUsdcAtomic(x402AuthorizationAmount(option)))
-    if (approvedAmount && approvedAmount !== requestedAmount) {
-      throw new HavenApiError(
-        'x402 resume request does not match the approved amount.',
-        409,
-        { status, selectedPayment: option },
-        status.paymentId,
-      )
-    }
-  }
-
-
-  private mapX402ReceiptFromAuthorization(
-    paymentRequired: X402PaymentRequired,
-    option: X402PaymentOption,
-    // #1521: `undefined` builds the receipt for a payment that already
-    // settled. A settled payment has no live authorization to carry, and
-    // minting one to fill this slot is precisely the defect that issue names.
-    paymentHeader: string | undefined,
-    raw: RawX402AuthorizeResponse,
-    execResult?: RawSignResponse,
-  ): X402Receipt {
-    const txHash = execResult?.tx_hash ?? raw.tx_hash ?? ''
-    const chainId = execResult?.chain_id ?? raw.chain_id ?? chainIdFromNetwork(option.network)
-    const token = execResult?.token ?? raw.token ?? 'USDC'
-    const amount = execResult?.amount ?? raw.amount ?? decimalFromUsdcAtomic(x402AuthorizationAmount(option))
-    const to = execResult?.to ?? raw.to ?? this.delegateAddress ?? ''
-    const explorerUrl = execResult?.explorer_url ?? raw.explorer_url ?? explorerUrlOrEmpty(chainId, txHash)
-    const merchantTo = execResult?.merchant_to ?? raw.merchant_to ?? option.payTo
-    const payer = raw.payer ?? raw.safe_address ?? raw.sign_data?.components.safe
-
-    return this.buildX402Receipt({
-      paymentId: raw.payment_id,
-      txHash,
-      token,
-      amount,
-      to,
-      resourceUrl: paymentRequired.resource.url,
-      explorerUrl,
-      accepted: option,
-      paymentHeader,
-      merchantTo,
-      payer,
-      chainId,
-    })
-  }
-
-  private mapX402ReceiptFromStatus(
-    paymentRequired: X402PaymentRequired,
-    option: X402PaymentOption,
-    // See `mapX402ReceiptFromAuthorization` — `undefined` is the settled case.
-    paymentHeader: string | undefined,
-    status: PaymentStatusResult,
-  ): X402Receipt {
-    if (!status.txHash) {
-      throw new HavenApiError(
-        `x402 payment ${status.paymentId} is ready to retry but has no Haven transaction hash.`,
-        502,
-        status,
-        status.paymentId,
-      )
-    }
-
-    return this.buildX402Receipt({
-      paymentId: status.paymentId,
-      txHash: status.txHash,
-      token: status.token || 'USDC',
-      amount: status.amount || decimalFromUsdcAtomic(x402AuthorizationAmount(option)),
-      to: this.delegateAddress ?? '',
-      resourceUrl: paymentRequired.resource.url,
-      explorerUrl: explorerUrlOrEmpty(status.chainId, status.txHash),
-      accepted: option,
-      paymentHeader,
-      merchantTo: status.merchantAddress ?? option.payTo,
-      payer: this.x402Wallet,
-      chainId: status.chainId || chainIdFromNetwork(option.network),
-    })
-  }
-
-  private buildX402Receipt(input: {
-    paymentId: string
-    txHash: string
-    token: string
-    amount: string
-    to: string
-    resourceUrl: string
-    explorerUrl: string
-    accepted: X402PaymentOption
-    // #1521: absent for a receipt describing an ALREADY-SETTLED payment,
-    // which has no live authorization to carry. `X402Receipt.paymentHeader`
-    // was already optional; only these builders assumed otherwise.
-    paymentHeader: string | undefined
-    merchantTo?: string | null
-    payer?: string
-    chainId?: number
-  }): X402Receipt {
-    const fundingExplorerUrl = input.explorerUrl || explorerUrlOrEmpty(input.chainId, input.txHash)
-
-    return {
-      success: true,
-      paymentId: input.paymentId,
-      txHash: input.txHash,
-      token: input.token,
-      amount: input.amount,
-      to: input.to,
-      resourceUrl: input.resourceUrl,
-      explorerUrl: input.explorerUrl,
-      accepted: input.accepted,
-      paymentHeader: input.paymentHeader,
-      merchantTo: input.merchantTo ?? input.accepted.payTo,
-      payer: input.payer,
-      chainId: input.chainId,
-      haven: {
-        paymentId: input.paymentId,
-        fundingTxHash: input.txHash,
-        fundingExplorerUrl,
-      },
-      merchant: {
-        payTo: input.merchantTo ?? input.accepted.payTo,
-      },
-      x402: {
-        amount: x402AuthorizationAmount(input.accepted),
-        token: input.token,
-        network: input.accepted.network,
-        asset: input.accepted.asset,
-        resource: input.accepted.resource ?? input.resourceUrl,
-      },
-    }
-  }
-
-  private async createStandardX402Header(
-    paymentRequired: X402PaymentRequired,
-    option: X402PaymentOption,
-  ): Promise<string> {
-    if (!this.delegateKey) {
-      throw new HavenSigningError('delegateKey is required to sign x402 payment headers.')
-    }
-
-    const account = privateKeyToAccount(this.delegateKey as `0x${string}`)
-    const requirements = toStandardPaymentRequirements(paymentRequired, option)
-
-    const header = await exact.evm.createPaymentHeader(
-      account,
-      paymentRequired.x402Version,
-      requirements,
-    )
-    if (paymentRequired.x402Version < 2) return header
-
-    const payment = decodeBase64Json<{ payload: unknown }>(header)
-    return encodeBase64Json({
-      x402Version: paymentRequired.x402Version,
-      accepted: option,
-      payload: payment.payload,
-    })
-  }
-
-  private cacheX402Receipt(
-    idempotencyKey: string,
-    paymentHeader: string,
-    receipt: X402Receipt,
-  ): void {
-    const expiresAt = getPaymentHeaderValidBefore(paymentHeader)
-    if (expiresAt > Date.now()) {
-      this.x402ReceiptCache.set(idempotencyKey, { expiresAt, receipt })
-    }
-  }
 
   private async recordMerchantRetryRejected(input: {
     rail: string
@@ -2147,243 +1737,12 @@ export class HavenClient {
    * backend has already confirmed on-chain submission and callers accept the
    * small propagation window as a trade-off for not configuring an RPC URL.
    */
-  private async waitForFundingTx(
-    txHash: string | undefined,
-    chainId: number | undefined,
-    timeoutMs = 30_000,
-  ): Promise<void> {
-    if (!txHash || !chainId) return
-    const rpcUrl = this.chainRpcs[chainId]
-    if (!rpcUrl) return
-    const provider = createJsonRpcProvider(rpcUrl)
-    const onChainReceipt = await provider.waitForTransaction(txHash, 1, timeoutMs)
-    if (!onChainReceipt || onChainReceipt.status !== 1) {
-      throw new HavenApiError(
-        'Funding tx did not confirm on-chain within the timeout window.',
-        500,
-        { txHash, chainId },
-      )
-    }
-  }
-
-  /**
-   * Can the delegate EOA still fund an authorization for `amountAtomic`?
-   *
-   * #1521: the only question that separates a legitimate resume (funding
-   * confirmed, merchant never paid — the delegate still holds the money) from
-   * a replayed settled payment (funding confirmed, merchant paid, delegate
-   * spent). The intent's own `status: 'confirmed'` is identical in both.
-   *
-   * The balance is asked of the CHAIN rather than of Haven's bookkeeping on
-   * purpose: the merchant-settlement evidence record is written by this SDK
-   * *after* the merchant call, so a client that dies between the two leaves
-   * the backend believing the merchant was never paid — the exact case the
-   * discriminator has to get right. The chain cannot be behind in that way.
-   *
-   * Returns `null` — never a guess — when `chainRpcs` has no entry for the
-   * chain or the read fails. Callers must treat that as "unverifiable", not
-   * as "funded".
-   */
-  private async delegateCanFund(
-    chainId: number | undefined,
-    tokenAddress: string,
-    amountAtomic: string,
-    timeoutMs = 10_000,
-  ): Promise<boolean | null> {
-    if (!chainId || !this.delegateAddress) return null
-    const rpcUrl = this.chainRpcs[chainId]
-    if (!rpcUrl) return null
-    try {
-      const provider = createJsonRpcProvider(rpcUrl)
-      const token = createErc20Contract(
-        tokenAddress,
-        ['function balanceOf(address) view returns (uint256)'] as const,
-        provider,
-      )
-      // Bounded like `waitForFundingTx` below. This sits on a money
-      // authorization path with no way for a caller to route around a stall,
-      // so an unresponsive RPC must degrade to "unverifiable" rather than
-      // hang the payment: a slow answer is worth less than a prompt refusal.
-      const balance = await Promise.race([
-        token.balanceOf(this.delegateAddress) as Promise<bigint>,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref?.()),
-      ])
-      if (balance === null) return null
-      return balance >= BigInt(amountAtomic)
-    } catch {
-      // An RPC that is down, or an amount that will not parse, tells us
-      // nothing about the delegate's balance. Saying so is the whole point of
-      // the tri-state — and on the accidental-replay path it fails toward
-      // refusing, never toward minting.
-      return null
-    }
-  }
-
   private throwIfNonSignableAuthorizationState(
     label: string,
     raw: RawX402AuthorizeResponse,
   ): void {
     if (raw.status === 'pending_signature') return
     throwPaymentStateError(label, raw)
-  }
-
-  private x402PayerAddress(): string | undefined {
-    return this.delegateAddress ?? this.x402Wallet
-  }
-
-  private snapshotX402Request(url: string, init?: RequestInit): X402RequestSnapshot {
-    return {
-      url,
-      method: init?.method ?? 'GET',
-      headers: Array.from(new Headers(init?.headers).entries()),
-      body: this.snapshotRequestBody(init?.body),
-    }
-  }
-
-  private snapshotRequestBody(body: BodyInit | null | undefined): string | undefined {
-    if (body == null) return undefined
-    if (typeof body === 'string') return body
-    if (body instanceof URLSearchParams) return body.toString()
-
-    throw new HavenApiError(
-      'Quote helpers can only capture resumable request bodies that are strings or URLSearchParams. ' +
-      'For streams, blobs, or binary bodies, preserve the original request yourself and call the matching resume method with fresh init.',
-      400,
-    )
-  }
-
-  private requestInitFromSnapshot(request: X402RequestSnapshot): RequestInit {
-    return {
-      method: request.method,
-      headers: request.headers,
-      body: request.body,
-    }
-  }
-
-  private withX402Wallet(init?: RequestInit, wallet = this.x402PayerAddress()): RequestInit | undefined {
-    if (!wallet) return init
-
-    const headers = new Headers(init?.headers)
-    if (!headers.has('x402-wallet')) {
-      headers.set('x402-wallet', wallet)
-    }
-
-    return {
-      ...init,
-      headers,
-    }
-  }
-
-  private buildX402Quote(
-    paymentRequired: X402PaymentRequired,
-    request: X402RequestSnapshot,
-    idempotencyKey?: string,
-    mcpTransport?: X402McpTransport,
-  ): X402Quote {
-    const option = selectStandardPaymentOption(paymentRequired.accepts)
-    if (!option) {
-      throw new HavenApiError(
-        'No compatible payment option found in x402 requirements. ' +
-        'Haven supports standard x402 exact payments on Base USDC.',
-        400,
-      )
-    }
-
-    const token = resolveTokenFromAddress(option.asset, option.network)
-    return {
-      rail: 'x402',
-      idempotencyKey: idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option),
-      paymentRequired,
-      accepted: option,
-      request,
-      ...(mcpTransport ? { mcpTransport } : {}),
-      resourceUrl: paymentRequired.resource.url,
-      description: paymentRequired.resource.description ?? option.description ?? null,
-      mimeType: paymentRequired.resource.mimeType ?? option.mimeType ?? null,
-      amountAtomic: x402AuthorizationAmount(option),
-      amount: decimalFromUsdcAtomic(x402AuthorizationAmount(option)),
-      token: token?.symbol ?? 'USDC',
-      // #1351: null when the asset is unrecognised on this network — the
-      // `token` fallback above is a LABEL, not evidence of 6 decimals, and a
-      // human-denominated cap must fail closed rather than convert against a
-      // guess. Same resolution as `token`, so the two never disagree.
-      decimals: token?.decimals ?? null,
-      asset: option.asset,
-      network: option.network,
-      chainId: chainIdOrNull(option.network),
-      merchantAddress: option.payTo,
-      maxTimeoutSeconds: option.maxTimeoutSeconds,
-    }
-  }
-
-  private buildX402ResumeState(input: {
-    paymentId: string
-    paymentRequired: X402PaymentRequired
-    accepted: X402PaymentOption
-    idempotencyKey: string
-    request?: X402RequestSnapshot
-  }): X402ResumeState {
-    const token = resolveTokenFromAddress(input.accepted.asset, input.accepted.network)
-    return {
-      rail: 'x402',
-      paymentId: input.paymentId,
-      idempotencyKey: input.idempotencyKey,
-      paymentRequired: input.paymentRequired,
-      accepted: input.accepted,
-      url: input.request?.url ?? input.paymentRequired.resource.url,
-      request: input.request,
-      resourceUrl: input.paymentRequired.resource.url,
-      description: input.paymentRequired.resource.description ?? input.accepted.description ?? null,
-      amountAtomic: x402AuthorizationAmount(input.accepted),
-      amount: decimalFromUsdcAtomic(x402AuthorizationAmount(input.accepted)),
-      token: token?.symbol ?? 'USDC',
-      asset: input.accepted.asset,
-      network: input.accepted.network,
-      chainId: chainIdOrNull(input.accepted.network),
-      merchantAddress: input.accepted.payTo,
-    }
-  }
-
-  // #1328: attachResumeState's 'mpp' branch (buildMppQuote / buildMppResumeState
-  // / attachMppResumeState) is retired along with the rest of the MPP-demo
-  // client surface — every remaining caller passes rail: 'x402' only, so this
-  // is now a direct alias for attachX402ResumeState rather than a dispatcher.
-  private attachResumeState(
-    err: unknown,
-    input: {
-      rail: 'x402'
-      paymentRequired: X402PaymentRequired
-      accepted: X402PaymentOption
-      idempotencyKey: string
-      request?: X402RequestSnapshot
-    },
-  ): void {
-    this.attachX402ResumeState(
-      err,
-      input.paymentRequired,
-      input.accepted,
-      input.idempotencyKey,
-      input.request,
-    )
-  }
-
-  private attachX402ResumeState(
-    err: unknown,
-    paymentRequired: X402PaymentRequired,
-    accepted: X402PaymentOption,
-    idempotencyKey: string,
-    request?: X402RequestSnapshot,
-  ): void {
-    if (!(err instanceof HavenPaymentStateError)) return
-    if (err.state.rail !== 'x402') return
-
-    err.resumeState = this.buildX402ResumeState({
-      paymentId: err.state.paymentId,
-      paymentRequired,
-      accepted,
-      idempotencyKey,
-      request,
-    })
   }
 
   // ── Tool Execution (for agent frameworks) ────────────────────────
@@ -2640,21 +1999,33 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function getPaymentHeaderValidBefore(paymentHeader: string): number {
-  try {
-    const payment = decodeBase64Json<{ payload?: { authorization?: { validBefore?: string } } }>(
-      paymentHeader,
-    )
-    const payload = payment.payload as { authorization?: { validBefore?: string } }
-    const validBeforeSeconds = Number(payload.authorization?.validBefore)
-    if (Number.isFinite(validBeforeSeconds)) return validBeforeSeconds * 1000
-  } catch {
-    // If the header cannot be decoded, skip caching rather than hiding errors.
-  }
-
-  return 0
+function parseMerchantSettlement(header: string | null): {
+  settlementTxHash?: string | null
+} {
+  if (!header) return {}
+  const parsed = parseProtocolReceiptHeader(header)
+  const tx =
+    typeof parsed?.transaction === 'string'
+      ? parsed.transaction
+      : typeof parsed?.txHash === 'string'
+        ? parsed.txHash
+        : typeof parsed?.tx_hash === 'string'
+          ? parsed.tx_hash
+          : null
+  return { settlementTxHash: tx }
 }
 
+
+/**
+ * Digest of a delegation-rail signing payload, or `undefined` when there is
+ * none (#1138).
+ *
+ * Guarded because a payload that cannot be hashed is not a recoverable
+ * condition to paper over: the edge signer derives this same digest before
+ * signing, so an unhashable payload can never be signed by anyone. Surfacing it
+ * as a named Haven error beats letting a raw viem type error escape from the
+ * middle of intent construction.
+ */
 function parseProtocolReceiptHeader(value: string): Record<string, unknown> | undefined {
   try {
     return decodeBase64Json<Record<string, unknown>>(value)

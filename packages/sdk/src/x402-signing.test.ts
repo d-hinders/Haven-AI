@@ -123,8 +123,11 @@ function makeHaven(): HavenClient {
 
 /**
  * Build a signed X-PAYMENT header through the SDK's real signing path.
- * `createStandardX402Header` is private; reaching into it keeps each test
- * focused on the signing path without mocking a 5-request payment flow.
+ *
+ * Header minting moved to the private `fundingLeg` module in #1618; reaching
+ * through the client rather than constructing the module directly is
+ * deliberate, because these tests pin what a REAL HavenClient signs — the
+ * wiring is part of what they guard.
  */
 async function buildHeader(
   haven: HavenClient = makeHaven(),
@@ -132,9 +135,11 @@ async function buildHeader(
   option: X402PaymentOption = accepted,
 ): Promise<string> {
   const target = haven as unknown as {
-    createStandardX402Header(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
+    fundingLeg: {
+      createPaymentHeader(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
+    }
   }
-  return target.createStandardX402Header(pr, option)
+  return target.fundingLeg.createPaymentHeader(pr, option)
 }
 
 describe('EIP-3009 authorization fields', () => {

@@ -41,174 +41,22 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      # The routing program itself lives in scripts/ci/change-classifier.mjs and is
+      # tested by scripts/ci/change-classifier.test.mjs (#1622). It was 164 lines of
+      # inline shell here, where no test could reach it — which is how #1206 left a
+      # suite running nowhere and #1030 left a money-path safeguard wrong. Keep this
+      # step a bare invocation: rules belong in the script, where they are covered.
       - name: Classify changed files
         id: filter
         env:
+          EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -euo pipefail
-
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            {
-              echo "code=true"
-              echo "frontend=true"
-              echo "backend=true"
-              echo "sdk=true"
-              echo "connect=true"
-              echo "mcp=true"
-              echo "mcp_server=true"
-              echo "signer=true"
-              echo "cli=true"
-              echo "full=true"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ -n "${BASE_SHA:-}" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
-            git diff --name-only "$BASE_SHA" "$HEAD_SHA" > changed-files.txt
-          else
-            git ls-tree -r --name-only "$HEAD_SHA" > changed-files.txt
-          fi
-
-          code=false
-          frontend=false
-          backend=false
-          sdk=false
-          connect=false
-          mcp=false
-          mcp_server=false
-          signer=false
-          cli=false
-          full=false
-
-          while IFS= read -r file; do
-            # CLAUDE.md mirrors backend contracts (the API surface table and the
-            # chain registry) that packages/backend/src/docs-drift pins. A
-            # CLAUDE.md-only edit must therefore run the backend suite even
-            # though it is Markdown — otherwise the drift test never guards it.
-            case "$file" in
-              CLAUDE.md)
-                code=true
-                backend=true
-                ;;
-              *.md|docs/*|AGENTS.md|LICENSE|LICENSE.*)
-                continue
-                ;;
-            esac
-
-            case "$file" in
-              .github/workflows/*.yml|.github/workflows/*.yaml|package.json|package-lock.json|tsconfig*.json)
-                code=true
-                full=true
-                ;;
-              # The dependency-boundary gate (#982) lives outside packages/ but
-              # polices packages/backend. Without this case, weakening a rule or
-              # the ratchet script would ship without the gate ever running.
-              .dependency-cruiser.cjs|scripts/dep-lint.mjs|scripts/dep-lint.test.mjs|scripts/db-mock-ratchet.mjs|scripts/db-mock-ratchet.test.mjs|scripts/generate-api-types.mjs)
-                code=true
-                backend=true
-                ;;
-              # The shared ratchet engine backs BOTH the backend db-mock gate
-              # and the frontend wire-type gate (#1447) — weakening it must run
-              # both, not just the backend one.
-              scripts/lib/ratchet.mjs)
-                code=true
-                backend=true
-                frontend=true
-                ;;
-              # Same rule as the dep-lint case above, for the wire-type ratchet
-              # (#1447): it lives outside packages/ but polices packages/frontend,
-              # and only the frontend job runs it. Without this case, a PR that
-              # ONLY loosens the scanner — widening the exemption regex, deleting
-              # the --update refusal — would go green with the gate never running.
-              scripts/lint-wire-types.mjs|scripts/lint-wire-types.test.mjs)
-                code=true
-                frontend=true
-                ;;
-              # The network-map pin test (#1478) spans backend, sdk and signer
-              # sources — weakening it must run every job that would have
-              # caught the drift, same rule as the ratchet scripts above.
-              scripts/network-map-pins.test.mjs)
-                code=true
-                backend=true
-                sdk=true
-                signer=true
-                ;;
-              packages/frontend/*)
-                code=true
-                frontend=true
-                ;;
-              packages/backend/*)
-                code=true
-                backend=true
-                ;;
-              packages/sdk/*)
-                code=true
-                sdk=true
-                ;;
-              packages/connect/*)
-                code=true
-                connect=true
-                ;;
-              packages/mcp/*)
-                code=true
-                mcp=true
-                ;;
-              packages/mcp-server/*)
-                code=true
-                mcp_server=true
-                ;;
-              packages/signer/*)
-                code=true
-                signer=true
-                ;;
-              packages/cli/*)
-                code=true
-                cli=true
-                ;;
-              packages/*)
-                code=true
-                full=true
-                ;;
-            esac
-          done < changed-files.txt
-
-          if [ "$full" = "true" ]; then
-            frontend=true
-            backend=true
-            sdk=true
-            connect=true
-            mcp=true
-            mcp_server=true
-            signer=true
-            cli=true
-          fi
-
-          if [ "$sdk" = "true" ]; then
-            backend=true
-            connect=true
-            mcp=true
-            mcp_server=true
-            signer=true
-          fi
-
-          if [ "$mcp" = "true" ] || [ "$signer" = "true" ]; then
-            connect=true
-          fi
-
-          {
-            echo "code=$code"
-            echo "frontend=$frontend"
-            echo "backend=$backend"
-            echo "sdk=$sdk"
-            echo "connect=$connect"
-            echo "mcp=$mcp"
-            echo "mcp_server=$mcp_server"
-            echo "signer=$signer"
-            echo "cli=$cli"
-            echo "full=$full"
-          } >> "$GITHUB_OUTPUT"
+        run: node scripts/ci/change-classifier.mjs
 
   # Unconditional by design (#1030). These tests cover repo-level CI config —
   # the money-path glob list and the money-flow QA freshness gate that replaced

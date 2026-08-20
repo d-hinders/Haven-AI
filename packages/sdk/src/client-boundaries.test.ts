@@ -100,7 +100,6 @@ const boundary: ClientBoundary = {
   ],
   privateOwnership: {
     'haven-http-status': [
-      'fetchAgent',
       'get',
       'post',
       'throwIfNonSignableAuthorizationState',
@@ -140,15 +139,17 @@ const boundary: ClientBoundary = {
   // from HavenClient, lower the matching ceiling in the same change. Never
   // raise one to accommodate a new responsibility on the facade.
   privateCeilings: {
-    'haven-http-status': 4,
+    'haven-http-status': 3,
     'local-signing': 1,
     'merchant-mcp': 6,
     'tool-adapter': 3,
     'x402-state-and-funding': 18,
   },
-  privateTotalCeiling: 32,
+  privateTotalCeiling: 31,
   localImports: [
+    './account-reads.js',
     './base64.js',
+    './delegate-sweep.js',
     './haven-api-transport.js',
     './mcp-merchant-transport.js',
     './payment-mappers.js',

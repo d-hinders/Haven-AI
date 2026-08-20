@@ -8,7 +8,7 @@ import {
   addressFromKey,
   verifySignature,
 } from './signer.js'
-import { verifyPaymentReceipt, type PaymentReceipt, type ReceiptVerification } from './receipt.js'
+import type { PaymentReceipt, ReceiptVerification } from './receipt.js'
 import type {
   HavenClientConfig,
   PaymentRequest,
@@ -42,13 +42,9 @@ import type {
   HavenAgent,
   HavenAgentSummary,
   HavenAgentAllowanceSummary,
-  HavenAgentReadiness,
   HavenAllowanceSummary,
   PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
-  RawHavenAgent,
-  RawHavenAllowanceSummary,
-  RawHavenPaymentReceiptsResponse,
   HavenCatalogEntry,
   RawCatalogEntry,
   AgentPaymentWarning,
@@ -57,7 +53,6 @@ import {
   AgentPaymentNextAction,
   AgentPaymentPhase,
   AgentPaymentRail,
-  AgentPaymentWarningCode,
   HavenApiError,
   HavenPaymentStateError,
   X402UnexpectedStatusError,
@@ -83,7 +78,6 @@ import { createJsonRpcProvider, createWallet, createErc20Contract } from './prov
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
 import { HavenApiTransport } from './haven-api-transport.js'
 import {
-  mapPaymentReceipt,
   mapPaymentResult,
   mapPaymentStatusResult,
 } from './payment-mappers.js'
@@ -97,19 +91,12 @@ import {
   McpMerchantTransport,
 } from './mcp-merchant-transport.js'
 import type { CapturedMerchantResponse } from './mcp-merchant-transport.js'
+import { AccountReads } from './account-reads.js'
+import { DelegateSweepApi } from './delegate-sweep.js'
 
 const CHAIN_EXPLORER_TX: Record<number, string> = {
   100:  'https://gnosisscan.io/tx',
   8453: 'https://basescan.org/tx',
-}
-
-// Canonical USDC contract address per chain — the single source the sweep flow
-// resolves against. Base (8453) is the only chain Haven sweeps today; the x402
-// path keeps its own lowercase copy for header comparison (see x402.ts
-// BASE_TOKENS). Add a chain here to make its USDC sweepable.
-const CHAIN_USDC: Record<number, string> = {
-  8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-  84532: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
 }
 
 function buildExplorerUrl(chainId: number | undefined, txHash: string): string {
@@ -123,38 +110,6 @@ function explorerUrlOrEmpty(chainId: number | undefined, txHash: string | null |
 
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
-
-function formatAtomicAmount(atomic: bigint, decimals: number): string {
-  // Defensive: negative atomics can't occur today (remaining is floored at 0n)
-  // but would otherwise produce corrupt output like "0.000...-5".
-  if (atomic < 0n) return '0.0'
-  const s = atomic.toString().padStart(decimals + 1, '0')
-  const intPart = s.slice(0, s.length - decimals) || '0'
-  const fracPart = s.slice(s.length - decimals).replace(/0+$/, '') || '0'
-  return `${intPart}.${fracPart}`
-}
-
-/** Parse an atomic-amount string, defaulting to 0n on malformed input. */
-function safeBigInt(value: string): bigint {
-  try {
-    return BigInt(value)
-  } catch {
-    return 0n
-  }
-}
-
-/**
- * Derive the agent's spend-readiness from its raw status and per-token remaining
- * allowance. See {@link HavenAgentReadiness} for the contract.
- */
-function deriveReadiness(
-  status: string,
-  allowances: ReadonlyArray<{ remainingAtomic: string }>,
-): HavenAgentReadiness {
-  if (status !== 'active') return 'revoked'
-  const hasSpendable = allowances.some((a) => safeBigInt(a.remainingAtomic) > 0n)
-  return hasSpendable ? 'ready' : 'needs_approval'
-}
 
 /** Cap the merchant body persisted to the reconciliation event (the full body is kept on the thrown error). */
 const MERCHANT_BODY_SNIPPET_LIMIT = 1000
@@ -258,6 +213,8 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
 export class HavenClient {
   private readonly delegateKey: string | undefined
   private readonly havenApi: HavenApiTransport
+  private readonly accountReads: AccountReads
+  private readonly delegateSweep: DelegateSweepApi
   private readonly x402Wallet: string | undefined
   private readonly merchantTransport: McpMerchantTransport
   private readonly confirmationTimeout: number
@@ -271,6 +228,17 @@ export class HavenClient {
   constructor(config: HavenClientConfig) {
     this.delegateKey = config.delegateKey
     this.havenApi = new HavenApiTransport(config)
+    this.accountReads = new AccountReads({
+      transport: this.havenApi,
+      getPaymentStatus: (paymentId) => this.getPaymentStatus(paymentId),
+    })
+    this.delegateSweep = new DelegateSweepApi({
+      transport: this.havenApi,
+      delegateKey: config.delegateKey,
+      chainRpcs: config.chainRpcs ?? {},
+      getAgent: () => this.getAgent(),
+      buildExplorerUrl: (chainId, hash) => buildExplorerUrl(chainId, hash),
+    })
     this.x402Wallet = config.x402Wallet
     this.merchantTransport = new McpMerchantTransport({ merchantTimeout: config.merchantTimeout })
     this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT
@@ -603,38 +571,7 @@ export class HavenClient {
    * Get the agent identity tied to this API key.
    */
   async getAgent(): Promise<HavenAgent> {
-    // #1348: coalesce CONCURRENT reads into one HTTP GET — the guided
-    // purchase flow legitimately wants the agent in two overlapping places
-    // (the caller's preflight and the quote leg's x402-wallet resolution).
-    // This is in-flight dedupe only, never a cache: the promise is cleared
-    // the moment it settles, so sequential calls stay fresh reads and a
-    // delegate rotation is picked up exactly as before.
-    if (this.agentInFlight) return this.agentInFlight
-    const request = this.fetchAgent()
-    this.agentInFlight = request
-    request.finally(() => {
-      this.agentInFlight = null
-    }).catch(() => {})
-    return request
-  }
-
-  private agentInFlight: Promise<HavenAgent> | null = null
-
-  private async fetchAgent(): Promise<HavenAgent> {
-    const raw = await this.get<RawHavenAgent>('/machine-payments/agent')
-    return {
-      id: raw.id,
-      name: raw.name,
-      status: raw.status,
-      safeAddress: raw.safe_address,
-      delegateAddress: raw.delegate_address,
-      chainId: raw.chain_id,
-      // Defensive normalization, not trust: the backend contract is exactly
-      // 'legacy' | 'delegation' (#1306), but an older/mismatched backend
-      // during a rollout window should degrade to the wider legacy bucket
-      // rather than propagate an unrecognized string.
-      executionRail: raw.execution_rail === 'delegation' ? 'delegation' : 'legacy',
-    }
+    return this.accountReads.getAgent()
   }
 
   /**
@@ -645,37 +582,7 @@ export class HavenClient {
    * without two round trips and manual assembly.
    */
   async getAgentSummary(): Promise<HavenAgentSummary> {
-    const [agent, allowanceSummary] = await Promise.all([
-      this.getAgent(),
-      this.getAllowances(),
-    ])
-
-    const allowances: HavenAgentAllowanceSummary[] = allowanceSummary.allowances.map((a) => {
-      // Only format a human amount when we KNOW the token's decimals. Guessing a
-      // default (e.g. 6) for an unregistered token would misformat an 18-decimal
-      // balance by 12 orders of magnitude and mislead the agent about what it can
-      // spend — so for unknown tokens we surface the exact atomic value, flagged.
-      const token = resolveTokenFromAddress(a.tokenAddress)
-      const remainingDisplay = token
-        ? `${formatAtomicAmount(safeBigInt(a.onchain.remaining), token.decimals)} ${a.tokenSymbol}`
-        : `${a.onchain.remaining} ${a.tokenSymbol} (atomic; unknown decimals)`
-      return {
-        tokenSymbol: a.tokenSymbol,
-        remainingAtomic: a.onchain.remaining,
-        remainingDisplay,
-        configuredAmount: a.configuredAmount,
-        resetPeriodMin: a.resetPeriodMin,
-        isResetPending: a.onchain.isResetPending,
-      }
-    })
-
-    const readiness = deriveReadiness(agent.status, allowances)
-    // #1590: same value under the honest name. `readiness` covers hosted
-    // identity + on-chain spend authority ONLY — the hosted side cannot see
-    // the local signer, and the bare name invited exactly that misread
-    // (2026-08-18: an agent took readiness:"ready" as end-to-end payment
-    // readiness while the signer was unstartable).
-    return { ...agent, readiness, spend_authority_readiness: readiness, allowances }
+    return this.accountReads.getAgentSummary()
   }
 
   /**
@@ -688,83 +595,7 @@ export class HavenClient {
    * Requires `chainRpcs` to be set for the agent's chain in `HavenClientConfig`.
    */
   async sweepDelegate(): Promise<SweepResult> {
-    if (!this.delegateKey) {
-      throw new HavenSigningError('delegateKey is required for sweepDelegate.')
-    }
-
-    const agent = await this.getAgent()
-    const { safeAddress, delegateAddress, chainId } = agent
-
-    if (!delegateAddress) {
-      throw new HavenApiError('Agent has no delegate address.', 422)
-    }
-
-    const rpcUrl = this.chainRpcs[chainId]
-    if (!rpcUrl) {
-      throw new HavenApiError(
-        `chainRpcs[${chainId}] must be configured to sweep the delegate wallet.`,
-        422,
-      )
-    }
-
-    const provider = createJsonRpcProvider(rpcUrl)
-    const wallet = createWallet(this.delegateKey, provider)
-
-    const ERC20_TRANSFER_ABI = ['function balanceOf(address) view returns (uint256)', 'function transfer(address to, uint256 amount) returns (bool)'] as const
-
-    const transfers: SweepResult['transfers'] = []
-
-    // ── 1. Sweep ERC-20 USDC ────────────────────────────────────────
-    const usdcAddress = CHAIN_USDC[chainId]
-    if (usdcAddress) {
-      const usdcContract = createErc20Contract(usdcAddress, ERC20_TRANSFER_ABI, wallet)
-      const usdcBalance: bigint = await usdcContract.balanceOf(delegateAddress)
-      if (usdcBalance > 0n) {
-        const tx = await usdcContract.transfer(safeAddress, usdcBalance)
-        const receipt = await (tx as { wait: (n: number) => Promise<{ hash: string } | null> }).wait(1)
-        const txHash: string = (receipt as { hash: string } | null)?.hash ?? (tx as { hash: string }).hash
-        transfers.push({
-          asset: 'USDC',
-          amount: formatAtomicAmount(usdcBalance, 6),
-          amountAtomic: usdcBalance.toString(),
-          txHash,
-          explorerUrl: buildExplorerUrl(chainId, txHash),
-        })
-      }
-    }
-
-    // ── 2. Sweep native ETH ─────────────────────────────────────────
-    const ethBalance = await provider.getBalance(delegateAddress)
-    if (ethBalance > 0n) {
-      // Reserve gas for the native transfer. An EIP-1559 (type-2) tx is billed up
-      // to maxFeePerGas, not gasPrice, so reserve against that — with a buffer for
-      // base-fee drift between estimation and inclusion — or the send reverts with
-      // "insufficient funds for intrinsic transaction cost".
-      const fee = await provider.getFeeData()
-      const effectiveGasPrice = fee.maxFeePerGas ?? fee.gasPrice ?? 1_000_000n
-      const gasLimit = 21_000n
-      const gasCost = effectiveGasPrice * gasLimit * 2n
-      const ethToSend = ethBalance > gasCost ? ethBalance - gasCost : 0n
-      if (ethToSend > 0n) {
-        const tx = await wallet.sendTransaction({ to: safeAddress, value: ethToSend })
-        const receipt = await tx.wait(1)
-        const txHash: string = receipt?.hash ?? tx.hash
-        transfers.push({
-          asset: 'ETH',
-          amount: formatAtomicAmount(ethToSend, 18),
-          amountAtomic: ethToSend.toString(),
-          txHash,
-          explorerUrl: buildExplorerUrl(chainId, txHash),
-        })
-      }
-    }
-
-    return {
-      fromAddress: delegateAddress,
-      toAddress: safeAddress,
-      chainId,
-      transfers,
-    }
+    return this.delegateSweep.sweepDelegate()
   }
 
   /**
@@ -776,7 +607,7 @@ export class HavenClient {
    * edge signer's `haven_sign_sweep_delegate`. No key is required on this client.
    */
   async prepareSweep(): Promise<SweepPrepareResponse> {
-    return this.post<SweepPrepareResponse>('/machine-payments/sweep/prepare', {})
+    return this.delegateSweep.prepareSweep()
   }
 
   /**
@@ -790,41 +621,14 @@ export class HavenClient {
     authorization: SweepAuthorization,
     signature: string,
   ): Promise<SweepSubmitResponse> {
-    return this.post<SweepSubmitResponse>('/machine-payments/sweep/submit', {
-      authorization,
-      signature,
-    })
+    return this.delegateSweep.submitSweep(authorization, signature)
   }
 
   /**
    * Get configured and on-chain allowances for the authenticated agent.
    */
   async getAllowances(): Promise<HavenAllowanceSummary> {
-    const raw = await this.get<RawHavenAllowanceSummary>('/machine-payments/allowances')
-    return {
-      agentId: raw.agent_id,
-      safeAddress: raw.safe_address,
-      delegateAddress: raw.delegate_address,
-      chainId: raw.chain_id,
-      allowances: raw.allowances.map((allowance) => ({
-        id: allowance.id,
-        tokenAddress: allowance.token_address,
-        tokenSymbol: allowance.token_symbol,
-        configuredAmount: allowance.configured_amount,
-        resetPeriodMin: allowance.reset_period_min,
-        onchain: {
-          amount: allowance.onchain.amount,
-          spent: allowance.onchain.spent,
-          remaining: allowance.onchain.remaining,
-          effectiveSpent: allowance.onchain.effective_spent,
-          resetTimeMin: allowance.onchain.reset_time_min,
-          lastResetMin: allowance.onchain.last_reset_min,
-          nonce: allowance.onchain.nonce,
-          isResetPending: allowance.onchain.is_reset_pending,
-          remainingIsFromChain: allowance.onchain.remaining_is_from_chain,
-        },
-      })),
-    }
+    return this.accountReads.getAllowances()
   }
 
   /**
@@ -860,83 +664,9 @@ export class HavenClient {
   ): Promise<{
     allowance: PostPurchaseAllowanceSummary | null
     warnings: AgentPaymentWarning[]
-    /** Same authenticated payment-state read used to resolve the settled token. */
     payment: PaymentStatusResult | null
   }> {
-    const unavailable = (detail: string): {
-      allowance: null
-      warnings: AgentPaymentWarning[]
-      payment: null
-    } => ({
-      payment: null,
-      allowance: null,
-      warnings: [
-        {
-          code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
-          message:
-            `Could not read the post-purchase allowance/budget for payment ${paymentId} (${detail}). ` +
-            'The payment itself succeeded — the on-chain policy remains the actual spend gate; this ' +
-            'only affects the remaining-budget figure reported here.',
-        },
-      ],
-    })
-    // #1320 review: all three reads in ONE parallel leg. Keep a successfully
-    // read payment state even when a best-effort allowance read fails: it is
-    // authoritative reporting data in its own right.
-    const [statusResult, agentResult, allowanceResult] = await Promise.allSettled([
-        this.getPaymentStatus(paymentId),
-        this.getAgent(),
-        this.getAllowances(),
-    ])
-    if (statusResult.status === 'rejected') {
-      return unavailable(statusResult.reason instanceof Error ? statusResult.reason.message : String(statusResult.reason))
-    }
-    const status = statusResult.value
-    if (agentResult.status === 'rejected') {
-      return { ...unavailable(agentResult.reason instanceof Error ? agentResult.reason.message : String(agentResult.reason)), payment: status }
-    }
-    if (allowanceResult.status === 'rejected') {
-      return { ...unavailable(allowanceResult.reason instanceof Error ? allowanceResult.reason.message : String(allowanceResult.reason)), payment: status }
-    }
-    try {
-      const tokenAddress = status.asset ?? status.x402?.asset ?? null
-      if (!tokenAddress) {
-        return { ...unavailable('the settled payment does not carry a resolvable token address'), payment: status }
-      }
-      const rail = agentResult.value.executionRail
-      const source = rail === 'delegation' ? 'active_delegations' : 'allowance_module'
-      const match = allowanceResult.value.allowances.find(
-        (a) => a.tokenAddress.toLowerCase() === tokenAddress.toLowerCase(),
-      )
-      if (!match) {
-        // #1320 review: a missing row is UNKNOWN, not zero — an unexpected
-        // address, rail mismatch, or read race must not report a confident
-        // "$0 remaining" to the user.
-        return { ...unavailable('no allowance/budget row matches the settled token'), payment: status }
-      }
-      // Same "only format when decimals are known" discipline as
-      // getAgentSummary() above — an unregistered token surfaces the exact
-      // atomic value rather than a misformatted guess.
-      const token = resolveTokenFromAddress(match.tokenAddress)
-      const remainingDisplay = token
-        ? `${formatAtomicAmount(safeBigInt(match.onchain.remaining), token.decimals)} ${match.tokenSymbol}`
-        : undefined
-      return {
-        payment: status,
-        allowance: {
-          rail,
-          remaining_atomic: match.onchain.remaining,
-          ...(remainingDisplay ? { remaining_display: remainingDisplay } : {}),
-          token_symbol: match.tokenSymbol,
-          token_address: match.tokenAddress,
-          reset_period: match.resetPeriodMin,
-          source,
-        },
-        warnings: [],
-      }
-    } catch (err) {
-      return unavailable(err instanceof Error ? err.message : String(err))
-    }
+    return this.accountReads.getPostPurchaseAllowanceSummary(paymentId)
   }
 
   /**
@@ -1004,9 +734,7 @@ export class HavenClient {
    * List recent machine-payment receipts/evidence for bookkeeping.
    */
   async listReceipts(options: { limit?: number } = {}): Promise<HavenPaymentReceipt[]> {
-    const query = options.limit ? `?limit=${encodeURIComponent(String(options.limit))}` : ''
-    const raw = await this.get<RawHavenPaymentReceiptsResponse>(`/machine-payments/receipts${query}`)
-    return raw.receipts.map(mapPaymentReceipt)
+    return this.accountReads.listReceipts(options)
   }
 
   /**
@@ -1018,10 +746,7 @@ export class HavenClient {
   async getReceipt(
     paymentId: string,
   ): Promise<{ receipt: PaymentReceipt; verification: ReceiptVerification }> {
-    const { receipt } = await this.get<{ receipt: PaymentReceipt }>(
-      `/payments/${paymentId}/receipt`,
-    )
-    return { receipt, verification: verifyPaymentReceipt(receipt) }
+    return this.accountReads.getReceipt(paymentId)
   }
 
   /**

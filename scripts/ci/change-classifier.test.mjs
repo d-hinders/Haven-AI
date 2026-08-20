@@ -1,0 +1,529 @@
+// Tests for the CI change classifier (#1622, epic #1621).
+//
+// The routing program these cover decides which jobs run, which means it
+// decides which GUARDS run. While it lived inline in ci.yml the only way to
+// exercise a rule was to push a commit and read the job graph, and the two
+// failures the epic cites (#1206, #1030) are both "a guard silently covered
+// nothing". So the bar here is: every rule arm is reachable from a test, and
+// the workflow's side of the contract is pinned rather than assumed.
+//
+// Run with: node --test scripts/ci/change-classifier.test.mjs
+// (also collected by the `ci_config_checks` job's `scripts/ci/*.test.mjs`)
+
+import { test, describe } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  OUTPUT_NAMES,
+  ZERO_SHA,
+  SURFACE_RULES,
+  PROPAGATION_RULES,
+  DOC_ONLY_PATTERNS,
+  classifyChangedFiles,
+  allSurfaces,
+  changedFilesCommand,
+  formatGithubOutput,
+  globToRegExp,
+} from './change-classifier.mjs'
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const ROOT = path.resolve(HERE, '..', '..')
+const SCRIPT = path.join(HERE, 'change-classifier.mjs')
+const workflow = readFileSync(path.join(ROOT, '.github/workflows/ci.yml'), 'utf8')
+
+/** The surfaces that came out true, as a sorted array — readable assertions. */
+const on = (files) =>
+  Object.entries(classifyChangedFiles(files))
+    .filter(([, v]) => v)
+    .map(([k]) => k)
+    .sort()
+
+describe('the contract with ci.yml', () => {
+  test('the workflow publishes exactly the ten outputs this script emits', () => {
+    // Targeted reader rather than a YAML dependency: the `outputs:` block of
+    // the `changes` job is a fixed shape, so if the shape changes this reads
+    // nothing and the assertion fails loudly instead of passing vacuously.
+    const start = workflow.indexOf('    outputs:\n')
+    assert.notEqual(start, -1, 'ci.yml has no `outputs:` block on the changes job')
+    const block = workflow.slice(start).split('\n').slice(1)
+    const names = []
+    for (const line of block) {
+      const m = line.match(/^\s{6}([a-z_]+):\s*\$\{\{\s*steps\.filter\.outputs\.([a-z_]+)\s*\}\}\s*$/)
+      if (!m) break
+      assert.equal(m[1], m[2], `output ${m[1]} is wired to steps.filter.outputs.${m[2]}`)
+      names.push(m[1])
+    }
+    assert.deepEqual(
+      names,
+      [...OUTPUT_NAMES],
+      'ci.yml and OUTPUT_NAMES disagree. Downstream jobs read needs.changes.outputs.<name>, ' +
+        'so a name that exists on only one side silently disables whatever reads it.',
+    )
+  })
+
+  test('the workflow actually invokes this script', () => {
+    // Extraction is only real if ci.yml calls the extracted program. Without
+    // this, the script could be deleted or orphaned and every test above would
+    // still pass while CI routed on something else entirely.
+    assert.match(
+      workflow,
+      /node scripts\/ci\/change-classifier\.mjs/,
+      'ci.yml no longer runs scripts/ci/change-classifier.mjs',
+    )
+  })
+
+  test('the classify step passes the event name and both SHAs', () => {
+    for (const key of ['EVENT_NAME:', 'BASE_SHA:', 'HEAD_SHA:']) {
+      assert.ok(workflow.includes(key), `ci.yml no longer sets ${key} for the classifier`)
+    }
+  })
+})
+
+describe('workflow_dispatch forces everything', () => {
+  test('allSurfaces sets all ten true', () => {
+    const outputs = allSurfaces()
+    assert.equal(Object.keys(outputs).length, OUTPUT_NAMES.length)
+    for (const name of OUTPUT_NAMES) assert.equal(outputs[name], true, `${name} must be true`)
+  })
+
+  test('the CLI honours EVENT_NAME=workflow_dispatch without consulting git', () => {
+    // No BASE_SHA, no HEAD_SHA, no --files-from: a dispatch must not depend on
+    // any of them, which is what the old shell's early `exit 0` guaranteed.
+    const { output } = runCli([], { EVENT_NAME: 'workflow_dispatch' })
+    assert.equal(output, OUTPUT_NAMES.map((n) => `${n}=true`).join('\n') + '\n')
+  })
+})
+
+describe('base-SHA handling', () => {
+  test('a normal PR/push diffs base against head', () => {
+    assert.deepEqual(changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb' }), [
+      'diff',
+      '--name-only',
+      'aaa',
+      'bbb',
+    ])
+  })
+
+  test('an all-zero base SHA falls back to the whole tree at head', () => {
+    // git reports the absent base of a branch's first push this way. Diffing
+    // against it would fail the step; listing the tree routes everything,
+    // which is the safe direction.
+    assert.deepEqual(changedFilesCommand({ baseSha: ZERO_SHA, headSha: 'bbb' }), [
+      'ls-tree',
+      '-r',
+      '--name-only',
+      'bbb',
+    ])
+  })
+
+  test('an absent base SHA falls back the same way', () => {
+    for (const baseSha of [undefined, '']) {
+      assert.deepEqual(
+        changedFilesCommand({ baseSha, headSha: 'bbb' }),
+        ['ls-tree', '-r', '--name-only', 'bbb'],
+        `base ${JSON.stringify(baseSha)} must list the tree`,
+      )
+    }
+  })
+})
+
+describe('documentation routes nowhere — except CLAUDE.md', () => {
+  test('prose, docs/ and licences produce no flags at all', () => {
+    assert.deepEqual(on(['README.md', 'docs/product/agent-passport.md', 'AGENTS.md', 'LICENSE']), [])
+  })
+
+  test('a nested docs path is still doc-only', () => {
+    // Shell `case` globs are not path-aware, so `*.md` and `docs/*` match at
+    // any depth. Losing that would start routing every doc edit into CI.
+    assert.deepEqual(on(['docs/contributing/ship-playbooks/frontend.md', 'a/b/c/notes.md']), [])
+  })
+
+  test('CLAUDE.md routes to the backend suite', () => {
+    // It mirrors backend contracts that packages/backend/src/docs-drift pins,
+    // so a CLAUDE.md-only edit must run the backend job even though it is
+    // Markdown — otherwise the drift test never guards it.
+    assert.deepEqual(on(['CLAUDE.md']), ['backend', 'code'])
+  })
+})
+
+describe('package routing', () => {
+  const cases = [
+    ['packages/frontend/src/app/page.tsx', ['code', 'frontend']],
+    ['packages/backend/src/routes/payments.ts', ['backend', 'code']],
+    ['packages/connect/src/index.ts', ['code', 'connect']],
+    ['packages/mcp-server/src/tools.ts', ['code', 'mcp_server']],
+    ['packages/cli/src/index.ts', ['cli', 'code']],
+  ]
+  for (const [file, expected] of cases) {
+    test(`${file} routes to ${expected.join(' + ')}`, () => {
+      assert.deepEqual(on([file]), expected)
+    })
+  }
+
+  test('packages/mcp-server is not swallowed by the packages/mcp rule', () => {
+    // `packages/mcp/*` is listed first and the names share a prefix, so this
+    // is the ordering mistake that would quietly stop routing mcp-server.
+    assert.deepEqual(on(['packages/mcp-server/src/tools.ts']), ['code', 'mcp_server'])
+    assert.deepEqual(on(['packages/mcp/src/index.ts']).includes('mcp_server'), false)
+  })
+
+  test('an unrouted workspace forces the full matrix', () => {
+    // packages/core is the shared kernel backend and frontend both consume;
+    // it has no job of its own, so everything must run.
+    assert.deepEqual(on(['packages/core/src/chains.ts']), allTrue())
+  })
+
+  test('a package-local tsconfig routes to its package, not the root config rule', () => {
+    // `tsconfig*.json` is anchored at the repo root; a nested one must not
+    // escalate a one-package change into the full matrix.
+    assert.deepEqual(on(['packages/backend/tsconfig.json']), ['backend', 'code'])
+  })
+})
+
+describe('root config forces the full matrix', () => {
+  for (const file of ['package.json', 'package-lock.json', 'tsconfig.json', '.github/workflows/ci.yml']) {
+    test(`${file} turns everything on`, () => {
+      assert.deepEqual(on([file]), allTrue())
+    })
+  }
+
+  test('a workflow file this repo does not have yet still matches by extension', () => {
+    assert.deepEqual(on(['.github/workflows/brand-new.yaml']), allTrue())
+  })
+
+  test('a .github file outside workflows/ routes nowhere', () => {
+    // Documenting current behaviour, not endorsing it: labeler.yml and
+    // CODEOWNERS genuinely route nothing today. Routing completeness is #1626.
+    assert.deepEqual(on(['.github/labeler.yml', '.github/CODEOWNERS']), [])
+  })
+})
+
+describe('guards outside packages/ route to the package they police', () => {
+  test('the dependency-boundary gate runs the backend job', () => {
+    // A PR that only weakens the gate must still run it (#982).
+    assert.deepEqual(on(['scripts/dep-lint.mjs']), ['backend', 'code'])
+    assert.deepEqual(on(['.dependency-cruiser.cjs']), ['backend', 'code'])
+  })
+
+  test('the shared ratchet engine runs both jobs it backs', () => {
+    // It backs the backend db-mock gate and the frontend wire-type gate
+    // (#1447) — weakening it must run both, not just one.
+    assert.deepEqual(on(['scripts/lib/ratchet.mjs']), ['backend', 'code', 'frontend'])
+  })
+
+  test('the wire-type ratchet runs the frontend job', () => {
+    assert.deepEqual(on(['scripts/lint-wire-types.mjs']), ['code', 'frontend'])
+  })
+
+  test('the network-map pin test runs every job that would catch the drift', () => {
+    // #1478 spans backend, sdk and signer sources. sdk fan-out then pulls in
+    // connect, mcp and mcp_server too.
+    assert.deepEqual(on(['scripts/network-map-pins.test.mjs']), [
+      'backend',
+      'code',
+      'connect',
+      'mcp',
+      'mcp_server',
+      'sdk',
+      'signer',
+    ])
+  })
+
+  test('an unrouted script routes nowhere', () => {
+    assert.deepEqual(on(['scripts/docs/new-doc.mjs']), [])
+  })
+})
+
+describe('dependency propagation', () => {
+  test('sdk fans out to every package that consumes it', () => {
+    assert.deepEqual(on(['packages/sdk/src/client.ts']), [
+      'backend',
+      'code',
+      'connect',
+      'mcp',
+      'mcp_server',
+      'sdk',
+      'signer',
+    ])
+  })
+
+  test('mcp fans out to connect', () => {
+    assert.deepEqual(on(['packages/mcp/src/index.ts']), ['code', 'connect', 'mcp'])
+  })
+
+  test('signer fans out to connect', () => {
+    assert.deepEqual(on(['packages/signer/src/index.ts']), ['code', 'connect', 'signer'])
+  })
+
+  test('full fans out to every package but frontend alone does not', () => {
+    assert.deepEqual(on(['packages/frontend/src/app/page.tsx']), ['code', 'frontend'])
+    assert.deepEqual(on(['package.json']), allTrue())
+  })
+
+  test('propagation runs in order — full, then sdk, then connect', () => {
+    // sdk's fan-out reads flags full may have set, and connect's reads flags
+    // sdk may have set. Reordering these silently under-routes.
+    assert.deepEqual(
+      PROPAGATION_RULES.map((r) => r.when.join('|')),
+      ['full', 'sdk', 'mcp|signer'],
+    )
+  })
+})
+
+describe('mixed and degenerate file lists', () => {
+  test('a docs + backend PR routes the backend job', () => {
+    assert.deepEqual(on(['docs/operations/dev-environment.md', 'packages/backend/src/routes/payments.ts']), [
+      'backend',
+      'code',
+    ])
+  })
+
+  test('flags accumulate across files and never turn back off', () => {
+    assert.deepEqual(on(['packages/frontend/src/app/page.tsx', 'packages/cli/src/index.ts']), [
+      'cli',
+      'code',
+      'frontend',
+    ])
+  })
+
+  test('an empty list produces ten falses, not an empty object', () => {
+    const outputs = classifyChangedFiles([])
+    assert.deepEqual(Object.keys(outputs).sort(), [...OUTPUT_NAMES].sort())
+    for (const name of OUTPUT_NAMES) assert.equal(outputs[name], false)
+  })
+
+  test('blank and whitespace-only lines are ignored', () => {
+    // `git diff --name-only` output ends with a newline, so the last split
+    // element is always empty.
+    assert.deepEqual(on(['', '   ', 'packages/cli/src/index.ts', '']), ['cli', 'code'])
+  })
+
+  test('an unrecognised top-level path routes nowhere', () => {
+    assert.deepEqual(on(['Dockerfile', '.gitignore']), [])
+  })
+})
+
+describe('output rendering', () => {
+  test('every line is name=boolean, in contract order', () => {
+    const rendered = formatGithubOutput(classifyChangedFiles(['packages/cli/src/index.ts']))
+    const lines = rendered.trimEnd().split('\n')
+    assert.deepEqual(
+      lines.map((l) => l.split('=')[0]),
+      [...OUTPUT_NAMES],
+    )
+    for (const line of lines) assert.match(line, /^[a-z_]+=(true|false)$/)
+    assert.ok(rendered.endsWith('\n'), 'must end with a newline so appends do not glue lines together')
+  })
+
+  test('a non-boolean value is refused rather than emitted', () => {
+    // GITHUB_OUTPUT is parsed line by line, so a value containing a newline
+    // would forge additional outputs — e.g. a forged `full=true`, or a forged
+    // `backend=false` that skips a guard. Nothing feeds caller-controlled text
+    // in today; this is what keeps that true.
+    for (const bad of ['true', 'true\nfull=true', 1, null, undefined]) {
+      assert.throws(
+        () => formatGithubOutput({ ...allSurfaces(), backend: bad }),
+        /must be a boolean/,
+        `value ${JSON.stringify(bad)} must be refused`,
+      )
+    }
+  })
+
+  test('a missing output is refused rather than emitted as empty', () => {
+    const partial = allSurfaces()
+    delete partial.full
+    assert.throws(() => formatGithubOutput(partial), /full must be a boolean/)
+  })
+})
+
+describe('glob semantics match the shell case they replaced', () => {
+  test('* crosses directory separators', () => {
+    // The rules were written for shell `case`, where * is not path-aware. If
+    // this became path-aware, `packages/frontend/*` would stop matching the
+    // subtree and only nested-file changes would route.
+    assert.ok(globToRegExp('packages/frontend/*').test('packages/frontend/src/app/page.tsx'))
+    assert.ok(globToRegExp('*.md').test('docs/a/b/c.md'))
+  })
+
+  test('patterns are anchored at both ends', () => {
+    assert.equal(globToRegExp('package.json').test('packages/mcp/package.json'), false)
+    assert.equal(globToRegExp('packages/mcp/*').test('x/packages/mcp/a.ts'), false)
+  })
+
+  test('regex metacharacters in a pattern are literal', () => {
+    assert.ok(globToRegExp('.dependency-cruiser.cjs').test('.dependency-cruiser.cjs'))
+    assert.equal(globToRegExp('.dependency-cruiser.cjs').test('Xdependency-cruiserXcjs'), false)
+  })
+
+  test('? matches exactly one character, as shell case does', () => {
+    // No rule uses `?` today, but the translation implements it, and an
+    // implemented-but-unverified branch is how a wrong rule ships the first
+    // time someone reaches for one.
+    assert.ok(globToRegExp('packages/mcp?/x.ts').test('packages/mcpX/x.ts'))
+    assert.equal(globToRegExp('packages/mcp?/x.ts').test('packages/mcp/x.ts'), false)
+    assert.equal(globToRegExp('packages/mcp?/x.ts').test('packages/mcpXY/x.ts'), false)
+  })
+
+  test('bracket expressions are refused, not silently mis-matched', () => {
+    assert.throws(() => globToRegExp('scripts/[abc].mjs'), /unsupported bracket expression/)
+  })
+
+  test('no rule pattern uses an unsupported construct', () => {
+    for (const { patterns } of [...SURFACE_RULES, { patterns: DOC_ONLY_PATTERNS }]) {
+      for (const p of patterns) assert.doesNotThrow(() => globToRegExp(p), `pattern ${p}`)
+    }
+  })
+})
+
+describe('the CLI', () => {
+  test('--files-from a path writes GITHUB_OUTPUT when set', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'classifier-'))
+    try {
+      const list = path.join(dir, 'changed.txt')
+      const ghOutput = path.join(dir, 'gh-output')
+      writeFileSync(list, 'packages/cli/src/index.ts\ndocs/x.md\n')
+      writeFileSync(ghOutput, '')
+      runCli(['--files-from', list], { GITHUB_OUTPUT: ghOutput })
+      const written = readFileSync(ghOutput, 'utf8')
+      assert.match(written, /^cli=true$/m)
+      assert.match(written, /^code=true$/m)
+      assert.match(written, /^frontend=false$/m)
+      assert.equal(written.trimEnd().split('\n').length, OUTPUT_NAMES.length)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('--files-from - reads stdin and prints to stdout when GITHUB_OUTPUT is unset', () => {
+    const { output } = runCli(['--files-from', '-'], {}, 'packages/backend/src/routes/payments.ts\n')
+    assert.match(output, /^backend=true$/m)
+    assert.match(output, /^sdk=false$/m)
+  })
+
+  test('a bad invocation exits non-zero instead of emitting nothing quietly', () => {
+    // A classifier that fails open would route nothing and every job would
+    // skip — a green PR that tested nothing. Failing the step instead fails
+    // the required `Detect changed surfaces` check, which blocks the merge.
+    assert.throws(() => runCli(['--files-from', '/nope/missing.txt'], {}), /Command failed|status 1/)
+  })
+})
+
+describe('the git-derived path ci.yml actually runs', () => {
+  // Everything above drives the classifier through --files-from, but ci.yml
+  // passes no such flag: it sets BASE_SHA/HEAD_SHA and lets the script shell
+  // out to git. That leaves the production entry point — the git invocation,
+  // its argument order, and the parse of its output — as the one path a
+  // refactor could break with every other test still green. Which is the exact
+  // failure this extraction exists to end, so it gets a real repo.
+
+  /** A throwaway git repo with two commits; returns paths and SHAs. */
+  function fixtureRepo(secondCommitFiles) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'classifier-git-'))
+    const git = (...args) =>
+      execFileSync('git', args, {
+        cwd: dir,
+        encoding: 'utf8',
+        env: {
+          PATH: process.env.PATH,
+          // Isolate from the developer's own git config so a stray
+          // core.quotepath or commit.gpgsign cannot change the result.
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_SYSTEM: '/dev/null',
+          GIT_AUTHOR_NAME: 't',
+          GIT_AUTHOR_EMAIL: 't@example.com',
+          GIT_COMMITTER_NAME: 't',
+          GIT_COMMITTER_EMAIL: 't@example.com',
+        },
+      }).trim()
+
+    git('init', '-q', '-b', 'main')
+    writeFileSync(path.join(dir, 'seed.txt'), 'seed\n')
+    git('add', '-A')
+    git('commit', '-qm', 'seed')
+    const base = git('rev-parse', 'HEAD')
+
+    for (const rel of secondCommitFiles) {
+      const full = path.join(dir, rel)
+      execFileSync('mkdir', ['-p', path.dirname(full)])
+      writeFileSync(full, 'x\n')
+    }
+    git('add', '-A')
+    git('commit', '-qm', 'change', ...(secondCommitFiles.length ? [] : ['--allow-empty']))
+    const head = git('rev-parse', 'HEAD')
+
+    return { dir, base, head }
+  }
+
+  test('BASE_SHA + HEAD_SHA classifies a real two-commit diff', () => {
+    const { dir, base, head } = fixtureRepo([
+      'packages/backend/src/routes/payments.ts',
+      'docs/ignored.md',
+    ])
+    try {
+      const { output } = runCli([], { BASE_SHA: base, HEAD_SHA: head }, '', dir)
+      // The backend file routes; the doc does not. sdk stays false, which is
+      // what proves the diff was really read rather than defaulted to "all".
+      assert.match(output, /^backend=true$/m)
+      assert.match(output, /^code=true$/m)
+      assert.match(output, /^sdk=false$/m)
+      assert.match(output, /^frontend=false$/m)
+      assert.match(output, /^full=false$/m)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('an all-zero BASE_SHA falls back to listing the whole tree at HEAD', () => {
+    // A branch's first push. The fallback must classify every tracked file,
+    // not fail the step and not silently route nothing.
+    const { dir, head } = fixtureRepo(['packages/cli/src/index.ts'])
+    try {
+      const { output } = runCli([], { BASE_SHA: ZERO_SHA, HEAD_SHA: head }, '', dir)
+      assert.match(output, /^cli=true$/m)
+      assert.match(output, /^code=true$/m)
+      // seed.txt is in the tree and routes nowhere; cli came from ls-tree.
+      assert.match(output, /^backend=false$/m)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('an unusable SHA fails the step rather than routing nothing', () => {
+    const { dir } = fixtureRepo([])
+    try {
+      assert.throws(
+        () => runCli([], { BASE_SHA: 'nonexistentsha', HEAD_SHA: 'alsomissing' }, '', dir),
+        /status 1|Command failed/,
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+/** All ten output names, sorted — the shape `on()` returns when everything is true. */
+function allTrue() {
+  return [...OUTPUT_NAMES].sort()
+}
+
+/** Run the classifier CLI in a clean env; returns its stdout. */
+function runCli(args, env, stdin = '', cwd = undefined) {
+  const output = execFileSync(process.execPath, [SCRIPT, ...args], {
+    encoding: 'utf8',
+    input: stdin,
+    cwd,
+    // stderr is the script's log channel; keep it out of the test output.
+    stdio: ['pipe', 'pipe', 'ignore'],
+    env: {
+      PATH: process.env.PATH,
+      // Deliberately NOT inheriting: a real Actions env would otherwise leak
+      // GITHUB_OUTPUT or EVENT_NAME into these assertions.
+      ...env,
+    },
+  })
+  return { output }
+}

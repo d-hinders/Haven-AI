@@ -35,6 +35,8 @@ covers:
   - packages/cli/src/**
   - packages/qa-agent/src/**
   - packages/sdk/src/client.ts
+  - packages/sdk/src/account-reads.ts
+  - packages/sdk/src/delegate-sweep.ts
   - packages/sdk/src/haven-api-transport.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/index.ts

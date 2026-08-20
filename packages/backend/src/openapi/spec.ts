@@ -383,6 +383,41 @@ const safeOwnerTx = {
   },
 } as const
 
+
+// ── Dashboard account building blocks (#1446) ────────────────────────────────
+
+/** The FULL profile row — what the profile write returns. */
+const userProfile = {
+  type: 'object',
+  required: ['id', 'name', 'email', 'wallet_address', 'safe_address', 'currency_preference', 'created_at'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    name: { type: ['string', 'null'] },
+    email: { type: 'string' },
+    wallet_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+    safe_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+    currency_preference: { type: ['string', 'null'] },
+    created_at: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+/**
+ * The NARROWER projection the wallet and safe writes return — five fields, no
+ * currency_preference and no created_at. Deliberately not the same shape as
+ * the profile write, and documented as the difference it is.
+ */
+const userIdentity = {
+  type: 'object',
+  required: ['id', 'name', 'email', 'wallet_address', 'safe_address'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    name: { type: ['string', 'null'] },
+    email: { type: 'string' },
+    wallet_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+    safe_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+  },
+} as const
+
 const errorResponse = {
   description: 'Error response',
   content: {
@@ -2039,6 +2074,269 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
+        },
+      },
+    },
+    // ── Dashboard account + owner directory (#1446) ─────────────────────────
+    // Profile/preference writes are the user's own record. The owner
+    // directory reads Safe owners LIVE from every linked account, so it is
+    // Safe-rail-shaped and inherits the #1440 retirement caveat recorded on
+    // the /user/safes block: an alias is decoration over on-chain membership,
+    // never a grant.
+    '/user/profile': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'updateUserProfile',
+        summary: "Rename the caller's own account.",
+        description: 'Returns the FULL profile row (including currency_preference and created_at) — a wider shape than the wallet and safe writes below.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name'],
+                properties: { name: { type: 'string', minLength: 1, maxLength: 80, description: 'Trimmed; blank or over 80 characters is a 400.' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The updated profile.', content: { 'application/json': { schema: userProfile } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The account was deleted while a valid token for it was still in flight.' },
+        },
+      },
+    },
+    '/user/wallet': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'updateUserWallet',
+        summary: "Record the caller's connected wallet address.",
+        description: 'Bookkeeping only: recording an address grants Haven nothing and moves nothing. Returns the narrower five-field identity projection, not the full profile.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['wallet_address'],
+                properties: { wallet_address: address },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The updated identity projection.', content: { 'application/json': { schema: userIdentity } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/user/safe': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'updateUserSafe',
+        summary: "Set the caller's legacy safe_address and link it as the default Safe.",
+        description:
+          "Writes the legacy users.safe_address column AND links the Safe into user_safes as the default — the multi-Safe table is the real home, this column is history. The order matters and is deliberate: the legacy column write is attempted FIRST and a vanished account refuses before anything is linked, rather than leaving a link whose owner no longer exists. Returns the narrower identity projection.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['safe_address'],
+                properties: {
+                  safe_address: address,
+                  chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base).' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The updated identity projection.', content: { 'application/json': { schema: userIdentity } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/user/preferences': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getUserPreferences',
+        summary: "Read the caller's display-currency preference.",
+        description: "Defaults to 'USD' when the account has never set one — a value, not an absence.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The current preference.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['currency_preference'],
+                  properties: { currency_preference: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'updateUserPreferences',
+        summary: 'Set the display-currency preference.',
+        description: 'Display only — it changes no balance, no price and no settlement asset.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['currency_preference'],
+                properties: { currency_preference: { type: 'string', enum: ['USD', 'EUR'] } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The stored preference.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['currency_preference'],
+                  properties: { currency_preference: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/user/owners': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listUserOwners',
+        summary: 'The owner directory across every linked Safe, with aliases.',
+        description:
+          "Reads each linked Safe's owners LIVE from the chain and groups them by address, so one owner appearing on three accounts is one entry listing three. Aliases are looked up ONLY for the addresses just confirmed on-chain, which is what stops a removed owner's alias from reappearing. **A partial chain failure is reported, never hidden**: partialFailure/failedSafeIds name the Safes whose owners could not be read, so a caller can tell an incomplete directory from a complete one. Those two fields are camelCase, unlike the rest of this API — documented as-is rather than silently normalised.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Owners grouped by address, plus the partial-failure report.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['owners', 'partialFailure', 'failedSafeIds'],
+                  properties: {
+                    owners: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['owner_address', 'name', 'accounts'],
+                        properties: {
+                          owner_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$', description: 'Lowercased for grouping.' },
+                          name: { type: ['string', 'null'], description: 'The stored alias, or null.' },
+                          accounts: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              required: ['id', 'safe_address', 'chain_id', 'name'],
+                              properties: {
+                                id: { type: 'string', format: 'uuid' },
+                                safe_address: address,
+                                chain_id: { type: 'integer' },
+                                name: { type: 'string' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    partialFailure: { type: 'boolean' },
+                    failedSafeIds: { type: 'array', items: { type: 'string' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/user/owners/{ownerAddress}': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'setOwnerAlias',
+        summary: 'Name an owner address.',
+        description:
+          "An alias is a label, never a grant — naming an address confers no authority over any Safe. The address must be a CURRENT owner of a linked account, checked against the live directory: an unknown address is a 404, but if the chain read partially failed the answer is **503 rather than 404**, because 'not an owner' and 'could not check' must not look the same.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'ownerAddress', in: 'path', required: true, schema: address, description: 'Owner address; matched case-insensitively (stored lowercase).' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name'],
+                properties: { name: { type: 'string', minLength: 1, maxLength: 80 } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The stored alias.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['owner_address', 'name'],
+                  properties: {
+                    owner_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
+                    name: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'Not a current owner of any linked account.' },
+          '503': { ...errorResponse, description: 'Owners could not be verified — distinct from "not an owner".' },
+        },
+      },
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'deleteOwnerAlias',
+        summary: "Remove an owner's alias.",
+        description: 'Drops the label only. Idempotent — removing an alias that does not exist still succeeds, and no ownership check is needed because no authority is involved either way.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'ownerAddress', in: 'path', required: true, schema: address, description: 'Owner address; matched case-insensitively (stored lowercase).' }],
+        responses: {
+          '200': {
+            description: 'Alias removed (or was already absent).',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
         },
       },
     },

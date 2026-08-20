@@ -119,10 +119,6 @@ export interface UndocumentedModule {
  */
 export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
   // ── Agent-facing / money-path — highest priority for #1446 ──
-  {
-    file: 'hybrid-accounts.ts',
-    because: 'Delegation-rail account provisioning (#886). Dashboard-driven today; agent-facing once onboarding opens up.',
-  },
   // ── Dashboard-session surfaces (JWT auth, not the agent API key) ──
   {
     file: 'auth.ts',
@@ -153,10 +149,6 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
     because: 'Relayed Safe execution — same retirement as safe-deploy.ts (#1440).',
   },
   // ── Integrations ──
-  {
-    file: 'fortnox.ts',
-    because: 'Fortnox OAuth + connection management for the bookkeeping feed; vendor-specific, dashboard-driven.',
-  },
 ]
 
 /**
@@ -173,5 +165,5 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
  * `index.ts` — and one of them (`GET /chains`) turned out to be undocumented.
  * That is the gate earning its keep on its first run, not slack being taken.
  */
-export const MAX_UNDOCUMENTED_MODULES = 9
-export const MAX_UNDOCUMENTED_ROUTES = 38
+export const MAX_UNDOCUMENTED_MODULES = 7
+export const MAX_UNDOCUMENTED_ROUTES = 26

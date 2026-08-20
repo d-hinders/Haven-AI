@@ -2707,6 +2707,510 @@ export const openapiSpec = {
         },
       },
     },
+    // ── Fortnox OAuth connect + legacy voucher push (#1446, epic #462) ──────
+    // CREDENTIAL BOUNDARY: the OAuth access and refresh tokens live server-side
+    // only. NOTHING in this surface returns them — /status exposes the granted
+    // scope and an expiry timestamp and nothing else, and the callback
+    // redirects without echoing anything it received. Pinned by the route
+    // tests, which are written as redaction tests rather than shape tests.
+    //
+    // This router is registered WITHOUT the global auth hook, deliberately:
+    // the callback is a browser redirect from Fortnox and carries no JWT, so
+    // every other route opts into authentication per-route instead.
+    '/accounting/fortnox/status': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getFortnoxStatus',
+        summary: 'Whether Fortnox is configured on this deployment and connected for the caller.',
+        description:
+          "Returns SAFE METADATA ONLY: the granted scope and the token expiry, never the tokens themselves. Two shapes, deliberately: when the deployment has no Fortnox credentials the answer omits scope/expiresAt entirely (there is nothing to report), and when it is configured they are present but null until a connection exists. `legacyBookkeeping` tells the UI whether the asserting voucher-push surface below is reachable at all — off by default (#492).",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Connection metadata.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['configured', 'connected', 'legacyBookkeeping'],
+                      properties: {
+                        configured: { type: 'boolean', enum: [false] },
+                        connected: { type: 'boolean', enum: [false] },
+                        legacyBookkeeping: { type: 'boolean' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['configured', 'connected', 'scope', 'expiresAt', 'legacyBookkeeping'],
+                      properties: {
+                        configured: { type: 'boolean', enum: [true] },
+                        connected: { type: 'boolean' },
+                        scope: { type: ['string', 'null'], description: 'The granted OAuth scope. Null until connected.' },
+                        expiresAt: { type: ['string', 'null'], description: 'Access-token expiry. Null until connected.' },
+                        legacyBookkeeping: { type: 'boolean' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/fortnox/connect-url': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'getFortnoxConnectUrl',
+        summary: 'Get the Fortnox consent URL as JSON.',
+        description:
+          "The JSON twin of /connect, and it exists for a concrete reason: a single-page app cannot carry its Bearer token through a plain browser navigation, so it fetches the URL here and navigates itself. The URL embeds a signed `state` that expires in 10 minutes and carries a purpose claim — see the callback.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The consent URL. Carries no token material.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['url'],
+                  properties: { url: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '503': { ...errorResponse, description: 'Fortnox is not configured on this deployment.' },
+        },
+      },
+    },
+    '/accounting/fortnox/connect': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'startFortnoxConnect',
+        summary: 'Redirect the browser to Fortnox consent.',
+        description: 'The redirect twin of /connect-url, for a navigation that can carry the session. Same signed, 10-minute, purpose-scoped state.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '302': { description: 'Redirect to the Fortnox consent screen.' },
+          '401': errorResponse,
+          '503': { ...errorResponse, description: 'Fortnox is not configured on this deployment.' },
+        },
+      },
+    },
+    '/accounting/fortnox/callback': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'fortnoxOAuthCallback',
+        summary: 'PUBLIC OAuth callback — authenticated by the signed state, not by a session.',
+        description:
+          "Hit by a browser redirect from Fortnox, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, and it must carry the fortnox_oauth PURPOSE claim — an ordinary session token is rejected here, so a valid Haven token cannot be replayed as OAuth state. **Every outcome is a redirect, never JSON**, and every failure collapses to the same `?fortnox=error` regardless of cause: a bad state, a failed code exchange and a failed save are indistinguishable to the browser by design. A user-declined consent is reported separately as `?fortnox=denied` because that is the user's own action, not a failure to hide.",
+        security: [],
+        parameters: [
+          { name: 'code', in: 'query', schema: { type: 'string' }, description: 'Authorization code from Fortnox.' },
+          { name: 'state', in: 'query', schema: { type: 'string' }, description: 'The signed, purpose-scoped state this flow issued.' },
+          { name: 'error', in: 'query', schema: { type: 'string' }, description: 'Present when the user declined consent.' },
+        ],
+        responses: {
+          '302': {
+            description: 'Always a redirect to the settings page: ?fortnox=connected, ?fortnox=denied, or ?fortnox=error.',
+          },
+        },
+      },
+    },
+    '/accounting/fortnox': {
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'disconnectFortnox',
+        summary: 'Disconnect Fortnox for the caller.',
+        description: 'Deletes the stored connection, tokens included. Answers **204 No Content** and returns no token material. Idempotent — disconnecting when nothing is connected still succeeds.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '204': { description: 'Disconnected (or was never connected).' },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/fortnox/push': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'pushFortnoxVouchers',
+        summary: 'Legacy asserting voucher push — GATED OFF by default.',
+        description:
+          "The asserting counterpart to the reporting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+        ],
+        responses: {
+          '200': {
+            description: 'Per-entry outcome of the push.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['pushed', 'skipped', 'failed', 'failures'],
+                  properties: {
+                    pushed: { type: 'integer' },
+                    skipped: { type: 'integer', description: 'Entries with no book-time SEK amount — unbookable, not errors.' },
+                    failed: { type: 'integer' },
+                    failures: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['paymentId', 'error'],
+                        properties: {
+                          paymentId: { type: 'string' },
+                          error: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Malformed date, or Fortnox is not connected.' },
+          '401': errorResponse,
+          '410': { ...errorResponse, description: 'The default: pushing finished vouchers is retired in favour of the draft feed.' },
+        },
+      },
+    },
+    // ── Hybrid DeleGator accounts (#1446, epic #821) ────────────────────────
+    // CUSTODY: Haven PREPARES and RELAYS; the owner's own key signs. Every
+    // write that reaches the CHAIN is a two-step prepare→submit where the
+    // signature is made on the caller's device and the re-derived calldata
+    // must match what was signed, so a compromised Haven cannot substitute a
+    // different operation. (Provisioning is the exception and needs no
+    // signature: it derives a counterfactual address and records a row —
+    // nothing executes, so there is nothing to sign.) Ownership is the
+    // user_safes row, so naming any address only ever reaches an account the
+    // caller already owns.
+    '/accounts/hybrid': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'createHybridAccount',
+        summary: 'Provision a counterfactual Hybrid DeleGator account.',
+        description:
+          "Computes the deterministic account address for an owner configuration (an EOA, P256 passkeys, or both) and records the row. **No transaction happens here** — the address is derived, not deployed, and `deployed: false` says so; the first sponsored operation (the budget grant) deploys the code. Refusals guard the derivation's own traps: the zero address is rejected because it derives the SAME account as the pure-passkey configuration while counting as a second signer, and duplicate passkey key_ids are rejected because they collapse to one on-chain key. A single-signer account is permitted (#1153) — the backup recommendation reaches the user after funding instead of walling the first minute.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                description: 'At least one owner is required: owner_address, passkeys, or both.',
+                properties: {
+                  chain_id: { type: 'integer', description: 'Defaults to Base Sepolia while delegation onboarding is dark-launched.' },
+                  name: { type: 'string', description: "Display label; defaults to 'My account'." },
+                  owner_address: { ...address, description: 'EOA owner. Must not be the zero address.' },
+                  passkeys: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['key_id', 'x', 'y'],
+                      properties: {
+                        key_id: { type: 'string' },
+                        x: { type: 'string', pattern: '^0x[0-9a-fA-F]{1,64}$', description: 'P256 public-key x coordinate.' },
+                        y: { type: 'string', pattern: '^0x[0-9a-fA-F]{1,64}$', description: 'P256 public-key y coordinate.' },
+                      },
+                    },
+                  },
+                  single_signer_waiver: {
+                    type: 'object',
+                    description:
+                      'Accepted and recorded as history, but REQUIRED FOR NOTHING (#1153) — sending it changes no outcome and omitting it changes no outcome. Kept on the request shape so existing clients keep working.',
+                    properties: { acknowledged: { type: 'boolean' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Account row recorded. Counterfactual — nothing was deployed.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'account_address', 'chain_id', 'account_type', 'deployed', 'created_at'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    account_address: address,
+                    chain_id: { type: 'integer' },
+                    account_type: { type: 'string', enum: ['delegator_hybrid'] },
+                    deployed: { type: 'boolean', enum: [false], description: 'Always false here — deployment rides the first sponsored operation.' },
+                    created_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Bad owner configuration, or a chain the delegation rail does not serve.' },
+          '401': errorResponse,
+          '409': { ...errorResponse, description: 'This account is already registered for the caller.' },
+          '502': { ...errorResponse, description: 'The account address could not be derived.' },
+        },
+      },
+    },
+    '/accounts/hybrid/{address}/signers': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getHybridAccountSigners',
+        summary: "Read an account's signer set (public key material only).",
+        description:
+          "The account-scoped twin of the agent-scoped read, and it exists for two cases the agent route cannot serve: resolving a signer at LOGIN, before any agent exists, and giving account-level recovery a data source for an account with zero agents. Owner-scoped; nothing secret — an address and P256 public-key coordinates. The exact configuration the address was derived FROM, so a client can rebuild the same signer.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'address', in: 'path', required: true, schema: address, description: 'The hybrid account address.' }, { name: 'chain_id', in: 'query', schema: { type: 'string' }, description: 'Required — the (address, chain) pair identifies the account.' }],
+        responses: {
+          '200': {
+            description: 'The signer set.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['account_address', 'chain_id', 'owner_address', 'passkeys'],
+                  properties: {
+                    account_address: address,
+                    chain_id: { type: 'integer' },
+                    owner_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', description: 'Null for a pure-passkey account.' },
+                    passkeys: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['key_id', 'x', 'y'],
+                        properties: { key_id: { type: 'string' }, x: { type: 'string' }, y: { type: 'string' } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'The account signer configuration is unknown.' },
+        },
+      },
+    },
+    '/accounts/hybrid/{address}/signers/prepare': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'prepareHybridSignerChange',
+        summary: 'Prepare a signer-set change for an EXISTING signer to sign.',
+        description:
+          "Enroll a backup passkey or EOA, or remove one. Haven prepares; an existing signer signs — Haven never signs a signer change. The chain's own last-signer rule is mirrored as a clear 409 rather than an opaque revert. The response branches on the signature scheme the device can satisfy.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'address', in: 'path', required: true, schema: address, description: 'The hybrid account address.' }, { name: 'chain_id', in: 'query', schema: { type: 'string' }, description: 'Required — the (address, chain) pair identifies the account.' }],
+        requestBody: { required: true, content: { 'application/json': { schema: signerActionBody } } },
+        responses: {
+          '200': {
+            description: 'Prepared change, shaped by the signature scheme. Carries no treasury_address.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'signing_payload', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        signing_payload: eip712Payload,
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+                        user_op_hash: { type: 'string' },
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/accounts/hybrid/{address}/signers/submit': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'submitHybridSignerChange',
+        summary: 'Submit the signed signer-set change.',
+        description:
+          'Envelope first, account second — a malformed body is a 400 regardless of account state. Storage syncs only after the on-chain operation succeeds, and the sync is pinned to the SIGNED calldata: a user_operation that does not match the signed action is refused rather than trusted.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'address', in: 'path', required: true, schema: address, description: 'The hybrid account address.' }, { name: 'chain_id', in: 'query', schema: { type: 'string' }, description: 'Required — the (address, chain) pair identifies the account.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature', 'user_operation'],
+                properties: {
+                  ...signerActionBody.properties,
+                  signature: hexBytes,
+                  user_operation: preparedUserOperation,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Signer set updated on-chain and in storage.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['updated', 'tx_hash'],
+                  properties: { updated: { type: 'boolean' }, tx_hash: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/accounts/hybrid/{address}/transfers/prepare': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'prepareHybridTransfer',
+        summary: 'MONEY PATH: prepare an owner-signed ERC-20 transfer from the account.',
+        description:
+          "The rail's Send. The treasury executes the transfer as a sponsored account operation **the OWNER signs** — the same prepare/submit and calldata-pinning discipline as a signer change, and the same device-decides scheme. Haven constructs and relays; it never signs, so it cannot move these funds on its own. Works on a counterfactual account: deploy and transfer ride one sponsored operation. Rate-limited on the money-path limiter.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'address', in: 'path', required: true, schema: address, description: 'The hybrid account address.' }, { name: 'chain_id', in: 'query', schema: { type: 'string' }, description: 'Required — the (address, chain) pair identifies the account.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['token_address', 'to', 'amount_atomic'],
+                properties: {
+                  token_address: address,
+                  to: { ...address, description: 'Recipient.' },
+                  amount_atomic: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
+                  signature_scheme: { type: 'string', enum: ['eip712_userop', 'webauthn_userop'] },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Prepared transfer, shaped by the signature scheme.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'signing_payload', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        signing_payload: eip712Payload,
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+                        user_op_hash: { type: 'string' },
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
+    '/accounts/hybrid/{address}/transfers/submit': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'submitHybridTransfer',
+        summary: 'MONEY PATH: submit the owner-signed transfer.',
+        description: 'Relays the signed operation. The calldata is pinned to what was signed, so the submitted transfer is the one the owner approved — a different recipient or amount is refused, not relayed. Rate-limited on the money-path limiter.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'address', in: 'path', required: true, schema: address, description: 'The hybrid account address.' }, { name: 'chain_id', in: 'query', schema: { type: 'string' }, description: 'Required — the (address, chain) pair identifies the account.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature', 'user_operation'],
+                properties: {
+                  token_address: address,
+                  to: address,
+                  amount_atomic: { type: 'string', pattern: '^[0-9]+$' },
+                  signature: hexBytes,
+                  user_operation: preparedUserOperation,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Transfer submitted on-chain.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['submitted', 'tx_hash'],
+                  properties: { submitted: { type: 'boolean' }, tx_hash: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
     '/agent-connection-setups': {
       post: {
         tags: ['Connect Agent 2'],

@@ -14,6 +14,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/haven-api-transport.ts
+  - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts

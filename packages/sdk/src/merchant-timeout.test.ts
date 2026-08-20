@@ -67,11 +67,11 @@ describe('merchant timeout calibration (#1300 review)', () => {
     // The demo merchant advertises maxTimeoutSeconds: 300 and its synchronous
     // settlement wait inherits viem's 180s default — a client default below
     // either aborts settlements the contract itself calls normal.
-    const clientSrc = (await import('node:fs')).readFileSync(
-      new URL('./client.ts', import.meta.url),
+    const transportSrc = (await import('node:fs')).readFileSync(
+      new URL('./mcp-merchant-transport.ts', import.meta.url),
       'utf8',
     )
-    const m = clientSrc.match(/DEFAULT_MERCHANT_TIMEOUT = ([0-9_]+)/)
+    const m = transportSrc.match(/DEFAULT_MERCHANT_TIMEOUT = ([0-9_]+)/)
     expect(m).toBeTruthy()
     expect(Number(m![1].replaceAll('_', ''))).toBeGreaterThanOrEqual(300_000)
   })

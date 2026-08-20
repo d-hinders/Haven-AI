@@ -13,6 +13,7 @@ covers:
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
   - packages/sdk/src/merchant-discovery.ts
@@ -61,6 +62,7 @@ Source of truth:
 
 - [`packages/sdk/src/x402.ts`](../../packages/sdk/src/x402.ts)
 - [`packages/sdk/src/client.ts`](../../packages/sdk/src/client.ts)
+- [`packages/sdk/src/mcp-merchant-transport.ts`](../../packages/sdk/src/mcp-merchant-transport.ts) — bounded paid MCP/merchant HTTP delivery, sessions, and SSE framing.
 - [`packages/sdk/src/payment-state.ts`](../../packages/sdk/src/payment-state.ts) — shared payment-state/status-error normalization.
 - [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts) — request
   validation, auth wiring, rate-limit config, and response serialization only.

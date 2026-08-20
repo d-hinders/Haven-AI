@@ -64,6 +64,19 @@ export const ZERO_SHA = '0'.repeat(40)
  * Only `*` and `?` are supported. Bracket expressions are rejected rather than
  * mis-handled: the epic asks for exact paths before glob semantics, so a
  * pattern needing more than this should be spelled out instead.
+ *
+ * The `s` (dotAll) flag is required, not cosmetic (#1638). A filename may
+ * contain a newline, and without dotAll neither `.*` nor `.` matches one — so
+ * `packages/mcp/*` would fail against `packages/mcp/src/new\nline.ts` and the
+ * file would route NOWHERE. Shell `case` has no such carve-out: its `*` matches
+ * any byte. This only became reachable once `-z` stopped git quoting such paths
+ * out of existence, which is why the two land together.
+ *
+ * The anchors stay `^`/`$` and MUST stay flagless in the `m` sense. Unlike
+ * Perl and Python, a JavaScript `$` without `m` matches only at end of input,
+ * so `scripts/dep-lint.mjs\n` does not match the exact pattern for
+ * `scripts/dep-lint.mjs`. Adding `m` would break that, and the guard-ownership
+ * manifest is built entirely on exact paths meaning exact — hence the test.
  */
 export function globToRegExp(pattern) {
   if (pattern.includes('[') || pattern.includes(']')) {
@@ -75,7 +88,7 @@ export function globToRegExp(pattern) {
     else if (ch === '?') source += '.'
     else source += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
-  return new RegExp(`^${source}$`)
+  return new RegExp(`^${source}$`, 's')
 }
 
 const matchesAny = (patterns, file) => patterns.some((p) => globToRegExp(p).test(file))
@@ -181,22 +194,70 @@ export const SURFACE_RULES = Object.freeze([
 ])
 
 /**
+ * The package dependency table: which workspace packages consume which
+ * (#1625). Read from .github/ for the same reason as the guard manifest —
+ * repo-governance data, dependency-free to parse.
+ */
+export const PACKAGE_DEPENDENCY_TABLE_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '.github',
+  'package-dependencies.json',
+)
+
+/** @type {Record<string, {dependsOn: string[], note?: string}>} */
+export const PACKAGE_DEPENDENCIES = Object.freeze(
+  JSON.parse(readFileSync(PACKAGE_DEPENDENCY_TABLE_PATH, 'utf8')).packages,
+)
+
+/** Job flags that name a package with a CI job of its own, in table order. */
+export const PACKAGE_JOBS = Object.freeze(Object.keys(PACKAGE_DEPENDENCIES))
+
+/**
+ * Every job that must re-run when `pkg` changes — its dependents, transitively.
+ *
+ * The table records only DIRECT dependencies, because that is what package.json
+ * declares and therefore the only thing that can be checked against reality.
+ * The closure is computed here so a chain (a -> b -> c) can never be half
+ * expanded in the data, which is the failure mode of pre-expanded fan-out
+ * lists: they look right until someone inserts a link in the middle.
+ *
+ * Exported for tests; cycles are impossible in a package graph and would hang
+ * a naive walk, so this one tracks what it has seen.
+ */
+export function dependentsOf(pkg, table = PACKAGE_DEPENDENCIES) {
+  const found = new Set()
+  const queue = [pkg]
+  while (queue.length) {
+    const current = queue.shift()
+    for (const [name, entry] of Object.entries(table)) {
+      if (!entry.dependsOn.includes(current)) continue
+      if (found.has(name)) continue
+      found.add(name)
+      queue.push(name)
+    }
+  }
+  found.delete(pkg)
+  return [...found]
+}
+
+/**
  * Fan-out applied after every file has been classified, in order.
  *
- * Order is part of the contract: `full` fans out to every package first, then
- * `sdk`'s dependents, then connect's. Each step reads flags the previous step
- * may have set.
+ * Derived from the dependency table rather than hand-written. `full` is not a
+ * package and not a dependency — it is the directive "run everything", so it
+ * fans out to every job the table names, and stays a separate concept from the
+ * per-package rules that follow.
+ *
+ * Order is still part of the contract: `full` first, so the package rules that
+ * follow see the flags it set.
  */
 export const PROPAGATION_RULES = Object.freeze([
-  {
-    when: ['full'],
-    then: ['frontend', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli'],
-  },
-  // Every published package depends on the SDK, and the backend is pinned
-  // against its wire types.
-  { when: ['sdk'], then: ['backend', 'connect', 'mcp', 'mcp_server', 'signer'] },
-  // connect bundles the MCP runtime and the signer.
-  { when: ['mcp', 'signer'], then: ['connect'] },
+  { when: ['full'], then: [...PACKAGE_JOBS] },
+  ...PACKAGE_JOBS.map((pkg) => ({ when: [pkg], then: dependentsOf(pkg) })).filter(
+    (rule) => rule.then.length > 0,
+  ),
 ])
 
 /** All ten flags false. */
@@ -230,8 +291,13 @@ export function classifyChangedFiles(files, { propagationRules = PROPAGATION_RUL
   }
 
   for (const raw of files) {
-    const file = raw.trim()
-    if (!file) continue
+    // Skip blank entries, but match the path EXACTLY as given. Trimming the
+    // value used for matching would corrupt a legitimate name with leading or
+    // trailing whitespace — harmless when the input was newline-delimited and
+    // such a name could not survive the round trip anyway, but wrong now that
+    // `-z` delivers paths verbatim (#1638).
+    if (!raw.trim()) continue
+    const file = raw
 
     const exception = DOC_EXCEPTIONS.find((rule) => matchesAny(rule.patterns, file))
     if (exception) {
@@ -261,17 +327,18 @@ export function classifyChangedFiles(files, { propagationRules = PROPAGATION_RUL
  * whole tree at HEAD counts as changed. That is the conservative direction:
  * everything runs.
  *
- * KNOWN GAP, preserved deliberately: `core.quotepath` defaults to true, so git
- * emits a path containing non-ASCII or control characters in quoted, escaped
- * form (`"packages/frontend/caf\303\251.ts"`). The quotes are part of the
- * string, so it matches no rule and the file routes NOWHERE — in this script
- * and in the inline shell it replaces, identically. Fixing it means reading a
- * NUL-delimited list (`-z`), which is a behaviour CHANGE and so belongs in a
- * slice that is not "extraction with behaviour held fixed". Tracked as #1638.
+ * `-z` is load-bearing, not a flourish (#1638). Without it `core.quotepath`
+ * defaults to true and git emits any path containing non-ASCII or control
+ * characters in quoted, escaped form — `"packages/frontend/caf\303\251.ts"`,
+ * quotes and backslashes included. That string matches no rule, so the file
+ * routed NOWHERE and its jobs silently did not run. `-z` turns the output into
+ * a NUL-separated list of raw paths, which is also the only separator a path
+ * cannot itself contain: a filename may hold a newline, so newline-delimited
+ * output is ambiguous even when nothing is quoted.
  */
 export function changedFilesCommand({ baseSha, headSha }) {
-  if (baseSha && baseSha !== ZERO_SHA) return ['diff', '--name-only', baseSha, headSha]
-  return ['ls-tree', '-r', '--name-only', headSha]
+  if (baseSha && baseSha !== ZERO_SHA) return ['diff', '-z', '--name-only', baseSha, headSha]
+  return ['ls-tree', '-r', '-z', '--name-only', headSha]
 }
 
 /**
@@ -297,7 +364,13 @@ export function formatGithubOutput(outputs) {
 
 function readFileList(source) {
   const raw = source === '-' ? readFileSync(0, 'utf8') : readFileSync(source, 'utf8')
-  return raw.split('\n')
+  // Newline-delimited, unlike the git path: this is a human and test
+  // affordance, and a NUL-separated list is miserable to hand-produce. That
+  // makes it the one input where a line ending can still cling to the path, so
+  // strip a trailing CR. Since #1638 stopped trimming the matched value, a CRLF
+  // list would otherwise leave `\r` on every entry and route NOTHING — the same
+  // silent, unsafe failure this fix exists to remove, relocated.
+  return raw.split('\n').map((line) => line.replace(/\r$/, ''))
 }
 
 function main(argv) {
@@ -326,7 +399,9 @@ function main(argv) {
               // swallow them on the success path.
               stdio: ['ignore', 'pipe', 'inherit'],
             },
-          ).split('\n')
+            // `-z` output is NUL-SEPARATED and NUL-TERMINATED, so the final
+            // element is always empty; classifyChangedFiles skips blanks.
+          ).split('\0')
     outputs = classifyChangedFiles(files)
     console.error(`change-classifier: ${files.filter((f) => f.trim()).length} changed path(s)`)
   }

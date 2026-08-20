@@ -75,9 +75,17 @@ export type paths = {
         };
         /** Fetch one Haven agent. */
         get: operations["getAgent"];
-        put?: never;
+        /**
+         * Rename an agent or change its description.
+         * @description Display metadata only — it changes no authority, no allowance and no key. The response carries the agent with its current allowances so a client can re-render without a second call.
+         */
+        put: operations["updateAgent"];
         post?: never;
-        delete?: never;
+        /**
+         * RETIRED — always answers 410. Archive instead.
+         * @description Deleting an agent is retired (#1401) and this route is a tombstone: **it always answers 410 and writes nothing.** Hard deletion failed outright on any agent with payment history (a foreign-key violation surfacing as a 500) and, where it did succeed, cascaded away seven tables of money-path audit trail. Removal is now an ARCHIVE that keeps the history: revoke the agent, kill its budgets, then POST /agents/{id}/archive. The typed route survives for reversibility, in the same spirit as the session-rail retirement.
+         */
+        delete: operations["deleteAgent"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1469,6 +1477,163 @@ export type paths = {
          * @description Counts DISTINCT users per onboarding step over a date range, with the conversion from the previous step, plus the median time from signup to first settled payment. Defaults to the last 30 days. The window is echoed back as resolved ISO timestamps so a caller can tell exactly which range produced the numbers rather than re-deriving the default.
          */
         get: operations["getOnboardingFunnel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PUBLIC: which chains this deployment serves.
+         * @description Two different lists, and the difference matters: `supported` is every chain the code knows, while `deployable` is the subset this environment will actually provision accounts on (#679). Onboarding pickers must offer `deployable`, not `supported`, or they will offer a chain the deployment refuses. No authentication — it is configuration, not data.
+         */
+        get: operations["getChains"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/x402/{id}/settle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * MONEY PATH: settle a delegation-rail x402 payment with the delegate signature.
+         * @description The delegation rail's settlement step, and the reason the rail has no funding leg: the agent signs the settlement child delegation, Haven assembles the merchant X-PAYMENT header, and the merchant redeems the chain directly from the budget delegation — **money moves account→merchant, never through a delegate hot balance**. Retry the merchant with the returned `payment_header`; it is a signed, single-use, amount-and-merchant-bound authorization, not a key. Refusals are specific on purpose: a payment on the wrong rail is a 409 rather than a confusing 400, and a lost settlement context is a 502 telling you to re-authorize rather than a silent failure. Agent-authenticated and rate-limited on the money-path limiter.
+         */
+        post: operations["settleX402Payment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause an agent — reversible, unlike revoke.
+         * @description Pausing stops Haven serving the agent while leaving its on-chain authority intact; revoking is the terminal action. A paused agent's standing reports as suspended rather than revoked.
+         */
+        post: operations["pauseAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a paused agent. */
+        post: operations["resumeAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/rotate-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a new API key for an active agent.
+         * @description **The plaintext key is returned ONCE, here, and is never retrievable again** — Haven stores only its hash. Rotation invalidates the previous key immediately, so a running agent must be given the new one before its next call. Only an ACTIVE agent can rotate: a revoked agent stays revoked (409), because handing out a fresh credential for it would undo the revocation.
+         */
+        post: operations["rotateAgentKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/allowances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a per-token allowance on the legacy AllowanceModule rail.
+         * @description Records the allowance Haven will execute against. **The authority itself is the on-chain AllowanceModule grant, not this row** — writing it here does not grant anything the chain has not been told about. `schedule_warning` is always null: session schedules are retired (#834) and the field survives only so existing clients keep parsing. Retiring rail (#1440).
+         */
+        post: operations["setAgentAllowance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/allowances/{tokenAddress}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an allowance row for one token.
+         * @description Removes Haven's record. **It does NOT revoke the on-chain grant** — the AllowanceModule allowance survives until the owner changes it on-chain, so deleting this row stops Haven executing against it but is not itself a revocation. Retiring rail (#1440).
+         */
+        delete: operations["deleteAgentAllowance"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/transactions/payment-intents/{paymentId}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the stored evidence for one payment or approval.
+         * @description The audit view behind a transaction row. `payment_id` is resolved for the caller — it carries whichever of the two source ids exists, so a client does not branch on payment-versus-approval to find its own identifier.
+         */
+        get: operations["getPaymentEvidence"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3638,6 +3803,112 @@ export interface operations {
             };
             /** @description Error response */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    updateAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Trimmed. */
+                    name?: string;
+                    /** @description Trimmed. */
+                    description?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The updated agent, with allowances. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    deleteAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Always. The message names the archive route to use instead. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10371,6 +10642,637 @@ export interface operations {
             };
             /** @description Error response */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getChains: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The chain registry for this deployment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Chains this environment will provision on. */
+                        deployable: number[];
+                        /** @description Chains the code knows about at all. */
+                        supported: number[];
+                    };
+                };
+            };
+        };
+    };
+    settleX402Payment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Payment intent id from authorize. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The delegate EIP-712 signature over the settlement child. */
+                    signature: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Settled; retry the merchant with payment_header. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        payment_id: string;
+                        /** @enum {string} */
+                        status: "submitted";
+                        /** @description The merchant X-PAYMENT header. Single-use and bound to this amount and merchant. */
+                        payment_header: string;
+                        resource_url?: string | null;
+                        /** @description Optional passport reference for the paying agent. */
+                        passport?: unknown;
+                    };
+                };
+            };
+            /** @description A delegate signature is required. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Payment not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Not a delegation-rail settlement, or not awaiting a signature. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Money-path rate limit. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Settlement state was lost — re-authorize. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    pauseAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paused. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such agent for this caller, or it cannot be paused from its current state. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    resumeAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resumed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such agent for this caller, or it cannot be resumed from its current state. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    rotateAgentKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new key. Store it now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Plaintext, shown once. */
+                        api_key: string;
+                        /** @description The prefix Haven keeps for display. */
+                        api_key_prefix: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The agent is not active. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    setAgentAllowance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example 0x1111111111111111111111111111111111111111 */
+                    token_address: string;
+                    token_symbol: string;
+                    /** @description Human-denominated amount. */
+                    allowance_amount: string;
+                    /** @description Refill period in minutes; 0 means one-time. */
+                    reset_period_min: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The stored allowance. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Always null — retained for client compatibility (#834). */
+                        schedule_warning: null;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The agent is revoked, or its Connect setup is still awaiting wallet approval — either way the allowance is refused before anything is written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    deleteAgentAllowance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+                tokenAddress: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Row removed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The agent is revoked, or its Connect setup is still awaiting wallet approval. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getPaymentEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paymentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The evidence record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        evidence: {
+                            /** @description Resolved from the payment intent id, else the approval request id. */
+                            payment_id: string | null;
+                        } & {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description Malformed paymentId. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No evidence for this payment. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

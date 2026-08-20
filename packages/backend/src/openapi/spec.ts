@@ -170,6 +170,82 @@ const signerActionBody = {
   },
 } as const
 
+
+// ── x402 demo-resource building blocks (#1446) ───────────────────────────────
+
+/**
+ * The 402 challenge body a resource server embeds in its own 402 response.
+ * Shape is fixed by _buildChallenge in routes/x402-resources.ts.
+ */
+const x402Challenge = {
+  type: 'object',
+  required: ['version', 'resource_id', 'accepts'],
+  properties: {
+    version: { type: 'string', examples: ['1'] },
+    resource_id: { type: 'string', format: 'uuid' },
+    accepts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['scheme', 'network', 'asset', 'maxAmountRequired', 'payTo', 'description', 'extra'],
+        properties: {
+          scheme: { type: 'string', examples: ['exact'] },
+          network: { type: 'string', examples: ['eip155:8453'] },
+          asset: address,
+          maxAmountRequired: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
+          payTo: address,
+          description: { type: 'string' },
+          extra: {
+            type: 'object',
+            required: ['name', 'authorize_endpoint', 'verify_endpoint'],
+            properties: {
+              name: { type: 'string' },
+              authorize_endpoint: { type: 'string' },
+              verify_endpoint: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const
+
+/** One registered resource as the list route reshapes it. */
+const x402Resource = {
+  type: 'object',
+  required: [
+    'resource_id', 'name', 'description', 'price_amount', 'price_human',
+    'token_symbol', 'token_address', 'chain_id', 'pay_to', 'active',
+    'created_at', 'challenge',
+  ],
+  properties: {
+    resource_id: { type: 'string', format: 'uuid' },
+    name: { type: 'string' },
+    description: { type: ['string', 'null'] },
+    price_amount: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
+    price_human: { type: 'string', description: 'Formatted with the token decimals; falls back to 6 for an unknown token.' },
+    token_symbol: { type: 'string', description: 'Stored uppercase.' },
+    token_address: {
+      type: 'string',
+      pattern: '^0x[0-9a-fA-F]{40}$',
+      description:
+        "Read back verbatim from storage. The create route lowercases on insert, but x402_resources has NO lowercase CHECK constraint (unlike agent_delegations), so a row written any other way keeps its case — compare case-insensitively.",
+    },
+    chain_id: { type: 'integer' },
+    pay_to: {
+      type: ['string', 'null'],
+      pattern: '^0x[0-9a-fA-F]{40}$',
+      description: "Null when the linked Safe was detached (safe_id is ON DELETE SET NULL) — the resource stays listed but cannot be paid.",
+    },
+    active: { type: 'boolean' },
+    created_at: { type: 'string', format: 'date-time' },
+    challenge: {
+      oneOf: [x402Challenge, { type: 'null' }],
+      description: 'Null exactly when pay_to is null — a challenge cannot be built without a payment address.',
+    },
+  },
+} as const
+
 const errorResponse = {
   description: 'Error response',
   content: {
@@ -1029,6 +1105,260 @@ export const openapiSpec = {
           '404': errorResponse,
           '409': errorResponse,
           '502': errorResponse,
+        },
+      },
+    },
+    // ── x402 demo resources (#1446) ─────────────────────────────────────────
+    // REGULATORY PERIMETER, carried from routes/x402-resources.ts: this is
+    // EXPLORATORY merchant-side x402, not production facilitator
+    // functionality. Documenting it does not widen it — see
+    // docs/regulatory/casp-risk-guardrails.md before exposing or expanding
+    // resource registration, public verification, receipts or settlement.
+    '/x402/resources': {
+      post: {
+        tags: ['x402'],
+        operationId: 'createX402Resource',
+        summary: 'Register a resource behind an x402 payment wall.',
+        description:
+          "Stores the resource and returns the 402 challenge a resource server embeds in its own responses. Price is ALWAYS atomic units (price_amount); price_human is derived for display only. Payment lands on the linked Safe — safe_id when given (ownership-checked), otherwise the user's default Safe; with neither, registration refuses rather than creating an unpayable resource.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name', 'price_amount', 'token_address', 'token_symbol'],
+                properties: {
+                  name: { type: 'string', minLength: 1, description: 'Trimmed; blank after trimming is a 400.' },
+                  description: { type: 'string' },
+                  price_amount: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units; must parse as an integer.' },
+                  token_address: address,
+                  token_symbol: { type: 'string', minLength: 1, description: 'Stored uppercase.' },
+                  chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base).' },
+                  safe_id: { type: 'string', format: 'uuid', description: "Must belong to the caller; omitted, the user's default Safe is used." },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Resource registered; the challenge is ready to embed.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['resource_id', 'name', 'price_amount', 'price_human', 'token_symbol', 'token_address', 'chain_id', 'pay_to', 'challenge'],
+                  properties: {
+                    resource_id: { type: 'string', format: 'uuid' },
+                    name: { type: 'string' },
+                    price_amount: { type: 'string', pattern: '^[0-9]+$' },
+                    price_human: { type: 'string' },
+                    token_symbol: { type: 'string' },
+                    token_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
+                    chain_id: { type: 'integer' },
+                    pay_to: address,
+                    challenge: x402Challenge,
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+      get: {
+        tags: ['x402'],
+        operationId: 'listX402Resources',
+        summary: "List the caller's registered resources, newest first.",
+        description:
+          'Includes deactivated resources — active is a field, not a filter, so an owner can see what they took down. pay_to and challenge are null together when the linked Safe was detached.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Resources ordered by created_at DESC.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['resources'],
+                  properties: {
+                    resources: { type: 'array', items: x402Resource },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/x402/resources/{id}': {
+      delete: {
+        tags: ['x402'],
+        operationId: 'deactivateX402Resource',
+        summary: 'Deactivate a resource (soft delete).',
+        description:
+          'Sets active=false, scoped to the caller. The row is kept so existing receipts keep their resource, and the challenge endpoint answers 410 rather than 404 — a payer learns the resource retired, not that it never existed.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Resource id.' }],
+        responses: {
+          '200': {
+            description: 'Resource deactivated.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/x402/receipts': {
+      get: {
+        tags: ['x402'],
+        operationId: 'listX402Receipts',
+        summary: 'List payments verified against the caller\'s resources (max 100, newest first).',
+        description:
+          'Receipts are written only by the verify endpoint, after on-chain verification. amount_human here is best-effort: it formats with 6 decimals unconditionally, so a non-6-decimal token displays wrong — amount_raw is the authoritative field.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Receipts ordered by verified_at DESC, capped at 100.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['receipts'],
+                  properties: {
+                    receipts: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['receipt_id', 'resource_id', 'resource_name', 'tx_hash', 'payer_address', 'amount_raw', 'amount_human', 'chain_id', 'verified_at'],
+                        properties: {
+                          receipt_id: { type: 'string', format: 'uuid' },
+                          resource_id: { type: 'string', format: 'uuid' },
+                          resource_name: { type: 'string' },
+                          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+                          payer_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+                          amount_raw: { type: 'string', pattern: '^[0-9]+$' },
+                          amount_human: { type: 'string', description: 'Formatted with 6 decimals unconditionally (best-effort).' },
+                          chain_id: { type: 'integer' },
+                          verified_at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/x402/resources/{id}/challenge': {
+      get: {
+        tags: ['x402'],
+        operationId: 'getX402ResourceChallenge',
+        summary: 'PUBLIC: fetch a resource\'s 402 payment challenge.',
+        description:
+          'No authentication — a challenge is public by construction, and it grants nothing: it states a price and a destination. NOTE THE SUCCESS CODE: this answers **402 Payment Required** with the challenge body, not 200, so a resource server can relay the status verbatim. 410 means the resource was deactivated; 503 means it has no payment address (its Safe was detached).',
+        security: [],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Resource id.' }],
+        responses: {
+          '402': {
+            description: 'The payment challenge (the success case for this route).',
+            content: { 'application/json': { schema: x402Challenge } },
+          },
+          '400': errorResponse,
+          '404': errorResponse,
+          '410': { ...errorResponse, description: 'Resource deactivated.' },
+          '503': { ...errorResponse, description: 'Resource has no payment address configured.' },
+        },
+      },
+    },
+    '/x402/resources/{id}/verify': {
+      post: {
+        tags: ['x402'],
+        operationId: 'verifyX402Payment',
+        summary: 'PUBLIC: verify a transaction paid for this resource, and mint a receipt.',
+        description:
+          "No authentication — verification reads the chain and the resource's own terms, so it grants the caller nothing they could not check themselves. The transaction must be an AllowanceModule transfer to the resource's Safe, in the resource's token, for at least its price. A tx_hash already used is a 409 (receipts are one-per-transaction, enforced before any RPC call). A failed verification is **402 with verified:false plus the expected terms** — a documented negative answer, not an error envelope.",
+        security: [],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Resource id.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['tx_hash'],
+                properties: { tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Payment verified on-chain; a receipt was stored.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['verified', 'receipt_id', 'resource_id', 'resource_name', 'tx_hash', 'payer_address', 'amount_raw', 'amount_human', 'token_symbol', 'verified_at'],
+                  properties: {
+                    verified: { type: 'boolean', enum: [true] },
+                    receipt_id: { type: 'string', format: 'uuid' },
+                    resource_id: { type: 'string', format: 'uuid' },
+                    resource_name: { type: 'string' },
+                    tx_hash: { type: 'string', pattern: '^0x[0-9a-f]{64}$', description: 'Lowercased before storage.' },
+                    payer_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+                    amount_raw: { type: 'string', pattern: '^[0-9]+$', description: "The VERIFIED on-chain amount, which can exceed the resource price." },
+                    amount_human: { type: 'string' },
+                    token_symbol: { type: 'string' },
+                    verified_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '402': {
+            description: 'Verification failed — the documented negative answer, with the terms the transaction had to meet.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['verified', 'reason', 'expected'],
+                  properties: {
+                    verified: { type: 'boolean', enum: [false] },
+                    reason: { type: 'string' },
+                    expected: {
+                      type: 'object',
+                      required: ['to', 'token', 'min_amount', 'chain_id'],
+                      properties: {
+                        to: address,
+                        token: {
+                          type: 'string',
+                          pattern: '^0x[0-9a-fA-F]{40}$',
+                          description: 'From storage, so case is not guaranteed (see the list schema).',
+                        },
+                        min_amount: { type: 'string', pattern: '^[0-9]+$' },
+                        chain_id: { type: 'integer' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'This transaction was already used as payment.' },
+          '410': { ...errorResponse, description: 'Resource deactivated.' },
+          '503': { ...errorResponse, description: 'Resource has no payment address.' },
         },
       },
     },

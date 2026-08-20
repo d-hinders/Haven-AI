@@ -1,11 +1,16 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import fastifyJwt from '@fastify/jwt'
 import { ethers } from 'ethers'
 
 const USER = 'user-1'
-const RESOURCE_ID = 'resource-1'
-const RECEIPT_ID = 'receipt-1'
+// A real row's id is a uuid (x402_resources.id is UUID PRIMARY KEY), and the
+// spec says so (#1446) — 'resource-1' would describe a response the database
+// cannot produce.
+const RESOURCE_ID = '3f2b91c4-7d18-4a52-9c6e-1b8d0e5a7f43'
+// x402_receipts.id is UUID PRIMARY KEY too (#1446).
+const RECEIPT_ID = 'c81d47a9-05e6-4f30-b2a7-6e93f1c40d28'
 const SAFE = '0x135a9215604711AC70d970e12Caa812c53537EF4'
 const PAYER_SAFE = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
 const DELEGATE = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
@@ -210,6 +215,8 @@ describe('x402 resource routes', () => {
           }],
         },
       })
+      // #1446: the documented 201 shape, against the real payload.
+      expectMatchesSpec('POST', '/x402/resources', res.json(), '201')
       expect(mockQuery).toHaveBeenNthCalledWith(
         1,
         'SELECT safe_address FROM user_safes WHERE id = $1 AND user_id = $2',
@@ -225,6 +232,115 @@ describe('x402 resource routes', () => {
         'USDC',
         8453,
       ])
+    })
+  })
+
+
+  // #1446: the three routes that had no test of their own — documented shapes
+  // are worthless if nothing ever compares them to a real payload.
+  describe('GET /x402/resources', () => {
+    it('lists the caller\'s resources with a built challenge (#1446)', async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [resourceRow()] })
+
+      const res = await authed('GET', '/x402/resources')
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json().resources).toHaveLength(1)
+      expect(res.json().resources[0].resource_id).toBe(RESOURCE_ID)
+      expectMatchesSpec('GET', '/x402/resources', res.json())
+    })
+
+    it('a detached Safe leaves pay_to AND challenge null together (#1446)', async () => {
+      // safe_id is ON DELETE SET NULL, so this is a state the table can reach:
+      // the resource stays listed but cannot be paid, and the spec says the two
+      // nulls travel together.
+      mockQuery.mockResolvedValueOnce({ rows: [resourceRow({ safe_address: null, safe_id: null })] })
+
+      const res = await authed('GET', '/x402/resources')
+
+      expect(res.json().resources[0].pay_to).toBeNull()
+      expect(res.json().resources[0].challenge).toBeNull()
+      expectMatchesSpec('GET', '/x402/resources', res.json())
+    })
+
+    it('includes deactivated resources — active is a field, not a filter', async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [resourceRow({ active: false })] })
+
+      const res = await authed('GET', '/x402/resources')
+
+      expect(res.json().resources[0].active).toBe(false)
+      expectMatchesSpec('GET', '/x402/resources', res.json())
+    })
+  })
+
+  describe('DELETE /x402/resources/:id', () => {
+    it('deactivates the caller\'s resource and returns the documented shape', async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [{ id: RESOURCE_ID }] })
+
+      const res = await authed('DELETE', `/x402/resources/${RESOURCE_ID}`)
+
+      expect(res.statusCode).toBe(200)
+      expectMatchesSpec('DELETE', '/x402/resources/{id}', res.json())
+      // Soft delete, scoped to the caller — the row survives so its receipts do.
+      const [sql, params] = mockQuery.mock.calls[0]
+      expect(String(sql)).toMatch(/SET active = false/)
+      expect(String(sql)).not.toMatch(/DELETE FROM/)
+      expect(params).toEqual([RESOURCE_ID, USER])
+    })
+
+    it("404s another user's resource rather than deactivating it", async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [] })
+
+      const res = await authed('DELETE', `/x402/resources/${RESOURCE_ID}`)
+
+      expect(res.statusCode).toBe(404)
+    })
+  })
+
+  describe('GET /x402/receipts', () => {
+    it('returns verified payments in the documented shape (#1446)', async () => {
+      mockQuery.mockResolvedValueOnce({
+        rows: [{
+          id: RECEIPT_ID,
+          resource_id: RESOURCE_ID,
+          resource_name: 'Weather API',
+          user_id: USER,
+          tx_hash: '0x' + 'ab'.repeat(32),
+          payer_address: DELEGATE,
+          amount_raw: '1500',
+          chain_id: 8453,
+          verified_at: '2026-06-26T09:00:00.000Z',
+        }],
+      })
+
+      const res = await authed('GET', '/x402/receipts')
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json().receipts[0].receipt_id).toBe(RECEIPT_ID)
+      expectMatchesSpec('GET', '/x402/receipts', res.json())
+      // The cap is part of the contract, not an implementation detail.
+      expect(String(mockQuery.mock.calls[0][0])).toMatch(/LIMIT 100/)
+    })
+
+    it('an unverifiable payer is null, not absent', async () => {
+      mockQuery.mockResolvedValueOnce({
+        rows: [{
+          id: RECEIPT_ID,
+          resource_id: RESOURCE_ID,
+          resource_name: 'Weather API',
+          user_id: USER,
+          tx_hash: '0x' + 'ab'.repeat(32),
+          payer_address: null,
+          amount_raw: '1500',
+          chain_id: 8453,
+          verified_at: '2026-06-26T09:00:00.000Z',
+        }],
+      })
+
+      const res = await authed('GET', '/x402/receipts')
+
+      expect(res.json().receipts[0].payer_address).toBeNull()
+      expectMatchesSpec('GET', '/x402/receipts', res.json())
     })
   })
 
@@ -255,6 +371,8 @@ describe('x402 resource routes', () => {
           },
         }],
       })
+      // The success code here is 402, and the spec documents it as such (#1446).
+      expectMatchesSpec('GET', '/x402/resources/{id}/challenge', res.json(), '402')
     })
   })
 
@@ -328,6 +446,8 @@ describe('x402 resource routes', () => {
         },
       })
       expect(mockQuery).toHaveBeenCalledTimes(2)
+      // The documented NEGATIVE answer: verified:false plus the expected terms.
+      expectMatchesSpec('POST', '/x402/resources/{id}/verify', res.json(), '402')
     })
 
     it('returns 402 when the payment uses the wrong token', async () => {
@@ -425,6 +545,7 @@ describe('x402 resource routes', () => {
         expect.stringContaining('INSERT INTO x402_receipts'),
         [RESOURCE_ID, USER, TX_HASH, PAYER_SAFE.toLowerCase(), '1500', 8453],
       )
+      expectMatchesSpec('POST', '/x402/resources/{id}/verify', res.json(), '201')
     })
   })
 })

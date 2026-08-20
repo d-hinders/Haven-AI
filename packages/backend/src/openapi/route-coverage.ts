@@ -120,10 +120,6 @@ export interface UndocumentedModule {
 export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
   // ── Agent-facing / money-path — highest priority for #1446 ──
   {
-    file: 'x402-resources.ts',
-    because: 'The x402 demo-resource + receipts surface; agent-reachable, undocumented since it shipped.',
-  },
-  {
     file: 'agent-passports.ts',
     because: 'Agent Passport issuance/status (epic #970). Governance metadata, never spend authority.',
   },
@@ -201,5 +197,5 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
  * `index.ts` — and one of them (`GET /chains`) turned out to be undocumented.
  * That is the gate earning its keep on its first run, not slack being taken.
  */
-export const MAX_UNDOCUMENTED_MODULES = 16
-export const MAX_UNDOCUMENTED_ROUTES = 76
+export const MAX_UNDOCUMENTED_MODULES = 15
+export const MAX_UNDOCUMENTED_ROUTES = 70

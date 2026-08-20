@@ -1,4 +1,5 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 
 const { mockQuery, mockLoadOwner, mockTreasury } = vi.hoisted(() => ({
@@ -56,6 +57,7 @@ describe('GET /accounts/hybrid/:address/signers (#1079)', () => {
       owner_address: null,
       passkeys: [{ key_id: '0xdeadbeef', x: '0x7', y: '0x9' }],
     })
+    expectMatchesSpec('GET', '/accounts/hybrid/{address}/signers', res.json())
     // Ownership is in the SQL: user_id + address + chain + delegation rail.
     const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
     expect(sql).toMatch(/account_type = 'delegator_hybrid'/)
@@ -237,6 +239,7 @@ describe('account-scoped signer management (#1081)', () => {
 
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ updated: true, tx_hash: '0x' + 'ff'.repeat(32) })
+    expectMatchesSpec('POST', '/accounts/hybrid/{address}/signers/submit', res.json())
     // Storage tracks the chain: the new key is recorded against this account.
     const insert = mockQuery.mock.calls.find(([sql]) =>
       /INSERT INTO hybrid_account_passkeys/.test(String(sql)),
@@ -340,6 +343,7 @@ describe('remove_owner — enrolling a wallet is not a one-way door (#1087)', ()
     expect(res.statusCode).toBe(200)
     // Owner still exists → legacy default scheme is the owner's EIP-712.
     expect(res.json().signature_scheme).toBe('eip712_userop')
+    expectMatchesSpec('POST', '/accounts/hybrid/{address}/signers/prepare', res.json())
     expect(mockTreasury).toHaveBeenCalled()
   })
 
@@ -484,6 +488,8 @@ describe('owner-initiated send (#1083)', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json().signature_scheme).toBe('webauthn_userop')
     expect(res.json().user_op_hash).toBeTruthy()
+    // The webauthn branch of the documented oneOf (#1446).
+    expectMatchesSpec('POST', '/accounts/hybrid/{address}/transfers/prepare', res.json())
     expect(mockTreasury.mock.calls[0][0]).toMatchObject({ signWith: 'passkey' })
   })
 
@@ -532,6 +538,7 @@ describe('owner-initiated send (#1083)', () => {
     })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ submitted: true, tx_hash: '0x' + 'ff'.repeat(32) })
+    expectMatchesSpec('POST', '/accounts/hybrid/{address}/transfers/submit', res.json())
   })
 
   it("404s an account the caller does not own", async () => {

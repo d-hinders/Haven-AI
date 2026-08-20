@@ -4,6 +4,7 @@
  * kit's contract, exercised live by pilot:provision-hybrid.
  */
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 
 const { mockQuery, mockCompute } = vi.hoisted(() => ({
@@ -34,7 +35,9 @@ function mockDb(opts: { existing?: boolean; count?: string } = {}) {
     }
     if (/COUNT\(\*\)/.test(s)) return Promise.resolve({ rows: [{ count: opts.count ?? '1' }] })
     if (/INSERT INTO user_safes/.test(s)) {
-      return Promise.resolve({ rows: [{ id: 'acct-1', created_at: '2026-07-10T00:00:00Z' }] })
+      // user_safes.id is a UUID column, so 'acct-1' described a row the
+      // database cannot produce (#1446).
+      return Promise.resolve({ rows: [{ id: '5a2f8d31-6c04-4e97-b183-9e7d2c6a0f58', created_at: '2026-07-10T00:00:00Z' }] })
     }
     return Promise.resolve({ rows: [] })
   })
@@ -66,6 +69,7 @@ describe('POST /accounts/hybrid (#825)', () => {
       chain_id: 84532,
       deployed: false,
     })
+    expectMatchesSpec('POST', '/accounts/hybrid', res.json(), '201')
     const insert = mockQuery.mock.calls.find((c) => /INSERT INTO user_safes/.test(String(c[0])))!
     expect(String(insert[0])).toContain("'delegator_hybrid'")
     expect(String(insert[0])).toContain("'delegation'")
@@ -84,7 +88,7 @@ describe('POST /accounts/hybrid (#825)', () => {
     // #885: the passkey set is persisted so the config round-trips for deploy/revoke.
     const pkInsert = mockQuery.mock.calls.find((c) => /INSERT INTO hybrid_account_passkeys/.test(String(c[0])))!
     expect(pkInsert, 'passkey set must be persisted').toBeDefined()
-    expect(pkInsert[1]).toEqual(['acct-1', 'cred-1', '0x' + '11'.repeat(32), '0x' + '22'.repeat(32)])
+    expect(pkInsert[1]).toEqual(['5a2f8d31-6c04-4e97-b183-9e7d2c6a0f58', 'cred-1', '0x' + '11'.repeat(32), '0x' + '22'.repeat(32)])
   })
 
   it.each([

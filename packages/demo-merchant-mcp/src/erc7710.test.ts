@@ -1,14 +1,19 @@
 import type { Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { keccak256 } from 'viem'
+import { encodeAbiParameters, keccak256, type Address, type Hex } from 'viem'
+import { DelegationManager as DELEGATION_MANAGER_PACKAGE_ABI, ERC20TransferAmountEnforcer } from '@metamask/delegation-abis'
 import { encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
 import { createDemoMerchantServer } from './http.js'
+import { PRODUCTS } from './products.js'
 import {
+  DELEGATION_STRUCT_COMPONENTS,
   ERC7710_TRANSFER_METHOD,
   PAYMENT_RESPONSE_HEADER,
   PAYMENT_SIGNATURE_HEADER,
   createX402PaymentProcessor,
+  decodeLeafDelegation,
+  decodeTransferAmountCap,
   type Erc7710SettlementClient,
   type SettlementClient,
   type X402PaymentProcessorOptions,
@@ -266,7 +271,7 @@ describe('demo merchant experimental erc7710 rail', () => {
     // Verification and settlement use the identical redeem call.
     expect(vi.mocked(erc7710Client.simulateRedeemDelegations).mock.calls[0][0]).toEqual(redeemCall)
 
-    expect(text).toContain('Köp bekräftat')
+    expect(text).toContain('Purchase confirmed')
     expect(text).toContain(DELEGATOR)
     expect(text).toContain(TX_HASH)
   })
@@ -414,5 +419,240 @@ describe("a product's own settlement methods bind the 402 it serves (#1441)", ()
     const paymentRequired = await unpaid.json() as PaymentRequired
 
     expect(paymentRequired.accepts).toHaveLength(2)
+  })
+})
+
+describe('restart survival — the chain remembers what the maps forget (#1515)', () => {
+  // The PINNED transfer-amount enforcer (deterministic; the signer pins the same).
+  const ENFORCER = '0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc' as const
+  const OTHER_ENFORCER = '0x1046bb45C8d673d4ea75321280DB34899413c069' as const
+  const LEAF_HASH = `0x${'1f'.repeat(32)}` as const
+  const PRICE = 1_000n // vpn_basic
+  const ERC7710_OPTIONS = {
+    erc7710: { delegationManager: DELEGATION_MANAGER, erc20TransferAmountEnforcer: ENFORCER },
+  } as const
+
+  /** ERC20TransferAmountEnforcer terms: 20-byte token ‖ 32-byte cap. */
+  function transferAmountTerms(cap: bigint): Hex {
+    const token = '00'.repeat(20)
+    const amount = cap.toString(16).padStart(64, '0')
+    return `0x${token}${amount}` as Hex
+  }
+
+  /**
+   * A REAL abi-encoded Delegation[] — the shape a MetaMask permissionContext
+   * has. `capEnforcer`/`cap` let a test forge the transfer-amount caveat.
+   */
+  function realPermissionContext(
+    opts: { capEnforcer?: Address; cap?: bigint } = {},
+  ): Hex {
+    const capEnforcer = opts.capEnforcer ?? ENFORCER
+    const cap = opts.cap ?? PRICE
+    return encodeAbiParameters(
+      [{ name: 'delegations', type: 'tuple[]', components: DELEGATION_STRUCT_COMPONENTS }],
+      [[
+        {
+          delegate: MERCHANT,
+          delegator: DELEGATOR,
+          authority: `0x${'aa'.repeat(32)}` as Hex,
+          caveats: [
+            // Deliberately NOT first: the check must find the transfer-amount
+            // caveat by (pinned) address, not by assuming a position.
+            { enforcer: OTHER_ENFORCER, terms: '0x' as Hex, args: '0x' as Hex },
+            { enforcer: capEnforcer, terms: transferAmountTerms(cap), args: '0x' as Hex },
+          ],
+          salt: 0n,
+          signature: `0x${'cc'.repeat(65)}` as Hex,
+        },
+      ]],
+    )
+  }
+
+  /** Chain state after a restart that lost the maps: the child is exhausted. */
+  function restartedClient(params: { spent: bigint | null }): Erc7710SettlementClient {
+    return {
+      simulateRedeemDelegations: vi
+        .fn<Erc7710SettlementClient['simulateRedeemDelegations']>()
+        .mockRejectedValue(new Error('ERC20TransferAmountEnforcer: allowance-exceeded')),
+      submitRedeemDelegations: vi.fn<Erc7710SettlementClient['submitRedeemDelegations']>(),
+      getDelegationHash: vi
+        .fn<NonNullable<Erc7710SettlementClient['getDelegationHash']>>()
+        .mockResolvedValue(LEAF_HASH),
+      // Only the PINNED enforcer answers with a real number; a forged enforcer
+      // in this mock would return whatever a real attacker contract chose — so
+      // the mock returns a huge number for ANY address to prove the code, not
+      // the mock, is what refuses an untrusted enforcer.
+      spentOnDelegation: vi
+        .fn<NonNullable<Erc7710SettlementClient['spentOnDelegation']>>()
+        .mockResolvedValue(params.spent),
+    }
+  }
+
+  it('a paid retry after a merchant restart is SERVED, with no second submit (the #1515 defect)', async () => {
+    const context = realPermissionContext()
+
+    // Before the restart: a normal successful settlement.
+    const first = mockErc7710Client()
+    const server1 = await startServer({ erc7710Client: first, options: ERC7710_OPTIONS })
+    const unpaid = await postBuyVpn(server1.url)
+    const paymentRequired = await unpaid.json() as PaymentRequired
+    const header = erc7710Header(paymentRequired, { permissionContext: context })
+    const paid = await postBuyVpn(server1.url, { [PAYMENT_SIGNATURE_HEADER]: header }, 2)
+    expect(paid.status).toBe(200)
+    expect(first.submitRedeemDelegations).toHaveBeenCalledTimes(1)
+
+    // "Restart": a fresh server with empty maps, over chain state where the
+    // child's exact amount is already spent — simulation now reverts.
+    const second = restartedClient({ spent: PRICE })
+    const server2 = await startServer({ erc7710Client: second, options: ERC7710_OPTIONS })
+    const retryUnpaid = await postBuyVpn(server2.url)
+    const retryPr = await retryUnpaid.json() as PaymentRequired
+    const retry = await postBuyVpn(
+      server2.url,
+      { [PAYMENT_SIGNATURE_HEADER]: erc7710Header(retryPr, { permissionContext: context }) },
+      2,
+    )
+    const text = await retry.text()
+
+    // The buyer whose money already moved gets the goods, and nothing is
+    // submitted on-chain again. The spent read went to the PINNED enforcer.
+    expect(retry.status).toBe(200)
+    expect(retry.headers.get(PAYMENT_RESPONSE_HEADER)).toBeTruthy()
+    expect(text).toContain('Purchase confirmed')
+    expect(second.submitRedeemDelegations).not.toHaveBeenCalled()
+    expect(second.spentOnDelegation).toHaveBeenCalledWith(ENFORCER, DELEGATION_MANAGER, LEAF_HASH)
+  })
+
+  it('an unredeemed child whose simulation fails is still REFUSED — the check must not over-serve', async () => {
+    const client = restartedClient({ spent: 0n })
+    const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
+    const unpaid = await postBuyVpn(url)
+    const paymentRequired = await unpaid.json() as PaymentRequired
+
+    const rejected = await postBuyVpn(
+      url,
+      { [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, { permissionContext: realPermissionContext() }) },
+      2,
+    )
+    const body = await rejected.json() as PaymentRequired
+
+    expect(rejected.status).toBe(402)
+    expect(body.error).toContain('simulation failed')
+    expect(client.submitRedeemDelegations).not.toHaveBeenCalled()
+  })
+
+  it('SECURITY: a forged caveat enforcer is NOT trusted — no free goods from an attacker oracle', async () => {
+    // The attacker names their own contract as the transfer-amount caveat and
+    // has it report a huge spend. The pinned-enforcer bind must ignore it: the
+    // real trusted enforcer is absent from this context, so the check finds no
+    // trusted caveat and refuses. `restartedClient` returns a huge spent for
+    // ANY address, so only the code's address bind — not the mock — refuses.
+    const client = restartedClient({ spent: 10n ** 18n })
+    const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
+    const unpaid = await postBuyVpn(url)
+    const paymentRequired = await unpaid.json() as PaymentRequired
+
+    const attacker = await postBuyVpn(
+      url,
+      {
+        [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, {
+          permissionContext: realPermissionContext({ capEnforcer: OTHER_ENFORCER }),
+        }),
+      },
+      2,
+    )
+    expect(attacker.status).toBe(402)
+    expect(client.submitRedeemDelegations).not.toHaveBeenCalled()
+    // The untrusted enforcer's spentMap is never even consulted.
+    expect(client.spentOnDelegation).not.toHaveBeenCalled()
+  })
+
+  it('SECURITY: a child spent for an expensive product cannot buy a cheaper one after restart', async () => {
+    // The exhausted child was minted exact-amount for vpn_pro (cap 3000). The
+    // buyer replays that SAME context against vpn_basic (price 1000). spentMap
+    // reports 3000 >= 1000 — but the cap bind (3000 ≠ 1000) refuses, so the
+    // pre-#1515 `spent >= amount` cross-product replay is closed.
+    const proContext = realPermissionContext({ cap: 3_000n })
+    const client = restartedClient({ spent: 3_000n })
+    const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
+    const unpaid = await postBuyVpn(url) // vpn_basic, price 1000
+    const paymentRequired = await unpaid.json() as PaymentRequired
+
+    const replay = await postBuyVpn(
+      url,
+      { [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, { permissionContext: proContext }) },
+      2,
+    )
+    expect(replay.status).toBe(402)
+    expect(client.submitRedeemDelegations).not.toHaveBeenCalled()
+  })
+
+  it('a client without the chain-read methods keeps the pre-#1515 refusal behaviour', async () => {
+    const client = mockErc7710Client()
+    vi.mocked(client.simulateRedeemDelegations).mockRejectedValue(new Error('allowance-exceeded'))
+    const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
+    const unpaid = await postBuyVpn(url)
+    const paymentRequired = await unpaid.json() as PaymentRequired
+
+    const rejected = await postBuyVpn(
+      url,
+      { [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, { permissionContext: realPermissionContext() }) },
+      2,
+    )
+    expect(rejected.status).toBe(402)
+  })
+
+  it('decodeLeafDelegation: real context round-trips, garbage is null — never a throw', () => {
+    const leaf = decodeLeafDelegation(realPermissionContext())
+    expect(leaf?.delegator).toBe(DELEGATOR)
+    expect(leaf?.caveats.map((caveat) => caveat.enforcer)).toEqual([OTHER_ENFORCER, ENFORCER])
+    expect(decodeLeafDelegation(PERMISSION_CONTEXT)).toBeNull()
+    expect(decodeLeafDelegation('0x')).toBeNull()
+  })
+
+  it('GUARD: erc7710-eligible product prices stay unique — the cap bind is price-shaped', () => {
+    // The already-redeemed bind identifies a purchase by its exact-amount cap,
+    // which is only a purchase identity while no two erc7710 products share a
+    // price. If two did, an exhausted child from one could satisfy the other
+    // post-restart: paid once, served twice. Prices are distinct today
+    // (vpn_basic and vpn_legacy both cost 1000, but vpn_legacy is 3009-only),
+    // and this fails the moment someone prices a new erc7710 product onto an
+    // existing one — which would silently reopen a free-goods path.
+    const erc7710Prices = Object.values(PRODUCTS)
+      .filter((product) => product.x402.settlementMethods.includes(ERC7710_TRANSFER_METHOD))
+      .map((product) => product.price_usdc)
+    expect(new Set(erc7710Prices).size).toBe(erc7710Prices.length)
+  })
+
+  it('decodeTransferAmountCap: reads maxTokens from 20+32-byte terms, null on short terms', () => {
+    expect(decodeTransferAmountCap(transferAmountTerms(1_000n))).toBe(1_000n)
+    expect(decodeTransferAmountCap(transferAmountTerms(0n))).toBe(0n)
+    expect(decodeTransferAmountCap('0x')).toBeNull()
+    expect(decodeTransferAmountCap(`0x${'00'.repeat(40)}` as Hex)).toBeNull()
+  })
+
+  it('pin: the mirrored Delegation struct matches @metamask/delegation-abis exactly', () => {
+    // The decode literal in x402.ts is hand-mirrored for static typing; this
+    // is what makes mirrored survivable. `getDelegationHash`'s input IS the
+    // struct, componentwise.
+    const fn = DELEGATION_MANAGER_PACKAGE_ABI.find(
+      (entry): entry is Extract<typeof entry, { type: 'function' }> =>
+        entry.type === 'function' && entry.name === 'getDelegationHash',
+    )
+    const strip = (components: readonly unknown[]): unknown =>
+      components.map((c) => {
+        const { name, type, components: nested } = c as { name: string; type: string; components?: readonly unknown[] }
+        return { name, type, ...(nested ? { components: strip(nested) } : {}) }
+      })
+    expect(strip((fn?.inputs[0] as { components: readonly unknown[] }).components)).toEqual(
+      strip(DELEGATION_STRUCT_COMPONENTS),
+    )
+
+    // And the spentMap read the client performs matches the enforcer's ABI.
+    const spentMap = ERC20TransferAmountEnforcer.find(
+      (entry) => entry.type === 'function' && entry.name === 'spentMap',
+    ) as { inputs: readonly { type: string }[]; outputs: readonly { type: string }[] } | undefined
+    expect(spentMap?.inputs.map((input) => input.type)).toEqual(['address', 'bytes32'])
+    expect(spentMap?.outputs.map((output) => output.type)).toEqual(['uint256'])
   })
 })

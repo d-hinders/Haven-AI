@@ -455,7 +455,9 @@ describe('haven_discover_tools', () => {
 
     expect(result.data[0].price_is_indicative).toBe(true)
     expect(result.data[0].price_atomic).toBe('10000')
-    expect(result.data[0].suggested_tool).toBe('haven_pay_mcp_tool')
+    // #1547: the structured field agrees with the description prose — MCP
+    // entries point at the GUIDED preflight, not the manual tool.
+    expect(result.data[0].suggested_tool).toBe('haven_prepare_catalog_purchase')
     expect(result.data[0].tool_arguments).toEqual({ prompt: 'hello' })
   })
 
@@ -1122,9 +1124,10 @@ describe('haven_pay_mcp_tool', () => {
     expect(result.data.tool_name).toBe('create_text')
     expect(result.data.arguments).toEqual({ prompt: 'Hello' })
     expect(result.data.mcp_transport).toEqual({ handshake_required: true, source: 'path' })
-    // The raw merchant 402 PaymentRequired must be returned (the signer needs it).
-    expect(result.data.payment_required).toBeDefined()
-    expect(Array.isArray(result.data.payment_required.accepts)).toBe(true)
+    // #1549: the raw merchant 402 PaymentRequired is compact-trimmed — the
+    // signer fetches it by payment_id (#1355), so echoing it was per-purchase
+    // token cost. It returns under include_signing_payload=true (next test).
+    expect(result.data.payment_required).toBeUndefined()
     expect(result.data.x402).toBeDefined()
     const initialize = calls.find((call) => call.body?.method === 'initialize')
     const initialized = calls.find((call) => call.body?.method === 'notifications/initialized')
@@ -1272,6 +1275,9 @@ describe('haven_pay_mcp_tool', () => {
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
         max_amount: '2000000',
+        // #1549: payment_required only rides the full shape now; this test's
+        // subject is the bazaar extension threading THROUGH it, so ask for it.
+        include_signing_payload: true,
       }),
     )
 
@@ -1735,6 +1741,9 @@ describe('haven_prepare_catalog_purchase', () => {
     // #1308 guidance — next step is the SAME signer call as haven_pay_mcp_tool.
     expect(result.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
     expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+    // #1588: the runtime-neutral pair rides along; next_tool stays byte-identical.
+    expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
+    expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign_x402')
     expect(result.data.next_arguments).toEqual({ payment_id: X402_INTENT_RESPONSE.payment_id })
     // Catalog price matched the live quote — no CATALOG_PRICE_DIFFERS warning.
     expect(result.data.warnings.some((w) => w.code === 'CATALOG_PRICE_DIFFERS')).toBe(false)
@@ -2139,6 +2148,132 @@ describe('haven_prepare_catalog_purchase', () => {
 
     const intentCall = calls.find((c) => c.url.endsWith('/x402'))
     expect(intentCall?.body?.idempotencyKey).toBe('catalog-purchase-key-1')
+  })
+
+  /**
+   * #1547 — the guided path honours the #1450 settlement-scheme preference.
+   *
+   * Before this, the catalog handler was hard-wired to createX402Intent (the
+   * 3009 funding leg) while haven_pay_mcp_tool ran #1453's selector — so the
+   * RECOMMENDED guided route forced the fallback scheme and its transient
+   * delegate hot balance. The negatives carry this suite for the same reason
+   * they carry the #1456 one: a selector that always answered "erc7710" would
+   * pass a happy-path-only file.
+   */
+  describe('settlement-scheme preference (#1547)', () => {
+    const ERC7710_PR = {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        ...PAYMENT_REQUIRED.accepts,
+        {
+          ...PAYMENT_REQUIRED.accepts[0],
+          extra: {
+            assetTransferMethod: 'erc7710',
+            facilitatorAddresses: ['0x4444444444444444444444444444444444444444'],
+          },
+        },
+      ],
+    }
+    const erc7710Header = btoa(JSON.stringify(ERC7710_PR))
+    const CHILD = {
+      payment_id: 'pay_7710',
+      status: 'pending_signature',
+      sign_data: {
+        hash: '0x' + '11'.repeat(32),
+        signature_scheme: 'eip712_delegation',
+        typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+      },
+    }
+
+    function xBody() {
+      const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+      return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, any>
+    }
+
+    async function prepare(header: string, agent: Record<string, unknown>, expectErc7710 = false) {
+      stubFetch({
+        'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': header } },
+        'POST /x402': { status: 201, body: expectErc7710 ? CHILD : X402_INTENT_RESPONSE },
+        'GET /machine-payments/agent': { status: 200, body: agent },
+        'GET /machine-payments/allowances': {
+          status: 200,
+          body: allowancesFixture(
+            '5000000',
+            (agent as { execution_rail?: string }).execution_rail === 'delegation' ? 'delegation' : 'legacy',
+          ),
+        },
+      })
+      return ok(
+        await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+      ) as { data: Record<string, any> }
+    }
+
+    it('delegation rail + erc7710 merchant: direct settlement, with the catalog fields and allowance block kept', async () => {
+      const res = await prepare(erc7710Header, DELEGATION_AGENT_RESPONSE, true)
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.settlement.funding_leg).toBe(false)
+      expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign')
+      expect((res.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
+      expect((res.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign')
+      expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
+      // The guided-path extras survive the scheme branch — this shape is the
+      // SAME contract as the 3009 one, minus the funding leg.
+      expect(res.data.catalog_id).toBe('cat_1')
+      expect(res.data.catalog_price_is_indicative).toBe(true)
+      expect(res.data.allowance).toMatchObject({ rail: 'delegation', sufficient: true })
+
+      const body = xBody()
+      // payTo = the MERCHANT is what selects direct settlement server-side.
+      expect(body.settlementScheme).toBe('erc7710')
+      expect(body.payTo).toBe(PAYMENT_REQUIRED.accepts[0].payTo)
+    })
+
+    it('persists the merchant call context on the erc7710 authorize, so settle rehydrates by payment_id (#1307)', async () => {
+      await prepare(erc7710Header, DELEGATION_AGENT_RESPONSE, true)
+      const body = xBody()
+      expect(body.mcpCallContext).toMatchObject({
+        merchantUrl: 'http://merchant.test/mcp',
+        toolName: 'create_text',
+        arguments: { prompt: 'Hello' },
+      })
+    })
+
+    it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
+      const res = await prepare(erc7710Header, AGENT_RESPONSE)
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+      expect((res.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
+      expect((res.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign_x402')
+      expect(xBody().settlementScheme).toBe('eip3009')
+    })
+
+    it('a 3009-only merchant stays on the bridge, even on a delegation account', async () => {
+      const res = await prepare(paymentRequiredHeader, DELEGATION_AGENT_RESPONSE)
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(xBody().settlementScheme).toBe('eip3009')
+    })
+
+    it('the CATALOG_PRICE_DIFFERS warning survives the scheme branch (it fires before it)', async () => {
+      stubFetch({
+        'GET /catalog/cat_1': {
+          status: 200,
+          body: { ...CATALOG_ENTRY_RESPONSE, price_atomic: '999' },
+        },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': erc7710Header } },
+        'POST /x402': { status: 201, body: CHILD },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'GET /machine-payments/allowances': {
+          status: 200,
+          body: allowancesFixture('5000000', 'delegation'),
+        },
+      })
+      const res = ok<{ settlement_scheme: string; warnings: Array<{ code: string }> }>(
+        await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(res.data.warnings.map((w) => w.code)).toContain('CATALOG_PRICE_DIFFERS')
+    })
   })
 })
 
@@ -3024,6 +3159,76 @@ describe('compact x402 signing payload (#1272)', () => {
     expect((result.data.x402 as { expected?: unknown }).expected).toBeDefined()
   })
 
+  /**
+   * #1549 — payment_required joins the compact contract on the MCP tool
+   * surfaces. The signer fetches it by payment_id (#1355); the response echo
+   * was the largest repeated block on every purchase. Same escape as
+   * typed_data: include_signing_payload=true restores it verbatim.
+   */
+  describe('payment_required compaction (#1549)', () => {
+    const mcpStubs = () => ({
+      'POST /mcp': {
+        status: 402 as const,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) },
+      },
+      'GET /machine-payments/agent': { status: 200 as const, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201 as const, body: X402_INTENT_RESPONSE },
+    })
+    const CATALOG_ROUTES = {
+      'GET /catalog/cat_1': {
+        status: 200 as const,
+        body: {
+          id: 'cat_1', name: 'CloudNest 50GB', description: 'Cloud storage tier',
+          category: 'compute', resource_url: 'http://merchant.test/mcp', rail: 'x402',
+          protocol: 'mcp', tool_name: 'create_text', tool_arguments: { prompt: 'Hello' },
+          price_display: '$1.50 USDC', price_atomic: '1500000',
+          asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', network: 'eip155:8453',
+          status: 'active', verified_at: '2026-06-16T08:50:39.772Z',
+        },
+      },
+      'GET /machine-payments/allowances': { status: 404 as const, body: {} },
+    }
+
+    it('haven_pay_mcp_tool: compact omits payment_required; the replay restores it verbatim and is measurably larger', async () => {
+      stubFetch(mcpStubs())
+      const compact = ok<Record<string, unknown>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp', tool_name: 'create_text',
+          arguments: { prompt: 'Hello' }, max_amount: '2000000', idempotency_key: 'k-1549',
+        }),
+      )
+      expect('payment_required' in compact.data).toBe(false)
+
+      stubFetch(mcpStubs())
+      const full = ok<{ payment_required?: unknown }>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp', tool_name: 'create_text',
+          arguments: { prompt: 'Hello' }, max_amount: '2000000', idempotency_key: 'k-1549',
+          include_signing_payload: true,
+        }),
+      )
+      expect(full.data.payment_required).toEqual(PAYMENT_REQUIRED)
+      // The point of the issue: the trim buys real bytes on every purchase.
+      expect(JSON.stringify(compact.data).length).toBeLessThan(JSON.stringify(full.data).length)
+    })
+
+    it('haven_prepare_catalog_purchase: same contract as haven_pay_mcp_tool', async () => {
+      stubFetch({ ...mcpStubs(), ...CATALOG_ROUTES })
+      const compact = ok<Record<string, unknown>>(
+        await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }),
+      )
+      expect('payment_required' in compact.data).toBe(false)
+
+      stubFetch({ ...mcpStubs(), ...CATALOG_ROUTES })
+      const full = ok<{ payment_required?: unknown }>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_1', max_amount: '2000000', include_signing_payload: true,
+        }),
+      )
+      expect(full.data.payment_required).toEqual(PAYMENT_REQUIRED)
+    })
+  })
+
   it('haven_pay_x402_quote include_signing_payload=true restores the full payload verbatim', async () => {
     stubFetch(stubs())
 
@@ -3440,6 +3645,8 @@ describe('structured agent guidance (#1308)', () => {
     expect(result.data.status).toBe('pending_approval')
     expect(result.data.next_action).toBe('wait_for_user_approval')
     expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven')
+    expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_get_payment_status')
     expect(result.data.safe_to_continue).toBe(false)
   })
 })
@@ -4228,5 +4435,47 @@ describe('null-holed payment_required (#1469)', () => {
     const text = JSON.stringify(result)
     expect(text).not.toMatch(/Cannot read properties/)
     expect(text).toMatch(/No compatible payment option|not a valid x402 PaymentRequired/)
+  })
+})
+
+describe('runtime-neutral tool naming (#1588)', () => {
+  it('every tool description that spells mcp__… also carries the runtime-naming hedge', async () => {
+    // Self-enforcing acceptance criterion: no agent-visible description may
+    // assert the Claude-family identifier as THE callable name without the
+    // runtime-neutral resolution alongside it. Registration-derived, so a new
+    // tool description cannot dodge the rule.
+    const { toolDescriptions } = await import('./tools.js')
+    const offenders = Object.entries(toolDescriptions)
+      .filter(([, description]) => description.includes('mcp__'))
+      .filter(([, description]) => !description.includes('next_tool_server'))
+      .map(([name]) => name)
+    expect(offenders).toEqual([])
+  })
+})
+
+describe('next_tool emission literals (#1588 review)', () => {
+  it('every nextTool literal in the source parses into the runtime-neutral pair', async () => {
+    // Source-derived like the description scanner: only 4 of the 9 emission
+    // sites are behaviourally pinned, and a mis-spelled literal on an
+    // unpinned site would silently drop the pair (the derivation omits on
+    // parse failure by design). This closes that hole for every literal,
+    // present and future.
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const source = readFileSync(fileURLToPath(new URL('./tools.ts', import.meta.url)), 'utf8')
+    const literals = [...source.matchAll(/nextTool: '([^']+)'/g)].map((m) => m[1])
+    expect(literals.length).toBeGreaterThanOrEqual(9)
+    const unparseable = literals.filter((l) => !/^mcp__([a-z0-9-]+)__([a-z0-9_]+)$/.test(l))
+    expect(unparseable).toEqual([])
+  })
+
+  it('suggested_tool hints use BARE tool names — the sibling convention, never the prefixed form', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const source = readFileSync(fileURLToPath(new URL('./tools.ts', import.meta.url)), 'utf8')
+    const prefixed = [...source.matchAll(/suggestedTool: '([^']+)'/g)]
+      .map((m) => m[1])
+      .filter((v) => v.startsWith('mcp__'))
+    expect(prefixed).toEqual([])
   })
 })

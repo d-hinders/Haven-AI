@@ -20,6 +20,7 @@
 
 import { AbiCoder, Contract, Interface } from 'ethers'
 import { getRelayer } from '../../infra/relayer.js'
+import { openOutboundRecord, submitRecorded } from '../../infra/outbound-queue.js'
 import { getEasDeployment, getPassportSchemaUid } from './schema.js'
 import type { Anchor, AnchorResult, PassportClaim } from './issuance.js'
 import type { Revoker } from './revocation.js'
@@ -58,25 +59,31 @@ export function encodeClaim(claim: PassportClaim): string {
   ])
 }
 
+/**
+ * The ONE place the attest request object is built (#1556 review): the
+ * outbound record's stored calldata and the transaction actually broadcast
+ * both derive from this, so they cannot drift apart.
+ */
+export function buildAttestRequest(chainId: number, claim: PassportClaim) {
+  return {
+    schema: getPassportSchemaUid(chainId),
+    data: {
+      // The agent EOA is the attestation subject — what a merchant looks up.
+      recipient: claim.agentEoa,
+      expirationTime: BigInt(claim.expiresAt),
+      // Revocable: live revocation is the core L0 claim (#973).
+      revocable: true,
+      refUID: ZERO_BYTES32,
+      data: encodeClaim(claim),
+      value: 0n,
+    },
+  }
+}
+
 /** Build the calldata without sending — the shape a test can assert on. */
 export function buildAttestCall(chainId: number, claim: PassportClaim): { to: string; data: string; value: bigint } {
   const { eas } = getEasDeployment(chainId)
-  const schemaUid = getPassportSchemaUid(chainId)
-  const data = new Interface(EAS_ABI).encodeFunctionData('attest', [
-    {
-      schema: schemaUid,
-      data: {
-        // The agent EOA is the attestation subject — what a merchant looks up.
-        recipient: claim.agentEoa,
-        expirationTime: BigInt(claim.expiresAt),
-        // Revocable: live revocation is the core L0 claim (#973).
-        revocable: true,
-        refUID: ZERO_BYTES32,
-        data: encodeClaim(claim),
-        value: 0n,
-      },
-    },
-  ])
+  const data = new Interface(EAS_ABI).encodeFunctionData('attest', [buildAttestRequest(chainId, claim)])
   return { to: eas, data, value: 0n }
 }
 
@@ -97,33 +104,56 @@ export const anchorOnChain: Anchor = async (
   const relayer = getRelayer(chainId)
   const contract = new Contract(eas, EAS_ABI, relayer)
 
-  const request = {
-    schema: getPassportSchemaUid(chainId),
-    data: {
-      recipient: claim.agentEoa,
-      expirationTime: BigInt(claim.expiresAt),
-      revocable: true,
-      refUID: ZERO_BYTES32,
-      data: encodeClaim(claim),
-      value: 0n,
-    },
-  }
+  const request = buildAttestRequest(chainId, claim)
 
   // Predict the UID; this also reverts here (costing nothing) if the schema or
   // the payload is wrong, instead of burning gas on a failing transaction.
   const attestationUid: string = await contract.attest.staticCall(request)
 
-  const tx = await contract.attest(request)
+  // #1556: durable record OPENED BEFORE the broadcast — a crash between here
+  // and the send leaves a queued row the bump worker can adopt, instead of a
+  // transaction only this process's memory knew about. `buildAttestCall` is
+  // the one encoding home, so the record carries the exact calldata a bump
+  // would re-broadcast.
+  const record = await openOutboundRecord({
+    chainId,
+    submitter: 'passport_attest',
+    to: eas,
+    data: buildAttestCall(chainId, claim).data,
+  })
+
+  // #1559: sign → stamp → broadcast through the outbound pipeline. The stamp
+  // (inside submitRecorded, under the relayer send lock) is both the durable
+  // record and the fence — see outbound-queue.ts. The receipt wait below
+  // stays outside the exclusive window so anchors and payments still confirm
+  // in parallel (#1546).
+  const tx = await submitRecorded({
+    chainId,
+    recordId: record.id,
+    to: eas,
+    data: buildAttestCall(chainId, claim).data,
+  })
   // Persist the hash BEFORE waiting (#1043): if the wait times out or the
   // process dies here, the retry recovers this attestation from its receipt
   // instead of minting a second one.
   await onBroadcast?.(tx.hash)
   // Bounded: the anchoring claim's stale window is 600s — an unbounded wait
   // could outlive it and let another worker reclaim mid-flight. 120s < 600s.
-  const receipt = await tx.wait(1, 120_000)
+  // ethers v6 THROWS out of wait() on a mined-and-reverted tx (#1556 review:
+  // the post-wait status check alone was dead code for exactly the failure
+  // mode it named) — the catch is where a revert actually closes the record.
+  let receipt
+  try {
+    receipt = await tx.wait(1, 120_000)
+  } catch (err) {
+    await record.failed(`passport attestation reverted (tx ${tx.hash})`)
+    throw err
+  }
   if (!receipt || receipt.status !== 1) {
+    await record.failed(`passport attestation reverted (tx ${tx.hash})`)
     throw new Error(`passport attestation reverted (tx ${tx.hash})`)
   }
+  await record.mined()
   return { attestationUid, txHash: tx.hash }
 }
 
@@ -161,15 +191,18 @@ export async function recoverAnchorFromReceipt(
 }
 
 
+/** The one revoke request object — record and broadcast share it (#1556). */
+export function buildRevokeRequest(chainId: number, attestationUid: string) {
+  return { schema: getPassportSchemaUid(chainId), data: { uid: attestationUid, value: 0n } }
+}
+
 /** Build the revoke calldata without sending — the shape a test can assert on. */
 export function buildRevokeCall(
   chainId: number,
   attestationUid: string,
 ): { to: string; data: string; value: bigint } {
   const { eas } = getEasDeployment(chainId)
-  const data = new Interface(EAS_ABI).encodeFunctionData('revoke', [
-    { schema: getPassportSchemaUid(chainId), data: { uid: attestationUid, value: 0n } },
-  ])
+  const data = new Interface(EAS_ABI).encodeFunctionData('revoke', [buildRevokeRequest(chainId, attestationUid)])
   return { to: eas, data, value: 0n }
 }
 
@@ -185,15 +218,32 @@ export function buildRevokeCall(
  */
 export const revokeOnChain: Revoker = async (chainId: number, attestationUid: string) => {
   const { eas } = getEasDeployment(chainId)
-  const contract = new Contract(eas, EAS_ABI, getRelayer(chainId))
-  const request = {
-    schema: getPassportSchemaUid(chainId),
-    data: { uid: attestationUid, value: 0n },
+  // #1556: same durable-record shape as `anchorOnChain`, opened pre-broadcast.
+  const record = await openOutboundRecord({
+    chainId,
+    submitter: 'passport_revoke',
+    to: eas,
+    data: buildRevokeCall(chainId, attestationUid).data,
+  })
+  // #1559: same sign → stamp → broadcast pipeline as `anchorOnChain`; the
+  // receipt wait stays outside the exclusive window (#1546).
+  const tx = await submitRecorded({
+    chainId,
+    recordId: record.id,
+    to: eas,
+    data: buildRevokeCall(chainId, attestationUid).data,
+  })
+  let receipt
+  try {
+    receipt = await tx.wait()
+  } catch (err) {
+    await record.failed(`passport revocation reverted (tx ${tx.hash})`)
+    throw err
   }
-  const tx = await contract.revoke(request)
-  const receipt = await tx.wait()
   if (!receipt || receipt.status !== 1) {
+    await record.failed(`passport revocation reverted (tx ${tx.hash})`)
     throw new Error(`passport revocation reverted (tx ${tx.hash})`)
   }
+  await record.mined()
   return { txHash: tx.hash }
 }

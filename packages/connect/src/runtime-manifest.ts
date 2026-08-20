@@ -1,4 +1,5 @@
 import { MCP_VERSION, registeredToolNames } from '@haven_ai/mcp'
+import { toolSchemas as signerToolSchemas } from '@haven_ai/signer'
 import { HAVEN_MINIMUM_NODE_VERSION } from '@haven_ai/sdk'
 
 // The required-tools list is derived from `@haven_ai/mcp`'s canonical
@@ -11,9 +12,9 @@ export const MCP_RUNTIME_MANIFEST = {
   mcpPackage: '@haven_ai/mcp',
   mcpVersion: MCP_VERSION,
   sdkPackage: '@haven_ai/sdk',
-  sdkVersion: '0.1.26-alpha.0',
+  sdkVersion: '0.1.27-alpha.0',
   signerPackage: '@haven_ai/signer',
-  signerVersion: '0.1.26-alpha.0',
+  signerVersion: '0.1.27-alpha.0',
   // Sourced from the SDK, never a literal (#1161). This field read '20.0.0'
   // while every package's `engines` said `>=24` and the docs said `>=24.0.0`,
   // so the guard that was supposed to enforce the floor waved Node v23 through
@@ -23,6 +24,13 @@ export const MCP_RUNTIME_MANIFEST = {
   minimumNodeVersion: HAVEN_MINIMUM_NODE_VERSION,
   supportedClients: ['codex-cli', 'codex-desktop', 'claude-code'] as const,
   requiredTools: registeredToolNames() as readonly string[],
+  /**
+   * The signer MCP's tool surface, DERIVED from the pinned @haven_ai/signer
+   * package (#1587) — same anti-drift rule as `requiredTools` above: a
+   * literal list here would rot the first time the signer gains a tool.
+   * The handshake probe requires all of them.
+   */
+  requiredSignerTools: Object.keys(signerToolSchemas) as readonly string[],
 } as const
 
 export function mcpPackageSpec(): string {

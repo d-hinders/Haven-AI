@@ -261,7 +261,7 @@ describe('demo merchant MCP x402 flow', () => {
     expect(paid.status).toBe(200)
     expect(paid.headers.get(PAYMENT_RESPONSE_HEADER)).toBeTruthy()
     expect(submit).toHaveBeenCalledTimes(1)
-    expect(text).toContain('Köp bekräftat')
+    expect(text).toContain('Purchase confirmed')
     expect(text).toContain(TX_HASH)
 
     // #956: the paid response carries the merchant's own receipt machine-
@@ -519,7 +519,7 @@ describe('demo merchant MCP x402 flow', () => {
       expect(status).toBe(200)
       expect(body.error).toBeUndefined()
       // The goods, not a challenge.
-      expect(text).toContain('Köp bekräftat')
+      expect(text).toContain('Purchase confirmed')
       // A settled payment is not a fault, so nothing is logged as one.
       expect(consoleError).not.toHaveBeenCalled()
     })
@@ -538,5 +538,204 @@ describe('demo merchant MCP x402 flow', () => {
       expect(body.error).not.toContain('merchant-side fault')
       expect(consoleError).not.toHaveBeenCalled()
     })
+  })
+})
+
+// ── #1550: display locale + result_detail ────────────────────────────────────
+// English is the demo default; Swedish stays behind `locale: 'sv'`; and the
+// invoice DOCUMENT (x-receipt-json + the JSON block) stays Swedish on every
+// locale — it is a bookkeeping artifact, not display copy.
+describe('display locale and result detail (#1550)', () => {
+  async function initSession(url: string): Promise<string> {
+    const init = await postMcp(url, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+    })
+    return init.headers.get('mcp-session-id')!
+  }
+
+  /** Decode the tool's own text out of the (possibly SSE-framed) HTTP body. */
+  function toolText(raw: string): string {
+    return (JSON.parse(raw.slice(raw.indexOf('{'))) as { result: { content: Array<{ text: string }> } }).result
+      .content[0].text
+  }
+
+  async function buy(
+    url: string,
+    sessionId: string,
+    args: Record<string, unknown>,
+    headers: Record<string, string> = {},
+    id = 3,
+  ) {
+    return postMcp(
+      url,
+      { jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'buy_vpn', arguments: { plan: 'basic', ...args } } },
+      { 'mcp-session-id': sessionId, ...headers },
+    )
+  }
+
+  async function settle(url: string, sessionId: string, args: Record<string, unknown> = {}, id = 4) {
+    const unpaid = await buy(url, sessionId, args, {}, id)
+    expect(unpaid.status).toBe(402)
+    const paymentRequired = (await unpaid.json()) as PaymentRequired
+    const paymentHeader = await signedHeader(paymentRequired)
+    return { paymentHeader }
+  }
+
+  it('defaults to English text while the invoice document stays Swedish', async () => {
+    const { url } = await startServer()
+    const sessionId = await initSession(url)
+    const { paymentHeader } = await settle(url, sessionId)
+
+    const paid = await buy(url, sessionId, {}, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader }, 5)
+    const text = await paid.text()
+
+    expect(paid.status).toBe(200)
+    expect(text).toContain('Purchase confirmed')
+    expect(text).toContain('INVOICE')
+    expect(text).toContain('Thank you for purchasing')
+    expect(text).not.toContain('Köp bekräftat')
+    expect(text).not.toContain('FAKTURA')
+
+    // The bookkeeping document is untouched by the display locale: Swedish
+    // keys, Swedish values, Swedish line description — in the header AND in
+    // the embedded JSON block.
+    const receipt = JSON.parse(Buffer.from(paid.headers.get('x-receipt-json')!, 'base64').toString('utf8'))
+    expect(receipt.status).toBe('Betald')
+    expect(receipt.betalningssatt).toBe('Kryptovaluta (USDC på Base)')
+    expect(receipt.rader[0].beskrivning).toContain('Grundläggande VPN-skydd')
+    expect(toolText(text)).toContain('"fakturanummer"')
+    expect(toolText(text)).toContain('Grundläggande VPN-skydd')
+  })
+
+  it("locale: 'sv' renders the classic Swedish output", async () => {
+    const { url } = await startServer()
+    const sessionId = await initSession(url)
+    const { paymentHeader } = await settle(url, sessionId, { locale: 'sv' })
+
+    const paid = await buy(url, sessionId, { locale: 'sv' }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader }, 5)
+    const text = await paid.text()
+
+    expect(paid.status).toBe(200)
+    expect(text).toContain('Köp bekräftat')
+    expect(text).toContain('FAKTURA')
+    expect(text).toContain('Tack för ditt köp')
+    expect(text).not.toContain('Purchase confirmed')
+  })
+
+  it("result_detail: 'summary' drops the invoice from the text but not from the contract", async () => {
+    const { url, submit } = await startServer()
+    const sessionId = await initSession(url)
+    const { paymentHeader } = await settle(url, sessionId, { result_detail: 'summary' })
+
+    const paid = await buy(url, sessionId, { result_detail: 'summary' }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader }, 5)
+    const text = await paid.text()
+
+    expect(paid.status).toBe(200)
+    expect(text).toContain('Purchase confirmed')
+    // No rendered invoice, no bookkeeping JSON dump…
+    expect(text).not.toContain('INVOICE')
+    expect(text).not.toContain('"fakturanummer"')
+    // …but the machine-readable receipt header and the structured summary are
+    // exactly as on the full shape.
+    expect(paid.headers.get('x-receipt-json')).toBeTruthy()
+    const envelope = JSON.parse(text.slice(text.indexOf('{'))) as {
+      result: { structuredContent?: { summary?: { invoice_id?: string; status?: string } } }
+    }
+    expect(envelope.result.structuredContent?.summary?.status).toBe('confirmed')
+    expect(envelope.result.structuredContent?.summary?.invoice_id).toMatch(/^FAK-/)
+    expect(submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('replays per (locale, detail) variant — a Swedish receipt never answers an English retry', async () => {
+    const { url, submit } = await startServer()
+    const sessionId = await initSession(url)
+    const { paymentHeader } = await settle(url, sessionId)
+
+    const en = await buy(url, sessionId, {}, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader }, 5)
+    const enText = await en.text()
+    const sv = await buy(url, sessionId, { locale: 'sv' }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader }, 6)
+    const svText = await sv.text()
+    const enAgain = await buy(url, sessionId, {}, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader }, 7)
+    const enAgainText = await enAgain.text()
+
+    // One settlement, three deliveries.
+    expect(submit).toHaveBeenCalledTimes(1)
+    expect(enText).toContain('Purchase confirmed')
+    expect(svText).toContain('Köp bekräftat')
+    // Same invoice number across variants — one document, two renders.
+    expect(svText.match(/FAK-2026-\d+/)?.[0]).toBe(enText.match(/FAK-2026-\d+/)?.[0])
+    // The replay is byte-identical per variant (ids differ per JSON-RPC call,
+    // so compare the tool text, not the envelope).
+    const toolText = (raw: string) =>
+      (JSON.parse(raw.slice(raw.indexOf('{'))) as { result: { content: Array<{ text: string }> } }).result
+        .content[0].text
+    expect(toolText(enAgainText)).toBe(toolText(enText))
+  })
+
+  it('localizes the in-band payment-required refusal (stdio topology)', async () => {
+    // Over HTTP the transport layer answers the 402 before the tool runs, so
+    // the tool's own refusal text is only reachable in-band — the stdio/local
+    // topology. Drive the MCP server directly, with no payment context.
+    const { buildMerchantMcpServer } = await import('./server.js')
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js')
+    const processor = createX402PaymentProcessor({
+      submit: vi.fn<SettlementClient['submit']>().mockResolvedValue(TX_HASH),
+      waitForReceipt: vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined),
+    })
+    const server = buildMerchantMcpServer({
+      merchantAddress: MERCHANT,
+      baseUrl: 'http://127.0.0.1:0',
+      buildPaymentRequired: processor.buildPaymentRequired,
+    })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test', version: '0' })
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+
+    const en = await client.callTool({ name: 'buy_vpn', arguments: { plan: 'basic' } })
+    expect((en.content as Array<{ text: string }>)[0].text).toContain('Payment required for')
+    expect((en.content as Array<{ text: string }>)[0].text).toContain('Re-send the same HTTP call')
+
+    const sv = await client.callTool({ name: 'buy_vpn', arguments: { plan: 'basic', locale: 'sv' } })
+    expect((sv.content as Array<{ text: string }>)[0].text).toContain('Betalning krävs för')
+
+    await client.close()
+    await server.close()
+  })
+
+  it('localizes list_products, defaulting to English', async () => {
+    const { url } = await startServer()
+    const sessionId = await initSession(url)
+
+    const en = await postMcp(
+      url,
+      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list_products', arguments: {} } },
+      { 'mcp-session-id': sessionId },
+    )
+    const enText = await en.text()
+    expect(enText).toContain('Available products:')
+    expect(enText).toContain('Essential VPN protection')
+    expect(enText).not.toContain('Tillgängliga produkter')
+
+    const sv = await postMcp(
+      url,
+      { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'list_products', arguments: { locale: 'sv' } } },
+      { 'mcp-session-id': sessionId },
+    )
+    const svText = await sv.text()
+    expect(svText).toContain('Tillgängliga produkter')
+    expect(svText).toContain('Grundläggande VPN-skydd')
+
+    // DELIBERATE (#1550 review finding): structuredContent is stable machine
+    // metadata and does NOT follow the locale — its description stays English
+    // even on a Swedish call; the localized copy lives in the text block.
+    const svBody = JSON.parse(svText.slice(svText.indexOf('{'))) as {
+      result: { structuredContent: { products: Array<{ product_id: string; description: string }> } }
+    }
+    const svBasic = svBody.result.structuredContent.products.find((p) => p.product_id === 'vpn_basic')
+    expect(svBasic?.description).toContain('Essential VPN protection')
   })
 })

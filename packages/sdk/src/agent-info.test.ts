@@ -211,6 +211,9 @@ describe('agent info helpers', () => {
       chainId: 8453,
       executionRail: 'legacy',
       readiness: 'ready',
+      // #1590: same value under the honest name; `readiness` is the
+      // deprecated alias and stays byte-identical.
+      spend_authority_readiness: 'ready',
       allowances: [{
         tokenSymbol: 'USDC',
         remainingAtomic: '7500',
@@ -234,6 +237,7 @@ describe('agent info helpers', () => {
     const summary = await haven.getAgentSummary()
 
     expect(summary.readiness).toBe('needs_approval')
+    expect(summary.spend_authority_readiness).toBe(summary.readiness)
     expect(summary.allowances[0]).toMatchObject({ remainingAtomic: '0', remainingDisplay: '0.0 USDC' })
   })
 
@@ -256,6 +260,7 @@ describe('agent info helpers', () => {
 
     expect(summary.executionRail).toBe('delegation')
     expect(summary.readiness).toBe('ready')
+    expect(summary.spend_authority_readiness).toBe(summary.readiness)
     expect(summary.allowances[0]).toMatchObject({
       tokenSymbol: 'USDC',
       remainingAtomic: '10000000',
@@ -278,6 +283,7 @@ describe('agent info helpers', () => {
     const summary = await haven.getAgentSummary()
 
     expect(summary.readiness).toBe('needs_approval')
+    expect(summary.spend_authority_readiness).toBe(summary.readiness)
     expect(summary.allowances).toEqual([])
   })
 
@@ -291,7 +297,10 @@ describe('agent info helpers', () => {
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
 
-    await expect(haven.getAgentSummary()).resolves.toMatchObject({ readiness: 'revoked' })
+    await expect(haven.getAgentSummary()).resolves.toMatchObject({
+      readiness: 'revoked',
+      spend_authority_readiness: 'revoked',
+    })
   })
 
   it('getAgentSummary formats an 18-decimal token (EURe) correctly', async () => {

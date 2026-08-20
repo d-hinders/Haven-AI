@@ -16,6 +16,17 @@ interface MerchantChainConfig {
   usdcDomainVersion: string
   /** Pinned to the same in-repo DelegationManager registry as the backend. */
   delegationManager: Address
+  /**
+   * The `ERC20TransferAmountEnforcer` this merchant will trust as the on-chain
+   * record of "how much has this settlement child spent" (#1515). Pinned, not
+   * read from the attacker-supplied payment: the enforcer address in a
+   * `permissionContext` caveat is chosen by whoever built the delegation, so
+   * trusting `spentMap` from an arbitrary caveat address lets a forged
+   * enforcer return any number. Deterministically deployed, so Base and Base
+   * Sepolia share it — the same address the signer pins
+   * (`packages/signer/src/settlement-child.ts`).
+   */
+  erc20TransferAmountEnforcer: Address
 }
 
 const CHAINS: Record<number, MerchantChainConfig> = {
@@ -24,12 +35,14 @@ const CHAINS: Record<number, MerchantChainConfig> = {
     usdcDomainName: 'USD Coin',
     usdcDomainVersion: '2',
     delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+    erc20TransferAmountEnforcer: '0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc',
   },
   84532: {
     usdcAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     usdcDomainName: 'USDC',
     usdcDomainVersion: '2',
     delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+    erc20TransferAmountEnforcer: '0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc',
   },
 }
 
@@ -46,6 +59,7 @@ export const USDC_ADDRESS = chain.usdcAddress
 export const USDC_DOMAIN_NAME = chain.usdcDomainName
 export const USDC_DOMAIN_VERSION = chain.usdcDomainVersion
 export const TRUSTED_DELEGATION_MANAGER = chain.delegationManager
+export const TRUSTED_ERC20_TRANSFER_AMOUNT_ENFORCER = chain.erc20TransferAmountEnforcer
 export const SUPPORTED_SETTLEMENT_METHODS = ['eip3009', 'erc7710'] as const
 export type SettlementMethod = (typeof SUPPORTED_SETTLEMENT_METHODS)[number]
 export const DEFAULT_SETTLEMENT_METHOD: SettlementMethod = 'eip3009'
@@ -85,7 +99,14 @@ export type ProductId =
 export interface Product {
   id: ProductId
   name: string
+  /** English display description (#1550 — the demo default is English). */
   description: string
+  /**
+   * Swedish display description, and the text that feeds the invoice JSON's
+   * `beskrivning` row: the invoice document is a Swedish bookkeeping artifact
+   * by design (see invoice.ts) and stays Swedish regardless of display locale.
+   */
+  description_sv: string
   /** Price in USDC base units (6 decimals). E.g. $1.00 = 1_000_000n */
   price_usdc: bigint
   category: 'vpn' | 'storage'
@@ -99,7 +120,8 @@ export const PRODUCTS: Record<ProductId, Product> = {
   vpn_basic: {
     id: 'vpn_basic',
     name: 'NordShield VPN Basic',
-    description: 'Grundläggande VPN-skydd. Upp till 10 enheter. Standardhastigheter. 50+ serverplatser.',
+    description: 'Essential VPN protection. Up to 10 devices. Standard speeds. 50+ server locations.',
+    description_sv: 'Grundläggande VPN-skydd. Upp till 10 enheter. Standardhastigheter. 50+ serverplatser.',
     price_usdc: 1_000n,
     category: 'vpn',
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
@@ -122,6 +144,8 @@ export const PRODUCTS: Record<ProductId, Product> = {
     id: 'vpn_legacy',
     name: 'NordShield VPN Legacy',
     description:
+      'VPN subscription that only supports EIP-3009 payment. Intended for clients without ERC-7710 support.',
+    description_sv:
       'VPN-abonnemang som endast stöder EIP-3009-betalning. Avsett för klienter utan ERC-7710-stöd.',
     price_usdc: 1_000n,
     category: 'vpn',
@@ -130,7 +154,8 @@ export const PRODUCTS: Record<ProductId, Product> = {
   vpn_pro: {
     id: 'vpn_pro',
     name: 'NordShield VPN Pro',
-    description: 'Premium VPN. Obegränsade enheter. Höghastighetsservrar. Dubbel-VPN. 90+ länder.',
+    description: 'Premium VPN. Unlimited devices. High-speed servers. Double-VPN. 90+ countries.',
+    description_sv: 'Premium VPN. Obegränsade enheter. Höghastighetsservrar. Dubbel-VPN. 90+ länder.',
     price_usdc: 3_000n,
     category: 'vpn',
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
@@ -138,7 +163,8 @@ export const PRODUCTS: Record<ProductId, Product> = {
   vpn_ultra: {
     id: 'vpn_ultra',
     name: 'NordShield VPN Ultra',
-    description: 'Ultimat sekretess. Onion-routing. Dedikerade IP-adresser. Prioritetssupport dygnet runt.',
+    description: 'Ultimate privacy. Onion routing. Dedicated IP addresses. 24/7 priority support.',
+    description_sv: 'Ultimat sekretess. Onion-routing. Dedikerade IP-adresser. Prioritetssupport dygnet runt.',
     price_usdc: 5_000n,
     category: 'vpn',
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
@@ -146,7 +172,8 @@ export const PRODUCTS: Record<ProductId, Product> = {
   storage_50gb: {
     id: 'storage_50gb',
     name: 'CloudNest 50 GB',
-    description: 'Säker krypterad molnlagring. 50 GB. Fildelning och automatisk synk ingår.',
+    description: 'Secure encrypted cloud storage. 50 GB. File sharing and automatic sync included.',
+    description_sv: 'Säker krypterad molnlagring. 50 GB. Fildelning och automatisk synk ingår.',
     price_usdc: 500n,
     category: 'storage',
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
@@ -154,7 +181,8 @@ export const PRODUCTS: Record<ProductId, Product> = {
   storage_200gb: {
     id: 'storage_200gb',
     name: 'CloudNest 200 GB',
-    description: 'Utökad lagring. 200 GB. Versionshantering, automatisk backup och prioritetsbandbredd.',
+    description: 'Expanded storage. 200 GB. Version history, automatic backup, and priority bandwidth.',
+    description_sv: 'Utökad lagring. 200 GB. Versionshantering, automatisk backup och prioritetsbandbredd.',
     price_usdc: 1_500n,
     category: 'storage',
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
@@ -162,7 +190,8 @@ export const PRODUCTS: Record<ProductId, Product> = {
   storage_1tb: {
     id: 'storage_1tb',
     name: 'CloudNest 1 TB',
-    description: 'Affärsklass molnlagring. 1 TB. API-åtkomst, teamdelning och SLA 99,9% drifttid.',
+    description: 'Business-grade cloud storage. 1 TB. API access, team sharing, and a 99.9% uptime SLA.',
+    description_sv: 'Affärsklass molnlagring. 1 TB. API-åtkomst, teamdelning och SLA 99,9% drifttid.',
     price_usdc: 4_000n,
     category: 'storage',
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
@@ -173,9 +202,23 @@ export function isSettlementMethod(value: unknown): value is SettlementMethod {
   return value === 'erc7710' || value === 'eip3009'
 }
 
+// ── Display locale (#1550) ───────────────────────────────────────────────────
+// English is the demo default — this merchant is Haven's own showcase and its
+// transcripts are read mostly by English-speaking developers. Swedish stays a
+// first-class option, and the invoice JSON (a Swedish bookkeeping artifact —
+// see invoice.ts) is deliberately NOT localized by this switch.
+
+export const MERCHANT_LOCALES = ['en', 'sv'] as const
+export type MerchantLocale = (typeof MERCHANT_LOCALES)[number]
+export const DEFAULT_MERCHANT_LOCALE: MerchantLocale = 'en'
+
+export function productDescription(product: Product, locale: MerchantLocale): string {
+  return locale === 'sv' ? product.description_sv : product.description
+}
+
 // ── Machine-readable product metadata (#1274) ───────────────────────────────
 // Builds the stable, per-product contract agents can select purchases from
-// without parsing the (Swedish) freeform `description` prose. This layer only
+// without parsing the localized freeform `description` prose. This layer only
 // CONSUMES the settlement methods the caller says are enabled — it does not
 // re-decide the erc7710/pinned-DelegationManager gate itself, so it inherits
 // #1266's compatibility decisions (eip3009 default/first, erc7710 opt-in,
@@ -255,7 +298,9 @@ export type BillingPeriod = 'monthly'
 export interface ProductMetadata {
   product_id: ProductId
   display_name: string
-  /** Localized/freeform prose (Swedish demo copy) — display-only. Agents should
+  /** Freeform prose, display-only — ALWAYS the English copy (#1550), even when
+   *  a tool call passes `locale: 'sv'`: this is stable machine metadata, and the
+   *  localized text lives in the tool's prose output instead. Agents should
    *  select products via `product_id` + `arguments_schema`, never by parsing this. */
   description: string
   /** Price in USDC base units (6 decimals), as a decimal string. */

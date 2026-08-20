@@ -144,6 +144,23 @@ async function handle(
     return
   }
 
+  // #1578: an UNKNOWN session id fails closed BEFORE the payment gate. The
+  // MCP contract (the SDK's own transport) is 404 + -32001 'Session not
+  // found' for an invalid session, and the ordering is the point: settling
+  // first would consume a one-use payment authorization for a response a
+  // strict client will refuse as session-less. Before this guard the request
+  // silently fell through to an anonymous transport and HAPPENED to succeed —
+  // protocol-invalid, and one client quirk away from charged-with-no-goods.
+  // The client's remedy is cheap and standard: re-initialize, then retry the
+  // SAME payment header — nothing was settled here, so the retry settles
+  // exactly once (and the #1519/#1551 chain-truth safeguards still cover a
+  // replay of an already-settled header).
+  const requestedSessionId = firstHeader(req.headers['mcp-session-id'])
+  if (requestedSessionId && !sessions.has(requestedSessionId) && !isInitializeRequest(body)) {
+    writeJson(res, 404, { jsonrpc: '2.0' as const, error: { code: -32001, message: 'Session not found' }, id: null })
+    return
+  }
+
   const paymentToolInfo = extractPaymentToolInfo(body)
   const session = await getSession(req, body, options, sessions)
 
@@ -381,7 +398,9 @@ function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
   const settlementMethod = isSettlementMethod(args.settlement_method) ? args.settlement_method : undefined
 
   let productId: ProductId | null = null
-  let descriptionSuffix = '1 månads abonnemang'
+  // #1550: the 402 challenge's description is merchant metadata shown in Haven
+  // quotes — English default, matching the MCP tool surface.
+  let descriptionSuffix = '1 month subscription'
 
   if (toolName === 'buy_vpn') {
     const plan = args.plan as string | undefined
@@ -393,7 +412,7 @@ function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
     const tier = args.tier as string | undefined
     if (tier === '50gb' || tier === '200gb' || tier === '1tb') {
       productId = `storage_${tier}` as ProductId
-      descriptionSuffix = '1 månads lagring'
+      descriptionSuffix = '1 month of storage'
     }
   }
 

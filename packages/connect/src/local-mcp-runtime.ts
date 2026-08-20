@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk'
+import { SIGNER_INSTALL_HEARTBEAT_MS, SIGNER_INSTALL_TIMEOUT_MS } from './signer-runtime.js'
 import {
   MCP_RUNTIME_MANIFEST,
   mcpPackageSpec,
@@ -32,6 +33,8 @@ export interface PreparedLocalMcpRuntime {
 
 export interface LocalMcpRuntimeDeps {
   runCommand?: (command: string, args: string[]) => Promise<void>
+  /** Install progress heartbeat, mirrored from the signer runtime (#1586/#1593). */
+  onProgress?: (message: string) => void
 }
 
 /**
@@ -77,7 +80,7 @@ export async function prepareLocalMcpRuntime(
   if (await installedRuntimeMatches(runtimeDirectory, cliPath)) {
     messages.push(`Using existing local Haven MCP runtime ${mcpPackageSpec()}.`)
   } else {
-    await installRuntimePackages(runtimeDirectory, npmCacheDirectory, deps.runCommand)
+    await installRuntimePackages(runtimeDirectory, npmCacheDirectory, deps)
     messages.push(`Installed local Haven MCP runtime ${mcpPackageSpec()}.`)
   }
 
@@ -134,8 +137,9 @@ export function assertSupportedNodeVersion(
 async function installRuntimePackages(
   runtimeDirectory: string,
   npmCacheDirectory: string,
-  runCommand: ((command: string, args: string[]) => Promise<void>) | undefined,
+  deps: LocalMcpRuntimeDeps,
 ): Promise<void> {
+  const { runCommand, onProgress } = deps
   // Mirrors prepareSignerRuntime's installRuntimePackages: fast path reuses the
   // default npm cache (warmed by npx) with --prefer-offline so the mcp + sdk
   // tarballs are not re-downloaded; fall back to the isolated Haven-owned cache
@@ -153,8 +157,21 @@ async function installRuntimePackages(
     sdkPackageSpec(),
   ]
   const run = async (args: string[]): Promise<void> => {
-    if (runCommand) await runCommand('npm', args)
-    else await execFileAsync('npm', args, { timeout: 120_000, maxBuffer: 1024 * 1024 })
+    // Heartbeat while npm works, and the same honest budget as the signer
+    // install: a cold-cache install can legitimately exceed the old 120s
+    // timeout, and a silent console reads as a hang (#1586/#1593).
+    const startedAt = Date.now()
+    const heartbeat = setInterval(() => {
+      const seconds = Math.round((Date.now() - startedAt) / 1000)
+      onProgress?.(`Still installing the local Haven MCP runtime… (${seconds}s — a cold cache can take several minutes)`)
+    }, SIGNER_INSTALL_HEARTBEAT_MS)
+    heartbeat.unref?.()
+    try {
+      if (runCommand) await runCommand('npm', args)
+      else await execFileAsync('npm', args, { timeout: SIGNER_INSTALL_TIMEOUT_MS, maxBuffer: 1024 * 1024 })
+    } finally {
+      clearInterval(heartbeat)
+    }
   }
 
   try {

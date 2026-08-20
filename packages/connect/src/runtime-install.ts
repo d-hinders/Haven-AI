@@ -79,6 +79,28 @@ export interface RuntimeInstallResult {
   messages: string[]
 }
 
+/**
+ * The config-write snapshot handed to `onRuntimeConfigured` (#1543). The
+ * booleans mirror the semantics of the FINAL report's unlock keys minus the
+ * probe verdicts: "configured" here means the config write succeeded, the
+ * required consent is acknowledged, and the signer credential exists on disk
+ * (a local fs check) — not that a handshake has verified it. A later probe
+ * failure refines the final report and sets its errorCode; the dashboard's
+ * unlock condition accepts either state.
+ */
+export interface EarlyRuntimeConfigReport {
+  runtime: RuntimeId
+  runtimeMcpMode: RuntimeMcpMode
+  hostedMcpConfigured: boolean
+  localSignerConfigured: boolean
+  localMcpConfigured: boolean
+  signerAcknowledged?: boolean
+  localMcpAcknowledged?: boolean
+  restartRequired: boolean
+  nextUserAction: string
+  errorCode?: string
+}
+
 export interface RuntimeInstallDeps {
   env?: NodeJS.ProcessEnv
   homeDir?: string
@@ -91,9 +113,26 @@ export interface RuntimeInstallDeps {
    * When provided, a few lightweight heartbeat lines are emitted as they run.
    */
   onProgress?: (message: string) => void
+  /**
+   * #1543: invoked once, the moment the runtime MCP config write has settled —
+   * BEFORE the network probes and the skill install. The dashboard withholds
+   * its budget-approval controls until an install-status report shows the
+   * runtime configured, and the final report only lands after the entire
+   * install; gating approval on that tail made the user wait on work approval
+   * does not depend on. The snapshot carries the config-write facts (no probe
+   * verdicts, no skill state); the caller's complete report remains
+   * authoritative and overwrites these keys. Best-effort by contract: a
+   * throwing callback is swallowed and never fails the install.
+   */
+  onRuntimeConfigured?: (report: EarlyRuntimeConfigReport) => Promise<void> | void
   runCommand?: (command: string, args: string[]) => Promise<void>
   prepareLocalMcpRuntime?: (input: PrepareLocalMcpRuntimeInput) => Promise<PreparedLocalMcpRuntime>
   prepareSignerRuntime?: (input: PrepareSignerRuntimeInput) => Promise<PreparedSignerRuntime>
+  probeSignerTools?: (
+    command: string,
+    args: string[],
+    requiredTools: readonly string[],
+  ) => Promise<LocalMcpProbeResult>
   probeLocalMcpTools?: (
     command: string,
     args: string[],
@@ -185,7 +224,18 @@ export async function installRuntime(
   // Hosted topology launches the local signer as its own MCP stdio server.
   // Pre-install it and register an absolute wrapper instead of a runtime
   // `npx -y` invocation, which is fragile in the agent runtime's MCP-spawn
-  // environment. Prep failure is non-fatal: fall back to the npx command.
+  // environment.
+  //
+  // #1586: prep failure is FATAL for this setup run — loud and fail-closed,
+  // never a silent npx fallback. The 2026-08-18 Codex Desktop test showed
+  // why: with Codex's startup_timeout_sec = 120, an npx first-launch is a
+  // multi-minute npm install killed at 2 minutes, leaving corrupted _npx
+  // dirs and a config that LOOKS wired but structurally cannot connect —
+  // strictly worse than a clear error. Fail-closed here means NO config is
+  // written at all (not even the hosted `haven` entry): a half-wired setup
+  // where quotes work but signing never can is the same looks-fine trap in
+  // a different place. The recovery is a re-run once the cause (network,
+  // npm cache) is addressed.
   let signerCommand: { command: string; args: string[] } | undefined
   if (!localRuntime) {
     progress('Getting the signer ready…')
@@ -194,9 +244,30 @@ export async function installRuntime(
       signerCommand = { command: signerRuntime.command, args: signerRuntime.args }
       consentMessages.push(...signerRuntime.messages)
     } catch (err) {
-      consentMessages.push(
-        `Could not pre-install the local Haven signer; falling back to npx launch: ${err instanceof Error ? err.message : String(err)}`,
-      )
+      return {
+        runtime,
+        runtimeMcpMode: 'hosted_plus_signer',
+        hostedMcpConfigured: false,
+        localSignerConfigured: false,
+        localMcpConfigured: false,
+        probeResult: 'signer_runtime_install_failed',
+        restartRequired: false,
+        nextUserAction:
+          'The local Haven signer runtime could not be installed, so no configuration was written. ' +
+          'Check your network (a cold install downloads the signer package set) and re-run: npx @haven_ai/connect@alpha',
+        errorCode: 'signer_runtime_install_failed',
+        configTarget: profile.label,
+        signerAcknowledged: signerConsent?.acknowledged,
+        localMcpAcknowledged: localMcpConsent?.acknowledged,
+        activationCommand: undefined,
+        signerRuntimePrepared: false,
+        messages: [
+          ...consentMessages,
+          `Could not pre-install the local Haven signer: ${err instanceof Error ? err.message : String(err)}`,
+          'No runtime configuration was written (fail-closed): a config pointing at an uninstalled signer looks wired but cannot start.',
+          'Re-run `npx @haven_ai/connect@alpha` to retry the setup.',
+        ],
+      }
     }
   }
   const signerRuntimePrepared = localRuntime ? undefined : signerCommand !== undefined
@@ -219,16 +290,64 @@ export async function installRuntime(
         mode: localRuntime ? 'local' : 'hosted',
       })
 
+  // #1543: the config write has settled — everything the dashboard's approval
+  // unlock reads is now known, so report it before the probes and skill
+  // install run. The signer-credential check is a local fs stat, cheap enough
+  // to make the early booleans carry the final report's semantics (minus the
+  // network probe verdicts, which only refine — never gate — the unlock).
+  if (deps.onRuntimeConfigured) {
+    const signerCredentialOnDisk = await probeLocalSignerCredential(input.signerPath)
+    const earlyLocalMcpOk = configResult.runtimeMcpMode === 'local_stdio' &&
+      configResult.localMcpConfigured &&
+      signerCredentialOnDisk &&
+      Boolean(localMcpConsent?.acknowledged)
+    const earlySignerOk = configResult.runtimeMcpMode === 'local_stdio'
+      ? earlyLocalMcpOk
+      : configResult.signerConfigured && signerCredentialOnDisk && Boolean(signerConsent?.acknowledged)
+    try {
+      await deps.onRuntimeConfigured({
+        runtime,
+        runtimeMcpMode: configResult.runtimeMcpMode,
+        hostedMcpConfigured: configResult.hostedConfigured,
+        localSignerConfigured: earlySignerOk,
+        localMcpConfigured: earlyLocalMcpOk,
+        signerAcknowledged: signerConsent?.acknowledged,
+        localMcpAcknowledged: localMcpConsent?.acknowledged,
+        restartRequired: configResult.restartRequired || restartRequiredForRuntime(runtime, deps.env),
+        nextUserAction: nextAction(runtime, profile.restartMode, configResult.errorCode),
+        errorCode: configResult.errorCode,
+      })
+    } catch {
+      // Best-effort by contract: early reporting must never fail the install —
+      // the caller's complete report follows either way.
+    }
+  }
+
   progress('Almost there — just confirming everything connects…')
   const localProbePromise = configResult.runtimeMcpMode === 'local_stdio' && localRuntimeInstall
     ? runLocalMcpProbe(localRuntimeInstall, deps)
     : Promise.resolve(undefined)
-  const [hostedProbe, signerCredentialReady, localMcpProbe] = await Promise.all([
+  // #1587: in the hosted topology the signer is its own MCP stdio server and
+  // gets the same courtesy as the hosted server — a REAL handshake
+  // (initialize → tools/list → required-tools check) against the registered
+  // command, not a credential-file stat. The 2026-08-18 Codex test is why:
+  // setup exited 0 on a signer that could not start, and the failure
+  // surfaced mid-payment. Cheap and fast now that #1586 guarantees the
+  // command is a prepared wrapper, never a cold npx launch.
+  const signerProbePromise = configResult.runtimeMcpMode !== 'local_stdio' && signerCommand
+    ? (deps.probeSignerTools ?? probeLocalMcpTools)(
+        signerCommand.command,
+        signerCommand.args,
+        MCP_RUNTIME_MANIFEST.requiredSignerTools,
+      )
+    : Promise.resolve(undefined)
+  const [hostedProbe, signerCredentialReady, localMcpProbe, signerProbe] = await Promise.all([
     configResult.hostedConfigured
       ? probeHostedMcpTools(input.apiKey, input.hostedMcpUrl, deps.fetch)
       : Promise.resolve({ status: 'bad_response' as const }),
     probeLocalSignerCredential(input.signerPath),
     localProbePromise,
+    signerProbePromise,
   ])
 
   const hostedOk = configResult.hostedConfigured && hostedProbe.status === 'ok'
@@ -239,17 +358,32 @@ export async function installRuntime(
     localMcpProbe?.status === 'ok'
   const signerOk = configResult.runtimeMcpMode === 'local_stdio'
     ? localMcpOk
-    : configResult.signerConfigured && signerCredentialReady && Boolean(signerConsent?.acknowledged)
+    : configResult.signerConfigured &&
+      signerCredentialReady &&
+      Boolean(signerConsent?.acknowledged) &&
+      // #1587: no handshake, no green. A signer command that was registered
+      // but not probed (manual topology) keeps the old semantics.
+      (signerProbe === undefined || signerProbe.status === 'ok')
   const restartRequired = configResult.restartRequired || restartRequiredForRuntime(runtime, deps.env)
   const errorCode = configResult.errorCode ??
     (configResult.runtimeMcpMode === 'local_stdio'
       ? localMcpErrorCode(signerCredentialReady, localMcpConsent, localMcpProbe?.status)
-      : hostedMcpErrorCode(configResult.hostedConfigured, hostedProbe.status) ?? signerConsentErrorCode(signerCredentialReady, signerConsent))
+      : hostedMcpErrorCode(configResult.hostedConfigured, hostedProbe.status) ??
+        signerConsentErrorCode(signerCredentialReady, signerConsent) ??
+        signerProbeErrorCode(signerProbe))
   const hostedProbeMessages = configResult.hostedConfigured && hostedProbe.status !== 'ok'
     ? [`Hosted Haven MCP probe failed: ${hostedProbe.status}.`]
     : configResult.hostedConfigured
       ? ['Verified hosted Haven MCP tools with a read-only handshake.']
       : []
+  const signerProbeMessages = signerProbe
+    ? signerProbe.status === 'ok'
+      ? ['Verified local Haven signer with a stdio handshake.']
+      : [
+          `Local Haven signer handshake failed: ${signerProbe.status}.`,
+          'Re-run `npx @haven_ai/connect@alpha` to repair the signer setup.',
+        ]
+    : []
   const localProbeMessages = localMcpProbe && localMcpProbe.status !== 'ok'
     ? [`Local Haven MCP handshake failed: ${localMcpProbe.status}.`]
     : localMcpProbe?.status === 'ok'
@@ -281,7 +415,7 @@ export async function installRuntime(
     activationCommand: configResult.activationCommand,
     skillInstalled: skillInstall?.installed,
     signerRuntimePrepared,
-    messages: [...consentMessages, ...(localRuntimeInstall?.messages ?? []), ...configResult.messages, ...hostedProbeMessages, ...localProbeMessages, ...(skillInstall?.messages ?? [])],
+    messages: [...consentMessages, ...(localRuntimeInstall?.messages ?? []), ...configResult.messages, ...hostedProbeMessages, ...signerProbeMessages, ...localProbeMessages, ...(skillInstall?.messages ?? [])],
   }
 }
 
@@ -320,11 +454,21 @@ async function configureClaudeCode(
   })
   try {
     if (!localMcpCommand) throw new Error('local MCP wrapper command is required')
+    // Remove stale entries first so re-runs and hosted→local switches are
+    // idempotent — `claude mcp add-json` fails when the name already exists.
+    // #1569: without this, a second setup left the runtime wired to the
+    // PREVIOUS agent's wrapper (the add collided, the old entry survived) —
+    // the hosted sibling below always did it in this order. Deliberate
+    // tradeoff: if the add fails AFTER a successful remove, the runtime ends
+    // with NO haven entry instead of a stale wrong-agent one — fail-closed,
+    // and the claude_code_config_failed recovery (rerun setup) works cleanly
+    // from that state because this sequence is idempotent from any start.
+    await runCommand('claude', ['mcp', 'remove', 'haven']).catch(() => undefined)
+    await runCommand('claude', ['mcp', 'remove', 'haven-signer']).catch(() => undefined)
     await runCommand('claude', ['mcp', 'add-json', 'haven', serverJson, '--scope', 'user'])
       .catch(async () => {
         await runCommand('claude', ['mcp', 'add', 'haven', '--scope', 'user', '--', localMcpCommand])
       })
-    await runCommand('claude', ['mcp', 'remove', 'haven-signer']).catch(() => undefined)
     const verified = await runCommand('claude', ['mcp', 'get', 'haven'])
       .then(() => true)
       .catch(() => false)
@@ -490,6 +634,11 @@ function signerConsentErrorCode(
   return undefined
 }
 
+function signerProbeErrorCode(probe: LocalMcpProbeResult | undefined): string | undefined {
+  if (!probe || probe.status === 'ok') return undefined
+  return `local_signer_probe_${probe.status}`
+}
+
 function hostedMcpErrorCode(
   hostedConfigured: boolean,
   hostedProbeStatus: string,
@@ -536,8 +685,10 @@ async function prepareRuntimeForLocalMcp(
   input: RuntimeInstallInput,
   deps: RuntimeInstallDeps,
 ): Promise<PreparedLocalMcpRuntime> {
+  // onProgress threaded through on purpose (#1593, the #1586 review lesson):
+  // without it the install heartbeat is dead code in production.
   const prepare = deps.prepareLocalMcpRuntime ?? ((runtimeInput: PrepareLocalMcpRuntimeInput) =>
-    prepareLocalMcpRuntime(runtimeInput, { runCommand: deps.runCommand }))
+    prepareLocalMcpRuntime(runtimeInput, { runCommand: deps.runCommand, onProgress: deps.onProgress }))
   return prepare({
     credentialDirectory: input.credentialDirectory,
     identityPath: input.identityPath,
@@ -551,7 +702,11 @@ async function prepareSignerForRuntime(
   deps: RuntimeInstallDeps,
 ): Promise<PreparedSignerRuntime> {
   const prepare = deps.prepareSignerRuntime ?? ((runtimeInput: PrepareSignerRuntimeInput) =>
-    prepareSignerRuntime(runtimeInput, { runCommand: deps.runCommand }))
+    // onProgress threaded through on purpose (#1586 review): without it the
+    // install heartbeat was dead code in production and the console still
+    // went silent for the whole cold install — the exact symptom the issue
+    // set out to remove, at a longer timeout.
+    prepareSignerRuntime(runtimeInput, { runCommand: deps.runCommand, onProgress: deps.onProgress }))
   return prepare({
     credentialDirectory: input.credentialDirectory,
     signerPath: input.signerPath,

@@ -100,11 +100,11 @@ export const toolDescriptions = {
   },
   getAgent: {
     summary:
-      'Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, a readiness signal, and per-token remaining allowance (atomic + human-readable). The recommended first call in a new session to confirm who you are and whether you can pay right now.',
+      'Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, spend_authority_readiness, and per-token remaining allowance (atomic + human-readable). The recommended first call in a new session to confirm who you are and whether Haven will let you spend right now.',
     selectionGuidance:
       'Use this as the one-shot orientation/bootstrap at the start of a session, or whenever you need to confirm identity together with whether the agent can spend right now. For a detailed per-token breakdown (configured vs spent vs reset window) use haven_get_allowances.',
     behavior:
-      'Reads identity plus the live spend-authority snapshot in one shot — the on-chain AllowanceModule on the legacy rail, the active budget delegation on the delegation rail. readiness is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. What an over-budget payment does differs by rail: on the legacy AllowanceModule rail it is queued for the wallet owner to approve in Haven; on the delegation rail there is no approval queue — an over-budget redemption reverts on-chain, so ask the owner to grant or raise the budget in Haven rather than waiting for an approval. allowances[] carries remainingAtomic and remainingDisplay per token. Identity fields (id, name, status, safeAddress, delegateAddress, chainId) are unchanged from before.',
+      'Reads identity plus the live spend-authority snapshot in one shot — the on-chain AllowanceModule on the legacy rail, the active budget delegation on the delegation rail. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. What an over-budget payment does differs by rail: on the legacy AllowanceModule rail it is queued for the wallet owner to approve in Haven; on the delegation rail there is no approval queue — an over-budget redemption reverts on-chain, so ask the owner to grant or raise the budget in Haven rather than waiting for an approval. allowances[] carries remainingAtomic and remainingDisplay per token. Identity fields (id, name, status, safeAddress, delegateAddress, chainId) are unchanged from before.',
     nextActionGuidance: '',
   },
   getAllowances: {
@@ -165,7 +165,7 @@ export const toolDescriptions = {
       'The catalog price (price_display/price_atomic, marked price_is_indicative) is a last-verified hint, NOT authoritative — the real price comes from the merchant\'s live 402 at pay time. ' +
       'Never creates a payment, signature, or approval.',
     nextActionGuidance:
-      'Pick an entry and pay it with the tool named in suggested_tool, passing the entry\'s resource_url, tool_name, and tool_arguments for MCP merchants. Confirm the price from the live pay-tool result (not the catalog), and pass the user\'s cap as max_amount_human in whole tokens ("no more than 1 USDC" → max_amount_human: "1") — never convert it to atomic units by hand (#1351).',
+      'Pick an entry and pay it with the tool named in suggested_tool, passing the entry\'s resource_url, tool_name, and tool_arguments for MCP merchants. Confirm the price from the live pay-tool result (not the catalog), and pass the user\'s cap as max_amount_human in whole tokens ("no more than 1 USDC" → max_amount_human: "1") — never convert it to atomic units by hand.',
   },
   sweep_delegate: {
     summary:

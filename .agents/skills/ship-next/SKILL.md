@@ -199,10 +199,13 @@ label **or** the diff touches any of:
 - `rails/execution-rail.ts` (the rail seam);
 - `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`, `rails/hybrid-account-config.ts`, or `routes/agent-delegations.ts`
   (the delegation rail);
-- `rails/sweep.ts`, `infra/relayer.ts`, or `modules/accounts/mainnet-gate.ts` (funds recovery, gas
-  payment, and the mainnet authority floor — added by #1045; the review found them
-  missing while they literally move or gate money; relocated out of the flat lib
-  directory by #998);
+- `rails/sweep.ts`, `infra/relayer*.ts`, `infra/outbound-*.ts`, or
+  `modules/accounts/mainnet-gate.ts` (funds recovery, gas payment, the durable
+  outbound-tx queue and its bump worker, the relayer spend guard/monitor, and the
+  mainnet authority floor — the relayer/mainnet trio added by #1045 after review
+  found them missing while they literally move or gate money; the outbound globs
+  added after epic #1554 shipped files that broadcast and replace real
+  transactions without appearing here);
 - `routes/safe-exec.ts`, `routes/approvals.ts`, or `routes/hybrid-accounts.ts`
   (user-signed execution, the approval queue, account provisioning);
 - `packages/sdk/src/signer.ts` (signing schemes are spend authority);
@@ -222,7 +225,13 @@ Route the merge:
 
 - **Migration:** leave the pull request for independent code-owner approval and merge (`.github/CODEOWNERS`). The author's own approval does not satisfy it.
 - **Frontend UI:** if either review pass flags a UX, copy, or design-system concern, ask the user before enabling auto-merge.
-- **Everything else, money-path included:** after local gates pass and independent review has no blocking or should-fix findings, enable squash auto-merge — `gh pr merge <pr> --auto --squash --delete-branch` right after opening. GitHub then updates the branch and merges when required checks go green; do not sit in a poll loop waiting.
+- **Everything else, money-path included:** after local gates pass and independent review has no blocking or should-fix findings, enable squash auto-merge — `gh pr merge <pr> --auto --squash --delete-branch` right after opening; do not sit in a poll loop waiting.
+
+Merge method, stated once because the two rules cross-contaminate: **feature → dev
+is squash; dev → main promotion is a merge commit, never squash** (the promotion
+rule and the pointer to its already-squashed recovery (#1173) live in
+[`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)).
+Do not let the promotion rule leak backwards into feature PRs.
 
 **Check `mergeStateStatus` before arming auto-merge.** On `DIRTY`, merge `dev` in and
 resolve first — arming auto-merge on a conflicted PR does nothing, silently. The
@@ -241,9 +250,25 @@ Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm a
 
 Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
 
-- **Auto-merged PRs:** `--auto` (above) means there is nothing to wait for — GitHub merges when green. Move on; you are re-invoked when the merge lands. **One exception, and it is the one that strands a queue:** if the PR goes `DIRTY` after arming, no checks run and no merge event ever arrives, so silence is not evidence of health. Treat a long quiet stretch on an armed PR as a prompt to read `mergeStateStatus` once, not as progress.
+- **Auto-merged PRs:** `--auto` (above) means GitHub merges when green — but **no
+  GitHub event re-invokes a local session**, so "armed" is not "watched". When the
+  next step depends on the merge (releasing claims, ticking the epic, taking the
+  next queue item), arm a Monitor or a background watch and act on its result;
+  otherwise check the PR's state at the next natural opportunity instead of
+  assuming it landed. Two silent-stall states to know: `DIRTY` after arming means
+  no checks run and no merge ever comes (read `mergeStateStatus`, don't wait), and
+  a required check failing means auto-merge simply never fires.
+- **Known infra flakes:** a required check failing with a known infrastructure
+  signature gets **one rerun before any diagnosis** (`gh run rerun <id> --failed`).
+  The signature list lives in
+  [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) §
+  *Known CI flake signatures* — check the failing job's log against it first; a
+  second failure after the rerun is a real failure.
 - **When a wait is genuinely needed** (holding a UI PR on a review finding, or confirming a specific run): use `gh pr checks <pr> --watch --fail-fast` (blocks until checks resolve, exits non-zero on failure) rather than a hand-rolled poll, or arm a Monitor if the client supports it.
-- **BEHIND** resolves itself under `--auto` (GitHub updates the branch). Only run `gh pr update-branch` manually when not using `--auto` and the branch is genuinely behind.
+- **BEHIND does NOT self-resolve under `--auto` in this repo** — observed twice:
+  the armed PR sat BEHIND indefinitely until a manual `gh pr update-branch <pr>`.
+  Treat BEHIND like DIRTY's quieter sibling: update the branch yourself, then let
+  the re-run checks carry the merge.
 
 ## Closeout
 
@@ -258,6 +283,16 @@ a build-order list, tick that slice's line, so the epic reads as status instead 
 needing its sub-issue states queried one by one. When it was the epic's **last open
 sub-issue**, say so and report the epic ready to close — do not close it: an epic can
 carry acceptance criteria and operator-verify steps of its own that outlive its slices.
+
+**Scan-ledger disposition.** When the epic being reported ready to close (or being
+closed by whoever holds that decision — ship-next itself never closes an epic, per
+the rule above) traces to a [quality-scan](../quality-scan/SKILL.md) finding, the
+epic-close step includes appending the dated disposition line (`shipped`, with the
+closing evidence) to `docs/quality/scan-ledger.md`. Name this explicitly in the
+ready-to-close report so the closer does it in the same pass — the ledger's
+exclusion rule only works if dispositions land when the state changes, not when
+someone happens to remember (#1554's line landed on memory alone, in a separate
+docs PR).
 
 **Acceptance-criteria evidence.** When the issue body has acceptance-criteria
 checkboxes, the closing comment ticks each one with a link to its evidence (test

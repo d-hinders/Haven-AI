@@ -18,9 +18,18 @@ process.env.DB_POOL_MAX ??= '5'
 // module-level `pool` repositories import — resolves unqualified names into
 // `test_w<worker>`. Mocked suites never connect and are unaffected. See
 // src/infra/__tests__/helpers/db-harness.ts for the full model.
+//
+// The worker schema is the WHOLE search_path (#1562). It used to be
+// `test_wN,public`, and that fallback was a trap: a worker schema missing a
+// table silently aliased the SHARED public one, where rows persist across
+// runs and workers — observed as a test seeing a 'mined' row it never
+// created. A missing table must be a loud error, never shared state. No
+// extension needs public here (verified: only plpgsql, in pg_catalog;
+// gen_random_uuid is core PG13+), and the migrations create everything a
+// repository touches inside the worker schema.
 {
   const url = new URL(process.env.DATABASE_URL)
   const worker = process.env.VITEST_WORKER_ID ?? '0'
-  url.searchParams.set('options', `-c search_path=test_w${worker},public`)
+  url.searchParams.set('options', `-c search_path=test_w${worker}`)
   process.env.DATABASE_URL = url.toString()
 }

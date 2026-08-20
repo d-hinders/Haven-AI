@@ -12,6 +12,11 @@ export type LocalMcpProbeStatus = 'ok' | 'timeout' | 'process_error' | 'bad_resp
 
 export interface LocalMcpProbeResult {
   status: LocalMcpProbeStatus
+  /** #1589: the initialize response's serverInfo/capabilities, when reached —
+   *  the doctor reports the signer's advertised compat versions from here
+   *  instead of a second probe call. */
+  serverInfo?: { name?: string; version?: string }
+  capabilities?: Record<string, unknown>
   toolNames?: string[]
 }
 
@@ -73,6 +78,8 @@ export async function probeLocalMcpTools(
     let stdout = ''
     let settled = false
     let sawInitialize = false
+    let serverInfo: { name?: string; version?: string } | undefined
+    let capabilities: Record<string, unknown> | undefined
 
     const finish = (result: LocalMcpProbeResult): void => {
       if (settled) return
@@ -107,6 +114,11 @@ export async function probeLocalMcpTools(
         }
         if (payload.id === 1 && !sawInitialize) {
           sawInitialize = true
+          const init = payload.result as
+            | { serverInfo?: { name?: string; version?: string }; capabilities?: Record<string, unknown> }
+            | undefined
+          serverInfo = init?.serverInfo
+          capabilities = init?.capabilities
           writeJsonRpc(child, { jsonrpc: '2.0', method: 'notifications/initialized', params: {} })
           writeJsonRpc(child, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
           continue
@@ -119,7 +131,7 @@ export async function probeLocalMcpTools(
                 .filter((name): name is string => typeof name === 'string')
             : []
           const missing = requiredTools.filter((name) => !toolNames.includes(name))
-          finish({ status: missing.length === 0 ? 'ok' : 'missing_tools', toolNames })
+          finish({ status: missing.length === 0 ? 'ok' : 'missing_tools', toolNames, serverInfo, capabilities })
           return
         }
       }

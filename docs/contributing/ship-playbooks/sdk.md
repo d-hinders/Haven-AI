@@ -2,12 +2,12 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-07-03"
+last-verified: "2026-08-19" # #1607: published set corrected to five (cli was missing), wildcard-pin rule updated to the #1526 two-direction form; every other claim re-read against the current release process and stands
 ---
 
 # SDK / API / credentials playbook
 
-Loaded by `ship-next` for `area:sdk` and `area:mcp` issues — the published packages (`@haven_ai/{sdk,signer,mcp,connect}`), the agent API contract, and credential surfaces. The playbook **links** the canonical procedures; it does not restate them.
+Loaded by `ship-next` for `area:sdk` and `area:mcp` issues — the published packages (`@haven_ai/{sdk,signer,mcp,connect,cli}`), the agent API contract, and credential surfaces. The playbook **links** the canonical procedures; it does not restate them.
 
 ## 1. Required reading
 
@@ -26,7 +26,7 @@ Run the package `typecheck` (`tsc --noEmit`) as the **final** gate step, after e
 
 - **OpenAPI drift** — keep `packages/backend/src/openapi/spec.test.ts` green; a documented agent-payment route must be in the spec or the `because:` allowlist.
 - **Install-path** — `connect`/`mcp`/`sdk` changes run the install smoke (`npm run smoke:pack -w packages/connect`); don't break the packed tarball resolution.
-- **Versioning** — never hand-edit version fields or cross-package dep pins; `scripts/release-bump.mjs` is the single source of truth, and pinning an internal `@haven_ai/*` dep to a wildcard is forbidden.
+- **Versioning** — never hand-edit version fields or cross-package dep pins; `scripts/release-bump.mjs` is the single source of truth. The internal-pin rule runs in **both directions** (#1526): wildcard pins are forbidden in the five **published** packages (sdk/signer/mcp/connect/cli), while **private workspace consumers** (`private: true` — backend, frontend, qa-agent, mcp-server) MUST pin `"*"` so npm always links the workspace. `npm run lint:workspace-pins` enforces both on every PR; the dividing line and its rationale live in CLAUDE.md § *Releasing & publishing packages*.
 
 ## 5. Merge
 

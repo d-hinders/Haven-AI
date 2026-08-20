@@ -10,7 +10,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-08-12" # #1341: re-verified loop stop and issue-readiness conditions after ship-next gained #1289 active-claim coordination
+last-verified: "2026-08-19" # #1607: Known CI flake signatures section added (rerun-once policy; ship-next points here). Prior: #1341: re-verified loop stop and issue-readiness conditions after ship-next gained #1289 active-claim coordination
 ---
 
 # Autonomous PR loop
@@ -372,6 +372,23 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
 
 Tune the carve-out by editing `.github/CODEOWNERS` — widen it to hold more PR
 classes for human merge, or narrow it to let more auto-merge.
+
+## Known CI flake signatures
+
+A required check failing with one of these signatures gets **one rerun**
+(`gh run rerun <run-id> --failed`) before any diagnosis; a second failure after
+the rerun is a real failure. Extend the list only with a signature observed at
+least twice.
+
+- **Azure apt-mirror Ign-loop** — browser-dependent jobs on ubuntu runners
+  ("Frontend browser smoke", "Design visual regression"): the log shows
+  `Ign:N http://azure.archive.ubuntu.com/ubuntu …` repeating until the step
+  times out or the job is canceled. apt hangs on the runner's regional mirror;
+  nothing in the PR is implicated. Observed repeatedly, most recently twice on 2026-08-19.
+- **Base Sepolia RPC flap** — `qa-dev` money-flow legs: transient RPC timeouts
+  or stale-nonce reads from the public Base Sepolia endpoint fail a leg that
+  passes on rerun. Stability-gate reruns rather than chasing the payment code
+  (the 2026-08-12 promotion lesson).
 
 ## What stays manual (by design)
 

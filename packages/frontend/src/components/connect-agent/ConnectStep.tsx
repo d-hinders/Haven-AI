@@ -119,7 +119,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
       {connectView?.kind === 'proposed' && (
         <SetupStatusState
           title="Waiting for more approvals"
-          body="The agent rules were proposed for wallet approval. Spending is not active until the remaining approvals are complete."
+          body="The agent budget was proposed for wallet approval. Spending is not active until the remaining approvals are complete."
           tone="warning"
           primaryLabel="Done"
           onPrimary={flow.handleClose}

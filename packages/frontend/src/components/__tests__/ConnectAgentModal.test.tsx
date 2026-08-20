@@ -248,7 +248,7 @@ async function fillAndCreateSetup() {
   fireEvent.change(screen.getByPlaceholderText('Amount'), {
     target: { value: '10' },
   })
-  fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Review agent budget' }))
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create setup prompt' }))
     await Promise.resolve()
@@ -318,7 +318,9 @@ const SETUP_PROMPT = [
   '',
   'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
   '',
-  'When the connector finishes, tell me to return to Haven to approve the agent rules.',
+  'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr. Appending --json is the ONLY permitted change to the command above.',
+  '',
+  'When the connector finishes, tell me to return to Haven to approve the budget.',
 ].join('\n')
 
 describe('ConnectAgentModal', () => {
@@ -443,7 +445,7 @@ describe('ConnectAgentModal', () => {
     expect(structureBelow()).toBe(before)
     expect(screen.queryByText('Budget draft')).not.toBeInTheDocument()
     // Continue still arms on the valid amount alone.
-    expect(screen.getByRole('button', { name: 'Review agent rules' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Review agent budget' })).toBeEnabled()
   })
 
   it('creates a pending setup and shows a private-key-free setup prompt', async () => {
@@ -477,6 +479,13 @@ describe('ConnectAgentModal', () => {
     expect(screen.getAllByText(/public signing address/i).length).toBeGreaterThan(0)
     const modalText = screen.getByRole('dialog').textContent ?? ''
     expect(modalText).not.toMatch(/delegate_key|private_key|privateKey|sk_agent_/)
+    // #1545 rendered-content pin (named headless equivalent — these lines sit
+    // below the prompt block's scroll fold in screenshot evidence): the full
+    // prompt renders the --json discoverability sentence and names the gate
+    // "the budget", never "agent rules".
+    expect(modalText).toContain('Appending --json is the ONLY permitted change to the command above.')
+    expect(modalText).toContain('return to Haven to approve the budget')
+    expect(modalText).not.toContain('approve the agent rules')
   })
 
   it('omits issue_passport by default (#1072)', async () => {
@@ -498,7 +507,7 @@ describe('ConnectAgentModal', () => {
     }
     fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /issue an agent passport/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review agent budget' }))
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Create setup prompt' }))
       await Promise.resolve()
@@ -523,12 +532,12 @@ describe('ConnectAgentModal', () => {
     // Unchecked by default — review step must say so, not stay silent.
     // #1411: the row restates the choice only ("Yes"/"No"), no longer a
     // sentence explaining what issuing means — that stays on the policy step.
-    fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review agent budget' }))
     expect(screen.getByText('No')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     fireEvent.click(screen.getByRole('checkbox', { name: /issue an agent passport/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review agent budget' }))
     expect(screen.getByText('Yes')).toBeInTheDocument()
   })
 
@@ -593,7 +602,7 @@ describe('ConnectAgentModal', () => {
     fireEvent.change(screen.getByPlaceholderText('Amount'), { target: { value: '42.50' } })
     fireEvent.change(screen.getByLabelText('Budget reset period'), { target: { value: '10080' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /issue an agent passport/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review agent budget' }))
 
     // Review restates the exact choices made above — Runtime and Budget rows
     // in particular are new to this pass (#1411); assert them here too so a
@@ -711,7 +720,7 @@ describe('ConnectAgentModal', () => {
     // The single anchor summary headline replaces the old stack of green
     // success / awaiting-approval / "Ready for Haven approval" / yellow
     // restart callouts. Restart guidance moves to the post-approval state.
-    expect(await screen.findByText('Approve agent rules')).toBeInTheDocument()
+    expect(await screen.findByText('Approve agent budget')).toBeInTheDocument()
     // #1377 C: the legacy approval renders inside the one step-4 shell.
     expect(screen.getByLabelText('Connection progress')).toBeInTheDocument()
     // #1418: ONE status voice on step 4 — the shell ticker above is the only
@@ -723,7 +732,7 @@ describe('ConnectAgentModal', () => {
     expect(screen.queryByText('Ready for Haven approval')).not.toBeInTheDocument()
     expect(screen.queryByText('Agent restart prepared')).not.toBeInTheDocument()
     expect(screen.queryByText(/until that approval is completed/i)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Approve rules' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve budget' })).toBeInTheDocument()
     expect(screen.queryByText(/active spending today/i)).not.toBeInTheDocument()
   })
 
@@ -745,15 +754,19 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    expect(await screen.findByText('Approve agent rules')).toBeInTheDocument()
+    expect(await screen.findByText('Approve agent budget')).toBeInTheDocument()
     // The budget is RESTATED from the setup — never an empty field to refill.
     expect(screen.getByText(/10\.00 USDC\.e per day/)).toBeInTheDocument()
     expect(screen.queryByPlaceholderText('Amount')).not.toBeInTheDocument()
 
     // #1377 C: the delegation approval renders inside the one step-4 shell.
     expect(screen.getByLabelText('Connection progress')).toBeInTheDocument()
-    // The legacy approval UI must be absent — that is the original bug:
-    expect(screen.queryByRole('button', { name: 'Approve rules' })).not.toBeInTheDocument()
+    // The legacy approval UI must be absent — that is the original bug. Both
+    // rails' approve buttons now share the label 'Approve budget' (#1572:
+    // one gate, one name), so the legacy screen is identified by its own
+    // description copy ("You sign to give…" vs the delegation rail's
+    // "You sign once to give…") instead of the button label:
+    expect(document.body.textContent).not.toContain('You sign to give')
     expect(document.body.textContent).not.toContain('still connecting to the wallet network')
     // ...and so must the hand-off that replaced it.
     expect(document.body.textContent).not.toContain("Set the agent's budget to activate it")
@@ -805,7 +818,7 @@ describe('ConnectAgentModal', () => {
     expect(screen.getByText(/No signature yet — nothing changed/)).toBeInTheDocument()
     // Still on the approval step, still actionable.
     expect(screen.getByRole('button', { name: 'Approve budget' })).toBeEnabled()
-    expect(screen.getByText('Approve agent rules')).toBeInTheDocument()
+    expect(screen.getByText('Approve agent budget')).toBeInTheDocument()
     // A cancelled signature is not a failure and not an approval.
     expect(document.body.textContent).not.toMatch(/could not set the budget/i)
     expect(mockApiPost).not.toHaveBeenCalledWith(
@@ -883,7 +896,7 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    await screen.findByText('Approve agent rules')
+    await screen.findByText('Approve agent budget')
     expect(screen.getByText('Verification details')).toBeInTheDocument()
     expect(screen.getByText('0x3333333333333333333333333333333333333333')).toBeInTheDocument()
     // Safe-only row must NOT appear on this rail — one signature IS the approval.
@@ -906,7 +919,7 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    await screen.findByText('Approve agent rules')
+    await screen.findByText('Approve agent budget')
     expect(screen.getByRole('button', { name: /^Switch to / })).toBeInTheDocument()
     expect(screen.getByText(/Switch networks to approve the budget/)).toBeInTheDocument()
   })
@@ -929,7 +942,7 @@ describe('ConnectAgentModal', () => {
     expect(screen.getByLabelText('Step 1 of 4')).toBeInTheDocument()
 
     await fillAndCreateSetup()
-    await screen.findByText('Approve agent rules')
+    await screen.findByText('Approve agent budget')
     expect(screen.queryByLabelText(/^Step \d+ of \d+$/)).not.toBeInTheDocument()
   })
 
@@ -946,7 +959,7 @@ describe('ConnectAgentModal', () => {
     expect(screen.queryByRole('button', { name: 'Add budget' })).not.toBeInTheDocument()
     expect(screen.getByText(/Setup grants one .*budget/)).toBeInTheDocument()
     // ...and the flow still continues.
-    expect(screen.getByRole('button', { name: 'Review agent rules' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Review agent budget' })).toBeEnabled()
   })
 
   it('uses non-wallet copy on the approval screen', async () => {
@@ -962,12 +975,12 @@ describe('ConnectAgentModal', () => {
     // Regression: "wallet" language was ambiguous (Safe vs. signing EOA vs.
     // passkey). Step copy should be direct and not reference wallet on the
     // approval screen.
-    expect(await screen.findByText('Approve the agent rules')).toBeInTheDocument() // header subtitle
+    expect(await screen.findByText('Approve the agent budget')).toBeInTheDocument() // header subtitle
     expect(
       screen.getByText(/^You sign to give Research Agent authority to spend/),
     ).toBeInTheDocument()
     const screenText = document.body.textContent ?? ''
-    expect(screenText).not.toContain('Approve the agent rules in your wallet')
+    expect(screenText).not.toContain('Approve the agent budget in your wallet')
     expect(screenText).not.toContain('Your wallet signs')
     expect(screenText).not.toContain('Return to Haven and approve')
   })
@@ -1153,7 +1166,7 @@ describe('ConnectAgentModal', () => {
     await fillAndCreateSetup()
 
     // The hosted topology must not get stuck on the local finalizing spinner.
-    expect(await screen.findByRole('button', { name: 'Approve rules' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Approve budget' })).toBeInTheDocument()
     expect(screen.queryByText('Finishing local setup')).not.toBeInTheDocument()
   })
 
@@ -1170,7 +1183,7 @@ describe('ConnectAgentModal', () => {
     await fillAndCreateSetup()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Approve rules' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
       await Promise.resolve()
       await Promise.resolve()
     })
@@ -1254,7 +1267,7 @@ describe('ConnectAgentModal', () => {
     renderModal({ safeAddress: SAFE.safe_address, safeId: SAFE.id })
     await fillAndCreateSetup()
 
-    expect(await screen.findByText('Approve agent rules')).toBeInTheDocument()
+    expect(await screen.findByText('Approve agent budget')).toBeInTheDocument()
     expect(screen.getByText('Base wallet on Base')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Submit approval' })).toBeInTheDocument()
     expect(mockUseSafeDetails).toHaveBeenLastCalledWith(BASE_SAFE.safe_address, { chainId: 8453 })
@@ -1316,7 +1329,7 @@ describe('ConnectAgentModal', () => {
     await fillAndCreateSetup()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Approve rules' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
       await Promise.resolve()
     })
 
@@ -1381,7 +1394,7 @@ describe('ConnectAgentModal', () => {
     await fillAndCreateSetup()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Approve rules' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
       await Promise.resolve()
     })
 
@@ -1626,10 +1639,10 @@ describe('ConnectAgentModal', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Continue to wallet approval' }))
       await Promise.resolve()
     })
-    expect(await screen.findByText('Approve agent rules')).toBeInTheDocument()
+    expect(await screen.findByText('Approve agent budget')).toBeInTheDocument()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Approve rules' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
       await Promise.resolve()
       await Promise.resolve()
     })
@@ -1672,7 +1685,7 @@ describe('ConnectAgentModal', () => {
     fireEvent.change(screen.getByPlaceholderText('Amount'), {
       target: { value: '10' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Review agent rules' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review agent budget' }))
 
     expect(screen.getByText('Haven wallet unavailable')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Create setup prompt' })).toBeDisabled()

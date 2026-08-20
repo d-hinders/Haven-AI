@@ -34,6 +34,35 @@ export async function runCli(
     io.stdout(`${helpText()}\n`)
     return 0
   }
+  if (parsed.doctor || parsed.repair) {
+    const { runDoctor, runRepair } = await import('./doctor.js')
+    const runtime = parsed.options.runtime ?? ''
+    const credentialsDir = parsed.options.credentialsDir
+    try {
+      if (parsed.repair) {
+        const repair = await runRepair({ runtime, credentialsDir })
+        for (const message of repair.messages) io.stderr(`${redactSecrets(message)}\n`)
+        if (!repair.ok) return 1
+      }
+      const report = await runDoctor({ runtime, credentialsDir })
+      // Defensively redacted like every other output path — the report is
+      // secret-free by construction, but signerCapabilities is untrusted
+      // process output and belts are cheap (#1589 review).
+      if (parsed.json) {
+        io.stdout(`${redactSecrets(JSON.stringify(report))}\n`)
+      } else {
+        for (const check of report.checks) {
+          io.stdout(redactSecrets(`${check.ok ? '✓' : '✗'} ${check.label}: ${check.detail}\n`))
+          if (check.repair) io.stdout(redactSecrets(`    ↳ repair: ${check.repair}\n`))
+        }
+        io.stdout(report.ok ? 'All checks passed.\n' : 'One or more checks FAILED — see repairs above.\n')
+      }
+      return report.ok ? 0 : 1
+    } catch (err) {
+      io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
+      return 1
+    }
+  }
   try {
     // --json is the automation contract: emit the outcome promptly instead of
     // blocking up to the approval-wait bound (#1377 D).

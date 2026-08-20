@@ -31,6 +31,7 @@ import type {
   X402PaymentOption,
   X402Intent,
   X402McpTransport,
+  X402McpCallContext,
   X402MerchantCallContext,
   RawX402MerchantCallContext,
   X402Quote,
@@ -841,7 +842,13 @@ export class HavenClient {
       }
     })
 
-    return { ...agent, readiness: deriveReadiness(agent.status, allowances), allowances }
+    const readiness = deriveReadiness(agent.status, allowances)
+    // #1590: same value under the honest name. `readiness` covers hosted
+    // identity + on-chain spend authority ONLY — the hosted side cannot see
+    // the local signer, and the bare name invited exactly that misread
+    // (2026-08-18: an agent took readiness:"ready" as end-to-end payment
+    // readiness while the signer was unstartable).
+    return { ...agent, readiness, spend_authority_readiness: readiness, allowances }
   }
 
   /**
@@ -1590,6 +1597,14 @@ export class HavenClient {
        * that asserted the wrong rail would build a request the backend rejects.
        */
       delegationRail?: boolean
+      /**
+       * #1547: the merchant MCP-tool call this authorization was quoted
+       * against, persisted so the settle leg can rehydrate it by payment_id
+       * (#1307) — the same option `createX402Intent` already carries. Without
+       * it an erc7710 settle needs merchant_url/tool_name/arguments
+       * re-threaded, which the guided catalog path (#1305) exists to remove.
+       */
+      mcpCallContext?: X402McpCallContext
     } = {},
   ): Promise<{
     paymentId: string
@@ -1655,6 +1670,9 @@ export class HavenClient {
       ...(selection.facilitatorAddresses
         ? { facilitatorAddresses: selection.facilitatorAddresses }
         : {}),
+      // #1307/#1547: persisted so the settle leg can rehydrate the merchant
+      // call by payment_id on this scheme too, not only on the 3009 bridge.
+      ...(options.mcpCallContext ? { mcpCallContext: options.mcpCallContext } : {}),
     })
 
     if (!raw.payment_id) {

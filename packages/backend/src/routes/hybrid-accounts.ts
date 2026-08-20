@@ -7,9 +7,12 @@
  * deterministic and deployment rides the first sponsored operation (#828).
  *
  * Fail-closed wiring (the #745 dark-launch pattern): the row carries
- * account_type='delegator_hybrid' and execution_rail='delegation' — a rail
- * value nothing routes to until #829; the payments route blocks it cleanly
- * rather than falling through to a legacy path that cannot serve it.
+ * account_type='delegator_hybrid' and execution_rail='delegation'. When this
+ * route first shipped, nothing routed to that rail value — the payments route
+ * blocked it cleanly rather than falling through to a legacy path that could
+ * not serve it. #829 then landed the delegation payment rail, so payments DO
+ * route here now; the fail-closed shape remains as the pattern for the next
+ * dark-launched rail.
  */
 
 import { FastifyInstance } from 'fastify'

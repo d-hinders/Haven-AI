@@ -99,7 +99,7 @@ export function DelegationApprovalStep({
   return (
     <>
       <AgentRulesSummary
-        title="Approve agent rules"
+        title="Approve agent budget"
         description={`You sign once to give ${status.agent.name ?? 'this agent'} authority to spend within this budget. It refills every period, and nothing executes outside what you approve here.`}
         density="compact"
         items={[

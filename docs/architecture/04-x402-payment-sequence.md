@@ -26,7 +26,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-17" # #1496: verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-19" # #1496: verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -396,23 +396,41 @@ price reservation. An unknown/degraded/non-MCP catalog row keeps the existing
 manual fallback: use `haven_pay_mcp_tool` with an explicit merchant URL and
 tool name. When ready to buy, call `haven_prepare_catalog_purchase` with a cap;
 that paid preflight obtains a fresh live quote and checks the cap independently.
+When the user stated no cap, the documented convention
+([#1548](https://github.com/d-hinders/Haven-AI/issues/1548)) is quote first and
+cap at the live quoted amount — never invented headroom; a price rise between
+the two then refuses safely at the cap check and the agent re-confirms with
+the user. Guidance only: the cap stays required and its enforcement is
+unchanged.
 
 `haven_prepare_catalog_purchase({ catalog_id, max_amount_human | max_amount, idempotency_key? })`
 starts a paid-MCP-tool purchase from a curated `merchant_catalog` row instead
 of a hand-copied `merchant_url` / `tool_name` / `tool_arguments`. It is a
 convenience and verification layer built entirely from EXISTING primitives —
-it composes, rather than duplicates, the `haven_pay_mcp_tool` internals (the
+it composes, rather than duplicates, the `haven_pay_mcp_tool` internals: the
 quote probe with the #1271 discovery fallback is shared via one
-`quoteMcpToolCall` helper) and the same `createX402Intent` call, with the
-`mcpCallContext` persisted per #1307. The response after step 1 is therefore
-the SAME compact ready-to-sign shape `haven_pay_mcp_tool` returns (#1272:
-`payment_id`, `payload_hash`, `expires_at`, `signer_compatibility`, `x402`)
-plus catalog fields — never a third signing surface. The signer flow after
-this tool is IDENTICAL to today's: `haven_sign_x402` with `payment_id` alone
-(#1355: the signer's authenticated sign-context fetch also carries the
+`quoteMcpToolCall` helper, and since
+[#1547](https://github.com/d-hinders/Haven-AI/issues/1547) the settlement
+scheme too — the guided path runs the same `selectX402SettlementScheme`
+(#1453) `haven_pay_mcp_tool` runs, where before it was hard-wired to the 3009
+funding leg (so the RECOMMENDED catalog route forced the fallback scheme while
+the manual tool got the preferred one). On the delegation rail against an
+erc7710-advertising merchant it composes the same `prepareX402Erc7710` call
+(#1456) and returns the direct-settlement shape (`settlement_scheme:
+'erc7710'`, `settlement.funding_leg: false`) plus the catalog fields and
+allowance block; the signer flow is then `haven_sign` with `payment_id` alone
+and settle carries NO `payment_header`. Otherwise it composes the same
+`createX402Intent` call, and the response is the SAME compact ready-to-sign
+shape `haven_pay_mcp_tool` returns (#1272: `payment_id`, `payload_hash`,
+`expires_at`, `signer_compatibility`, `x402`) plus catalog fields — never a
+third signing surface; the signer flow is `haven_sign_x402` with `payment_id`
+alone (#1355: the signer's authenticated sign-context fetch also carries the
 `payment_required` persisted on the intent's `machine_metadata` at authorize
 time — the #1307 pattern applied to the sign leg; on a pre-#1355 backend the
 signer asks for `payment_required` explicitly), then `haven_settle_mcp_tool`.
+On BOTH schemes the `mcpCallContext` is persisted per #1307 (the erc7710
+authorize accepts it too, #1547), so settle rehydrates the merchant call by
+`payment_id` and the agent never re-threads merchant fields.
 
 Sequence:
 
@@ -786,7 +804,10 @@ which the caller replays on the merchant retry. As of
 reachable from the **hosted MCP tool surface**, which is the topology a normal
 agent uses: `haven_pay_mcp_tool` selects the scheme server-side (rail from the
 account, capability from the merchant's `accepts[]`) and reports it, and
-`haven_settle_mcp_tool` exchanges the signed child for the header. Note the
+`haven_settle_mcp_tool` exchanges the signed child for the header. As of
+[#1547](https://github.com/d-hinders/Haven-AI/issues/1547) the guided catalog
+preflight (`haven_prepare_catalog_purchase`) runs the same selector — see the
+Guided Catalog Purchase section above. Note the
 sequence inversion, because it is the whole substance of that wiring: on the
 3009 path the agent's signature FUNDS the delegate and the header is built by
 the local signer; on erc7710 the signature IS the settlement child and the

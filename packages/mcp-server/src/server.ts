@@ -9,7 +9,7 @@ import {
 } from './tools.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.1.26-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.1.27-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -23,7 +23,9 @@ export const HOSTED_INSTRUCTIONS = [
   'Haven hosted MCP server: keyless. It constructs and relays payments and never',
   'holds or receives a signing key — signing happens only in the local',
   'haven-signer MCP server. Call haven_get_agent first, every session: identity,',
-  'readiness, and live remaining budget in one call.',
+  'spend_authority_readiness, and live remaining budget in one call. That signal',
+  'covers hosted identity + on-chain spend authority ONLY — it cannot see the',
+  'local signer; a signer tool call (tools/list suffices) is the signer check.',
   '',
   'For a catalogued MCP merchant, use haven_discover_tools to find a catalog_id,',
   'then haven_quote_catalog_purchase when you need its live price before choosing',
@@ -33,12 +35,33 @@ export const HOSTED_INSTRUCTIONS = [
   'a spending cap is required. Give it in whole tokens as the user said it:',
   'max_amount_human "1" is 1 USDC. (max_amount is the atomic-unit form, where',
   '"1" is 0.000001 USDC; send one or the other, never both.)',
+  'When the user stated NO cap (the common "buy X" case): quote first,',
+  'then cap at the live quoted amount. Never invent headroom and never ask the',
+  'user for a number they did not volunteer. If the price then rises before',
+  'prepare, the cap check refuses safely — re-quote and confirm the new price',
+  'with the user. A cap the user DID state always wins over this convention.',
   'Every payment tool response carries next_action,',
   'next_tool, and next_arguments — follow those fields first; description prose',
-  'is fallback, not the source of truth.',
+  'is fallback, not the source of truth. next_tool is Claude-family namespaced',
+  '(mcp__<server>__<tool>); if your runtime names servers differently (Codex',
+  'config keys: haven, haven_signer), resolve via the paired next_tool_server +',
+  'next_tool_name — the bare tool name on that logical server.',
   '',
-  'Sign only by payment_id, through the local signer — never relay typed_data',
-  'yourself. Settle only by payment_id, signature, and payment_header.',
+  'Signing and settling, every x402 payment tool: the response guidance names',
+  'the signer tool — pass JUST { payment_id }; the signer fetches the exact',
+  'bytes itself, so never copy or re-type typed_data. (haven_pay is the',
+  'exception: sign it per its own response guidance, passing typed_data_b64',
+  'through unchanged when present.) On the EIP-3009 shape, settle',
+  'with payment_id + signature + payment_header. On the erc7710 shape there is',
+  'no funding leg and NO payment_header — settle with payment_id + signature',
+  'only. The guidance says which shape you are on.',
+  'A quote expires at expires_at: re-run the same tool with the SAME',
+  'idempotency_key before signing again. An out-of-date signer refuses to sign',
+  'with a machine-readable version-mismatch error (code, supported_versions,',
+  'received_version) — stop, tell the user to re-run',
+  'npx @haven_ai/connect@alpha; nothing has been spent at that point.',
+  'If a merchant rejects AFTER funding, the delegate holds stranded funds —',
+  'recover them with haven_sweep_delegate.',
   '',
   'pending_approval, or a guidance block with safe_to_continue false, means stop',
   'and tell the user — do not retry, re-sign, or re-pay while a payment is',

@@ -2,8 +2,10 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
-import { installRuntime, supportsLocalMcp } from './runtime-install.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
+import { SIGNER_INSTALL_TIMEOUT_MS, prepareSignerRuntime } from './signer-runtime.js'
+import { prepareLocalMcpRuntime } from './local-mcp-runtime.js'
+import { installRuntime, supportsLocalMcp, type EarlyRuntimeConfigReport } from './runtime-install.js'
 
 const API_KEY = 'sk_agent_secret_for_runtime_test'
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
@@ -28,6 +30,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: okLocalMcpProbe(),
     })
@@ -82,6 +85,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: okLocalMcpProbe(),
     })
@@ -114,6 +118,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: okLocalMcpProbe(),
     })
@@ -148,6 +153,7 @@ describe('installRuntime', () => {
       homeDir: dir,
       runCommand,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: okLocalMcpProbe(),
     })
@@ -157,7 +163,18 @@ describe('installRuntime', () => {
     expect(result.localMcpConfigured).toBe(true)
     expect(result.localMcpAcknowledged).toBe(true)
     expect(result.nextUserAction).toBe('return_to_haven_for_wallet_approval_then_restart_claude_code')
+    // #1569: stale entries are removed BEFORE the add, mirroring the hosted
+    // writer — `claude mcp add-json` fails on a name collision, so a re-run
+    // otherwise left the previous agent's entry in place.
     expect(commands[0]).toMatchObject({
+      command: 'claude',
+      args: ['mcp', 'remove', 'haven'],
+    })
+    expect(commands[1]).toMatchObject({
+      command: 'claude',
+      args: ['mcp', 'remove', 'haven-signer'],
+    })
+    expect(commands[2]).toMatchObject({
       command: 'claude',
       args: [
         'mcp',
@@ -173,11 +190,7 @@ describe('installRuntime', () => {
         'user',
       ],
     })
-    expect(commands[1]).toMatchObject({
-      command: 'claude',
-      args: ['mcp', 'remove', 'haven-signer'],
-    })
-    expect(commands[2]).toMatchObject({
+    expect(commands[3]).toMatchObject({
       command: 'claude',
       args: ['mcp', 'get', 'haven'],
     })
@@ -189,6 +202,118 @@ describe('installRuntime', () => {
     expect(JSON.stringify(commands)).not.toContain('Authorization')
     expect(JSON.stringify(commands)).not.toContain(API_KEY)
     expect(JSON.stringify(commands)).not.toContain(PRIVATE_KEY)
+  })
+
+  // #1569 regression: a SECOND local-stdio setup against a config that already
+  // holds a `haven` entry must replace it with the new agent's wrapper. The
+  // fake `claude mcp` below enforces the real CLI's collision semantics —
+  // add/add-json fail when the name exists — which is exactly what stranded
+  // re-runs on the previous agent's wrapper before the remove-first fix.
+  it('replaces the previous agent Claude Code local MCP entry on a re-run', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-claude-rerun-'))
+    const entries = new Map<string, string>()
+    const runCommand = vi.fn(async (command: string, args: string[]) => {
+      if (command !== 'claude') throw new Error(`unexpected command ${command}`)
+      const [, verb, name, payload] = args
+      if (verb === 'remove') {
+        entries.delete(name)
+        return
+      }
+      if (verb === 'add-json' || verb === 'add') {
+        if (entries.has(name)) throw new Error(`MCP server "${name}" already exists`)
+        entries.set(name, payload ?? args.join(' '))
+        return
+      }
+      if (verb === 'get') {
+        if (!entries.has(name)) throw new Error(`No MCP server named "${name}"`)
+        return
+      }
+      throw new Error(`unexpected claude mcp verb ${verb}`)
+    })
+
+    const runSetup = async (agentDir: string) => {
+      const credentialDirectory = join(dir, agentDir)
+      const identityPath = await writeIdentityCredential(credentialDirectory)
+      const signerPath = await writeSignerCredential(credentialDirectory)
+      return installRuntime({
+        runtime: 'claude-code',
+        hostedMcpUrl: HOSTED_URL,
+        apiKey: API_KEY,
+        signerPath,
+        identityPath,
+        credentialDirectory,
+        ackLocalTools: true,
+        localMcp: true,
+      }, {
+        homeDir: dir,
+        runCommand,
+        fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
+        prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
+        probeLocalMcpTools: okLocalMcpProbe(),
+      })
+    }
+
+    const first = await runSetup('agent-1')
+    expect(first.localMcpConfigured).toBe(true)
+    expect(entries.get('haven')).toContain(join(dir, 'agent-1', 'bin', 'haven-mcp'))
+
+    const second = await runSetup('agent-2')
+    expect(second.localMcpConfigured).toBe(true)
+    expect(second.errorCode).toBeUndefined()
+    // The entry now points at the NEW agent's wrapper — replaced, not stale.
+    expect(entries.get('haven')).toContain(join(dir, 'agent-2', 'bin', 'haven-mcp'))
+    expect(entries.get('haven')).not.toContain(join(dir, 'agent-1', 'bin', 'haven-mcp'))
+  })
+
+  // #1569 residual: a genuine CLI failure between the remove and the add
+  // leaves NO haven entry — fail-closed, never a stale wrong-agent one — and
+  // the error path reports claude_code_config_failed with rerun guidance,
+  // which works from the no-entry state because the sequence is idempotent.
+  it('fails closed with no stale entry when the add fails after the remove', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-claude-addfail-'))
+    const credentialDirectory = join(dir, 'agent-2')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const entries = new Map<string, string>([['haven', 'previous-agent-wrapper']])
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      const [, verb, name] = args
+      if (verb === 'remove') {
+        entries.delete(name)
+        return
+      }
+      // Both the add-json attempt and the add fallback genuinely fail.
+      if (verb === 'add-json' || verb === 'add') throw new Error('claude CLI unavailable')
+      if (verb === 'get') {
+        if (!entries.has(name)) throw new Error(`No MCP server named "${name}"`)
+        return
+      }
+      throw new Error(`unexpected claude mcp verb ${verb}`)
+    })
+
+    const result = await installRuntime({
+      runtime: 'claude-code',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+      localMcp: true,
+    }, {
+      homeDir: dir,
+      runCommand,
+      fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
+      prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
+      probeLocalMcpTools: okLocalMcpProbe(),
+    })
+
+    expect(result.errorCode).toBe('claude_code_config_failed')
+    expect(result.localMcpConfigured).toBe(false)
+    // Fail-closed: the previous agent's entry is gone, not silently kept.
+    expect(entries.has('haven')).toBe(false)
+    expect(result.messages.join('\n')).toContain('Could not update Claude Code MCP config')
   })
 
   it('reports local MCP runtime install failures without marking restart-ready', async () => {
@@ -209,6 +334,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: vi.fn(async () => {
         throw new Error('npm cache could not install package')
       }),
@@ -243,6 +369,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: vi.fn(async () => {
         const err = new Error('Node.js 18.19.0 is not supported. Haven local MCP requires Node.js >=20.0.0.')
         Object.assign(err, { code: 'local_mcp_unsupported_node_version' })
@@ -275,6 +402,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
       probeLocalMcpTools: vi.fn(async () => ({ status: 'missing_tools' as const, toolNames: ['haven_get_agent'] })),
     })
@@ -306,6 +434,7 @@ describe('installRuntime', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
     })
 
     expect(result.runtime).toBe('other')
@@ -338,6 +467,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
@@ -381,7 +511,105 @@ describe('installRuntime hosted default topology', () => {
     },
   )
 
-  it('falls back to npx (non-fatal) and flags signerRuntimePrepared=false when signer prep fails', async () => {
+  it('#1587: localSignerConfigured goes true ONLY after a real signer handshake', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-probe-ok-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const probe = okSignerProbe()
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      probeSignerTools: probe,
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+    })
+
+    expect(result.localSignerConfigured).toBe(true)
+    expect(result.errorCode).toBeUndefined()
+    // The probe was a REAL handshake against the registered command, with the
+    // signer's derived tool surface as the requirement.
+    expect(probe).toHaveBeenCalledTimes(1)
+    expect(probe.mock.calls[0][2]).toEqual(MCP_RUNTIME_MANIFEST.requiredSignerTools)
+    expect(result.messages.join('\n')).toContain('Verified local Haven signer with a stdio handshake.')
+  })
+
+  it.each([
+    ['process_error' as const, 'local_signer_probe_process_error'],
+    ['timeout' as const, 'local_signer_probe_timeout'],
+    ['missing_tools' as const, 'local_signer_probe_missing_tools'],
+  ])('#1587: a signer that cannot handshake (%s) is NOT reported configured', async (status, expectedCode) => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-probe-fail-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      probeSignerTools: vi.fn(async () => ({ status, toolNames: [] })),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+    })
+
+    // The 2026-08-18 shape, closed: an unstartable signer can no longer ride
+    // a green setup report.
+    expect(result.localSignerConfigured).toBe(false)
+    expect(result.errorCode).toBe(expectedCode)
+    expect(result.probeResult).toContain('local_signer_unavailable')
+    expect(result.messages.join('\n')).toContain(`Local Haven signer handshake failed: ${status}.`)
+    expect(result.messages.join('\n')).toContain('npx @haven_ai/connect@alpha')
+  })
+
+  it('#1587/#1543: a failing signer probe REFINES the final report but never gates the early unlock', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-refine-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    let early: EarlyRuntimeConfigReport | undefined
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      probeSignerTools: vi.fn(async () => ({ status: 'timeout' as const, toolNames: [] })),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+      onRuntimeConfigured: async (report) => {
+        early = report
+      },
+    })
+
+    // The dashboard unlock saw the pre-probe truth; the final report carries
+    // the refinement — the exact #1543 division of labour.
+    expect(early?.localSignerConfigured).toBe(true)
+    expect(early?.errorCode).toBeUndefined()
+    expect(result.localSignerConfigured).toBe(false)
+    expect(result.errorCode).toBe('local_signer_probe_timeout')
+  })
+
+  it('#1586: signer prep failure is LOUD and FAIL-CLOSED — no config written, no npx fallback', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-prepfail-'))
     const credentialDirectory = join(dir, 'agent-1')
     const identityPath = await writeIdentityCredential(credentialDirectory)
@@ -398,20 +626,212 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: vi.fn(async () => {
         throw new Error('npm registry unreachable')
       }),
     })
 
-    const codexConfig = await readFile(join(dir, '.codex', 'config.toml'), 'utf8')
-
-    // Degrades gracefully: still hosted+signer, but observably on the npx path.
-    expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
+    // Loud: the exact error surface the AC names.
+    expect(result.errorCode).toBe('signer_runtime_install_failed')
+    expect(result.probeResult).toBe('signer_runtime_install_failed')
+    expect(result.localSignerConfigured).toBe(false)
     expect(result.signerRuntimePrepared).toBe(false)
-    expect(codexConfig).toContain('command = "npx"')
-    expect(codexConfig).toContain(signerPath)
-    expect(result.messages.join('\n')).toContain('falling back to npx launch')
-    expect(codexConfig).not.toContain(PRIVATE_KEY)
+    expect(result.hostedMcpConfigured).toBe(false)
+    // The recovery is named.
+    expect(result.nextUserAction).toContain('npx @haven_ai/connect@alpha')
+    expect(result.messages.join('\n')).toContain('No runtime configuration was written')
+
+    // Fail-CLOSED: nothing was written at all — the old silent npx entry
+    // (Codex startup_timeout_sec=120 vs a multi-minute npx cold install) was
+    // a config that looked wired but structurally could not start. The whole
+    // write is skipped, hosted entry included: quotes-work-but-signing-never-
+    // can is the same looks-fine trap in a different place.
+    await expect(readFile(join(dir, '.codex', 'config.toml'), 'utf8')).rejects.toThrow()
+  })
+
+  it('#1586 review: the heartbeat reaches onProgress THROUGH installRuntime — not only at the unit level', async () => {
+    // The first draft's heartbeat was dead code in production: the unit test
+    // called prepareSignerRuntime directly, and prepareSignerForRuntime never
+    // threaded onProgress. This test goes through the real entry point.
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-heartbeat-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const progress: string[] = []
+
+    vi.useFakeTimers()
+    try {
+      const runtimeDirectory = join(dir, '.haven', 'signer-runtime', MCP_RUNTIME_MANIFEST.signerVersion)
+      const cliDir = join(runtimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist')
+      const slowInstall = vi.fn(async () => {
+        await vi.advanceTimersByTimeAsync(40_000)
+        await mkdir(cliDir, { recursive: true })
+        await writeFile(join(cliDir, 'cli.js'), '// cli')
+        for (const pkg of ['signer', 'sdk']) {
+          const pkgDir = join(runtimeDirectory, 'node_modules', '@haven_ai', pkg)
+          await mkdir(pkgDir, { recursive: true })
+          await writeFile(
+            join(pkgDir, 'package.json'),
+            JSON.stringify({ version: pkg === 'signer' ? MCP_RUNTIME_MANIFEST.signerVersion : MCP_RUNTIME_MANIFEST.sdkVersion }),
+          )
+        }
+      })
+      await installRuntime({
+        runtime: 'codex-cli',
+        hostedMcpUrl: HOSTED_URL,
+        apiKey: API_KEY,
+        signerPath,
+        identityPath,
+        credentialDirectory,
+        ackLocalTools: true,
+      }, {
+        homeDir: dir,
+        fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
+        runCommand: slowInstall,
+        onProgress: (m) => progress.push(m),
+      })
+      expect(progress.some((m) => m.includes('Still installing'))).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('#1586: an install slower than the OLD 120s budget still succeeds — prep waits it out', async () => {
+    // Simulated via the injectable runCommand: the run takes (a scaled-down)
+    // longer-than-the-old-budget interval; the point pinned is that prep does
+    // not race a 120s timer of its own — the budget lives in
+    // SIGNER_INSTALL_TIMEOUT_MS (600s), asserted directly.
+    expect(SIGNER_INSTALL_TIMEOUT_MS).toBeGreaterThanOrEqual(600_000)
+
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-signer-slow-'))
+    const runtimeDirectory = join(dir, '.haven', 'signer-runtime', MCP_RUNTIME_MANIFEST.signerVersion)
+    const cliDir = join(runtimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist')
+    const heartbeats: string[] = []
+    vi.useFakeTimers()
+    try {
+      const slowInstall = vi.fn(async () => {
+        // The "install": complete only after 130 virtual seconds — past the
+        // old budget — then materialise what the postcondition checks read.
+        await vi.advanceTimersByTimeAsync(130_000)
+        await mkdir(cliDir, { recursive: true })
+        await writeFile(join(cliDir, 'cli.js'), '// cli')
+        for (const pkg of ['signer', 'sdk']) {
+          const pkgDir = join(runtimeDirectory, 'node_modules', '@haven_ai', pkg)
+          await mkdir(pkgDir, { recursive: true })
+          await writeFile(
+            join(pkgDir, 'package.json'),
+            JSON.stringify({ version: pkg === 'signer' ? MCP_RUNTIME_MANIFEST.signerVersion : MCP_RUNTIME_MANIFEST.sdkVersion }),
+          )
+        }
+      })
+      const prepared = await prepareSignerRuntime(
+        { credentialDirectory: join(dir, 'agent-1'), signerPath: join(dir, 'agent-1', 'signer.json'), homeDir: dir },
+        { runCommand: slowInstall, onProgress: (m) => heartbeats.push(m) },
+      )
+      expect(prepared.cliPath).toContain('cli.js')
+      expect(slowInstall).toHaveBeenCalledTimes(1)
+      // The console heard from the install while it ran (AC: >=1 heartbeat).
+      expect(heartbeats.length).toBeGreaterThanOrEqual(1)
+      expect(heartbeats[0]).toContain('Still installing')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('#1593: the LOCAL MCP runtime install heartbeat reaches onProgress THROUGH installRuntime', async () => {
+    // Twin of the #1586 test above, for the local-stdio topology: the local
+    // runtime's heartbeat must be live through the real entry point, not only
+    // when prepareLocalMcpRuntime is called directly — the #1586 lesson was a
+    // heartbeat that unit-tested green while runtime-install never threaded
+    // onProgress. No prepareLocalMcpRuntime fake here on purpose.
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-local-mcp-heartbeat-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const progress: string[] = []
+
+    vi.useFakeTimers()
+    try {
+      // On the local topology the MCP runtime install is the ONLY one that
+      // runs through runCommand (the separate signer preinstall is gated to
+      // the hosted topology, `if (!localRuntime)` in runtime-install.ts), so
+      // the fake materialises the MCP layout at whatever --prefix npm got.
+      const slowInstall = vi.fn(async (_command: string, args: string[]) => {
+        await vi.advanceTimersByTimeAsync(40_000)
+        const prefix = args[args.indexOf('--prefix') + 1]
+        await mkdir(join(prefix, 'node_modules', '@haven_ai', 'mcp', 'dist'), { recursive: true })
+        await writeFile(join(prefix, 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js'), '// cli')
+        for (const [pkg, version] of [['mcp', MCP_RUNTIME_MANIFEST.mcpVersion], ['sdk', MCP_RUNTIME_MANIFEST.sdkVersion]] as const) {
+          const pkgDir = join(prefix, 'node_modules', '@haven_ai', pkg)
+          await mkdir(pkgDir, { recursive: true })
+          await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ version }))
+        }
+      })
+      const result = await installRuntime({
+        runtime: 'codex-cli',
+        hostedMcpUrl: HOSTED_URL,
+        apiKey: API_KEY,
+        signerPath,
+        identityPath,
+        credentialDirectory,
+        ackLocalTools: true,
+        localMcp: true,
+      }, {
+        homeDir: dir,
+        fetch: okToolsFetch(),
+        probeSignerTools: okSignerProbe(),
+        probeLocalMcpTools: okLocalMcpProbe(),
+        runCommand: slowInstall,
+        onProgress: (m) => progress.push(m),
+      })
+      expect(result.localMcpConfigured).toBe(true)
+      expect(progress.some((m) => m.includes('Still installing the local Haven MCP runtime'))).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('#1593: a local MCP install slower than the OLD 120s budget still succeeds', async () => {
+    // The local runtime shares the signer's honest budget — one constant, no
+    // 120s race of its own (SIGNER_INSTALL_TIMEOUT_MS, >=600s asserted in the
+    // #1586 twin above).
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-local-mcp-slow-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const runtimeDirectory = join(dir, '.haven', 'mcp-runtime', MCP_RUNTIME_MANIFEST.mcpVersion)
+    const heartbeats: string[] = []
+    vi.useFakeTimers()
+    try {
+      const slowInstall = vi.fn(async () => {
+        await vi.advanceTimersByTimeAsync(130_000)
+        await mkdir(join(runtimeDirectory, 'node_modules', '@haven_ai', 'mcp', 'dist'), { recursive: true })
+        await writeFile(join(runtimeDirectory, 'node_modules', '@haven_ai', 'mcp', 'dist', 'cli.js'), '// cli')
+        for (const pkg of ['mcp', 'sdk']) {
+          const pkgDir = join(runtimeDirectory, 'node_modules', '@haven_ai', pkg)
+          await mkdir(pkgDir, { recursive: true })
+          await writeFile(
+            join(pkgDir, 'package.json'),
+            JSON.stringify({ version: pkg === 'mcp' ? MCP_RUNTIME_MANIFEST.mcpVersion : MCP_RUNTIME_MANIFEST.sdkVersion }),
+          )
+        }
+      })
+      const prepared = await prepareLocalMcpRuntime(
+        {
+          credentialDirectory,
+          identityPath: join(credentialDirectory, 'identity.json'),
+          signerPath: join(credentialDirectory, 'signer.json'),
+          homeDir: dir,
+        },
+        { runCommand: slowInstall, onProgress: (m) => heartbeats.push(m) },
+      )
+      expect(prepared.cliPath).toContain('cli.js')
+      expect(slowInstall).toHaveBeenCalledTimes(1)
+      expect(heartbeats.length).toBeGreaterThanOrEqual(1)
+      expect(heartbeats[0]).toContain('Still installing the local Haven MCP runtime')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('writes hosted MCP + signer for Claude Code by default (no opt-in)', async () => {
@@ -436,6 +856,7 @@ describe('installRuntime hosted default topology', () => {
       homeDir: dir,
       runCommand,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
@@ -496,6 +917,7 @@ describe('installRuntime hosted default topology', () => {
       }, {
         homeDir: dir,
         fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
         runCommand: vi.fn(async () => undefined),
         prepareSignerRuntime: fakePrepareSignerRuntime(),
       })
@@ -537,11 +959,200 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
     expect(result.runtimeMcpMode).toBe('hosted_plus_signer')
     expect(result.hostedMcpConfigured).toBe(true)
+  })
+
+  // #1543: the dashboard's approval unlock reads only config/consent facts, so
+  // they are reported the moment the config write settles — before the network
+  // probes and skill install, whose tail approval does not depend on.
+  it('fires the early config-written report after the write and before the probes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-early-report-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const order: string[] = []
+    const probeFetch = vi.fn(async () => {
+      order.push('probe')
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { tools: [{ name: 'haven_get_agent' }] },
+      }), { status: 200 })
+    }) as unknown as typeof fetch
+    let early: EarlyRuntimeConfigReport | undefined
+    const onRuntimeConfigured = vi.fn(async (report: EarlyRuntimeConfigReport) => {
+      early = report
+      order.push('early-report')
+    })
+
+    const result = await installRuntime({
+      runtime: 'cursor',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: probeFetch,
+      probeSignerTools: okSignerProbe(),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+      onRuntimeConfigured,
+    })
+
+    expect(onRuntimeConfigured).toHaveBeenCalledTimes(1)
+    expect(order[0]).toBe('early-report')
+    expect(order).toContain('probe')
+    // The early booleans carry the unlock keys' semantics minus probe verdicts.
+    expect(early).toMatchObject({
+      runtime: 'cursor',
+      runtimeMcpMode: 'hosted_plus_signer',
+      hostedMcpConfigured: true,
+      localSignerConfigured: true,
+      localMcpConfigured: false,
+    })
+    expect(early?.errorCode).toBeUndefined()
+    // The early projection agrees with the final report on the shared facts.
+    expect(early?.nextUserAction).toBe(result.nextUserAction)
+    expect(early?.restartRequired).toBe(result.restartRequired)
+  })
+
+  // Reviewer finding on #1543: the local_stdio early-boolean formula must not
+  // silently diverge from the final report's — pin it on a real local install.
+  it('fires the early report with local_stdio semantics on a local MCP install', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-early-report-local-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    let early: EarlyRuntimeConfigReport | undefined
+    const onRuntimeConfigured = vi.fn(async (report: EarlyRuntimeConfigReport) => {
+      early = report
+    })
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+      localMcp: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
+      prepareLocalMcpRuntime: fakePrepareLocalMcpRuntime(),
+      probeLocalMcpTools: okLocalMcpProbe(),
+      onRuntimeConfigured,
+    })
+
+    expect(onRuntimeConfigured).toHaveBeenCalledTimes(1)
+    expect(early).toMatchObject({
+      runtime: 'codex-cli',
+      runtimeMcpMode: 'local_stdio',
+      hostedMcpConfigured: false,
+      localSignerConfigured: true,
+      localMcpConfigured: true,
+      localMcpAcknowledged: true,
+    })
+    // The early projection agrees with the final report's unlock keys.
+    expect(early?.localMcpConfigured).toBe(result.localMcpConfigured)
+    expect(early?.localSignerConfigured).toBe(result.localSignerConfigured)
+  })
+
+  it('does not fire the early report when local runtime preparation fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-early-report-prep-fail-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const onRuntimeConfigured = vi.fn()
+
+    const result = await installRuntime({
+      runtime: 'codex-cli',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+      localMcp: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
+      prepareLocalMcpRuntime: vi.fn(async () => {
+        throw new Error('npm cache could not install package')
+      }),
+      probeLocalMcpTools: okLocalMcpProbe(),
+      onRuntimeConfigured,
+    })
+
+    // No config write happened, so there is nothing configured to report.
+    expect(result.errorCode).toBe('local_mcp_runtime_install_failed')
+    expect(onRuntimeConfigured).not.toHaveBeenCalled()
+  })
+
+  it('never fails the install when the early report throws', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-early-report-throw-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+
+    const result = await installRuntime({
+      runtime: 'cursor',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+      onRuntimeConfigured: vi.fn(async () => {
+        throw new Error('report endpoint down')
+      }),
+    })
+
+    expect(result.errorCode).toBeUndefined()
+    expect(result.hostedMcpConfigured).toBe(true)
+  })
+
+  it('does not fire the early report on the manual runtime path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-early-report-manual-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const onRuntimeConfigured = vi.fn()
+
+    const result = await installRuntime({
+      runtime: 'other',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackSigner: true,
+    }, {
+      homeDir: dir,
+      fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
+      onRuntimeConfigured,
+    })
+
+    // No config was written, so there is nothing configured to report early;
+    // the caller's final report carries the manual-setup state.
+    expect(result.errorCode).toBe('manual_runtime_setup_required')
+    expect(onRuntimeConfigured).not.toHaveBeenCalled()
   })
 
   // #1332: guidance-surface parity — setup on each runtime with a documented
@@ -564,6 +1175,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
@@ -603,6 +1215,7 @@ describe('installRuntime hosted default topology', () => {
       homeDir: dir,
       env: {},
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
@@ -631,6 +1244,7 @@ describe('installRuntime hosted default topology', () => {
     }, {
       homeDir: dir,
       fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
       prepareSignerRuntime: fakePrepareSignerRuntime(),
     })
 
@@ -675,6 +1289,15 @@ async function writeSignerCredential(directory: string): Promise<string> {
   )
   await chmod(signerPath, 0o600)
   return signerPath
+}
+
+/** #1587: hosted tests stub the signer handshake — the real probe would try
+ *  to SPAWN the fake wrapper command. Failure-path tests override this. */
+function okSignerProbe() {
+  return vi.fn(async (_command: string, _args: string[], required: readonly string[]) => ({
+    status: 'ok' as const,
+    toolNames: [...required],
+  }))
 }
 
 function okToolsFetch(): typeof fetch {

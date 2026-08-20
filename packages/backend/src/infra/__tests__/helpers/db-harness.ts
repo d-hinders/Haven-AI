@@ -10,7 +10,7 @@
  *
  * One Postgres SCHEMA per vitest worker (`test_w<VITEST_WORKER_ID>`), bound
  * via the connection string: `vitest.setup.ts` appends
- * `?options=-c search_path=test_wN,public` to `DATABASE_URL` before anything
+ * `?options=-c search_path=test_wN` to `DATABASE_URL` before anything
  * imports `config.ts`, so EVERY connection the app pool hands out — including
  * the module-level `pool` import repositories use — resolves unqualified
  * table names into the worker's schema. That is what lets this harness change
@@ -122,9 +122,28 @@ export function initDbHarness(): Promise<void> {
   ready ??= (async () => {
     // Explicitly qualified — CREATE SCHEMA ignores search_path.
     await db.query(`CREATE SCHEMA IF NOT EXISTS ${WORKER_SCHEMA}`)
-    // The runner creates/reads `schema_migrations` UNQUALIFIED, so it lives
-    // in the worker schema and tracks that schema's applied versions.
-    await runMigrations()
+    // SERIALISE migration runs across workers (#1562, found by #1559's CI):
+    // two workers applying the full migration set concurrently into fresh
+    // schemas can deadlock in Postgres (40P01 on AccessExclusive locks — the
+    // DDL touches shared catalog state even though the schemas differ), and
+    // every added real-DB test file raises the concurrency. A GLOBAL
+    // advisory lock makes builds sequential; re-runs after the first are a
+    // no-op schema_migrations read, so the cost is bounded to run start.
+    // Held on a dedicated connection: pg advisory locks are session-scoped,
+    // and the pool would otherwise hand the lock's session to someone else.
+    const lockHolder = await db.connect()
+    try {
+      await lockHolder.query('SELECT pg_advisory_lock(811000061)')
+      try {
+        // The runner creates/reads `schema_migrations` UNQUALIFIED, so it
+        // lives in the worker schema and tracks that schema's versions.
+        await runMigrations()
+      } finally {
+        await lockHolder.query('SELECT pg_advisory_unlock(811000061)')
+      }
+    } finally {
+      lockHolder.release()
+    }
   })()
   return ready
 }
@@ -135,8 +154,22 @@ export function initDbHarness(): Promise<void> {
  * deliberate (#1220): the code under test uses `withTransaction` itself, and
  * an outer wrapper would make real BEGIN/ROLLBACK behaviour untestable —
  * which is precisely a guarantee this epic exists to prove.
+ *
+ * AWAITS `initDbHarness()` first, deliberately. The #1555/#1559 outbound
+ * files called `initDbHarness()` bare at describe-registration time — the
+ * returned promise was never awaited, so whenever a NEW migration had to
+ * apply (fresh CI schema), the first tests ran CONCURRENTLY with their own
+ * worker's migration DDL: 42P01 "relation does not exist" when a table was
+ * not there yet, 40P01 deadlocks when the DDL's AccessExclusive/ShareRow-
+ * Exclusive locks collided with the test's queries (three CI hits on
+ * 2026-08-19, all on unrelated PRs). Awaiting here makes the ordering a
+ * harness GUARANTEE for every file that uses `resetDb` in `beforeEach` —
+ * a forgotten await at a call site degrades to correct, not to a race.
+ * Init is idempotent and memoised, so this costs one resolved-promise await
+ * after the first call.
  */
 export async function resetDb(): Promise<void> {
+  await initDbHarness()
   const { rows } = await db.query<{ tablename: string }>(
     `SELECT tablename FROM pg_tables WHERE schemaname = $1 AND tablename <> 'schema_migrations'`,
     [WORKER_SCHEMA],

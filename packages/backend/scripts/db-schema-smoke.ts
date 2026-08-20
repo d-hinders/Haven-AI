@@ -30,6 +30,17 @@ import { SELECT_DELEGATION_FOR_PAYMENT_SQL } from '../src/infra/repositories/del
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
 import {
+  CLAIM_NEXT_OUTBOUND_TX_SQL,
+  CLAIM_ORPHANED_OUTBOUND_TX_SQL,
+  COUNT_LANE_ATTEMPTS_AT_NONCE_SQL,
+  ENQUEUE_OUTBOUND_TX_SQL,
+  LIST_UNMINED_OUTBOUND_TXS_SQL,
+  MARK_OUTBOUND_TX_BROADCAST_SQL,
+  MARK_OUTBOUND_TX_FAILED_SQL,
+  MARK_OUTBOUND_TX_MINED_SQL,
+  MARK_OUTBOUND_TX_REPLACED_SQL,
+} from '../src/infra/repositories/outbound-txs.js'
+import {
   FIND_ALLOWANCE_NONCE_WATERMARK_SQL,
   UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL,
 } from '../src/infra/repositories/allowance-nonce-watermarks.js'
@@ -411,6 +422,15 @@ const QUERIES: SmokeQuery[] = [
   // re-open the stale-nonce window.
   { name: 'nonce: raise the allowance watermark (GREATEST upsert)', sql: UPSERT_ALLOWANCE_NONCE_WATERMARK_SQL },
   { name: 'nonce: read the allowance watermark', sql: FIND_ALLOWANCE_NONCE_WATERMARK_SQL },
+  { name: 'outbound: enqueue a tx', sql: ENQUEUE_OUTBOUND_TX_SQL },
+  { name: 'outbound: claim next per chain', sql: CLAIM_NEXT_OUTBOUND_TX_SQL },
+  { name: 'outbound: mark broadcast', sql: MARK_OUTBOUND_TX_BROADCAST_SQL },
+  { name: 'outbound: mark mined', sql: MARK_OUTBOUND_TX_MINED_SQL },
+  { name: 'outbound: mark failed', sql: MARK_OUTBOUND_TX_FAILED_SQL },
+  { name: 'outbound: mark replaced', sql: MARK_OUTBOUND_TX_REPLACED_SQL },
+  { name: 'outbound: list unmined for the bump worker', sql: LIST_UNMINED_OUTBOUND_TXS_SQL },
+  { name: 'outbound: claim an orphaned queued row (#1558)', sql: CLAIM_ORPHANED_OUTBOUND_TX_SQL },
+  { name: 'outbound: count lane attempts at a nonce (#1558)', sql: COUNT_LANE_ATTEMPTS_AT_NONCE_SQL },
   // Owner-alias aggregate (#1167). IMPORTED — verbatim from routes/user.ts.
   { name: 'owner-aliases: list for confirmed owners', sql: LIST_OWNER_ALIASES_SQL },
   { name: 'owner-aliases: upsert', sql: UPSERT_OWNER_ALIAS_SQL },

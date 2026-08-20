@@ -45,9 +45,13 @@ user's approval in Haven.
 
 Hosted tools run in the \`mcp__haven__\` namespace. Local signing tools run in
 the \`mcp__haven-signer__\` namespace and keep the delegate key on this machine.
-Tool results carry the exact next step (\`next_action\`, \`next_tool\`,
-\`next_arguments\`) — follow those fields first; the prose below is fallback
-and orientation, not the source of truth.
+That namespacing is Claude-family; other runtimes name the servers by their
+own config keys (Codex: \`haven\`, \`haven_signer\`). Tool results carry the
+exact next step (\`next_action\`, \`next_tool\`, \`next_arguments\`, plus the
+runtime-neutral \`next_tool_server\` + \`next_tool_name\` — the bare tool name
+on that logical server, whatever your runtime calls it).
+Follow those fields first; the prose below is fallback and orientation, not
+the source of truth.
 
 ## When to use this skill
 
@@ -73,8 +77,10 @@ Before any payment, confirm the *live remaining* budget with the tools —
 spending:
 
 - \`mcp__haven__haven_get_agent\` — the recommended first call: identity
-  (wallet, network) plus a readiness signal (\`ready\` / \`needs_approval\` /
-  \`revoked\`) and live remaining per-token allowance, in one shot.
+  (wallet, network) plus \`spend_authority_readiness\` (\`ready\` / \`needs_approval\` /
+  \`revoked\`) and live remaining per-token allowance, in one shot. That signal
+  covers hosted identity and on-chain spend authority only — it cannot see the
+  local signer; the signer is verified by calling any signer tool.
 - \`mcp__haven__haven_get_allowances\` — detailed per-token breakdown
   (configured, spent, reset window) when you need more than the summary.
 

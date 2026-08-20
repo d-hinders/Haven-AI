@@ -1,0 +1,108 @@
+{
+  "$comment": [
+    "ROOT-GUARD OWNERSHIP MANIFEST (#1624, epic #1621).",
+    "",
+    "Haven has guards that live OUTSIDE the tree they police: a lint under",
+    "scripts/ that polices packages/backend, a ratchet that polices",
+    "packages/frontend. Only the policed package's CI job actually runs them.",
+    "So a pull request that ONLY weakens such a guard -- widening an exemption",
+    "regex, deleting a refusal, loosening a rule -- would go green with the",
+    "guard never running, unless the CI change classifier is told that the",
+    "guard belongs to that job.",
+    "",
+    "That knowledge used to be four bespoke arms of a case statement. It is",
+    "data now, and this file is the single place it lives. The classifier",
+    "(scripts/ci/change-classifier.mjs) turns each entry into a routing rule;",
+    "nothing else decides it.",
+    "",
+    "FIELDS",
+    "",
+    "  path     Exact repo-root-relative path. NOT a glob -- see below.",
+    "  jobs     The output flags whose CI jobs own this file. These are the",
+    "           jobs that would actually catch a regression in it.",
+    "  runsVia  The npm script(s) those jobs run to exercise the guard. This is",
+    "           what makes `jobs` a CHECKED claim rather than an assertion:",
+    "           scripts/ci/root-guard-ownership.test.mjs reads .github/workflows/ci.yml",
+    "           and fails if a named job does not actually run one of these.",
+    "  reason   Why this ownership, in a sentence someone can disagree with.",
+    "",
+    "EXACT PATHS ONLY, deliberately. The epic asks for exact paths before glob",
+    "semantics, and a guard manifest is where a too-clever glob does the most",
+    "damage: `scripts/*.mjs` would silently claim every future script in that",
+    "directory for the backend job. A new guard gets a new line. The one place",
+    "globs remain is the root-CONFIG rule in the classifier (workflow files,",
+    "package.json, tsconfig*.json), which forces the full matrix rather than",
+    "naming an owner -- a different question, and its glob behaviour is",
+    "characterized by rows in scripts/ci/routing-matrix.mjs.",
+    "",
+    "ADDING A GUARD: add the entry here, and add a matrix row in",
+    "scripts/ci/routing-matrix.mjs. The tests fail until you do both -- an",
+    "entry nothing exercises is the failure mode this epic exists to remove.",
+    "",
+    "NOT a completeness claim. This file says where the guards it lists belong;",
+    "it does not assert that every guard in the repo is listed. Enforcing that",
+    "is #1626."
+  ],
+  "guards": [
+    {
+      "path": ".dependency-cruiser.cjs",
+      "jobs": ["backend"],
+      "runsVia": ["lint:deps"],
+      "reason": "The module-boundary rule set (#982). It is authoritative over the prose in the architecture doc, so weakening a rule here is exactly the change that must re-run the gate enforcing it."
+    },
+    {
+      "path": "scripts/dep-lint.mjs",
+      "jobs": ["backend"],
+      "runsVia": ["lint:deps"],
+      "reason": "The dependency-boundary gate itself. It scans packages/backend and packages/core but is only ever run by backend_checks."
+    },
+    {
+      "path": "scripts/dep-lint.test.mjs",
+      "jobs": ["backend"],
+      "runsVia": ["lint:deps:test"],
+      "reason": "The gate's own self-test. A lint nobody tests can start passing vacuously, so loosening the test must run it."
+    },
+    {
+      "path": "scripts/db-mock-ratchet.mjs",
+      "jobs": ["backend"],
+      "runsVia": ["lint:db-mocks"],
+      "reason": "The shrink-only ratchet that stops the positional-mock pattern growing back in packages/backend tests (#1219)."
+    },
+    {
+      "path": "scripts/db-mock-ratchet.test.mjs",
+      "jobs": ["backend"],
+      "runsVia": ["lint:db-mocks:test"],
+      "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
+    },
+    {
+      "path": "scripts/generate-api-types.mjs",
+      "jobs": ["backend"],
+      "runsVia": ["check:api-types"],
+      "reason": "Generates packages/core/src/api-types.ts from the backend OpenAPI spec. Backend rather than frontend despite writing into core: the drift check that would fail runs only in backend_checks."
+    },
+    {
+      "path": "scripts/lib/ratchet.mjs",
+      "jobs": ["backend", "frontend"],
+      "runsVia": ["lint:db-mocks", "lint:wire-types"],
+      "reason": "The shared ratchet ENGINE, backing both the backend db-mock gate and the frontend wire-type gate (#1447). Routing it to one job would leave the other gate unguarded, which is the whole reason two jobs are named here."
+    },
+    {
+      "path": "scripts/lint-wire-types.mjs",
+      "jobs": ["frontend"],
+      "runsVia": ["lint:wire-types"],
+      "reason": "The wire-type ratchet (#1447). It polices packages/frontend hooks and types, and only frontend_checks runs it."
+    },
+    {
+      "path": "scripts/lint-wire-types.test.mjs",
+      "jobs": ["frontend"],
+      "runsVia": ["lint:wire-types:test"],
+      "reason": "Its self-test. Widening the exemption regex or deleting the --update refusal without running the gate is the specific failure this covers."
+    },
+    {
+      "path": "scripts/network-map-pins.test.mjs",
+      "jobs": ["backend", "sdk", "signer"],
+      "runsVia": ["lint:network-pins"],
+      "reason": "The network-map pin test (#1478) spans backend, SDK and signer sources, and all three jobs run it. Naming fewer would let a drift ship past the job that would have caught it."
+    }
+  ]
+}

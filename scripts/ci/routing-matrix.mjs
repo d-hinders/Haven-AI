@@ -312,6 +312,12 @@ export const ROUTING_MATRIX = [
     why: 'The classifier does not route itself. Correct today only because ci_config_checks is unconditional and collects scripts/ci/*.test.mjs — the moment that job gains a surface filter, the router stops testing its own changes.',
   },
   {
+    files: ['.github/root-guard-ownership.json'],
+    expect: [],
+    kind: RETAINED,
+    why: 'Editing the guard-ownership manifest changes routing for ten files, yet routes nowhere itself — `.github/*` is only matched under workflows/. Covered today because ci_config_checks is unconditional and runs root-guard-ownership.test.mjs, exactly as for the classifier above; the same caveat applies (#1624).',
+  },
+  {
     files: ['Dockerfile'],
     expect: [],
     kind: RETAINED,

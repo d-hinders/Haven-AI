@@ -25,6 +25,8 @@
 
 import { readFileSync, appendFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * The output contract with ci.yml, in emission order.
@@ -98,11 +100,48 @@ export const DOC_ONLY_PATTERNS = Object.freeze(['*.md', 'docs/*', 'AGENTS.md', '
 export const DOC_EXCEPTIONS = Object.freeze([{ patterns: ['CLAUDE.md'], surfaces: ['code', 'backend'] }])
 
 /**
+ * The root-guard ownership manifest: which job owns each guard that lives
+ * outside the tree it polices (#1624).
+ *
+ * Read from .github/ rather than declared here because it is repo-governance
+ * data, like money-path-globs.json and CODEOWNERS beside it — the question
+ * "who owns this guard" outlives whichever program is currently asking it.
+ * Parsed with JSON.parse to keep this file dependency-free.
+ */
+export const ROOT_GUARD_MANIFEST_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '.github',
+  'root-guard-ownership.json',
+)
+
+/** @type {{path: string, jobs: string[], runsVia: string[], reason: string}[]} */
+export const ROOT_GUARDS = Object.freeze(
+  JSON.parse(readFileSync(ROOT_GUARD_MANIFEST_PATH, 'utf8')).guards,
+)
+
+/**
+ * One routing rule per manifest entry.
+ *
+ * `code` is added to every entry's jobs because it is not a job — it is the
+ * "some code changed at all" flag every surface rule sets. Keeping it out of
+ * the manifest keeps that file about ownership.
+ */
+export const ROOT_GUARD_RULES = Object.freeze(
+  ROOT_GUARDS.map((guard) => ({
+    patterns: [guard.path],
+    surfaces: ['code', ...guard.jobs],
+  })),
+)
+
+/**
  * Surface rules, first match wins (shell `case` semantics).
  *
  * The cross-surface arms are the interesting ones: a guard that lives outside
  * packages/ but polices a package must trigger that package's job, or a PR
- * that only weakens the guard goes green with the guard never running.
+ * that only weakens the guard goes green with the guard never running. Those
+ * arms are now generated from the manifest above.
  */
 export const SURFACE_RULES = Object.freeze([
   {
@@ -117,39 +156,13 @@ export const SURFACE_RULES = Object.freeze([
     ],
     surfaces: ['code', 'full'],
   },
-  {
-    // The dependency-boundary gate (#982) lives outside packages/ but polices
-    // packages/backend. Without this rule, weakening a rule or the ratchet
-    // script would ship without the gate ever running.
-    patterns: [
-      '.dependency-cruiser.cjs',
-      'scripts/dep-lint.mjs',
-      'scripts/dep-lint.test.mjs',
-      'scripts/db-mock-ratchet.mjs',
-      'scripts/db-mock-ratchet.test.mjs',
-      'scripts/generate-api-types.mjs',
-    ],
-    surfaces: ['code', 'backend'],
-  },
-  {
-    // The shared ratchet engine backs BOTH the backend db-mock gate and the
-    // frontend wire-type gate (#1447) — weakening it must run both.
-    patterns: ['scripts/lib/ratchet.mjs'],
-    surfaces: ['code', 'backend', 'frontend'],
-  },
-  {
-    // Same rule as dep-lint above, for the wire-type ratchet (#1447): it lives
-    // outside packages/ but polices packages/frontend, and only the frontend
-    // job runs it.
-    patterns: ['scripts/lint-wire-types.mjs', 'scripts/lint-wire-types.test.mjs'],
-    surfaces: ['code', 'frontend'],
-  },
-  {
-    // The network-map pin test (#1478) spans backend, sdk and signer sources —
-    // weakening it must run every job that would have caught the drift.
-    patterns: ['scripts/network-map-pins.test.mjs'],
-    surfaces: ['code', 'backend', 'sdk', 'signer'],
-  },
+  // The guards that live outside the tree they police, one rule per entry in
+  // .github/root-guard-ownership.json (#1624). These were four hand-written
+  // arms; the ownership is data now, and the manifest is the only place it is
+  // decided. Position in this list does not matter — every guard path is exact
+  // and none collides with another rule — but they stay here so the routing
+  // order reads the same as it did.
+  ...ROOT_GUARD_RULES,
   { patterns: ['packages/frontend/*'], surfaces: ['code', 'frontend'] },
   { patterns: ['packages/backend/*'], surfaces: ['code', 'backend'] },
   { patterns: ['packages/sdk/*'], surfaces: ['code', 'sdk'] },

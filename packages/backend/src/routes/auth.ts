@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import bcrypt from 'bcrypt'
+import { randomBytes } from 'node:crypto'
 import { authMiddleware } from '../middleware/auth.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import {
@@ -12,6 +13,24 @@ import { listSessionSafesForUser } from '../infra/repositories/user-safes.js'
 import { sessionSafePayload } from '../modules/accounts/index.js'
 
 const SALT_ROUNDS = 10
+
+/**
+ * A real bcrypt hash of a value nobody can present, computed ONCE at module
+ * load (#1646).
+ *
+ * Login answers the same 401 for an unknown email and a wrong password so the
+ * endpoint is not an account-enumeration oracle. That was true of the STATUS
+ * and BODY and false of the timing: `bcrypt.compare` at cost factor 10 takes
+ * tens of milliseconds and used to run only when a user row existed, so an
+ * unknown address returned after a single fast SELECT. The difference is
+ * consistent, measurable by anyone unauthenticated, and discloses exactly what
+ * the equal-401 was there to hide.
+ *
+ * Comparing against this hash on the unknown-email path makes both paths do
+ * the same work. The value is unguessable and never stored, so a compare
+ * against it can only ever fail — it costs time, not security.
+ */
+const ABSENT_USER_PASSWORD_HASH = bcrypt.hashSync(randomBytes(32).toString('hex'), SALT_ROUNDS)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MAX_EMAIL_LENGTH = 255
 const MIN_PASSWORD_LENGTH = 8
@@ -126,14 +145,14 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     const user = await findUserCredentialsByEmail(normalizedEmail)
 
     // Same 401 as a wrong password, deliberately: telling the two apart would
-    // make this endpoint an account-enumeration oracle.
-    if (!user) {
-      return reply.code(401).send({ error: 'Invalid email or password' })
-    }
+    // make this endpoint an account-enumeration oracle. The comparison runs
+    // on BOTH paths (#1646) — against the absent-user hash when there is no
+    // row — so the answer costs the same whether or not the account exists.
+    // Skipping it for an unknown email leaked, through latency alone, exactly
+    // what the identical 401 was hiding.
+    const valid = await bcrypt.compare(password, user?.password_hash ?? ABSENT_USER_PASSWORD_HASH)
 
-    const valid = await bcrypt.compare(password, user.password_hash)
-
-    if (!valid) {
+    if (!user || !valid) {
       return reply.code(401).send({ error: 'Invalid email or password' })
     }
 

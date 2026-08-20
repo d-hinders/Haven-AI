@@ -3,6 +3,25 @@ import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { FastifyInstance } from 'fastify'
 import bcrypt from 'bcrypt'
 
+/**
+ * #1646: spy on the REAL bcrypt rather than replacing it. The property under
+ * test is that the password comparison happens on both login paths; a stub
+ * that never hashes could not distinguish a paid cost from a skipped one.
+ */
+const compareSpy = vi.fn()
+vi.mock('bcrypt', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('bcrypt')>()
+  return {
+    default: {
+      ...actual,
+      compare: (...args: Parameters<typeof actual.compare>) => {
+        compareSpy(...args)
+        return actual.compare(...args)
+      },
+    },
+  }
+})
+
 // Mock the db module
 const mockQuery = vi.fn()
 vi.mock('../../db.js', () => ({
@@ -194,6 +213,49 @@ describe('Auth routes', () => {
 
       expect(response.statusCode).toBe(401)
       expect(response.json().error).toBe('Invalid email or password')
+    })
+
+    it('#1646 MUTATION PROOF: an UNKNOWN email still runs the password comparison', async () => {
+      // Login answers the same 401 for an unknown email and a wrong password
+      // so it is not an account-enumeration oracle — true of the status and
+      // body, and previously FALSE of the timing: bcrypt.compare at cost
+      // factor 10 ran only when a row existed, so an unknown address returned
+      // after one fast SELECT and latency alone disclosed what the identical
+      // answer was hiding. Pinning the INVOCATION, not the clock: a latency
+      // assertion tests the machine and flakes in CI.
+      compareSpy.mockClear()
+      // SQL-keyed, not a positional once-call (#1227's sanctioned form).
+      mockQuery.mockImplementation(async () => ({ rows: [] }))
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'nobody@example.com', password: 'some-password' },
+      })
+
+      expect(response.statusCode).toBe(401)
+      // Against the previous shape this is 0 — that IS the bug.
+      expect(compareSpy).toHaveBeenCalledTimes(1)
+      // And it must be a REAL hash at the SAME cost factor: a call count alone
+      // would still pass if the absent-user hash were swapped for something
+      // cheap, which would reopen a smaller version of the same gap.
+      expect(compareSpy.mock.calls[0][1]).toMatch(/^\$2[aby]\$10\$/)
+    })
+
+    it('#1646: the absent-user hash can never match — it costs time, not security', async () => {
+      // Whatever is presented against a missing account, the comparison fails:
+      // the hash is of unguessable random bytes that are never stored.
+      mockQuery.mockImplementation(async () => ({ rows: [] }))
+      // (An EMPTY password never reaches the comparison — the shape check
+      // answers 400 before the lookup, on both paths alike.)
+      for (const attempt of ['admin', 'correct horse battery staple', 'x'.repeat(64)]) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: { email: 'nobody@example.com', password: attempt },
+        })
+        expect(res.statusCode).toBe(401)
+      }
     })
 
     it('returns 401 for wrong password', async () => {

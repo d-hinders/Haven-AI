@@ -101,9 +101,22 @@ describe('workflow_dispatch forces everything', () => {
 })
 
 describe('base-SHA handling', () => {
+  test('both invocations are NUL-delimited', () => {
+    // The whole of #1638. Drop -z from either arm and every path containing a
+    // non-ASCII or control character comes back quoted and escaped, matches no
+    // rule, and routes nowhere — silently, in the unsafe direction.
+    for (const args of [
+      changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb' }),
+      changedFilesCommand({ baseSha: undefined, headSha: 'bbb' }),
+    ]) {
+      assert.ok(args.includes('-z'), `${args.join(' ')} is missing -z`)
+    }
+  })
+
   test('a normal PR/push diffs base against head', () => {
     assert.deepEqual(changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb' }), [
       'diff',
+      '-z',
       '--name-only',
       'aaa',
       'bbb',
@@ -117,6 +130,7 @@ describe('base-SHA handling', () => {
     assert.deepEqual(changedFilesCommand({ baseSha: ZERO_SHA, headSha: 'bbb' }), [
       'ls-tree',
       '-r',
+      '-z',
       '--name-only',
       'bbb',
     ])
@@ -126,7 +140,7 @@ describe('base-SHA handling', () => {
     for (const baseSha of [undefined, '']) {
       assert.deepEqual(
         changedFilesCommand({ baseSha, headSha: 'bbb' }),
-        ['ls-tree', '-r', '--name-only', 'bbb'],
+        ['ls-tree', '-r', '-z', '--name-only', 'bbb'],
         `base ${JSON.stringify(baseSha)} must list the tree`,
       )
     }
@@ -159,6 +173,15 @@ describe('list handling', () => {
     const outputs = classifyChangedFiles([])
     assert.deepEqual(Object.keys(outputs).sort(), [...OUTPUT_NAMES].sort())
     for (const name of OUTPUT_NAMES) assert.equal(outputs[name], false)
+  })
+
+  test('a path is matched verbatim, never trimmed', () => {
+    // Trimming the matched value would make "scripts/dep-lint.mjs " (trailing
+    // space) — a different file — route as though it were the guard. Blank
+    // entries are still skipped; it is only the value used for MATCHING that
+    // is now exact (#1638).
+    assert.deepEqual(on(['scripts/dep-lint.mjs ']), [])
+    assert.deepEqual(on(['scripts/dep-lint.mjs']), ['backend', 'code'])
   })
 
   test('blank and whitespace-only lines are ignored', () => {
@@ -279,6 +302,25 @@ describe('glob semantics match the shell case they replaced', () => {
     assert.equal(globToRegExp('packages/mcp?/x.ts').test('packages/mcpXY/x.ts'), false)
   })
 
+  test('* matches a newline, as shell case does (#1638)', () => {
+    // Without the dotAll flag `.*` stops at a newline, so a file whose name
+    // contains one routes nowhere — the same silent, unsafe failure as the
+    // quoted-path bug, reachable only once -z stopped hiding such paths.
+    assert.ok(globToRegExp('packages/mcp/*').test('packages/mcp/src/new\nline.ts'))
+    assert.ok(globToRegExp('*.md').test('docs/two\nlines.md'))
+  })
+
+  test('the tail anchor stays strict — no `m` flag creeps in', () => {
+    // Unlike Perl and Python, a JavaScript `$` without `m` matches only at end
+    // of input, so this already holds. It is pinned because ADDING `m` would
+    // silently break it: `/^foo$/m.test('foo\n')` is true. The guard-ownership
+    // manifest is built on exact paths meaning exact, so a lenient tail anchor
+    // would let one file match another's entry.
+    assert.equal(globToRegExp('scripts/dep-lint.mjs').test('scripts/dep-lint.mjs\n'), false)
+    assert.equal(globToRegExp('scripts/dep-lint.mjs').test('scripts/dep-lint.mjs'), true)
+    assert.equal(globToRegExp('scripts/dep-lint.mjs').flags.includes('m'), false)
+  })
+
   test('bracket expressions are refused, not silently mis-matched', () => {
     assert.throws(() => globToRegExp('scripts/[abc].mjs'), /unsupported bracket expression/)
   })
@@ -313,6 +355,25 @@ describe('the CLI', () => {
     const { output } = runCli(['--files-from', '-'], {}, 'packages/backend/src/routes/payments.ts\n')
     assert.match(output, /^backend=true$/m)
     assert.match(output, /^sdk=false$/m)
+  })
+
+  test('--files-from tolerates a CRLF list', () => {
+    // #1638 stopped trimming the value used for matching, which is right for
+    // the NUL-delimited git path but leaves this newline-delimited entrypoint
+    // as the one place a line ending can still cling to a path. A stray \r
+    // would match no rule and route NOTHING — the same silent, unsafe failure
+    // this fix exists to remove.
+    const dir = mkdtempSync(path.join(tmpdir(), 'classifier-crlf-'))
+    try {
+      const list = path.join(dir, 'changed.txt')
+      writeFileSync(list, 'scripts/dep-lint.mjs\r\npackages/cli/src/index.ts\r\n')
+      const { output } = runCli(['--files-from', list], {})
+      assert.match(output, /^backend=true$/m, 'the guard should still route to backend')
+      assert.match(output, /^cli=true$/m)
+      assert.match(output, /^frontend=false$/m)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test('a bad invocation exits non-zero instead of emitting nothing quietly', () => {
@@ -397,6 +458,48 @@ describe('the git-derived path ci.yml actually runs', () => {
       assert.match(output, /^cli=true$/m)
       assert.match(output, /^code=true$/m)
       // seed.txt is in the tree and routes nowhere; cli came from ls-tree.
+      assert.match(output, /^backend=false$/m)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('a path git would otherwise quote still routes (#1638)', () => {
+    // THE regression test for #1638. With plain `--name-only`, core.quotepath
+    // emits café.ts as "packages/frontend/src/caf\303\251.ts" — quotes and
+    // escapes included — which matches no rule, so frontend_checks silently did
+    // not run for it. Each file lives in a different package so the assertion
+    // shows WHICH routing survived, not merely that something did.
+    const { dir, base, head } = fixtureRepo([
+      'packages/frontend/src/caf\u00e9.ts', // non-ASCII: the quoted case
+      'packages/cli/src/back\\slash.ts', // a literal backslash in the name
+      'packages/backend/src/with space.ts', // spaces were never quoted; pinned anyway
+    ])
+    try {
+      const { output } = runCli([], { BASE_SHA: base, HEAD_SHA: head }, '', dir)
+      for (const flag of ['code', 'frontend', 'cli', 'backend']) {
+        assert.match(output, new RegExp(`^${flag}=true$`, 'm'), `${flag} should have routed`)
+      }
+      // Nothing spurious: these three packages fan out to nothing.
+      for (const flag of ['sdk', 'mcp', 'signer', 'full']) {
+        assert.match(output, new RegExp(`^${flag}=false$`, 'm'), `${flag} should not have routed`)
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('a path containing a NEWLINE routes correctly', () => {
+    // The case that makes NUL the only honest separator: a filename may contain
+    // a newline, so newline-delimited output is ambiguous even with quoting
+    // disabled. git quotes this one too, so it is also a #1638 case.
+    const { dir, base, head } = fixtureRepo(['packages/mcp/src/new\nline.ts'])
+    try {
+      const { output } = runCli([], { BASE_SHA: base, HEAD_SHA: head }, '', dir)
+      assert.match(output, /^mcp=true$/m)
+      // mcp fans out to connect, which proves the path was classified rather
+      // than merely producing some non-false flag.
+      assert.match(output, /^connect=true$/m)
       assert.match(output, /^backend=false$/m)
     } finally {
       rmSync(dir, { recursive: true, force: true })

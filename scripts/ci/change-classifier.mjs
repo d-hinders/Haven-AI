@@ -64,6 +64,19 @@ export const ZERO_SHA = '0'.repeat(40)
  * Only `*` and `?` are supported. Bracket expressions are rejected rather than
  * mis-handled: the epic asks for exact paths before glob semantics, so a
  * pattern needing more than this should be spelled out instead.
+ *
+ * The `s` (dotAll) flag is required, not cosmetic (#1638). A filename may
+ * contain a newline, and without dotAll neither `.*` nor `.` matches one — so
+ * `packages/mcp/*` would fail against `packages/mcp/src/new\nline.ts` and the
+ * file would route NOWHERE. Shell `case` has no such carve-out: its `*` matches
+ * any byte. This only became reachable once `-z` stopped git quoting such paths
+ * out of existence, which is why the two land together.
+ *
+ * The anchors stay `^`/`$` and MUST stay flagless in the `m` sense. Unlike
+ * Perl and Python, a JavaScript `$` without `m` matches only at end of input,
+ * so `scripts/dep-lint.mjs\n` does not match the exact pattern for
+ * `scripts/dep-lint.mjs`. Adding `m` would break that, and the guard-ownership
+ * manifest is built entirely on exact paths meaning exact — hence the test.
  */
 export function globToRegExp(pattern) {
   if (pattern.includes('[') || pattern.includes(']')) {
@@ -75,7 +88,7 @@ export function globToRegExp(pattern) {
     else if (ch === '?') source += '.'
     else source += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
-  return new RegExp(`^${source}$`)
+  return new RegExp(`^${source}$`, 's')
 }
 
 const matchesAny = (patterns, file) => patterns.some((p) => globToRegExp(p).test(file))
@@ -278,8 +291,13 @@ export function classifyChangedFiles(files, { propagationRules = PROPAGATION_RUL
   }
 
   for (const raw of files) {
-    const file = raw.trim()
-    if (!file) continue
+    // Skip blank entries, but match the path EXACTLY as given. Trimming the
+    // value used for matching would corrupt a legitimate name with leading or
+    // trailing whitespace — harmless when the input was newline-delimited and
+    // such a name could not survive the round trip anyway, but wrong now that
+    // `-z` delivers paths verbatim (#1638).
+    if (!raw.trim()) continue
+    const file = raw
 
     const exception = DOC_EXCEPTIONS.find((rule) => matchesAny(rule.patterns, file))
     if (exception) {
@@ -309,17 +327,18 @@ export function classifyChangedFiles(files, { propagationRules = PROPAGATION_RUL
  * whole tree at HEAD counts as changed. That is the conservative direction:
  * everything runs.
  *
- * KNOWN GAP, preserved deliberately: `core.quotepath` defaults to true, so git
- * emits a path containing non-ASCII or control characters in quoted, escaped
- * form (`"packages/frontend/caf\303\251.ts"`). The quotes are part of the
- * string, so it matches no rule and the file routes NOWHERE — in this script
- * and in the inline shell it replaces, identically. Fixing it means reading a
- * NUL-delimited list (`-z`), which is a behaviour CHANGE and so belongs in a
- * slice that is not "extraction with behaviour held fixed". Tracked as #1638.
+ * `-z` is load-bearing, not a flourish (#1638). Without it `core.quotepath`
+ * defaults to true and git emits any path containing non-ASCII or control
+ * characters in quoted, escaped form — `"packages/frontend/caf\303\251.ts"`,
+ * quotes and backslashes included. That string matches no rule, so the file
+ * routed NOWHERE and its jobs silently did not run. `-z` turns the output into
+ * a NUL-separated list of raw paths, which is also the only separator a path
+ * cannot itself contain: a filename may hold a newline, so newline-delimited
+ * output is ambiguous even when nothing is quoted.
  */
 export function changedFilesCommand({ baseSha, headSha }) {
-  if (baseSha && baseSha !== ZERO_SHA) return ['diff', '--name-only', baseSha, headSha]
-  return ['ls-tree', '-r', '--name-only', headSha]
+  if (baseSha && baseSha !== ZERO_SHA) return ['diff', '-z', '--name-only', baseSha, headSha]
+  return ['ls-tree', '-r', '-z', '--name-only', headSha]
 }
 
 /**
@@ -345,7 +364,13 @@ export function formatGithubOutput(outputs) {
 
 function readFileList(source) {
   const raw = source === '-' ? readFileSync(0, 'utf8') : readFileSync(source, 'utf8')
-  return raw.split('\n')
+  // Newline-delimited, unlike the git path: this is a human and test
+  // affordance, and a NUL-separated list is miserable to hand-produce. That
+  // makes it the one input where a line ending can still cling to the path, so
+  // strip a trailing CR. Since #1638 stopped trimming the matched value, a CRLF
+  // list would otherwise leave `\r` on every entry and route NOTHING — the same
+  // silent, unsafe failure this fix exists to remove, relocated.
+  return raw.split('\n').map((line) => line.replace(/\r$/, ''))
 }
 
 function main(argv) {
@@ -374,7 +399,9 @@ function main(argv) {
               // swallow them on the success path.
               stdio: ['ignore', 'pipe', 'inherit'],
             },
-          ).split('\n')
+            // `-z` output is NUL-SEPARATED and NUL-TERMINATED, so the final
+            // element is always empty; classifyChangedFiles skips blanks.
+          ).split('\0')
     outputs = classifyChangedFiles(files)
     console.error(`change-classifier: ${files.filter((f) => f.trim()).length} changed path(s)`)
   }

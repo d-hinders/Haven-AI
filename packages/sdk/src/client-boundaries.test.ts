@@ -102,14 +102,8 @@ const boundary: ClientBoundary = {
     'haven-http-status': [
       'fetchAgent',
       'get',
-      'mapPaymentReceipt',
-      'mapPaymentResult',
-      'mapPaymentStatusResult',
-      'paymentStateFromRaw',
       'post',
-      'request',
       'throwIfNonSignableAuthorizationState',
-      'throwPaymentStateError',
     ],
     'local-signing': ['signForData'],
     'merchant-mcp': [
@@ -153,15 +147,18 @@ const boundary: ClientBoundary = {
   // from HavenClient, lower the matching ceiling in the same change. Never
   // raise one to accommodate a new responsibility on the facade.
   privateCeilings: {
-    'haven-http-status': 10,
+    'haven-http-status': 4,
     'local-signing': 1,
     'merchant-mcp': 13,
     'tool-adapter': 3,
     'x402-state-and-funding': 18,
   },
-  privateTotalCeiling: 45,
+  privateTotalCeiling: 39,
   localImports: [
     './base64.js',
+    './haven-api-transport.js',
+    './payment-mappers.js',
+    './payment-state.js',
     './provider.js',
     './receipt.js',
     './signer.js',

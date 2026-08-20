@@ -421,7 +421,7 @@ export type paths = {
         };
         /**
          * List payments verified against the caller's resources (max 100, newest first).
-         * @description Receipts are written only by the verify endpoint, after on-chain verification. amount_human here is best-effort: it formats with 6 decimals unconditionally, so a non-6-decimal token displays wrong — amount_raw is the authoritative field.
+         * @description Receipts are written only by the verify endpoint, after on-chain verification. amount_human formats with the receipt token’s OWN decimals (#1630); a token this deployment does not recognise falls back to 6. amount_raw remains the authoritative field — amount_human is a display string.
          */
         get: operations["listX402Receipts"];
         put?: never;
@@ -5680,7 +5680,7 @@ export interface operations {
                             tx_hash: string;
                             payer_address: string | null;
                             amount_raw: string;
-                            /** @description Formatted with 6 decimals unconditionally (best-effort). */
+                            /** @description Display string, formatted with the token's own decimals (6 for an unrecognised token). Read amount_raw for the authoritative value. */
                             amount_human: string;
                             chain_id: number;
                             /** Format: date-time */

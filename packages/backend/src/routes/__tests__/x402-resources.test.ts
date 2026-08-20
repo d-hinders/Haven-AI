@@ -16,6 +16,10 @@ const PAYER_SAFE = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
 const DELEGATE = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const DAI = '0x00000000000000000000000000000000000000da'
+// Gnosis EURe. The chain registry is stubbed in this file, so the fixture's
+// decimals come from the stub — the test below separately pins that the REAL
+// registry agrees, which is what keeps the stub honest (#1630).
+const EURE_GNOSIS = '0xcB444e90D8198415266c6a2724b7900fb12FC56E'
 const MODULE = '0x0000000000000000000000000000000000000042'
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const TX_HASH = `0x${'ab'.repeat(32)}`
@@ -23,12 +27,21 @@ const TX_HASH = `0x${'ab'.repeat(32)}`
 const { mockQuery, allowanceMocks, chainMocks } = vi.hoisted(() => {
   const usdc = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
   const module = '0x0000000000000000000000000000000000000042'
+  // EURe (18 decimals) sits beside USDC (6) so a test can tell "asks the token"
+  // apart from "hardcodes 6" (#1630) — with a single-token registry the two
+  // are indistinguishable.
+  const eure = '0xcB444e90D8198415266c6a2724b7900fb12FC56E'
   const chain = {
     tokens: {
       USDC: {
         symbol: 'USDC',
         address: usdc,
         decimals: 6,
+      },
+      EURE: {
+        symbol: 'EURe',
+        address: eure,
+        decimals: 18,
       },
     },
     tokenByAddress: {
@@ -330,6 +343,7 @@ describe('x402 resource routes', () => {
           payer_address: DELEGATE,
           amount_raw: '1500',
           chain_id: 8453,
+          token_address: USDC,
           verified_at: '2026-06-26T09:00:00.000Z',
         }],
       })
@@ -343,6 +357,71 @@ describe('x402 resource routes', () => {
       expect(String(mockQuery.mock.calls[0][0])).toMatch(/LIMIT 100/)
     })
 
+    it('#1630 MUTATION PROOF: an 18-decimal token formats with ITS decimals, not 6', async () => {
+      // amount_human used to format every token with 6 decimals — correct for
+      // USDC, off by twelve orders of magnitude for an 18-decimal one like
+      // Gnosis EURe. amount_raw was always authoritative, but a dashboard
+      // reading 1500000000000 EURe for a €1.50 receipt is not a small wart.
+      mockDbFor({
+        receipts: [{
+          id: RECEIPT_ID,
+          resource_id: RESOURCE_ID,
+          resource_name: 'EU invoice API',
+          user_id: USER,
+          tx_hash: '0x' + 'cd'.repeat(32),
+          payer_address: DELEGATE,
+          amount_raw: '1500000000000000000', // 1.5 EURe
+          chain_id: 100,
+          token_address: EURE_GNOSIS,
+          verified_at: '2026-06-26T09:00:00.000Z',
+        }],
+      })
+
+      const res = await authed('GET', '/x402/receipts')
+
+      expect(res.statusCode).toBe(200)
+      // Against the previous unconditional 6 this reads '1500000000000.00'.
+      expect(res.json().receipts[0].amount_human).toBe('1.50')
+      // The authoritative field is untouched by the formatting change.
+      expect(res.json().receipts[0].amount_raw).toBe('1500000000000000000')
+    })
+
+    it('#1630: the stubbed registry agrees with the REAL one about EURe', async () => {
+      // The route test above runs against the stub. This one imports the
+      // shared registry unmocked, so a stub that quietly disagreed with
+      // reality could not keep the decimals test passing.
+      const { getChainData } = await vi.importActual<
+        typeof import('@haven_ai/core')
+      >('@haven_ai/core')
+      const eure = getChainData(100).tokens.find(
+        (t) => t.address?.toLowerCase() === EURE_GNOSIS.toLowerCase(),
+      )
+      expect(eure?.decimals).toBe(18)
+    })
+
+    it('#1630: a token this deployment does not know still falls back to 6', async () => {
+      // The fallback is what makes the fix safe: an unrecognised token is no
+      // worse off than it was before, never NaN and never a thrown request.
+      mockDbFor({
+        receipts: [{
+          id: RECEIPT_ID,
+          resource_id: RESOURCE_ID,
+          resource_name: 'Unknown token API',
+          user_id: USER,
+          tx_hash: '0x' + 'ef'.repeat(32),
+          payer_address: DELEGATE,
+          amount_raw: '1500',
+          chain_id: 8453,
+          token_address: '0x' + '99'.repeat(20),
+          verified_at: '2026-06-26T09:00:00.000Z',
+        }],
+      })
+
+      const res = await authed('GET', '/x402/receipts')
+
+      expect(res.json().receipts[0].amount_human).toBe('0.0015')
+    })
+
     it('an unverifiable payer is null, not absent', async () => {
       mockDbFor({
         receipts: [{
@@ -354,6 +433,7 @@ describe('x402 resource routes', () => {
           payer_address: null,
           amount_raw: '1500',
           chain_id: 8453,
+          token_address: USDC,
           verified_at: '2026-06-26T09:00:00.000Z',
         }],
       })

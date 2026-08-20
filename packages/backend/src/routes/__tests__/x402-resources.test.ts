@@ -100,6 +100,27 @@ function validPaymentCalldata(amount = 1500n) {
   ])
 }
 
+
+/**
+ * SQL-keyed DB stub (#1219's sanctioned form, not a positional once-chain):
+ * each statement is answered by what it ASKS for, so adding a query to a
+ * route cannot silently re-shuffle a test's answers. Used by the routes
+ * documented under #1446.
+ */
+function mockDbFor(opts: {
+  resources?: Array<Record<string, unknown>>
+  receipts?: Array<Record<string, unknown>>
+  deactivated?: Array<Record<string, unknown>>
+} = {}) {
+  mockQuery.mockImplementation(async (sql: string) => {
+    const text = String(sql)
+    if (/FROM x402_receipts/.test(text)) return { rows: opts.receipts ?? [] }
+    if (/SET active = false/.test(text)) return { rows: opts.deactivated ?? [] }
+    if (/FROM x402_resources/.test(text)) return { rows: opts.resources ?? [] }
+    return { rows: [] }
+  })
+}
+
 describe('x402 resource routes', () => {
   let app: FastifyInstance
   let token: string
@@ -240,7 +261,7 @@ describe('x402 resource routes', () => {
   // are worthless if nothing ever compares them to a real payload.
   describe('GET /x402/resources', () => {
     it('lists the caller\'s resources with a built challenge (#1446)', async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [resourceRow()] })
+      mockDbFor({ resources: [resourceRow()] })
 
       const res = await authed('GET', '/x402/resources')
 
@@ -254,7 +275,7 @@ describe('x402 resource routes', () => {
       // safe_id is ON DELETE SET NULL, so this is a state the table can reach:
       // the resource stays listed but cannot be paid, and the spec says the two
       // nulls travel together.
-      mockQuery.mockResolvedValueOnce({ rows: [resourceRow({ safe_address: null, safe_id: null })] })
+      mockDbFor({ resources: [resourceRow({ safe_address: null, safe_id: null })] })
 
       const res = await authed('GET', '/x402/resources')
 
@@ -264,7 +285,7 @@ describe('x402 resource routes', () => {
     })
 
     it('includes deactivated resources — active is a field, not a filter', async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [resourceRow({ active: false })] })
+      mockDbFor({ resources: [resourceRow({ active: false })] })
 
       const res = await authed('GET', '/x402/resources')
 
@@ -275,7 +296,7 @@ describe('x402 resource routes', () => {
 
   describe('DELETE /x402/resources/:id', () => {
     it('deactivates the caller\'s resource and returns the documented shape', async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [{ id: RESOURCE_ID }] })
+      mockDbFor({ deactivated: [{ id: RESOURCE_ID }] })
 
       const res = await authed('DELETE', `/x402/resources/${RESOURCE_ID}`)
 
@@ -289,7 +310,7 @@ describe('x402 resource routes', () => {
     })
 
     it("404s another user's resource rather than deactivating it", async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [] })
+      mockDbFor({ deactivated: [] })
 
       const res = await authed('DELETE', `/x402/resources/${RESOURCE_ID}`)
 
@@ -299,8 +320,8 @@ describe('x402 resource routes', () => {
 
   describe('GET /x402/receipts', () => {
     it('returns verified payments in the documented shape (#1446)', async () => {
-      mockQuery.mockResolvedValueOnce({
-        rows: [{
+      mockDbFor({
+        receipts: [{
           id: RECEIPT_ID,
           resource_id: RESOURCE_ID,
           resource_name: 'Weather API',
@@ -323,8 +344,8 @@ describe('x402 resource routes', () => {
     })
 
     it('an unverifiable payer is null, not absent', async () => {
-      mockQuery.mockResolvedValueOnce({
-        rows: [{
+      mockDbFor({
+        receipts: [{
           id: RECEIPT_ID,
           resource_id: RESOURCE_ID,
           resource_name: 'Weather API',

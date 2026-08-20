@@ -1397,6 +1397,86 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agent-activity/{id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One agent's payments, approvals and tool calls, newest first.
+         * @description A heterogeneous list discriminated by `type`: payment, approval, or mcp_tool_call. **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the three sources separately and the results are then merged and sorted, so this route can return up to three times `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.
+         */
+        get: operations["getAgentActivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-activity/{id}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One agent's spend totals per token, plus its pending-approval count.
+         * @description Totals count CONFIRMED spend only, so an in-flight payment does not inflate them. Each window (all time, today, this week) is a separate per-token list rather than one list with three numbers, because a token can appear in one window and not another.
+         */
+        get: operations["getAgentStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-activity/feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Combined activity across every agent the caller owns.
+         * @description The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` counts everything actionable across the account, not just what appears in this page.
+         */
+        get: operations["getActivityFeed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analytics/funnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Onboarding step conversion and median time-to-first-payment.
+         * @description Counts DISTINCT users per onboarding step over a date range, with the conversion from the previous step, plus the median time from signup to first settled payment. Defaults to the last 30 days. The window is echoed back as resolved ISO timestamps so a caller can tell exactly which range produced the numbers rather than re-deriving the default.
+         */
+        get: operations["getOnboardingFunnel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-connection-setups": {
         parameters: {
             query?: never;
@@ -9882,6 +9962,415 @@ export interface operations {
             };
             /** @description This credential is already registered. Note: a SECOND passkey on the same chain is NOT a conflict. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAgentActivity: {
+        parameters: {
+            query?: {
+                /** @description Capped at 100. */
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Agent id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Merged activity, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        activity: ({
+                            /** @enum {string} */
+                            type: "payment";
+                            id: string;
+                            token: string | null;
+                            amount_raw?: string | null;
+                            amount: string | null;
+                            to: string | null;
+                            status: string | null;
+                            tx_hash?: string | null;
+                            payment_id?: string;
+                            payment_proof_status?: string | null;
+                            /** @description Derived from the payment lifecycle. */
+                            payment_flow_status?: string | null;
+                            /** @description Derived: why this payment needs a human look, if it does. */
+                            payment_attention_reason?: string | null;
+                            /** @description Falls back to 'direct'. */
+                            source?: string;
+                            x402_resource_url?: string | null;
+                            x402_merchant_address?: string | null;
+                            chain_id?: number | null;
+                            token_address?: string | null;
+                            safe_id?: string | null;
+                            safe_address?: string | null;
+                            safe_name?: string | null;
+                            /** @description Null exactly when tx_hash is null. */
+                            explorer_url?: string | null;
+                            /** @description Which on-chain mechanism moved the money (#799). */
+                            execution_rail?: string | null;
+                            session_permission_id?: string | null;
+                            /** @description Which delegation authorized a delegation-rail payment (#829). */
+                            delegation_hash?: string | null;
+                            confirmed_at?: string | null;
+                            created_at: string;
+                            /** @description Feed only — the per-agent list already knows the agent. */
+                            agent_id?: string;
+                            /** @description Feed only; 'Unknown' when the agent row is gone. */
+                            agent_name?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "approval";
+                            id: string;
+                            token: string | null;
+                            amount: string | null;
+                            to: string | null;
+                            reason?: string | null;
+                            status: string | null;
+                            tx_hash?: string | null;
+                            /** @description Synthesised when absent: an executed approval reports 'payment_confirmed'. */
+                            payment_proof_status?: string | null;
+                            payment_flow_status?: string | null;
+                            payment_attention_reason?: string | null;
+                            source?: string;
+                            x402_resource_url?: string | null;
+                            chain_id?: number | null;
+                            token_address?: string | null;
+                            safe_id?: string | null;
+                            safe_address?: string | null;
+                            safe_name?: string | null;
+                            explorer_url?: string | null;
+                            created_at: string;
+                            /** @description Feed only. */
+                            agent_id?: string;
+                            /** @description Feed only. */
+                            agent_name?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "mcp_tool_call";
+                            id: string;
+                            tool_name: string;
+                            /** @description Set when the call created or advanced a payment. */
+                            payment_id?: string | null;
+                            result_status?: string | null;
+                            next_action?: string | null;
+                            error_code?: string | null;
+                            status_code?: number | null;
+                            created_at: string;
+                            /** @description Feed only. */
+                            agent_id?: string;
+                            /** @description Feed only. */
+                            agent_name?: string;
+                        })[];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such agent for this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAgentStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Agent id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Spend totals and the pending count. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        all_time: {
+                            token: string | null;
+                            total_spent: string | null;
+                            tx_count: number;
+                        }[];
+                        today: {
+                            token: string | null;
+                            total_spent: string | null;
+                            tx_count: number;
+                        }[];
+                        this_week: {
+                            token: string | null;
+                            total_spent: string | null;
+                            tx_count: number;
+                        }[];
+                        pending_approvals: number;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such agent for this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getActivityFeed: {
+        parameters: {
+            query?: {
+                /** @description Capped at 100. */
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Merged cross-agent activity plus the actionable-approval count. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        activity: ({
+                            /** @enum {string} */
+                            type: "payment";
+                            id: string;
+                            token: string | null;
+                            amount_raw?: string | null;
+                            amount: string | null;
+                            to: string | null;
+                            status: string | null;
+                            tx_hash?: string | null;
+                            payment_id?: string;
+                            payment_proof_status?: string | null;
+                            /** @description Derived from the payment lifecycle. */
+                            payment_flow_status?: string | null;
+                            /** @description Derived: why this payment needs a human look, if it does. */
+                            payment_attention_reason?: string | null;
+                            /** @description Falls back to 'direct'. */
+                            source?: string;
+                            x402_resource_url?: string | null;
+                            x402_merchant_address?: string | null;
+                            chain_id?: number | null;
+                            token_address?: string | null;
+                            safe_id?: string | null;
+                            safe_address?: string | null;
+                            safe_name?: string | null;
+                            /** @description Null exactly when tx_hash is null. */
+                            explorer_url?: string | null;
+                            /** @description Which on-chain mechanism moved the money (#799). */
+                            execution_rail?: string | null;
+                            session_permission_id?: string | null;
+                            /** @description Which delegation authorized a delegation-rail payment (#829). */
+                            delegation_hash?: string | null;
+                            confirmed_at?: string | null;
+                            created_at: string;
+                            /** @description Feed only — the per-agent list already knows the agent. */
+                            agent_id?: string;
+                            /** @description Feed only; 'Unknown' when the agent row is gone. */
+                            agent_name?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "approval";
+                            id: string;
+                            token: string | null;
+                            amount: string | null;
+                            to: string | null;
+                            reason?: string | null;
+                            status: string | null;
+                            tx_hash?: string | null;
+                            /** @description Synthesised when absent: an executed approval reports 'payment_confirmed'. */
+                            payment_proof_status?: string | null;
+                            payment_flow_status?: string | null;
+                            payment_attention_reason?: string | null;
+                            source?: string;
+                            x402_resource_url?: string | null;
+                            chain_id?: number | null;
+                            token_address?: string | null;
+                            safe_id?: string | null;
+                            safe_address?: string | null;
+                            safe_name?: string | null;
+                            explorer_url?: string | null;
+                            created_at: string;
+                            /** @description Feed only. */
+                            agent_id?: string;
+                            /** @description Feed only. */
+                            agent_name?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "mcp_tool_call";
+                            id: string;
+                            tool_name: string;
+                            /** @description Set when the call created or advanced a payment. */
+                            payment_id?: string | null;
+                            result_status?: string | null;
+                            next_action?: string | null;
+                            error_code?: string | null;
+                            status_code?: number | null;
+                            created_at: string;
+                            /** @description Feed only. */
+                            agent_id?: string;
+                            /** @description Feed only. */
+                            agent_name?: string;
+                        })[];
+                        pending_approvals: number;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getOnboardingFunnel: {
+        parameters: {
+            query?: {
+                /** @description Date; defaults to 30 days before `to`. */
+                from?: string;
+                /** @description Date; defaults to now. */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Funnel counts and median TTFP. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        steps: {
+                            /** @enum {string} */
+                            event: "signed_up" | "safe_deployed" | "safe_imported" | "agent_created" | "allowance_granted" | "safe_funded" | "first_payment_settled";
+                            /** @description DISTINCT users who reached this step. */
+                            users: number;
+                            /** @description Null when there is nothing to convert from: the first step, or any step whose predecessor counted zero users. */
+                            conversionFromPrev: number | null;
+                        }[];
+                        /** @description Median signup→first-settled-payment in ms. Null when nobody has completed it in the window. */
+                        medianTtfpMs: number | null;
+                        /**
+                         * Format: date-time
+                         * @description The resolved window start.
+                         */
+                        from: string;
+                        /**
+                         * Format: date-time
+                         * @description The resolved window end.
+                         */
+                        to: string;
+                    };
+                };
+            };
+            /** @description Unparseable dates, or from is not before to. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

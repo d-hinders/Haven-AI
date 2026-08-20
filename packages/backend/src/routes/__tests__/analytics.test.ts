@@ -1,6 +1,7 @@
 import Fastify, { FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }))
 
@@ -59,6 +60,7 @@ describe('analytics routes', () => {
     expect(body.medianTtfpMs).toBe(120000)
     expect(body.from).toContain('2026-01-01')
     expect(body.to).toContain('2026-07-01')
+    expectMatchesSpec('GET', '/analytics/funnel', body)
 
     // signed_up step has no conversionFromPrev
     expect(body.steps[0]).toMatchObject({ event: 'signed_up', users: 100, conversionFromPrev: null })

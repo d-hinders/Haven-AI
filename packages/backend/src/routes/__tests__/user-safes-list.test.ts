@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 /**
  * Route-level invariants for `GET /user/safes` (the Safe list).
@@ -51,7 +52,17 @@ describe('GET /user/safes — list invariants', () => {
 
   it('returns the caller-scoped Safes under a { safes } envelope', async () => {
     const rows = [
-      { id: 's1', safe_address: '0xabc', chain_id: 8453, name: 'Main', is_default: true, created_at: '2026-01-01T00:00:00.000Z' },
+      // A real row: user_safes.id is a UUID and safe_address is a full
+      // 20-byte address, so 's1'/'0xabc' described a response the table
+      // cannot produce (#1446).
+      {
+        id: 'd2c47f10-9a83-4e61-8b25-7c3f0e91a4d6',
+        safe_address: '0x' + 'ab'.repeat(20),
+        chain_id: 8453,
+        name: 'Main',
+        is_default: true,
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
     ]
     mockPoolQuery.mockResolvedValueOnce({ rows })
 
@@ -66,6 +77,8 @@ describe('GET /user/safes — list invariants', () => {
     // Scoped by the JWT subject — never a client-supplied id.
     const [, params] = mockPoolQuery.mock.calls[0]
     expect(params).toEqual([USER])
+    // #1446: the documented shape, against the real payload.
+    expectMatchesSpec('GET', '/user/safes', res.json())
   })
 
   it('scopes the query to the *calling* user, so one user cannot list another’s Safes', async () => {

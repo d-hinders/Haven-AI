@@ -8,6 +8,7 @@ covers:
   - packages/signer/src/**
   - packages/sdk/src/client.ts
   - packages/sdk/src/haven-api-transport.ts
+  - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/x402.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts

@@ -8,7 +8,6 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/db/migrations/029_payment_fees.ts
   - packages/backend/src/config.ts
-  - packages/sdk/src/client.ts
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/types.ts
   - packages/sdk/src/payment-fee.test.ts

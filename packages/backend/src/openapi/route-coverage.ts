@@ -42,67 +42,9 @@ export interface UndocumentedRoute {
  */
 export const KNOWN_UNDOCUMENTED_ROUTES: UndocumentedRoute[] = [
   // ── agents.ts ──
-  {
-    method: 'PUT',
-    path: '/agents/{id}',
-    because:
-      'Dashboard-only mutation that uses dashboard JWT auth, not the agent API key. ' +
-      'Could be documented when the dashboard surface is folded into a separate dashboard spec.',
-  },
-  {
-    method: 'DELETE',
-    path: '/agents/{id}',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/pause',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/resume',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/rotate-key',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'DELETE',
-    path: '/agents/{id}/allowances/{tokenAddress}',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/allowances',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
   // ── transactions.ts ──
-  {
-    method: 'GET',
-    path: '/transactions/payment-intents/{paymentId}/evidence',
-    because: 'Dashboard-only audit view using dashboard JWT auth.',
-  },
   // ── index.ts (declared straight on the app, not via a routes/ module) ──
-  {
-    method: 'GET',
-    path: '/chains',
-    because:
-      'Public chain/token registry read, declared inline in index.ts next to /health. ' +
-      'It SHOULD be in the spec — it was simply invisible until #1443 taught the gate ' +
-      'to look at index.ts, and documenting it belongs to the #1446 backfill rather ' +
-      'than to the gate that found it.',
-  },
   // ── x402.ts ──
-  {
-    method: 'POST',
-    path: '/x402/{id}/settle',
-    because:
-      'Delegation-rail x402 settlement (#830, epic #821). Behind the /x402 ' +
-      'darkened rail; documented in the OpenAPI spec in the epic docs sweep (#834).',
-  },
 ]
 
 export interface UndocumentedModule {
@@ -146,4 +88,4 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
  * That is the gate earning its keep on its first run, not slack being taken.
  */
 export const MAX_UNDOCUMENTED_MODULES = 2
-export const MAX_UNDOCUMENTED_ROUTES = 12
+export const MAX_UNDOCUMENTED_ROUTES = 2

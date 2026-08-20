@@ -889,6 +889,49 @@ export const openapiSpec = {
           '404': errorResponse,
         },
       },
+      put: {
+        tags: ['Agents'],
+        operationId: 'updateAgent',
+        summary: "Rename an agent or change its description.",
+        description: 'Display metadata only — it changes no authority, no allowance and no key. The response carries the agent with its current allowances so a client can re-render without a second call.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', description: 'Trimmed.' },
+                  description: { type: 'string', description: 'Trimmed.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The updated agent, with allowances.',
+            content: { 'application/json': { schema: { type: 'object', additionalProperties: true } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Agents'],
+        operationId: 'deleteAgent',
+        summary: 'RETIRED — always answers 410. Archive instead.',
+        description:
+          "Deleting an agent is retired (#1401) and this route is a tombstone: **it always answers 410 and writes nothing.** Hard deletion failed outright on any agent with payment history (a foreign-key violation surfacing as a 500) and, where it did succeed, cascaded away seven tables of money-path audit trail. Removal is now an ARCHIVE that keeps the history: revoke the agent, kill its budgets, then POST /agents/{id}/archive. The typed route survives for reversibility, in the same spirit as the session-rail retirement.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '410': { ...errorResponse, description: 'Always. The message names the archive route to use instead.' },
+        },
+      },
     },
     '/agents/{id}/delegate-balance': {
       get: {
@@ -3963,6 +4006,257 @@ export const openapiSpec = {
           },
           '400': { ...errorResponse, description: 'Unparseable dates, or from is not before to.' },
           '401': errorResponse,
+        },
+      },
+    },
+    // ── Routes previously excluded one by one (#1446, final slice) ──────────
+    // These ten sat in KNOWN_UNDOCUMENTED_ROUTES rather than in a deferred
+    // module. Two of their reasons no longer hold: GET /chains' own entry said
+    // it SHOULD be in the spec and that documenting it belonged to this
+    // backfill, and POST /x402/{id}/settle was excluded pending a sweep (#834)
+    // that closed without doing it. The other eight were held back until "the
+    // dashboard surface is folded into a separate dashboard spec" — a premise
+    // this epic overtook, since the spec now carries the dashboard surface.
+    '/chains': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getChains',
+        summary: 'PUBLIC: which chains this deployment serves.',
+        description:
+          'Two different lists, and the difference matters: `supported` is every chain the code knows, while `deployable` is the subset this environment will actually provision accounts on (#679). Onboarding pickers must offer `deployable`, not `supported`, or they will offer a chain the deployment refuses. No authentication — it is configuration, not data.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'The chain registry for this deployment.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['deployable', 'supported'],
+                  properties: {
+                    deployable: { type: 'array', items: { type: 'integer' }, description: 'Chains this environment will provision on.' },
+                    supported: { type: 'array', items: { type: 'integer' }, description: 'Chains the code knows about at all.' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/x402/{id}/settle': {
+      post: {
+        tags: ['x402'],
+        operationId: 'settleX402Payment',
+        summary: 'MONEY PATH: settle a delegation-rail x402 payment with the delegate signature.',
+        description:
+          "The delegation rail's settlement step, and the reason the rail has no funding leg: the agent signs the settlement child delegation, Haven assembles the merchant X-PAYMENT header, and the merchant redeems the chain directly from the budget delegation — **money moves account→merchant, never through a delegate hot balance**. Retry the merchant with the returned `payment_header`; it is a signed, single-use, amount-and-merchant-bound authorization, not a key. Refusals are specific on purpose: a payment on the wrong rail is a 409 rather than a confusing 400, and a lost settlement context is a 502 telling you to re-authorize rather than a silent failure. Agent-authenticated and rate-limited on the money-path limiter.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Payment intent id from authorize.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature'],
+                properties: { signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'The delegate EIP-712 signature over the settlement child.' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Settled; retry the merchant with payment_header.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['payment_id', 'status', 'payment_header'],
+                  properties: {
+                    payment_id: { type: 'string' },
+                    status: { type: 'string', enum: ['submitted'] },
+                    payment_header: { type: 'string', description: 'The merchant X-PAYMENT header. Single-use and bound to this amount and merchant.' },
+                    resource_url: { type: ['string', 'null'] },
+                    passport: { description: 'Optional passport reference for the paying agent.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'A delegate signature is required.' },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'Payment not found.' },
+          '409': { ...errorResponse, description: 'Not a delegation-rail settlement, or not awaiting a signature.' },
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': { ...errorResponse, description: 'Settlement state was lost — re-authorize.' },
+        },
+      },
+    },
+    '/agents/{id}/pause': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'pauseAgent',
+        summary: 'Pause an agent — reversible, unlike revoke.',
+        description: "Pausing stops Haven serving the agent while leaving its on-chain authority intact; revoking is the terminal action. A paused agent's standing reports as suspended rather than revoked.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': { description: 'Paused.', content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such agent for this caller, or it cannot be paused from its current state.' },
+        },
+      },
+    },
+    '/agents/{id}/resume': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'resumeAgent',
+        summary: 'Resume a paused agent.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': { description: 'Resumed.', content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such agent for this caller, or it cannot be resumed from its current state.' },
+        },
+      },
+    },
+    '/agents/{id}/rotate-key': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'rotateAgentKey',
+        summary: 'Issue a new API key for an active agent.',
+        description:
+          "**The plaintext key is returned ONCE, here, and is never retrievable again** — Haven stores only its hash. Rotation invalidates the previous key immediately, so a running agent must be given the new one before its next call. Only an ACTIVE agent can rotate: a revoked agent stays revoked (409), because handing out a fresh credential for it would undo the revocation.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'The new key. Store it now.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['api_key', 'api_key_prefix'],
+                  properties: {
+                    api_key: { type: 'string', description: 'Plaintext, shown once.' },
+                    api_key_prefix: { type: 'string', description: 'The prefix Haven keeps for display.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'The agent is not active.' },
+        },
+      },
+    },
+    '/agents/{id}/allowances': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'setAgentAllowance',
+        summary: 'Set a per-token allowance on the legacy AllowanceModule rail.',
+        description:
+          "Records the allowance Haven will execute against. **The authority itself is the on-chain AllowanceModule grant, not this row** — writing it here does not grant anything the chain has not been told about. `schedule_warning` is always null: session schedules are retired (#834) and the field survives only so existing clients keep parsing. Retiring rail (#1440).",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
+                properties: {
+                  token_address: address,
+                  token_symbol: { type: 'string' },
+                  allowance_amount: { type: 'string', description: 'Human-denominated amount.' },
+                  reset_period_min: { type: 'integer', description: 'Refill period in minutes; 0 means one-time.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The stored allowance.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: true,
+                  required: ['schedule_warning'],
+                  properties: {
+                    schedule_warning: { type: 'null', description: 'Always null — retained for client compatibility (#834).' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'The agent is revoked, or its Connect setup is still awaiting wallet approval — either way the allowance is refused before anything is written.' },
+        },
+      },
+    },
+    '/agents/{id}/allowances/{tokenAddress}': {
+      delete: {
+        tags: ['Agents'],
+        operationId: 'deleteAgentAllowance',
+        summary: "Remove an allowance row for one token.",
+        description:
+          "Removes Haven's record. **It does NOT revoke the on-chain grant** — the AllowanceModule allowance survives until the owner changes it on-chain, so deleting this row stops Haven executing against it but is not itself a revocation. Retiring rail (#1440).",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, { name: 'tokenAddress', in: 'path', required: true, schema: address }],
+        responses: {
+          '200': { description: 'Row removed.', content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'The agent is revoked, or its Connect setup is still awaiting wallet approval.' },
+        },
+      },
+    },
+    '/transactions/payment-intents/{paymentId}/evidence': {
+      get: {
+        tags: ['Transactions'],
+        operationId: 'getPaymentEvidence',
+        summary: 'Read the stored evidence for one payment or approval.',
+        description:
+          "The audit view behind a transaction row. `payment_id` is resolved for the caller — it carries whichever of the two source ids exists, so a client does not branch on payment-versus-approval to find its own identifier.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'The evidence record.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['evidence'],
+                  properties: {
+                    evidence: {
+                      type: 'object',
+                      additionalProperties: true,
+                      required: ['payment_id'],
+                      properties: {
+                        payment_id: { type: ['string', 'null'], description: 'Resolved from the payment intent id, else the approval request id.' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Malformed paymentId.' },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No evidence for this payment.' },
         },
       },
     },

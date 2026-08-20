@@ -197,10 +197,17 @@ export function allSurfaces() {
 /**
  * Classify an explicit list of changed paths into the ten output flags.
  *
+ * `propagationRules` is a seam for tests, not a runtime knob — CI always uses
+ * the default. It exists so the characterization matrix can ask "would any
+ * fixture actually notice if this propagation rule were deleted?", which is a
+ * question you cannot answer from outside without re-implementing the fan-out
+ * and thereby testing the copy instead of the original (#1623).
+ *
  * @param {string[]} files repo-root-relative paths, as `git diff --name-only` emits them
+ * @param {{propagationRules?: typeof PROPAGATION_RULES}} [options]
  * @returns {Record<string, boolean>} every name in OUTPUT_NAMES, always present
  */
-export function classifyChangedFiles(files) {
+export function classifyChangedFiles(files, { propagationRules = PROPAGATION_RULES } = {}) {
   const outputs = noSurfaces()
   const set = (surfaces) => {
     for (const surface of surfaces) {
@@ -226,7 +233,7 @@ export function classifyChangedFiles(files) {
     if (rule) set(rule.surfaces)
   }
 
-  for (const { when, then } of PROPAGATION_RULES) {
+  for (const { when, then } of propagationRules) {
     if (when.some((name) => outputs[name])) set(then)
   }
 

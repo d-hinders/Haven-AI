@@ -13,6 +13,7 @@ covers:
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
   - packages/sdk/src/merchant-discovery.ts
   - packages/mcp/src/tools.ts
@@ -60,6 +61,7 @@ Source of truth:
 
 - [`packages/sdk/src/x402.ts`](../../packages/sdk/src/x402.ts)
 - [`packages/sdk/src/client.ts`](../../packages/sdk/src/client.ts)
+- [`packages/sdk/src/payment-state.ts`](../../packages/sdk/src/payment-state.ts) — shared payment-state/status-error normalization.
 - [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts) — request
   validation, auth wiring, rate-limit config, and response serialization only.
   The authorize orchestration (scheme routing, funding-leg prep, erc7710 child

@@ -16,6 +16,9 @@ covers:
   - packages/backend/src/routes/transactions.ts
   - packages/sdk/src/x402.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/haven-api-transport.ts
+  - packages/sdk/src/payment-mappers.ts
+  - packages/sdk/src/payment-state.ts
   - packages/sdk/src/types.ts
   - packages/backend/src/domain/agent-payment-taxonomy.ts
   - packages/backend/src/domain/__tests__/agent-payment-taxonomy.parity.test.ts

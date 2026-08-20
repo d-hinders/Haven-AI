@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
   - packages/backend/src/modules/fee/fee-module.ts
-last-verified: "2026-08-14" # #1199: re-verified after signer-removal recovery clarification; architecture index unchanged
+last-verified: "2026-08-20" # #1615: re-verified after SDK module-ownership coverage updates; architecture index unchanged. Prior: #1199 signer-removal recovery clarification
 ---
 
 # Haven — Architecture

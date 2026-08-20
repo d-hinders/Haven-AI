@@ -1213,6 +1213,106 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the caller's approval requests, actionable ones first.
+         * @description **This read has a write side effect, deliberately**: it first expires every stale pending/approved request of the caller's, so the list can never show an actionable item that time has already killed. Ordering puts pending and approved ahead of everything else, then newest first. `source` and `x402_resource_url` are derived (payment_rail preferred over the legacy source column, payment_resource_url over the legacy x402 column) so this list and the approve response always agree. `actionable_count` and `pending_count` carry the SAME number — the second is a legacy alias kept for existing clients, not a different count.
+         */
+        get: operations["listApprovalRequests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/approvals/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record consent and hand back the payment to execute.
+         * @description **Approving executes nothing.** It flips the request to approved and returns the payment details; the user's own wallet then executes the Safe transaction and reports the hash to /executed. Ownership, pending status and a live expiry are all conditions of the UPDATE itself, so an expired, foreign or already-actioned request writes nothing — the 404 covers all of those without distinguishing them, because to a caller who does not own it they are the same answer. A retired-rail request is the one exception that IS distinguished (410 via a diagnostic read on the failure path): it stays readable and rejectable but can never be approved, because approving it would hand the frontend an executable funding transaction for a rail that no longer exists. The response repeats the resolved resource URL in BOTH x402_resource_url and payment_resource_url so callers never have to coalesce client-side.
+         */
+        post: operations["approveApprovalRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/approvals/{id}/proposed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record that a multi-signature payment was submitted for co-signing.
+         * @description For a Safe that needs more than one signature: the transaction is proposed, not yet executed, and this records that intermediate state so the queue does not show it as still awaiting the user. Same WHERE-clause guards as approve, and the same retired-rail refusal.
+         */
+        post: operations["markApprovalProposed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/approvals/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject a pending or approved request.
+         * @description Deliberately broader than approve in three ways. It accepts an already-APPROVED request, because consent given is consent that can be withdrawn while nothing has executed; it carries NO retired-rail guard; and it does not require a live expiry, so a request that has aged out but has not yet been lazily marked expired can still be rejected. All three follow from the same rule: never trap a request in a user queue. Rejecting executes nothing and un-does nothing on-chain — if the payment was already sent, rejecting the record does not recall it.
+         */
+        post: operations["rejectApprovalRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/approvals/{id}/executed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the transaction hash after executing the approved payment.
+         * @description Closes the loop: the user's wallet executed the Safe transaction, and this records the hash and snapshots the fiat value at execution time. The state is checked TWICE on purpose — once to load the request and once again inside the UPDATE — so a request that stopped being approved while the fiat lookup was in flight answers **409 rather than being overwritten**. That 409 is distinct from the 404: 404 means it was never approvable for this caller, 409 means it was and no longer is. The hash is recorded, never verified here; Haven does not confirm the transaction on-chain at this point.
+         */
+        post: operations["recordApprovalExecution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-connection-setups": {
         parameters: {
             query?: never;
@@ -8881,6 +8981,444 @@ export interface operations {
             };
             /** @description Error response */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listApprovalRequests: {
+        parameters: {
+            query?: {
+                /** @description Filter by status, or 'all'. Defaults to 'pending'. */
+                status?: string;
+                /** @description Capped at 100. */
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Approval requests plus the actionable count. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        approvals: {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            agent_id: string;
+                            /** @description 'Unknown Agent' when the agent row is gone — the request stays readable. */
+                            agent_name: string;
+                            /** @example 0x1111111111111111111111111111111111111111 */
+                            safe_address: string;
+                            chain_id: number;
+                            token_symbol: string;
+                            token_address: string;
+                            to_address: string;
+                            /** @description Atomic units. */
+                            amount_raw: string;
+                            amount_human: string;
+                            reason: string | null;
+                            /** @description Derived: payment_rail, else the legacy source column, else 'direct'. */
+                            source: string;
+                            /** @description Derived: payment_resource_url, else the legacy x402 column. */
+                            x402_resource_url: string | null;
+                            merchant_address: string | null;
+                            payment_rail: string | null;
+                            payment_resource_url: string | null;
+                            status: string;
+                            tx_hash: string | null;
+                            /** Format: date-time */
+                            reviewed_at: string | null;
+                            /** Format: date-time */
+                            created_at: string;
+                            /** Format: date-time */
+                            expires_at: string;
+                        }[];
+                        /** @description Pending plus approved. */
+                        actionable_count: number;
+                        /** @description Legacy alias — identical to actionable_count. */
+                        pending_count: number;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    approveApprovalRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Approval-request id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Consent recorded; execute the payment yourself. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        /** @enum {string} */
+                        status: "approved";
+                        message: string;
+                        payment: {
+                            token_symbol: string;
+                            token_address: string;
+                            to_address: string;
+                            amount_raw: string;
+                            amount_human: string;
+                            /** @example 0x1111111111111111111111111111111111111111 */
+                            safe_address: string;
+                            source: string;
+                            x402_resource_url: string | null;
+                            merchant_address: string | null;
+                            payment_rail: string | null;
+                            payment_resource_url: string | null;
+                        };
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Not found, not the caller's, already actioned, or expired — deliberately one answer. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The request belongs to a retired rail: readable and rejectable, never approvable. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    markApprovalProposed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Approval-request id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Marked as proposed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        /** @enum {string} */
+                        status: "proposed";
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Retired rail. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    rejectApprovalRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Approval-request id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rejected. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        /** @enum {string} */
+                        status: "rejected";
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    recordApprovalExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Approval-request id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    tx_hash: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Execution recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        /** @enum {string} */
+                        status: "executed";
+                        tx_hash: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Not found, not the caller's, or not in an approved state. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description It stopped being approved between the read and the write. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

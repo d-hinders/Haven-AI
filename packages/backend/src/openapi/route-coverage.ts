@@ -129,10 +129,6 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
     because: 'WebAuthn enrolment for dashboard sessions; credential handling, no payment surface.',
   },
   {
-    file: 'approvals.ts',
-    because: 'The legacy over-budget approval queue — a Safe/AllowanceModule-rail feature slated for retirement (#1440). Documenting a dying rail would be waste; revisit when #1440 lands.',
-  },
-  {
     file: 'agent-activity.ts',
     because: 'Dashboard activity feed for one agent; read-only projection of data already documented elsewhere.',
   },
@@ -165,5 +161,5 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
  * `index.ts` — and one of them (`GET /chains`) turned out to be undocumented.
  * That is the gate earning its keep on its first run, not slack being taken.
  */
-export const MAX_UNDOCUMENTED_MODULES = 7
-export const MAX_UNDOCUMENTED_ROUTES = 26
+export const MAX_UNDOCUMENTED_MODULES = 6
+export const MAX_UNDOCUMENTED_ROUTES = 21

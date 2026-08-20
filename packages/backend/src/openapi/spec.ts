@@ -510,6 +510,119 @@ const sessionUser = {
   },
 } as const
 
+
+// ── Activity-feed building blocks (#1446) ────────────────────────────────────
+
+/**
+ * One payment in an activity list. `explorer_url` and the two lifecycle
+ * fields (payment_flow_status, payment_attention_reason) are DERIVED at read
+ * time — the first from the chain registry, the others from the
+ * machine-payment lifecycle helper — so a client never has to re-derive them.
+ */
+const activityPayment = {
+  type: 'object',
+  required: ['type', 'id', 'token', 'amount', 'to', 'status', 'created_at'],
+  properties: {
+    type: { type: 'string', enum: ['payment'] },
+    id: { type: 'string' },
+    token: { type: ['string', 'null'] },
+    amount_raw: { type: ['string', 'null'] },
+    amount: { type: ['string', 'null'] },
+    to: { type: ['string', 'null'] },
+    status: { type: ['string', 'null'] },
+    tx_hash: { type: ['string', 'null'] },
+    payment_id: { type: 'string' },
+    payment_proof_status: { type: ['string', 'null'] },
+    payment_flow_status: { type: ['string', 'null'], description: 'Derived from the payment lifecycle.' },
+    payment_attention_reason: { type: ['string', 'null'], description: 'Derived: why this payment needs a human look, if it does.' },
+    source: { type: 'string', description: "Falls back to 'direct'." },
+    x402_resource_url: { type: ['string', 'null'] },
+    x402_merchant_address: { type: ['string', 'null'] },
+    chain_id: { type: ['integer', 'null'] },
+    token_address: { type: ['string', 'null'] },
+    safe_id: { type: ['string', 'null'] },
+    safe_address: { type: ['string', 'null'] },
+    safe_name: { type: ['string', 'null'] },
+    explorer_url: { type: ['string', 'null'], description: 'Null exactly when tx_hash is null.' },
+    execution_rail: { type: ['string', 'null'], description: 'Which on-chain mechanism moved the money (#799).' },
+    session_permission_id: { type: ['string', 'null'] },
+    delegation_hash: { type: ['string', 'null'], description: 'Which delegation authorized a delegation-rail payment (#829).' },
+    confirmed_at: { type: ['string', 'null'] },
+    created_at: { type: 'string' },
+    agent_id: { type: 'string', description: 'Feed only — the per-agent list already knows the agent.' },
+    agent_name: { type: 'string', description: "Feed only; 'Unknown' when the agent row is gone." },
+  },
+} as const
+
+/** One approval in an activity list. Narrower than a payment. */
+const activityApproval = {
+  type: 'object',
+  required: ['type', 'id', 'token', 'amount', 'to', 'status', 'created_at'],
+  properties: {
+    type: { type: 'string', enum: ['approval'] },
+    id: { type: 'string' },
+    token: { type: ['string', 'null'] },
+    amount: { type: ['string', 'null'] },
+    to: { type: ['string', 'null'] },
+    reason: { type: ['string', 'null'] },
+    status: { type: ['string', 'null'] },
+    tx_hash: { type: ['string', 'null'] },
+    payment_proof_status: {
+      type: ['string', 'null'],
+      description: "Synthesised when absent: an executed approval reports 'payment_confirmed'.",
+    },
+    payment_flow_status: { type: ['string', 'null'] },
+    payment_attention_reason: { type: ['string', 'null'] },
+    source: { type: 'string' },
+    x402_resource_url: { type: ['string', 'null'] },
+    chain_id: { type: ['integer', 'null'] },
+    token_address: { type: ['string', 'null'] },
+    safe_id: { type: ['string', 'null'] },
+    safe_address: { type: ['string', 'null'] },
+    safe_name: { type: ['string', 'null'] },
+    explorer_url: { type: ['string', 'null'] },
+    created_at: { type: 'string' },
+    agent_id: { type: 'string', description: 'Feed only.' },
+    agent_name: { type: 'string', description: 'Feed only.' },
+  },
+} as const
+
+/** One MCP tool call — the agent-facing audit log entry. */
+const activityToolCall = {
+  type: 'object',
+  required: ['type', 'id', 'tool_name', 'created_at'],
+  properties: {
+    type: { type: 'string', enum: ['mcp_tool_call'] },
+    id: { type: 'string' },
+    tool_name: { type: 'string' },
+    payment_id: { type: ['string', 'null'], description: 'Set when the call created or advanced a payment.' },
+    result_status: { type: ['string', 'null'] },
+    next_action: { type: ['string', 'null'] },
+    error_code: { type: ['string', 'null'] },
+    status_code: { type: ['integer', 'null'] },
+    created_at: { type: 'string' },
+    agent_id: { type: 'string', description: 'Feed only.' },
+    agent_name: { type: 'string', description: 'Feed only.' },
+  },
+} as const
+
+/** The heterogeneous activity entry, discriminated by `type`. */
+const activityEntry = { oneOf: [activityPayment, activityApproval, activityToolCall] } as const
+
+/** Per-token spend totals, as the stats route shapes them. */
+const spendTotals = {
+  type: 'array',
+  items: {
+    type: 'object',
+    required: ['token', 'total_spent', 'tx_count'],
+    properties: {
+      token: { type: ['string', 'null'] },
+      total_spent: { type: ['string', 'null'] },
+      tx_count: { type: 'integer' },
+    },
+  },
+} as const
+
 const errorResponse = {
   description: 'Error response',
   content: {
@@ -3702,6 +3815,153 @@ export const openapiSpec = {
               },
             },
           },
+          '401': errorResponse,
+        },
+      },
+    },
+    // ── Activity + analytics (#1446) ────────────────────────────────────────
+    // Read-only. Nothing here writes, signs, or moves anything — these are the
+    // owner's window onto what an agent did, including the MCP tool-call audit
+    // log, which is how a tool call that never became a payment stays visible.
+    '/agent-activity/{id}/activity': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getAgentActivity',
+        summary: "One agent's payments, approvals and tool calls, newest first.",
+        description:
+          "A heterogeneous list discriminated by `type`: payment, approval, or mcp_tool_call. **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the three sources separately and the results are then merged and sorted, so this route can return up to three times `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+        ],
+        responses: {
+          '200': {
+            description: 'Merged activity, newest first.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['activity'],
+                  properties: { activity: { type: 'array', items: activityEntry } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such agent for this caller.' },
+        },
+      },
+    },
+    '/agent-activity/{id}/stats': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getAgentStats',
+        summary: "One agent's spend totals per token, plus its pending-approval count.",
+        description:
+          'Totals count CONFIRMED spend only, so an in-flight payment does not inflate them. Each window (all time, today, this week) is a separate per-token list rather than one list with three numbers, because a token can appear in one window and not another.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' }],
+        responses: {
+          '200': {
+            description: 'Spend totals and the pending count.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['all_time', 'today', 'this_week', 'pending_approvals'],
+                  properties: {
+                    all_time: spendTotals,
+                    today: spendTotals,
+                    this_week: spendTotals,
+                    pending_approvals: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such agent for this caller.' },
+        },
+      },
+    },
+    '/agent-activity/feed': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getActivityFeed',
+        summary: 'Combined activity across every agent the caller owns.',
+        description:
+          "The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` counts everything actionable across the account, not just what appears in this page.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+        ],
+        responses: {
+          '200': {
+            description: 'Merged cross-agent activity plus the actionable-approval count.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['activity', 'pending_approvals'],
+                  properties: {
+                    activity: { type: 'array', items: activityEntry },
+                    pending_approvals: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/analytics/funnel': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getOnboardingFunnel',
+        summary: 'Onboarding step conversion and median time-to-first-payment.',
+        description:
+          'Counts DISTINCT users per onboarding step over a date range, with the conversion from the previous step, plus the median time from signup to first settled payment. Defaults to the last 30 days. The window is echoed back as resolved ISO timestamps so a caller can tell exactly which range produced the numbers rather than re-deriving the default.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to 30 days before `to`.' },
+          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to now.' },
+        ],
+        responses: {
+          '200': {
+            description: 'Funnel counts and median TTFP.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['steps', 'medianTtfpMs', 'from', 'to'],
+                  properties: {
+                    steps: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['event', 'users', 'conversionFromPrev'],
+                        properties: {
+                          event: {
+                            type: 'string',
+                            enum: ['signed_up', 'safe_deployed', 'safe_imported', 'agent_created', 'allowance_granted', 'safe_funded', 'first_payment_settled'],
+                          },
+                          users: { type: 'integer', description: 'DISTINCT users who reached this step.' },
+                          conversionFromPrev: { type: ['number', 'null'], description: 'Null when there is nothing to convert from: the first step, or any step whose predecessor counted zero users.' },
+                        },
+                      },
+                    },
+                    medianTtfpMs: { type: ['integer', 'null'], description: 'Median signup→first-settled-payment in ms. Null when nobody has completed it in the window.' },
+                    from: { type: 'string', format: 'date-time', description: 'The resolved window start.' },
+                    to: { type: 'string', format: 'date-time', description: 'The resolved window end.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Unparseable dates, or from is not before to.' },
           '401': errorResponse,
         },
       },

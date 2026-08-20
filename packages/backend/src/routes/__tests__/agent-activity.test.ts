@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 
@@ -162,6 +163,9 @@ describe('agent activity routes', () => {
     expect(response.statusCode).toBe(200)
     const body = response.json()
     expect(body.activity).toHaveLength(2)
+    // #1446: the payment AND approval branches of the documented oneOf — this
+    // is the only test that produces both, and they were unasserted.
+    expectMatchesSpec('GET', '/agent-activity/{id}/activity', body)
     expect(body.activity[0]).toMatchObject({
       type: 'payment',
       safe_id: 'safe-base',
@@ -222,6 +226,8 @@ describe('agent activity routes', () => {
     const body = response.json()
     expect(body.pending_approvals).toBe(0)
     expect(body.activity).toHaveLength(2)
+    // The FEED route had no schema assertion at all (#1446 review).
+    expectMatchesSpec('GET', '/agent-activity/feed', body)
     expect(body.activity[0]).toMatchObject({
       type: 'payment',
       agent_id: 'agent-1',

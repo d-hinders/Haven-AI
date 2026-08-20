@@ -29,6 +29,7 @@
     "lint:copy": "node scripts/frontend-copy-lint.mjs",
     "lint:copy:update": "node scripts/frontend-copy-lint.mjs --update",
     "lint:copy:test": "node --test scripts/frontend-copy-lint.test.mjs",
+    "branch-hygiene": "node scripts/branch-hygiene.mjs",
     "lint:db-mocks": "node scripts/db-mock-ratchet.mjs",
     "lint:wire-types": "node scripts/lint-wire-types.mjs",
     "lint:network-pins": "node --test scripts/network-map-pins.test.mjs",

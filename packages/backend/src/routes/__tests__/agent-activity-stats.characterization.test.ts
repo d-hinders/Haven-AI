@@ -17,6 +17,7 @@
  * Written against the UNCHANGED routes and passing before the extraction.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 
@@ -140,6 +141,7 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
         this_week: [{ token: 'USDC', total_spent: '7.00', tx_count: 3 }],
         pending_approvals: 4,
       })
+      expectMatchesSpec('GET', '/agent-activity/{id}/stats', response.json())
     })
 
     it('returns empty buckets and a zero count when the agent has no history', async () => {
@@ -253,6 +255,8 @@ describe('agent activity stats + guards (characterization, #1167)', () => {
           created_at: '2026-05-08T11:50:00Z',
         },
       ])
+      // The mcp_tool_call branch of the documented oneOf (#1446).
+      expectMatchesSpec('GET', '/agent-activity/{id}/activity', body)
     })
 
     it("404s without reading any activity when the agent is not the caller's", async () => {

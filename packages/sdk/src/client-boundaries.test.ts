@@ -137,6 +137,7 @@ const boundary: ClientBoundary = {
     './signer.js',
     './sweep.js',
     './types.js',
+    './x402-erc7710.js',
     './x402-funding-leg.js',
     './x402-protocol.js',
     './x402.js',

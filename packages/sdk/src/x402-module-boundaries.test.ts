@@ -35,6 +35,16 @@ describe('x402 module boundaries (#1618)', () => {
     expect(imports.join('\n')).not.toContain('x402-funding-leg')
   })
 
+  it('MUTATION PROOF: the erc7710 module imports no funding leg and no RPC provider (#1619)', () => {
+    // The scheme's defining property is an absence — no funding transaction to
+    // confirm, no delegate balance to check. Either import would be the first
+    // step back toward the confusion this epic is decomposing away.
+    const imports = source('x402-erc7710.ts').match(/^import[\s\S]*?from '.*'$/gm) ?? []
+    expect(imports.length).toBeGreaterThan(0)
+    expect(imports.join('\n')).not.toContain('x402-funding-leg')
+    expect(imports.join('\n')).not.toContain('provider.js')
+  })
+
   it('the funding leg is internal — the SDK entrypoint does not publish it', () => {
     // A published module is a compatibility promise. This is an internal
     // decomposition, so neither module is part of the SDK's public surface.
@@ -42,6 +52,7 @@ describe('x402 module boundaries (#1618)', () => {
     expect(exports.length).toBeGreaterThan(0)
     expect(exports.join('\n')).not.toContain('x402-funding-leg')
     expect(exports.join('\n')).not.toContain('x402-protocol')
+    expect(exports.join('\n')).not.toContain('x402-erc7710')
   })
 
   it('the funding leg mints and caches with no HavenClient at all', async () => {

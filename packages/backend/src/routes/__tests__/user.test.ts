@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { FastifyInstance } from 'fastify'
 
 const { mockQuery, mockGetSafeDetails } = vi.hoisted(() => ({
@@ -17,6 +18,12 @@ vi.mock('../../modules/accounts/index.js', () => ({
 }))
 
 import { buildApp } from '../../__tests__/helpers.js'
+
+/** users.id is a UUID column; fixtures must look like one (#1446). */
+const USER_UUID = '4f6c2b18-7d90-4a35-9e81-2c5b7f3a0d64'
+/** user_safes.id likewise. */
+const SAFE_UUID_A = 'b7e1d0c4-3a52-4f68-8c91-5d2e7a4b0f31'
+const SAFE_UUID_B = '1c93a6f8-2e40-4b57-9d83-6f0a5c1e8b72'
 
 describe('User routes', () => {
   let app: FastifyInstance
@@ -45,7 +52,9 @@ describe('User routes', () => {
 
       mockQuery.mockResolvedValueOnce({
         rows: [{
-          id: 'user-1',
+          // users.id is a UUID column (migration 000), so 'user-1' described
+          // a row the database cannot produce (#1446).
+          id: USER_UUID,
           name: 'Ada Lovelace',
           email: 'test@example.com',
           wallet_address: null,
@@ -64,8 +73,9 @@ describe('User routes', () => {
 
       expect(response.statusCode).toBe(200)
       const body = response.json()
-      expect(body.id).toBe('user-1')
+      expect(body.id).toBe(USER_UUID)
       expect(body.name).toBe('Ada Lovelace')
+      expectMatchesSpec('PUT', '/user/profile', response.json())
     })
 
     it('returns 400 for invalid name', async () => {
@@ -240,13 +250,13 @@ describe('User routes', () => {
         .mockResolvedValueOnce({
           rows: [
             {
-              id: 'safe-1',
+              id: SAFE_UUID_A,
               safe_address: '0x1111111111111111111111111111111111111111',
               chain_id: 100,
               name: 'Main account',
             },
             {
-              id: 'safe-2',
+              id: SAFE_UUID_B,
               safe_address: '0x2222222222222222222222222222222222222222',
               chain_id: 8453,
               name: 'Base account',
@@ -283,13 +293,13 @@ describe('User routes', () => {
             name: 'Ledger main',
             accounts: [
               {
-                id: 'safe-1',
+                id: SAFE_UUID_A,
                 safe_address: '0x1111111111111111111111111111111111111111',
                 chain_id: 100,
                 name: 'Main account',
               },
               {
-                id: 'safe-2',
+                id: SAFE_UUID_B,
                 safe_address: '0x2222222222222222222222222222222222222222',
                 chain_id: 8453,
                 name: 'Base account',
@@ -301,7 +311,7 @@ describe('User routes', () => {
             name: null,
             accounts: [
               {
-                id: 'safe-1',
+                id: SAFE_UUID_A,
                 safe_address: '0x1111111111111111111111111111111111111111',
                 chain_id: 100,
                 name: 'Main account',
@@ -314,6 +324,7 @@ describe('User routes', () => {
       })
 
       expect(mockQuery.mock.calls[1][1]).toEqual(['user-1', [ownerA, ownerB]])
+      expectMatchesSpec('GET', '/user/owners', response.json())
     })
 
     it('hides aliases for removed owners by querying only current owner addresses', async () => {
@@ -324,7 +335,7 @@ describe('User routes', () => {
         .mockResolvedValueOnce({
           rows: [
             {
-              id: 'safe-1',
+              id: SAFE_UUID_A,
               safe_address: '0x1111111111111111111111111111111111111111',
               chain_id: 100,
               name: 'Main account',
@@ -361,7 +372,7 @@ describe('User routes', () => {
         .mockResolvedValueOnce({
           rows: [
             {
-              id: 'safe-1',
+              id: SAFE_UUID_A,
               safe_address: '0x1111111111111111111111111111111111111111',
               chain_id: 100,
               name: 'Main account',
@@ -392,6 +403,7 @@ describe('User routes', () => {
         name: 'Ledger main',
       })
       expect(mockQuery.mock.calls[1][1]).toEqual(['user-1', owner, 'Ledger main'])
+      expectMatchesSpec('PUT', '/user/owners/{ownerAddress}', response.json())
     })
 
     it('does not save an alias for an address that is not a current owner', async () => {
@@ -400,7 +412,7 @@ describe('User routes', () => {
       mockQuery.mockResolvedValueOnce({
         rows: [
           {
-            id: 'safe-1',
+            id: SAFE_UUID_A,
             safe_address: '0x1111111111111111111111111111111111111111',
             chain_id: 100,
             name: 'Main account',
@@ -444,6 +456,7 @@ describe('User routes', () => {
         'user-1',
         '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       ])
+      expectMatchesSpec('DELETE', '/user/owners/{ownerAddress}', response.json())
     })
   })
 })

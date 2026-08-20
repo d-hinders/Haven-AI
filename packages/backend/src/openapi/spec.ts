@@ -418,6 +418,52 @@ const userIdentity = {
   },
 } as const
 
+
+// ── Bookkeeping building blocks (#1446, epics #462/#491) ─────────────────────
+
+/** One reporting-feed sync row, as the status route returns it. */
+const feedSyncRow = {
+  type: 'object',
+  required: ['id', 'user_id', 'provider', 'payment_id', 'external_ref', 'status', 'error', 'attempts', 'created_at', 'updated_at'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    user_id: { type: 'string', format: 'uuid' },
+    provider: { type: 'string', examples: ['fortnox'] },
+    payment_id: { type: 'string' },
+    external_ref: { type: ['string', 'null'], description: 'The provider-side reference once pushed.' },
+    status: { type: 'string', enum: ['pending', 'pushed', 'failed', 'skipped'] },
+    error: { type: ['string', 'null'] },
+    attempts: { type: 'integer' },
+    created_at: { type: 'string', format: 'date-time' },
+    updated_at: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+/**
+ * The read-back verdict from the provider's OWN records (#1362). Strictly
+ * read-only: it asserts nothing and cannot modify an invoice.
+ */
+const invoiceVerification = {
+  type: 'object',
+  required: ['registered', 'missing', 'booked', 'cancelled', 'invoice_number', 'voucher', 'invoice_date', 'total', 'checked_at'],
+  properties: {
+    registered: { type: 'boolean', description: 'The invoice exists in Fortnox under our external_ref.' },
+    missing: {
+      type: ['string', 'null'],
+      enum: ['deleted', 'foreign_invoice', null],
+      description:
+        "Why registered is false. 'deleted' = the number 404s; 'foreign_invoice' = an invoice exists at that number but carries someone else's ExternalInvoiceNumber (a company-switch collision). Null when registered. Both mean OUR record was never delivered under our ref — but an audit trail must not say \'no longer exists\' about an invoice that does.",
+    },
+    booked: { type: ['boolean', 'null'], description: 'A human has booked it. Null when not registered.' },
+    cancelled: { type: ['boolean', 'null'], description: 'Registered but struck. Null when not registered.' },
+    invoice_number: { type: 'integer' },
+    voucher: { type: ['string', 'null'], description: '`<series><number> <year>` once booked, e.g. "A123 2026". Null until then.' },
+    invoice_date: { type: ['string', 'null'] },
+    total: { type: ['number', 'null'] },
+    checked_at: { type: 'string', format: 'date-time' },
+  },
+} as const
+
 const errorResponse = {
   description: 'Error response',
   content: {
@@ -2337,6 +2383,327 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': errorResponse,
+        },
+      },
+    },
+    // ── Bookkeeping: export, reconcile, categories (#1446, epic #462) ───────
+    // Read-only over settled-payment data. No custody surface: nothing here
+    // moves money, and the reporting feed below is deliberately NON-ASSERTING
+    // (#491) — it hands the accounting tool a draft, never a booked verdict.
+    '/accounting/export': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'exportAccounting',
+        summary: 'Legacy SIE export — GATED OFF by default.',
+        description:
+          "Superseded by the non-asserting reporting feed (#491): agent spend now syncs into the accounting tool as draft transactions instead of being exported as an asserting SIE file. **410 is the normal answer on a default deployment**; the route only serves when the legacy flag is on. Responds with a FILE, not JSON — Content-Disposition attachment, plus the custom headers X-Export-Entry-Count and X-Export-Skipped reporting how many entries were written and how many could not be.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'format', in: 'query', schema: { type: 'string', enum: ['sie'] }, description: "Defaults to 'sie'; anything else is a 400." },
+          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date (YYYY-MM-DD…).' },
+          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date (YYYY-MM-DD…).' },
+          { name: 'company', in: 'query', schema: { type: 'string' }, description: "Company name in the file header; defaults to 'Haven'." },
+        ],
+        responses: {
+          '200': {
+            description: 'The SIE file.',
+            headers: {
+              'X-Export-Entry-Count': { schema: { type: 'string' }, description: 'Entries written.' },
+              'X-Export-Skipped': { schema: { type: 'string' }, description: 'Entries that could not be written.' },
+            },
+            content: { 'application/octet-stream': { schema: { type: 'string' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '410': { ...errorResponse, description: 'The default: SIE export is retired in favour of the reporting feed.' },
+        },
+      },
+    },
+    '/accounting/reconcile': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'reconcileAccounting',
+        summary: 'Surface the entries that cannot book cleanly over a period.',
+        description:
+          'Read-only diagnosis, never a fix: it classifies each entry and counts the classes, so a user can see WHY a period will not balance before trying to book it. Note the camelCase byStatus/paymentId/txHash/settledAt fields — this report comes from the accounting module, not from SQL rows.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+        ],
+        responses: {
+          '200': {
+            description: 'The reconciliation report.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['total', 'ok', 'issues', 'byStatus', 'items'],
+                  properties: {
+                    total: { type: 'integer' },
+                    ok: { type: 'integer' },
+                    issues: { type: 'integer' },
+                    byStatus: {
+                      type: 'object',
+                      required: ['ok', 'missing_fx', 'missing_tx', 'unbalanced'],
+                      properties: {
+                        ok: { type: 'integer' },
+                        missing_fx: { type: 'integer', description: 'No SEK amount — the FX rate was unavailable.' },
+                        missing_tx: { type: 'integer', description: 'No transaction hash to anchor the entry.' },
+                        unbalanced: { type: 'integer', description: 'Debits and credits disagree.' },
+                      },
+                    },
+                    items: {
+                      type: 'array',
+                      description:
+                        'ONLY the entries that need attention — an entry classified ok is counted in byStatus but never listed here, so items.length is issues, not total.',
+                      items: {
+                        type: 'object',
+                        required: ['paymentId', 'txHash', 'settledAt', 'status'],
+                        properties: {
+                          paymentId: { type: 'string' },
+                          txHash: { type: 'string' },
+                          settledAt: { type: 'string' },
+                          status: { type: 'string', enum: ['ok', 'missing_fx', 'missing_tx', 'unbalanced'] },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/categories': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listAccountOverrides',
+        summary: "The caller's per-merchant BAS account overrides.",
+        description:
+          'NOTE THE CASING: this read returns the SQL rows as-is (resource_url/bas_account, snake_case), while the write below echoes its own request fields (resourceUrl/account, camelCase). Same path, two conventions — documented rather than normalised, because a generated client must match what the routes actually emit.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Overrides ordered by resource_url.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['overrides'],
+                  properties: {
+                    overrides: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['resource_url', 'bas_account'],
+                        properties: {
+                          resource_url: { type: 'string' },
+                          bas_account: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'setAccountOverride',
+        summary: 'Map a merchant to a BAS account.',
+        description:
+          'Idempotent upsert keyed on (user, resourceUrl). A category is a bookkeeping label — it changes no payment and moves nothing. The response echoes the request fields in camelCase, unlike the snake_case read above.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['resourceUrl', 'account'],
+                properties: {
+                  resourceUrl: { type: 'string', minLength: 1 },
+                  account: { type: 'string', pattern: '^[0-9]{3,6}$', description: 'A BAS account number.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The stored override, echoed.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['resourceUrl', 'account'],
+                  properties: { resourceUrl: { type: 'string' }, account: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'clearAccountOverride',
+        summary: "Clear a merchant's BAS account override.",
+        description: 'Answers **204 No Content**, not a success envelope. Idempotent: clearing an override that was never set still succeeds.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'resourceUrl', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: {
+          '204': { description: 'Override cleared (or was never set).' },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/reporting/status': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getReportingStatus',
+        summary: 'Whether the reporting feed is available, connected, and live — plus recent syncs.',
+        description:
+          'Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Feed status.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['hosted', 'flagEnabled', 'liveSyncReady', 'available', 'connected', 'syncs'],
+                  properties: {
+                    hosted: { type: 'boolean' },
+                    flagEnabled: { type: 'boolean' },
+                    liveSyncReady: { type: 'boolean', description: 'A real provider adapter is registered.' },
+                    available: { type: 'boolean', description: 'The caller is entitled to the feed.' },
+                    connected: { type: 'boolean', description: 'The caller has a live provider connection.' },
+                    syncs: { type: 'array', items: feedSyncRow },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/reporting/sync': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'syncReportingFeed',
+        summary: 'Backfill and retry the feed for the caller.',
+        description:
+          'Pushes what has not been pushed and retries what failed. Gated: **404 when the feed is unavailable**, which is how an unentitled caller sees it. Returns how many rows were fed — 0 is a normal answer, not a failure.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Rows fed.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['fed'],
+                  properties: { fed: { type: 'integer' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+        },
+      },
+    },
+    '/accounting/reporting/verify/{paymentId}': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'verifyReportingInvoice',
+        summary: "Read back a pushed invoice from the provider's own records.",
+        description:
+          'Strictly read-only (#1362): it confirms whether the supplier invoice still exists and whether a human has booked it, and asserts nothing — the non-asserting principle is untouched. A payment that was never pushed, a disconnected provider, or a sync row with no invoice reference all answer 409 with a machine-readable error_code, because none of them is a verification result.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string' }, description: 'Haven payment id.' }],
+        responses: {
+          '200': {
+            description: "The provider's verdict.",
+            content: { 'application/json': { schema: invoiceVerification } },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+          '409': {
+            description: 'Not verifiable — not pushed, not connected, or no invoice reference.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['error', 'error_code'],
+                  properties: {
+                    error: { type: 'string' },
+                    error_code: { type: 'string', enum: ['not_pushed', 'not_connected', 'no_invoice_ref'] },
+                    status: { type: ['string', 'null'] },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/accounting/reporting/reopen/{paymentId}': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'reopenReportingPush',
+        summary: 'Reopen a pushed row for retry — only when the provider confirms the invoice is gone.',
+        description:
+          "The ONLY path that flips a pushed row back to retryable, and it is conditional on the PROVIDER, not on the caller's say-so (#1365): the server re-runs the read-back and reopens only when the invoice is confirmed gone, or when a number collision proves the invoice at that number is not ours. **An invoice that still exists refuses with 409 and writes nothing** — that is the double-post guard, and reopening against a live invoice would duplicate it. A row that moved between the check and the flip (raced by a concurrent sync) also refuses rather than pretending. After a successful reopen, the next sync re-claims and re-pushes through the normal retry path.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string' }, description: 'Haven payment id.' }],
+        responses: {
+          '200': {
+            description: 'Row reopened for retry.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['reopened', 'payment_id', 'next'],
+                  properties: {
+                    reopened: { type: 'boolean', enum: [true] },
+                    payment_id: { type: 'string' },
+                    next: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+          '409': {
+            description: 'Refused, nothing written — the invoice still exists, the row is not pushed, or it moved under us.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['error', 'error_code'],
+                  properties: {
+                    error: { type: 'string' },
+                    error_code: { type: 'string', enum: ['not_pushed', 'not_connected', 'no_invoice_ref', 'invoice_exists'] },
+                    invoice_number: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },

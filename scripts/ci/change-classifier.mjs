@@ -181,22 +181,70 @@ export const SURFACE_RULES = Object.freeze([
 ])
 
 /**
+ * The package dependency table: which workspace packages consume which
+ * (#1625). Read from .github/ for the same reason as the guard manifest —
+ * repo-governance data, dependency-free to parse.
+ */
+export const PACKAGE_DEPENDENCY_TABLE_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '.github',
+  'package-dependencies.json',
+)
+
+/** @type {Record<string, {dependsOn: string[], note?: string}>} */
+export const PACKAGE_DEPENDENCIES = Object.freeze(
+  JSON.parse(readFileSync(PACKAGE_DEPENDENCY_TABLE_PATH, 'utf8')).packages,
+)
+
+/** Job flags that name a package with a CI job of its own, in table order. */
+export const PACKAGE_JOBS = Object.freeze(Object.keys(PACKAGE_DEPENDENCIES))
+
+/**
+ * Every job that must re-run when `pkg` changes — its dependents, transitively.
+ *
+ * The table records only DIRECT dependencies, because that is what package.json
+ * declares and therefore the only thing that can be checked against reality.
+ * The closure is computed here so a chain (a -> b -> c) can never be half
+ * expanded in the data, which is the failure mode of pre-expanded fan-out
+ * lists: they look right until someone inserts a link in the middle.
+ *
+ * Exported for tests; cycles are impossible in a package graph and would hang
+ * a naive walk, so this one tracks what it has seen.
+ */
+export function dependentsOf(pkg, table = PACKAGE_DEPENDENCIES) {
+  const found = new Set()
+  const queue = [pkg]
+  while (queue.length) {
+    const current = queue.shift()
+    for (const [name, entry] of Object.entries(table)) {
+      if (!entry.dependsOn.includes(current)) continue
+      if (found.has(name)) continue
+      found.add(name)
+      queue.push(name)
+    }
+  }
+  found.delete(pkg)
+  return [...found]
+}
+
+/**
  * Fan-out applied after every file has been classified, in order.
  *
- * Order is part of the contract: `full` fans out to every package first, then
- * `sdk`'s dependents, then connect's. Each step reads flags the previous step
- * may have set.
+ * Derived from the dependency table rather than hand-written. `full` is not a
+ * package and not a dependency — it is the directive "run everything", so it
+ * fans out to every job the table names, and stays a separate concept from the
+ * per-package rules that follow.
+ *
+ * Order is still part of the contract: `full` first, so the package rules that
+ * follow see the flags it set.
  */
 export const PROPAGATION_RULES = Object.freeze([
-  {
-    when: ['full'],
-    then: ['frontend', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli'],
-  },
-  // Every published package depends on the SDK, and the backend is pinned
-  // against its wire types.
-  { when: ['sdk'], then: ['backend', 'connect', 'mcp', 'mcp_server', 'signer'] },
-  // connect bundles the MCP runtime and the signer.
-  { when: ['mcp', 'signer'], then: ['connect'] },
+  { when: ['full'], then: [...PACKAGE_JOBS] },
+  ...PACKAGE_JOBS.map((pkg) => ({ when: [pkg], then: dependentsOf(pkg) })).filter(
+    (rule) => rule.then.length > 0,
+  ),
 ])
 
 /** All ten flags false. */

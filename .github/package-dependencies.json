@@ -1,0 +1,79 @@
+{
+  "$comment": [
+    "PACKAGE DEPENDENCY TABLE (#1625, epic #1621).",
+    "",
+    "Which workspace packages consume which. The CI change classifier derives",
+    "its job fan-out from this: if a package changes, every job whose package",
+    "TRANSITIVELY depends on it must run too, or a change can break a consumer",
+    "whose suite never ran on the pull request that broke it.",
+    "",
+    "This is a DIFFERENT question from .github/root-guard-ownership.json, and",
+    "the two are kept apart on purpose:",
+    "",
+    "  root-guard-ownership.json -- SOURCE OWNERSHIP. Which job validates a",
+    "    given file. Answers 'who checks this?'",
+    "",
+    "  package-dependencies.json -- BUILD/TEST PROPAGATION. Which packages are",
+    "    broken by a change to another package. Answers 'who else must re-run?'",
+    "",
+    "A guard file has an owner but no dependents; a package has dependents but",
+    "no owner in that sense. Merging them would force one of the two questions",
+    "to be answered in the other's vocabulary.",
+    "",
+    "FIELDS",
+    "",
+    "  dependsOn  Job flags of the packages this one consumes DIRECTLY. The",
+    "             classifier computes the transitive closure itself, so never",
+    "             pre-expand a chain here -- write what package.json declares",
+    "             and nothing more.",
+    "  note       Anything a reader would otherwise have to rediscover.",
+    "",
+    "Keys are OUTPUT FLAGS, not directory names: packages/mcp-server is the",
+    "`mcp_server` flag. Only packages that have a CI job of their own appear.",
+    "packages/core and packages/qa-agent deliberately do not: neither has a job,",
+    "and both fall to the packages/* catch-all that forces the full matrix. That",
+    "is over-routing rather than under-routing, and is pinned as a RETAINED row",
+    "in scripts/ci/routing-matrix.mjs for #1626 to decide on.",
+    "",
+    "CHECKED, NOT DECLARED. scripts/ci/package-dependencies.test.mjs reads every",
+    "package.json and fails if this table disagrees with the real @haven_ai/*",
+    "dependencies -- in both directions. devDependencies count: packages/mcp-server",
+    "only uses @haven_ai/signer in its tests, and its tests are exactly what its",
+    "CI job runs.",
+    "",
+    "NOT a completeness claim about jobs. Whether every package HAS a job, and",
+    "whether every job is reachable, is #1626."
+  ],
+  "packages": {
+    "frontend": {
+      "dependsOn": [],
+      "note": "Consumes @haven_ai/core, which has no job flag, so there is nothing to fan out to. A core change forces the full matrix by the packages/* catch-all instead."
+    },
+    "backend": {
+      "dependsOn": ["sdk"],
+      "note": "Also consumes @haven_ai/core; same as frontend, core carries no job flag."
+    },
+    "sdk": {
+      "dependsOn": [],
+      "note": "The root of the graph. Nothing internal is below it, which is why an SDK change fans out the widest."
+    },
+    "connect": {
+      "dependsOn": ["sdk", "mcp", "signer"],
+      "note": "The connector bundles the MCP runtime and the signer it hands out, so it rebuilds when either moves."
+    },
+    "mcp": {
+      "dependsOn": ["sdk"]
+    },
+    "mcp_server": {
+      "dependsOn": ["sdk", "signer"],
+      "note": "@haven_ai/signer is a devDependency, consumed by src/hosted-signer-integration.test.ts. mcp_server_checks runs those tests, so the dependency is real for CI even though it is not shipped."
+    },
+    "signer": {
+      "dependsOn": ["sdk"]
+    },
+    "cli": {
+      "dependsOn": [],
+      "note": "Declares no internal dependencies at all, which is why an SDK change does not fan out to it."
+    }
+  }
+}

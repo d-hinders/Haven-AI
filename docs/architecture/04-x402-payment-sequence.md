@@ -16,6 +16,7 @@ covers:
   - packages/sdk/src/x402-protocol.ts
   - packages/sdk/src/x402-funding-leg.ts
   - packages/sdk/src/x402-erc7710.ts
+  - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
@@ -84,6 +85,13 @@ Source of truth:
   3009 path. It asks no chain anything, because on this path there is no
   funding transaction to confirm and no delegate balance to check.
 - [`packages/sdk/src/mcp-merchant-transport.ts`](../../packages/sdk/src/mcp-merchant-transport.ts) — bounded paid MCP/merchant HTTP delivery, sessions, and SSE framing.
+- [`packages/sdk/src/merchant-completion.ts`](../../packages/sdk/src/merchant-completion.ts) —
+  what must be true AROUND a merchant call once a payment exists (#1620): which
+  wallet the merchant sees, what the payment's live state permits, and the
+  evidence written afterwards. Scheme-neutral, so the erc7710 and 3009 paths
+  finish through the same door. Every write here is best-effort and swallows:
+  the resource is already paid for, and bookkeeping that threw would turn a
+  completed payment into a reported failure.
 - [`packages/sdk/src/payment-state.ts`](../../packages/sdk/src/payment-state.ts) — shared payment-state/status-error normalization.
 - [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts) — request
   validation, auth wiring, rate-limit config, and response serialization only.

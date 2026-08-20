@@ -131,157 +131,18 @@ describe('base-SHA handling', () => {
   })
 })
 
-describe('documentation routes nowhere — except CLAUDE.md', () => {
-  test('prose, docs/ and licences produce no flags at all', () => {
-    assert.deepEqual(on(['README.md', 'docs/product/agent-passport.md', 'AGENTS.md', 'LICENSE']), [])
-  })
+// NOTE: the routing rules themselves — which file turns which flag on, the
+// cross-surface guard arms, the doc-only skips, the CLAUDE.md exception, the
+// package fan-out — are characterized in routing-matrix.mjs and asserted by
+// routing-matrix.test.mjs on all ten outputs (#1623). They deliberately do NOT
+// also live here: two places asserting the same rule is how one of them drifts
+// and starts passing vacuously, which is the failure this epic exists to fix.
+//
+// What stays in this file is the classifier's PLUMBING — the contract with
+// ci.yml, list handling, propagation ordering, output rendering, glob
+// semantics, and the CLI/git entry points.
 
-  test('a nested docs path is still doc-only', () => {
-    // Shell `case` globs are not path-aware, so `*.md` and `docs/*` match at
-    // any depth. Losing that would start routing every doc edit into CI.
-    assert.deepEqual(on(['docs/contributing/ship-playbooks/frontend.md', 'a/b/c/notes.md']), [])
-  })
-
-  test('CLAUDE.md routes to the backend suite', () => {
-    // It mirrors backend contracts that packages/backend/src/docs-drift pins,
-    // so a CLAUDE.md-only edit must run the backend job even though it is
-    // Markdown — otherwise the drift test never guards it.
-    assert.deepEqual(on(['CLAUDE.md']), ['backend', 'code'])
-  })
-})
-
-describe('package routing', () => {
-  const cases = [
-    ['packages/frontend/src/app/page.tsx', ['code', 'frontend']],
-    ['packages/backend/src/routes/payments.ts', ['backend', 'code']],
-    ['packages/connect/src/index.ts', ['code', 'connect']],
-    ['packages/mcp-server/src/tools.ts', ['code', 'mcp_server']],
-    ['packages/cli/src/index.ts', ['cli', 'code']],
-  ]
-  for (const [file, expected] of cases) {
-    test(`${file} routes to ${expected.join(' + ')}`, () => {
-      assert.deepEqual(on([file]), expected)
-    })
-  }
-
-  test('packages/mcp-server is not swallowed by the packages/mcp rule', () => {
-    // `packages/mcp/*` is listed first and the names share a prefix, so this
-    // is the ordering mistake that would quietly stop routing mcp-server.
-    assert.deepEqual(on(['packages/mcp-server/src/tools.ts']), ['code', 'mcp_server'])
-    assert.deepEqual(on(['packages/mcp/src/index.ts']).includes('mcp_server'), false)
-  })
-
-  test('an unrouted workspace forces the full matrix', () => {
-    // packages/core is the shared kernel backend and frontend both consume;
-    // it has no job of its own, so everything must run.
-    assert.deepEqual(on(['packages/core/src/chains.ts']), allTrue())
-  })
-
-  test('a package-local tsconfig routes to its package, not the root config rule', () => {
-    // `tsconfig*.json` is anchored at the repo root; a nested one must not
-    // escalate a one-package change into the full matrix.
-    assert.deepEqual(on(['packages/backend/tsconfig.json']), ['backend', 'code'])
-  })
-})
-
-describe('root config forces the full matrix', () => {
-  for (const file of ['package.json', 'package-lock.json', 'tsconfig.json', '.github/workflows/ci.yml']) {
-    test(`${file} turns everything on`, () => {
-      assert.deepEqual(on([file]), allTrue())
-    })
-  }
-
-  test('a workflow file this repo does not have yet still matches by extension', () => {
-    assert.deepEqual(on(['.github/workflows/brand-new.yaml']), allTrue())
-  })
-
-  test('a .github file outside workflows/ routes nowhere', () => {
-    // Documenting current behaviour, not endorsing it: labeler.yml and
-    // CODEOWNERS genuinely route nothing today. Routing completeness is #1626.
-    assert.deepEqual(on(['.github/labeler.yml', '.github/CODEOWNERS']), [])
-  })
-})
-
-describe('guards outside packages/ route to the package they police', () => {
-  test('the dependency-boundary gate runs the backend job', () => {
-    // A PR that only weakens the gate must still run it (#982).
-    assert.deepEqual(on(['scripts/dep-lint.mjs']), ['backend', 'code'])
-    assert.deepEqual(on(['.dependency-cruiser.cjs']), ['backend', 'code'])
-  })
-
-  test('the shared ratchet engine runs both jobs it backs', () => {
-    // It backs the backend db-mock gate and the frontend wire-type gate
-    // (#1447) — weakening it must run both, not just one.
-    assert.deepEqual(on(['scripts/lib/ratchet.mjs']), ['backend', 'code', 'frontend'])
-  })
-
-  test('the wire-type ratchet runs the frontend job', () => {
-    assert.deepEqual(on(['scripts/lint-wire-types.mjs']), ['code', 'frontend'])
-  })
-
-  test('the network-map pin test runs every job that would catch the drift', () => {
-    // #1478 spans backend, sdk and signer sources. sdk fan-out then pulls in
-    // connect, mcp and mcp_server too.
-    assert.deepEqual(on(['scripts/network-map-pins.test.mjs']), [
-      'backend',
-      'code',
-      'connect',
-      'mcp',
-      'mcp_server',
-      'sdk',
-      'signer',
-    ])
-  })
-
-  test('an unrouted script routes nowhere', () => {
-    assert.deepEqual(on(['scripts/docs/new-doc.mjs']), [])
-  })
-})
-
-describe('dependency propagation', () => {
-  test('sdk fans out to every package that consumes it', () => {
-    assert.deepEqual(on(['packages/sdk/src/client.ts']), [
-      'backend',
-      'code',
-      'connect',
-      'mcp',
-      'mcp_server',
-      'sdk',
-      'signer',
-    ])
-  })
-
-  test('mcp fans out to connect', () => {
-    assert.deepEqual(on(['packages/mcp/src/index.ts']), ['code', 'connect', 'mcp'])
-  })
-
-  test('signer fans out to connect', () => {
-    assert.deepEqual(on(['packages/signer/src/index.ts']), ['code', 'connect', 'signer'])
-  })
-
-  test('full fans out to every package but frontend alone does not', () => {
-    assert.deepEqual(on(['packages/frontend/src/app/page.tsx']), ['code', 'frontend'])
-    assert.deepEqual(on(['package.json']), allTrue())
-  })
-
-  test('propagation runs in order — full, then sdk, then connect', () => {
-    // sdk's fan-out reads flags full may have set, and connect's reads flags
-    // sdk may have set. Reordering these silently under-routes.
-    assert.deepEqual(
-      PROPAGATION_RULES.map((r) => r.when.join('|')),
-      ['full', 'sdk', 'mcp|signer'],
-    )
-  })
-})
-
-describe('mixed and degenerate file lists', () => {
-  test('a docs + backend PR routes the backend job', () => {
-    assert.deepEqual(on(['docs/operations/dev-environment.md', 'packages/backend/src/routes/payments.ts']), [
-      'backend',
-      'code',
-    ])
-  })
-
+describe('list handling', () => {
   test('flags accumulate across files and never turn back off', () => {
     assert.deepEqual(on(['packages/frontend/src/app/page.tsx', 'packages/cli/src/index.ts']), [
       'cli',
@@ -291,6 +152,8 @@ describe('mixed and degenerate file lists', () => {
   })
 
   test('an empty list produces ten falses, not an empty object', () => {
+    // The shape matters as much as the values: a downstream job reads
+    // needs.changes.outputs.<name>, and a missing key is not the same as false.
     const outputs = classifyChangedFiles([])
     assert.deepEqual(Object.keys(outputs).sort(), [...OUTPUT_NAMES].sort())
     for (const name of OUTPUT_NAMES) assert.equal(outputs[name], false)
@@ -301,9 +164,17 @@ describe('mixed and degenerate file lists', () => {
     // element is always empty.
     assert.deepEqual(on(['', '   ', 'packages/cli/src/index.ts', '']), ['cli', 'code'])
   })
+})
 
-  test('an unrecognised top-level path routes nowhere', () => {
-    assert.deepEqual(on(['Dockerfile', '.gitignore']), [])
+describe('propagation ordering', () => {
+  test('propagation runs in order — full, then sdk, then connect', () => {
+    // sdk's fan-out reads flags full may have set, and connect's reads flags
+    // sdk may have set. Reordering these silently under-routes. This is
+    // structure, not a routing rule, so it stays here rather than in the matrix.
+    assert.deepEqual(
+      PROPAGATION_RULES.map((r) => r.when.join('|')),
+      ['full', 'sdk', 'mcp|signer'],
+    )
   })
 })
 
@@ -504,11 +375,6 @@ describe('the git-derived path ci.yml actually runs', () => {
     }
   })
 })
-
-/** All ten output names, sorted — the shape `on()` returns when everything is true. */
-function allTrue() {
-  return [...OUTPUT_NAMES].sort()
-}
 
 /** Run the classifier CLI in a clean env; returns its stdout. */
 function runCli(args, env, stdin = '', cwd = undefined) {

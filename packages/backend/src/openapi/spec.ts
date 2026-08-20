@@ -464,6 +464,52 @@ const invoiceVerification = {
   },
 } as const
 
+
+// ── Session building blocks (#1446) ──────────────────────────────────────────
+
+/**
+ * A Safe as the session payloads carry it. sessionSafePayload STRIPS
+ * owner_address and passkey_count — the raw signer inputs — and replaces them
+ * with the two derived answers the UI actually needs.
+ */
+const sessionSafe = {
+  type: 'object',
+  required: [
+    'id', 'safe_address', 'chain_id', 'name', 'is_default', 'created_at',
+    'account_type', 'value_bearing_chain', 'needs_backup_recommendation',
+  ],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    safe_address: address,
+    chain_id: { type: 'integer' },
+    name: { type: 'string' },
+    is_default: { type: 'boolean' },
+    created_at: { type: 'string', format: 'date-time' },
+    account_type: { type: ['string', 'null'] },
+    value_bearing_chain: { type: 'boolean', description: 'Derived from the chain — is real value at stake here.' },
+    needs_backup_recommendation: {
+      type: ['boolean', 'null'],
+      description:
+        'Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account.',
+    },
+  },
+} as const
+
+/** The user object every session response carries. */
+const sessionUser = {
+  type: 'object',
+  required: ['id', 'name', 'email', 'wallet_address', 'safe_address', 'currency_preference', 'safes'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    name: { type: ['string', 'null'] },
+    email: { type: 'string' },
+    wallet_address: { type: ['string', 'null'] },
+    safe_address: { type: ['string', 'null'] },
+    currency_preference: { type: 'string' },
+    safes: { type: 'array', items: sessionSafe },
+  },
+} as const
+
 const errorResponse = {
   description: 'Error response',
   content: {
@@ -3455,6 +3501,208 @@ export const openapiSpec = {
           '401': errorResponse,
           '404': { ...errorResponse, description: "Not found, not the caller's, or not in an approved state." },
           '409': { ...errorResponse, description: 'It stopped being approved between the read and the write.' },
+        },
+      },
+    },
+    // ── Session + passkeys (#1446) ──────────────────────────────────────────
+    // CREDENTIAL BOUNDARY: no response here returns a password, a hash, or a
+    // passkey's private material. The passkey routes echo an id, the derived
+    // signer address and the chain — never the public-key coordinates they
+    // were derived from, and never the stored attestation.
+    '/auth/signup': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'signup',
+        summary: 'Create an account and return a session token.',
+        description:
+          "The email is NORMALISED before the uniqueness check, deliberately: an exact match on the raw input would let `ADA@Example.com` register alongside a stored `ada@example.com`, giving one person two accounts and two treasuries. Password bounds are 8-128 characters. The returned user is a fixed new-account shape — no wallet, no Safe, USD, an empty safes list — because none of those exist yet.",
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name', 'email', 'password'],
+                properties: {
+                  name: { type: 'string', minLength: 1, maxLength: 80, description: 'Trimmed; control characters are rejected.' },
+                  email: { type: 'string', maxLength: 255 },
+                  password: { type: 'string', minLength: 8, maxLength: 128 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Account created; the token is valid for 7 days.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['token', 'user'],
+                  properties: { token: { type: 'string' }, user: sessionUser },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '409': { ...errorResponse, description: 'An account with this email already exists.' },
+        },
+      },
+    },
+    '/auth/login': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'login',
+        summary: 'Exchange credentials for a session token.',
+        description:
+          "**An unknown email and a wrong password return the SAME 401**, deliberately: distinguishing them would turn this endpoint into an account-enumeration oracle, letting anyone discover which addresses have Haven accounts. Do not make the error message more helpful. Note the honest limit of that protection today: it holds for the STATUS and BODY, but not for timing — the password comparison runs only when an account exists, so response latency still distinguishes the two cases (#1646). The token is valid for 7 days, and the response carries the user's Safes so a client needs no second call to render a session.",
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['email', 'password'],
+                properties: { email: { type: 'string' }, password: { type: 'string' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Session established.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['token', 'user'],
+                  properties: { token: { type: 'string' }, user: sessionUser },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': { ...errorResponse, description: 'Invalid email or password — one answer for both, on purpose.' },
+        },
+      },
+    },
+    '/auth/me': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getSession',
+        summary: 'Read the authenticated session: profile plus Safes.',
+        description:
+          'Both reads are scoped to the JWT subject, never to a client-supplied id. Returns the FULL profile row (including created_at, unlike the login and signup user object) plus the same Safe list. A 404 here means the account was deleted while a valid token for it was still in flight.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The session.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'name', 'email', 'wallet_address', 'safe_address', 'currency_preference', 'created_at', 'safes'],
+                  properties: {
+                    ...userProfile.properties,
+                    safes: { type: 'array', items: sessionSafe },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The account no longer exists.' },
+        },
+      },
+    },
+    '/passkeys': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'registerPasskey',
+        summary: 'Enroll a passkey signer for the caller.',
+        description:
+          "Derives the Safe passkey-signer address from the P256 public key and records it. **A second passkey on the same chain is allowed and is the point** (#1229): it is a BACKUP SIGNER, and this rail's only recovery — refusing it used to lock out exactly the users who most needed protection. Only a duplicate credential_id is refused. HONEST LIMITATION: the attestation object is persisted for future verification but is NOT cryptographically verified yet, so a bad enrollment harms only the enrolling user. The response is NARROWER than the list read below — an id, the credential, the derived signer address and the chain, never the public-key coordinates or the stored attestation.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['credential_id', 'public_key_x', 'public_key_y', 'chain_id'],
+                properties: {
+                  credential_id: { type: 'string', description: 'Non-empty base64url.' },
+                  public_key_x: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: '32-byte 0x-hex.' },
+                  public_key_y: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: '32-byte 0x-hex.' },
+                  chain_id: { type: 'integer' },
+                  raw_attestation_object: { type: 'string', description: 'Optional base64url attestation. Stored, not yet verified.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Passkey enrolled.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'credential_id', 'signer_address', 'chain_id'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    credential_id: { type: 'string' },
+                    signer_address: { type: 'string', description: 'Derived from the public key; stored lowercase.' },
+                    chain_id: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '409': { ...errorResponse, description: 'This credential is already registered. Note: a SECOND passkey on the same chain is NOT a conflict.' },
+        },
+      },
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listPasskeys',
+        summary: "List the caller's enrolled passkeys.",
+        description: 'Wider than the create response: it also carries the bound Safe address and the enrollment time. Still no key material.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Enrolled passkeys.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['passkeys'],
+                  properties: {
+                    passkeys: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['id', 'credential_id', 'signer_address', 'chain_id', 'safe_address', 'created_at'],
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          credential_id: { type: 'string' },
+                          signer_address: { type: 'string' },
+                          chain_id: { type: 'integer' },
+                          safe_address: { type: ['string', 'null'], description: 'Null until the passkey is bound to a Safe.' },
+                          created_at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
         },
       },
     },

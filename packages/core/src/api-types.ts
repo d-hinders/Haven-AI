@@ -1313,6 +1313,90 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/auth/signup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create an account and return a session token.
+         * @description The email is NORMALISED before the uniqueness check, deliberately: an exact match on the raw input would let `ADA@Example.com` register alongside a stored `ada@example.com`, giving one person two accounts and two treasuries. Password bounds are 8-128 characters. The returned user is a fixed new-account shape — no wallet, no Safe, USD, an empty safes list — because none of those exist yet.
+         */
+        post: operations["signup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange credentials for a session token.
+         * @description **An unknown email and a wrong password return the SAME 401**, deliberately: distinguishing them would turn this endpoint into an account-enumeration oracle, letting anyone discover which addresses have Haven accounts. Do not make the error message more helpful. Note the honest limit of that protection today: it holds for the STATUS and BODY, but not for timing — the password comparison runs only when an account exists, so response latency still distinguishes the two cases (#1646). The token is valid for 7 days, and the response carries the user's Safes so a client needs no second call to render a session.
+         */
+        post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the authenticated session: profile plus Safes.
+         * @description Both reads are scoped to the JWT subject, never to a client-supplied id. Returns the FULL profile row (including created_at, unlike the login and signup user object) plus the same Safe list. A 404 here means the account was deleted while a valid token for it was still in flight.
+         */
+        get: operations["getSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/passkeys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the caller's enrolled passkeys.
+         * @description Wider than the create response: it also carries the bound Safe address and the enrollment time. Still no key material.
+         */
+        get: operations["listPasskeys"];
+        put?: never;
+        /**
+         * Enroll a passkey signer for the caller.
+         * @description Derives the Safe passkey-signer address from the P256 public key and records it. **A second passkey on the same chain is allowed and is the point** (#1229): it is a BACKUP SIGNER, and this rail's only recovery — refusing it used to lock out exactly the users who most needed protection. Only a duplicate credential_id is refused. HONEST LIMITATION: the attestation object is persisted for future verification but is NOT cryptographically verified yet, so a bad enrollment harms only the enrolling user. The response is NARROWER than the list read below — an id, the credential, the derived signer address and the chain, never the public-key coordinates or the stored attestation.
+         */
+        post: operations["registerPasskey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-connection-setups": {
         parameters: {
             query?: never;
@@ -9418,6 +9502,385 @@ export interface operations {
                 };
             };
             /** @description It stopped being approved between the read and the write. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    signup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Trimmed; control characters are rejected. */
+                    name: string;
+                    email: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Account created; the token is valid for 7 days. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        token: string;
+                        user: {
+                            /** Format: uuid */
+                            id: string;
+                            name: string | null;
+                            email: string;
+                            wallet_address: string | null;
+                            safe_address: string | null;
+                            currency_preference: string;
+                            safes: {
+                                /** Format: uuid */
+                                id: string;
+                                /** @example 0x1111111111111111111111111111111111111111 */
+                                safe_address: string;
+                                chain_id: number;
+                                name: string;
+                                is_default: boolean;
+                                /** Format: date-time */
+                                created_at: string;
+                                account_type: string | null;
+                                /** @description Derived from the chain — is real value at stake here. */
+                                value_bearing_chain: boolean;
+                                /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
+                                needs_backup_recommendation: boolean | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description An account with this email already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Session established. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        token: string;
+                        user: {
+                            /** Format: uuid */
+                            id: string;
+                            name: string | null;
+                            email: string;
+                            wallet_address: string | null;
+                            safe_address: string | null;
+                            currency_preference: string;
+                            safes: {
+                                /** Format: uuid */
+                                id: string;
+                                /** @example 0x1111111111111111111111111111111111111111 */
+                                safe_address: string;
+                                chain_id: number;
+                                name: string;
+                                is_default: boolean;
+                                /** Format: date-time */
+                                created_at: string;
+                                account_type: string | null;
+                                /** @description Derived from the chain — is real value at stake here. */
+                                value_bearing_chain: boolean;
+                                /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
+                                needs_backup_recommendation: boolean | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Invalid email or password — one answer for both, on purpose. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The session. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        name: string | null;
+                        email: string;
+                        wallet_address: string | null;
+                        safe_address: string | null;
+                        currency_preference: string | null;
+                        /** Format: date-time */
+                        created_at: string;
+                        safes: {
+                            /** Format: uuid */
+                            id: string;
+                            /** @example 0x1111111111111111111111111111111111111111 */
+                            safe_address: string;
+                            chain_id: number;
+                            name: string;
+                            is_default: boolean;
+                            /** Format: date-time */
+                            created_at: string;
+                            account_type: string | null;
+                            /** @description Derived from the chain — is real value at stake here. */
+                            value_bearing_chain: boolean;
+                            /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
+                            needs_backup_recommendation: boolean | null;
+                        }[];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The account no longer exists. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listPasskeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enrolled passkeys. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        passkeys: {
+                            /** Format: uuid */
+                            id: string;
+                            credential_id: string;
+                            signer_address: string;
+                            chain_id: number;
+                            /** @description Null until the passkey is bound to a Safe. */
+                            safe_address: string | null;
+                            /** Format: date-time */
+                            created_at: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    registerPasskey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Non-empty base64url. */
+                    credential_id: string;
+                    /** @description 32-byte 0x-hex. */
+                    public_key_x: string;
+                    /** @description 32-byte 0x-hex. */
+                    public_key_y: string;
+                    chain_id: number;
+                    /** @description Optional base64url attestation. Stored, not yet verified. */
+                    raw_attestation_object?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Passkey enrolled. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        credential_id: string;
+                        /** @description Derived from the public key; stored lowercase. */
+                        signer_address: string;
+                        chain_id: number;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description This credential is already registered. Note: a SECOND passkey on the same chain is NOT a conflict. */
             409: {
                 headers: {
                     [name: string]: unknown;

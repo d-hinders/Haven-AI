@@ -374,7 +374,11 @@ export const openapiSpec = {
     { name: 'Agents' },
     { name: 'Connect Agent 2' },
     { name: 'Payments' },
-    { name: 'x402' },
+    {
+      name: 'x402',
+      description:
+        'Agent-side x402 payment authorization, plus an EXPLORATORY merchant-side surface (resource registration, public verification, receipts). The merchant-side routes are not production facilitator functionality and must not be exposed or expanded without legal/product review — see docs/regulatory/casp-risk-guardrails.md.',
+    },
     { name: 'Machine payments' },
     { name: 'Transactions' },
     { name: 'Delegations' },

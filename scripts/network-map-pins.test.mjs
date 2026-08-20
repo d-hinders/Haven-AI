@@ -76,8 +76,10 @@ const backend = bareAliasesFromConditionals(
   read('packages/backend/src/modules/x402/helpers.ts'),
   'function chainIdFromX402Network',
 )
+// #1618 moved this map out of client.ts into the scheme-neutral x402
+// protocol module. The pin follows the map, not the file it used to sit in.
 const sdkClient = bareAliasesFromConditionals(
-  read('packages/sdk/src/client.ts'),
+  read('packages/sdk/src/x402-protocol.ts'),
   'function chainIdFromNetwork',
 )
 const signer = bareAliasesFromConditionals(

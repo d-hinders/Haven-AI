@@ -15,6 +15,7 @@ covers:
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402-protocol.ts
   - packages/sdk/src/x402-funding-leg.ts
+  - packages/sdk/src/x402-erc7710.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
@@ -76,6 +77,12 @@ Source of truth:
   key, and the authorization-keyed receipt cache. The erc7710 direct-settlement
   path has no funding leg and must not import this module; a test enforces that
   the protocol layer never does either.
+- [`packages/sdk/src/x402-erc7710.ts`](../../packages/sdk/src/x402-erc7710.ts) —
+  the direct-settlement lifecycle (#1619): scheme and rail selection, the
+  authorize/settle halves the hosted topology drives with the local signer in
+  between, and the refusals that keep it from ever silently rerouting to the
+  3009 path. It asks no chain anything, because on this path there is no
+  funding transaction to confirm and no delegate balance to check.
 - [`packages/sdk/src/mcp-merchant-transport.ts`](../../packages/sdk/src/mcp-merchant-transport.ts) — bounded paid MCP/merchant HTTP delivery, sessions, and SSE framing.
 - [`packages/sdk/src/payment-state.ts`](../../packages/sdk/src/payment-state.ts) — shared payment-state/status-error normalization.
 - [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts) — request

@@ -36,7 +36,6 @@ import type {
   ResumeX402PaymentInput,
   RawX402AuthorizeResponse,
   X402Erc7710Settlement,
-  RawX402SettleResponse,
   HavenAgent,
   HavenAgentSummary,
   HavenAgentAllowanceSummary,
@@ -63,7 +62,6 @@ import {
   parsePaymentRequiredResponse,
   resolveTokenFromAddress,
   selectStandardPaymentOption,
-  selectX402SettlementScheme,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
 } from './x402.js'
@@ -106,6 +104,7 @@ import {
   x402PayerAddress,
 } from './x402-protocol.js'
 import { X402FundingLeg } from './x402-funding-leg.js'
+import { X402Erc7710 } from './x402-erc7710.js'
 
 const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
@@ -175,6 +174,11 @@ export class HavenClient {
    * and delegates; it does not reimplement any of it.
    */
   private readonly fundingLeg: X402FundingLeg
+  /**
+   * The erc7710 direct-settlement lifecycle (#1619). Separate from the funding
+   * leg on purpose: this scheme has no funding leg to share.
+   */
+  private readonly erc7710: X402Erc7710
   /** Delegate address derived from the private key (if provided) */
   readonly delegateAddress: string | undefined
 
@@ -211,6 +215,12 @@ export class HavenClient {
       signForData: (signData) => this.signForData(signData),
       assertSignableAuthorizationState: (label, raw) =>
         this.throwIfNonSignableAuthorizationState(label, raw),
+    })
+    this.erc7710 = new X402Erc7710({
+      delegateKey: this.delegateKey,
+      post: (path, body) => this.post(path, body),
+      signForData: (signData) => this.signForData(signData),
+      getAgent: () => this.getAgent(),
     })
   }
 
@@ -903,45 +913,19 @@ export class HavenClient {
   /**
    * Pay a merchant through **erc7710 direct settlement** (#1454, epic #1450).
    *
-   * The whole point of this path is what it does NOT do. There is no funding
-   * leg: the merchant redeems a delegation chain and pulls from the treasury
-   * directly, so the delegate EOA never holds the money, no sweep can strand
-   * it, and the #713 reconciliation class does not apply. It is also why this
-   * method is SMALLER than the 3009 path — the backend assembles the merchant
-   * `X-PAYMENT` header in `assembleSettlementPayload`, so the SDK builds no
-   * header locally.
+   * **Nothing has settled when this returns** — that is why it does not return
+   * an `X402Receipt`; the caller still has to retry the merchant with the
+   * header. **MCP callers must pass `options.resourceUrl`**, because an in-band
+   * MCP 402 challenge frequently carries no `resource` object at all.
    *
-   *     authorize (payTo = the MERCHANT) → sign the child → settle → header
-   *
-   * The caller then retries the merchant with that header. **Nothing has
-   * settled when this returns** — that is why it does not return an
-   * `X402Receipt`.
-   *
-   * Requires a delegation-rail account. The backend enforces that
-   * (`validateGenericSchemeRail`), and so does this method, before building a
-   * request the backend would only reject: an error a client can explain is
-   * worth more than a 400 it has to decode.
-   *
-   * **MCP callers must pass `options.resourceUrl`.** An in-band MCP 402
-   * challenge frequently carries no `resource` object at all, so
-   * `paymentRequired.resource?.url` is undefined and the backend answers
-   * "Valid url is required". The QA scenario this path was ported from falls
-   * back to the request URL for exactly that reason — the SDK cannot, because
-   * it never saw the request. Pass it.
+   * Both caveats, and why this scheme has no funding leg, are explained where
+   * the lifecycle lives: `x402-erc7710.ts` (#1619).
    */
   async settleX402Erc7710(
     paymentRequired: X402PaymentRequired,
     options: { resourceUrl?: string } = {},
   ): Promise<X402Erc7710Settlement> {
-    if (!this.delegateKey) {
-      throw new HavenSigningError(
-        'delegateKey is required for x402 payments. Pass it in the HavenClient config.',
-      )
-    }
-    const prepared = await this.prepareX402Erc7710(paymentRequired, options)
-    const signature = await this.signForData(prepared.signData)
-    const paymentHeader = await this.submitX402Erc7710(prepared.paymentId, signature)
-    return { ...prepared.settlement, paymentHeader }
+    return this.erc7710.settle(paymentRequired, options)
   }
 
   /**
@@ -950,32 +934,23 @@ export class HavenClient {
    *
    * Split out because the hosted topology cannot use `settleX402Erc7710()`:
    * that method signs in-process with `delegateKey`, and hosted Haven does not
-   * have one and must not. The hosted MCP server drives these two halves with
-   * the LOCAL signer in between, so the key stays where it belongs and the
-   * request shaping stays in one place rather than being reimplemented.
+   * have one and must not.
    */
   async prepareX402Erc7710(
     paymentRequired: X402PaymentRequired,
     options: {
       resourceUrl?: string
       /**
-       * The account's rail, when the caller has ALREADY read it from
-       * `GET /machine-payments/agent` — passing it skips a duplicate fetch
-       * (#1456: the hosted tool reads the agent for the delegate address
-       * anyway, and #1348 pins that path to exactly one agent round-trip).
-       *
-       * This is an optimisation, not a trust boundary: omit it and the rail is
-       * read here, and either way the backend independently refuses erc7710
-       * from a non-delegation account (`validateGenericSchemeRail`). A caller
-       * that asserted the wrong rail would build a request the backend rejects.
+       * The account's rail, when the caller has ALREADY read it — passing it
+       * skips a duplicate fetch (#1456). An optimisation, not a trust
+       * boundary: the backend independently refuses erc7710 from a
+       * non-delegation account (`validateGenericSchemeRail`).
        */
       delegationRail?: boolean
       /**
        * #1547: the merchant MCP-tool call this authorization was quoted
        * against, persisted so the settle leg can rehydrate it by payment_id
-       * (#1307) — the same option `createX402Intent` already carries. Without
-       * it an erc7710 settle needs merchant_url/tool_name/arguments
-       * re-threaded, which the guided catalog path (#1305) exists to remove.
+       * (#1307).
        */
       mcpCallContext?: X402McpCallContext
     } = {},
@@ -984,122 +959,18 @@ export class HavenClient {
     signData: SignData
     settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>
   }> {
-
-    // The rail half of the #1450 preference rule is not visible in a 402
-    // response — it is a property of the ACCOUNT, so read it rather than let a
-    // caller assert it. #1453's selector takes it as input for exactly this
-    // reason, and this is the one place that input is sourced from truth.
-    const delegationRail =
-      options.delegationRail ?? (await this.getAgent()).executionRail === 'delegation'
-
-    // Rail first, and BEFORE selection — the two failures have different
-    // remedies and the caller needs the one that applies. Checking selection
-    // first made a legacy-rail agent at an erc7710-only merchant get "no
-    // compatible payment option", which is true and useless: the option is
-    // there, the account cannot use it. (Found by this method's own tests.)
-    if (!delegationRail) {
-      throw new HavenApiError(
-        'erc7710 settlement requires a delegation-rail account; this one is not on it. ' +
-          'Use authorizeX402() for the standard EIP-3009 path.',
-        400,
-      )
-    }
-
-    const selection = selectX402SettlementScheme(paymentRequired.accepts, { delegationRail })
-
-    if (!selection || selection.scheme !== 'erc7710') {
-      // Never silently reroute to the other scheme (#1454 AC). On a delegation
-      // rail the only remaining reason is the merchant, so name that.
-      throw new HavenApiError(
-        'This merchant does not advertise an erc7710 settlement option ' +
-          "(no accepts[] entry carries extra.assetTransferMethod: 'erc7710'). " +
-          'Use authorizeX402() for the standard EIP-3009 path.',
-        400,
-      )
-    }
-
-    const option = selection.option
-    const merchantPayTo = option.payTo
-    const amountAtomic = x402AuthorizationAmount(option)
-
-    const raw = await this.post<RawX402AuthorizeResponse>('/x402', {
-      url: options.resourceUrl ?? paymentRequired.resource?.url,
-      // payTo = the MERCHANT is what selects direct settlement server-side.
-      // The explicit settlementScheme must AGREE with that shape (#1360) —
-      // disagreement is a 400 by design, so that a stale delegate address
-      // becomes a loud mismatch instead of a silent reroute to the 3009 leg.
-      payTo: merchantPayTo,
-      settlementScheme: 'erc7710',
-      amount: amountAtomic,
-      asset: option.asset,
-      network: option.network,
-      // The v2 header echoes the accepted entry field-for-field, so the quoted
-      // timeout must round-trip or the merchant rejects the echo (#1064).
-      maxTimeoutSeconds: option.maxTimeoutSeconds,
-      // #1058: forward the advertised facilitators verbatim — the child becomes
-      // redeemable ONLY by them. `null` here means the merchant advertised none
-      // (or an empty array, which the backend 400s on), so the field is OMITTED
-      // rather than sent empty. See x402FacilitatorAddresses.
-      ...(selection.facilitatorAddresses
-        ? { facilitatorAddresses: selection.facilitatorAddresses }
-        : {}),
-      // #1307/#1547: persisted so the settle leg can rehydrate the merchant
-      // call by payment_id on this scheme too, not only on the 3009 bridge.
-      ...(options.mcpCallContext ? { mcpCallContext: options.mcpCallContext } : {}),
-    })
-
-    if (!raw.payment_id) {
-      throw new HavenApiError('No payment_id returned from x402/authorize', 500, raw)
-    }
-    const signData = raw.sign_data
-    if (signData?.signature_scheme !== 'eip712_delegation' || !signData.typed_data) {
-      // The backend chose a different scheme than the shape asked for. Refuse
-      // loudly: signing whatever came back would be exactly the "silent
-      // reroute" this path exists to make impossible.
-      throw new HavenApiError(
-        'x402/authorize did not return an erc7710 settlement child ' +
-          `(signature_scheme was ${JSON.stringify(signData?.signature_scheme)}). ` +
-          'Refusing to sign a payload this path did not ask for.',
-        500,
-        raw,
-      )
-    }
-
-    return {
-      paymentId: raw.payment_id,
-      signData,
-      settlement: {
-        paymentId: raw.payment_id,
-        merchantPayTo,
-        amountAtomic,
-        asset: option.asset,
-        network: option.network,
-        facilitatorAddresses: selection.facilitatorAddresses,
-      },
-    }
+    return this.erc7710.prepare(paymentRequired, options)
   }
 
   /**
    * The SETTLE half (#1456): exchange the signed child for the merchant header.
    *
    * The SDK builds no header on this path — the backend assembles the MetaMask
-   * erc7710 payload in `assembleSettlementPayload`. Whoever produced the
-   * signature (an in-process delegate key, or the local edge signer over the
-   * hosted boundary) is irrelevant here.
+   * erc7710 payload. Whoever produced the signature (an in-process delegate
+   * key, or the local edge signer over the hosted boundary) is irrelevant.
    */
   async submitX402Erc7710(paymentId: string, signature: string): Promise<string> {
-    const settled = await this.post<RawX402SettleResponse>(
-      `/x402/${paymentId}/settle`,
-      { signature },
-    )
-    if (!settled.payment_header) {
-      throw new HavenApiError(
-        'x402 settle returned no payment_header — the merchant cannot be retried.',
-        500,
-        settled,
-      )
-    }
-    return settled.payment_header
+    return this.erc7710.submit(paymentId, signature)
   }
 
   async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt> {

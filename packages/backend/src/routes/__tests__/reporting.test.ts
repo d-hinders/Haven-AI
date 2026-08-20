@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 
@@ -120,7 +121,20 @@ describe('reporting routes', () => {
       entitlementMocks.reportingFeedAvailable.mockResolvedValue(true)
       connectorMocks.hasLiveConnector.mockReturnValue(true)
       fortnoxMocks.getFortnoxConnection.mockResolvedValue({ user_id: USER })
-      const syncs = [{ payment_id: 'pi-1', status: 'pushed' }]
+      // A whole FeedSyncRow, as listSyncs really returns one (#1446) — a
+      // partial fixture describes a response the table cannot produce.
+      const syncs = [{
+        id: 'e4a9c1b7-2f38-4d05-9a61-8c7e3b0f5d42',
+        user_id: '9d3e6a12-5c47-4b80-a1f9-2e7d4c8b0356',
+        provider: 'fortnox',
+        payment_id: 'pi-1',
+        external_ref: '13',
+        status: 'pushed',
+        error: null,
+        attempts: 1,
+        created_at: '2026-08-13T09:00:00.000Z',
+        updated_at: '2026-08-13T09:00:05.000Z',
+      }]
       orchestratorMocks.getReportingStatus.mockResolvedValue(syncs)
 
       const res = await authed('GET', '/accounting/reporting/status')
@@ -135,6 +149,7 @@ describe('reporting routes', () => {
         syncs,
       })
       expect(orchestratorMocks.getReportingStatus).toHaveBeenCalledWith(USER)
+      expectMatchesSpec('GET', '/accounting/reporting/status', res.json())
     })
 
     it('reports connected:false when entitled but Fortnox is not connected', async () => {
@@ -160,7 +175,7 @@ describe('reporting routes', () => {
       fortnoxMocks.verifyFortnoxInvoice.mockResolvedValue({
         ok: true,
         verification: {
-          registered: true, booked: false, cancelled: false,
+          registered: true, missing: null, booked: false, cancelled: false,
           invoice_number: 11, voucher: null, invoice_date: '2026-08-12',
           total: 10.42, checked_at: '2026-08-12T14:00:00.000Z',
         },
@@ -169,6 +184,7 @@ describe('reporting routes', () => {
       expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ registered: true, booked: false, invoice_number: 11 })
       expect(fortnoxMocks.verifyFortnoxInvoice).toHaveBeenCalledWith(USER, 'pay-1')
+      expectMatchesSpec('GET', '/accounting/reporting/verify/{paymentId}', res.json())
     })
 
     it('maps refusals to an actionable 409 with the error code', async () => {
@@ -209,6 +225,7 @@ describe('reporting routes', () => {
       expect(fortnoxMocks.reopenMissingPushed).toHaveBeenCalledWith(
         USER, 'fortnox', 'pay-1', expect.stringMatching(/no longer exists/),
       )
+      expectMatchesSpec('POST', '/accounting/reporting/reopen/{paymentId}', res.json())
     })
 
     it('a company-switch collision reopens with an HONEST reason — never "no longer exists" (#1376 review)', async () => {
@@ -279,6 +296,7 @@ describe('reporting routes', () => {
       // extra invocation of its own.
       expect(orchestratorMocks.syncUser).toHaveBeenCalledTimes(1)
       expect(orchestratorMocks.syncUser).toHaveBeenCalledWith(USER)
+      expectMatchesSpec('POST', '/accounting/reporting/sync', res.json())
     })
   })
 })

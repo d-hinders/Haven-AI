@@ -825,6 +825,154 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/accounting/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Legacy SIE export — GATED OFF by default.
+         * @description Superseded by the non-asserting reporting feed (#491): agent spend now syncs into the accounting tool as draft transactions instead of being exported as an asserting SIE file. **410 is the normal answer on a default deployment**; the route only serves when the legacy flag is on. Responds with a FILE, not JSON — Content-Disposition attachment, plus the custom headers X-Export-Entry-Count and X-Export-Skipped reporting how many entries were written and how many could not be.
+         */
+        get: operations["exportAccounting"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Surface the entries that cannot book cleanly over a period.
+         * @description Read-only diagnosis, never a fix: it classifies each entry and counts the classes, so a user can see WHY a period will not balance before trying to book it. Note the camelCase byStatus/paymentId/txHash/settledAt fields — this report comes from the accounting module, not from SQL rows.
+         */
+        get: operations["reconcileAccounting"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's per-merchant BAS account overrides.
+         * @description NOTE THE CASING: this read returns the SQL rows as-is (resource_url/bas_account, snake_case), while the write below echoes its own request fields (resourceUrl/account, camelCase). Same path, two conventions — documented rather than normalised, because a generated client must match what the routes actually emit.
+         */
+        get: operations["listAccountOverrides"];
+        /**
+         * Map a merchant to a BAS account.
+         * @description Idempotent upsert keyed on (user, resourceUrl). A category is a bookkeeping label — it changes no payment and moves nothing. The response echoes the request fields in camelCase, unlike the snake_case read above.
+         */
+        put: operations["setAccountOverride"];
+        post?: never;
+        /**
+         * Clear a merchant's BAS account override.
+         * @description Answers **204 No Content**, not a success envelope. Idempotent: clearing an override that was never set still succeeds.
+         */
+        delete: operations["clearAccountOverride"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/reporting/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether the reporting feed is available, connected, and live — plus recent syncs.
+         * @description Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error.
+         */
+        get: operations["getReportingStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/reporting/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backfill and retry the feed for the caller.
+         * @description Pushes what has not been pushed and retries what failed. Gated: **404 when the feed is unavailable**, which is how an unentitled caller sees it. Returns how many rows were fed — 0 is a normal answer, not a failure.
+         */
+        post: operations["syncReportingFeed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/reporting/verify/{paymentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read back a pushed invoice from the provider's own records.
+         * @description Strictly read-only (#1362): it confirms whether the supplier invoice still exists and whether a human has booked it, and asserts nothing — the non-asserting principle is untouched. A payment that was never pushed, a disconnected provider, or a sync row with no invoice reference all answer 409 with a machine-readable error_code, because none of them is a verification result.
+         */
+        get: operations["verifyReportingInvoice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/reporting/reopen/{paymentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen a pushed row for retry — only when the provider confirms the invoice is gone.
+         * @description The ONLY path that flips a pushed row back to retryable, and it is conditional on the PROVIDER, not on the caller's say-so (#1365): the server re-runs the read-back and reopens only when the invoice is confirmed gone, or when a number collision proves the invoice at that number is not ours. **An invoice that still exists refuses with 409 and writes nothing** — that is the double-post guard, and reopening against a live invoice would duplicate it. A row that moved between the check and the flip (raced by a concurrent sync) also refuses rather than pretending. After a successful reopen, the next sync re-claims and re-pushes through the normal retry path.
+         */
+        post: operations["reopenReportingPush"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-connection-setups": {
         parameters: {
             query?: never;
@@ -6871,6 +7019,584 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    exportAccounting: {
+        parameters: {
+            query?: {
+                /** @description Defaults to 'sie'; anything else is a 400. */
+                format?: "sie";
+                /** @description ISO date (YYYY-MM-DD…). */
+                from?: string;
+                /** @description ISO date (YYYY-MM-DD…). */
+                to?: string;
+                /** @description Company name in the file header; defaults to 'Haven'. */
+                company?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The SIE file. */
+            200: {
+                headers: {
+                    /** @description Entries written. */
+                    "X-Export-Entry-Count"?: string;
+                    /** @description Entries that could not be written. */
+                    "X-Export-Skipped"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The default: SIE export is retired in favour of the reporting feed. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    reconcileAccounting: {
+        parameters: {
+            query?: {
+                /** @description ISO date. */
+                from?: string;
+                /** @description ISO date. */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reconciliation report. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        total: number;
+                        ok: number;
+                        issues: number;
+                        byStatus: {
+                            ok: number;
+                            /** @description No SEK amount — the FX rate was unavailable. */
+                            missing_fx: number;
+                            /** @description No transaction hash to anchor the entry. */
+                            missing_tx: number;
+                            /** @description Debits and credits disagree. */
+                            unbalanced: number;
+                        };
+                        /** @description ONLY the entries that need attention — an entry classified ok is counted in byStatus but never listed here, so items.length is issues, not total. */
+                        items: {
+                            paymentId: string;
+                            txHash: string;
+                            settledAt: string;
+                            /** @enum {string} */
+                            status: "ok" | "missing_fx" | "missing_tx" | "unbalanced";
+                        }[];
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listAccountOverrides: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Overrides ordered by resource_url. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        overrides: {
+                            resource_url: string;
+                            bas_account: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    setAccountOverride: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    resourceUrl: string;
+                    /** @description A BAS account number. */
+                    account: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The stored override, echoed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        resourceUrl: string;
+                        account: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    clearAccountOverride: {
+        parameters: {
+            query: {
+                resourceUrl: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Override cleared (or was never set). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getReportingStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Feed status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        hosted: boolean;
+                        flagEnabled: boolean;
+                        /** @description A real provider adapter is registered. */
+                        liveSyncReady: boolean;
+                        /** @description The caller is entitled to the feed. */
+                        available: boolean;
+                        /** @description The caller has a live provider connection. */
+                        connected: boolean;
+                        syncs: {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            user_id: string;
+                            /** @example fortnox */
+                            provider: string;
+                            payment_id: string;
+                            /** @description The provider-side reference once pushed. */
+                            external_ref: string | null;
+                            /** @enum {string} */
+                            status: "pending" | "pushed" | "failed" | "skipped";
+                            error: string | null;
+                            attempts: number;
+                            /** Format: date-time */
+                            created_at: string;
+                            /** Format: date-time */
+                            updated_at: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    syncReportingFeed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rows fed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        fed: number;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The reporting feed is not available for this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    verifyReportingInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Haven payment id. */
+                paymentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The provider's verdict. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The invoice exists in Fortnox under our external_ref. */
+                        registered: boolean;
+                        /**
+                         * @description Why registered is false. 'deleted' = the number 404s; 'foreign_invoice' = an invoice exists at that number but carries someone else's ExternalInvoiceNumber (a company-switch collision). Null when registered. Both mean OUR record was never delivered under our ref — but an audit trail must not say 'no longer exists' about an invoice that does.
+                         * @enum {string|null}
+                         */
+                        missing: "deleted" | "foreign_invoice" | null;
+                        /** @description A human has booked it. Null when not registered. */
+                        booked: boolean | null;
+                        /** @description Registered but struck. Null when not registered. */
+                        cancelled: boolean | null;
+                        invoice_number: number;
+                        /** @description `<series><number> <year>` once booked, e.g. "A123 2026". Null until then. */
+                        voucher: string | null;
+                        invoice_date: string | null;
+                        total: number | null;
+                        /** Format: date-time */
+                        checked_at: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The reporting feed is not available for this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Not verifiable — not pushed, not connected, or no invoice reference. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "not_pushed" | "not_connected" | "no_invoice_ref";
+                        status?: string | null;
+                    };
+                };
+            };
+        };
+    };
+    reopenReportingPush: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Haven payment id. */
+                paymentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Row reopened for retry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        reopened: true;
+                        payment_id: string;
+                        next: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The reporting feed is not available for this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Refused, nothing written — the invoice still exists, the row is not pushed, or it moved under us. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "not_pushed" | "not_connected" | "no_invoice_ref" | "invoice_exists";
+                        invoice_number?: number;
                     };
                 };
             };

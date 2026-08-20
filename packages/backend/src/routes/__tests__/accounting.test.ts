@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 
@@ -102,6 +103,25 @@ describe('accounting routes — route-level invariants', () => {
     expect(buildAccountingEntries).not.toHaveBeenCalled()
   })
 
+  it('#1446: once enabled, the 200 carries the documented file headers', async () => {
+    // The documented 200 (file body + X-Export-* headers) had no test at all —
+    // the route was only covered at its auth and gate boundaries.
+    configMock.legacyBookkeepingEnabled = true
+    sieExport.mockReturnValueOnce({
+      content: '#FLAGGA 0\n',
+      mimeType: 'text/plain; charset=cp437',
+      filename: 'haven-2026.se',
+      entryCount: 4,
+      skipped: 1,
+    })
+    const res = await authed('GET', '/accounting/export')
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-disposition']).toContain('attachment; filename="haven-2026.se"')
+    expect(res.headers['x-export-entry-count']).toBe('4')
+    expect(res.headers['x-export-skipped']).toBe('1')
+    expect(res.body).toContain('#FLAGGA')
+  })
+
   it('GET /export rejects an unsupported format with 400 once enabled', async () => {
     configMock.legacyBookkeepingEnabled = true
     const res = await authed('GET', '/accounting/export?format=csv')
@@ -128,6 +148,32 @@ describe('accounting routes — route-level invariants', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual(EMPTY_REPORT)
     expect(buildAccountingEntries).toHaveBeenCalledWith({ userId: USER, from: '2026-01-01', to: '2026-03-31' })
+    expectMatchesSpec('GET', '/accounting/reconcile', res.json())
+  })
+
+  it('#1446: a report WITH issues matches the documented items shape', async () => {
+    // The empty-report fixture above never exercises `items`, so the documented
+    // item shape would have been unverified. reconcileEntries lists ONLY the
+    // entries that need attention — ok entries are counted, never listed.
+    reconcileEntries.mockReturnValueOnce({
+      total: 3,
+      ok: 2,
+      issues: 1,
+      byStatus: { ok: 2, missing_fx: 1, missing_tx: 0, unbalanced: 0 },
+      items: [
+        {
+          paymentId: 'pi-77',
+          txHash: '0x' + 'ab'.repeat(32),
+          settledAt: '2026-08-01T12:00:00.000Z',
+          status: 'missing_fx',
+        },
+      ],
+    })
+    const res = await authed('GET', '/accounting/reconcile')
+    expect(res.statusCode).toBe(200)
+    expect(res.json().items).toHaveLength(1)
+    expect(res.json().total).toBe(3)
+    expectMatchesSpec('GET', '/accounting/reconcile', res.json())
   })
 
   // --- GET /categories (user scoping) --------------------------------------
@@ -140,6 +186,9 @@ describe('accounting routes — route-level invariants', () => {
     // Scoped by the JWT subject — never a client-supplied id.
     const [, params] = mockQuery.mock.calls[0]
     expect(params).toEqual([USER])
+    // NOTE the casing difference this pins: the READ returns SQL rows
+    // (snake_case) while the write below echoes its request (camelCase).
+    expectMatchesSpec('GET', '/accounting/categories', res.json())
   })
 
   it('GET /categories scopes the query to the *calling* user, not a shared id', async () => {
@@ -176,6 +225,7 @@ describe('accounting routes — route-level invariants', () => {
     expect(res.json()).toEqual({ resourceUrl: 'https://api.x', account: '4000' })
     const [, params] = mockQuery.mock.calls[0]
     expect(params).toEqual([USER, 'https://api.x', '4000'])
+    expectMatchesSpec('PUT', '/accounting/categories', res.json())
   })
 
   // --- DELETE /categories --------------------------------------------------

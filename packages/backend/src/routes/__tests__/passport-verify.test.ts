@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify from 'fastify'
 import { Wallet, verifyMessage } from 'ethers'
 import passportVerifyRoutes from '../passport-verify.js'
@@ -98,6 +99,8 @@ describe('GET /passport/verify', () => {
       SIGNER.address.toLowerCase(),
     )
     expect(verifyReceipt(body, SIGNER.address).valid).toBe(true)
+    // #1446: the documented receipt shape, against a real signed payload.
+    expectMatchesSpec('GET', '/passport/verify', body)
   })
 
   it('resolves EITHER address to the same passport', async () => {
@@ -143,6 +146,8 @@ describe('GET /passport/verify', () => {
     expect(res.json()).toEqual({ found: false, reason: 'no_passport' })
     // And it must not be cached: "no passport today" can become one tomorrow.
     expect(res.headers['cache-control']).toBe('no-store')
+    // The other branch of the documented oneOf — a 200 that says no.
+    expectMatchesSpec('GET', '/passport/verify', res.json())
   })
 
   it('never resolves the ZERO address', async () => {
@@ -266,6 +271,7 @@ describe('GET /passport/issuer', () => {
     const res = await (await build()).inject({ url: '/passport/issuer' })
     expect(res.json().issuer.toLowerCase()).toBe(SIGNER.address.toLowerCase())
     expect(res.json().receipt_ttl_seconds).toBeGreaterThan(0)
+    expectMatchesSpec('GET', '/passport/issuer', res.json())
   })
 
   it('503s when verification is not configured', async () => {

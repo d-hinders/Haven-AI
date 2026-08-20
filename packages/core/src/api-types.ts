@@ -464,6 +464,70 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agents/{id}/passport": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read an agent's passport state and its authoritative standing.
+         * @description `passport: null` means the agent has none — the normal case for a basic agent, never an error (issuance is opt-in). The two fields answer different questions and are deliberately not collapsed into one badge: `standing` is the DATABASE's authoritative answer about the agent, while `passport.status`/the anchor describe how far the on-chain attestation has got. The chain lags; the database does not.
+         */
+        get: operations["getAgentPassport"];
+        put?: never;
+        /**
+         * Opt an existing agent in to a passport.
+         * @description Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.
+         */
+        post: operations["requestAgentPassport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/passport/issuer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PUBLIC: the issuer address a merchant pins to verify receipts offline.
+         * @description Published so pinning is a one-time setup step rather than something a merchant extracts from a receipt it has not yet verified — trusting the issuer field of an unverified artifact is circular. Rate-limited.
+         */
+        get: operations["getPassportIssuer"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/passport/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PUBLIC: fetch a signed governance receipt for an agent.
+         * @description Unauthenticated by design — the caller is a merchant deciding whether to serve an agent; it has no Haven account and cannot be asked to get one. That makes the disclosure boundary the only protection, so the receipt carries booleans and public on-chain addresses and nothing else: no budget, no balance, no owner, and no Safe/treasury identifier beyond the spend accounts a merchant already needs in order to recognise the payer (the delegate EOA on an EIP-3009 header, the smart account in erc7710 redemption). Query by EXACTLY ONE of `address` or `uid`; both or neither is a 400. **An agent with no passport is 200 with `found: false`, not a 404** — issuance is opt-in so most agents have none, and an error status invites integrations to treat a lookup failure as a pass. Only passports already public on-chain resolve; a pending or failed one is indistinguishable from having none. Caching follows the same logic: a negative answer is `no-store` (today's no can be tomorrow's yes), a receipt is cacheable for half its TTL so an HTTP cache can never outlive the signed envelope.
+         */
+        get: operations["verifyPassport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-connection-setups": {
         parameters: {
             query?: never;
@@ -4654,6 +4718,435 @@ export interface operations {
                 };
             };
             /** @description Resource has no payment address. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAgentPassport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Passport state (or null) plus the agent's standing. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        passport: {
+                            /**
+                             * @description Issuance progress. The enum is the table CHECK (migration 048), so a client can branch on it safely.
+                             * @enum {string}
+                             */
+                            status: "pending" | "anchored" | "failed";
+                            /** @description L0 only. The table CHECK pins this to 0 — higher tiers are not issuable (#970). */
+                            assurance_level: number;
+                            /** @description EAS UID once anchored — the evidence pointer, never the decision. */
+                            attestation_uid: string | null;
+                            tx_hash: string | null;
+                            chain_id: number | null;
+                            attempts: number;
+                            last_error: string | null;
+                            /** Format: date-time */
+                            requested_at: string | null;
+                            /** Format: date-time */
+                            anchored_at: string | null;
+                        } | null;
+                        /** @description The standing OBJECT (not a bare string): the database-authoritative answer plus the chain-lag transparency fields. Always present, even for an agent with no passport row. */
+                        standing: {
+                            agentId: string;
+                            /**
+                             * @description THE answer, derived from agents.status alone — an agent revoked before its passport ever anchored is still revoked.
+                             * @enum {string}
+                             */
+                            standing: "active" | "suspended" | "revoked" | "unknown";
+                            /**
+                             * @description Describes the chain, for transparency — not for deciding.
+                             * @enum {string}
+                             */
+                            anchor: "not_anchored" | "anchored" | "revocation_pending" | "revoked_onchain";
+                            attestationUid: string | null;
+                            /** @description True when the database says revoked but the chain has not caught up — a merchant reading only the chain in this window would be WRONG. */
+                            chainLagging: boolean;
+                            /** Format: date-time */
+                            revocationConfirmedAt: string | null;
+                        };
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    requestAgentPassport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Already anchored — nothing was minted and no gas was spent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        passport: {
+                            /**
+                             * @description Issuance progress. The enum is the table CHECK (migration 048), so a client can branch on it safely.
+                             * @enum {string}
+                             */
+                            status: "pending" | "anchored" | "failed";
+                            /** @description L0 only. The table CHECK pins this to 0 — higher tiers are not issuable (#970). */
+                            assurance_level: number;
+                            /** @description EAS UID once anchored — the evidence pointer, never the decision. */
+                            attestation_uid: string | null;
+                            tx_hash: string | null;
+                            chain_id: number | null;
+                            attempts: number;
+                            last_error: string | null;
+                            /** Format: date-time */
+                            requested_at: string | null;
+                            /** Format: date-time */
+                            anchored_at: string | null;
+                        };
+                        /** @enum {boolean} */
+                        already_issued: true;
+                    };
+                };
+            };
+            /** @description Passport requested; the anchor is in progress. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        passport: {
+                            /**
+                             * @description Issuance progress. The enum is the table CHECK (migration 048), so a client can branch on it safely.
+                             * @enum {string}
+                             */
+                            status: "pending" | "anchored" | "failed";
+                            /** @description L0 only. The table CHECK pins this to 0 — higher tiers are not issuable (#970). */
+                            assurance_level: number;
+                            /** @description EAS UID once anchored — the evidence pointer, never the decision. */
+                            attestation_uid: string | null;
+                            tx_hash: string | null;
+                            chain_id: number | null;
+                            attempts: number;
+                            last_error: string | null;
+                            /** Format: date-time */
+                            requested_at: string | null;
+                            /** Format: date-time */
+                            anchored_at: string | null;
+                        } | null;
+                    };
+                };
+            };
+            /** @description Agent has no bound account, or passports are not issued on its chain. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Agent is revoked — revocation is terminal. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Passport issuance is not configured on this deployment. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getPassportIssuer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The issuer and the receipt envelope parameters. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example 0x1111111111111111111111111111111111111111 */
+                        issuer: string;
+                        version: string;
+                        receipt_ttl_seconds: number;
+                        /** @example eip191-personal-sign-over-canonical-json */
+                        signature_scheme: string;
+                    };
+                };
+            };
+            /** @description Rate limited. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Verification is not configured on this deployment. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    verifyPassport: {
+        parameters: {
+            query?: {
+                /** @description The agent's delegate EOA or smart account. */
+                address?: string;
+                /** @description EAS attestation UID. */
+                uid?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Either a signed receipt, or a clean `found: false` — both are normal answers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        found: true;
+                        receipt: {
+                            version: string;
+                            /**
+                             * @description The signing address a merchant pins — fetch it from GET /passport/issuer.
+                             * @example 0x1111111111111111111111111111111111111111
+                             */
+                            issuer: string;
+                            /** @description Haven's opaque agent id. Not PII and not a wallet. */
+                            agentId: string;
+                            /** @description The delegate EOA a merchant sees on an EIP-3009 header. */
+                            agentEoa: string | null;
+                            /** @description The Hybrid delegator a merchant sees in erc7710 redemption. */
+                            smartAccount: string | null;
+                            /** @enum {integer} */
+                            assuranceLevel: 0;
+                            /**
+                             * @description THE answer, sourced from the database — never derived from the chain.
+                             * @enum {string}
+                             */
+                            standing: "active" | "suspended" | "revoked" | "unknown";
+                            /**
+                             * @description The on-chain anchor's progress, for transparency. Never the authority.
+                             * @enum {string}
+                             */
+                            anchor: "not_anchored" | "anchored" | "revocation_pending" | "revoked_onchain";
+                            evidenceUid: string | null;
+                            chainId: number | null;
+                            controls: {
+                                /** @description The rail whose primitive holds the policy: 'delegation' or 'allowance'. */
+                                rail: string;
+                                policyEnforcedOnchain: boolean;
+                                treasuryBound: boolean;
+                            } | null;
+                            /** @description Monotonic ORDERING marker (ms) over changes to the agent record, not a causation signal; 0 means no timestamp. Equal epochs do NOT imply equal receipts — anchor progress moves without it (#1015). */
+                            standingEpoch: number;
+                            issuedAt: number;
+                            /** @description issuedAt + the TTL published by GET /passport/issuer. */
+                            expiresAt: number;
+                        };
+                        /** @description EIP-191 signature over the canonical JSON of `receipt`. */
+                        signature: string;
+                    } | {
+                        /** @enum {boolean} */
+                        found: false;
+                        reason?: string;
+                    };
+                };
+            };
+            /** @description Not exactly one of address/uid, or a malformed value. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Rate limited. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Receipt signing is not configured — fail closed rather than serve an unsigned receipt. */
             503: {
                 headers: {
                     [name: string]: unknown;

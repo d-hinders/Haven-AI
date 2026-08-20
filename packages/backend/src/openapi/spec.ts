@@ -246,6 +246,93 @@ const x402Resource = {
   },
 } as const
 
+
+// ── Agent Passport building blocks (#1446, epic #970) ────────────────────────
+
+/** The passport row as the agent-scoped routes serialize it. */
+const passportState = {
+  type: 'object',
+  required: [
+    'status', 'assurance_level', 'attestation_uid', 'tx_hash', 'chain_id',
+    'attempts', 'last_error', 'requested_at', 'anchored_at',
+  ],
+  properties: {
+    status: {
+      type: 'string',
+      enum: ['pending', 'anchored', 'failed'],
+      description:
+        'Issuance progress. The enum is the table CHECK (migration 048), so a client can branch on it safely.',
+    },
+    assurance_level: {
+      type: 'integer',
+      description: 'L0 only. The table CHECK pins this to 0 — higher tiers are not issuable (#970).',
+    },
+    attestation_uid: { type: ['string', 'null'], description: 'EAS UID once anchored — the evidence pointer, never the decision.' },
+    tx_hash: { type: ['string', 'null'] },
+    chain_id: { type: ['integer', 'null'] },
+    attempts: { type: 'integer' },
+    last_error: { type: ['string', 'null'] },
+    requested_at: { type: ['string', 'null'], format: 'date-time' },
+    anchored_at: { type: ['string', 'null'], format: 'date-time' },
+  },
+} as const
+
+/**
+ * The signed receipt a merchant verifies OFFLINE. Field names are camelCase —
+ * unlike the rest of this API — because the signature is over a canonical
+ * JSON serialization of exactly these keys: renaming one breaks every
+ * verifier. Documented as-is rather than normalized (#1446).
+ */
+const passportReceipt = {
+  type: 'object',
+  required: [
+    'version', 'issuer', 'agentId', 'agentEoa', 'smartAccount', 'assuranceLevel',
+    'standing', 'anchor', 'evidenceUid', 'chainId', 'controls', 'standingEpoch',
+    'issuedAt', 'expiresAt',
+  ],
+  properties: {
+    version: { type: 'string' },
+    issuer: { ...address, description: 'The signing address a merchant pins — fetch it from GET /passport/issuer.' },
+    agentId: { type: 'string', description: "Haven's opaque agent id. Not PII and not a wallet." },
+    agentEoa: { type: ['string', 'null'], description: 'The delegate EOA a merchant sees on an EIP-3009 header.' },
+    smartAccount: { type: ['string', 'null'], description: 'The Hybrid delegator a merchant sees in erc7710 redemption.' },
+    assuranceLevel: { type: 'integer', enum: [0] },
+    standing: {
+      type: 'string',
+      enum: ['active', 'suspended', 'revoked', 'unknown'],
+      description: 'THE answer, sourced from the database — never derived from the chain.',
+    },
+    anchor: {
+      type: 'string',
+      enum: ['not_anchored', 'anchored', 'revocation_pending', 'revoked_onchain'],
+      description: "The on-chain anchor's progress, for transparency. Never the authority.",
+    },
+    evidenceUid: { type: ['string', 'null'] },
+    chainId: { type: ['integer', 'null'] },
+    controls: {
+      oneOf: [
+        {
+          type: 'object',
+          required: ['rail', 'policyEnforcedOnchain', 'treasuryBound'],
+          properties: {
+            rail: { type: 'string', description: "The rail whose primitive holds the policy: 'delegation' or 'allowance'." },
+            policyEnforcedOnchain: { type: 'boolean' },
+            treasuryBound: { type: 'boolean' },
+          },
+        },
+        { type: 'null' },
+      ],
+    },
+    standingEpoch: {
+      type: 'integer',
+      description:
+        'Monotonic ORDERING marker (ms) over changes to the agent record, not a causation signal; 0 means no timestamp. Equal epochs do NOT imply equal receipts — anchor progress moves without it (#1015).',
+    },
+    issuedAt: { type: 'integer' },
+    expiresAt: { type: 'integer', description: 'issuedAt + the TTL published by GET /passport/issuer.' },
+  },
+} as const
+
 const errorResponse = {
   description: 'Error response',
   content: {
@@ -1363,6 +1450,190 @@ export const openapiSpec = {
           '409': { ...errorResponse, description: 'This transaction was already used as payment.' },
           '410': { ...errorResponse, description: 'Resource deactivated.' },
           '503': { ...errorResponse, description: 'Resource has no payment address.' },
+        },
+      },
+    },
+    // ── Agent Passport (epic #970, documented by #1446) ─────────────────────
+    // GOVERNANCE METADATA, never spend authority: a passport attests that an
+    // agent was issued by Haven, bound to a treasury, governed by
+    // on-chain-enforced controls, and is revocable. It verifies no payment and
+    // settles nothing. The word "verified" is reserved for the unissuable L2
+    // tier — see docs/product/agent-passport.md.
+    '/agents/{id}/passport': {
+      get: {
+        tags: ['Agents'],
+        operationId: 'getAgentPassport',
+        summary: "Read an agent's passport state and its authoritative standing.",
+        description:
+          "`passport: null` means the agent has none — the normal case for a basic agent, never an error (issuance is opt-in). The two fields answer different questions and are deliberately not collapsed into one badge: `standing` is the DATABASE's authoritative answer about the agent, while `passport.status`/the anchor describe how far the on-chain attestation has got. The chain lags; the database does not.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '200': {
+            description: 'Passport state (or null) plus the agent\'s standing.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['passport', 'standing'],
+                  properties: {
+                    passport: { oneOf: [passportState, { type: 'null' }] },
+                    standing: {
+                      type: 'object',
+                      description:
+                        'The standing OBJECT (not a bare string): the database-authoritative answer plus the chain-lag transparency fields. Always present, even for an agent with no passport row.',
+                      required: ['agentId', 'standing', 'anchor', 'attestationUid', 'chainLagging', 'revocationConfirmedAt'],
+                      properties: {
+                        agentId: { type: 'string' },
+                        standing: {
+                          type: 'string',
+                          enum: ['active', 'suspended', 'revoked', 'unknown'],
+                          description: 'THE answer, derived from agents.status alone — an agent revoked before its passport ever anchored is still revoked.',
+                        },
+                        anchor: {
+                          type: 'string',
+                          enum: ['not_anchored', 'anchored', 'revocation_pending', 'revoked_onchain'],
+                          description: 'Describes the chain, for transparency — not for deciding.',
+                        },
+                        attestationUid: { type: ['string', 'null'] },
+                        chainLagging: {
+                          type: 'boolean',
+                          description: 'True when the database says revoked but the chain has not caught up — a merchant reading only the chain in this window would be WRONG.',
+                        },
+                        revocationConfirmedAt: { type: ['string', 'null'], format: 'date-time' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+      post: {
+        tags: ['Agents'],
+        operationId: 'requestAgentPassport',
+        summary: 'Opt an existing agent in to a passport.',
+        description:
+          "Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '202': {
+            description: 'Passport requested; the anchor is in progress.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['passport'],
+                  properties: { passport: { oneOf: [passportState, { type: 'null' }] } },
+                },
+              },
+            },
+          },
+          '200': {
+            description: 'Already anchored — nothing was minted and no gas was spent.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['passport', 'already_issued'],
+                  properties: {
+                    passport: passportState,
+                    already_issued: { type: 'boolean', enum: [true] },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Agent has no bound account, or passports are not issued on its chain.' },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'Agent is revoked — revocation is terminal.' },
+          '503': { ...errorResponse, description: 'Passport issuance is not configured on this deployment.' },
+        },
+      },
+    },
+    '/passport/issuer': {
+      get: {
+        tags: ['Agents'],
+        operationId: 'getPassportIssuer',
+        summary: 'PUBLIC: the issuer address a merchant pins to verify receipts offline.',
+        description:
+          'Published so pinning is a one-time setup step rather than something a merchant extracts from a receipt it has not yet verified — trusting the issuer field of an unverified artifact is circular. Rate-limited.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'The issuer and the receipt envelope parameters.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['issuer', 'version', 'receipt_ttl_seconds', 'signature_scheme'],
+                  properties: {
+                    issuer: address,
+                    version: { type: 'string' },
+                    receipt_ttl_seconds: { type: 'integer' },
+                    signature_scheme: { type: 'string', examples: ['eip191-personal-sign-over-canonical-json'] },
+                  },
+                },
+              },
+            },
+          },
+          '429': { ...errorResponse, description: 'Rate limited.' },
+          '503': { ...errorResponse, description: 'Verification is not configured on this deployment.' },
+        },
+      },
+    },
+    '/passport/verify': {
+      get: {
+        tags: ['Agents'],
+        operationId: 'verifyPassport',
+        summary: 'PUBLIC: fetch a signed governance receipt for an agent.',
+        description:
+          "Unauthenticated by design — the caller is a merchant deciding whether to serve an agent; it has no Haven account and cannot be asked to get one. That makes the disclosure boundary the only protection, so the receipt carries booleans and public on-chain addresses and nothing else: no budget, no balance, no owner, and no Safe/treasury identifier beyond the spend accounts a merchant already needs in order to recognise the payer (the delegate EOA on an EIP-3009 header, the smart account in erc7710 redemption). Query by EXACTLY ONE of `address` or `uid`; both or neither is a 400. **An agent with no passport is 200 with `found: false`, not a 404** — issuance is opt-in so most agents have none, and an error status invites integrations to treat a lookup failure as a pass. Only passports already public on-chain resolve; a pending or failed one is indistinguishable from having none. Caching follows the same logic: a negative answer is `no-store` (today's no can be tomorrow's yes), a receipt is cacheable for half its TTL so an HTTP cache can never outlive the signed envelope.",
+        security: [],
+        parameters: [
+          { name: 'address', in: 'query', required: false, schema: address, description: "The agent's delegate EOA or smart account." },
+          { name: 'uid', in: 'query', required: false, schema: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' }, description: 'EAS attestation UID.' },
+        ],
+        responses: {
+          '200': {
+            description: 'Either a signed receipt, or a clean `found: false` — both are normal answers.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['found', 'receipt', 'signature'],
+                      properties: {
+                        found: { type: 'boolean', enum: [true] },
+                        receipt: passportReceipt,
+                        signature: { type: 'string', description: 'EIP-191 signature over the canonical JSON of `receipt`.' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['found'],
+                      properties: {
+                        found: { type: 'boolean', enum: [false] },
+                        reason: { type: 'string' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Not exactly one of address/uid, or a malformed value.' },
+          '429': { ...errorResponse, description: 'Rate limited.' },
+          '503': { ...errorResponse, description: 'Receipt signing is not configured — fail closed rather than serve an unsigned receipt.' },
         },
       },
     },

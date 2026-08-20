@@ -157,14 +157,6 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
     file: 'fortnox.ts',
     because: 'Fortnox OAuth + connection management for the bookkeeping feed; vendor-specific, dashboard-driven.',
   },
-  {
-    file: 'accounting.ts',
-    because: 'Accounting export surface behind the reporting entitlement.',
-  },
-  {
-    file: 'reporting.ts',
-    because: 'Reporting-feed status and backfill controls; dashboard-driven.',
-  },
 ]
 
 /**
@@ -181,5 +173,5 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
  * `index.ts` — and one of them (`GET /chains`) turned out to be undocumented.
  * That is the gate earning its keep on its first run, not slack being taken.
  */
-export const MAX_UNDOCUMENTED_MODULES = 11
-export const MAX_UNDOCUMENTED_ROUTES = 47
+export const MAX_UNDOCUMENTED_MODULES = 9
+export const MAX_UNDOCUMENTED_ROUTES = 38

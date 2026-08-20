@@ -16,6 +16,7 @@ covers:
   - packages/connect/src/signer-runtime.ts
   - packages/connect/src/storage.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/signer.ts
   - packages/sdk/src/sweep.ts
   - packages/sdk/src/x402.ts

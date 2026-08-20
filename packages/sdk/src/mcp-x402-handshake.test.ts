@@ -566,6 +566,46 @@ describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
     expect(result.body).toEqual({ ok: true })
   })
 
+  it('propagates a funded merchant timeout without recording rejection or success evidence', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      // The funding gate has passed before the bounded paid delivery begins.
+      .mockResolvedValueOnce(paymentStatusReady(genericUrl))
+      .mockImplementationOnce((_url, init) =>
+        new Promise((_resolve, reject) => {
+          ;(init as RequestInit).signal?.addEventListener('abort', () => reject((init as RequestInit).signal!.reason))
+        }),
+      )
+    const client = new HavenClient({
+      apiKey: 'sk_agent_test',
+      delegateKey,
+      baseUrl: backendUrl,
+      merchantTimeout: 20,
+    })
+    const body = JSON.stringify({ prompt: 'timeout characterization' })
+
+    await expect(client.completeX402MerchantCall({
+      url: genericUrl,
+      init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body },
+      paymentId: 'pay_123',
+      paymentHeader: 'PAYMENT_HEADER_TIMEOUT',
+    })).rejects.toMatchObject({
+      name: 'MerchantTimeoutError',
+      statusCode: 504,
+      merchantErrorCode: 'merchant_timeout',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const paidCall = fetchMock.mock.calls[1]
+    expect(headersOf(paidCall).get('X-PAYMENT')).toBe('PAYMENT_HEADER_TIMEOUT')
+    expect((paidCall[1] as RequestInit).body).toBe(body)
+    expect(fetchMock.mock.calls.some(([url]) =>
+      String(url).includes('/machine-payments/evidence') ||
+      String(url).includes('/machine-payments/reconciliation-events') ||
+      String(url).includes('/merchant-receipts'),
+    )).toBe(false)
+  })
+
   it('uses quote-time Bazaar transport context to handshake a non-/mcp hosted merchant completion', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

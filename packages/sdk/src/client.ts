@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks'
 import { exact } from 'x402/schemes'
 import { hashTypedData } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
@@ -15,9 +14,6 @@ import type {
   PaymentRequest,
   PaymentIntent,
   PaymentResult,
-  PaymentStatus,
-  PaymentPhase,
-  PaymentNextAction,
   PaymentStatusResult,
   PaymentResumeState,
   SignData,
@@ -53,7 +49,6 @@ import type {
   RawHavenAgent,
   RawHavenAllowanceSummary,
   RawHavenPaymentReceiptsResponse,
-  RawHavenPaymentReceipt,
   HavenCatalogEntry,
   RawCatalogEntry,
   AgentPaymentWarning,
@@ -87,8 +82,17 @@ import type {
 } from './sweep.js'
 import { createJsonRpcProvider, createWallet, createErc20Contract } from './provider.js'
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
-
-const DEFAULT_BASE_URL = 'http://localhost:3001'
+import { HavenApiTransport } from './haven-api-transport.js'
+import {
+  mapPaymentReceipt,
+  mapPaymentResult,
+  mapPaymentStatusResult,
+} from './payment-mappers.js'
+import {
+  paymentStateFromRaw,
+  paymentStateStatusCode,
+  throwPaymentStateError,
+} from './payment-state.js'
 
 const CHAIN_EXPLORER_TX: Record<number, string> = {
   100:  'https://gnosisscan.io/tx',
@@ -113,7 +117,6 @@ function explorerUrlOrEmpty(chainId: number | undefined, txHash: string | null |
   return txHash ? buildExplorerUrl(chainId, txHash) : ''
 }
 
-const DEFAULT_REQUEST_TIMEOUT = 30_000
 // #1300: merchant-facing default, CALIBRATED against this repo's own
 // tolerances (post-merge review finding): the demo merchant advertises
 // maxTimeoutSeconds: 300 in every PaymentRequired, and its synchronous
@@ -179,19 +182,6 @@ interface CapturedMerchantResponse {
   merchant_body: string
 }
 
-const PAYMENT_STATE_STATUS_CODES: Record<string, number> = {
-  pending: 202,
-  pending_approval: 202,
-  approved: 202,
-  proposed: 202,
-  executed: 200,
-  pending_signature: 409,
-  submitted: 409,
-  expired: 410,
-  failed: 502,
-  rejected: 409,
-}
-
 function chainIdFromNetwork(network: string | undefined): number | undefined {
   if (network === 'base') return 8453
   // #1471: canonical in the x402 spec's NetworkSchema, and the backend maps
@@ -205,55 +195,6 @@ function chainIdFromNetwork(network: string | undefined): number | undefined {
 
 function chainIdOrNull(network: string | undefined): number | null {
   return chainIdFromNetwork(network) ?? null
-}
-
-function phaseForStatus(status: string): PaymentPhase | null {
-  if (status === 'pending_signature') return AgentPaymentPhase.AgentSignatureRequired
-  if (status === 'submitted') return AgentPaymentPhase.PaymentSubmitted
-  if (status === 'confirmed') return AgentPaymentPhase.PaymentConfirmed
-  if (status === 'pending' || status === 'pending_approval') return AgentPaymentPhase.UserApprovalRequired
-  if (status === 'approved') return AgentPaymentPhase.UserExecutionRequired
-  if (status === 'proposed') return AgentPaymentPhase.WaitingForAdditionalApprovals
-  if (status === 'executed') return AgentPaymentPhase.FundingSent
-  if (status === 'rejected') return AgentPaymentPhase.Rejected
-  if (status === 'expired') return AgentPaymentPhase.Expired
-  if (status === 'failed') return AgentPaymentPhase.Failed
-  return null
-}
-
-function nextActionForStatus(status: string): PaymentNextAction | null {
-  if (status === 'pending_signature') return AgentPaymentNextAction.SignAndSubmitPayment
-  if (status === 'submitted') return AgentPaymentNextAction.CheckStatusLater
-  if (status === 'confirmed') return AgentPaymentNextAction.None
-  if (status === 'pending' || status === 'pending_approval') return AgentPaymentNextAction.WaitForUserApproval
-  if (status === 'approved') return AgentPaymentNextAction.WaitForUserToCompletePayment
-  if (status === 'proposed') return AgentPaymentNextAction.WaitForUserApproval
-  if (status === 'executed') return AgentPaymentNextAction.RetryOriginalX402Request
-  if (status === 'rejected') return AgentPaymentNextAction.StopAndTellUser
-  if (status === 'expired') return AgentPaymentNextAction.RequestAgainIfUserStillWantsIt
-  if (status === 'failed') return AgentPaymentNextAction.StopAndTellUser
-  return null
-}
-
-function messageForState(
-  label: string,
-  status: string,
-  paymentId: string,
-  nextAction: PaymentNextAction,
-): string {
-  if (status === 'pending' || status === 'pending_approval') {
-    return `${label} is above the remaining agent budget and is waiting for user approval in Haven (payment_id: ${paymentId}).`
-  }
-  if (status === 'executed') {
-    return 'The user completed the funding payment. Retry the original x402 request.'
-  }
-  if (status === 'rejected') {
-    return `The user rejected this payment request (payment_id: ${paymentId}).`
-  }
-  if (status === 'expired') {
-    return `This payment request expired (payment_id: ${paymentId}).`
-  }
-  return `${label} is ${status}; next_action=${nextAction} (payment_id: ${paymentId}).`
 }
 
 function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
@@ -406,31 +347,15 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
 }
 
 export class HavenClient {
-  private readonly apiKey: string
   private readonly delegateKey: string | undefined
-  private readonly baseUrl: string
+  private readonly havenApi: HavenApiTransport
   private readonly x402Wallet: string | undefined
-  private readonly requestTimeout: number
   private readonly merchantTimeout: number
   private readonly confirmationTimeout: number
   private readonly pollingInterval: number
   private readonly chainRpcs: Record<number, string>
   private readonly inFlightX402 = new Map<string, Promise<X402Receipt>>()
   private readonly x402ReceiptCache = new Map<string, { expiresAt: number; receipt: X402Receipt }>()
-  /**
-   * Setup-time headers configured via `HavenClientConfig.defaultHeaders`.
-   * Read-only after construction — use `withRequestContext` for per-call
-   * scoping so concurrent requests don't race on shared mutable state.
-   */
-  private readonly defaultHeaders: Record<string, string>
-  /**
-   * Async-local store for per-request context (currently: extra headers).
-   * Each `withRequestContext` invocation produces an isolated store, so
-   * overlapping async work — like two MCP tool dispatches in flight at
-   * the same time — see their own headers without stepping on each other.
-   */
-  private readonly requestContext = new AsyncLocalStorage<{ headers: Record<string, string> }>()
-
   /** Monotonic JSON-RPC id source for the MCP `initialize` handshake. */
   private mcpRequestId = 0
 
@@ -438,17 +363,13 @@ export class HavenClient {
   readonly delegateAddress: string | undefined
 
   constructor(config: HavenClientConfig) {
-    this.apiKey = config.apiKey
     this.delegateKey = config.delegateKey
-    this.baseUrl = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '')
+    this.havenApi = new HavenApiTransport(config)
     this.x402Wallet = config.x402Wallet
-    this.requestTimeout = config.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
     this.merchantTimeout = config.merchantTimeout ?? DEFAULT_MERCHANT_TIMEOUT
     this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT
     this.pollingInterval = config.pollingInterval ?? DEFAULT_POLLING_INTERVAL
     this.chainRpcs = config.chainRpcs ?? {}
-    this.defaultHeaders = { ...(config.defaultHeaders ?? {}) }
-
     if (this.delegateKey) {
       this.delegateAddress = addressFromKey(this.delegateKey)
     }
@@ -470,7 +391,7 @@ export class HavenClient {
    * context.
    */
   withRequestContext<T>(headers: Record<string, string>, fn: () => Promise<T>): Promise<T> {
-    return this.requestContext.run({ headers: { ...headers } }, fn)
+    return this.havenApi.withRequestContext(headers, fn)
   }
 
   // ── High-Level API ───────────────────────────────────────────────
@@ -524,7 +445,7 @@ export class HavenClient {
     // surfaces it as an explicit error rather than returning a malformed
     // intent with no signData.
     if (raw.status === 'pending_approval') {
-      this.throwPaymentStateError('Payment', raw)
+      throwPaymentStateError('Payment', raw)
     }
 
     return {
@@ -604,7 +525,7 @@ export class HavenClient {
     // Anything other than a signable funding intent (pending_approval,
     // expired, already-executed, error) is surfaced through the shared path.
     if (raw.status !== 'pending_signature') {
-      this.throwPaymentStateError('x402 payment', raw)
+      throwPaymentStateError('x402 payment', raw)
     }
     if (!raw.sign_data?.hash) {
       throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
@@ -758,7 +679,7 @@ export class HavenClient {
    */
   async getPayment(paymentId: string): Promise<PaymentResult> {
     const raw = await this.get<RawStatusResponse>(`/payments/${paymentId}`)
-    return this.mapPaymentResult(raw)
+    return mapPaymentResult(raw, buildExplorerUrl)
   }
 
   /**
@@ -769,7 +690,7 @@ export class HavenClient {
    */
   async getPaymentStatus(paymentId: string): Promise<PaymentStatusResult> {
     const raw = await this.get<RawPaymentStatusResult>(`/machine-payments/${paymentId}/status`)
-    return this.mapPaymentStatusResult(raw)
+    return mapPaymentStatusResult(raw)
   }
 
   /**
@@ -1179,7 +1100,7 @@ export class HavenClient {
   async listReceipts(options: { limit?: number } = {}): Promise<HavenPaymentReceipt[]> {
     const query = options.limit ? `?limit=${encodeURIComponent(String(options.limit))}` : ''
     const raw = await this.get<RawHavenPaymentReceiptsResponse>(`/machine-payments/receipts${query}`)
-    return raw.receipts.map((receipt) => this.mapPaymentReceipt(receipt))
+    return raw.receipts.map(mapPaymentReceipt)
   }
 
   /**
@@ -1446,7 +1367,7 @@ export class HavenClient {
     // cannot vouch for; shape 2 is the caller following documented steps, so
     // "can't tell" proceeds and only a balance verified ABSENT refuses —
     // otherwise every approval resume without a `chainRpcs` entry would break.
-    const state = this.paymentStateFromRaw('x402 payment', raw)
+    const state = paymentStateFromRaw('x402 payment', raw)
     const executedReplay = raw.success && raw.tx_hash
       ? 'idempotency-collision' as const
       : state?.nextAction === AgentPaymentNextAction.RetryOriginalX402Request
@@ -1512,7 +1433,7 @@ export class HavenClient {
     )
 
     if (execResult.status !== 'confirmed') {
-      this.throwPaymentStateError('x402 payment', execResult)
+      throwPaymentStateError('x402 payment', execResult)
     }
 
     // Wait for ≥1 on-chain confirmation before retrying the merchant so the
@@ -2397,7 +2318,7 @@ export class HavenClient {
         )
 
     if (!readyForMerchantCompletion) {
-      throw new HavenPaymentStateError(status.message, PAYMENT_STATE_STATUS_CODES[status.status] ?? 409, status)
+      throw new HavenPaymentStateError(status.message, paymentStateStatusCode(status.status, 409), status)
     }
 
     // Deliberately NOT relaxed to "absent is fine": on the funding-leg path a
@@ -2465,7 +2386,7 @@ export class HavenClient {
     }
 
     if (status.nextAction !== AgentPaymentNextAction.RetryOriginalX402Request) {
-      throw new HavenPaymentStateError(status.message, PAYMENT_STATE_STATUS_CODES[status.status] ?? 409, status)
+      throw new HavenPaymentStateError(status.message, paymentStateStatusCode(status.status, 409), status)
     }
 
     if (!status.txHash) {
@@ -2831,102 +2752,7 @@ export class HavenClient {
     raw: RawX402AuthorizeResponse,
   ): void {
     if (raw.status === 'pending_signature') return
-    this.throwPaymentStateError(label, raw)
-  }
-
-  private throwPaymentStateError(
-    label: string,
-    raw: RawX402AuthorizeResponse | RawSignResponse,
-  ): never {
-    const statusCode = PAYMENT_STATE_STATUS_CODES[raw.status] ?? 502
-    const state = this.paymentStateFromRaw(label, raw)
-
-    if (state) {
-      throw new HavenPaymentStateError(state.message, statusCode, state, raw)
-    }
-
-    if (raw.status === 'pending_approval') {
-      throw new HavenApiError(
-        `${label} exceeds the on-chain allowance and was queued for owner approval (payment_id: ${raw.payment_id}).`,
-        statusCode,
-        raw,
-      )
-    }
-
-    if (raw.status === 'expired') {
-      throw new HavenApiError(
-        `${label} expired before it could be completed (payment_id: ${raw.payment_id}).`,
-        statusCode,
-        raw,
-      )
-    }
-
-    const paymentId = raw.payment_id ? ` (payment_id: ${raw.payment_id})` : ''
-    const message = raw.error ?? `${label} ${raw.status}${paymentId}`
-    throw new HavenApiError(message, statusCode, raw)
-  }
-
-  private paymentStateFromRaw(
-    label: string,
-    raw: RawX402AuthorizeResponse | RawSignResponse,
-  ): PaymentStatusResult | null {
-    if (!raw.payment_id || !raw.status) return null
-
-    const phase = (raw.phase as PaymentPhase | undefined) ?? phaseForStatus(raw.status)
-    const nextAction = (raw.next_action as PaymentNextAction | undefined) ?? nextActionForStatus(raw.status)
-    if (!phase || !nextAction) return null
-
-    const amount = raw.amount ?? raw.requested ?? ''
-    const token = raw.token ?? ''
-    const message =
-      raw.message ??
-      raw.error ??
-      messageForState(label, raw.status, raw.payment_id, nextAction)
-
-    return {
-      paymentId: raw.payment_id,
-      kind: raw.kind === 'payment_intent' ? 'payment_intent' : 'approval_request',
-      rail: raw.rail ?? 'direct',
-      status: raw.status === 'pending' ? 'pending_approval' : raw.status,
-      phase,
-      nextAction,
-      amount,
-      token,
-      resourceUrl: raw.resource_url ?? null,
-      merchantAddress: raw.merchant_address ?? raw.merchant_to ?? null,
-      txHash: raw.tx_hash ?? null,
-      expiresAt: raw.expires_at ?? '',
-      chainId: raw.chain_id ?? 0,
-      message,
-      amountAtomic: raw.amount_atomic ?? raw.x402?.amount_atomic ?? raw.mpp?.amount_atomic ?? null,
-      asset: raw.asset ?? raw.x402?.asset ?? raw.mpp?.asset ?? null,
-      network: raw.network ?? raw.x402?.network ?? raw.mpp?.network ?? null,
-      description: raw.description ?? raw.x402?.description ?? raw.mpp?.description ?? null,
-      idempotencyKey: raw.idempotency_key ?? raw.x402?.idempotency_key ?? raw.mpp?.idempotency_key ?? null,
-      x402: raw.x402
-        ? {
-            amountAtomic: raw.x402.amount_atomic ?? raw.amount_atomic ?? null,
-            asset: raw.x402.asset ?? raw.asset ?? null,
-            network: raw.x402.network ?? raw.network ?? null,
-            resourceUrl: raw.x402.resource_url ?? raw.resource_url ?? null,
-            merchantAddress: raw.x402.merchant_address ?? raw.merchant_address ?? raw.merchant_to ?? null,
-            description: raw.x402.description ?? raw.description ?? null,
-            idempotencyKey: raw.x402.idempotency_key ?? raw.idempotency_key ?? null,
-          }
-        : undefined,
-      mpp: raw.mpp
-        ? {
-            amountAtomic: raw.mpp.amount_atomic ?? raw.amount_atomic ?? null,
-            asset: raw.mpp.asset ?? raw.asset ?? null,
-            network: raw.mpp.network ?? raw.network ?? null,
-            resourceUrl: raw.mpp.resource_url ?? raw.resource_url ?? null,
-            merchantAddress: raw.mpp.merchant_address ?? raw.merchant_address ?? raw.merchant_to ?? null,
-            description: raw.mpp.description ?? raw.description ?? null,
-            idempotencyKey: raw.mpp.idempotency_key ?? raw.idempotency_key ?? null,
-            challengeId: raw.mpp.challenge_id ?? raw.challenge_id ?? null,
-          }
-        : undefined,
-    }
+    throwPaymentStateError(label, raw)
   }
 
   private x402PayerAddress(): string | undefined {
@@ -3346,11 +3172,11 @@ export class HavenClient {
   // ── HTTP Helpers ─────────────────────────────────────────────────
 
   private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
-    return this.request<T>('POST', path, body)
+    return this.havenApi.post<T>(path, body)
   }
 
   private async get<T>(path: string): Promise<T> {
-    return this.request<T>('GET', path)
+    return this.havenApi.get<T>(path)
   }
 
   /**
@@ -3378,180 +3204,6 @@ export class HavenClient {
     }
   }
 
-  private async request<T>(
-    method: 'GET' | 'POST',
-    path: string,
-    body?: Record<string, unknown>,
-  ): Promise<T> {
-    const url = `${this.baseUrl}${path}`
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeout)
-
-    try {
-      const contextHeaders = this.requestContext.getStore()?.headers ?? {}
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-          ...this.defaultHeaders,
-          ...contextHeaders,
-        },
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        const record = data as Record<string, unknown>
-        const errorText = typeof record.error === 'string' ? record.error : undefined
-        // agentAuth's structured refusals (#1130: agent_pending_approval,
-        // agent_paused) carry their guidance as `detail` (singular) — without
-        // this fallback the operator sees a bare error code and none of the
-        // actionable text.
-        const rawDetails = record.details ?? record.detail
-        const detailsText =
-          typeof rawDetails === 'string'
-            ? rawDetails
-            : rawDetails != null
-              ? JSON.stringify(rawDetails)
-              : undefined
-        // Surface the backend's `details` alongside the generic `error` —
-        // otherwise messages like "On-chain execution failed" mask the actual
-        // revert reason (#684). The full body is still attached for callers.
-        const message =
-          errorText && detailsText
-            ? `${errorText}: ${detailsText}`
-            : errorText ?? detailsText ?? `API request failed`
-        throw new HavenApiError(message, res.status, data)
-      }
-
-      return data as T
-    } catch (err) {
-      if (err instanceof HavenApiError) throw err
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw new HavenApiError(`Request to ${path} timed out`, 408)
-      }
-      throw new HavenApiError(
-        `Request to ${path} failed: ${err instanceof Error ? err.message : String(err)}`,
-        0,
-      )
-    } finally {
-      clearTimeout(timeout)
-    }
-  }
-
-  // ── Mapping Helpers ──────────────────────────────────────────────
-
-  private mapPaymentResult(raw: RawStatusResponse): PaymentResult {
-    return {
-      paymentId: raw.payment_id,
-      status: raw.status as PaymentStatus,
-      token: raw.token,
-      amount: raw.amount,
-      to: raw.to,
-      txHash: raw.tx_hash,
-      errorMessage: raw.error_message,
-      explorerUrl: raw.explorer_url ?? (raw.tx_hash ? buildExplorerUrl(raw.chain_id, raw.tx_hash) : null),
-      fee: raw.fee
-        ? {
-            amount: raw.fee.amount,
-            token: raw.fee.token,
-            basisPoints: raw.fee.basis_points,
-            applied: raw.fee.applied,
-          }
-        : null,
-      createdAt: raw.created_at,
-      signedAt: raw.signed_at,
-      submittedAt: raw.submitted_at,
-      confirmedAt: raw.confirmed_at,
-      expiresAt: raw.expires_at,
-    }
-  }
-
-  private mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStatusResult {
-    return {
-      paymentId: raw.payment_id,
-      kind: raw.kind,
-      rail: raw.rail,
-      status: raw.status,
-      phase: raw.phase,
-      nextAction: raw.next_action,
-      amount: raw.amount,
-      token: raw.token,
-      resourceUrl: raw.resource_url,
-      merchantAddress: raw.merchant_address,
-      payerAddress: raw.payer_address ?? null,
-      txHash: raw.tx_hash,
-      expiresAt: raw.expires_at,
-      chainId: raw.chain_id,
-      message: raw.message,
-      fee: raw.fee
-        ? {
-            amount: raw.fee.amount,
-            token: raw.fee.token,
-            basisPoints: raw.fee.basis_points,
-            applied: raw.fee.applied,
-          }
-        : null,
-      amountAtomic: raw.amount_atomic ?? raw.x402?.amount_atomic ?? null,
-      asset: raw.asset ?? raw.x402?.asset ?? null,
-      network: raw.network ?? raw.x402?.network ?? null,
-      description: raw.description ?? raw.x402?.description ?? null,
-      idempotencyKey: raw.idempotency_key ?? raw.x402?.idempotency_key ?? null,
-      x402: raw.x402
-        ? {
-            amountAtomic: raw.x402.amount_atomic ?? raw.amount_atomic ?? null,
-            asset: raw.x402.asset ?? raw.asset ?? null,
-            network: raw.x402.network ?? raw.network ?? null,
-            resourceUrl: raw.x402.resource_url ?? raw.resource_url,
-            merchantAddress: raw.x402.merchant_address ?? raw.merchant_address,
-            description: raw.x402.description ?? raw.description ?? null,
-            idempotencyKey: raw.x402.idempotency_key ?? raw.idempotency_key ?? null,
-          }
-        : undefined,
-    }
-  }
-
-  private mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentReceipt {
-    const receipt: HavenPaymentReceipt = {
-      id: raw.id,
-      paymentId: raw.payment_id,
-      rail: raw.rail,
-      proofStatus: raw.proof_status,
-      txHash: raw.tx_hash,
-      chainId: raw.chain_id,
-      resourceUrl: raw.resource_url,
-      merchantAddress: raw.merchant_address,
-      payerAddress: raw.payer_address,
-      settlementAddress: raw.settlement_address,
-      tokenSymbol: raw.token_symbol,
-      tokenAddress: raw.token_address,
-      amountRaw: raw.amount_raw,
-      amount: raw.amount_human,
-      challengeId: raw.challenge_id,
-      idempotencyKey: raw.idempotency_key,
-      challengePayload: raw.challenge_payload,
-      selectedPayment: raw.selected_payment,
-      paymentProofHeaderName: raw.payment_proof_header_name,
-      protocolReceiptHeaderName: raw.protocol_receipt_header_name,
-      protocolReceiptPayload: raw.protocol_receipt_payload,
-      merchantStatus: raw.merchant_status,
-      confirmedAt: raw.confirmed_at,
-      createdAt: raw.created_at,
-      updatedAt: raw.updated_at,
-    }
-
-    if ('payment_intent_id' in raw) {
-      receipt.paymentIntentId = raw.payment_intent_id ?? null
-    }
-    if ('approval_request_id' in raw) {
-      receipt.approvalRequestId = raw.approval_request_id ?? null
-    }
-
-    return receipt
-  }
 }
 
 function sleep(ms: number): Promise<void> {

@@ -13,6 +13,9 @@ covers:
   - packages/backend/src/domain/payment-coverage.ts
   - packages/backend/src/rails/sweep.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/haven-api-transport.ts
+  - packages/sdk/src/payment-mappers.ts
+  - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
 last-verified: "2026-08-12" # re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---

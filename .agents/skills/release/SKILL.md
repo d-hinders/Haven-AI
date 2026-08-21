@@ -114,6 +114,26 @@ Zero declarations added or removed is the bar. Changed lines should be private
 members and comments only. This is cheap and it is the only check that would
 catch a facade that quietly dropped an export.
 
+## Independent Review
+
+**A release PR gets a reviewer pass, like any other.** Use the reviewer role from
+[haven-agent-workflow](../haven-agent-workflow/SKILL.md) — delegate to an
+independent reviewer where the client supports it, otherwise run a distinct
+findings-first pass. Apply blocking and should-fix findings and rerun the
+affected checks; ask the user before applying anything ambiguous.
+
+**"The diff is script-generated" is not a reason to skip this**, and it is the
+rationalisation to watch for, because it is half true: the *lines* are
+mechanical, so reading them proves little. What needs an independent eye is the
+judgement around them, none of which the bump script has any opinion about —
+whether a release is warranted at all, whether the contract docs say something
+true, whether the compatibility claim was tested or assumed, and whether
+anything in the release notes is asserted rather than verified.
+
+Self-review does not substitute. The author is the one person who cannot see
+the assumption they already made, which is exactly the class of defect a
+release carries into production.
+
 ## The Release PR
 
 Target **`dev`**, never `main` — `dev-gate` fails a `release/*` branch aimed at

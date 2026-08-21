@@ -14,6 +14,10 @@ const FACTORY_DATA = '0x' + '88'.repeat(40)
 
 const trace: string[] = []
 let waitReverts = false
+/** #1722: the tx never mines — the wait settles only via its own timeout arg. */
+let waitStalls = false
+/** Exactly what the deploy passes to `wait()`, per call. */
+let waitCalls: Array<[confirms: number | undefined, timeoutMs: number | undefined]> = []
 
 type Stamp = { hash: string; nonce: number | bigint }
 const broadcastSpy = vi.fn(async (stamp: Stamp) => {
@@ -37,10 +41,21 @@ const submitSpy = vi.fn(async (params: { recordId: string | null }) => {
   return {
     hash: TX_HASH,
     nonce: 9,
-    wait: async () => {
+    wait: async (confirms?: number, timeoutMs?: number) => {
+      waitCalls.push([confirms, timeoutMs])
       if (waitReverts) {
         const err = new Error('transaction execution reverted') as Error & { code: string }
         err.code = 'CALL_EXCEPTION'
+        throw err
+      }
+      if (waitStalls) {
+        // Mirrors ethers v6 verbatim (`providers/provider.js` → `wait`): a tx
+        // that never mines settles ONLY through the caller's timeout argument,
+        // and with none it never settles at all.
+        if (timeoutMs == null) return await new Promise<never>(() => {})
+        await new Promise((resolve) => setTimeout(resolve, timeoutMs))
+        const err = new Error('wait for transaction timeout') as Error & { code: string }
+        err.code = 'TIMEOUT'
         throw err
       }
       return { status: 1, gasUsed: 100n, gasPrice: 5n }
@@ -99,6 +114,8 @@ const OWNER = { ownerAddress: ('0x' + 'aa'.repeat(20)) as `0x${string}` }
 beforeEach(() => {
   trace.length = 0
   waitReverts = false
+  waitStalls = false
+  waitCalls = []
   deployedBytecode = '0x'
   vi.clearAllMocks()
 })
@@ -175,5 +192,45 @@ describe('concurrent first payments deploy once (#1673)', () => {
     expect(result.alreadyDeployed).toBe(true)
     expect(submitSpy).not.toHaveBeenCalled()
     expect(openSpy).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * #1722 — CHARACTERIZATION of the confirmation wait, captured BEFORE the
+ * bound is added (money-path playbook §2).
+ *
+ * These two tests describe today's behaviour, not the desired one: the deploy
+ * calls `tx.wait()` bare, and ethers v6's `wait(confirms?, timeout?)` waits
+ * indefinitely when called that way. Because that wait runs inside the #1673
+ * advisory-lock critical section, the pooled-connection hold inherits its
+ * unboundedness.
+ */
+describe('CHARACTERIZATION: the deploy confirmation wait (#1722)', () => {
+  it('is called bare — no confirmations, no timeout', async () => {
+    await ensureHybridDeployed(84532, OWNER)
+    expect(waitCalls).toEqual([[undefined, undefined]])
+  })
+
+  it('never returns when the receipt never arrives, and leaves the record open', async () => {
+    vi.useFakeTimers()
+    try {
+      waitStalls = true
+      const inFlight = ensureHybridDeployed(84532, OWNER)
+      const settled = inFlight.then(
+        () => 'resolved',
+        () => 'rejected',
+      )
+
+      // Ten minutes of chain time: far past any plausible deploy.
+      await vi.advanceTimersByTimeAsync(600_000)
+      expect(await Promise.race([settled, Promise.resolve('pending')])).toBe('pending')
+
+      // The record is neither mined nor failed — the caller is still holding
+      // its advisory lock, and with it a connection from the shared pool.
+      expect(minedSpy).not.toHaveBeenCalled()
+      expect(failedSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

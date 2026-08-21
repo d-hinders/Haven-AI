@@ -32,9 +32,10 @@ may now run more than one, and the relayer is what still caps throughput.**
   payments from a brand-new agent cannot both pass the check and both broadcast
   a deploy to the same CREATE2 address. Fail-open by construction: an
   unavailable lock degrades to the pre-#1673 duplicate deploy, which costs a
-  second relayer gas spend and never a failed payment. What that hold costs is
-  a pooled connection, which is a recorded accepted trade — see *Accepted cost*
-  below.
+  second relayer gas spend rather than correctness. Read that as scoped to the
+  lock — the *request* can still fail, because whatever made the lock
+  unavailable can hit the guarded work too. What the hold costs, and why it is
+  accepted anyway, is worked through in *Accepted cost* below.
 - **Allowance-nonce coordination on every legacy-rail sign-hash builder**
   ([#718](https://github.com/d-hinders/Haven-AI/issues/718),
   [#1196](https://github.com/d-hinders/Haven-AI/issues/1196)). #692 wired the

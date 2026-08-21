@@ -51,10 +51,10 @@ CASP shard. Name the issues.
 
 ## Choose The Version
 
-Pass an explicit version string, never a bump type — `scripts/README.md`
+Pass an explicit version string, never a bump type. `scripts/README.md`
 § *Which version string* has the convention and the one case that departs from
-it. The judgement it does not make for you: if the last attempt at this version
-failed to publish, you are retrying, not releasing.
+it — including when you are retrying a failed publish rather than releasing.
+Read it there; nothing about the choice lives here.
 
 ## Cut The Bump
 
@@ -147,11 +147,11 @@ Publishing happens on the `dev → main` promotion. **Follow
 sequence, the BEHIND/sync-back rule, and why both merge with a merge commit
 rather than a squash. Do not restate it; read it.
 
-Three things that section does not say, because they only show up while doing it:
+What it leaves to you:
 
-- The promotion is a deliberate human step. **Confirm the user wants it** before
-  opening it — cutting the release and shipping it to production are two
-  decisions, not one.
+- It calls the promotion a human step; it does not say whose. **Confirm the user
+  wants it** before opening one — cutting the release and shipping it to
+  production are two decisions, and only the first is yours.
 - A sync-back claims zero content change, so **prove it**: the merged tree hash
   must equal `dev`'s, and `git diff origin/dev` must be empty, before you push.
   Test the merge in a throwaway worktree rather than on a shared branch.

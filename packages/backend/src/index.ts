@@ -150,6 +150,14 @@ app.get('/health', async (_request, reply) => {
   // when they curl /health, and losing it because Postgres is slow would repeat
   // the failure this field exists to end.
   const passport = passportReadiness()
+  // Trust-proxy state (#1670). The auth rate-limit tier arms only when the
+  // process actually READS a hop count > 0 — and whether it does is invisible
+  // from outside: on the first dev rollout the operator set the variable, the
+  // service kept answering, and 32 probe logins still went unthrottled because
+  // the running process predated the env change. This field ends that class of
+  // guessing. Not secret: the setting is documented in .env.example, and the
+  // hop count reveals topology no more than any traceroute would.
+  const trustProxy = { hops: config.trustProxyHops, authRateLimitArmed: config.trustProxyHops > 0 }
   try {
     await pool.query('SELECT 1')
     const dbLatencyMs = Date.now() - start
@@ -159,6 +167,7 @@ app.get('/health', async (_request, reply) => {
       db: { status: 'ok', latencyMs: dbLatencyMs },
       relayer,
       passport,
+      trustProxy,
     }
   } catch (err) {
     reply.status(503)
@@ -168,6 +177,7 @@ app.get('/health', async (_request, reply) => {
       db: { status: 'error', error: err instanceof Error ? err.message : String(err) },
       relayer,
       passport,
+      trustProxy,
     }
   }
 })

@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/platform/leader-lock.ts
   - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/infra/relayer.ts
-last-verified: "2026-08-21" # #1680: rate-limit counters join the list of things multiple replicas now handle — the plugin's in-process store made the real ceiling max × replicas, fixed with a shared Postgres tier (fail-open, 250 ms deadline, leader-gated sweep) on the same pattern as the #718 nonce watermark. Prior: #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
+last-verified: "2026-08-21" # #1722: the deploy lock's connection hold now has a real ceiling — the confirmation wait is `tx.wait(1, 120_000)`, bracketed under the bump worker's 180 s adoption age, and expiry hands the tx to that worker instead of marking the record failed. The rest of the accept (burst threshold, fail-open scoping, the 502 shape) re-read and unchanged. Prior: #1680: rate-limit counters join the list of things multiple replicas now handle — the plugin's in-process store made the real ceiling max × replicas, fixed with a shared Postgres tier (fail-open, 250 ms deadline, leader-gated sweep) on the same pattern as the #718 nonce watermark. Prior: #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
 ---
 
 # Backend Scaling
@@ -106,14 +106,29 @@ pool** (`DB_POOL_MAX`, default 20) for as long as the work it serialises runs.
 For its only caller today that work spans `submitRecorded` and `tx.wait()`, so
 the hold is a chain round-trip — normally seconds.
 
-**That tail is not actually bounded.** `tx.wait()` is called bare
-(`rails/hybrid-provisioning.ts`), and ethers v6's `wait(confirms?, timeout?)`
-waits indefinitely without a timeout argument, so a tx that never mines — an
-RPC hiccup, or a base-fee spike past the doubled headroom `getRelayerFeeOverrides`
-applies — holds the connection for as long as it takes.
-[#1722](https://github.com/d-hinders/Haven-AI/issues/1722) tracks bounding it,
-which is worth doing whichever option below eventually wins: the accept rests
-on this hold being short, and nothing currently makes it so.
+**The tail is bounded at 120 s** ([#1722](https://github.com/d-hinders/Haven-AI/issues/1722)).
+The wait is `tx.wait(1, HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS)` — 120 000 ms — so the
+worst-case hold is that deadline plus the surrounding round-trips, not "however
+long the transaction takes". Until #1722 the call was bare, and ethers v6's
+`wait(confirms?, timeout?)` waits indefinitely that way: a transaction that
+never mined (an RPC hiccup, or a base-fee spike past the doubled headroom
+`getRelayerFeeOverrides` applies) held its connection for as long as it took.
+The accept below rests on the hold being short; this is what makes it so.
+
+The value is bracketed rather than round: one confirmation of a single factory
+call on 2 s Base blocks is a handful of blocks, so 120 s never fires on a
+healthy deploy; and it sits under `STALE_BROADCAST_SECONDS` (180 s), the age at
+which the bump worker adopts a `broadcast` row — so the request has released
+the lock, and its connection, before another owner can take the transaction.
+
+**Expiry hands off, it does not fail.** A wait timeout cancels nothing: the
+transaction stays in the mempool and may still mine, so the durable outbound
+record (#1556) is deliberately left `broadcast` for the bump worker (#1558) to
+adopt and, if needed, replace with bumped fees — never marked failed, which
+would strand it between two owners. The caller sees the same retryable **502**
+it already gets for any other deploy failure, and a retry is safe because the
+factory deploy is permissionless, relayer-paid and idempotent on-chain: a
+duplicate costs gas and nothing else.
 
 **The burst that would hurt** is brand-new accounts deploying at once. Each
 holds a lock connection while, inside that same critical section, the relayer

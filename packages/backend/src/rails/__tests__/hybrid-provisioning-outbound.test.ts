@@ -6,7 +6,7 @@
  * the #717 spend-guard is the part worth pinning: the spend stamp lives in a
  * finally and must still run when the record closes as failed.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const TX_HASH = '0x' + 'ee'.repeat(32)
 const FACTORY = '0x' + '77'.repeat(20)
@@ -108,8 +108,21 @@ vi.mock('@metamask/smart-accounts-kit', async () => {
   }
 })
 
-const { ensureHybridDeployed } = await import('../hybrid-provisioning.js')
+const { STALE_BROADCAST_SECONDS } = await import('../../infra/outbound-bump-worker.js')
+const { ensureHybridDeployed, HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS } = await import(
+  '../hybrid-provisioning.js'
+)
 const OWNER = { ownerAddress: ('0x' + 'aa'.repeat(20)) as `0x${string}` }
+
+// Warm the deploy path's LAZY imports (`relayer-spend-guard`, `relayer` and
+// `outbound-queue` are imported INSIDE the function) and the advisory lock's
+// first pool connection, so the first real test is not the one paying for
+// them. Both costs are harness artefacts, and on a loaded machine they were
+// enough to push that test past vitest's 5 s default on their own.
+beforeAll(async () => {
+  deployedBytecode = '0x'
+  await ensureHybridDeployed(84532, OWNER).catch(() => undefined)
+})
 
 beforeEach(() => {
   trace.length = 0
@@ -196,41 +209,21 @@ describe('concurrent first payments deploy once (#1673)', () => {
 })
 
 /**
- * #1722 — CHARACTERIZATION of the confirmation wait, captured BEFORE the
- * bound is added (money-path playbook §2).
+ * #1722 — the confirmation wait now carries an explicit bound.
  *
- * These two tests describe today's behaviour, not the desired one: the deploy
- * calls `tx.wait()` bare, and ethers v6's `wait(confirms?, timeout?)` waits
- * indefinitely when called that way. Because that wait runs inside the #1673
- * advisory-lock critical section, the pooled-connection hold inherits its
- * unboundedness.
+ * The characterization this replaces (previous commit) recorded the old call:
+ * `tx.wait()` bare, which in ethers v6 waits indefinitely. What EXPIRY does
+ * needs a stalled tx and fake timers, which do not mix with this file's live
+ * advisory lock — that half lives in `hybrid-provisioning-wait-bound.test.ts`.
  */
-describe('CHARACTERIZATION: the deploy confirmation wait (#1722)', () => {
-  it('is called bare — no confirmations, no timeout', async () => {
+describe('the deploy confirmation wait is bounded (#1722)', () => {
+  it('passes ONE confirmation and an explicit deadline, below the bump worker s adoption age', async () => {
     await ensureHybridDeployed(84532, OWNER)
-    expect(waitCalls).toEqual([[undefined, undefined]])
-  })
+    expect(waitCalls).toEqual([[1, HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS]])
 
-  it('never returns when the receipt never arrives, and leaves the record open', async () => {
-    vi.useFakeTimers()
-    try {
-      waitStalls = true
-      const inFlight = ensureHybridDeployed(84532, OWNER)
-      const settled = inFlight.then(
-        () => 'resolved',
-        () => 'rejected',
-      )
-
-      // Ten minutes of chain time: far past any plausible deploy.
-      await vi.advanceTimersByTimeAsync(600_000)
-      expect(await Promise.race([settled, Promise.resolve('pending')])).toBe('pending')
-
-      // The record is neither mined nor failed — the caller is still holding
-      // its advisory lock, and with it a connection from the shared pool.
-      expect(minedSpy).not.toHaveBeenCalled()
-      expect(failedSpy).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
+    // The ceiling that makes the value defensible rather than round: the
+    // caller must be gone before the bump worker adopts the row, or the two
+    // own the same transaction at once.
+    expect(HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS).toBeLessThan(STALE_BROADCAST_SECONDS * 1_000)
   })
 })

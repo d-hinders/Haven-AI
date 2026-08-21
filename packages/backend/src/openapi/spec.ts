@@ -3671,7 +3671,7 @@ export const openapiSpec = {
         operationId: 'signup',
         summary: 'Create an account and return a session token.',
         description:
-          "The email is NORMALISED before the uniqueness check, deliberately: an exact match on the raw input would let `ADA@Example.com` register alongside a stored `ada@example.com`, giving one person two accounts and two treasuries. Password bounds are 8-128 characters. The returned user is a fixed new-account shape — no wallet, no Safe, USD, an empty safes list — because none of those exist yet.",
+          "The email is NORMALISED before the uniqueness check, deliberately: an exact match on the raw input would let `ADA@Example.com` register alongside a stored `ada@example.com`, giving one person two accounts and two treasuries. Password bounds are 8-128 characters. The returned user is a fixed new-account shape — no wallet, no Safe, USD, an empty safes list — because none of those exist yet. **The 409 for a taken address is a deliberate, ACCEPTED disclosure (#1654):** one unauthenticated request tells the caller whether an email has a Haven account, which is stronger than the oracle #1646 closed on login. It stands because telling a returning user \"you already have an account — sign in instead\" is real product value, and because the standard mitigation is structurally unavailable here: a 201 carries the SESSION TOKEN, so answering 201 for a taken address would either mint a token for someone else's account or return a token-less 201 that is an equally strong oracle — genuine hardening needs an email-verification channel this API does not have. Rate limiting was considered and deliberately NOT added (#1670): without trustProxy, every external client behind the deployment proxy shares ONE per-IP bucket, so a limit tight enough to slow bulk enumeration is a cheap global signup/login denial-of-service, and keying per email cannot throttle enumeration at all — each probed address gets its own fresh bucket. The prerequisite (trustProxy plus per-caller keys) is tracked separately. If an email channel is ever added, revisit this tradeoff in the same change. Timing is not equalised on this route because the status already discloses account existence — the clock has nothing to add beyond what the 409 already says.",
         security: [],
         requestBody: {
           required: true,
@@ -3703,7 +3703,7 @@ export const openapiSpec = {
             },
           },
           '400': errorResponse,
-          '409': { ...errorResponse, description: 'An account with this email already exists.' },
+          '409': { ...errorResponse, description: 'An account with this email already exists. A deliberate, documented enumeration disclosure — see this operation\'s description (#1654).' },
         },
       },
     },

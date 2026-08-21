@@ -162,6 +162,35 @@ describe('Auth routes', () => {
       expect(response.statusCode).toBe(409)
       expect(response.json().error).toBe('An account with this email already exists')
     })
+
+    it('#1654: the 409 enumeration disclosure is ACCEPTED — and the reason is that 201 carries the token', async () => {
+      // Signup answers 409 vs 201, so one unauthenticated request reveals
+      // whether an address has an account. That is a documented, deliberate
+      // tradeoff, not an oversight (#1654) — and this test pins the
+      // structural fact the acceptance rests on: a successful signup returns
+      // the SESSION TOKEN in the 201 body. Answering 201 for a taken address
+      // would therefore either mint a token for someone else's account or
+      // return a token-less 201 that is an equally strong oracle. If signup
+      // ever stops returning the token (an email-verification flow), this
+      // fails, which is the signal to revisit the acceptance in the same
+      // change — the spec description says so too.
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (/SELECT id FROM users/i.test(String(sql))) return { rows: [] }
+        return {
+          rows: [{ id: USER_UUID, name: 'Ada Lovelace', email: 'fresh@example.com' }],
+        }
+      })
+
+      const created = await app.inject({
+        method: 'POST',
+        url: '/auth/signup',
+        payload: { name: 'Ada Lovelace', email: 'fresh@example.com', password: 'password123' },
+      })
+
+      expect(created.statusCode).toBe(201)
+      expect(typeof created.json().token).toBe('string')
+      expect(created.json().token.length).toBeGreaterThan(0)
+    })
   })
 
   // --- POST /auth/login ---

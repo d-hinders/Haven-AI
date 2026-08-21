@@ -308,8 +308,24 @@ rcheck() { # name expected_exit payload
 # reviewer gate existed; with it, an unverifiable pull request is refused. The
 # assertions moved from stdout to exit status for the same reason the F2 bypass
 # survived the suite — a case that reads stdout cannot see a block.
-rcheck "malformed payload naming create_pull_request BLOCKS" 2 '{"session_id":"x","tool_name":BROKEN,"create_pull_request"'
-rcheck "malformed payload containing gh pr create BLOCKS" 2 '{"session_id":"x",BROKEN gh pr create'
+# These two carry NO structural signal — no `"tool_name": "...create_pull_request"`,
+# no `"command": "... gh pr create"` — only the bare phrase in mangled text. They
+# WARN rather than block, and that is the settled answer after three rounds on
+# this branch:
+#
+#   round 1: they warned, and an unparseable PR-shaped payload could dodge the
+#            gate entirely -> called a bypass.
+#   round 2: made every such payload BLOCK -> false-blocked any malformed
+#            payload merely MENTIONING the phrase, and these files are full of it.
+#   round 3: block on a structural signal, warn otherwise.
+#
+# Why warning is enough here: a payload this mangled is not a tool call the
+# harness would execute either — it sees the same bytes. Blocking unrecognisable
+# garbage protects against nothing, while false-blocking real work is a live
+# cost. The property these cases were written to defend is intact: a PR-shaped
+# payload must never pass UNNOTICED, and a warning is not silence.
+check "malformed payload naming create_pull_request warns" fire '{"session_id":"x","tool_name":BROKEN,"create_pull_request"'
+check "malformed payload containing gh pr create warns" fire '{"session_id":"x",BROKEN gh pr create'
 # ...but an unidentifiable payload must still stay quiet, or every unparseable
 # tool call becomes noise and the guard gets muted that way instead.
 check "malformed payload, nothing PR-shaped" silent 'not json at all'
@@ -422,7 +438,9 @@ rcheck "missing session_id -> does NOT block" 0 '{"tool_name":"mcp__github__crea
 # two pre-existing cases on this branch assert stdout, and a block writes to
 # stderr — so they passed while the bypass was live. Assert the exit code.
 unreviewed rgate4
-rcheck "unparseable payload that looks like a PR still BLOCKS" 2 '{"session_id":"rgate4",BROKEN gh pr create'
+rcheck "unparseable payload with a structural PR signal BLOCKS" 2 \
+  '{"session_id":"rgate4","tool_name":"mcp__github__create_pull_request", BROKEN'
+check "unparseable payload with only a bare mention warns instead" fire '{"session_id":"rgate4",BROKEN gh pr create'
 
 # F3 regression: a marker that exists but cannot be read is a malfunction, and
 # the contract is to fail OPEN. Skipped as root, which can read mode-000 files
@@ -438,8 +456,45 @@ else
   printf '  SKIP  unreadable-marker case (running as root reads mode-000)\n'
 fi
 
+# --- strict mode must not false-block on a coincidental mention -------------
+#
+# The first strict implementation matched `create_pull_request` / `gh pr create`
+# anywhere in a malformed payload, so an unrelated tool call that merely
+# MENTIONED the phrase was hard-blocked — and these very files are full of the
+# phrase. No case covered "malformed + unrelated tool + incidental mention",
+# which is why the suite passed while the regression was live. These are the
+# reviewer's own reproductions.
+unreviewed strictsess
+rcheck "malformed Write that merely mentions gh pr create does NOT block" 0 \
+  '{"tool_name":"Write","tool_input":{"file_path":"README.md","content":"See gh pr create docs"} BROKEN'
+rcheck "malformed Task prompt naming create_pull_request does NOT block" 0 \
+  '{"tool_name":"Task","tool_input":{"description":"explain create_pull_request semantics"} SYNTAX_ERROR'
+# ...while a malformed payload whose TOOL is the PR tool still blocks.
+rcheck "malformed payload whose tool_name IS the PR tool still BLOCKS" 2 \
+  '{"session_id":"strictsess","tool_name":"mcp__github__create_pull_request","tool_input":{ BROKEN'
+rcheck "malformed payload whose command IS gh pr create still BLOCKS" 2 \
+  '{"session_id":"strictsess","tool_name":"Bash","tool_input":{"command":"gh pr create --fill" BROKEN'
+
+# --- marker-path malfunctions all fail OPEN ---------------------------------
+# Only the EACCES-on-a-regular-file shape was fixed first; review of that fix
+# found the siblings still failing closed. None of these depend on being root.
+unreviewed dirsess
+mkdir -p "$MARKER_DIR/claude-reviewed-dirsess" 2>/dev/null
+rcheck "marker path is a DIRECTORY -> fails open" 0 "$(pr dirsess 1)"
+rmdir "$MARKER_DIR/claude-reviewed-dirsess" 2>/dev/null
+
+unreviewed loopsess
+ln -s "$MARKER_DIR/claude-reviewed-loopsess" "$MARKER_DIR/claude-reviewed-loopsess" 2>/dev/null
+rcheck "marker path is a SYMLINK LOOP -> fails open" 0 "$(pr loopsess 1)"
+rm -f "$MARKER_DIR/claude-reviewed-loopsess" 2>/dev/null
+
+unreviewed danglesess
+ln -s "$MARKER_DIR/definitely-not-there-$$" "$MARKER_DIR/claude-reviewed-danglesess" 2>/dev/null
+rcheck "marker path is a DANGLING SYMLINK -> fails open" 0 "$(pr danglesess 1)"
+rm -f "$MARKER_DIR/claude-reviewed-danglesess" 2>/dev/null
+
 # F7: leave no stray markers behind, including the ones seeded at the top.
-for _s in rgate rgate2 rgate3 rgate4 rgate5 testsess sess1 sess2 wsess gatesess x ______etc_passwd; do
+for _s in rgate rgate2 rgate3 rgate4 rgate5 strictsess dirsess loopsess danglesess testsess sess1 sess2 wsess gatesess x ______etc_passwd; do
   unreviewed "$_s"
 done
 

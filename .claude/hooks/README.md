@@ -88,9 +88,12 @@ difference between them matters:
 | ship-next warning | which *route* opened the PR | warns, never blocks (owner decision 2026-07-26) |
 | reviewer gate | whether an independent review *happened* | **blocks** (owner decision 2026-08-21) |
 
-`reviewer-marker.sh` records a pass when a `haven-reviewer` or
-`haven-design-reviewer` subagent is actually launched; the gate blocks PR
-creation when no pass is recorded for the current branch.
+`reviewer-marker.sh` records a pass when a `haven-reviewer` subagent is
+actually launched; the gate blocks PR creation when no pass is recorded for the
+current branch. **`haven-design-reviewer` does not clear it** — on
+`area:frontend` it is a second pass, not a replacement (`AGENTS.md`), and
+accepting it would let a pull request satisfy an unconditional rule while never
+running `haven-reviewer` at all.
 
 ### Why blocking, when the sibling policy deliberately is not
 

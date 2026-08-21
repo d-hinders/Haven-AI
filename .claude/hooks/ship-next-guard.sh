@@ -235,8 +235,16 @@ payload it will not guess.' >&2
   # permission, grep then fails, and control fell through to the BLOCK. Found by
   # review, reproduced as a non-root user — it does NOT reproduce as root, which
   # reads mode-000 files, so the first attempt to confirm it came back clean.
-  if [ -e "$rmarker" ] && [ ! -r "$rmarker" ]; then
-    return 0
+  # Fail open on ANY malfunction of the marker PATH, not merely EACCES on a
+  # regular file. The first fix covered only the shape the review reported;
+  # review of the fix found the siblings still failing closed — a directory at
+  # the marker path, a symlink loop (ELOOP makes -e false), a dangling link.
+  # "Something is wrong with the path" is never evidence a branch was
+  # unreviewed, and this gate must not block on its own plumbing.
+  if [ -e "$rmarker" ] || [ -L "$rmarker" ]; then
+    if [ ! -f "$rmarker" ] || [ ! -r "$rmarker" ]; then
+      return 0
+    fi
   fi
 
   if [ -f "$rmarker" ] && grep -Fxq "$rbranch" "$rmarker" 2>/dev/null; then
@@ -357,12 +365,43 @@ if [ -z "$tool" ]; then
   # assert stdout ("fire"), and a block writes to stderr and exits 2, so they
   # passed either way. That is the same defect class as a muted guard: a check
   # that cannot observe the thing it is meant to protect.
-  case "$input" in
-    *create_pull_request*|*"gh pr create"*)
-      require_reviewer_pass strict
-      fire_unless_ship_next
-      ;;
-  esac
+  # STRICT applies only on a STRUCTURAL signal, never a bare substring.
+  #
+  # The first version of this blocked on `*create_pull_request*` / `*gh pr
+  # create*` anywhere in the raw payload, which is a false-block generator:
+  # these very files contain dozens of literal occurrences, so a malformed
+  # payload from an unrelated tool that merely MENTIONS the phrase — editing
+  # this hook, a prompt discussing the workflow, a grep — was hard-blocked.
+  # Review reproduced it with a Write payload whose content said "See gh pr
+  # create docs". That contradicts the fail-open-on-malfunction contract
+  # directly, and traded a bypass for a worse defect in the other direction.
+  #
+  # So strict now requires the phrase to sit where a PR creation would actually
+  # put it: inside the tool_name, or inside a command field. Anything else with
+  # a coincidental mention falls through to the non-blocking warning, which is
+  # what it did before the gate existed.
+  #
+  # Residual, accepted and stated rather than hidden: a malformed Bash payload
+  # whose command merely QUOTES `gh pr create` (`grep "gh pr create"`) still
+  # blocks. Command-position parsing is not available here — that is precisely
+  # what could not be parsed — and between blocking a grep and letting an
+  # unverifiable PR through, this errs toward the grep. It is also recoverable
+  # in one step: re-run the command in a well-formed call.
+  strict_signal=0
+  if printf '%s' "$input" | grep -qE '"tool_name"[[:space:]]*:[[:space:]]*"[^"]*create_pull_request' 2>/dev/null; then
+    strict_signal=1
+  elif printf '%s' "$input" | grep -qE '"command"[[:space:]]*:[[:space:]]*"[^"]*gh[[:space:]]+pr[[:space:]]+create' 2>/dev/null; then
+    strict_signal=1
+  fi
+
+  if [ "$strict_signal" -eq 1 ]; then
+    require_reviewer_pass strict
+    fire_unless_ship_next
+  else
+    case "$input" in
+      *create_pull_request*|*"gh pr create"*) fire_unless_ship_next ;;
+    esac
+  fi
   exit 0
 fi
 if [ "$tool" = "mcp__github__create_pull_request" ]; then

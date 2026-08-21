@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { createConnectApiClient, ConnectRequestError, type ConnectApiClient, type ResolvedSetup } from './api.js'
 import { resolveTokenFromAddress } from '@haven_ai/sdk'
 import {
@@ -9,6 +11,7 @@ import {
 } from './key.js'
 import { redactSecrets, shortAddress } from './redact.js'
 import {
+  defaultCredentialRoot,
   preflightCredentialStorage,
   writeCredentialFiles,
   type StoredCredentialPaths,
@@ -297,6 +300,28 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     log('Haven setup needs a couple more steps on this machine — see the notes above.')
   } else {
     log('Haven setup on this machine is complete.')
+  }
+
+  // #1688: a re-run minted a NEW agent, and nothing retires the old one — the
+  // previous directory keeps an API key and a signing key, and any host that
+  // started before this run keeps spending as that agent. Name the superseded
+  // agents here, at the moment the user is watching, with the one action only
+  // they can take. Connect never revokes or deletes credentials itself.
+  try {
+    const supersededIds = await listOtherAgentIds(options.credentialsDir, registration.agent_id)
+    if (supersededIds.length > 0) {
+      log('')
+      log(
+        `Heads-up: this setup created a NEW agent. Your previous agent(s) — ${supersededIds.join(', ')} — ` +
+          'still exist with their own keys, and any host that was already running keeps acting as them.',
+      )
+      log(
+        'If you meant to replace them: revoke them on the Haven agent page, restart long-lived hosts, ' +
+          `then remove their directories under ~/.haven/agents. Run ${RERUN_HINT} --doctor to check whether their keys are still live.`,
+      )
+    }
+  } catch {
+    // Best-effort — never let the heads-up break a completed setup.
   }
 
   // Report the completed runtime state before polling for budget approval.
@@ -709,6 +734,47 @@ function activationInstructionWithWhy(profile: RuntimeProfile): string {
     return `${profile.activationInstruction} (The entries are already written and verified — ${profile.label} only reads MCP config at app launch, which is why this step is still needed.)`
   }
   return profile.activationInstruction
+}
+
+const RERUN_HINT = 'npx @haven_ai/connect@alpha'
+
+/**
+ * Agent ids of every OTHER credential directory (#1688) — the agents this
+ * run just superseded. Reads identity.json for the id; a directory that does
+ * not parse is named by its directory name, because "I could not read it" is
+ * still a directory the user should know exists.
+ */
+async function listOtherAgentIds(baseDir: string | undefined, currentAgentId: string): Promise<string[]> {
+  const root = defaultCredentialRoot(baseDir)
+  let entries: string[] = []
+  try {
+    entries = await readdir(root)
+  } catch {
+    return []
+  }
+  const ids: string[] = []
+  for (const entry of entries) {
+    if (entry === currentAgentId) continue
+    const identityPath = join(root, entry, 'identity.json')
+    // Gate on the FILE EXISTING before treating the entry as an agent at all
+    // (#1688 review, B1): readdir returns every filesystem entry, and a
+    // .DS_Store or sync-relic that merely fails to read must be skipped —
+    // naming it would tell the user to "revoke" a file. A directory whose
+    // identity.json EXISTS but does not parse is the case worth surfacing,
+    // by directory name, because a corrupt agent dir is still an agent dir.
+    try {
+      await stat(identityPath)
+    } catch {
+      continue
+    }
+    try {
+      const identity = JSON.parse(await readFile(identityPath, 'utf8')) as { agent_id?: string }
+      ids.push(identity.agent_id ?? entry)
+    } catch {
+      ids.push(entry)
+    }
+  }
+  return ids
 }
 
 function printNextSteps(

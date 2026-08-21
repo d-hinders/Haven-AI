@@ -24,8 +24,8 @@ export function Textarea({
   ...props
 }: TextareaProps) {
   const borderClass = invalid
-    ? 'border-[var(--v2-danger)] focus:border-[var(--v2-danger)] focus:ring-[var(--v2-danger)]/20'
-    : 'border-[var(--v2-border)] focus:border-[var(--v2-brand)] focus:ring-[var(--v2-brand)]/20'
+    ? 'border-[var(--v2-danger)] focus:border-[var(--v2-danger)] focus:ring-danger/20'
+    : 'border-[var(--v2-border)] focus:border-[var(--v2-brand)] focus:ring-brand/20'
 
   const textareaEl = (
     <textarea

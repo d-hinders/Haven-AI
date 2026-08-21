@@ -535,7 +535,7 @@ export default function EditAgentModal({
                               }
                               disabled={isRemoving}
                               aria-label={`Remove ${sym} budget`}
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-danger)]/30 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/30 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <Icon icon={X} className="h-3 w-3" />
                             </button>

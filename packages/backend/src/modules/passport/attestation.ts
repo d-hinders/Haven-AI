@@ -270,6 +270,71 @@ export async function recoverAnchorFromReceipt(
 }
 
 
+/**
+ * How long a revoke waits for its own receipt before handing the transaction
+ * off to the bump worker (#1742).
+ *
+ * Bracketed by the two things that actually constrain it, not picked round:
+ *
+ * - FLOOR — what a healthy revoke takes. This is ONE confirmation of a single
+ *   EAS `revoke` call on 2 s Base / Base Sepolia blocks, broadcast with the
+ *   relayer's doubled fee headroom: one to a few blocks. 120 s is ~60 blocks
+ *   of slack, so a healthy revoke never reaches the deadline and no ordinary
+ *   caller sees a behaviour change.
+ * - CEILING — where the transaction stops being this caller's problem. TWO
+ *   independent owners can take it over, and the deadline must sit under
+ *   both:
+ *     - `STALE_BROADCAST_SECONDS` (180 s, `infra/outbound-bump-worker.ts`) is
+ *       the age at which the bump worker's unmined scan adopts a `broadcast`
+ *       row and begins fee-replacing it;
+ *     - the revocation LEASE (300 s, `claimRevocation`'s `leaseSeconds` in
+ *       `infra/repositories/agent-passports.ts`) is when another caller may
+ *       reclaim the revocation and submit its own attempt.
+ *   Waiting past either would leave this caller waiting on a transaction
+ *   someone else already owns. 120 s is under both. A test asserts the 180 s
+ *   inequality — the TIGHTER of the two, so it is the one that actually
+ *   binds, and the only one exported as a constant rather than a default
+ *   parameter a test could only duplicate as a literal.
+ *
+ * It matches `anchorOnChain`'s 120 s next door, which is the right kind of
+ * coincidence: both are one confirmation of one EAS call on the same chains,
+ * bounded above by the same worker. The anchor's ceiling is argued from its
+ * 600 s claim window instead, so these are two derivations that agree, not
+ * one constant copied twice.
+ */
+export const PASSPORT_REVOKE_CONFIRM_TIMEOUT_MS = 120_000
+
+/**
+ * The revoke was broadcast but not confirmed within
+ * {@link PASSPORT_REVOKE_CONFIRM_TIMEOUT_MS} (#1742).
+ *
+ * Deliberately distinct from a revert: nothing failed, the transaction may
+ * still mine, and its durable outbound record is intentionally left in
+ * `broadcast` for the bump worker (#1558) to adopt. `reconcileRevocation`
+ * catches this like any other revoke error and schedules a backoff retry, so
+ * the anchor keeps converging on the DB's authoritative `revoked` standing —
+ * which is exactly the behaviour `revocation.ts` was built for ("a failed
+ * revoke RETRIES with backoff until the two agree").
+ */
+export class PassportRevokeUnconfirmedError extends Error {
+  constructor(
+    readonly txHash: string,
+    timeoutMs: number,
+  ) {
+    super(
+      `passport revocation not confirmed within ${timeoutMs}ms (tx ${txHash}) — ` +
+        'the transaction may still mine; its outbound record is left for the bump worker',
+    )
+    this.name = 'PassportRevokeUnconfirmedError'
+  }
+}
+
+// `isWaitTimeout` is defined once at the top of this file. #1742 introduced a
+// second copy here because #1735 had not landed yet; #1735 landed first, so
+// this one is gone and both halves share the anchor's definition. #1757 tracks
+// hoisting it out of this module entirely — it exists a third time, unexported,
+// in `rails/hybrid-provisioning.ts`.
+
 /** The one revoke request object — record and broadcast share it (#1556). */
 export function buildRevokeRequest(chainId: number, attestationUid: string) {
   return { schema: getPassportSchemaUid(chainId), data: { uid: attestationUid, value: 0n } }
@@ -313,12 +378,53 @@ export const revokeOnChain: Revoker = async (chainId: number, attestationUid: st
     data: buildRevokeCall(chainId, attestationUid).data,
   })
   let receipt
+  let waitError: unknown
   try {
-    receipt = await tx.wait()
+    // #1742: BOUNDED. Called bare, `wait()` waits forever in ethers v6 — and
+    // this runs inside the passport sweep, which is sequential under ONE
+    // leader lock (`index.ts` runPassportSweep → runIfLeader). So a single
+    // never-mining revoke used to park every revocation queued behind it, the
+    // `alarm` phase that reports stuck revocations, and a pooled Postgres
+    // connection, all indefinitely. The alarm being downstream of the stall is
+    // the sharp end: the one signal that would surface "agents revoked in
+    // Haven still hold a live attestation on-chain" was silenced by the very
+    // condition it exists to report.
+    receipt = await tx.wait(1, PASSPORT_REVOKE_CONFIRM_TIMEOUT_MS)
   } catch (err) {
-    await record.failed(`passport revocation reverted (tx ${tx.hash})`)
-    throw err
+    // ethers v6 throws out of wait() on a mined-and-reverted tx, so this catch
+    // is where a real revert closes the record. Since #1742 it also catches
+    // the deadline (`code: 'TIMEOUT'`), which is NOT a revert — see below.
+    waitError = err
   }
+  // NO RECEIPT IS NOT A REVERT (#1742). A wait timeout cancels nothing — the
+  // transaction stays in the mempool and may still mine — and #690 records
+  // that a lagging RPC can hand back a null receipt for a tx that confirmed.
+  // Both mean "not observed", so the record is left in `broadcast`: the state
+  // the bump worker's unmined scan adopts and fee-replaces at the SAME nonce.
+  // That hand-off is safe here in both of the worker's paths — `passport_revoke`
+  // is on `REBROADCAST_SAFE_SUBMITTERS` (a second revoke of the same UID
+  // reverts, moving nothing), and the stale-broadcast scan is same-nonce so it
+  // cannot duplicate the effect anyway. Marking it failed instead would drop
+  // the transaction out of that scan and leave it with no owner at all.
+  //
+  // The caller is `reconcileRevocation`, which catches this like any other
+  // error and schedules a backoff retry — so the anchor keeps converging on
+  // the DB's authoritative `revoked` standing, which is the whole design of
+  // `revocation.ts` ("no terminal failed revocation state"). Timing out is
+  // therefore the SAFE direction: it re-queues the revoke instead of hanging
+  // the queue that carries it.
+  if (!receipt && (!waitError || isWaitTimeout(waitError))) {
+    throw new PassportRevokeUnconfirmedError(tx.hash, PASSPORT_REVOKE_CONFIRM_TIMEOUT_MS)
+  }
+  if (waitError) {
+    await record.failed(`passport revocation reverted (tx ${tx.hash})`)
+    throw waitError
+  }
+  // `!receipt` is unreachable here — the two branches above have taken every
+  // path that reaches this point with no receipt — but it is kept because the
+  // compiler cannot prove that, and an unchecked `receipt.status` would be a
+  // narrowing bug the moment a branch above is edited. Same defensive shape
+  // `anchorOnChain` uses next door.
   if (!receipt || receipt.status !== 1) {
     await record.failed(`passport revocation reverted (tx ${tx.hash})`)
     throw new Error(`passport revocation reverted (tx ${tx.hash})`)

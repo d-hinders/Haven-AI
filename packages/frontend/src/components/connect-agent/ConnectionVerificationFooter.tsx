@@ -59,7 +59,10 @@ export function ConnectionVerificationFooter({
 
   return (
     <details className="group text-[12px]">
-      <summary className="flex cursor-pointer list-none items-start gap-2 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
+      {/* py-1: at 12px the bare row gave a ~36-40px hit height on mobile,
+          under the 44px guideline — thin for the control that reveals this
+          flow's anti-phishing evidence. */}
+      <summary className="flex cursor-pointer list-none items-start gap-2 py-1 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]">
         {check}
         <span>
           {VERIFIED_LABEL}

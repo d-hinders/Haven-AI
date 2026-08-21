@@ -173,7 +173,12 @@ export function SetupDoneState({
           below (w-full inside a max-w-xl modal), and a 384px cap left the
           button overhanging everything above it by ~150px. */}
       <div className="text-center">
-        <h3 className="text-sm font-semibold leading-relaxed text-[var(--v2-ink)]">
+        {/* text-balance: this line is the money-clarity payoff, and its length
+            depends on the agent name, the amount and the WALLET name — a
+            rendered review caught "…from Operating wallet." stranding
+            "wallet." alone on line two. Balancing spreads the break rather
+            than leaving it to whichever names a user happens to have. */}
+        <h3 className="text-balance text-sm font-semibold leading-relaxed text-[var(--v2-ink)]">
           {canNameGrant ? (
             <>
               {/* .v2-tabular on the amount: design-system.md asks for tabular

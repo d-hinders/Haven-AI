@@ -21,6 +21,8 @@ type ScenarioShape = {
 }
 /** Kept in step with the scenario's own constant in screenshot.mjs. */
 const SETUP_ID = 'setup-screenshot'
+/** Likewise FIXTURE_SAFE.id — the legacy scenario must reuse the same account. */
+const FIXTURE_SAFE_ID = 'safe-fixture'
 
 describe('screenshot populated fixture (#896 follow-up)', () => {
   it('serves the populated shapes the hooks actually read', () => {
@@ -136,6 +138,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
   describe('scenarios (#1409)', () => {
     const connect = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent']
     const approve = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve']
+    const approveLegacy = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve-legacy']
     const signerRemoval = (SCENARIOS as Record<string, ScenarioShape>)['account-signer-removal']
     const backupRecovery = (SCENARIOS as Record<string, ScenarioShape>)['account-backup-recovery']
 
@@ -246,6 +249,28 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(status.agent_budget[0].allowance_amount).toBe('25000000')
         // The collapsed verification row's whole point is showing this.
         expect(status.delegate_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+      })
+
+      it('puts the LEGACY twin on the other rail, and ONLY by account_type', () => {
+        // The rail branch reads `account_type` off /auth/me. Without this
+        // override the legacy scenario would silently capture the DELEGATION
+        // screen under the legacy filename — the exact wrong-screen failure
+        // the scenario's own copy-based wait exists to catch.
+        const me = approveLegacy.api('/auth/me', 'GET') as {
+          safes: Array<{ account_type: string; id: string }>
+          email: string
+        }
+        expect(me.safes[0].account_type).toBe('safe')
+        // Same account otherwise — a scenario states only what is special.
+        expect(me.email).toBe('fixture@haven.test')
+        expect(me.safes[0].id).toBe(FIXTURE_SAFE_ID)
+        const safes = approveLegacy.api('/user/safes', 'GET') as {
+          safes: Array<{ account_type: string }>
+        }
+        // Both readers must agree: `useAgentConnectionSetup` resolves the rail
+        // from /auth/me, but a disagreeing /user/safes would make the capture
+        // depend on which hook won.
+        expect(safes.safes[0].account_type).toBe('safe')
       })
 
       it('serves a reachable signer so the Approve button renders, not the connect fallback', () => {

@@ -882,6 +882,13 @@ describe('ConnectAgentModal', () => {
     // sentence twice on the screen that grants spend authority.
     expect(countOccurrences(document.body.textContent ?? '', 'the agent budget')).toBe(1)
     expect(screen.queryByText('Approve agent budget')).not.toBeInTheDocument()
+    // #1684 trimmed that description to ONE line, and the two things it had
+    // to keep are pinned here rather than left to "it is short and visible":
+    // the refill, and the guarantee — which is stated NOWHERE else in the
+    // flow, on the screen that grants spend authority. A future trim that
+    // takes either now fails.
+    expect(screen.getByText(/refills every period/)).toBeInTheDocument()
+    expect(screen.getByText(/nothing executes outside it/)).toBeInTheDocument()
     // The budget is RESTATED from the setup — never an empty field to refill.
     expect(screen.getByText(/10\.00 USDC\.e per day/)).toBeInTheDocument()
     expect(screen.queryByPlaceholderText('Amount')).not.toBeInTheDocument()

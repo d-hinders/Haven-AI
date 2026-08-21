@@ -795,6 +795,101 @@ export const SCENARIOS = {
       await shoot(dialog, 'approve-verification-open')
     },
   },
+  'connect-agent-approve-legacy': {
+    description: 'Connect agent modal, step 4, the APPROVE screen on the LEGACY rail (#1684)',
+    // The delegation twin of this (`connect-agent-approve`) cannot reach this
+    // screen: the rail branch reads `account_type` off `/auth/me`, and the
+    // shared fixture's account is `delegator_hybrid`. #1684 changes BOTH
+    // approve screens — the card heading, the one-row verification footer and
+    // the `Cancel` label are shared — so the legacy one needs its own capture
+    // rather than an argument by symmetry.
+    //
+    // A fixture has no wallet to connect, so the reachable state is the
+    // approval-blocked one (`approvalBlockReason` → `no_signer`). That is
+    // honest rather than convenient: every element this issue changed renders
+    // in it, and the blocked branch is itself a state worth having evidence
+    // for.
+    api(apiPath, method) {
+      if (apiPath === '/auth/me') {
+        // Same account, LEGACY rail. Spread rather than rebuilt so this
+        // scenario states only the one field that puts it on the other rail.
+        return {
+          ...FIXTURE_USER,
+          safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }],
+        }
+      }
+      if (apiPath === '/user/safes') {
+        return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      }
+      if (apiPath === '/agent-connection-setups' && method === 'POST') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          status: 'connected_local',
+          setup_token: CONNECT_SETUP_TOKEN,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: CONNECT_COMMAND,
+          setup_prompt: 'Please connect this workspace to Haven.',
+        }
+      }
+      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: 'agent-fixture-1',
+          status: 'connected_local',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          agent: { name: 'Research agent', description: 'Pays for research APIs' },
+          haven_wallet: {
+            id: FIXTURE_SAFE.id,
+            name: FIXTURE_SAFE.name,
+            address: FIXTURE_SAFE.safe_address,
+            chain_id: FIXTURE_SAFE.chain_id,
+            network: 'Base Sepolia',
+          },
+          agent_budget: [
+            {
+              id: 'budget-1',
+              token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+              token_symbol: 'USDC',
+              allowance_amount: '25000000',
+              reset_period_min: 1440,
+            },
+          ],
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          install_status: {
+            runtime_mcp_mode: 'local_stdio',
+            local_mcp_configured: true,
+            local_mcp_acknowledged: true,
+            credential_files_written: true,
+            skill_installed: true,
+            restart_required: true,
+          },
+          approval: { status: 'pending', safe_tx_hash: null, tx_hash: null },
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      await dialog.getByLabel('Agent name').fill('Research agent')
+      await dialog.getByRole('button', { name: 'Set agent budget' }).click()
+      await dialog.getByPlaceholder('Amount').fill('25')
+      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
+      await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
+
+      // Confirmed by the LEGACY rail's own description copy — "You sign to
+      // give…" against the delegation rail's "You sign once to give…". A run
+      // that lands on the delegation screen fails here rather than shooting it
+      // under the legacy filename, which is the whole point of the scenario.
+      await dialog
+        .getByText(/You sign to give Research agent authority to spend/)
+        .waitFor({ timeout: 30_000 })
+      await shoot(dialog, 'approve')
+    },
+  },
   'connect-agent-approved': {
     description: 'Connect agent modal, step 4, the APPROVED ending (#1394)',
     // Separate scenario rather than a stage of `connect-agent`: that one pins

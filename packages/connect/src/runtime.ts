@@ -10,6 +10,7 @@ import {
   type LocalDelegateKey,
 } from './key.js'
 import { redactSecrets, shortAddress } from './redact.js'
+import { assertValidServerSlug } from './server-names.js'
 import {
   assertServerSlugAvailable,
   defaultCredentialRoot,
@@ -179,6 +180,12 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
 
   await preflightStorage({ baseDir: options.credentialsDir, warn: log })
   if (options.serverName) {
+    // Validated HERE too, not only in the CLI parser (#1696 review): runConnect
+    // is exported, and a library caller passing a reserved or malformed slug
+    // would otherwise register a live agent and write real key material to
+    // disk before failing deep inside the config writer — the exact orphaned
+    // -agent outcome this ordering exists to prevent.
+    assertValidServerSlug(options.serverName)
     // #1696: the slug keys the credential directory, and connect never
     // overwrites credential files — so a taken slug must refuse HERE, before
     // a key is minted or an agent registered, not fail on the write and
@@ -320,7 +327,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   // agents here, at the moment the user is watching, with the one action only
   // they can take. Connect never revokes or deletes credentials itself.
   try {
-    const supersededIds = await listOtherAgentIds(options.credentialsDir, registration.agent_id)
+    const supersededIds = await listOtherAgentIds(options.credentialsDir, credentialPaths.directory)
     if (supersededIds.length > 0) {
       log('')
       log(
@@ -759,7 +766,7 @@ const RERUN_HINT = 'npx @haven_ai/connect@alpha'
  * not parse is named by its directory name, because "I could not read it" is
  * still a directory the user should know exists.
  */
-async function listOtherAgentIds(baseDir: string | undefined, currentAgentId: string): Promise<string[]> {
+async function listOtherAgentIds(baseDir: string | undefined, currentDirectory: string): Promise<string[]> {
   const root = defaultCredentialRoot(baseDir)
   let entries: string[] = []
   try {
@@ -769,7 +776,11 @@ async function listOtherAgentIds(baseDir: string | undefined, currentAgentId: st
   }
   const ids: string[] = []
   for (const entry of entries) {
-    if (entry === currentAgentId) continue
+    // Exclude by the DIRECTORY this run wrote, never by agent id (#1696
+    // review): a named agent's directory is its slug, which never equals the
+    // agent uuid, so an id comparison would name the agent just created as a
+    // superseded one and tell the user to revoke it on a clean first run.
+    if (join(root, entry) === currentDirectory) continue
     const identityPath = join(root, entry, 'identity.json')
     // Gate on the FILE EXISTING before treating the entry as an agent at all
     // (#1688 review, B1): readdir returns every filesystem entry, and a

@@ -235,16 +235,30 @@ payload it will not guess.' >&2
   # permission, grep then fails, and control fell through to the BLOCK. Found by
   # review, reproduced as a non-root user — it does NOT reproduce as root, which
   # reads mode-000 files, so the first attempt to confirm it came back clean.
-  # Fail open on ANY malfunction of the marker PATH, not merely EACCES on a
-  # regular file. The first fix covered only the shape the review reported;
-  # review of the fix found the siblings still failing closed — a directory at
-  # the marker path, a symlink loop (ELOOP makes -e false), a dangling link.
-  # "Something is wrong with the path" is never evidence a branch was
-  # unreviewed, and this gate must not block on its own plumbing.
-  if [ -e "$rmarker" ] || [ -L "$rmarker" ]; then
-    if [ ! -f "$rmarker" ] || [ ! -r "$rmarker" ]; then
-      return 0
-    fi
+  # Fail open on EXACTLY ONE shape: an existing REGULAR FILE that cannot be
+  # read. That is a plausible accident — permissions, a prior process — and
+  # blocking on it would stop real work over plumbing.
+  #
+  # Everything else at this path is treated as ABSENCE, which blocks. An earlier
+  # version widened this to "any path malfunction" (directory, symlink loop,
+  # dangling link) on the reasoning that malfunctions are symmetric. They are
+  # not, and review caught it: `reviewer-marker.sh` only ever appends to a
+  # regular file, so a DIRECTORY at this name is not something a real pass can
+  # produce — it can only have been put there. The session id is known to the
+  # calling agent and the path is deterministic, which made
+  #
+  #     mkdir -p "$TMPDIR/claude-reviewed-$SESSION_ID"
+  #
+  # a one-command silencer for the gate the owner asked for as a full stop,
+  # certified by three of this file's own tests. It also REGRESSED behaviour
+  # that was already correct: before the widening a directory fell through to
+  # the block, because `[ -f ]` is false for one.
+  #
+  # `[ -f ]` is the right test throughout: false for a directory, a dangling
+  # link and a symlink loop; true for an unreadable regular file, whose
+  # unreadability `[ ! -r ]` then catches.
+  if [ -f "$rmarker" ] && [ ! -r "$rmarker" ]; then
+    return 0
   fi
 
   if [ -f "$rmarker" ] && grep -Fxq "$rbranch" "$rmarker" 2>/dev/null; then

@@ -475,26 +475,36 @@ rcheck "malformed payload whose tool_name IS the PR tool still BLOCKS" 2 \
 rcheck "malformed payload whose command IS gh pr create still BLOCKS" 2 \
   '{"session_id":"strictsess","tool_name":"Bash","tool_input":{"command":"gh pr create --fill" BROKEN'
 
-# --- marker-path malfunctions all fail OPEN ---------------------------------
-# Only the EACCES-on-a-regular-file shape was fixed first; review of that fix
-# found the siblings still failing closed. None of these depend on being root.
+# --- a non-regular-file at the marker path is ABSENCE, and must BLOCK -------
+#
+# These three asserted the OPPOSITE for one commit, and in doing so certified a
+# bypass: reviewer-marker.sh only ever appends to a regular file, so a directory
+# at this deterministic path cannot come from a real review pass — but it made
+# `mkdir -p "$TMPDIR/claude-reviewed-$SESSION_ID"` silence the gate in one
+# command. Absence is the correct reading, and absence blocks.
 unreviewed dirsess
 mkdir -p "$MARKER_DIR/claude-reviewed-dirsess" 2>/dev/null
-rcheck "marker path is a DIRECTORY -> fails open" 0 "$(pr dirsess 1)"
+rcheck "marker path is a DIRECTORY -> still BLOCKS (not a bypass)" 2 "$(pr dirsess 1)"
 rmdir "$MARKER_DIR/claude-reviewed-dirsess" 2>/dev/null
 
 unreviewed loopsess
 ln -s "$MARKER_DIR/claude-reviewed-loopsess" "$MARKER_DIR/claude-reviewed-loopsess" 2>/dev/null
-rcheck "marker path is a SYMLINK LOOP -> fails open" 0 "$(pr loopsess 1)"
+rcheck "marker path is a SYMLINK LOOP -> still BLOCKS" 2 "$(pr loopsess 1)"
 rm -f "$MARKER_DIR/claude-reviewed-loopsess" 2>/dev/null
 
 unreviewed danglesess
 ln -s "$MARKER_DIR/definitely-not-there-$$" "$MARKER_DIR/claude-reviewed-danglesess" 2>/dev/null
-rcheck "marker path is a DANGLING SYMLINK -> fails open" 0 "$(pr danglesess 1)"
+rcheck "marker path is a DANGLING SYMLINK -> still BLOCKS" 2 "$(pr danglesess 1)"
 rm -f "$MARKER_DIR/claude-reviewed-danglesess" 2>/dev/null
 
+# The bypass itself, named, so it cannot be reintroduced quietly.
+unreviewed attacksess
+mkdir -p "$MARKER_DIR/claude-reviewed-attacksess" 2>/dev/null
+rcheck "mkdir at the marker path does NOT silence the gate" 2 "$(pr attacksess 1)"
+rmdir "$MARKER_DIR/claude-reviewed-attacksess" 2>/dev/null
+
 # F7: leave no stray markers behind, including the ones seeded at the top.
-for _s in rgate rgate2 rgate3 rgate4 rgate5 strictsess dirsess loopsess danglesess testsess sess1 sess2 wsess gatesess x ______etc_passwd; do
+for _s in rgate rgate2 rgate3 rgate4 rgate5 strictsess dirsess loopsess danglesess attacksess testsess sess1 sess2 wsess gatesess x ______etc_passwd; do
   unreviewed "$_s"
 done
 

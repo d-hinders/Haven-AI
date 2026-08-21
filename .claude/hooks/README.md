@@ -116,12 +116,20 @@ pull request is not a rule.
   real gap this cannot see — the warning still names it, and it stays judgement.
 - **Not consumed.** Unlike the ship-next token, a recorded pass survives the
   pull request. "Review happened for this branch" does not stop being true.
-- **Fails open** on its own malfunction — missing `jq`, unreadable marker,
-  detached HEAD. A guard that blocks all PR creation when its plumbing breaks
-  gets removed, and then it guards nothing. The asymmetry is deliberate and the
-  opposite of the ship-next marker's, because the failure modes are opposite: a
-  retained ship-next token means *silence*, while a missing reviewer marker
-  means *a block*.
+- **Fails open** on its own malfunction — missing `jq`, detached HEAD, or an
+  existing **regular file** at the marker path that cannot be read. A guard that
+  blocks all PR creation when its plumbing breaks gets removed, and then it
+  guards nothing.
+- **But "malfunction" is narrow, and that boundary is load-bearing.** Anything
+  at the marker path that is not a readable regular file — a directory, a
+  symlink loop, a dangling link — is treated as ABSENCE, and absence blocks.
+  A version of this hook briefly failed open on all of them, reasoning that path
+  malfunctions are symmetric. They are not: `reviewer-marker.sh` only ever
+  appends to a regular file, so a directory at that name cannot come from a real
+  pass. Since the path is deterministic and the session id is known to the
+  calling agent, `mkdir -p "$TMPDIR/claude-reviewed-$SESSION_ID"` silenced the
+  entire gate in one command — with three tests certifying it as intended. If
+  you ever widen this condition, that is the case to think about first.
 - **Bypass** by unsetting the hook — and say in the pull request that review was
   skipped and why. Do not do it silently.
 

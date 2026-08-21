@@ -41,6 +41,8 @@ export const LEADER_LOCK_KEYS = {
   passportSweep: 811005,
   /** Outbound-tx bump/replacement worker (#1558, epic #1554). */
   outboundBump: 811006,
+  /** Expired rate-limit counter sweep (#1680). */
+  rateLimitSweep: 811007,
 } as const
 
 /**

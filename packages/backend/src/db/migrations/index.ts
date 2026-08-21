@@ -61,6 +61,7 @@ import * as retireMppDemoCatalog from './059_retire_mpp_demo_catalog.js'
 import * as agentsArchivedAt from './060_agents_archived_at.js'
 import * as outboundTxs from './061_outbound_txs.js'
 import * as normalizePriceDisplay from './062_normalize_price_display.js'
+import * as rateLimitCounters from './063_rate_limit_counters.js'
 
 export interface Migration {
   version: string
@@ -135,4 +136,5 @@ export const migrations: Migration[] = [
   agentsArchivedAt,
   outboundTxs,
   normalizePriceDisplay,
+  rateLimitCounters,
 ]

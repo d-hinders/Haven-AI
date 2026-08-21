@@ -91,13 +91,23 @@ export const demoRateLimit = {
  * an untrusted proxy we cannot know anyway.
  *
  * "Mostly", precisely: the key generator runs as an `onRequest` hook, BEFORE the
- * handler validates the address, so it buckets raw query text. @fastify/rate-limit's
- * default store is an LRU capped at 5000 entries, so this is not unbounded
- * memory growth — but a caller flooding >5000 distinct junk subjects inside a
- * window can EVICT a specific legitimate subject's counter and reset its
- * ceiling. So the isolation is a large improvement on one global bucket, not an
- * absolute guarantee. Making it absolute means a shared store with real keys,
- * which needs `trustProxy` first.
+ * handler validates the address, so it buckets raw query text.
+ *
+ * #1680 changed what that costs, and in the right direction. This used to sit
+ * on the plugin's in-process LRU capped at 5000 entries, where a caller
+ * flooding >5000 distinct junk subjects inside a window could EVICT a
+ * legitimate subject's counter and reset its ceiling — the isolation was a
+ * large improvement on one global bucket, but not a guarantee. Counters now
+ * live in `rate_limit_counters`, so no eviction resets anyone: a subject's
+ * count survives any amount of junk beside it, and the count is shared across
+ * replicas rather than per-process.
+ *
+ * The residual risk MOVED rather than vanished. Junk subjects now become real
+ * rows until the leader-gated sweep clears them, so a flood costs table growth
+ * instead of a lost counter — bounded, because a row is keyed by subject and
+ * updated in place, so the table tracks DISTINCT subjects seen recently rather
+ * than requests. Trading an eviction that breaks the guarantee for rows that
+ * cost space is the trade worth making.
  *
  * 120/min per subject is generous on purpose: receipts carry a 5-minute signed
  * TTL and are explicitly cacheable, so a correctly integrated merchant needs

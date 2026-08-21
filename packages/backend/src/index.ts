@@ -7,6 +7,8 @@ import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
 import rateLimit from '@fastify/rate-limit'
 import { rateLimitKeyFor } from './middleware/rate-limit.js'
+import { SharedRateLimitStore, setRateLimitDegradedReporter } from './middleware/shared-rate-limit-store.js'
+import { deleteExpiredRateLimits } from './infra/repositories/rate-limit-counters.js'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
 import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
@@ -119,9 +121,21 @@ await app.register(fastifyJwt, {
 // the proxy address behind Railway — acceptable for the public demo routes,
 // where a shared throttle still beats an open faucet, and the reason the
 // auth tier (#1670) refuses to arm itself until the proxy is trusted.
+// #1680: the shared Postgres-backed store replaces the plugin's in-process
+// LRU. With the default store each replica counted only its own share of the
+// traffic, so the real ceiling was `max × replicas` and it ROSE with load —
+// live probing of dev read x-ratelimit-remaining back as two interleaved
+// descending series. The store is fail-open and deadline-bounded: a database
+// problem degrades to the old per-replica counting rather than locking anyone
+// out of signup or login.
 await app.register(rateLimit, {
   global: false,
   keyGenerator: (request: FastifyRequest) => rateLimitKeyFor(request),
+  store: SharedRateLimitStore,
+})
+
+setRateLimitDegradedReporter((reason) => {
+  app.log.warn({ reason }, 'Rate-limit store fell back to per-replica counting (#1680)')
 })
 
 await app.register(openapiRoutes)
@@ -254,6 +268,13 @@ if (fortnoxConfigured()) {
 
 // --- Start ---
 const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly
+
+/**
+ * #1680: the sweep only reclaims space — every read already filters on expiry,
+ * so a late run costs dead rows, never a wrong count. Five minutes keeps the
+ * table small without adding a chatty query to a busy database.
+ */
+const RATE_LIMIT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
 const DELEGATE_MONITOR_INTERVAL_MS = 60 * 60 * 1000 // hourly (#714)
 // Every 5 minutes, not hourly: this sweep carries revocation reconciliation,
 // and the backoff schedule it drives starts at 30s. An hourly tick would flatten
@@ -304,6 +325,25 @@ const start = async () => {
     }
     void runCatalogRefresh()
     setInterval(runCatalogRefresh, CATALOG_REFRESH_INTERVAL_MS).unref()
+
+    // Expired rate-limit counters (#1680): nothing else removes them, and the
+    // table is written by UNAUTHENTICATED traffic — so without a sweep,
+    // unbounded growth is reachable by anyone with a script and a supply of
+    // source addresses. Leader-gated like every tick here; a missed run only
+    // leaves dead rows, never a wrong count, because every read filters on
+    // expiry.
+    const runRateLimitSweep = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.rateLimitSweep, async () => {
+          const deleted = await deleteExpiredRateLimits()
+          if (deleted > 0) app.log.debug({ deleted }, 'Swept expired rate-limit counters')
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Rate-limit counter sweep failed')
+      }
+    }
+    void runRateLimitSweep()
+    setInterval(runRateLimitSweep, RATE_LIMIT_SWEEP_INTERVAL_MS).unref()
 
     // Delegate balance monitor (#714): hourly read-only scan of every active
     // agent's delegate USDC balance — WARNs on lingering (sweepable) balances

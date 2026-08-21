@@ -5,12 +5,13 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
-const { mockQuery, mockSelect, mockCompute, mockCreateIntent, mockPrepareFunding } = vi.hoisted(() => ({
+const { mockQuery, mockSelect, mockCompute, mockCreateIntent, mockPrepareFunding, mockEnsureDeployed } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockSelect: vi.fn(),
   mockCompute: vi.fn(),
   mockCreateIntent: vi.fn(),
   mockPrepareFunding: vi.fn(),
+  mockEnsureDeployed: vi.fn(),
 }))
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 
@@ -20,6 +21,7 @@ vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery
 import { privateKeyToAccount } from 'viem/accounts'
 import { delegationSigningPayload } from '../../rails/delegation-policy.js'
 import { typedDataDigest } from '../../modules/x402/x402-delegation.js'
+import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
 const DELEGATE_SIGNER = privateKeyToAccount(('0x' + '11'.repeat(32)) as `0x${string}`)
 async function signChild(child: unknown): Promise<`0x${string}`> {
   const payload = delegationSigningPayload(child as never, 84532)
@@ -47,7 +49,7 @@ vi.mock('../../rails/delegation-authorization.js', () => ({
 }))
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
-  return { ...actual, computeHybridAccountAddress: mockCompute }
+  return { ...actual, computeHybridAccountAddress: mockCompute, ensureHybridDeployed: mockEnsureDeployed }
 })
 // The delegation-rail authorize orchestration writes the intent via the
 // repository directly now (#997 removed the `lib/machine-payments.js`
@@ -104,7 +106,11 @@ describe('x402 delegation-rail settlement (#830)', () => {
     mockCompute.mockReset()
     mockCreateIntent.mockReset()
     mockPrepareFunding.mockReset()
+    mockEnsureDeployed.mockReset()
     mockCompute.mockResolvedValue(DELEGATE_ACCT)
+    // #1667: default to an already-deployed delegate account; the regression
+    // block below overrides this to exercise the counterfactual first payment.
+    mockEnsureDeployed.mockResolvedValue({ address: DELEGATE_ACCT, alreadyDeployed: true })
     // #961: every delegation authorize consults the hourly cap; default to
     // an uncapped agent with no existing intents.
     mockQuery.mockImplementation((sql: string) => {
@@ -156,6 +162,92 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(call.delegationHash).not.toBe(call.budgetDelegationHash)
     // No allowance/funding query ran — there is no funding leg on this rail:
     expect(mockQuery.mock.calls.some((c) => /allowance/i.test(String(c[0])))).toBe(false)
+  })
+
+  // ── #1667: the settlement child's delegator must EXIST on-chain ──────────
+  // The child's delegator is the delegate HYBRID account; the DelegationManager
+  // verifies its signature via EIP-1271 (code) or ecrecover (no code). Against
+  // a counterfactual account the EOA signature recovers to the EOA ≠ delegator
+  // → InvalidEOASignature (0x3db6791c), the exact prod failure. The 3009
+  // funding leg deploys the account via its UserOp's initCode; a fresh agent
+  // whose FIRST payment is erc7710 — and every recipient-pinned agent, which
+  // can never run a 3009 leg — needs the authorize to deploy it.
+  describe('delegate-account deploy on erc7710 authorize (#1667)', () => {
+    function primeErc7710() {
+      mockSelect.mockResolvedValue({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    }
+
+    it('REGRESSION: authorize ensures the delegate hybrid account is deployed, attributed to the agent', async () => {
+      primeErc7710()
+      mockEnsureDeployed.mockResolvedValue({
+        address: DELEGATE_ACCT, alreadyDeployed: false, txHash: '0x' + '77'.repeat(32),
+      })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody(),
+      })
+      expect(res.statusCode).toBe(201)
+      // Deployed from the delegate EOA's owner config, pinned to the SAME
+      // address the child was built against, billed to this agent (#717):
+      expect(mockEnsureDeployed).toHaveBeenCalledWith(
+        84532,
+        { ownerAddress: DELEGATE_SIGNER.address },
+        DELEGATE_ACCT,
+        { agentId: 'agent-1', userId: 'user-1' },
+      )
+    })
+
+    it('fail-closed: a deploy failure 502s BEFORE any intent row exists, so authorize is retryable', async () => {
+      mockSelect.mockResolvedValue({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+      mockEnsureDeployed.mockRejectedValue(new Error('relayer has no provider'))
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody(),
+      })
+      expect(res.statusCode).toBe(502)
+      expect(res.json().error).toMatch(/deploy the delegate account/)
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+    })
+
+    it('maps a relayer budget breach to 429 (#717 discipline, same as grant activation)', async () => {
+      mockSelect.mockResolvedValue({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+      mockEnsureDeployed.mockRejectedValue(new RelayerBudgetExceededError('hybrid_deploy', 5, 60))
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody(),
+      })
+      expect(res.statusCode).toBe(429)
+      expect(res.json().error).toMatch(/Relayer budget exceeded/)
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+    })
+
+    it('the 3009 funding shape never calls it — that leg deploys via its own UserOp initCode', async () => {
+      mockPrepareFunding.mockResolvedValue(PREPARED)
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(201)
+      expect(mockEnsureDeployed).not.toHaveBeenCalled()
+    })
   })
 
   // ── #1058: facilitator redeemers ─────────────────────────────────────────

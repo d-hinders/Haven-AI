@@ -72,11 +72,14 @@ vi.mock('../../infra/relayer.js', async () => {
 
 // The counterfactual account: derived via viem + the kit — faked to the two
 // members ensureHybridDeployed actually uses.
+// #1673: bytecode is a variable rather than a constant '0x', so a test can
+// model the state a QUEUED caller finds after the winner's deploy mines.
+let deployedBytecode = '0x'
 vi.mock('viem', async () => {
   const actual = await vi.importActual<typeof import('viem')>('viem')
   return {
     ...actual,
-    createPublicClient: () => ({ getBytecode: async () => '0x' }),
+    createPublicClient: () => ({ getBytecode: async () => deployedBytecode }),
   }
 })
 vi.mock('@metamask/smart-accounts-kit', async () => {
@@ -96,6 +99,7 @@ const OWNER = { ownerAddress: ('0x' + 'aa'.repeat(20)) as `0x${string}` }
 beforeEach(() => {
   trace.length = 0
   waitReverts = false
+  deployedBytecode = '0x'
   vi.clearAllMocks()
 })
 
@@ -120,5 +124,56 @@ describe('hybrid deploy outbound record (#1556)', () => {
     expect(trace).toEqual(['record:open', 'broadcast', 'spend:finish', 'record:failed'])
     expect(minedSpy).not.toHaveBeenCalled()
     expect(finishSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * #1673 — the deploy is serialised per (chain, address).
+ *
+ * #1667 put `ensureHybridDeployed` on every erc7710 authorize, so a brand-new
+ * agent paying two merchants at once reaches the bytecode check twice with
+ * different idempotency keys — outside the #961 replay dedupe. Both used to
+ * pass and both broadcast a deploy to the same CREATE2 address.
+ */
+describe('concurrent first payments deploy once (#1673)', () => {
+  it('MUTATION PROOF: two concurrent calls broadcast ONE deploy, and the loser reports alreadyDeployed', async () => {
+    // The winner's deploy makes the account real; model that by flipping the
+    // bytecode when the broadcast happens, which is what the queued caller's
+    // second check will see.
+    submitSpy.mockImplementationOnce(async (params: { recordId: string | null }) => {
+      trace.push('broadcast')
+      void params
+      deployedBytecode = '0x60016001'
+      return {
+        hash: TX_HASH,
+        nonce: 9,
+        wait: async () => ({ status: 1, gasUsed: 100n, gasPrice: 5n }),
+      }
+    })
+
+    const [a, b] = await Promise.all([
+      ensureHybridDeployed(84532, OWNER),
+      ensureHybridDeployed(84532, OWNER),
+    ])
+
+    // Exactly one broadcast — remove the lock and this is 2, which is the
+    // wasted relayer gas spend the issue reports.
+    expect(trace.filter((t) => t === 'broadcast')).toHaveLength(1)
+    expect(openSpy).toHaveBeenCalledTimes(1)
+
+    const outcomes = [a.alreadyDeployed, b.alreadyDeployed].sort()
+    expect(outcomes).toEqual([false, true])
+    // Both callers still get a usable answer — the loser is not an error.
+    expect(a.address).toBe(b.address)
+  })
+
+  it('a caller arriving AFTER the deploy never reaches the relayer at all', async () => {
+    deployedBytecode = '0x60016001'
+
+    const result = await ensureHybridDeployed(84532, OWNER)
+
+    expect(result.alreadyDeployed).toBe(true)
+    expect(submitSpy).not.toHaveBeenCalled()
+    expect(openSpy).not.toHaveBeenCalled()
   })
 })

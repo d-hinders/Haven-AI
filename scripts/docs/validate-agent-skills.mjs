@@ -10,6 +10,7 @@ export const REQUIRED_SKILLS = [
   "haven-reset",
   "haven-agent-workflow",
   "quality-scan",
+  "release",
 ];
 
 export const REQUIRED_ROLES = [
@@ -33,7 +34,7 @@ export const ROLE_REFERENCES = {
 export const RESET_CLIENTS = ["claude-code", "codex"];
 
 const COMMAND_TARGETS = Object.fromEntries(
-  ["new-task", "ship-next", "haven-reset", "quality-scan"].map((name) => [
+  ["new-task", "ship-next", "haven-reset", "quality-scan", "release"].map((name) => [
     `.claude/commands/${name}.md`,
     `.agents/skills/${name}/SKILL.md`,
   ]),

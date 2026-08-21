@@ -36,6 +36,25 @@ check() { # name expected(fire|silent) payload
 }
 b() { printf '{"session_id":"testsess","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1"; }
 MARKER_DIR="${TMPDIR:-/tmp}"
+
+# --- reviewer gate: satisfy it for the ship-next cases ----------------------
+#
+# The guard now BLOCKS pull request creation unless an independent reviewer pass
+# is recorded for the branch (reviewer-marker.sh). That is a DIFFERENT policy
+# from the ship-next warning these cases measure, and it runs first — so without
+# this setup every warning case would be blocked before the warning is reached
+# and read as a false "silent". Record a pass for each session the suite uses;
+# the reviewer gate has its own cases at the end of this file.
+#
+# The sanitized names matter: session_id is mapped through
+# `tr -c 'A-Za-z0-9_-' '_'`, so `../../etc/passwd` becomes `______etc_passwd`.
+TEST_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || TEST_BRANCH=""
+reviewed() {
+  [ -n "$TEST_BRANCH" ] || return 0
+  printf '%s\n' "$TEST_BRANCH" > "$MARKER_DIR/claude-reviewed-$1" 2>/dev/null || true
+}
+unreviewed() { rm -f "$MARKER_DIR/claude-reviewed-$1" 2>/dev/null || true; }
+for _s in testsess sess1 sess2 wsess gatesess x ______etc_passwd; do reviewed "$_s"; done
 mkrm() { rm -f "$MARKER_DIR/claude-ship-next-$1"; }      # clear marker
 mkhas() { [ -f "$MARKER_DIR/claude-ship-next-$1" ]; }    # marker still there?
 # Write tokens, one per line: mktok sess1 1030 '*'
@@ -267,12 +286,46 @@ check "empty session_id -> warns" fire '{"session_id":"","tool_name":"mcp__githu
 check "path-traversal session_id -> warns" fire "$(pr '../../etc/passwd')"
 
 
+rcheck() { # name expected_exit payload
+  printf '%s' "$3" | sh "$GUARD" >/dev/null 2>&1
+  actual=$?
+  if [ "$actual" = "$2" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf '  FAIL  %-52s expected exit %s, got %s\n' "$1" "$2" "$actual"
+  fi
+}
+
 # --- the last silence path: an unparseable payload that IS a PR creation --
 # Found by review, outside the scope it was asked to check. The top-level jq
 # extraction used to `|| exit 0`, bypassing the marker gate entirely — so the
 # documented "can never fail toward silence" property was not actually true.
-check "malformed payload naming create_pull_request" fire '{"session_id":"x","tool_name":BROKEN,"create_pull_request"'
-check "malformed payload containing gh pr create" fire '{"session_id":"x",BROKEN gh pr create'
+#
+# These two now BLOCK rather than warn, which is a stronger form of the property
+# they were written to protect: a PR-shaped payload the guard cannot parse must
+# never pass unnoticed. Warning was the strongest response available before the
+# reviewer gate existed; with it, an unverifiable pull request is refused. The
+# assertions moved from stdout to exit status for the same reason the F2 bypass
+# survived the suite — a case that reads stdout cannot see a block.
+# These two carry NO structural signal — no `"tool_name": "...create_pull_request"`,
+# no `"command": "... gh pr create"` — only the bare phrase in mangled text. They
+# WARN rather than block, and that is the settled answer after three rounds on
+# this branch:
+#
+#   round 1: they warned, and an unparseable PR-shaped payload could dodge the
+#            gate entirely -> called a bypass.
+#   round 2: made every such payload BLOCK -> false-blocked any malformed
+#            payload merely MENTIONING the phrase, and these files are full of it.
+#   round 3: block on a structural signal, warn otherwise.
+#
+# Why warning is enough here: a payload this mangled is not a tool call the
+# harness would execute either — it sees the same bytes. Blocking unrecognisable
+# garbage protects against nothing, while false-blocking real work is a live
+# cost. The property these cases were written to defend is intact: a PR-shaped
+# payload must never pass UNNOTICED, and a warning is not silence.
+check "malformed payload naming create_pull_request warns" fire '{"session_id":"x","tool_name":BROKEN,"create_pull_request"'
+check "malformed payload containing gh pr create warns" fire '{"session_id":"x",BROKEN gh pr create'
 # ...but an unidentifiable payload must still stay quiet, or every unparseable
 # tool call becomes noise and the guard gets muted that way instead.
 check "malformed payload, nothing PR-shaped" silent 'not json at all'
@@ -334,6 +387,145 @@ for needle in "CODEOWNERS" "coupling-gate.mjs" "origin/dev" "docs:check" "script
     *"$needle"*) pass=$((pass + 1)) ;;
     *) fail=$((fail + 1)); printf '  FAIL  warning text is missing: %s\n' "$needle" ;;
   esac
+done
+
+
+# --- the reviewer gate (blocking) -------------------------------------------
+#
+# Distinct from every case above: those measure the ship-next WARNING on stdout,
+# this measures a BLOCK — exit 2 with a message on stderr. check() reads stdout,
+# so it cannot see this; these assert the exit status directly.
+WRITER_R="$(dirname "$0")/reviewer-marker.sh"
+
+unreviewed rgate
+rcheck "no reviewer pass -> PR creation BLOCKS" 2 "$(pr rgate 1)"
+rcheck "no reviewer pass -> gh pr create BLOCKS" 2 "$(bs rgate 'gh pr create --base dev --fill')"
+rcheck "no reviewer pass -> a non-PR command is untouched" 0 "$(bs rgate 'git status')"
+
+# A reviewer pass recorded by the real writer must clear it.
+printf '{"session_id":"rgate","hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"subagent_type":"haven-reviewer"}}' \
+  | sh "$WRITER_R" 2>/dev/null
+if [ -n "$TEST_BRANCH" ] && grep -Fxq "$TEST_BRANCH" "$MARKER_DIR/claude-reviewed-rgate" 2>/dev/null; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); printf '  FAIL  reviewer-marker.sh did not record the pass\n'
+fi
+rcheck "after a reviewer pass -> PR creation proceeds" 0 "$(pr rgate 1)"
+
+# The marker is NOT consumed. Unlike the ship-next token, this answers "did
+# review happen for this branch", which does not stop being true after one PR.
+rcheck "reviewer pass is not consumed by one PR" 0 "$(pr rgate 2)"
+
+# Only reviewer roles count.
+unreviewed rgate2
+printf '{"session_id":"rgate2","hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"subagent_type":"haven-explorer"}}' \
+  | sh "$WRITER_R" 2>/dev/null
+rcheck "a non-reviewer subagent does NOT clear the gate" 2 "$(pr rgate2 1)"
+
+# haven-design-reviewer is a SECOND pass, not a substitute (AGENTS.md), so it
+# must NOT clear the gate on its own. This case asserted the opposite until
+# review pointed out it locked in the very substitution the prose forbids.
+unreviewed rgate3
+printf '{"session_id":"rgate3","hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"subagent_type":"haven-design-reviewer"}}' \
+  | sh "$WRITER_R" 2>/dev/null
+rcheck "haven-design-reviewer alone does NOT clear the gate" 2 "$(pr rgate3 1)"
+
+# Fail-open on its own malfunction: blocking every PR because the plumbing broke
+# would get the hook removed, and then it guards nothing.
+rcheck "missing session_id -> does NOT block" 0 '{"tool_name":"mcp__github__create_pull_request","tool_input":{}}'
+
+# F2 regression: an unparseable PR-shaped payload must still hit the gate. The
+# two pre-existing cases on this branch assert stdout, and a block writes to
+# stderr — so they passed while the bypass was live. Assert the exit code.
+unreviewed rgate4
+rcheck "unparseable payload with a structural PR signal BLOCKS" 2 \
+  '{"session_id":"rgate4","tool_name":"mcp__github__create_pull_request", BROKEN'
+check "unparseable payload with only a bare mention warns instead" fire '{"session_id":"rgate4",BROKEN gh pr create'
+
+# F3 regression: a marker that exists but cannot be read is a malfunction, and
+# the contract is to fail OPEN. Skipped as root, which can read mode-000 files
+# and would make the case pass vacuously.
+if [ "$(id -u 2>/dev/null || echo 0)" != "0" ]; then
+  unreviewed rgate5
+  printf '%s\n' "$TEST_BRANCH" > "$MARKER_DIR/claude-reviewed-rgate5" 2>/dev/null
+  chmod 000 "$MARKER_DIR/claude-reviewed-rgate5" 2>/dev/null
+  rcheck "unreadable marker fails OPEN, not closed" 0 "$(pr rgate5 1)"
+  chmod 644 "$MARKER_DIR/claude-reviewed-rgate5" 2>/dev/null
+  unreviewed rgate5
+else
+  printf '  SKIP  unreadable-marker case (running as root reads mode-000)\n'
+fi
+
+# --- strict mode must not false-block on a coincidental mention -------------
+#
+# The first strict implementation matched `create_pull_request` / `gh pr create`
+# anywhere in a malformed payload, so an unrelated tool call that merely
+# MENTIONED the phrase was hard-blocked — and these very files are full of the
+# phrase. No case covered "malformed + unrelated tool + incidental mention",
+# which is why the suite passed while the regression was live. These are the
+# reviewer's own reproductions.
+unreviewed strictsess
+rcheck "malformed Write that merely mentions gh pr create does NOT block" 0 \
+  '{"tool_name":"Write","tool_input":{"file_path":"README.md","content":"See gh pr create docs"} BROKEN'
+rcheck "malformed Task prompt naming create_pull_request does NOT block" 0 \
+  '{"tool_name":"Task","tool_input":{"description":"explain create_pull_request semantics"} SYNTAX_ERROR'
+# ...while a malformed payload whose TOOL is the PR tool still blocks.
+rcheck "malformed payload whose tool_name IS the PR tool still BLOCKS" 2 \
+  '{"session_id":"strictsess","tool_name":"mcp__github__create_pull_request","tool_input":{ BROKEN'
+rcheck "malformed payload whose command IS gh pr create still BLOCKS" 2 \
+  '{"session_id":"strictsess","tool_name":"Bash","tool_input":{"command":"gh pr create --fill" BROKEN'
+
+# --- a non-regular-file at the marker path is ABSENCE, and must BLOCK -------
+#
+# These three asserted the OPPOSITE for one commit, and in doing so certified a
+# bypass: reviewer-marker.sh only ever appends to a regular file, so a directory
+# at this deterministic path cannot come from a real review pass — but it made
+# `mkdir -p "$TMPDIR/claude-reviewed-$SESSION_ID"` silence the gate in one
+# command. Absence is the correct reading, and absence blocks.
+unreviewed dirsess
+mkdir -p "$MARKER_DIR/claude-reviewed-dirsess" 2>/dev/null
+rcheck "marker path is a DIRECTORY -> still BLOCKS (not a bypass)" 2 "$(pr dirsess 1)"
+rmdir "$MARKER_DIR/claude-reviewed-dirsess" 2>/dev/null
+
+unreviewed loopsess
+ln -s "$MARKER_DIR/claude-reviewed-loopsess" "$MARKER_DIR/claude-reviewed-loopsess" 2>/dev/null
+rcheck "marker path is a SYMLINK LOOP -> still BLOCKS" 2 "$(pr loopsess 1)"
+rm -f "$MARKER_DIR/claude-reviewed-loopsess" 2>/dev/null
+
+unreviewed danglesess
+ln -s "$MARKER_DIR/definitely-not-there-$$" "$MARKER_DIR/claude-reviewed-danglesess" 2>/dev/null
+rcheck "marker path is a DANGLING SYMLINK -> still BLOCKS" 2 "$(pr danglesess 1)"
+rm -f "$MARKER_DIR/claude-reviewed-danglesess" 2>/dev/null
+
+# The symlink bypass: a link to a readable file containing the branch name is
+# NOT a review pass. `-f` and `grep` both follow links, so this sailed through
+# the branch meant to PROVE a review happened — not a fail-open path at all,
+# which is why narrowing the malfunction condition never touched it and the
+# cases aimed at that condition could not see it.
+unreviewed symsess
+printf '%s\n' "$TEST_BRANCH" > "$MARKER_DIR/sym-target-$$" 2>/dev/null
+ln -s "$MARKER_DIR/sym-target-$$" "$MARKER_DIR/claude-reviewed-symsess" 2>/dev/null
+rcheck "symlink to a readable branch-name file does NOT clear the gate" 2 "$(pr symsess 1)"
+rm -f "$MARKER_DIR/claude-reviewed-symsess" "$MARKER_DIR/sym-target-$$" 2>/dev/null
+
+# And the same trick against the ship-next token marker must still warn.
+mkrm symtok
+printf '%s\n' '*' > "$MARKER_DIR/ship-next-target-$$" 2>/dev/null
+ln -s "$MARKER_DIR/ship-next-target-$$" "$MARKER_DIR/claude-ship-next-symtok" 2>/dev/null
+reviewed symtok
+check "symlinked ship-next marker does not silence the warning" fire "$(pr symtok 1)"
+rm -f "$MARKER_DIR/claude-ship-next-symtok" "$MARKER_DIR/ship-next-target-$$" 2>/dev/null
+unreviewed symtok
+
+# The bypass itself, named, so it cannot be reintroduced quietly.
+unreviewed attacksess
+mkdir -p "$MARKER_DIR/claude-reviewed-attacksess" 2>/dev/null
+rcheck "mkdir at the marker path does NOT silence the gate" 2 "$(pr attacksess 1)"
+rmdir "$MARKER_DIR/claude-reviewed-attacksess" 2>/dev/null
+
+# F7: leave no stray markers behind, including the ones seeded at the top.
+for _s in rgate rgate2 rgate3 rgate4 rgate5 strictsess dirsess loopsess danglesess attacksess symsess symtok testsess sess1 sess2 wsess gatesess x ______etc_passwd; do
+  unreviewed "$_s"
 done
 
 printf '\nship-next guard: %d passed, %d failed\n' "$pass" "$fail"

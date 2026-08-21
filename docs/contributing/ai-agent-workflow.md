@@ -10,7 +10,7 @@ covers:
   - AGENTS.md
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/ai-review-patterns.md
-last-verified: "2026-08-05"
+last-verified: "2026-08-21" # the independent reviewer pass is now unconditional and route-independent (owner decision 2026-08-21): "owning an equivalent review yourself" no longer reads as licence to self-review. The no-check-for-workflow property is unchanged — the new gate asks whether review happened, never which route ran.
 ---
 
 # Haven AI Agent Workflow
@@ -21,7 +21,9 @@ The captain is the main interactive session. It owns product judgment, git, shar
 
 > **What is enforced vs. what this document adds ([#1025](https://github.com/d-hinders/Haven-AI/issues/1025)).** The mechanical standards are **CI required checks**, and the migrations gate is a `CODEOWNERS` **review rule** — different mechanisms, same property: they apply to every pull request whoever or whatever opened it. Nothing in this document is needed to make them apply, and no workflow choice skips them. The authoritative list, with its fork and promotion caveats, is the ruleset inventory in [`autonomous-pr-loop.md`](autonomous-pr-loop.md).
 >
-> Everything below is the layer CI **cannot** check: judgement, review, and the traps a diff walks into. `ship-next` is the default route through it because it is the fastest one, not because it is required. Working differently is fine and stays possible — it means owning an equivalent review yourself, and saying so in the pull request. There is deliberately no check for which workflow was used: enforce outcomes, never tooling.
+> Everything below is the layer CI **cannot** check: judgement, review, and the traps a diff walks into. `ship-next` is the default route through it because it is the fastest one, not because it is required. Working differently is fine and stays possible — it means owning the equivalent judgement yourself, and saying so in the pull request. There is deliberately no check for which workflow was used: enforce outcomes, never tooling.
+>
+> **One item does not vary with the route: the independent reviewer pass runs on every pull request** (owner decision 2026-08-21; see `AGENTS.md` and CLAUDE.md § *How shipping is governed*). "Owning it yourself" means running `haven-reviewer` yourself, not reviewing your own diff — the author is the one person who cannot see the assumption they already made. This stays consistent with *enforce outcomes, never tooling*: `.claude/hooks/ship-next-guard.sh` gates on whether review HAPPENED, never on which workflow ran, and the route stays free.
 
 ## Default Delegation Policy
 
@@ -286,7 +288,7 @@ The canonical `ship-next` skill follows the narrower autonomous issue-to-PR loop
 7. Integrate after each meaningful slice.
 8. Run relevant build or test checks.
 9. Run the **Captain Self-Check Preflight** above for the surfaces the diff touches. Pair any skipped browser verification with a headless equivalent vitest.
-10. Ask `haven-reviewer` for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
+10. Ask `haven-reviewer` for a final diff review. Every pull request, unconditionally — the risk list this step used to carry was the licence for skipping it (owner decision 2026-08-21; `AGENTS.md` is canonical).
 11. Ask `haven-doc-reviewer` for a doc-accuracy pass when the diff touches code mapped by some doc's `covers:` front-matter (the coupling gate flags these). Update the implicated docs before opening the PR.
 12. Let the captain fix final issues, commit, push, and open the PR.
 13. Add the PR closeout contract and merge-readiness report before calling the work complete.
@@ -344,7 +346,7 @@ Follow the Haven agent workflow:
 11. Integrate each slice before starting broad follow-up work.
 12. Run relevant tests, type checks, builds, or browser checks when practical.
 13. Run the **Captain Self-Check Preflight** for every changed surface, including a headless equivalent when browser verification is skipped.
-14. Use haven-reviewer for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
+14. Use haven-reviewer for a final diff review. Every pull request, unconditionally (owner decision 2026-08-21; `AGENTS.md` is canonical).
 15. Use haven-doc-reviewer when changed code matches a document's `covers:` front-matter, and update any stale claims it identifies.
 
 Gravity files the captain should usually own:

@@ -7,7 +7,7 @@ covers:
   - package.json
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
-last-verified: "2026-08-09" # #1227: lint:db-mocks added to the Backend/API verification row
+last-verified: "2026-08-21" # the haven-reviewer rule is unconditional (owner decision 2026-08-21); the risk list this file carried was the licence for skipping it. AGENTS.md is canonical. Prior: #1227: lint:db-mocks added to the Backend/API verification row
 ---
 
 # PR Workflow Checklist
@@ -83,7 +83,7 @@ Good split examples:
 - For frontend diffs touching a rendered route or a shared primitive, attach rendered-screen evidence (`npm run screenshot -w packages/frontend -- <routes>`, desktop + mobile PNGs) and get a `haven-design-reviewer` pass over the screenshots in addition to `haven-reviewer` — a finding from either pauses auto-merge (`ship-playbooks/frontend.md`).
 - If the PR adds a `ui/` or `haven/` primitive, document it on `/design-system` in the same PR — the *Design-system coupling (strict)* check blocks on a missing showcase entry — on every PR, however it was opened ([#1023](https://github.com/d-hinders/Haven-AI/issues/1023)) — and a sticky comment explains the finding. Check locally with `npm run design:coupling -w packages/frontend -- --strict`; escape: `// design-system-exempt: <reason>`.
 - If SDK/API behavior, credential semantics, x402/MPP behavior, setup prompts, or product language changes, review generated credential files, `.env` examples, SDK snippets, demo scripts, and skill bundles.
-- Use `haven-reviewer` before requesting review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
+- Use `haven-reviewer` before requesting review. **Every pull request** — the risk list this line used to carry was conditional, and that conditional is what skipping was drawn from (owner decision 2026-08-21; `AGENTS.md` is canonical).
 - If this PR includes a follow-up commit that fixes a bug the original commits introduced, the fix commit must include the smallest regression test (typically a vitest case) that would have caught it. If no such test is practical, document why in the commit body. Every recent "Address reviewer findings" commit that compounded into durable quality landed 2–4 targeted vitest cases alongside the fix.
 
 ## Before Merging

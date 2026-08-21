@@ -10,7 +10,7 @@ covers:
   - AGENTS.md
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/ai-review-patterns.md
-last-verified: "2026-08-05"
+last-verified: "2026-08-21" # the independent reviewer pass is now unconditional and route-independent (owner decision 2026-08-21): "owning an equivalent review yourself" no longer reads as licence to self-review. The no-check-for-workflow property is unchanged — the new gate asks whether review happened, never which route ran.
 ---
 
 # Haven AI Agent Workflow
@@ -21,7 +21,9 @@ The captain is the main interactive session. It owns product judgment, git, shar
 
 > **What is enforced vs. what this document adds ([#1025](https://github.com/d-hinders/Haven-AI/issues/1025)).** The mechanical standards are **CI required checks**, and the migrations gate is a `CODEOWNERS` **review rule** — different mechanisms, same property: they apply to every pull request whoever or whatever opened it. Nothing in this document is needed to make them apply, and no workflow choice skips them. The authoritative list, with its fork and promotion caveats, is the ruleset inventory in [`autonomous-pr-loop.md`](autonomous-pr-loop.md).
 >
-> Everything below is the layer CI **cannot** check: judgement, review, and the traps a diff walks into. `ship-next` is the default route through it because it is the fastest one, not because it is required. Working differently is fine and stays possible — it means owning an equivalent review yourself, and saying so in the pull request. There is deliberately no check for which workflow was used: enforce outcomes, never tooling.
+> Everything below is the layer CI **cannot** check: judgement, review, and the traps a diff walks into. `ship-next` is the default route through it because it is the fastest one, not because it is required. Working differently is fine and stays possible — it means owning the equivalent judgement yourself, and saying so in the pull request. There is deliberately no check for which workflow was used: enforce outcomes, never tooling.
+>
+> **One item does not vary with the route: the independent reviewer pass runs on every pull request** (owner decision 2026-08-21; see `AGENTS.md` and CLAUDE.md § *How shipping is governed*). "Owning it yourself" means running `haven-reviewer` yourself, not reviewing your own diff — the author is the one person who cannot see the assumption they already made. This stays consistent with *enforce outcomes, never tooling*: `.claude/hooks/ship-next-guard.sh` gates on whether review HAPPENED, never on which workflow ran, and the route stays free.
 
 ## Default Delegation Policy
 

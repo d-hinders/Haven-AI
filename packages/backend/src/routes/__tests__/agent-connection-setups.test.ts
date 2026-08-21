@@ -523,9 +523,10 @@ describe('agent connection setup routes', () => {
 
   // #1672: command-path runtimes carry NO --runtime flag — the connector
   // detects the environment it executes inside, so an embedded wrong hint can
-  // no longer configure the wrong client. The collapsed picker id 'agent' and
-  // the legacy command-path ids all behave the same.
-  it.each(['agent', 'claude-code', 'codex-cli', 'codex-desktop'])(
+  // no longer configure the wrong client. #1682's named picker rows
+  // (claude-code / codex / cowork), #1672's collapsed 'agent', and the legacy
+  // per-client ids all behave the same.
+  it.each(['claude-code', 'codex', 'cowork', 'agent', 'codex-cli', 'codex-desktop'])(
     'omits --runtime from the setup command for the detected runtime %s',
     async (runtime) => {
       const app = await buildApp()
@@ -573,6 +574,84 @@ describe('agent connection setup routes', () => {
 
     expect(response.statusCode).toBe(201)
     expect(response.json().connector_command).toContain('--runtime claude-desktop')
+
+    await app.close()
+  })
+
+  // #1682: OpenClaw is a snippet runtime, so it keeps the flag like every
+  // other snippet row. This requires the connector's `openclaw` alias to be
+  // PUBLISHED — an id the published connector does not know is refused before
+  // any side effect (#1672's no-detection-no-flag rule), so a connect release
+  // must reach npm before this row is usable in production.
+  it('keeps --runtime openclaw for the OpenClaw snippet runtime, and stores the picked id', async () => {
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        runtime: 'openclaw',
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().connector_command).toContain('--runtime openclaw')
+    const insertSetup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO agent_connection_setups'),
+    )
+    expect(insertSetup?.[1] as unknown[]).toContain('openclaw')
+
+    await app.close()
+  })
+
+  // Local MCP follows the command path, so the two new named rows get it and
+  // a snippet row still does not.
+  it.each(['codex', 'cowork'])(
+    'accepts local_mcp for the %s runtime',
+    async (runtime) => {
+      const app = await buildApp()
+      primeDb(safeLookup())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agent-connection-setups',
+        payload: {
+          name: 'Research Agent',
+          safe_id: SAFE.id,
+          runtime,
+          local_mcp: true,
+          allowances: [ALLOWANCE],
+        },
+      })
+
+      expect(response.statusCode).toBe(201)
+      expect(response.json().connector_command).toContain('--local')
+
+      await app.close()
+    },
+  )
+
+  it('still rejects local_mcp for the OpenClaw snippet runtime', async () => {
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        runtime: 'openclaw',
+        local_mcp: true,
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
 
     await app.close()
   })

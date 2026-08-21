@@ -23,7 +23,7 @@ covers:
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-08-21" # #1672: noted the collapsed AI-agent picker entry in the per-environment run list; steps themselves unchanged. Prior: #1346 runtime-specific activation + read-only Connect verification re-checked; #1330 Hermes .env credential-reference verification
+last-verified: "2026-08-21" # #1682: the per-environment run list notes the name-first picker (a row per environment again); steps themselves unchanged. Prior: #1672: noted the collapsed AI-agent picker entry in the per-environment run list; steps themselves unchanged. Prior: #1346 runtime-specific activation + read-only Connect verification re-checked; #1330 Hermes .env credential-reference verification
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
@@ -68,11 +68,12 @@ workflows.
 ## #419 — Agent connection, end to end
 
 Run per environment: **Claude Code, Claude Desktop, Cursor, VS Code MCP, Hermes
-Agent, custom SDK runtime**, plus any others available. (Since #1672 the
-dashboard picker offers ONE "AI agent (Claude Code, Codex, Cowork)" entry for
-the whole command-path family — "environment" here means where you run and
-verify the connector, not a separate picker row; the connector detects the
-runtime it executes inside.)
+Agent, custom SDK runtime**, plus any others available. (Since #1682 the
+dashboard picker is a flat list of product names — Claude Code, Claude Desktop,
+Codex, Cowork, Cursor, Hermes Agent, OpenClaw, VS Code, "Not listed / other" —
+so a row exists per environment again. The three command-path rows still send
+the same flag-free command and the connector detects the runtime it executes
+inside, so covering one of them exercises the others' plumbing.)
 
 1. **Create the setup** in the dashboard (Connect agent) and pick the target
    environment. Expect a single paste-able setup prompt; no private key shown.

@@ -460,7 +460,7 @@ describe('ConnectAgentModal', () => {
       '/agent-connection-setups',
       expect.objectContaining({
         name: 'Research Agent',
-        runtime: 'agent',
+        runtime: 'claude-code',
         safe_id: SAFE.id,
       }),
     ))
@@ -547,7 +547,8 @@ describe('ConnectAgentModal', () => {
   it('exposes local MCP only as an Advanced opt-in and sends local_mcp when chosen', async () => {
     renderModal()
 
-    // Advanced affordance is visible for the AI-agent entry (supports local MCP)
+    // Advanced affordance is visible for the default Claude Code row, which is
+    // on the command path and so supports local MCP.
     fireEvent.click(screen.getByText('Advanced'))
     fireEvent.click(screen.getByRole('checkbox'))
 
@@ -555,7 +556,7 @@ describe('ConnectAgentModal', () => {
 
     await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith(
       '/agent-connection-setups',
-      expect.objectContaining({ runtime: 'agent', local_mcp: true }),
+      expect.objectContaining({ runtime: 'claude-code', local_mcp: true }),
     ))
   })
 
@@ -596,7 +597,7 @@ describe('ConnectAgentModal', () => {
       target: { value: 'Handles vendor invoices' },
     })
     fireEvent.change(screen.getByLabelText('Where will this agent run?'), {
-      target: { value: 'agent' },
+      target: { value: 'cowork' },
     })
     fireEvent.click(screen.getByText('Advanced'))
     fireEvent.click(screen.getByRole('checkbox'))
@@ -610,7 +611,7 @@ describe('ConnectAgentModal', () => {
     // Review restates the exact choices made above — Runtime and Budget rows
     // in particular are new to this pass (#1411); assert them here too so a
     // silently-dropped row and a silently-changed payload are both caught.
-    expect(screen.getByText('AI agent (Claude Code, Codex, Cowork)')).toBeInTheDocument()
+    expect(screen.getByText('Cowork')).toBeInTheDocument()
     expect(screen.getByText(/42\.50 USDC\.e per week/)).toBeInTheDocument()
     expect(screen.getByText('Yes')).toBeInTheDocument()
 
@@ -625,7 +626,7 @@ describe('ConnectAgentModal', () => {
       name: 'Research Agent',
       description: 'Handles vendor invoices',
       safe_id: SAFE.id,
-      runtime: 'agent',
+      runtime: 'cowork',
       local_mcp: true,
       allowances: [
         {
@@ -663,26 +664,119 @@ describe('ConnectAgentModal', () => {
     expect(within(select).queryByRole('option', { name: 'Operating wallet' })).not.toBeInTheDocument()
   })
 
-  // #1672: Codex Desktop no longer has its own picker row — the collapsed
-  // AI-agent entry covers it, and the connector detects which runtime it is
-  // actually executing inside. BEFORE the connector runs, the specific runtime
-  // is unknowable, so the approval heads-up shows generically for the whole
-  // command path (the review found a codex-desktop-only gate would render
-  // AFTER the user already faced the dialog).
-  it('shows the generic approval heads-up for the collapsed AI-agent entry before the connector reports', async () => {
+  // #1682: the picker is a flat list of PRODUCT NAMES. No umbrella row, no
+  // optgroups, Claude Code selected by default, and the catch-all last.
+  it('offers exactly the named runtime rows, with Claude Code selected by default', () => {
+    renderModal()
+
+    const select = screen.getByLabelText('Where will this agent run?') as HTMLSelectElement
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+      'Claude Code',
+      'Claude Desktop',
+      'Codex (CLI or Desktop)',
+      'Cowork',
+      'Cursor',
+      'Hermes Agent',
+      'OpenClaw',
+      'VS Code (incl. Insiders)',
+      'Not listed / other',
+    ])
+    expect(select.value).toBe('claude-code')
+    // The umbrella label #1682 removed: no row asks the user to classify
+    // their own app, and no <optgroup> reintroduces the taxonomy.
+    expect(screen.queryByText(/AI agent \(Claude Code, Codex, Cowork\)/)).not.toBeInTheDocument()
+    expect(select.querySelector('optgroup')).toBeNull()
+  })
+
+  // #1682 acceptance: the three command-path rows are LABELS over one
+  // behaviour — the identical flag-free command — differing only in the id
+  // they record. #1672's detection is what decides the config, so a row that
+  // sent its own --runtime hint would reintroduce the bug that closed.
+  it.each(['claude-code', 'codex', 'cowork'])(
+    'sends the %s row down the command path with the Advanced local-MCP affordance',
+    async (runtime) => {
+      renderModal()
+
+      fireEvent.change(screen.getByLabelText('Where will this agent run?'), {
+        target: { value: runtime },
+      })
+      expect(screen.getByText('Advanced')).toBeInTheDocument()
+
+      await fillAndCreateSetup()
+
+      await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith(
+        '/agent-connection-setups',
+        expect.objectContaining({ runtime }),
+      ))
+      // The pre-run approval heads-up covers the whole command path, not one
+      // named row (#1672 review).
+      expect(await screen.findByText(/Your agent app may ask you to approve running the setup command/i)).toBeInTheDocument()
+      expect(screen.getByText(/It includes your approval for the exact local setup actions/i)).toBeInTheDocument()
+    },
+  )
+
+  // The snippet rows are the other modality: no local-MCP opt-in, and the
+  // command-path approval heads-up must not appear for them.
+  it.each(['claude-desktop', 'cursor', 'openclaw', 'vscode', 'hermes', 'other'])(
+    'keeps the %s row on the snippet path, without the command-path affordances',
+    async (runtime) => {
+      renderModal()
+
+      fireEvent.change(screen.getByLabelText('Where will this agent run?'), {
+        target: { value: runtime },
+      })
+      expect(screen.queryByText('Advanced')).not.toBeInTheDocument()
+
+      await fillAndCreateSetup()
+
+      await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith(
+        '/agent-connection-setups',
+        expect.objectContaining({ runtime }),
+      ))
+      expect(await screen.findByText('Connect your agent')).toBeInTheDocument()
+      expect(screen.queryByText(/may ask you to approve running the setup command/i)).not.toBeInTheDocument()
+    },
+  )
+
+  // Regression (#1682 review): `resetForm` and the initial state each held
+  // their own default-runtime literal, so renaming the default left the reset
+  // pointing at an id with no matching <option>. Reopening the modal then
+  // posted the stale id — and in a real browser showed an EMPTY picker. Both
+  // now read one constant; this walks close → reopen, the only path that runs
+  // `resetForm`.
+  //
+  // The PAYLOAD assertion is the one that bites: verified by mutation, jsdom
+  // still reports the old value on a select whose option no longer exists, so
+  // the `select.value` checks below are a cheap sanity guard, NOT the catch.
+  it('reopens on the default row after a close, not a stale runtime id', async () => {
+    render(<ReopenableModal />)
+
+    fireEvent.change(screen.getByLabelText('Where will this agent run?'), {
+      target: { value: 'cursor' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen modal' }))
+
+    const select = screen.getByLabelText('Where will this agent run?') as HTMLSelectElement
+    expect(select.value).toBe('claude-code')
+
+    await fillAndCreateSetup()
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith(
+      '/agent-connection-setups',
+      expect.objectContaining({ runtime: 'claude-code' }),
+    ))
+  })
+
+  // #1672: Codex Desktop has no picker row of its own — the Codex row covers
+  // both, and the connector detects which one it is actually executing
+  // inside. BEFORE the connector runs the specific runtime is unknowable, so
+  // the approval heads-up stays generic (the review found a codex-desktop-only
+  // gate would render AFTER the user already faced the dialog).
+  it('does not offer a Codex Desktop row of its own', () => {
     renderModal()
 
     expect(screen.queryByRole('option', { name: 'Codex Desktop' })).not.toBeInTheDocument()
-    await fillAndCreateSetup()
-
-    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith(
-      '/agent-connection-setups',
-      expect.objectContaining({
-        runtime: 'agent',
-      }),
-    ))
-    expect(await screen.findByText(/Your agent app may ask you to approve running the setup command/i)).toBeInTheDocument()
-    expect(screen.getByText(/It includes your approval for the exact local setup actions/i)).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Codex (CLI or Desktop)' })).toBeInTheDocument()
   })
 
   // Once the connector's /resolve reports the detected runtime (which happens

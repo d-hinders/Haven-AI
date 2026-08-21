@@ -25,12 +25,16 @@ export interface DelegatorPasskeySigner {
   signers: HybridAccountSigners
 }
 
-/** Mirror of GET /accounts/hybrid/:address/signers (and the agent-scoped twin). */
+/**
+ * Mirror of GET /accounts/hybrid/:address/signers (and the agent-scoped twin).
+ * `created_at` (#1679) is optional here — this shape is also parsed back from
+ * localStorage, where blobs stored before the field existed have none.
+ */
 export interface HybridAccountSigners {
   account_address: string
   chain_id: number
   owner_address: string | null
-  passkeys: Array<{ key_id: string; x: `0x${string}`; y: `0x${string}` }>
+  passkeys: Array<{ key_id: string; x: `0x${string}`; y: `0x${string}`; created_at?: string | null }>
 }
 
 export interface EoaSigner {

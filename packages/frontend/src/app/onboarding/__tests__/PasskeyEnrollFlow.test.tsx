@@ -97,7 +97,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith({
       safeAddress: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
@@ -141,9 +141,9 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
 
-    await waitFor(() => expect(onError).toHaveBeenCalledWith('Face ID prompt was cancelled.'))
+    await waitFor(() => expect(onError).toHaveBeenCalledWith('The passkey prompt was cancelled.'))
     expect(mockEnrollPasskey).not.toHaveBeenCalled()
     expect(mockDeployPasskeySafe).not.toHaveBeenCalled()
     expect(mockPost).not.toHaveBeenCalled()
@@ -174,7 +174,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
     expect(mockListPasskeys).toHaveBeenCalled()
@@ -209,7 +209,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith({
       safeAddress: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
@@ -248,7 +248,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
 
     await waitFor(() =>
       expect(onError).toHaveBeenCalledWith(
@@ -297,7 +297,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
     expect(mockDeployPasskeySafe).toHaveBeenCalled()
@@ -323,7 +323,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
 
     await waitFor(() =>
       expect(onError).toHaveBeenCalledWith('This credential is already registered'),
@@ -371,7 +371,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
     expect(onError).not.toHaveBeenCalledWith(expect.stringContaining('could not confirm'))
@@ -419,7 +419,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith({
       safeAddress: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
@@ -437,7 +437,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
 
     await waitFor(() => {
       const stored = localStorage.getItem(
@@ -461,7 +461,7 @@ describe('PasskeyEnrollFlow', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create account with Face ID / Touch ID' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account with a passkey' }))
 
     await waitFor(() => expect(onError).toHaveBeenCalledWith(PASSKEY_REQUIRED_MESSAGE))
     // An honest dead end: no "Try again" that could only fail the same way,

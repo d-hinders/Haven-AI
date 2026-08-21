@@ -40,7 +40,7 @@ vi.mock('@/app/onboarding/PasskeyEnrollFlow', () => ({
           onComplete({ safeAddress: CREATED_ADDRESS, txHash: `0x${'cd'.repeat(32)}` })
         }}
       >
-        Create account with Face ID / Touch ID
+        Create account with a passkey
       </button>
       <button type="button" onClick={() => onError(PASSKEY_REQUIRED_MESSAGE)}>
         fail-unsupported
@@ -101,7 +101,7 @@ async function completeCreation() {
   // act() so the success-state effects (including the auto-advance timer) have
   // flushed by the time the helper returns.
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: /Face ID/ }))
+    fireEvent.click(screen.getByRole('button', { name: /passkey/i }))
   })
   await screen.findByRole('button', { name: 'Go to dashboard' })
 }
@@ -116,7 +116,7 @@ describe('OnboardingClient (#1162)', () => {
     try {
       render(<OnboardingClient />)
       expect(screen.getByRole('button', { name: 'Hybrid create' })).toBeTruthy()
-      expect(screen.queryByRole('button', { name: /Face ID/ })).toBeNull()
+      expect(screen.queryByRole('button', { name: /passkey/i })).toBeNull()
     } finally {
       vi.unstubAllEnvs()
     }
@@ -128,7 +128,7 @@ describe('OnboardingClient (#1162)', () => {
     expect(screen.getByText('Welcome, Ada Lovelace')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Create your Haven account' })).toBeTruthy()
     expect(screen.getByLabelText('Network')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Face ID/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /passkey/i })).toBeTruthy()
 
     // No EOA fork...
     expect(screen.queryByText(/connect a wallet/i)).toBeNull()
@@ -155,7 +155,7 @@ describe('OnboardingClient (#1162)', () => {
 
     expect(screen.getByText(/You're in/)).toBeTruthy()
     // Same screen, swapped content: the create action is gone.
-    expect(screen.queryByRole('button', { name: /Face ID/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /passkey/i })).toBeNull()
     // The address / setup-transaction ceremony left with the interstitial, so
     // the counterfactual (empty tx hash) case can't render a broken link.
     expect(document.querySelectorAll('a').length).toBe(1) // the Haven wordmark only

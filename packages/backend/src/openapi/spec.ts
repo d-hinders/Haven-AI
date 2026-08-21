@@ -1392,34 +1392,10 @@ export const openapiSpec = {
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
           '200': {
-            description: 'The signer set.',
+            description: 'The signer set. Same shape as the account-scoped read (#1679).',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['account_address', 'chain_id', 'owner_address', 'passkeys'],
-                  properties: {
-                    account_address: address,
-                    chain_id: { type: 'integer' },
-                    owner_address: {
-                      type: ['string', 'null'],
-                      pattern: '^0x[0-9a-fA-F]{40}$',
-                      description: 'Null for a pure-passkey account.',
-                    },
-                    passkeys: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: ['key_id', 'x', 'y'],
-                        properties: {
-                          key_id: { type: 'string' },
-                          x: { type: 'string', description: '0x-hex P256 public-key x coordinate.' },
-                          y: { type: 'string', description: '0x-hex P256 public-key y coordinate.' },
-                        },
-                      },
-                    },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/HybridAccountSigners' },
               },
             },
           },
@@ -3175,23 +3151,7 @@ export const openapiSpec = {
             description: 'The signer set.',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['account_address', 'chain_id', 'owner_address', 'passkeys'],
-                  properties: {
-                    account_address: address,
-                    chain_id: { type: 'integer' },
-                    owner_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', description: 'Null for a pure-passkey account.' },
-                    passkeys: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: ['key_id', 'x', 'y'],
-                        properties: { key_id: { type: 'string' }, x: { type: 'string' }, y: { type: 'string' } },
-                      },
-                    },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/HybridAccountSigners' },
               },
             },
           },
@@ -5756,6 +5716,35 @@ export const openapiSpec = {
       },
     },
     schemas: {
+      HybridAccountSigners: {
+        type: 'object',
+        description:
+          "A hybrid account's signer set — the exact configuration the account address was derived from. Public key material plus per-credential enrollment time (#1679); nothing secret.",
+        required: ['account_address', 'chain_id', 'owner_address', 'passkeys'],
+        properties: {
+          account_address: { type: 'string', pattern: '^0x[0-9a-fA-F]{40}$' },
+          chain_id: { type: 'integer' },
+          owner_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', description: 'Null for a pure-passkey account.' },
+          passkeys: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['key_id', 'x', 'y', 'created_at'],
+              properties: {
+                key_id: { type: 'string' },
+                x: { type: 'string' },
+                y: { type: 'string' },
+                created_at: {
+                  type: ['string', 'null'],
+                  format: 'date-time',
+                  description:
+                    'When this credential was enrolled (#1679) — the UI labels the row "Passkey · added {date}". Null only if the stored row is missing; clients fall back to ordinal "Passkey N" labels, never a platform name.',
+                },
+              },
+            },
+          },
+        },
+      },
       Delegation: {
         type: 'object',
         description:

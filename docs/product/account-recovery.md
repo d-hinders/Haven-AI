@@ -57,7 +57,7 @@ device there is **no recovery**, and losing it loses the account and everything
 in it. What changed is that Haven tells you rather than stopping you.
 
 **You'll be asked to add a backup once the account holds funds — not during
-signup.** Signup is one screen and one Face ID prompt (#1162). The prompt to add
+signup.** Signup is one screen and one passkey prompt (#1162). The prompt to add
 a backup appears on the dashboard after money arrives, because before that
 there is nothing to protect and no reason for the question. It is dismissible,
 it stops appearing once you add a backup, and you can add one at any time from
@@ -67,7 +67,8 @@ it stops appearing once you add a backup, and you can add one at any time from
 
 On your account page, open **Backup & recovery** and choose one:
 
-- **Add a backup with Face ID / Touch ID** — creates a second passkey. On the
+- **Add a backup passkey** — creates a second passkey (approve with Face ID,
+  Touch ID, Windows Hello, or your device PIN). On the
   same device it's a second credential; on a *different* device (your phone as
   well as your laptop) it's true device redundancy. One prompt, no transaction
   you pay for.
@@ -125,7 +126,7 @@ nobody holds. Restoring access is not something a support ticket can do.
 **Where you add the backup.** These accounts don't have a **Backup & recovery**
 screen. Go to **Approvers** in settings and add either:
 
-- **a second passkey** — a new Face ID / Touch ID credential, enrolled and
+- **a second passkey** — a new passkey credential, enrolled and
   added as an owner in one flow; or
 - **a wallet address** — any browser or hardware wallet you control.
 

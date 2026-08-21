@@ -357,7 +357,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       account_address: FIXTURE_SAFE.safe_address,
       chain_id: FIXTURE_SAFE.chain_id,
       owner_address: null,
-      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
   }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/passport')) {
@@ -506,7 +506,7 @@ export const SCENARIOS = {
           account_address: FIXTURE_SAFE.safe_address,
           chain_id: FIXTURE_SAFE.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
-          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         }
       }
       return undefined

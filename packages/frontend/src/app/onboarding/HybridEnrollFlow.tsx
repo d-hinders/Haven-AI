@@ -99,7 +99,7 @@ export default function HybridEnrollFlow({
     } catch (err) {
       let message = 'Account setup failed. Please try again.'
       if (err instanceof PasskeyCancelledError) {
-        message = 'Face ID prompt was cancelled.'
+        message = 'The passkey prompt was cancelled.'
       } else if (err instanceof PasskeyUnsupportedError) {
         message = PASSKEY_REQUIRED_MESSAGE
         setBlocked(true)
@@ -116,7 +116,7 @@ export default function HybridEnrollFlow({
   if (stage === 'idle') {
     return (
       <Button onClick={() => void start()} size="lg" className="w-full">
-        Create account with Face ID / Touch ID
+        Create account with a passkey
       </Button>
     )
   }
@@ -128,7 +128,7 @@ export default function HybridEnrollFlow({
     >
       <div className="h-2 w-2 animate-pulse rounded-full bg-[var(--v2-brand)]" />
       <span className="text-sm text-[var(--v2-ink-2)]">
-        {stage === 'creating_passkey' ? 'Waiting for Face ID…' : 'Setting up your account…'}
+        {stage === 'creating_passkey' ? 'Waiting for your passkey…' : 'Setting up your account…'}
       </span>
     </div>
   )

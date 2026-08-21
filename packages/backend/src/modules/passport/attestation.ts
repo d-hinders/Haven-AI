@@ -212,8 +212,10 @@ export async function recoverAnchorFromReceipt(
  *       `infra/repositories/agent-passports.ts`) is when another caller may
  *       reclaim the revocation and submit its own attempt.
  *   Waiting past either would leave this caller waiting on a transaction
- *   someone else already owns. 120 s is under both, and a test asserts both
- *   inequalities so none of the three can silently cross.
+ *   someone else already owns. 120 s is under both. A test asserts the 180 s
+ *   inequality — the TIGHTER of the two, so it is the one that actually
+ *   binds, and the only one exported as a constant rather than a default
+ *   parameter a test could only duplicate as a literal.
  *
  * It matches `anchorOnChain`'s 120 s next door, which is the right kind of
  * coincidence: both are one confirmation of one EAS call on the same chains,

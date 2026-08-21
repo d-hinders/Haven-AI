@@ -33,6 +33,8 @@ type WaitMode =
   | 'stall'
   /** Resolves a null receipt — a lagging RPC for a tx that may have mined (#690). */
   | 'null-receipt'
+  /** Resolves a status-0 receipt without throwing — see the test that uses it. */
+  | 'status-zero'
 
 let waitMode: WaitMode = 'success'
 let waitCalls: Array<[confirms: number | undefined, timeoutMs: number | undefined]> = []
@@ -69,6 +71,7 @@ const submitSpy = vi.fn(async (params: { recordId: string | null }) => {
         throw err
       }
       if (waitMode === 'null-receipt') return null
+      if (waitMode === 'status-zero') return { status: 0 }
       if (waitMode === 'stall') {
         // Faithful to ethers v6 (`providers/provider.js` → `wait`): with no
         // timeout argument there is NO deadline, so this never settles.
@@ -221,6 +224,25 @@ describe('an unconfirmed passport revoke (#1742)', () => {
 
     await expect(revokeOnChain(84532, UID)).rejects.toThrow('provider exploded')
     expect(failedSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('a status-0 receipt that RESOLVES still closes the record failed', async () => {
+    // Believed unreachable: ethers v6 throws CALL_EXCEPTION on a
+    // mined-and-reverted tx rather than resolving `{ status: 0 }`, which is
+    // why the surrounding code treats the throw as the real revert path
+    // (#1556 review). But "believed dead" is not "proven dead", and without
+    // this test the `receipt.status !== 1` guard is VACUOUS — deleting it
+    // outright passes every other test in this file. Found by the #1742
+    // review pass; kept so the branch cannot rot into a silent success if a
+    // future ethers version, or a non-ethers provider shim, ever resolves it.
+    waitMode = 'status-zero'
+
+    const err = await revokeOnChain(84532, UID).catch((e: unknown) => e)
+
+    expect(err).not.toBeInstanceOf(PassportRevokeUnconfirmedError)
+    expect((err as Error).message).toMatch(/revocation reverted/)
+    expect(failedSpy).toHaveBeenCalledTimes(1)
+    expect(minedSpy).not.toHaveBeenCalled()
   })
 
   it('a mined revoke still closes the record mined', async () => {

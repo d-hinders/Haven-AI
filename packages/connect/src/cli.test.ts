@@ -136,3 +136,52 @@ describe('--tombstone (#1681)', () => {
     expect(stdout.join('')).toContain('unknown')
   })
 })
+
+describe('--doctor per-agent output (#1697)', () => {
+  it('names every OTHER agent and its verdict — a second agent is never silently dropped', async () => {
+    const stdout: string[] = []
+    const doctor = await import('./doctor.js')
+    const spy = vi.spyOn(doctor, 'runDoctor').mockResolvedValue({
+      version: 1,
+      ok: false,
+      runtime: 'codex-cli',
+      credentialDirectory: '/home/u/.haven/agents/agent-1',
+      checks: [{ id: 'credentials', label: 'Agent credentials', ok: true, detail: 'fine' }],
+      agents: [
+        {
+          agentId: 'agent-1', directory: '/home/u/.haven/agents/agent-1',
+          classification: 'wired' as const, checks: [],
+        },
+        {
+          slug: 'ops', agentId: 'agent-ops', directory: '/home/u/.haven/agents/ops',
+          classification: 'wired' as const,
+          checks: [{
+            id: 'identity_match', label: 'Hosted identity matches the local signing key',
+            ok: false, detail: 'MISMATCH: quote as one agent and sign as another.',
+            repair: 'Re-run setup for this agent.',
+          }],
+        },
+        {
+          agentId: 'agent-dead', directory: '/home/u/.haven/agents/dead',
+          classification: 'retired' as const, checks: [],
+        },
+      ],
+    })
+    try {
+      const exitCode = await runCli(['--doctor', '--runtime', 'codex-cli'], {
+        stdout: (m) => stdout.push(m), stderr: () => undefined,
+      })
+      expect(exitCode).toBe(1)
+      const out = stdout.join('')
+      expect(out).toContain('Other agents on this machine')
+      expect(out).toContain('ops (agent-ops)')
+      expect(out).toContain('wired, 1 check(s) FAILED')
+      expect(out).toContain('MISMATCH')
+      expect(out).toContain('agent-dead: retired')
+      // The primary is described by the flat list above, not repeated here.
+      expect(out).not.toContain('agent-1: wired')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})

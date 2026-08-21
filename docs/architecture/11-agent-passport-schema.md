@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-08-08"
+last-verified: "2026-08-21" # #1735: the "recovered, never re-minted" claim is qualified — recovery is keyed off the persisted tx hash (hence the bump-worker exclusion) and presumes a null receipt means dropped, so a fee-stuck anchor can still re-mint (#1745). Anchor wait disposition on expiry recorded. Rest of the anchoring/revocation prose re-read against the code and unchanged.
 ---
 
 # L0 Agent Passport — EAS schema
@@ -185,12 +185,28 @@ row simply stops being due. Rows past the attention threshold (10 attempts —
 hours of failing) are counted and logged by the sweep as an operational
 alarm rather than churning silently.
 
-A broadcast whose result was lost is **recovered, never re-minted**: the tx
-hash is persisted the moment the transaction is broadcast (before the wait),
-and a retry reads the attestation UID back from that receipt. Re-minting
-would create a second live attestation with the first permanently invisible
-to Haven. The on-chain wait is bounded (120s) so it cannot outlive the
-anchoring claim's 600s stale window.
+A broadcast whose result was lost is **recovered rather than re-minted** where
+recovery is possible: the tx hash is persisted the moment the transaction is
+broadcast (before the wait), and a retry reads the attestation UID back from
+that receipt. Re-minting would create a second live attestation with the first
+permanently invisible to Haven. The on-chain wait is bounded (120s) so it
+cannot outlive the anchoring claim's 600s stale window.
+
+Two limits on "never re-minted", stated because the unqualified version is not
+true today:
+
+- The recovery is **keyed off the persisted tx hash**, so anything that
+  replaces the transaction breaks it. That is why
+  [#1735](https://github.com/d-hinders/Haven-AI/issues/1735) excludes
+  `passport_attest` from the bump worker's fee-replacement path, and why an
+  expiry of the 120 s wait leaves the outbound record `broadcast` (for
+  chain-first reconciliation) instead of closing it `failed` as a revert.
+- `getTransactionReceipt` returns `null` for a **pending** transaction exactly
+  as for a dropped one, and the retry presumes dropped — so a fee-stuck anchor
+  can still be re-minted at the next nonce, ≈180 s after broadcast. Tracked as
+  [#1745](https://github.com/d-hinders/Haven-AI/issues/1745); the
+  [vendor-ops runbook](../operations/delegation-rail-vendor-ops.md) §3
+  sequences operator action around it.
 
 ## Revocation — what merchants must check
 

@@ -100,6 +100,25 @@ export async function runCli(
           io.stdout(redactSecrets(`${check.ok ? '✓' : '✗'} ${check.label}: ${check.detail}\n`))
           if (check.repair) io.stdout(redactSecrets(`    ↳ repair: ${check.repair}\n`))
         }
+        // #1697: the other agents on this machine. The flat list above
+        // describes ONE agent; multi-agent means the rest still have to be
+        // accounted for, by name and by verdict, never silently dropped.
+        const otherAgents = report.agents.filter((agent) => agent.directory !== report.credentialDirectory)
+        if (otherAgents.length > 0) {
+          io.stdout('\nOther agents on this machine:\n')
+          for (const agent of otherAgents) {
+            const name = agent.slug ? `${agent.slug} (${agent.agentId ?? 'unknown'})` : agent.agentId ?? 'unknown'
+            const failed = agent.checks.filter((check) => !check.ok)
+            const verdict = agent.classification === 'wired'
+              ? failed.length === 0 ? 'wired, all checks passed' : `wired, ${failed.length} check(s) FAILED`
+              : agent.classification
+            io.stdout(redactSecrets(`  ${failed.length > 0 ? '✗' : '•'} ${name}: ${verdict}\n`))
+            for (const check of failed) {
+              io.stdout(redactSecrets(`      ✗ ${check.label}: ${check.detail}\n`))
+              if (check.repair) io.stdout(redactSecrets(`        ↳ repair: ${check.repair}\n`))
+            }
+          }
+        }
         io.stdout(report.ok ? 'All checks passed.\n' : 'One or more checks FAILED — see repairs above.\n')
       }
       return report.ok ? 0 : 1

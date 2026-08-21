@@ -1196,18 +1196,6 @@ const DETECTED_RUNTIMES = new Set([
   'codex-desktop',
 ])
 
-// #1682 rollout shim. `openclaw` is a NEW picker row, and the connector that
-// `npx @haven_ai/connect@alpha` resolves to is whatever is on npm — which
-// refuses an unknown --runtime value before any side effect (#1672's
-// no-detection-no-flag rule). Until a connect release carries the openclaw
-// alias, the flag is downgraded to the id that already means exactly what
-// OpenClaw needs: 'other' — credentials on disk, no auto-written config, the
-// user pastes the snippet. Nothing is lost by the downgrade, because the
-// connector normalises openclaw to 'other' anyway; only the picked id, which
-// is stored on the setup row before the command is ever built, tells us the
-// row was chosen. Drop this once the alias is published.
-const CONNECTOR_FLAG_ALIASES: Record<string, string> = { openclaw: 'other' }
-
 function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: string | null, localMcp = false): string {
   const args = [
     `npx -y ${CONNECTOR_PACKAGE}`,
@@ -1215,9 +1203,7 @@ function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: stri
     `--api ${shellQuote(apiUrl)}`,
     '--ack-local-tools',
   ]
-  if (runtime && !DETECTED_RUNTIMES.has(runtime)) {
-    args.push(`--runtime ${shellQuote(CONNECTOR_FLAG_ALIASES[runtime] ?? runtime)}`)
-  }
+  if (runtime && !DETECTED_RUNTIMES.has(runtime)) args.push(`--runtime ${shellQuote(runtime)}`)
   if (localMcp) args.push('--local')
   return args.join(' ')
 }

@@ -578,12 +578,12 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
-  // #1682: OpenClaw is a new picker row, but the connector on npm predates its
-  // alias and refuses an unknown --runtime before any side effect. The flag is
-  // downgraded to 'other' — the id that already means "credentials on disk, no
-  // auto-written config, paste the snippet" — so the row is not dead on
-  // arrival in production. The PICKED id is still what gets stored.
-  it('downgrades the OpenClaw --runtime flag to other, while storing the picked id', async () => {
+  // #1682: OpenClaw is a snippet runtime, so it keeps the flag like every
+  // other snippet row. This requires the connector's `openclaw` alias to be
+  // PUBLISHED — an id the published connector does not know is refused before
+  // any side effect (#1672's no-detection-no-flag rule), so a connect release
+  // must reach npm before this row is usable in production.
+  it('keeps --runtime openclaw for the OpenClaw snippet runtime, and stores the picked id', async () => {
     const app = await buildApp()
     primeDb(safeLookup())
 
@@ -599,9 +599,7 @@ describe('agent connection setup routes', () => {
     })
 
     expect(response.statusCode).toBe(201)
-    const command = response.json().connector_command
-    expect(command).toContain('--runtime other')
-    expect(command).not.toContain('--runtime openclaw')
+    expect(response.json().connector_command).toContain('--runtime openclaw')
     const insertSetup = mockClientQuery.mock.calls.find(([sql]) =>
       String(sql).includes('INSERT INTO agent_connection_setups'),
     )

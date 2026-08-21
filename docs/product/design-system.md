@@ -189,6 +189,27 @@ White‑on‑brand (used inside dark CTA band):
 
 **No gradient buttons. No glow shadows.**
 
+**Tap targets ([#1726](https://github.com/d-hinders/Haven-AI/issues/1726)).** `sm` paints
+36px tall and `md` 40px — both under the ~44px usually cited as comfortable for touch.
+(Not an accessibility failure: WCAG 2.2 AA *Target Size (Minimum)* floors at 24px. It is
+mis-tap rate, and it bites hardest in row lists of destructive actions.) `Button` closes
+the gap without moving any pixels: `sm` and `md` carry a transparent pseudo-element that
+extends the **hit area** to 44px while the button still renders at its declared height.
+`lg` is already 44px and carries nothing.
+
+Consequences worth knowing:
+
+- **Do not "fix" this by raising `h-9`/`h-10`.** The compact sizes are compact on purpose
+  — tables, toolbars and row lists chose them for density — and changing them moves the
+  rhythm of every one of those surfaces and invalidates the `/design-system` baselines.
+- **The target grows vertically only.** An `sm` button's width already clears 44px at real
+  call sites; growing it sideways would let a button in a `gap-2` toolbar swallow taps
+  meant for its neighbour.
+- **Keep at least 8px between stacked controls.** The overhang is 4px per edge on `sm` and
+  2px on `md`, so at the system's 8px minimum gap adjacent targets meet but never overlap.
+  A tighter gap makes two buttons fight over the same pixels.
+- Choosing `size` therefore stays a **density** decision, not an ergonomics one.
+
 ### Cards (`Card`)
 
 `bg-white border border-[var(--v2-border)] rounded-[10px] shadow-[var(--v2-shadow-card)]`. Padding by use: `p-7` standard, `p-5` compact, `p-7 md:p-10` hero‑adjacent.

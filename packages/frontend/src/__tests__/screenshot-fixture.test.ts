@@ -136,6 +136,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
   describe('scenarios (#1409)', () => {
     const connect = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent']
     const signerRemoval = (SCENARIOS as Record<string, ScenarioShape>)['account-signer-removal']
+    const backupRecovery = (SCENARIOS as Record<string, ScenarioShape>)['account-backup-recovery']
 
     it('overrides only the account signer set needed to reach the removal confirmation (#1199)', () => {
       const signers = signerRemoval.api('/accounts/hybrid/0x111/signers', 'GET')
@@ -144,6 +145,39 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         passkeys: [expect.objectContaining({ key_id: '0x' + '11'.repeat(32) })],
       })
       expect(signerRemoval.api('/auth/me', 'GET')).toBeUndefined()
+    })
+
+    it('serves the healthy multi-signer set the card layout has to render (#1693)', () => {
+      // The shared fixture is one passkey and no wallet — the "only one way to
+      // approve" state. That shows neither the Wallet row nor a second passkey,
+      // so the row layout this capture exists to evidence is not reachable
+      // through it.
+      const signers = backupRecovery.api('/accounts/hybrid/0x111/signers', 'GET') as {
+        owner_address: string
+        passkeys: { key_id: string; created_at: string }[]
+      }
+      expect(signers.owner_address).toBe('0x' + 'ee'.repeat(20))
+      expect(signers.passkeys).toHaveLength(2)
+      expect(new Set(signers.passkeys.map((p) => p.key_id)).size).toBe(2)
+    })
+
+    it('dates every passkey at noon UTC so the wrapped label is timezone-stable (#1679)', () => {
+      // The label IS the evidence: passkeyRowLabel formats created_at in LOCAL
+      // time, so a midnight timestamp would render a different day either side
+      // of UTC and the committed PNG would stop matching what CI shoots.
+      const signers = backupRecovery.api('/accounts/hybrid/0x111/signers', 'GET') as {
+        passkeys: { created_at: string }[]
+      }
+      for (const pk of signers.passkeys) {
+        expect(pk.created_at).toMatch(/T12:00:00\.000Z$/)
+      }
+      // A date long enough to wrap at 390px is the whole point of the capture.
+      expect(signers.passkeys.map((p) => p.created_at)).toContain('2026-03-03T12:00:00.000Z')
+    })
+
+    it('leaves everything but the signer set to the shared fixture (#1693)', () => {
+      expect(backupRecovery.api('/auth/me', 'GET')).toBeUndefined()
+      expect(backupRecovery.api('/agents', 'GET')).toBeUndefined()
     })
 
     it('pins the setup at awaiting_connection for the whole capture', () => {

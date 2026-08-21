@@ -35,6 +35,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       options.apiBaseUrl = requireValue(argv, ++i, arg)
     } else if (arg === '--runtime') {
       options.runtime = requireValue(argv, ++i, arg)
+    } else if (arg === '--runtime-force') {
+      options.runtimeForce = requireValue(argv, ++i, arg)
     } else if (arg === '--credentials-dir') {
       options.credentialsDir = requireValue(argv, ++i, arg)
     } else if (arg === '--environment-label') {
@@ -86,12 +88,15 @@ export function helpText(): string {
     'sends Haven only the public signing address plus a proof signature.',
     '',
     'Usage:',
-    '  npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code',
+    '  npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --ack-local-tools',
     '',
     'Options:',
     '  --setup <token>            Short-lived setup token from Haven.',
     '  --api <url>                Haven backend API URL. Defaults to HAVEN_API_URL or http://localhost:3001.',
     '  --runtime <name>           Agent runtime hint, such as claude-code, codex-cli, codex-desktop, cursor, vscode, claude-desktop, or hermes.',
+    '                             Usually unnecessary: the connector detects the runtime it runs inside, and a detection',
+    '                             that contradicts this hint wins (with a printed notice). Needed only in a plain terminal.',
+    '  --runtime-force <name>     Escape hatch: use exactly this runtime, ignoring environment detection.',
     '  --credentials-dir <path>   Credential directory fallback. Defaults to ~/.haven/agents.',
     '  --environment-label <text> Non-sensitive label shown in Haven setup review.',
     '  --ack-local-tools          Write the one-time local Haven tools acknowledgement during setup.',

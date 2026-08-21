@@ -749,7 +749,9 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
   }
 }
 
-const LOCAL_MCP_RUNTIMES = new Set(['claude-code', 'codex-cli', 'codex-desktop'])
+// 'agent' is the collapsed command-path picker entry (#1672) — it covers
+// Claude Code and Codex, the runtimes local MCP supports.
+const LOCAL_MCP_RUNTIMES = new Set(['agent', 'claude-code', 'codex-cli', 'codex-desktop'])
 
 async function resolveUserSafe(userId: string, safeId?: string): Promise<UserSafeRow | null> {
   return setups.findUserSafe(userId, safeId)
@@ -1168,6 +1170,14 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
   }
 }
 
+// #1672: command-path runtimes get NO --runtime flag — the connector detects
+// the environment it executes inside (CLAUDECODE/CODEX_*/… markers), and an
+// embedded wrong hint used to silently configure the wrong client. 'agent' is
+// the collapsed picker entry; the three legacy ids keep old clients flag-free
+// too. Snippet-only runtimes (claude-desktop, cursor, …) keep the flag: their
+// command is run from a plain terminal where nothing is detectable.
+const DETECTED_RUNTIMES = new Set(['agent', 'claude-code', 'codex-cli', 'codex-desktop'])
+
 function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: string | null, localMcp = false): string {
   const args = [
     `npx -y ${CONNECTOR_PACKAGE}`,
@@ -1175,7 +1185,7 @@ function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: stri
     `--api ${shellQuote(apiUrl)}`,
     '--ack-local-tools',
   ]
-  if (runtime) args.push(`--runtime ${shellQuote(runtime)}`)
+  if (runtime && !DETECTED_RUNTIMES.has(runtime)) args.push(`--runtime ${shellQuote(runtime)}`)
   if (localMcp) args.push('--local')
   return args.join(' ')
 }

@@ -285,6 +285,9 @@ function connectedSetupStatus(overrides: Record<string, unknown> = {}) {
       reset_period_min: 1440,
     }],
     delegate_address: '0x3333333333333333333333333333333333333333',
+    // #1672: the connector reports the runtime it DETECTED; runtime-specific
+    // copy (restart guidance) keys off this, not the collapsed picker choice.
+    runtime: 'claude-code',
     install_status: {
       runtime_mcp_mode: 'local_stdio',
       hosted_mcp_configured: false,
@@ -457,7 +460,7 @@ describe('ConnectAgentModal', () => {
       '/agent-connection-setups',
       expect.objectContaining({
         name: 'Research Agent',
-        runtime: 'claude-code',
+        runtime: 'agent',
         safe_id: SAFE.id,
       }),
     ))
@@ -544,7 +547,7 @@ describe('ConnectAgentModal', () => {
   it('exposes local MCP only as an Advanced opt-in and sends local_mcp when chosen', async () => {
     renderModal()
 
-    // Advanced affordance is visible for Claude Code (supports local MCP)
+    // Advanced affordance is visible for the AI-agent entry (supports local MCP)
     fireEvent.click(screen.getByText('Advanced'))
     fireEvent.click(screen.getByRole('checkbox'))
 
@@ -552,7 +555,7 @@ describe('ConnectAgentModal', () => {
 
     await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith(
       '/agent-connection-setups',
-      expect.objectContaining({ runtime: 'claude-code', local_mcp: true }),
+      expect.objectContaining({ runtime: 'agent', local_mcp: true }),
     ))
   })
 
@@ -593,7 +596,7 @@ describe('ConnectAgentModal', () => {
       target: { value: 'Handles vendor invoices' },
     })
     fireEvent.change(screen.getByLabelText('Where will this agent run?'), {
-      target: { value: 'codex-cli' },
+      target: { value: 'agent' },
     })
     fireEvent.click(screen.getByText('Advanced'))
     fireEvent.click(screen.getByRole('checkbox'))
@@ -607,7 +610,7 @@ describe('ConnectAgentModal', () => {
     // Review restates the exact choices made above — Runtime and Budget rows
     // in particular are new to this pass (#1411); assert them here too so a
     // silently-dropped row and a silently-changed payload are both caught.
-    expect(screen.getByText('Codex CLI')).toBeInTheDocument()
+    expect(screen.getByText('AI agent (Claude Code, Codex, Cowork)')).toBeInTheDocument()
     expect(screen.getByText(/42\.50 USDC\.e per week/)).toBeInTheDocument()
     expect(screen.getByText('Yes')).toBeInTheDocument()
 
@@ -622,7 +625,7 @@ describe('ConnectAgentModal', () => {
       name: 'Research Agent',
       description: 'Handles vendor invoices',
       safe_id: SAFE.id,
-      runtime: 'codex-cli',
+      runtime: 'agent',
       local_mcp: true,
       allowances: [
         {
@@ -660,27 +663,49 @@ describe('ConnectAgentModal', () => {
     expect(within(select).queryByRole('option', { name: 'Operating wallet' })).not.toBeInTheDocument()
   })
 
-  it('supports Codex Desktop as a first-class runtime option', async () => {
+  // #1672: Codex Desktop no longer has its own picker row — the collapsed
+  // AI-agent entry covers it, and the connector detects which runtime it is
+  // actually executing inside. BEFORE the connector runs, the specific runtime
+  // is unknowable, so the approval heads-up shows generically for the whole
+  // command path (the review found a codex-desktop-only gate would render
+  // AFTER the user already faced the dialog).
+  it('shows the generic approval heads-up for the collapsed AI-agent entry before the connector reports', async () => {
     renderModal()
 
-    fireEvent.change(screen.getByLabelText('Where will this agent run?'), {
-      target: { value: 'codex-desktop' },
-    })
+    expect(screen.queryByRole('option', { name: 'Codex Desktop' })).not.toBeInTheDocument()
     await fillAndCreateSetup()
 
     await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith(
       '/agent-connection-setups',
       expect.objectContaining({
-        runtime: 'codex-desktop',
+        runtime: 'agent',
       }),
     ))
-    expect(await screen.findByText(/Codex Desktop may ask you to approve running the setup command/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Your agent app may ask you to approve running the setup command/i)).toBeInTheDocument()
     expect(screen.getByText(/It includes your approval for the exact local setup actions/i)).toBeInTheDocument()
+  })
+
+  // Once the connector's /resolve reports the detected runtime (which happens
+  // while the setup row is still awaiting_connection — metadata updates at
+  // resolve, status flips at register), the copy sharpens to name the app.
+  it('sharpens the approval heads-up to Codex Desktop once the connector reports that runtime', async () => {
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: connectedSetupStatus({ status: 'awaiting_connection', runtime: 'codex-desktop' }),
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    renderModal()
+    await fillAndCreateSetup()
+
+    expect(await screen.findByText(/Codex Desktop may ask you to approve running the setup command/i)).toBeInTheDocument()
   })
 
   it('supports Hermes Agent as a first-class runtime option', async () => {
     mockUseAgentConnectionSetupStatus.mockReturnValue({
-      data: connectedSetupStatus({ status: 'active' }),
+      // The connector in a Hermes environment reports hermes (#1672) — the
+      // runtime-specific restart copy keys off this reported value.
+      data: connectedSetupStatus({ status: 'active', runtime: 'hermes' }),
       loading: false,
       error: null,
       refetch: vi.fn(),

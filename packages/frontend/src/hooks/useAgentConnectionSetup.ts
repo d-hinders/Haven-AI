@@ -59,14 +59,20 @@ export interface ManualCredential {
   delegateAddress: string
 }
 
+// #1672: the command-path runtimes (Claude Code, Codex CLI/Desktop, Cowork)
+// collapsed into ONE entry — they share an identical setup command, and the
+// connector detects which one it is executing inside, so the pick no longer
+// decides what gets configured. Snippet-based clients keep their own rows
+// because their instructions genuinely differ.
 export const RUNTIME_OPTIONS = [
-  { id: 'claude-code', label: 'Claude Code' },
-  { id: 'codex-cli', label: 'Codex CLI' },
-  { id: 'codex-desktop', label: 'Codex Desktop' },
+  { id: 'agent', label: 'AI agent (Claude Code, Codex, Cowork)' },
+  // Directly under the collapsed entry, so a Claude Desktop (chat app) user
+  // scanning past "Claude…" in the default row can't miss their real option
+  // (#1672 design review).
+  { id: 'claude-desktop', label: 'Claude Desktop' },
   { id: 'cursor', label: 'Cursor' },
   { id: 'vscode', label: 'VS Code' },
   { id: 'vscode-insiders', label: 'VS Code Insiders' },
-  { id: 'claude-desktop', label: 'Claude Desktop' },
   { id: 'hermes', label: 'Hermes Agent' },
   { id: 'other', label: 'Other agent' },
 ]
@@ -416,7 +422,7 @@ export function useAgentConnectionSetup({
   const [step, setStep] = useState<SetupStep>('details')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [runtime, setRuntime] = useState('claude-code')
+  const [runtime, setRuntime] = useState('agent')
   const [localMcp, setLocalMcp] = useState(false)
   const [issuePassport, setIssuePassport] = useState(false)
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
@@ -565,7 +571,7 @@ export function useAgentConnectionSetup({
     setStep('details')
     setName('')
     setDescription('')
-    setRuntime('claude-code')
+    setRuntime('agent')
     setLocalMcp(false)
     setIssuePassport(false)
     setAllowances([])
@@ -614,7 +620,7 @@ export function useAgentConnectionSetup({
       ? addAmountValidation.message
       : '')
   const walletUnavailable = !safeId
-  const localMcpSupported = runtime === 'claude-code' || runtime === 'codex-cli' || runtime === 'codex-desktop'
+  const localMcpSupported = runtime === 'agent'
 
   async function handleCreateSetup() {
     if (!safeId) {

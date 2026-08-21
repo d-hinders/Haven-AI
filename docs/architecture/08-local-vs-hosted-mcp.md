@@ -15,7 +15,7 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/middleware/agentToolAudit.ts
-last-verified: "2026-08-12" # re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-21" # #1672: the local-MCP example command drops --runtime claude-code — runtime selection is detection-first now (see mcp-runtime-compatibility.md); everything else re-read and unchanged. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -40,7 +40,7 @@ narrower than running the whole Haven stack locally.
 Opt in on a supported runtime:
 
 ```bash
-npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code --local
+npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --ack-local-tools --local
 ```
 
 ## Custody boundary

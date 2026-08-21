@@ -73,9 +73,15 @@ export function WaitingForConnector({
         <p className="mt-2 text-xs font-medium leading-relaxed text-[var(--v2-ink)]">
           Haven advances this screen automatically once the agent connects — no refresh, nothing else to click here.
         </p>
-        {runtime === 'codex-desktop' && (
+        {/* #1672 review: with the collapsed picker the specific runtime is
+            unknown until the connector reports, so the approval heads-up must
+            show generically for the whole command path — a codex-desktop-only
+            gate would render AFTER the user already faced the dialog. */}
+        {(runtime === 'agent' || runtime === 'codex-desktop') && (
           <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-            Codex Desktop may ask you to approve running the setup command. That is expected.
+            {runtime === 'codex-desktop'
+              ? 'Codex Desktop may ask you to approve running the setup command. That is expected.'
+              : 'Your agent app may ask you to approve running the setup command. That is expected.'}
           </p>
         )}
       </div>

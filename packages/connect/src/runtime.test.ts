@@ -136,6 +136,7 @@ describe('runConnect', () => {
     const writeCredentials = vi.fn()
     const error = await expectRejection(runConnect({
       setupToken: 'hv_setup_test_expired',
+      runtime: 'claude-code',
       apiBaseUrl: 'https://api.haven.example',
     }, {
       nodeVersion: SUPPORTED_NODE,
@@ -164,6 +165,7 @@ describe('runConnect', () => {
     const registerSetup = vi.fn()
     await expect(runConnect({
       setupToken: 'hv_setup_test_invalid_expiry',
+      runtime: 'claude-code',
       apiBaseUrl: 'https://api.haven.example',
     }, {
       nodeVersion: SUPPORTED_NODE,
@@ -443,12 +445,91 @@ describe('runConnect', () => {
   })
 
   it('rejects --local on runtimes that do not support local MCP', async () => {
+    // env: {} — the test host may itself be an agent shell (CLAUDECODE=1),
+    // where #1672's detection would override the explicit cursor hint.
     await expect(runConnect({
       setupToken: 'hv_setup_test',
       apiBaseUrl: 'https://api.haven.example',
       runtime: 'cursor',
       localMcp: true,
-    }, { nodeVersion: SUPPORTED_NODE })).rejects.toThrow(/only available for Claude Code and Codex/)
+    }, { nodeVersion: SUPPORTED_NODE, env: {} })).rejects.toThrow(/only available for Claude Code and Codex/)
+  })
+
+  describe('detection-first runtime resolution (#1672)', () => {
+    function resolutionSpies() {
+      return {
+        api: {
+          resolveSetup: vi.fn(),
+          registerSetup: vi.fn(),
+          updateInstallStatus: vi.fn(),
+          getConnectorStatus: vi.fn(),
+        } as unknown as ConnectApiClient,
+        preflightStorage: vi.fn(),
+        writeCredentials: vi.fn(),
+        installRuntime: vi.fn(),
+        generateKey: vi.fn(),
+      }
+    }
+
+    it('detection overrides a contradicting --runtime hint, with a printed notice', async () => {
+      const logs: string[] = []
+      const spies = resolutionSpies()
+      // The run still fails later (stub API returns nothing) — the assertions
+      // are about what happened BEFORE that: the notice and the resolved value.
+      await expectRejection(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'claude-desktop',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: { CLAUDECODE: '1' }, log: (m) => logs.push(m) }))
+
+      expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-code' }))
+      expect(logs.some((m) => m.includes('detected; ignoring the claude-desktop hint'))).toBe(true)
+    })
+
+    it('--runtime-force wins over detection', async () => {
+      const spies = resolutionSpies()
+      await expectRejection(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtimeForce: 'claude-desktop',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: { CLAUDECODE: '1' } }))
+
+      expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-desktop' }))
+    })
+
+    it('refuses before any side effect when nothing is detected and no --runtime is given', async () => {
+      const spies = resolutionSpies()
+      await expect(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} })).rejects.toThrow(/Could not determine the agent runtime/)
+
+      // The #1161 discipline: refusal must not burn the setup token.
+      expect(spies.api.resolveSetup).not.toHaveBeenCalled()
+      expect(spies.writeCredentials).not.toHaveBeenCalled()
+      expect(spies.generateKey).not.toHaveBeenCalled()
+    })
+
+    it('refuses an unknown --runtime-force value, naming the valid ones', async () => {
+      const spies = resolutionSpies()
+      await expect(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtimeForce: 'not-a-runtime',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} })).rejects.toThrow(/Unknown --runtime-force value "not-a-runtime"/)
+      expect(spies.api.resolveSetup).not.toHaveBeenCalled()
+    })
+
+    it('an explicit --runtime in a plain terminal (no detection) still applies as given', async () => {
+      const spies = resolutionSpies()
+      await expectRejection(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'claude-desktop',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} }))
+
+      expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-desktop' }))
+    })
   })
 
   it('uses the hard-restart copy on desktop GUI runtimes', async () => {

@@ -521,7 +521,42 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
-  it('includes Codex Desktop runtime in the generated setup command', async () => {
+  // #1672: command-path runtimes carry NO --runtime flag — the connector
+  // detects the environment it executes inside, so an embedded wrong hint can
+  // no longer configure the wrong client. The collapsed picker id 'agent' and
+  // the legacy command-path ids all behave the same.
+  it.each(['agent', 'claude-code', 'codex-cli', 'codex-desktop'])(
+    'omits --runtime from the setup command for the detected runtime %s',
+    async (runtime) => {
+      const app = await buildApp()
+      primeDb(safeLookup())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agent-connection-setups',
+        payload: {
+          name: 'Research Agent',
+          safe_id: SAFE.id,
+          runtime,
+          allowances: [ALLOWANCE],
+        },
+      })
+
+      expect(response.statusCode).toBe(201)
+      const body = response.json()
+      expect(body.connector_command).toContain(`npx -y ${CONNECTOR_PACKAGE}`)
+      expect(body.connector_command).toContain('--ack-local-tools')
+      expect(body.connector_command).not.toContain('--runtime')
+      expect(body.setup_prompt).toContain('I approve running this exact Haven setup command')
+      expect(body.setup_prompt).toContain(`download and execute the published npm package ${CONNECTOR_PACKAGE}`)
+      expect(body.setup_prompt).toContain('Do not print private keys, API keys, credential file contents, or config secrets')
+      expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
+
+      await app.close()
+    },
+  )
+
+  it('keeps --runtime for snippet-based runtimes, where nothing is detectable', async () => {
     const app = await buildApp()
     primeDb(safeLookup())
 
@@ -531,21 +566,13 @@ describe('agent connection setup routes', () => {
       payload: {
         name: 'Research Agent',
         safe_id: SAFE.id,
-        runtime: 'codex-desktop',
+        runtime: 'claude-desktop',
         allowances: [ALLOWANCE],
       },
     })
 
     expect(response.statusCode).toBe(201)
-    const body = response.json()
-    expect(body.connector_command).toContain(`npx -y ${CONNECTOR_PACKAGE}`)
-    expect(body.connector_command).toContain('--ack-local-tools')
-    expect(body.connector_command).toContain('--runtime codex-desktop')
-    expect(body.setup_prompt).toContain('I approve running this exact Haven setup command')
-    expect(body.setup_prompt).toContain(`download and execute the published npm package ${CONNECTOR_PACKAGE}`)
-    expect(body.setup_prompt).toContain('update Codex MCP config under ~/.codex/config.toml')
-    expect(body.setup_prompt).toContain('Do not print private keys, API keys, credential file contents, or config secrets')
-    expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
+    expect(response.json().connector_command).toContain('--runtime claude-desktop')
 
     await app.close()
   })

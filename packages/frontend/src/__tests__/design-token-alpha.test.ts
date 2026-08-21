@@ -81,10 +81,15 @@ describe('channel tokens stay in sync with their hex originals (#1708)', () => {
   it('keeps every hex declaration in #RRGGBB form for token-contrast.test.ts', () => {
     // That suite regex-parses `--v2-<name>: #RRGGBB` out of this same file.
     // Replacing a hex with its channel form would make the colour invisible to
-    // the WCAG contrast guard instead of failing it.
-    for (const name of ['brand', 'danger', 'warning', 'success', 'ink', 'border']) {
-      expect(css).toMatch(new RegExp(`--v2-${name}:\\s*#[0-9a-f]{6};`))
-    }
+    // the WCAG contrast guard instead of failing it. Checked for EVERY colour
+    // that has a channel form, not a hand-picked subset — a spot-check would
+    // miss exactly the token nobody thought to list.
+    const missing = channelTokens()
+      .map((t) => t.name)
+      .filter((name) => !new RegExp(`--v2-${name}:\\s*#[0-9a-f]{6};`).test(css))
+    expect(missing, 'these tokens lost their #RRGGBB form; token-contrast.test.ts reads it').toEqual(
+      [],
+    )
   })
 })
 

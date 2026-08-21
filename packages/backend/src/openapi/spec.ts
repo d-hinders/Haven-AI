@@ -62,6 +62,567 @@ const agentAuthForbidden = {
   },
 }
 
+
+// ── Delegation-lifecycle building blocks (#1446) ─────────────────────────────
+
+const delegationHash = {
+  type: 'string',
+  pattern: '^0x[0-9a-fA-F]{64}$',
+  description: "The delegation's stable identity (#827) — keccak of the unsigned delegation.",
+} as const
+
+const delegationHashList = {
+  type: 'array',
+  minItems: 1,
+  items: delegationHash,
+} as const
+
+const delegationHashParam = {
+  name: 'hash',
+  in: 'path',
+  required: true,
+  schema: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+  description: 'Delegation hash from the build/list response.',
+} as const
+
+/** Arbitrary-length 0x-hex — an ECDSA signature or an ABI-encoded WebAuthn assertion. */
+const hexBytes = {
+  type: 'string',
+  pattern: '^0x[0-9a-fA-F]+$',
+} as const
+
+/**
+ * A prepared ERC-4337 UserOperation, echoed back verbatim on submit. Fields are
+ * the bundler's concern, not this contract's — bigints travel as '<digits>n'
+ * strings (the prepare step's JSON encoding, revived on submit).
+ */
+const preparedUserOperation = {
+  type: 'object',
+  additionalProperties: true,
+} as const
+
+/** EIP-712 typed data the owner key signs verbatim (domain/types/message). */
+const eip712Payload = {
+  type: 'object',
+  additionalProperties: true,
+} as const
+
+/** A prepared treasury UserOp, branching on how the account signs it. */
+const preparedTreasuryOp = {
+  oneOf: [
+    {
+      type: 'object',
+      required: ['signature_scheme', 'signing_payload', 'user_operation', 'treasury_address', 'instructions'],
+      properties: {
+        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+        signing_payload: eip712Payload,
+        user_operation: preparedUserOperation,
+        treasury_address: address,
+        instructions: { type: 'string' },
+      },
+    },
+    {
+      type: 'object',
+      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'treasury_address', 'instructions'],
+      properties: {
+        signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+        user_op_hash: { type: 'string' },
+        user_operation: preparedUserOperation,
+        treasury_address: address,
+        instructions: { type: 'string' },
+      },
+    },
+  ],
+} as const
+
+/** Optional per-request signature-scheme selector for multi-signer accounts. */
+const signatureSchemeBody = {
+  type: 'object',
+  properties: {
+    signature_scheme: {
+      type: 'string',
+      enum: ['eip712_userop', 'webauthn_userop'],
+      description: 'Multi-signer accounts choose per request; omitted, an EOA owner defaults to eip712_userop.',
+    },
+  },
+} as const
+
+/** A signer-set change (rails/hybrid-signer-actions.ts SignerActionBody). */
+const signerActionBody = {
+  type: 'object',
+  required: ['action'],
+  properties: {
+    action: { type: 'string', enum: ['add_passkey', 'remove_passkey', 'add_owner', 'remove_owner'] },
+    passkey: {
+      type: 'object',
+      description: 'Required for add_passkey/remove_passkey.',
+      properties: {
+        key_id: { type: 'string' },
+        x: { type: 'string' },
+        y: { type: 'string' },
+      },
+    },
+    owner_address: { ...address, description: 'Required for add_owner.' },
+    signature_scheme: {
+      type: 'string',
+      enum: ['eip712_userop', 'webauthn_userop'],
+    },
+  },
+} as const
+
+
+// ── x402 demo-resource building blocks (#1446) ───────────────────────────────
+
+/**
+ * The 402 challenge body a resource server embeds in its own 402 response.
+ * Shape is fixed by _buildChallenge in routes/x402-resources.ts.
+ */
+const x402Challenge = {
+  type: 'object',
+  required: ['version', 'resource_id', 'accepts'],
+  properties: {
+    version: { type: 'string', examples: ['1'] },
+    resource_id: { type: 'string', format: 'uuid' },
+    accepts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['scheme', 'network', 'asset', 'maxAmountRequired', 'payTo', 'description', 'extra'],
+        properties: {
+          scheme: { type: 'string', examples: ['exact'] },
+          network: { type: 'string', examples: ['eip155:8453'] },
+          asset: address,
+          maxAmountRequired: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
+          payTo: address,
+          description: { type: 'string' },
+          extra: {
+            type: 'object',
+            required: ['name', 'authorize_endpoint', 'verify_endpoint'],
+            properties: {
+              name: { type: 'string' },
+              authorize_endpoint: { type: 'string' },
+              verify_endpoint: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const
+
+/** One registered resource as the list route reshapes it. */
+const x402Resource = {
+  type: 'object',
+  required: [
+    'resource_id', 'name', 'description', 'price_amount', 'price_human',
+    'token_symbol', 'token_address', 'chain_id', 'pay_to', 'active',
+    'created_at', 'challenge',
+  ],
+  properties: {
+    resource_id: { type: 'string', format: 'uuid' },
+    name: { type: 'string' },
+    description: { type: ['string', 'null'] },
+    price_amount: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
+    price_human: { type: 'string', description: 'Formatted with the token decimals; falls back to 6 for an unknown token.' },
+    token_symbol: { type: 'string', description: 'Stored uppercase.' },
+    token_address: {
+      type: 'string',
+      pattern: '^0x[0-9a-fA-F]{40}$',
+      description:
+        "Read back verbatim from storage. The create route lowercases on insert, but x402_resources has NO lowercase CHECK constraint (unlike agent_delegations), so a row written any other way keeps its case — compare case-insensitively.",
+    },
+    chain_id: { type: 'integer' },
+    pay_to: {
+      type: ['string', 'null'],
+      pattern: '^0x[0-9a-fA-F]{40}$',
+      description: "Null when the linked Safe was detached (safe_id is ON DELETE SET NULL) — the resource stays listed but cannot be paid.",
+    },
+    active: { type: 'boolean' },
+    created_at: { type: 'string', format: 'date-time' },
+    challenge: {
+      oneOf: [x402Challenge, { type: 'null' }],
+      description: 'Null exactly when pay_to is null — a challenge cannot be built without a payment address.',
+    },
+  },
+} as const
+
+
+// ── Agent Passport building blocks (#1446, epic #970) ────────────────────────
+
+/** The passport row as the agent-scoped routes serialize it. */
+const passportState = {
+  type: 'object',
+  required: [
+    'status', 'assurance_level', 'attestation_uid', 'tx_hash', 'chain_id',
+    'attempts', 'last_error', 'requested_at', 'anchored_at',
+  ],
+  properties: {
+    status: {
+      type: 'string',
+      enum: ['pending', 'anchored', 'failed'],
+      description:
+        'Issuance progress. The enum is the table CHECK (migration 048), so a client can branch on it safely.',
+    },
+    assurance_level: {
+      type: 'integer',
+      description: 'L0 only. The table CHECK pins this to 0 — higher tiers are not issuable (#970).',
+    },
+    attestation_uid: { type: ['string', 'null'], description: 'EAS UID once anchored — the evidence pointer, never the decision.' },
+    tx_hash: { type: ['string', 'null'] },
+    chain_id: { type: ['integer', 'null'] },
+    attempts: { type: 'integer' },
+    last_error: { type: ['string', 'null'] },
+    requested_at: { type: ['string', 'null'], format: 'date-time' },
+    anchored_at: { type: ['string', 'null'], format: 'date-time' },
+  },
+} as const
+
+/**
+ * The signed receipt a merchant verifies OFFLINE. Field names are camelCase —
+ * unlike the rest of this API — because the signature is over a canonical
+ * JSON serialization of exactly these keys: renaming one breaks every
+ * verifier. Documented as-is rather than normalized (#1446).
+ */
+const passportReceipt = {
+  type: 'object',
+  required: [
+    'version', 'issuer', 'agentId', 'agentEoa', 'smartAccount', 'assuranceLevel',
+    'standing', 'anchor', 'evidenceUid', 'chainId', 'controls', 'standingEpoch',
+    'issuedAt', 'expiresAt',
+  ],
+  properties: {
+    version: { type: 'string' },
+    issuer: { ...address, description: 'The signing address a merchant pins — fetch it from GET /passport/issuer.' },
+    agentId: { type: 'string', description: "Haven's opaque agent id. Not PII and not a wallet." },
+    agentEoa: { type: ['string', 'null'], description: 'The delegate EOA a merchant sees on an EIP-3009 header.' },
+    smartAccount: { type: ['string', 'null'], description: 'The Hybrid delegator a merchant sees in erc7710 redemption.' },
+    assuranceLevel: { type: 'integer', enum: [0] },
+    standing: {
+      type: 'string',
+      enum: ['active', 'suspended', 'revoked', 'unknown'],
+      description: 'THE answer, sourced from the database — never derived from the chain.',
+    },
+    anchor: {
+      type: 'string',
+      enum: ['not_anchored', 'anchored', 'revocation_pending', 'revoked_onchain'],
+      description: "The on-chain anchor's progress, for transparency. Never the authority.",
+    },
+    evidenceUid: { type: ['string', 'null'] },
+    chainId: { type: ['integer', 'null'] },
+    controls: {
+      oneOf: [
+        {
+          type: 'object',
+          required: ['rail', 'policyEnforcedOnchain', 'treasuryBound'],
+          properties: {
+            rail: { type: 'string', description: "The rail whose primitive holds the policy: 'delegation' or 'allowance'." },
+            policyEnforcedOnchain: { type: 'boolean' },
+            treasuryBound: { type: 'boolean' },
+          },
+        },
+        { type: 'null' },
+      ],
+    },
+    standingEpoch: {
+      type: 'integer',
+      description:
+        'Monotonic ORDERING marker (ms) over changes to the agent record, not a causation signal; 0 means no timestamp. Equal epochs do NOT imply equal receipts — anchor progress moves without it (#1015).',
+    },
+    issuedAt: { type: 'integer' },
+    expiresAt: { type: 'integer', description: 'issuedAt + the TTL published by GET /passport/issuer.' },
+  },
+} as const
+
+
+// ── Safe (account) management building blocks (#1446) ────────────────────────
+
+/** A linked Safe as every write and the list route return it. */
+const userSafe = {
+  type: 'object',
+  required: ['id', 'safe_address', 'chain_id', 'name', 'is_default', 'created_at'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    safe_address: address,
+    chain_id: { type: 'integer' },
+    name: { type: 'string', description: "Display label; defaults to 'My account' when none is given." },
+    is_default: { type: 'boolean', description: 'The first Safe a user links becomes the default.' },
+    created_at: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+/** An approver (Safe owner) decorated with Haven-stored metadata. */
+const approver = {
+  type: 'object',
+  required: ['address', 'type', 'label'],
+  properties: {
+    address: {
+      ...address,
+      description: 'Checksummed, as the chain returns it — membership comes from getOwners(), not from Haven.',
+    },
+    type: {
+      type: 'string',
+      enum: ['eoa', 'passkey'],
+      description: "Decoration only; defaults to 'eoa' for an owner Haven has no metadata row for.",
+    },
+    label: { type: ['string', 'null'], description: 'Trimmed and capped at 120 characters.' },
+  },
+} as const
+
+/**
+ * An unsigned Safe self-call for an owner change. Haven CONSTRUCTS and guards
+ * it; the user signs and relays it through /safe/exec. Haven never signs.
+ */
+const safeOwnerTx = {
+  type: 'object',
+  required: ['to', 'value', 'data', 'operation'],
+  properties: {
+    to: { ...address, description: 'The Safe itself — owner changes are self-calls.' },
+    value: { type: 'string', enum: ['0'] },
+    data: { type: 'string', pattern: '^0x[0-9a-fA-F]*$' },
+    operation: { type: 'integer', enum: [0], description: 'CALL, never DELEGATECALL.' },
+  },
+} as const
+
+
+// ── Dashboard account building blocks (#1446) ────────────────────────────────
+
+/** The FULL profile row — what the profile write returns. */
+const userProfile = {
+  type: 'object',
+  required: ['id', 'name', 'email', 'wallet_address', 'safe_address', 'currency_preference', 'created_at'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    name: { type: ['string', 'null'] },
+    email: { type: 'string' },
+    wallet_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+    safe_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+    currency_preference: { type: ['string', 'null'] },
+    created_at: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+/**
+ * The NARROWER projection the wallet and safe writes return — five fields, no
+ * currency_preference and no created_at. Deliberately not the same shape as
+ * the profile write, and documented as the difference it is.
+ */
+const userIdentity = {
+  type: 'object',
+  required: ['id', 'name', 'email', 'wallet_address', 'safe_address'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    name: { type: ['string', 'null'] },
+    email: { type: 'string' },
+    wallet_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+    safe_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+  },
+} as const
+
+
+// ── Bookkeeping building blocks (#1446, epics #462/#491) ─────────────────────
+
+/** One reporting-feed sync row, as the status route returns it. */
+const feedSyncRow = {
+  type: 'object',
+  required: ['id', 'user_id', 'provider', 'payment_id', 'external_ref', 'status', 'error', 'attempts', 'created_at', 'updated_at'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    user_id: { type: 'string', format: 'uuid' },
+    provider: { type: 'string', examples: ['fortnox'] },
+    payment_id: { type: 'string' },
+    external_ref: { type: ['string', 'null'], description: 'The provider-side reference once pushed.' },
+    status: { type: 'string', enum: ['pending', 'pushed', 'failed', 'skipped'] },
+    error: { type: ['string', 'null'] },
+    attempts: { type: 'integer' },
+    created_at: { type: 'string', format: 'date-time' },
+    updated_at: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+/**
+ * The read-back verdict from the provider's OWN records (#1362). Strictly
+ * read-only: it asserts nothing and cannot modify an invoice.
+ */
+const invoiceVerification = {
+  type: 'object',
+  required: ['registered', 'missing', 'booked', 'cancelled', 'invoice_number', 'voucher', 'invoice_date', 'total', 'checked_at'],
+  properties: {
+    registered: { type: 'boolean', description: 'The invoice exists in Fortnox under our external_ref.' },
+    missing: {
+      type: ['string', 'null'],
+      enum: ['deleted', 'foreign_invoice', null],
+      description:
+        "Why registered is false. 'deleted' = the number 404s; 'foreign_invoice' = an invoice exists at that number but carries someone else's ExternalInvoiceNumber (a company-switch collision). Null when registered. Both mean OUR record was never delivered under our ref — but an audit trail must not say \'no longer exists\' about an invoice that does.",
+    },
+    booked: { type: ['boolean', 'null'], description: 'A human has booked it. Null when not registered.' },
+    cancelled: { type: ['boolean', 'null'], description: 'Registered but struck. Null when not registered.' },
+    invoice_number: { type: 'integer' },
+    voucher: { type: ['string', 'null'], description: '`<series><number> <year>` once booked, e.g. "A123 2026". Null until then.' },
+    invoice_date: { type: ['string', 'null'] },
+    total: { type: ['number', 'null'] },
+    checked_at: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+
+// ── Session building blocks (#1446) ──────────────────────────────────────────
+
+/**
+ * A Safe as the session payloads carry it. sessionSafePayload STRIPS
+ * owner_address and passkey_count — the raw signer inputs — and replaces them
+ * with the two derived answers the UI actually needs.
+ */
+const sessionSafe = {
+  type: 'object',
+  required: [
+    'id', 'safe_address', 'chain_id', 'name', 'is_default', 'created_at',
+    'account_type', 'value_bearing_chain', 'needs_backup_recommendation',
+  ],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    safe_address: address,
+    chain_id: { type: 'integer' },
+    name: { type: 'string' },
+    is_default: { type: 'boolean' },
+    created_at: { type: 'string', format: 'date-time' },
+    account_type: { type: ['string', 'null'] },
+    value_bearing_chain: { type: 'boolean', description: 'Derived from the chain — is real value at stake here.' },
+    needs_backup_recommendation: {
+      type: ['boolean', 'null'],
+      description:
+        'Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account.',
+    },
+  },
+} as const
+
+/** The user object every session response carries. */
+const sessionUser = {
+  type: 'object',
+  required: ['id', 'name', 'email', 'wallet_address', 'safe_address', 'currency_preference', 'safes'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    name: { type: ['string', 'null'] },
+    email: { type: 'string' },
+    wallet_address: { type: ['string', 'null'] },
+    safe_address: { type: ['string', 'null'] },
+    currency_preference: { type: 'string' },
+    safes: { type: 'array', items: sessionSafe },
+  },
+} as const
+
+
+// ── Activity-feed building blocks (#1446) ────────────────────────────────────
+
+/**
+ * One payment in an activity list. `explorer_url` and the two lifecycle
+ * fields (payment_flow_status, payment_attention_reason) are DERIVED at read
+ * time — the first from the chain registry, the others from the
+ * machine-payment lifecycle helper — so a client never has to re-derive them.
+ */
+const activityPayment = {
+  type: 'object',
+  required: ['type', 'id', 'token', 'amount', 'to', 'status', 'created_at'],
+  properties: {
+    type: { type: 'string', enum: ['payment'] },
+    id: { type: 'string' },
+    token: { type: ['string', 'null'] },
+    amount_raw: { type: ['string', 'null'] },
+    amount: { type: ['string', 'null'] },
+    to: { type: ['string', 'null'] },
+    status: { type: ['string', 'null'] },
+    tx_hash: { type: ['string', 'null'] },
+    payment_id: { type: 'string' },
+    payment_proof_status: { type: ['string', 'null'] },
+    payment_flow_status: { type: ['string', 'null'], description: 'Derived from the payment lifecycle.' },
+    payment_attention_reason: { type: ['string', 'null'], description: 'Derived: why this payment needs a human look, if it does.' },
+    source: { type: 'string', description: "Falls back to 'direct'." },
+    x402_resource_url: { type: ['string', 'null'] },
+    x402_merchant_address: { type: ['string', 'null'] },
+    chain_id: { type: ['integer', 'null'] },
+    token_address: { type: ['string', 'null'] },
+    safe_id: { type: ['string', 'null'] },
+    safe_address: { type: ['string', 'null'] },
+    safe_name: { type: ['string', 'null'] },
+    explorer_url: { type: ['string', 'null'], description: 'Null exactly when tx_hash is null.' },
+    execution_rail: { type: ['string', 'null'], description: 'Which on-chain mechanism moved the money (#799).' },
+    session_permission_id: { type: ['string', 'null'] },
+    delegation_hash: { type: ['string', 'null'], description: 'Which delegation authorized a delegation-rail payment (#829).' },
+    confirmed_at: { type: ['string', 'null'] },
+    created_at: { type: 'string' },
+    agent_id: { type: 'string', description: 'Feed only — the per-agent list already knows the agent.' },
+    agent_name: { type: 'string', description: "Feed only; 'Unknown' when the agent row is gone." },
+  },
+} as const
+
+/** One approval in an activity list. Narrower than a payment. */
+const activityApproval = {
+  type: 'object',
+  required: ['type', 'id', 'token', 'amount', 'to', 'status', 'created_at'],
+  properties: {
+    type: { type: 'string', enum: ['approval'] },
+    id: { type: 'string' },
+    token: { type: ['string', 'null'] },
+    amount: { type: ['string', 'null'] },
+    to: { type: ['string', 'null'] },
+    reason: { type: ['string', 'null'] },
+    status: { type: ['string', 'null'] },
+    tx_hash: { type: ['string', 'null'] },
+    payment_proof_status: {
+      type: ['string', 'null'],
+      description: "Synthesised when absent: an executed approval reports 'payment_confirmed'.",
+    },
+    payment_flow_status: { type: ['string', 'null'] },
+    payment_attention_reason: { type: ['string', 'null'] },
+    source: { type: 'string' },
+    x402_resource_url: { type: ['string', 'null'] },
+    chain_id: { type: ['integer', 'null'] },
+    token_address: { type: ['string', 'null'] },
+    safe_id: { type: ['string', 'null'] },
+    safe_address: { type: ['string', 'null'] },
+    safe_name: { type: ['string', 'null'] },
+    explorer_url: { type: ['string', 'null'] },
+    created_at: { type: 'string' },
+    agent_id: { type: 'string', description: 'Feed only.' },
+    agent_name: { type: 'string', description: 'Feed only.' },
+  },
+} as const
+
+/** One MCP tool call — the agent-facing audit log entry. */
+const activityToolCall = {
+  type: 'object',
+  required: ['type', 'id', 'tool_name', 'created_at'],
+  properties: {
+    type: { type: 'string', enum: ['mcp_tool_call'] },
+    id: { type: 'string' },
+    tool_name: { type: 'string' },
+    payment_id: { type: ['string', 'null'], description: 'Set when the call created or advanced a payment.' },
+    result_status: { type: ['string', 'null'] },
+    next_action: { type: ['string', 'null'] },
+    error_code: { type: ['string', 'null'] },
+    status_code: { type: ['integer', 'null'] },
+    created_at: { type: 'string' },
+    agent_id: { type: 'string', description: 'Feed only.' },
+    agent_name: { type: 'string', description: 'Feed only.' },
+  },
+} as const
+
+/** The heterogeneous activity entry, discriminated by `type`. */
+const activityEntry = { oneOf: [activityPayment, activityApproval, activityToolCall] } as const
+
+/** Per-token spend totals, as the stats route shapes them. */
+const spendTotals = {
+  type: 'array',
+  items: {
+    type: 'object',
+    required: ['token', 'total_spent', 'tx_count'],
+    properties: {
+      token: { type: ['string', 'null'] },
+      total_spent: { type: ['string', 'null'] },
+      tx_count: { type: 'integer' },
+    },
+  },
+} as const
+
 const errorResponse = {
   description: 'Error response',
   content: {
@@ -190,9 +751,14 @@ export const openapiSpec = {
     { name: 'Agents' },
     { name: 'Connect Agent 2' },
     { name: 'Payments' },
-    { name: 'x402' },
+    {
+      name: 'x402',
+      description:
+        'Agent-side x402 payment authorization, plus an EXPLORATORY merchant-side surface (resource registration, public verification, receipts). The merchant-side routes are not production facilitator functionality and must not be exposed or expanded without legal/product review — see docs/regulatory/casp-risk-guardrails.md.',
+    },
     { name: 'Machine payments' },
     { name: 'Transactions' },
+    { name: 'Delegations' },
   ],
   paths: {
     '/openapi.json': {
@@ -323,6 +889,49 @@ export const openapiSpec = {
           '404': errorResponse,
         },
       },
+      put: {
+        tags: ['Agents'],
+        operationId: 'updateAgent',
+        summary: "Rename an agent or change its description.",
+        description: 'Display metadata only — it changes no authority, no allowance and no key. The response carries the agent with its current allowances so a client can re-render without a second call.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', description: 'Trimmed.' },
+                  description: { type: 'string', description: 'Trimmed.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The updated agent, with allowances.',
+            content: { 'application/json': { schema: { type: 'object', additionalProperties: true } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Agents'],
+        operationId: 'deleteAgent',
+        summary: 'RETIRED — always answers 410. Archive instead.',
+        description:
+          "Deleting an agent is retired (#1401) and this route is a tombstone: **it always answers 410 and writes nothing.** Hard deletion failed outright on any agent with payment history (a foreign-key violation surfacing as a 500) and, where it did succeed, cascaded away seven tables of money-path audit trail. Removal is now an ARCHIVE that keeps the history: revoke the agent, kill its budgets, then POST /agents/{id}/archive. The typed route survives for reversibility, in the same spirit as the session-rail retirement.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '410': { ...errorResponse, description: 'Always. The message names the archive route to use instead.' },
+        },
+      },
     },
     '/agents/{id}/delegate-balance': {
       get: {
@@ -442,6 +1051,3212 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '404': errorResponse,
+        },
+      },
+    },
+    // ── Delegation lifecycle (#828, documented by #1446) ────────────────────
+    // DESCRIPTIVE ONLY: these shapes document what the routes already return.
+    // Spend authority lives in the signed delegation's on-chain caveat
+    // enforcers, never in this spec — the backend prepares and relays but
+    // signs nothing here (#824 invariants 5/12).
+    '/agents/{id}/delegations': {
+      get: {
+        tags: ['Delegations'],
+        operationId: 'listAgentDelegations',
+        summary: "List an agent's budget delegations with lifecycle status.",
+        description:
+          "Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'Delegations ordered by created_at DESC.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['delegations'],
+                  properties: {
+                    delegations: { type: 'array', items: { $ref: '#/components/schemas/Delegation' } },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/delegations/build': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'buildAgentDelegation',
+        summary: 'Grant step 1: build an unsigned budget delegation for the owner to sign.',
+        description:
+          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827).',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['token_address', 'budget_atomic', 'period_seconds'],
+                properties: {
+                  token_address: address,
+                  recipient_address: {
+                    ...address,
+                    description: 'Optional recipient pin. Omit (or null) for an open budget.',
+                  },
+                  budget_atomic: {
+                    type: 'string',
+                    pattern: '^[0-9]+$',
+                    description: 'Positive atomic token amount; must fit uint96 (the enforcer word size).',
+                  },
+                  period_seconds: { type: 'integer', minimum: 60, description: 'Native refill period; ≥ 60.' },
+                  expires_at: { type: 'integer', description: 'Unix seconds, must be in the future. Default: now + 90 days.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Pending delegation stored; the owner signs signing_payload next.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['delegation_hash', 'version', 'delegate_account_address', 'signing_payload'],
+                  properties: {
+                    delegation_hash: delegationHash,
+                    version: { type: 'integer', description: 'Fresh per (agent, token, recipient) slot — replacement identity (#827).' },
+                    delegate_account_address: address,
+                    signing_payload: {
+                      type: 'object',
+                      description: "EIP-712 typed data (primaryType 'Delegation') the owner signs verbatim.",
+                      additionalProperties: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/delegations/{hash}/activate': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'activateAgentDelegation',
+        summary: 'Grant step 2: attach the owner signature and make the budget live.',
+        description:
+          "Stores the owner's signature on the pending delegation and flips it active, marking any previously active grant in the same (token, recipient) slot replaced — atomically, so the slot never ends up with zero live grants mid-replacement. Deploys the counterfactual delegator account via the relayer first when needed (#860; permissionless factory call, no owner signature). Activating an agent's FIRST budget also activates a pending_approval agent — on this rail the grant signature IS the approval (#1069). Signature validation is a shape check only (65-byte ECDSA or longer WebAuthn assertion); the real validator is EIP-1271 at redemption.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, delegationHashParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature'],
+                properties: {
+                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130,}$' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Budget is live.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['activated', 'delegation_hash'],
+                  properties: {
+                    activated: { type: 'boolean' },
+                    delegation_hash: delegationHash,
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '429': { ...errorResponse, description: 'Relayer gas budget exhausted — retry later.' },
+          '500': { ...errorResponse, description: 'Stored owner config no longer derives the stored account address.' },
+          '502': { ...errorResponse, description: 'Account deploy failed; the grant stays pending and activate can be retried.' },
+        },
+      },
+    },
+    '/agents/{id}/delegations/{hash}/revoke': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'prepareDelegationRevocation',
+        summary: 'Revoke step 1: prepare the disableDelegation UserOp for the owner to sign.',
+        description:
+          'Prepares a sponsored treasury UserOp executing disableDelegation. The response branches on the signature scheme: an EOA owner signs EIP-712 typed data (signing_payload); a pure-passkey account signs the userOpHash via WebAuthn (user_op_hash). Multi-signer accounts pick per request with signature_scheme. A row already disabled on-chain is healed to revoked and answered 409 instead of preparing a doomed op (#1423).',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, delegationHashParam],
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: signatureSchemeBody } },
+        },
+        responses: {
+          '200': {
+            description: 'Prepared revocation, shaped by the signature scheme.',
+            content: { 'application/json': { schema: preparedTreasuryOp } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/delegations/{hash}/revoke/submit': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'submitDelegationRevocation',
+        summary: 'Revoke step 2: submit the signed UserOp; the row flips only after it lands.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, delegationHashParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature', 'user_operation'],
+                properties: {
+                  signature: hexBytes,
+                  user_operation: preparedUserOperation,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Delegation disabled on-chain and marked revoked.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['revoked', 'tx_hash'],
+                  properties: {
+                    revoked: { type: 'boolean' },
+                    tx_hash: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/delegations/revoke-all': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'prepareRevokeAllDelegations',
+        summary: 'Batch revoke step 1: ONE signature kills every non-revoked budget (#1400).',
+        description:
+          'Bundles one disableDelegation call per pending/active delegation into a single sponsored UserOp (capped at 25 per batch; a coarser 100-row ceiling refuses before any reconciliation reads). Rows already disabled on-chain are healed to revoked and dropped from the batch first (#1423). Response shape matches the per-hash prepare, plus the delegation_hashes the batch will kill.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: signatureSchemeBody } },
+        },
+        responses: {
+          '200': {
+            description: 'Prepared batch revocation, shaped by the signature scheme.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'signing_payload', 'user_operation', 'treasury_address', 'delegation_hashes', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        signing_payload: eip712Payload,
+                        user_operation: preparedUserOperation,
+                        treasury_address: address,
+                        delegation_hashes: delegationHashList,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'treasury_address', 'delegation_hashes', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+                        user_op_hash: { type: 'string' },
+                        user_operation: preparedUserOperation,
+                        treasury_address: address,
+                        delegation_hashes: delegationHashList,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '422': { ...errorResponse, description: 'Batch too large — revoke per hash, then retry.' },
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/delegations/revoke-all/submit': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'submitRevokeAllDelegations',
+        summary: 'Batch revoke step 2: submit the signed batch; rows flip only after the UserOp lands.',
+        description:
+          'The response reports the hashes that actually flipped (scoped to this agent), never an echo of the request.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature', 'user_operation', 'delegation_hashes'],
+                properties: {
+                  signature: hexBytes,
+                  user_operation: preparedUserOperation,
+                  delegation_hashes: delegationHashList,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Batch disabled on-chain; the listed rows are marked revoked.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['revoked', 'tx_hash', 'delegation_hashes'],
+                  properties: {
+                    revoked: { type: 'boolean' },
+                    tx_hash: { type: 'string' },
+                    delegation_hashes: delegationHashList,
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/account-signers': {
+      get: {
+        tags: ['Delegations'],
+        operationId: 'getAccountSigners',
+        summary: "Read the treasury account's signer set (public key material only).",
+        description:
+          "The exact owner configuration the account address was derived from (#887) — the dashboard rebuilds the WebAuthn signer from this. Nothing secret: an address and P256 public-key coordinates.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'The signer set.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['account_address', 'chain_id', 'owner_address', 'passkeys'],
+                  properties: {
+                    account_address: address,
+                    chain_id: { type: 'integer' },
+                    owner_address: {
+                      type: ['string', 'null'],
+                      pattern: '^0x[0-9a-fA-F]{40}$',
+                      description: 'Null for a pure-passkey account.',
+                    },
+                    passkeys: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['key_id', 'x', 'y'],
+                        properties: {
+                          key_id: { type: 'string' },
+                          x: { type: 'string', description: '0x-hex P256 public-key x coordinate.' },
+                          y: { type: 'string', description: '0x-hex P256 public-key y coordinate.' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/account-signers/prepare': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'prepareSignerChange',
+        summary: 'Prepare a signer-set change (enroll a backup, remove a key) for an EXISTING signer to sign.',
+        description:
+          "Signer changes are ACCOUNT operations prepared here and signed by an existing signer — Haven prepares, never signs (#824). The chain's CannotRemoveLastSigner rule is mirrored as a clear 409 instead of an opaque revert; an informed two-to-one transition is permitted (#1199). Unlike the revocation prepares, this response carries no treasury_address.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: signerActionBody } },
+        },
+        responses: {
+          '200': {
+            description: 'Prepared signer change, shaped by the signature scheme.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'signing_payload', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        signing_payload: eip712Payload,
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+                        user_op_hash: { type: 'string' },
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/account-signers/submit': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'submitSignerChange',
+        summary: 'Submit the signed signer-set change; storage syncs only after the on-chain op succeeds.',
+        description:
+          'Body precedence is envelope first, config second: a malformed body is a 400 regardless of account state. The DB sync is pinned to the SIGNED calldata — a user_operation that does not match the signed action is refused.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature', 'user_operation'],
+                properties: {
+                  ...signerActionBody.properties,
+                  signature: hexBytes,
+                  user_operation: preparedUserOperation,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Signer set updated on-chain and in storage.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['updated', 'tx_hash'],
+                  properties: {
+                    updated: { type: 'boolean' },
+                    tx_hash: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    // ── x402 demo resources (#1446) ─────────────────────────────────────────
+    // REGULATORY PERIMETER, carried from routes/x402-resources.ts: this is
+    // EXPLORATORY merchant-side x402, not production facilitator
+    // functionality. Documenting it does not widen it — see
+    // docs/regulatory/casp-risk-guardrails.md before exposing or expanding
+    // resource registration, public verification, receipts or settlement.
+    '/x402/resources': {
+      post: {
+        tags: ['x402'],
+        operationId: 'createX402Resource',
+        summary: 'Register a resource behind an x402 payment wall.',
+        description:
+          "Stores the resource and returns the 402 challenge a resource server embeds in its own responses. Price is ALWAYS atomic units (price_amount); price_human is derived for display only. Payment lands on the linked Safe — safe_id when given (ownership-checked), otherwise the user's default Safe; with neither, registration refuses rather than creating an unpayable resource.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name', 'price_amount', 'token_address', 'token_symbol'],
+                properties: {
+                  name: { type: 'string', minLength: 1, description: 'Trimmed; blank after trimming is a 400.' },
+                  description: { type: 'string' },
+                  price_amount: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units; must parse as an integer.' },
+                  token_address: address,
+                  token_symbol: { type: 'string', minLength: 1, description: 'Stored uppercase.' },
+                  chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base).' },
+                  safe_id: { type: 'string', format: 'uuid', description: "Must belong to the caller; omitted, the user's default Safe is used." },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Resource registered; the challenge is ready to embed.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['resource_id', 'name', 'price_amount', 'price_human', 'token_symbol', 'token_address', 'chain_id', 'pay_to', 'challenge'],
+                  properties: {
+                    resource_id: { type: 'string', format: 'uuid' },
+                    name: { type: 'string' },
+                    price_amount: { type: 'string', pattern: '^[0-9]+$' },
+                    price_human: { type: 'string' },
+                    token_symbol: { type: 'string' },
+                    token_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
+                    chain_id: { type: 'integer' },
+                    pay_to: address,
+                    challenge: x402Challenge,
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+      get: {
+        tags: ['x402'],
+        operationId: 'listX402Resources',
+        summary: "List the caller's registered resources, newest first.",
+        description:
+          'Includes deactivated resources — active is a field, not a filter, so an owner can see what they took down. pay_to and challenge are null together when the linked Safe was detached.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Resources ordered by created_at DESC.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['resources'],
+                  properties: {
+                    resources: { type: 'array', items: x402Resource },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/x402/resources/{id}': {
+      delete: {
+        tags: ['x402'],
+        operationId: 'deactivateX402Resource',
+        summary: 'Deactivate a resource (soft delete).',
+        description:
+          'Sets active=false, scoped to the caller. The row is kept so existing receipts keep their resource, and the challenge endpoint answers 410 rather than 404 — a payer learns the resource retired, not that it never existed.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Resource id.' }],
+        responses: {
+          '200': {
+            description: 'Resource deactivated.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/x402/receipts': {
+      get: {
+        tags: ['x402'],
+        operationId: 'listX402Receipts',
+        summary: 'List payments verified against the caller\'s resources (max 100, newest first).',
+        description:
+          'Receipts are written only by the verify endpoint, after on-chain verification. amount_human formats with the receipt token\u2019s OWN decimals (#1630); a token this deployment does not recognise falls back to 6. amount_raw remains the authoritative field \u2014 amount_human is a display string.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Receipts ordered by verified_at DESC, capped at 100.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['receipts'],
+                  properties: {
+                    receipts: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['receipt_id', 'resource_id', 'resource_name', 'tx_hash', 'payer_address', 'amount_raw', 'amount_human', 'chain_id', 'verified_at'],
+                        properties: {
+                          receipt_id: { type: 'string', format: 'uuid' },
+                          resource_id: { type: 'string', format: 'uuid' },
+                          resource_name: { type: 'string' },
+                          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+                          payer_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+                          amount_raw: { type: 'string', pattern: '^[0-9]+$' },
+                          amount_human: { type: 'string', description: "Display string, formatted with the token's own decimals (6 for an unrecognised token). Read amount_raw for the authoritative value." },
+                          chain_id: { type: 'integer' },
+                          verified_at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/x402/resources/{id}/challenge': {
+      get: {
+        tags: ['x402'],
+        operationId: 'getX402ResourceChallenge',
+        summary: 'PUBLIC: fetch a resource\'s 402 payment challenge.',
+        description:
+          'No authentication — a challenge is public by construction, and it grants nothing: it states a price and a destination. NOTE THE SUCCESS CODE: this answers **402 Payment Required** with the challenge body, not 200, so a resource server can relay the status verbatim. 410 means the resource was deactivated; 503 means it has no payment address (its Safe was detached).',
+        security: [],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Resource id.' }],
+        responses: {
+          '402': {
+            description: 'The payment challenge (the success case for this route).',
+            content: { 'application/json': { schema: x402Challenge } },
+          },
+          '400': errorResponse,
+          '404': errorResponse,
+          '410': { ...errorResponse, description: 'Resource deactivated.' },
+          '503': { ...errorResponse, description: 'Resource has no payment address configured.' },
+        },
+      },
+    },
+    '/x402/resources/{id}/verify': {
+      post: {
+        tags: ['x402'],
+        operationId: 'verifyX402Payment',
+        summary: 'PUBLIC: verify a transaction paid for this resource, and mint a receipt.',
+        description:
+          "No authentication — verification reads the chain and the resource's own terms, so it grants the caller nothing they could not check themselves. The transaction must be an AllowanceModule transfer to the resource's Safe, in the resource's token, for at least its price. A tx_hash already used is a 409 (receipts are one-per-transaction, enforced before any RPC call). A failed verification is **402 with verified:false plus the expected terms** — a documented negative answer, not an error envelope.",
+        security: [],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Resource id.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['tx_hash'],
+                properties: { tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Payment verified on-chain; a receipt was stored.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['verified', 'receipt_id', 'resource_id', 'resource_name', 'tx_hash', 'payer_address', 'amount_raw', 'amount_human', 'token_symbol', 'verified_at'],
+                  properties: {
+                    verified: { type: 'boolean', enum: [true] },
+                    receipt_id: { type: 'string', format: 'uuid' },
+                    resource_id: { type: 'string', format: 'uuid' },
+                    resource_name: { type: 'string' },
+                    tx_hash: { type: 'string', pattern: '^0x[0-9a-f]{64}$', description: 'Lowercased before storage.' },
+                    payer_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+                    amount_raw: { type: 'string', pattern: '^[0-9]+$', description: "The VERIFIED on-chain amount, which can exceed the resource price." },
+                    amount_human: { type: 'string' },
+                    token_symbol: { type: 'string' },
+                    verified_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '402': {
+            description: 'Verification failed — the documented negative answer, with the terms the transaction had to meet.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['verified', 'reason', 'expected'],
+                  properties: {
+                    verified: { type: 'boolean', enum: [false] },
+                    reason: { type: 'string' },
+                    expected: {
+                      type: 'object',
+                      required: ['to', 'token', 'min_amount', 'chain_id'],
+                      properties: {
+                        to: address,
+                        token: {
+                          type: 'string',
+                          pattern: '^0x[0-9a-fA-F]{40}$',
+                          description: 'From storage, so case is not guaranteed (see the list schema).',
+                        },
+                        min_amount: { type: 'string', pattern: '^[0-9]+$' },
+                        chain_id: { type: 'integer' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'This transaction was already used as payment.' },
+          '410': { ...errorResponse, description: 'Resource deactivated.' },
+          '503': { ...errorResponse, description: 'Resource has no payment address.' },
+        },
+      },
+    },
+    // ── Agent Passport (epic #970, documented by #1446) ─────────────────────
+    // GOVERNANCE METADATA, never spend authority: a passport attests that an
+    // agent was issued by Haven, bound to a treasury, governed by
+    // on-chain-enforced controls, and is revocable. It verifies no payment and
+    // settles nothing. The word "verified" is reserved for the unissuable L2
+    // tier — see docs/product/agent-passport.md.
+    '/agents/{id}/passport': {
+      get: {
+        tags: ['Agents'],
+        operationId: 'getAgentPassport',
+        summary: "Read an agent's passport state and its authoritative standing.",
+        description:
+          "`passport: null` means the agent has none — the normal case for a basic agent, never an error (issuance is opt-in). The two fields answer different questions and are deliberately not collapsed into one badge: `standing` is the DATABASE's authoritative answer about the agent, while `passport.status`/the anchor describe how far the on-chain attestation has got. The chain lags; the database does not.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '200': {
+            description: 'Passport state (or null) plus the agent\'s standing.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['passport', 'standing'],
+                  properties: {
+                    passport: { oneOf: [passportState, { type: 'null' }] },
+                    standing: {
+                      type: 'object',
+                      description:
+                        'The standing OBJECT (not a bare string): the database-authoritative answer plus the chain-lag transparency fields. Always present, even for an agent with no passport row.',
+                      required: ['agentId', 'standing', 'anchor', 'attestationUid', 'chainLagging', 'revocationConfirmedAt'],
+                      properties: {
+                        agentId: { type: 'string' },
+                        standing: {
+                          type: 'string',
+                          enum: ['active', 'suspended', 'revoked', 'unknown'],
+                          description: 'THE answer, derived from agents.status alone — an agent revoked before its passport ever anchored is still revoked.',
+                        },
+                        anchor: {
+                          type: 'string',
+                          enum: ['not_anchored', 'anchored', 'revocation_pending', 'revoked_onchain'],
+                          description: 'Describes the chain, for transparency — not for deciding.',
+                        },
+                        attestationUid: { type: ['string', 'null'] },
+                        chainLagging: {
+                          type: 'boolean',
+                          description: 'True when the database says revoked but the chain has not caught up — a merchant reading only the chain in this window would be WRONG.',
+                        },
+                        revocationConfirmedAt: { type: ['string', 'null'], format: 'date-time' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+      post: {
+        tags: ['Agents'],
+        operationId: 'requestAgentPassport',
+        summary: 'Opt an existing agent in to a passport.',
+        description:
+          "Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '202': {
+            description: 'Passport requested; the anchor is in progress.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['passport'],
+                  properties: { passport: { oneOf: [passportState, { type: 'null' }] } },
+                },
+              },
+            },
+          },
+          '200': {
+            description: 'Already anchored — nothing was minted and no gas was spent.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['passport', 'already_issued'],
+                  properties: {
+                    passport: passportState,
+                    already_issued: { type: 'boolean', enum: [true] },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Agent has no bound account, or passports are not issued on its chain.' },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'Agent is revoked — revocation is terminal.' },
+          '503': { ...errorResponse, description: 'Passport issuance is not configured on this deployment.' },
+        },
+      },
+    },
+    '/passport/issuer': {
+      get: {
+        tags: ['Agents'],
+        operationId: 'getPassportIssuer',
+        summary: 'PUBLIC: the issuer address a merchant pins to verify receipts offline.',
+        description:
+          'Published so pinning is a one-time setup step rather than something a merchant extracts from a receipt it has not yet verified — trusting the issuer field of an unverified artifact is circular. Rate-limited.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'The issuer and the receipt envelope parameters.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['issuer', 'version', 'receipt_ttl_seconds', 'signature_scheme'],
+                  properties: {
+                    issuer: address,
+                    version: { type: 'string' },
+                    receipt_ttl_seconds: { type: 'integer' },
+                    signature_scheme: { type: 'string', examples: ['eip191-personal-sign-over-canonical-json'] },
+                  },
+                },
+              },
+            },
+          },
+          '429': { ...errorResponse, description: 'Rate limited.' },
+          '503': { ...errorResponse, description: 'Verification is not configured on this deployment.' },
+        },
+      },
+    },
+    '/passport/verify': {
+      get: {
+        tags: ['Agents'],
+        operationId: 'verifyPassport',
+        summary: 'PUBLIC: fetch a signed governance receipt for an agent.',
+        description:
+          "Unauthenticated by design — the caller is a merchant deciding whether to serve an agent; it has no Haven account and cannot be asked to get one. That makes the disclosure boundary the only protection, so the receipt carries booleans and public on-chain addresses and nothing else: no budget, no balance, no owner, and no Safe/treasury identifier beyond the spend accounts a merchant already needs in order to recognise the payer (the delegate EOA on an EIP-3009 header, the smart account in erc7710 redemption). Query by EXACTLY ONE of `address` or `uid`; both or neither is a 400. **An agent with no passport is 200 with `found: false`, not a 404** — issuance is opt-in so most agents have none, and an error status invites integrations to treat a lookup failure as a pass. Only passports already public on-chain resolve; a pending or failed one is indistinguishable from having none. Caching follows the same logic: a negative answer is `no-store` (today's no can be tomorrow's yes), a receipt is cacheable for half its TTL so an HTTP cache can never outlive the signed envelope.",
+        security: [],
+        parameters: [
+          { name: 'address', in: 'query', required: false, schema: address, description: "The agent's delegate EOA or smart account." },
+          { name: 'uid', in: 'query', required: false, schema: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' }, description: 'EAS attestation UID.' },
+        ],
+        responses: {
+          '200': {
+            description: 'Either a signed receipt, or a clean `found: false` — both are normal answers.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['found', 'receipt', 'signature'],
+                      properties: {
+                        found: { type: 'boolean', enum: [true] },
+                        receipt: passportReceipt,
+                        signature: { type: 'string', description: 'EIP-191 signature over the canonical JSON of `receipt`.' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['found'],
+                      properties: {
+                        found: { type: 'boolean', enum: [false] },
+                        reason: { type: 'string' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Not exactly one of address/uid, or a malformed value.' },
+          '429': { ...errorResponse, description: 'Rate limited.' },
+          '503': { ...errorResponse, description: 'Receipt signing is not configured — fail closed rather than serve an unsigned receipt.' },
+        },
+      },
+    },
+    // ── Safe (account) management (#1446) ───────────────────────────────────
+    // CUSTODY BOUNDARY: Haven links, labels and CONSTRUCTS owner-change
+    // transactions, but never signs one. Membership truth is on-chain
+    // (getOwners()); the approver rows here only decorate it with a label and
+    // a type. A user who deletes a Safe from Haven still owns it on-chain.
+    //
+    // RETIRING SURFACE (#1440, owner decision 2026-08-14: the Safe rail goes
+    // away entirely). Of the operations below, only the four plain-CRUD ones
+    // (list, rename, set-default, unlink) are expected to survive — user_safes
+    // is shared with the delegation rail. `deploy`, the import POST and every
+    // approver route are on that epic's removal list, and their entries here
+    // come out with them. Documented anyway, deliberately: the spec describes
+    // the API that exists TODAY, and an undocumented live route is the failure
+    // #1442 was opened on. Do not build new callers against the retiring half.
+    '/user/safes': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listUserSafes',
+        summary: "List the Safes linked to the caller's account, oldest first.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Linked Safes ordered by created_at ASC.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['safes'],
+                  properties: { safes: { type: 'array', items: userSafe } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'addUserSafe',
+        summary: 'Link (import) an existing Safe to the caller\'s account.',
+        description:
+          'Registration only — this moves nothing on-chain and grants Haven no authority over the Safe. The same address on the same chain cannot be linked twice (409). The first Safe a user links becomes their default.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['safe_address'],
+                properties: {
+                  safe_address: address,
+                  chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base); must be a supported chain.' },
+                  name: { type: 'string', description: "Trimmed; blank or absent becomes 'My account'." },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Safe linked.',
+            content: { 'application/json': { schema: userSafe } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '409': { ...errorResponse, description: 'This Safe is already linked to the account.' },
+        },
+      },
+    },
+    '/user/safes/deploy': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'deployUserSafe',
+        summary: 'Deploy a new Safe with the relayer paying gas.',
+        description:
+          'The relayer sponsors the deployment and returns the deployed address plus the transaction hash. Deployment does NOT link the Safe: registration is a separate POST /user/safes call, so onboarding and add-account take the identical path. The deployed Safe is owned by owner_address (single owner, threshold 1) and never by Haven. Note that owner_address is NOT checked against the caller: any authenticated user can have a Safe deployed for any address, so this is a relayer-gas surface bounded only by the global rate limit, not a per-caller ownership check.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['owner_address'],
+                properties: {
+                  owner_address: address,
+                  chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base); must be a supported chain.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Safe deployed; link it with POST /user/safes.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['safe_address', 'tx_hash'],
+                  properties: { safe_address: address, tx_hash: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '500': { ...errorResponse, description: 'Relay deployment failed.' },
+        },
+      },
+    },
+    '/user/safes/{safeId}': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'renameUserSafe',
+        summary: 'Rename a linked Safe.',
+        description: 'Display metadata only — the name exists nowhere on-chain.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name'],
+                properties: { name: { type: 'string', minLength: 1, description: 'Trimmed; blank after trimming is a 400.' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The renamed Safe.',
+            content: { 'application/json': { schema: userSafe } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'unlinkUserSafe',
+        summary: 'Unlink a Safe from the Haven account.',
+        description:
+          'Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
+        responses: {
+          '200': {
+            description: 'Safe unlinked.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/user/safes/{safeId}/default': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'setDefaultUserSafe',
+        summary: 'Make a linked Safe the default.',
+        description: "Exactly one Safe is default per user; setting one clears the previous.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
+        responses: {
+          '200': {
+            description: 'Default updated.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/user/safes/known-approvers': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listKnownApprovers',
+        summary: "The caller's approver registry across all their Safes.",
+        description:
+          'Distinct by address, carrying the most recent label/type and every safe_id the approver is known on — so a picker can offer reuse on another account while excluding the Safes it already approves (#417). Haven metadata only; it confers nothing on-chain.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Known approvers, distinct by address.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['approvers'],
+                  properties: {
+                    approvers: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['address', 'type', 'label', 'safe_ids'],
+                        properties: {
+                          ...approver.properties,
+                          safe_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/user/safes/{safeId}/approvers': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listSafeApprovers',
+        summary: "Read a Safe's on-chain owners, decorated with stored labels.",
+        description:
+          'The owner list and threshold are read live from the chain (`getOwners()`), not from Haven — an owner added outside Haven appears here with no label rather than being invisible.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
+        responses: {
+          '200': {
+            description: 'On-chain owners plus the Safe threshold.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['threshold', 'approvers'],
+                  properties: {
+                    threshold: { type: 'integer' },
+                    approvers: { type: 'array', items: approver },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '502': { ...errorResponse, description: 'Could not read owners from the network.' },
+        },
+      },
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'upsertSafeApproverMetadata',
+        summary: 'Record an approver\'s label and type after the on-chain change lands.',
+        description:
+          'Metadata only, and idempotent: this does not add an owner. Call it after relaying the transaction from /approvers/tx. Enrolling a passkey approver also binds it to the Safe as a signing fast-path — deliberately non-fatal, because /safe/exec re-derives the binding from the on-chain owner list when it is missing.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['address'],
+                properties: {
+                  address: address,
+                  type: { type: 'string', enum: ['eoa', 'passkey'], description: "Defaults to 'eoa'." },
+                  label: { type: 'string', description: 'Trimmed and capped at 120 characters; blank becomes null.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Metadata recorded.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/user/safes/{safeId}/approvers/tx': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'buildSafeApproverTx',
+        summary: 'Build the UNSIGNED owner-change transaction for the user to sign.',
+        description:
+          "Haven constructs and guards; the user signs and relays through /safe/exec. Haven never signs an owner change. The guards run against the LIVE owner list, before any transaction is produced: removing the final owner is refused (409), as is adding an owner the Safe already has; removing an address that is not an owner is a 404.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['action', 'address'],
+                properties: {
+                  action: { type: 'string', enum: ['add', 'remove'] },
+                  address: address,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The unsigned Safe self-call.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['chain_id', 'safe_address', 'tx'],
+                  properties: {
+                    chain_id: { type: 'integer' },
+                    safe_address: address,
+                    tx: safeOwnerTx,
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'Safe not found, or the address to remove is not an owner.' },
+          '409': { ...errorResponse, description: 'Would remove the last owner, or the owner already exists.' },
+          '502': { ...errorResponse, description: 'Could not read owners from the network.' },
+        },
+      },
+    },
+    '/user/safes/{safeId}/approvers/{address}': {
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'deleteSafeApproverMetadata',
+        summary: "Drop an approver's stored metadata after the on-chain removal.",
+        description:
+          'Cleans up the decoration row only — it removes no owner. The last-owner guard lives on /approvers/tx, where the actual removal is built.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' },
+          { name: 'address', in: 'path', required: true, schema: address, description: 'Approver address.' },
+        ],
+        responses: {
+          '200': {
+            description: 'Metadata removed.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    // ── Dashboard account + owner directory (#1446) ─────────────────────────
+    // Profile/preference writes are the user's own record. The owner
+    // directory reads Safe owners LIVE from every linked account, so it is
+    // Safe-rail-shaped and inherits the #1440 retirement caveat recorded on
+    // the /user/safes block: an alias is decoration over on-chain membership,
+    // never a grant.
+    '/user/profile': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'updateUserProfile',
+        summary: "Rename the caller's own account.",
+        description: 'Returns the FULL profile row (including currency_preference and created_at) — a wider shape than the wallet and safe writes below.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name'],
+                properties: { name: { type: 'string', minLength: 1, maxLength: 80, description: 'Trimmed; blank or over 80 characters is a 400.' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The updated profile.', content: { 'application/json': { schema: userProfile } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The account was deleted while a valid token for it was still in flight.' },
+        },
+      },
+    },
+    '/user/wallet': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'updateUserWallet',
+        summary: "Record the caller's connected wallet address.",
+        description: 'Bookkeeping only: recording an address grants Haven nothing and moves nothing. Returns the narrower five-field identity projection, not the full profile.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['wallet_address'],
+                properties: { wallet_address: address },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The updated identity projection.', content: { 'application/json': { schema: userIdentity } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/user/safe': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'updateUserSafe',
+        summary: "Set the caller's legacy safe_address and link it as the default Safe.",
+        description:
+          "Writes the legacy users.safe_address column AND links the Safe into user_safes as the default — the multi-Safe table is the real home, this column is history. The order matters and is deliberate: the legacy column write is attempted FIRST and a vanished account refuses before anything is linked, rather than leaving a link whose owner no longer exists. Returns the narrower identity projection.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['safe_address'],
+                properties: {
+                  safe_address: address,
+                  chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base).' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The updated identity projection.', content: { 'application/json': { schema: userIdentity } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/user/preferences': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getUserPreferences',
+        summary: "Read the caller's display-currency preference.",
+        description: "Defaults to 'USD' when the account has never set one — a value, not an absence.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The current preference.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['currency_preference'],
+                  properties: { currency_preference: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'updateUserPreferences',
+        summary: 'Set the display-currency preference.',
+        description: 'Display only — it changes no balance, no price and no settlement asset.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['currency_preference'],
+                properties: { currency_preference: { type: 'string', enum: ['USD', 'EUR'] } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The stored preference.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['currency_preference'],
+                  properties: { currency_preference: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/user/owners': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listUserOwners',
+        summary: 'The owner directory across every linked Safe, with aliases.',
+        description:
+          "Reads each linked Safe's owners LIVE from the chain and groups them by address, so one owner appearing on three accounts is one entry listing three. Aliases are looked up ONLY for the addresses just confirmed on-chain, which is what stops a removed owner's alias from reappearing. **A partial chain failure is reported, never hidden**: partialFailure/failedSafeIds name the Safes whose owners could not be read, so a caller can tell an incomplete directory from a complete one. Those two fields are camelCase, unlike the rest of this API — documented as-is rather than silently normalised.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Owners grouped by address, plus the partial-failure report.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['owners', 'partialFailure', 'failedSafeIds'],
+                  properties: {
+                    owners: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['owner_address', 'name', 'accounts'],
+                        properties: {
+                          owner_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$', description: 'Lowercased for grouping.' },
+                          name: { type: ['string', 'null'], description: 'The stored alias, or null.' },
+                          accounts: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              required: ['id', 'safe_address', 'chain_id', 'name'],
+                              properties: {
+                                id: { type: 'string', format: 'uuid' },
+                                safe_address: address,
+                                chain_id: { type: 'integer' },
+                                name: { type: 'string' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    partialFailure: { type: 'boolean' },
+                    failedSafeIds: { type: 'array', items: { type: 'string' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/user/owners/{ownerAddress}': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'setOwnerAlias',
+        summary: 'Name an owner address.',
+        description:
+          "An alias is a label, never a grant — naming an address confers no authority over any Safe. The address must be a CURRENT owner of a linked account, checked against the live directory: an unknown address is a 404, but if the chain read partially failed the answer is **503 rather than 404**, because 'not an owner' and 'could not check' must not look the same.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'ownerAddress', in: 'path', required: true, schema: address, description: 'Owner address; matched case-insensitively (stored lowercase).' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name'],
+                properties: { name: { type: 'string', minLength: 1, maxLength: 80 } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The stored alias.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['owner_address', 'name'],
+                  properties: {
+                    owner_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
+                    name: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'Not a current owner of any linked account.' },
+          '503': { ...errorResponse, description: 'Owners could not be verified — distinct from "not an owner".' },
+        },
+      },
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'deleteOwnerAlias',
+        summary: "Remove an owner's alias.",
+        description: 'Drops the label only. Idempotent — removing an alias that does not exist still succeeds, and no ownership check is needed because no authority is involved either way.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'ownerAddress', in: 'path', required: true, schema: address, description: 'Owner address; matched case-insensitively (stored lowercase).' }],
+        responses: {
+          '200': {
+            description: 'Alias removed (or was already absent).',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+    },
+    // ── Bookkeeping: export, reconcile, categories (#1446, epic #462) ───────
+    // Read-only over settled-payment data. No custody surface: nothing here
+    // moves money, and the reporting feed below is deliberately NON-ASSERTING
+    // (#491) — it hands the accounting tool a draft, never a booked verdict.
+    '/accounting/export': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'exportAccounting',
+        summary: 'Legacy SIE export — GATED OFF by default.',
+        description:
+          "Superseded by the non-asserting reporting feed (#491): agent spend now syncs into the accounting tool as draft transactions instead of being exported as an asserting SIE file. **410 is the normal answer on a default deployment**; the route only serves when the legacy flag is on. Responds with a FILE, not JSON — Content-Disposition attachment, plus the custom headers X-Export-Entry-Count and X-Export-Skipped reporting how many entries were written and how many could not be.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'format', in: 'query', schema: { type: 'string', enum: ['sie'] }, description: "Defaults to 'sie'; anything else is a 400." },
+          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date (YYYY-MM-DD…).' },
+          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date (YYYY-MM-DD…).' },
+          { name: 'company', in: 'query', schema: { type: 'string' }, description: "Company name in the file header; defaults to 'Haven'." },
+        ],
+        responses: {
+          '200': {
+            description: 'The SIE file.',
+            headers: {
+              'X-Export-Entry-Count': { schema: { type: 'string' }, description: 'Entries written.' },
+              'X-Export-Skipped': { schema: { type: 'string' }, description: 'Entries that could not be written.' },
+            },
+            content: { 'application/octet-stream': { schema: { type: 'string' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '410': { ...errorResponse, description: 'The default: SIE export is retired in favour of the reporting feed.' },
+        },
+      },
+    },
+    '/accounting/reconcile': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'reconcileAccounting',
+        summary: 'Surface the entries that cannot book cleanly over a period.',
+        description:
+          'Read-only diagnosis, never a fix: it classifies each entry and counts the classes, so a user can see WHY a period will not balance before trying to book it. Note the camelCase byStatus/paymentId/txHash/settledAt fields — this report comes from the accounting module, not from SQL rows.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+        ],
+        responses: {
+          '200': {
+            description: 'The reconciliation report.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['total', 'ok', 'issues', 'byStatus', 'items'],
+                  properties: {
+                    total: { type: 'integer' },
+                    ok: { type: 'integer' },
+                    issues: { type: 'integer' },
+                    byStatus: {
+                      type: 'object',
+                      required: ['ok', 'missing_fx', 'missing_tx', 'unbalanced'],
+                      properties: {
+                        ok: { type: 'integer' },
+                        missing_fx: { type: 'integer', description: 'No SEK amount — the FX rate was unavailable.' },
+                        missing_tx: { type: 'integer', description: 'No transaction hash to anchor the entry.' },
+                        unbalanced: { type: 'integer', description: 'Debits and credits disagree.' },
+                      },
+                    },
+                    items: {
+                      type: 'array',
+                      description:
+                        'ONLY the entries that need attention — an entry classified ok is counted in byStatus but never listed here, so items.length is issues, not total.',
+                      items: {
+                        type: 'object',
+                        required: ['paymentId', 'txHash', 'settledAt', 'status'],
+                        properties: {
+                          paymentId: { type: 'string' },
+                          txHash: { type: 'string' },
+                          settledAt: { type: 'string' },
+                          status: { type: 'string', enum: ['ok', 'missing_fx', 'missing_tx', 'unbalanced'] },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/categories': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listAccountOverrides',
+        summary: "The caller's per-merchant BAS account overrides.",
+        description:
+          'NOTE THE CASING: this read returns the SQL rows as-is (resource_url/bas_account, snake_case), while the write below echoes its own request fields (resourceUrl/account, camelCase). Same path, two conventions — documented rather than normalised, because a generated client must match what the routes actually emit.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Overrides ordered by resource_url.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['overrides'],
+                  properties: {
+                    overrides: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['resource_url', 'bas_account'],
+                        properties: {
+                          resource_url: { type: 'string' },
+                          bas_account: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'setAccountOverride',
+        summary: 'Map a merchant to a BAS account.',
+        description:
+          'Idempotent upsert keyed on (user, resourceUrl). A category is a bookkeeping label — it changes no payment and moves nothing. The response echoes the request fields in camelCase, unlike the snake_case read above.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['resourceUrl', 'account'],
+                properties: {
+                  resourceUrl: { type: 'string', minLength: 1 },
+                  account: { type: 'string', pattern: '^[0-9]{3,6}$', description: 'A BAS account number.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The stored override, echoed.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['resourceUrl', 'account'],
+                  properties: { resourceUrl: { type: 'string' }, account: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'clearAccountOverride',
+        summary: "Clear a merchant's BAS account override.",
+        description: 'Answers **204 No Content**, not a success envelope. Idempotent: clearing an override that was never set still succeeds.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'resourceUrl', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: {
+          '204': { description: 'Override cleared (or was never set).' },
+          '400': errorResponse,
+          '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/reporting/status': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getReportingStatus',
+        summary: 'Whether the reporting feed is available, connected, and live — plus recent syncs.',
+        description:
+          'Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Feed status.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['hosted', 'flagEnabled', 'liveSyncReady', 'available', 'connected', 'syncs'],
+                  properties: {
+                    hosted: { type: 'boolean' },
+                    flagEnabled: { type: 'boolean' },
+                    liveSyncReady: { type: 'boolean', description: 'A real provider adapter is registered.' },
+                    available: { type: 'boolean', description: 'The caller is entitled to the feed.' },
+                    connected: { type: 'boolean', description: 'The caller has a live provider connection.' },
+                    syncs: { type: 'array', items: feedSyncRow },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/reporting/sync': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'syncReportingFeed',
+        summary: 'Backfill and retry the feed for the caller.',
+        description:
+          'Pushes what has not been pushed and retries what failed. Gated: **404 when the feed is unavailable**, which is how an unentitled caller sees it. Returns how many rows were fed — 0 is a normal answer, not a failure.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Rows fed.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['fed'],
+                  properties: { fed: { type: 'integer' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+        },
+      },
+    },
+    '/accounting/reporting/verify/{paymentId}': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'verifyReportingInvoice',
+        summary: "Read back a pushed invoice from the provider's own records.",
+        description:
+          'Strictly read-only (#1362): it confirms whether the supplier invoice still exists and whether a human has booked it, and asserts nothing — the non-asserting principle is untouched. A payment that was never pushed, a disconnected provider, or a sync row with no invoice reference all answer 409 with a machine-readable error_code, because none of them is a verification result.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string' }, description: 'Haven payment id.' }],
+        responses: {
+          '200': {
+            description: "The provider's verdict.",
+            content: { 'application/json': { schema: invoiceVerification } },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+          '409': {
+            description: 'Not verifiable — not pushed, not connected, or no invoice reference.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['error', 'error_code'],
+                  properties: {
+                    error: { type: 'string' },
+                    error_code: { type: 'string', enum: ['not_pushed', 'not_connected', 'no_invoice_ref'] },
+                    status: { type: ['string', 'null'] },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/accounting/reporting/reopen/{paymentId}': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'reopenReportingPush',
+        summary: 'Reopen a pushed row for retry — only when the provider confirms the invoice is gone.',
+        description:
+          "The ONLY path that flips a pushed row back to retryable, and it is conditional on the PROVIDER, not on the caller's say-so (#1365): the server re-runs the read-back and reopens only when the invoice is confirmed gone, or when a number collision proves the invoice at that number is not ours. **An invoice that still exists refuses with 409 and writes nothing** — that is the double-post guard, and reopening against a live invoice would duplicate it. A row that moved between the check and the flip (raced by a concurrent sync) also refuses rather than pretending. After a successful reopen, the next sync re-claims and re-pushes through the normal retry path.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string' }, description: 'Haven payment id.' }],
+        responses: {
+          '200': {
+            description: 'Row reopened for retry.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['reopened', 'payment_id', 'next'],
+                  properties: {
+                    reopened: { type: 'boolean', enum: [true] },
+                    payment_id: { type: 'string' },
+                    next: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+          '409': {
+            description: 'Refused, nothing written — the invoice still exists, the row is not pushed, or it moved under us.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['error', 'error_code'],
+                  properties: {
+                    error: { type: 'string' },
+                    error_code: { type: 'string', enum: ['not_pushed', 'not_connected', 'no_invoice_ref', 'invoice_exists'] },
+                    invoice_number: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    // ── Fortnox OAuth connect + legacy voucher push (#1446, epic #462) ──────
+    // CREDENTIAL BOUNDARY: the OAuth access and refresh tokens live server-side
+    // only. NOTHING in this surface returns them — /status exposes the granted
+    // scope and an expiry timestamp and nothing else, and the callback
+    // redirects without echoing anything it received. Pinned by the route
+    // tests, which are written as redaction tests rather than shape tests.
+    //
+    // This router is registered WITHOUT the global auth hook, deliberately:
+    // the callback is a browser redirect from Fortnox and carries no JWT, so
+    // every other route opts into authentication per-route instead.
+    '/accounting/fortnox/status': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getFortnoxStatus',
+        summary: 'Whether Fortnox is configured on this deployment and connected for the caller.',
+        description:
+          "Returns SAFE METADATA ONLY: the granted scope and the token expiry, never the tokens themselves. Two shapes, deliberately: when the deployment has no Fortnox credentials the answer omits scope/expiresAt entirely (there is nothing to report), and when it is configured they are present but null until a connection exists. `legacyBookkeeping` tells the UI whether the asserting voucher-push surface below is reachable at all — off by default (#492).",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Connection metadata.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['configured', 'connected', 'legacyBookkeeping'],
+                      properties: {
+                        configured: { type: 'boolean', enum: [false] },
+                        connected: { type: 'boolean', enum: [false] },
+                        legacyBookkeeping: { type: 'boolean' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['configured', 'connected', 'scope', 'expiresAt', 'legacyBookkeeping'],
+                      properties: {
+                        configured: { type: 'boolean', enum: [true] },
+                        connected: { type: 'boolean' },
+                        scope: { type: ['string', 'null'], description: 'The granted OAuth scope. Null until connected.' },
+                        expiresAt: { type: ['string', 'null'], description: 'Access-token expiry. Null until connected.' },
+                        legacyBookkeeping: { type: 'boolean' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/fortnox/connect-url': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'getFortnoxConnectUrl',
+        summary: 'Get the Fortnox consent URL as JSON.',
+        description:
+          "The JSON twin of /connect, and it exists for a concrete reason: a single-page app cannot carry its Bearer token through a plain browser navigation, so it fetches the URL here and navigates itself. The URL embeds a signed `state` that expires in 10 minutes and carries a purpose claim — see the callback.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The consent URL. Carries no token material.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['url'],
+                  properties: { url: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '503': { ...errorResponse, description: 'Fortnox is not configured on this deployment.' },
+        },
+      },
+    },
+    '/accounting/fortnox/connect': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'startFortnoxConnect',
+        summary: 'Redirect the browser to Fortnox consent.',
+        description: 'The redirect twin of /connect-url, for a navigation that can carry the session. Same signed, 10-minute, purpose-scoped state.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '302': { description: 'Redirect to the Fortnox consent screen.' },
+          '401': errorResponse,
+          '503': { ...errorResponse, description: 'Fortnox is not configured on this deployment.' },
+        },
+      },
+    },
+    '/accounting/fortnox/callback': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'fortnoxOAuthCallback',
+        summary: 'PUBLIC OAuth callback — authenticated by the signed state, not by a session.',
+        description:
+          "Hit by a browser redirect from Fortnox, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, and it must carry the fortnox_oauth PURPOSE claim — an ordinary session token is rejected here, so a valid Haven token cannot be replayed as OAuth state. **Every outcome is a redirect, never JSON**, and every failure collapses to the same `?fortnox=error` regardless of cause: a bad state, a failed code exchange and a failed save are indistinguishable to the browser by design. A user-declined consent is reported separately as `?fortnox=denied` because that is the user's own action, not a failure to hide.",
+        security: [],
+        parameters: [
+          { name: 'code', in: 'query', schema: { type: 'string' }, description: 'Authorization code from Fortnox.' },
+          { name: 'state', in: 'query', schema: { type: 'string' }, description: 'The signed, purpose-scoped state this flow issued.' },
+          { name: 'error', in: 'query', schema: { type: 'string' }, description: 'Present when the user declined consent.' },
+        ],
+        responses: {
+          '302': {
+            description: 'Always a redirect to the settings page: ?fortnox=connected, ?fortnox=denied, or ?fortnox=error.',
+          },
+        },
+      },
+    },
+    '/accounting/fortnox': {
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'disconnectFortnox',
+        summary: 'Disconnect Fortnox for the caller.',
+        description: 'Deletes the stored connection, tokens included. Answers **204 No Content** and returns no token material. Idempotent — disconnecting when nothing is connected still succeeds.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '204': { description: 'Disconnected (or was never connected).' },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/fortnox/push': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'pushFortnoxVouchers',
+        summary: 'Legacy asserting voucher push — GATED OFF by default.',
+        description:
+          "The asserting counterpart to the reporting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+        ],
+        responses: {
+          '200': {
+            description: 'Per-entry outcome of the push.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['pushed', 'skipped', 'failed', 'failures'],
+                  properties: {
+                    pushed: { type: 'integer' },
+                    skipped: { type: 'integer', description: 'Entries with no book-time SEK amount — unbookable, not errors.' },
+                    failed: { type: 'integer' },
+                    failures: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['paymentId', 'error'],
+                        properties: {
+                          paymentId: { type: 'string' },
+                          error: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Malformed date, or Fortnox is not connected.' },
+          '401': errorResponse,
+          '410': { ...errorResponse, description: 'The default: pushing finished vouchers is retired in favour of the draft feed.' },
+        },
+      },
+    },
+    // ── Hybrid DeleGator accounts (#1446, epic #821) ────────────────────────
+    // CUSTODY: Haven PREPARES and RELAYS; the owner's own key signs. Every
+    // write that reaches the CHAIN is a two-step prepare→submit where the
+    // signature is made on the caller's device and the re-derived calldata
+    // must match what was signed, so a compromised Haven cannot substitute a
+    // different operation. (Provisioning is the exception and needs no
+    // signature: it derives a counterfactual address and records a row —
+    // nothing executes, so there is nothing to sign.) Ownership is the
+    // user_safes row, so naming any address only ever reaches an account the
+    // caller already owns.
+    '/accounts/hybrid': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'createHybridAccount',
+        summary: 'Provision a counterfactual Hybrid DeleGator account.',
+        description:
+          "Computes the deterministic account address for an owner configuration (an EOA, P256 passkeys, or both) and records the row. **No transaction happens here** — the address is derived, not deployed, and `deployed: false` says so; the first sponsored operation (the budget grant) deploys the code. Refusals guard the derivation's own traps: the zero address is rejected because it derives the SAME account as the pure-passkey configuration while counting as a second signer, and duplicate passkey key_ids are rejected because they collapse to one on-chain key. A single-signer account is permitted (#1153) — the backup recommendation reaches the user after funding instead of walling the first minute.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                description: 'At least one owner is required: owner_address, passkeys, or both.',
+                properties: {
+                  chain_id: { type: 'integer', description: 'Defaults to Base Sepolia while delegation onboarding is dark-launched.' },
+                  name: { type: 'string', description: "Display label; defaults to 'My account'." },
+                  owner_address: { ...address, description: 'EOA owner. Must not be the zero address.' },
+                  passkeys: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['key_id', 'x', 'y'],
+                      properties: {
+                        key_id: { type: 'string' },
+                        x: { type: 'string', pattern: '^0x[0-9a-fA-F]{1,64}$', description: 'P256 public-key x coordinate.' },
+                        y: { type: 'string', pattern: '^0x[0-9a-fA-F]{1,64}$', description: 'P256 public-key y coordinate.' },
+                      },
+                    },
+                  },
+                  single_signer_waiver: {
+                    type: 'object',
+                    description:
+                      'Accepted and recorded as history, but REQUIRED FOR NOTHING (#1153) — sending it changes no outcome and omitting it changes no outcome. Kept on the request shape so existing clients keep working.',
+                    properties: { acknowledged: { type: 'boolean' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Account row recorded. Counterfactual — nothing was deployed.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'account_address', 'chain_id', 'account_type', 'deployed', 'created_at'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    account_address: address,
+                    chain_id: { type: 'integer' },
+                    account_type: { type: 'string', enum: ['delegator_hybrid'] },
+                    deployed: { type: 'boolean', enum: [false], description: 'Always false here — deployment rides the first sponsored operation.' },
+                    created_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Bad owner configuration, or a chain the delegation rail does not serve.' },
+          '401': errorResponse,
+          '409': { ...errorResponse, description: 'This account is already registered for the caller.' },
+          '502': { ...errorResponse, description: 'The account address could not be derived.' },
+        },
+      },
+    },
+    '/accounts/hybrid/{address}/signers': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getHybridAccountSigners',
+        summary: "Read an account's signer set (public key material only).",
+        description:
+          "The account-scoped twin of the agent-scoped read, and it exists for two cases the agent route cannot serve: resolving a signer at LOGIN, before any agent exists, and giving account-level recovery a data source for an account with zero agents. Owner-scoped; nothing secret — an address and P256 public-key coordinates. The exact configuration the address was derived FROM, so a client can rebuild the same signer.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'address', in: 'path', required: true, schema: address, description: 'The hybrid account address.' }, { name: 'chain_id', in: 'query', schema: { type: 'string' }, description: 'Required — the (address, chain) pair identifies the account.' }],
+        responses: {
+          '200': {
+            description: 'The signer set.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['account_address', 'chain_id', 'owner_address', 'passkeys'],
+                  properties: {
+                    account_address: address,
+                    chain_id: { type: 'integer' },
+                    owner_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', description: 'Null for a pure-passkey account.' },
+                    passkeys: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['key_id', 'x', 'y'],
+                        properties: { key_id: { type: 'string' }, x: { type: 'string' }, y: { type: 'string' } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'The account signer configuration is unknown.' },
+        },
+      },
+    },
+    '/accounts/hybrid/{address}/signers/prepare': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'prepareHybridSignerChange',
+        summary: 'Prepare a signer-set change for an EXISTING signer to sign.',
+        description:
+          "Enroll a backup passkey or EOA, or remove one. Haven prepares; an existing signer signs — Haven never signs a signer change. The chain's own last-signer rule is mirrored as a clear 409 rather than an opaque revert. The response branches on the signature scheme the device can satisfy.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'address', in: 'path', required: true, schema: address, description: 'The hybrid account address.' }, { name: 'chain_id', in: 'query', schema: { type: 'string' }, description: 'Required — the (address, chain) pair identifies the account.' }],
+        requestBody: { required: true, content: { 'application/json': { schema: signerActionBody } } },
+        responses: {
+          '200': {
+            description: 'Prepared change, shaped by the signature scheme. Carries no treasury_address.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'signing_payload', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        signing_payload: eip712Payload,
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+                        user_op_hash: { type: 'string' },
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/accounts/hybrid/{address}/signers/submit': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'submitHybridSignerChange',
+        summary: 'Submit the signed signer-set change.',
+        description:
+          'Envelope first, account second — a malformed body is a 400 regardless of account state. Storage syncs only after the on-chain operation succeeds, and the sync is pinned to the SIGNED calldata: a user_operation that does not match the signed action is refused rather than trusted.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'address', in: 'path', required: true, schema: address, description: 'The hybrid account address.' }, { name: 'chain_id', in: 'query', schema: { type: 'string' }, description: 'Required — the (address, chain) pair identifies the account.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature', 'user_operation'],
+                properties: {
+                  ...signerActionBody.properties,
+                  signature: hexBytes,
+                  user_operation: preparedUserOperation,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Signer set updated on-chain and in storage.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['updated', 'tx_hash'],
+                  properties: { updated: { type: 'boolean' }, tx_hash: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/accounts/hybrid/{address}/transfers/prepare': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'prepareHybridTransfer',
+        summary: 'MONEY PATH: prepare an owner-signed ERC-20 transfer from the account.',
+        description:
+          "The rail's Send. The treasury executes the transfer as a sponsored account operation **the OWNER signs** — the same prepare/submit and calldata-pinning discipline as a signer change, and the same device-decides scheme. Haven constructs and relays; it never signs, so it cannot move these funds on its own. Works on a counterfactual account: deploy and transfer ride one sponsored operation. Rate-limited on the money-path limiter.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'address', in: 'path', required: true, schema: address, description: 'The hybrid account address.' }, { name: 'chain_id', in: 'query', schema: { type: 'string' }, description: 'Required — the (address, chain) pair identifies the account.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['token_address', 'to', 'amount_atomic'],
+                properties: {
+                  token_address: address,
+                  to: { ...address, description: 'Recipient.' },
+                  amount_atomic: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
+                  signature_scheme: { type: 'string', enum: ['eip712_userop', 'webauthn_userop'] },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Prepared transfer, shaped by the signature scheme.',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'signing_payload', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        signing_payload: eip712Payload,
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                    {
+                      type: 'object',
+                      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'instructions'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+                        user_op_hash: { type: 'string' },
+                        user_operation: preparedUserOperation,
+                        instructions: { type: 'string' },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
+    '/accounts/hybrid/{address}/transfers/submit': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'submitHybridTransfer',
+        summary: 'MONEY PATH: submit the owner-signed transfer.',
+        description: 'Relays the signed operation. The calldata is pinned to what was signed, so the submitted transfer is the one the owner approved — a different recipient or amount is refused, not relayed. Rate-limited on the money-path limiter.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'address', in: 'path', required: true, schema: address, description: 'The hybrid account address.' }, { name: 'chain_id', in: 'query', schema: { type: 'string' }, description: 'Required — the (address, chain) pair identifies the account.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature', 'user_operation'],
+                properties: {
+                  token_address: address,
+                  to: address,
+                  amount_atomic: { type: 'string', pattern: '^[0-9]+$' },
+                  signature: hexBytes,
+                  user_operation: preparedUserOperation,
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Transfer submitted on-chain.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['submitted', 'tx_hash'],
+                  properties: { submitted: { type: 'boolean' }, tx_hash: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
+    // ── Approval queue (#1446) ──────────────────────────────────────────────
+    // The human circuit breaker on the legacy AllowanceModule rail: a payment
+    // that exceeds the on-chain allowance is queued here instead of executing.
+    //
+    // TWO PROPERTIES WORTH KNOWING BEFORE READING THE SHAPES.
+    // First, every state flip is guarded INSIDE the UPDATE's WHERE clause —
+    // ownership, current status and expiry are all conditions of the write, so
+    // an expired, foreign or already-actioned request writes nothing and the
+    // race is closed by the database rather than by a check-then-write.
+    // Second, approving executes NOTHING. It records consent and hands back
+    // the payment details; the user's own wallet executes the Safe
+    // transaction and reports the hash to /executed. Haven never signs it.
+    //
+    // RETIRING SURFACE (#1440): this queue belongs to the Safe rail, which the
+    // owner decided to retire. Documented because it is live today; do not
+    // build new callers against it.
+    '/approvals': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listApprovalRequests',
+        summary: "List the caller's approval requests, actionable ones first.",
+        description:
+          "**This read has a write side effect, deliberately**: it first expires every stale pending/approved request of the caller's, so the list can never show an actionable item that time has already killed. Ordering puts pending and approved ahead of everything else, then newest first. `source` and `x402_resource_url` are derived (payment_rail preferred over the legacy source column, payment_resource_url over the legacy x402 column) so this list and the approve response always agree. `actionable_count` and `pending_count` carry the SAME number — the second is a legacy alias kept for existing clients, not a different count.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'status', in: 'query', schema: { type: 'string' }, description: "Filter by status, or 'all'. Defaults to 'pending'." },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 }, description: 'Capped at 100.' },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+        ],
+        responses: {
+          '200': {
+            description: 'Approval requests plus the actionable count.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['approvals', 'actionable_count', 'pending_count'],
+                  properties: {
+                    approvals: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: [
+                          'id', 'agent_id', 'agent_name', 'safe_address', 'chain_id',
+                          'token_symbol', 'token_address', 'to_address', 'amount_raw',
+                          'amount_human', 'reason', 'source', 'x402_resource_url',
+                          'merchant_address', 'payment_rail', 'payment_resource_url',
+                          'status', 'tx_hash', 'reviewed_at', 'created_at', 'expires_at',
+                        ],
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          agent_id: { type: 'string', format: 'uuid' },
+                          agent_name: { type: 'string', description: "'Unknown Agent' when the agent row is gone — the request stays readable." },
+                          safe_address: address,
+                          chain_id: { type: 'integer' },
+                          token_symbol: { type: 'string' },
+                          token_address: { type: 'string' },
+                          to_address: { type: 'string' },
+                          amount_raw: { type: 'string', description: 'Atomic units.' },
+                          amount_human: { type: 'string' },
+                          reason: { type: ['string', 'null'] },
+                          source: { type: 'string', description: "Derived: payment_rail, else the legacy source column, else 'direct'." },
+                          x402_resource_url: { type: ['string', 'null'], description: 'Derived: payment_resource_url, else the legacy x402 column.' },
+                          merchant_address: { type: ['string', 'null'] },
+                          payment_rail: { type: ['string', 'null'] },
+                          payment_resource_url: { type: ['string', 'null'] },
+                          status: { type: 'string' },
+                          tx_hash: { type: ['string', 'null'] },
+                          reviewed_at: { type: ['string', 'null'], format: 'date-time' },
+                          created_at: { type: 'string', format: 'date-time' },
+                          expires_at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                    actionable_count: { type: 'integer', description: 'Pending plus approved.' },
+                    pending_count: { type: 'integer', description: 'Legacy alias — identical to actionable_count.' },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/approvals/{id}/approve': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'approveApprovalRequest',
+        summary: 'Record consent and hand back the payment to execute.',
+        description:
+          "**Approving executes nothing.** It flips the request to approved and returns the payment details; the user's own wallet then executes the Safe transaction and reports the hash to /executed. Ownership, pending status and a live expiry are all conditions of the UPDATE itself, so an expired, foreign or already-actioned request writes nothing — the 404 covers all of those without distinguishing them, because to a caller who does not own it they are the same answer. A retired-rail request is the one exception that IS distinguished (410 via a diagnostic read on the failure path): it stays readable and rejectable but can never be approved, because approving it would hand the frontend an executable funding transaction for a rail that no longer exists. The response repeats the resolved resource URL in BOTH x402_resource_url and payment_resource_url so callers never have to coalesce client-side.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
+        responses: {
+          '200': {
+            description: 'Consent recorded; execute the payment yourself.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'status', 'message', 'payment'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    status: { type: 'string', enum: ['approved'] },
+                    message: { type: 'string' },
+                    payment: {
+                      type: 'object',
+                      required: [
+                        'token_symbol', 'token_address', 'to_address', 'amount_raw',
+                        'amount_human', 'safe_address', 'source', 'x402_resource_url',
+                        'merchant_address', 'payment_rail', 'payment_resource_url',
+                      ],
+                      properties: {
+                        token_symbol: { type: 'string' },
+                        token_address: { type: 'string' },
+                        to_address: { type: 'string' },
+                        amount_raw: { type: 'string' },
+                        amount_human: { type: 'string' },
+                        safe_address: address,
+                        source: { type: 'string' },
+                        x402_resource_url: { type: ['string', 'null'] },
+                        merchant_address: { type: ['string', 'null'] },
+                        payment_rail: { type: ['string', 'null'] },
+                        payment_resource_url: { type: ['string', 'null'] },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: "Not found, not the caller's, already actioned, or expired — deliberately one answer." },
+          '410': { ...errorResponse, description: 'The request belongs to a retired rail: readable and rejectable, never approvable.' },
+        },
+      },
+    },
+    '/approvals/{id}/proposed': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'markApprovalProposed',
+        summary: 'Record that a multi-signature payment was submitted for co-signing.',
+        description:
+          'For a Safe that needs more than one signature: the transaction is proposed, not yet executed, and this records that intermediate state so the queue does not show it as still awaiting the user. Same WHERE-clause guards as approve, and the same retired-rail refusal.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
+        responses: {
+          '200': {
+            description: 'Marked as proposed.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'status'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    status: { type: 'string', enum: ['proposed'] },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '410': { ...errorResponse, description: 'Retired rail.' },
+        },
+      },
+    },
+    '/approvals/{id}/reject': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'rejectApprovalRequest',
+        summary: 'Reject a pending or approved request.',
+        description:
+          "Deliberately broader than approve in three ways. It accepts an already-APPROVED request, because consent given is consent that can be withdrawn while nothing has executed; it carries NO retired-rail guard; and it does not require a live expiry, so a request that has aged out but has not yet been lazily marked expired can still be rejected. All three follow from the same rule: never trap a request in a user queue. Rejecting executes nothing and un-does nothing on-chain — if the payment was already sent, rejecting the record does not recall it.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
+        responses: {
+          '200': {
+            description: 'Rejected.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'status'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    status: { type: 'string', enum: ['rejected'] },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/approvals/{id}/executed': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'recordApprovalExecution',
+        summary: 'Report the transaction hash after executing the approved payment.',
+        description:
+          "Closes the loop: the user's wallet executed the Safe transaction, and this records the hash and snapshots the fiat value at execution time. The state is checked TWICE on purpose — once to load the request and once again inside the UPDATE — so a request that stopped being approved while the fiat lookup was in flight answers **409 rather than being overwritten**. That 409 is distinct from the 404: 404 means it was never approvable for this caller, 409 means it was and no longer is. The hash is recorded, never verified here; Haven does not confirm the transaction on-chain at this point.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Approval-request id.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['tx_hash'],
+                properties: { tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Execution recorded.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'status', 'tx_hash'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    status: { type: 'string', enum: ['executed'] },
+                    tx_hash: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: "Not found, not the caller's, or not in an approved state." },
+          '409': { ...errorResponse, description: 'It stopped being approved between the read and the write.' },
+        },
+      },
+    },
+    // ── Session + passkeys (#1446) ──────────────────────────────────────────
+    // CREDENTIAL BOUNDARY: no response here returns a password, a hash, or a
+    // passkey's private material. The passkey routes echo an id, the derived
+    // signer address and the chain — never the public-key coordinates they
+    // were derived from, and never the stored attestation.
+    '/auth/signup': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'signup',
+        summary: 'Create an account and return a session token.',
+        description:
+          "The email is NORMALISED before the uniqueness check, deliberately: an exact match on the raw input would let `ADA@Example.com` register alongside a stored `ada@example.com`, giving one person two accounts and two treasuries. Password bounds are 8-128 characters. The returned user is a fixed new-account shape — no wallet, no Safe, USD, an empty safes list — because none of those exist yet.",
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name', 'email', 'password'],
+                properties: {
+                  name: { type: 'string', minLength: 1, maxLength: 80, description: 'Trimmed; control characters are rejected.' },
+                  email: { type: 'string', maxLength: 255 },
+                  password: { type: 'string', minLength: 8, maxLength: 128 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Account created; the token is valid for 7 days.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['token', 'user'],
+                  properties: { token: { type: 'string' }, user: sessionUser },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '409': { ...errorResponse, description: 'An account with this email already exists.' },
+        },
+      },
+    },
+    '/auth/login': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'login',
+        summary: 'Exchange credentials for a session token.',
+        description:
+          "**An unknown email and a wrong password return the SAME 401**, deliberately: distinguishing them would turn this endpoint into an account-enumeration oracle, letting anyone discover which addresses have Haven accounts. Do not make the error message more helpful. The protection covers timing as well as the status and body (#1646): the password comparison runs on BOTH paths — against an absent-user hash when there is no account — so the answer costs materially the same either way (the remaining difference is the sub-millisecond indexed lookup, far below bcrypt cost). The token is valid for 7 days, and the response carries the user's Safes so a client needs no second call to render a session.",
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['email', 'password'],
+                properties: { email: { type: 'string' }, password: { type: 'string' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Session established.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['token', 'user'],
+                  properties: { token: { type: 'string' }, user: sessionUser },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': { ...errorResponse, description: 'Invalid email or password — one answer for both, on purpose.' },
+        },
+      },
+    },
+    '/auth/me': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getSession',
+        summary: 'Read the authenticated session: profile plus Safes.',
+        description:
+          'Both reads are scoped to the JWT subject, never to a client-supplied id. Returns the FULL profile row (including created_at, unlike the login and signup user object) plus the same Safe list. A 404 here means the account was deleted while a valid token for it was still in flight.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The session.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'name', 'email', 'wallet_address', 'safe_address', 'currency_preference', 'created_at', 'safes'],
+                  properties: {
+                    ...userProfile.properties,
+                    safes: { type: 'array', items: sessionSafe },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The account no longer exists.' },
+        },
+      },
+    },
+    '/passkeys': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'registerPasskey',
+        summary: 'Enroll a passkey signer for the caller.',
+        description:
+          "Derives the Safe passkey-signer address from the P256 public key and records it. **A second passkey on the same chain is allowed and is the point** (#1229): it is a BACKUP SIGNER, and this rail's only recovery — refusing it used to lock out exactly the users who most needed protection. Only a duplicate credential_id is refused. HONEST LIMITATION: the attestation object is persisted for future verification but is NOT cryptographically verified yet, so a bad enrollment harms only the enrolling user. The response is NARROWER than the list read below — an id, the credential, the derived signer address and the chain, never the public-key coordinates or the stored attestation.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['credential_id', 'public_key_x', 'public_key_y', 'chain_id'],
+                properties: {
+                  credential_id: { type: 'string', description: 'Non-empty base64url.' },
+                  public_key_x: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: '32-byte 0x-hex.' },
+                  public_key_y: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: '32-byte 0x-hex.' },
+                  chain_id: { type: 'integer' },
+                  raw_attestation_object: { type: 'string', description: 'Optional base64url attestation. Stored, not yet verified.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Passkey enrolled.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'credential_id', 'signer_address', 'chain_id'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    credential_id: { type: 'string' },
+                    signer_address: { type: 'string', description: 'Derived from the public key; stored lowercase.' },
+                    chain_id: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '409': { ...errorResponse, description: 'This credential is already registered. Note: a SECOND passkey on the same chain is NOT a conflict.' },
+        },
+      },
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listPasskeys',
+        summary: "List the caller's enrolled passkeys.",
+        description: 'Wider than the create response: it also carries the bound Safe address and the enrollment time. Still no key material.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Enrolled passkeys.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['passkeys'],
+                  properties: {
+                    passkeys: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['id', 'credential_id', 'signer_address', 'chain_id', 'safe_address', 'created_at'],
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          credential_id: { type: 'string' },
+                          signer_address: { type: 'string' },
+                          chain_id: { type: 'integer' },
+                          safe_address: { type: ['string', 'null'], description: 'Null until the passkey is bound to a Safe.' },
+                          created_at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    // ── Activity + analytics (#1446) ────────────────────────────────────────
+    // Read-only. Nothing here writes, signs, or moves anything — these are the
+    // owner's window onto what an agent did, including the MCP tool-call audit
+    // log, which is how a tool call that never became a payment stays visible.
+    '/agent-activity/{id}/activity': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getAgentActivity',
+        summary: "One agent's payments, approvals and tool calls, newest first.",
+        description:
+          "A heterogeneous list discriminated by `type`: payment, approval, or mcp_tool_call. **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the three sources separately and the results are then merged and sorted, so this route can return up to three times `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+        ],
+        responses: {
+          '200': {
+            description: 'Merged activity, newest first.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['activity'],
+                  properties: { activity: { type: 'array', items: activityEntry } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such agent for this caller.' },
+        },
+      },
+    },
+    '/agent-activity/{id}/stats': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getAgentStats',
+        summary: "One agent's spend totals per token, plus its pending-approval count.",
+        description:
+          'Totals count CONFIRMED spend only, so an in-flight payment does not inflate them. Each window (all time, today, this week) is a separate per-token list rather than one list with three numbers, because a token can appear in one window and not another.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' }],
+        responses: {
+          '200': {
+            description: 'Spend totals and the pending count.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['all_time', 'today', 'this_week', 'pending_approvals'],
+                  properties: {
+                    all_time: spendTotals,
+                    today: spendTotals,
+                    this_week: spendTotals,
+                    pending_approvals: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such agent for this caller.' },
+        },
+      },
+    },
+    '/agent-activity/feed': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getActivityFeed',
+        summary: 'Combined activity across every agent the caller owns.',
+        description:
+          "The same three entry types as the per-agent list, each additionally carrying agent_id and agent_name so the feed can attribute a row without a second lookup ('Unknown' when the agent row is gone — the activity stays visible). Unlike the per-agent route, the merged list IS truncated to `limit`. A caller with no agents gets an empty list and a zero count rather than an error. `pending_approvals` counts everything actionable across the account, not just what appears in this page.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+        ],
+        responses: {
+          '200': {
+            description: 'Merged cross-agent activity plus the actionable-approval count.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['activity', 'pending_approvals'],
+                  properties: {
+                    activity: { type: 'array', items: activityEntry },
+                    pending_approvals: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/analytics/funnel': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getOnboardingFunnel',
+        summary: 'Onboarding step conversion and median time-to-first-payment.',
+        description:
+          'Counts DISTINCT users per onboarding step over a date range, with the conversion from the previous step, plus the median time from signup to first settled payment. Defaults to the last 30 days. The window is echoed back as resolved ISO timestamps so a caller can tell exactly which range produced the numbers rather than re-deriving the default.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to 30 days before `to`.' },
+          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to now.' },
+        ],
+        responses: {
+          '200': {
+            description: 'Funnel counts and median TTFP.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['steps', 'medianTtfpMs', 'from', 'to'],
+                  properties: {
+                    steps: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['event', 'users', 'conversionFromPrev'],
+                        properties: {
+                          event: {
+                            type: 'string',
+                            enum: ['signed_up', 'safe_deployed', 'safe_imported', 'agent_created', 'allowance_granted', 'safe_funded', 'first_payment_settled'],
+                          },
+                          users: { type: 'integer', description: 'DISTINCT users who reached this step.' },
+                          conversionFromPrev: { type: ['number', 'null'], description: 'Null when there is nothing to convert from: the first step, or any step whose predecessor counted zero users.' },
+                        },
+                      },
+                    },
+                    medianTtfpMs: { type: ['integer', 'null'], description: 'Median signup→first-settled-payment in ms. Null when nobody has completed it in the window.' },
+                    from: { type: 'string', format: 'date-time', description: 'The resolved window start.' },
+                    to: { type: 'string', format: 'date-time', description: 'The resolved window end.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Unparseable dates, or from is not before to.' },
+          '401': errorResponse,
+        },
+      },
+    },
+    // ── Routes previously excluded one by one (#1446, final slice) ──────────
+    // These ten sat in KNOWN_UNDOCUMENTED_ROUTES rather than in a deferred
+    // module. Two of their reasons no longer hold: GET /chains' own entry said
+    // it SHOULD be in the spec and that documenting it belonged to this
+    // backfill, and POST /x402/{id}/settle was excluded pending a sweep (#834)
+    // that closed without doing it. The other eight were held back until "the
+    // dashboard surface is folded into a separate dashboard spec" — a premise
+    // this epic overtook, since the spec now carries the dashboard surface.
+    '/chains': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getChains',
+        summary: 'PUBLIC: which chains this deployment serves.',
+        description:
+          'Two different lists, and the difference matters: `supported` is every chain the code knows, while `deployable` is the subset this environment will actually provision accounts on (#679). Onboarding pickers must offer `deployable`, not `supported`, or they will offer a chain the deployment refuses. No authentication — it is configuration, not data.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'The chain registry for this deployment.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['deployable', 'supported'],
+                  properties: {
+                    deployable: { type: 'array', items: { type: 'integer' }, description: 'Chains this environment will provision on.' },
+                    supported: { type: 'array', items: { type: 'integer' }, description: 'Chains the code knows about at all.' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/x402/{id}/settle': {
+      post: {
+        tags: ['x402'],
+        operationId: 'settleX402Payment',
+        summary: 'MONEY PATH: settle a delegation-rail x402 payment with the delegate signature.',
+        description:
+          "The delegation rail's settlement step, and the reason the rail has no funding leg: the agent signs the settlement child delegation, Haven assembles the merchant X-PAYMENT header, and the merchant redeems the chain directly from the budget delegation — **money moves account→merchant, never through a delegate hot balance**. Retry the merchant with the returned `payment_header`; it is a signed, single-use, amount-and-merchant-bound authorization, not a key. Refusals are specific on purpose: a payment on the wrong rail is a 409 rather than a confusing 400, and a lost settlement context is a 502 telling you to re-authorize rather than a silent failure. Agent-authenticated and rate-limited on the money-path limiter.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Payment intent id from authorize.' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature'],
+                properties: { signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'The delegate EIP-712 signature over the settlement child.' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Settled; retry the merchant with payment_header.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['payment_id', 'status', 'payment_header'],
+                  properties: {
+                    payment_id: { type: 'string' },
+                    status: { type: 'string', enum: ['submitted'] },
+                    payment_header: { type: 'string', description: 'The merchant X-PAYMENT header. Single-use and bound to this amount and merchant.' },
+                    resource_url: { type: ['string', 'null'] },
+                    passport: { description: 'Optional passport reference for the paying agent.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'A delegate signature is required.' },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'Payment not found.' },
+          '409': { ...errorResponse, description: 'Not a delegation-rail settlement, or not awaiting a signature.' },
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': { ...errorResponse, description: 'Settlement state was lost — re-authorize.' },
+        },
+      },
+    },
+    '/agents/{id}/pause': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'pauseAgent',
+        summary: 'Pause an agent — reversible, unlike revoke.',
+        description: "Pausing stops Haven serving the agent while leaving its on-chain authority intact; revoking is the terminal action. A paused agent's standing reports as suspended rather than revoked.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': { description: 'Paused.', content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such agent for this caller, or it cannot be paused from its current state.' },
+        },
+      },
+    },
+    '/agents/{id}/resume': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'resumeAgent',
+        summary: 'Resume a paused agent.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': { description: 'Resumed.', content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such agent for this caller, or it cannot be resumed from its current state.' },
+        },
+      },
+    },
+    '/agents/{id}/rotate-key': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'rotateAgentKey',
+        summary: 'Issue a new API key for an active agent.',
+        description:
+          "**The plaintext key is returned ONCE, here, and is never retrievable again** — Haven stores only its hash. Rotation invalidates the previous key immediately, so a running agent must be given the new one before its next call. Only an ACTIVE agent can rotate: a revoked agent stays revoked (409), because handing out a fresh credential for it would undo the revocation.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'The new key. Store it now.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['api_key', 'api_key_prefix'],
+                  properties: {
+                    api_key: { type: 'string', description: 'Plaintext, shown once.' },
+                    api_key_prefix: { type: 'string', description: 'The prefix Haven keeps for display.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'The agent is not active.' },
+        },
+      },
+    },
+    '/agents/{id}/allowances': {
+      post: {
+        tags: ['Agents'],
+        operationId: 'setAgentAllowance',
+        summary: 'Set a per-token allowance on the legacy AllowanceModule rail.',
+        description:
+          "Records the allowance Haven will execute against. **The authority itself is the on-chain AllowanceModule grant, not this row** — writing it here does not grant anything the chain has not been told about. `schedule_warning` is always null: session schedules are retired (#834) and the field survives only so existing clients keep parsing. Retiring rail (#1440).",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['token_address', 'token_symbol', 'allowance_amount', 'reset_period_min'],
+                properties: {
+                  token_address: address,
+                  token_symbol: { type: 'string' },
+                  allowance_amount: { type: 'string', description: 'Human-denominated amount.' },
+                  reset_period_min: { type: 'integer', description: 'Refill period in minutes; 0 means one-time.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The stored allowance.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: true,
+                  required: ['schedule_warning'],
+                  properties: {
+                    schedule_warning: { type: 'null', description: 'Always null — retained for client compatibility (#834).' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'The agent is revoked, or its Connect setup is still awaiting wallet approval — either way the allowance is refused before anything is written.' },
+        },
+      },
+    },
+    '/agents/{id}/allowances/{tokenAddress}': {
+      delete: {
+        tags: ['Agents'],
+        operationId: 'deleteAgentAllowance',
+        summary: "Remove an allowance row for one token.",
+        description:
+          "Removes Haven's record. **It does NOT revoke the on-chain grant** — the AllowanceModule allowance survives until the owner changes it on-chain, so deleting this row stops Haven executing against it but is not itself a revocation. Retiring rail (#1440).",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, { name: 'tokenAddress', in: 'path', required: true, schema: address }],
+        responses: {
+          '200': { description: 'Row removed.', content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } } },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'The agent is revoked, or its Connect setup is still awaiting wallet approval.' },
+        },
+      },
+    },
+    '/transactions/payment-intents/{paymentId}/evidence': {
+      get: {
+        tags: ['Transactions'],
+        operationId: 'getPaymentEvidence',
+        summary: 'Read the stored evidence for one payment or approval.',
+        description:
+          "The audit view behind a transaction row. `payment_id` is resolved for the caller — it carries whichever of the two source ids exists, so a client does not branch on payment-versus-approval to find its own identifier.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'The evidence record.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['evidence'],
+                  properties: {
+                    evidence: {
+                      type: 'object',
+                      additionalProperties: true,
+                      required: ['payment_id'],
+                      properties: {
+                        payment_id: { type: ['string', 'null'], description: 'Resolved from the payment intent id, else the approval request id.' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Malformed paymentId.' },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No evidence for this payment.' },
         },
       },
     },
@@ -1939,6 +5754,34 @@ export const openapiSpec = {
       },
     },
     schemas: {
+      Delegation: {
+        type: 'object',
+        description:
+          "One budget-delegation row (#828). start_date and expires_at are unix-second BIGINTs and arrive as digit STRINGS (node-postgres decodes int8 as string). The signed delegation object is never included here — the list is lifecycle metadata only.",
+        required: [
+          'id', 'chain_id', 'token_address', 'recipient_address', 'delegation_hash',
+          'version', 'status', 'budget_atomic', 'period_seconds', 'start_date',
+          'expires_at', 'created_at',
+        ],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          chain_id: { type: 'integer' },
+          token_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$', description: 'Stored lowercase (table CHECK).' },
+          recipient_address: {
+            type: ['string', 'null'],
+            pattern: '^0x[0-9a-f]{40}$',
+            description: 'Lowercase recipient pin, or null for an open budget.',
+          },
+          delegation_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+          version: { type: 'integer' },
+          status: { type: 'string', enum: ['pending', 'active', 'replaced', 'revoked'] },
+          budget_atomic: { type: 'string', pattern: '^[0-9]+$' },
+          period_seconds: { type: 'integer' },
+          start_date: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
+          expires_at: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
+          created_at: { type: 'string', format: 'date-time' },
+        },
+      },
       /**
        * #1446: an address-book label. `LIST_CONTACTS_FOR_USER_SQL` and both
        * RETURNING clauses in `infra/repositories/contacts.ts` select exactly

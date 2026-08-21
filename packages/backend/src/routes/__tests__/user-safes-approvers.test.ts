@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 const { mockPoolQuery, mockGetSafeDetails } = vi.hoisted(() => ({
   mockPoolQuery: vi.fn(),
@@ -91,6 +92,7 @@ describe('approver routes on /user/safes/:safeId/approvers', () => {
     expect(body.tx.to.toLowerCase()).toBe(SAFE_ADDRESS)
     expect(body.tx.operation).toBe(0)
     expect(body.tx.data.slice(0, 10)).toBe('0xf8dc5dd9') // removeOwner selector
+    expectMatchesSpec('POST', '/user/safes/{safeId}/approvers/tx', body)
   })
 
   it('rejects adding an address that is already an owner with 409', async () => {
@@ -121,6 +123,7 @@ describe('approver routes on /user/safes/:safeId/approvers', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.json().tx.data.slice(0, 10)).toBe('0x0d582f13') // addOwnerWithThreshold selector
+    expectMatchesSpec('POST', '/user/safes/{safeId}/approvers/tx', response.json())
   })
 
   it('404s when the safe is not owned by the caller', async () => {
@@ -155,13 +158,14 @@ describe('approver routes on /user/safes/:safeId/approvers', () => {
       { address: A, type: 'passkey', label: 'My passkey' },
       { address: B, type: 'eoa', label: null },
     ])
+    expectMatchesSpec('GET', '/user/safes/{safeId}/approvers', response.json())
   })
 
   it('lists the user\'s known approvers across Safes for reuse', async () => {
     mockPoolQuery.mockResolvedValueOnce({
       rows: [
         { address: A, type: 'eoa', label: 'Co-founder', safe_ids: [SAFE_ID] },
-        { address: B, type: 'passkey', label: 'My passkey', safe_ids: [SAFE_ID, 'safe-2'] },
+        { address: B, type: 'passkey', label: 'My passkey', safe_ids: [SAFE_ID, '6b1f0c39-84ad-4e72-9f15-0d3a8e27c5b1'] },
       ],
     })
 
@@ -177,6 +181,7 @@ describe('approver routes on /user/safes/:safeId/approvers', () => {
     expect(body.approvers[0]).toEqual({ address: A, type: 'eoa', label: 'Co-founder', safe_ids: [SAFE_ID] })
     // The query is scoped to the authenticated user.
     expect(mockPoolQuery.mock.calls[0][1]).toEqual(['user-1'])
+    expectMatchesSpec('GET', '/user/safes/known-approvers', response.json())
   })
 
   it('validates the address before doing any network read', async () => {

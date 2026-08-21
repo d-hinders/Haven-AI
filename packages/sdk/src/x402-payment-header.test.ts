@@ -23,12 +23,15 @@ const PAYMENT_REQUIRED = {
 
 async function signedHeader() {
   const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey: KEY })
+  // Header minting lives on the private funding-leg module since #1618.
   const header = await (haven as unknown as {
-    createStandardX402Header(
-      paymentRequired: typeof PAYMENT_REQUIRED,
-      option: (typeof PAYMENT_REQUIRED.accepts)[number],
-    ): Promise<string>
-  }).createStandardX402Header(PAYMENT_REQUIRED, PAYMENT_REQUIRED.accepts[0])
+    fundingLeg: {
+      createPaymentHeader(
+        paymentRequired: typeof PAYMENT_REQUIRED,
+        option: (typeof PAYMENT_REQUIRED.accepts)[number],
+      ): Promise<string>
+    }
+  }).fundingLeg.createPaymentHeader(PAYMENT_REQUIRED, PAYMENT_REQUIRED.accepts[0])
   return { header, payer: haven.delegateAddress! }
 }
 

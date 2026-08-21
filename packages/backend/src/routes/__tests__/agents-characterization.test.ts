@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify from 'fastify'
 import agentRoutes from '../agents.js'
 
@@ -380,6 +381,7 @@ describe('DELETE /agents/:id — retired (#1401)', () => {
 
     const res = await app.inject({ method: 'DELETE', url: '/agents/agent-1' })
     expect(res.statusCode).toBe(410)
+    expectMatchesSpec('DELETE', '/agents/{id}', res.json(), '410')
     expect(res.json().error).toMatch(/archive/)
     expect(mockQuery).not.toHaveBeenCalled()
     await app.close()
@@ -433,6 +435,7 @@ describe('POST /agents/:id/rotate-key', () => {
     const body = res.json()
     expect(body.api_key).toMatch(/^sk_agent_/)
     expect(body.api_key_prefix).toBe(body.api_key.slice(0, 12))
+    expectMatchesSpec('POST', '/agents/{id}/rotate-key', body)
     const [sql, params] = mockQuery.mock.calls[0]
     expect(String(sql)).toContain("status = 'active'")
     // [hash, prefix, id, sub]
@@ -473,6 +476,7 @@ describe('POST /agents/:id/pause and /resume', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ success: true })
     const [sql, params] = mockQuery.mock.calls[0]
+    expectMatchesSpec('POST', '/agents/{id}/pause', res.json())
     expect(String(sql)).toContain("SET status = 'paused'")
     expect(String(sql)).toContain("status = 'active'")
     expect(params).toEqual(['agent-1', 'user-1'])

@@ -360,7 +360,7 @@ describeSmoke('published package smoke', () => {
       '  extra: null,',
       '}',
       '',
-      '// Build the EIP-3009 header exactly as createStandardX402Header does.',
+      '// Build the EIP-3009 header exactly as the SDK funding leg does.',
       'const rawHeader = await exact.evm.createPaymentHeader(account, 2, mockOption)',
       'const rawPayload = JSON.parse(atob(rawHeader))',
       '',

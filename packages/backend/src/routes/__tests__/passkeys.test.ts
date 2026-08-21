@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { FastifyInstance } from 'fastify'
 import { buildApp } from '../../__tests__/helpers.js'
 import { predictSafePasskeySignerAddress } from '../../modules/accounts/index.js'
@@ -44,7 +45,7 @@ describe('Passkey routes', () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     mockQuery.mockResolvedValueOnce({
       rows: [{
-        id: 'passkey-1',
+        id: '8c1e4f70-2a63-4b95-8d07-1f4a6b3c9e28',
         credential_id: fixtureBody.credential_id,
         signer_address: predictSafePasskeySignerAddress({
           x: fixtureBody.public_key_x,
@@ -63,8 +64,9 @@ describe('Passkey routes', () => {
     })
 
     expect(response.statusCode).toBe(201)
+    expectMatchesSpec('POST', '/passkeys', response.json(), '201')
     expect(response.json()).toEqual({
-      id: 'passkey-1',
+      id: '8c1e4f70-2a63-4b95-8d07-1f4a6b3c9e28',
       credential_id: fixtureBody.credential_id,
       signer_address: '0xe54122f41f7adf87fb6d5ab36bae42fc2aac882c',
       chain_id: 8453,
@@ -121,7 +123,7 @@ describe('Passkey routes', () => {
     mockQuery.mockResolvedValue({
       rows: [
         {
-          id: 'passkey-2',
+          id: '9d2f5081-3b74-4ca6-9e18-2a5b7c4d0f39',
           credential_id: fixtureBody.credential_id,
           signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
           chain_id: fixtureBody.chain_id,
@@ -220,7 +222,7 @@ describe('Passkey routes', () => {
     mockQuery.mockResolvedValueOnce({
       rows: [
         {
-          id: 'passkey-1',
+          id: '8c1e4f70-2a63-4b95-8d07-1f4a6b3c9e28',
           credential_id: 'cred-1',
           signer_address: '0x1111111111111111111111111111111111111111',
           chain_id: 100,
@@ -228,7 +230,7 @@ describe('Passkey routes', () => {
           created_at: '2026-05-04T10:00:00.000Z',
         },
         {
-          id: 'passkey-2',
+          id: '9d2f5081-3b74-4ca6-9e18-2a5b7c4d0f39',
           credential_id: 'cred-2',
           signer_address: '0x2222222222222222222222222222222222222222',
           chain_id: 8453,
@@ -248,7 +250,7 @@ describe('Passkey routes', () => {
     expect(response.json()).toEqual({
       passkeys: [
         {
-          id: 'passkey-1',
+          id: '8c1e4f70-2a63-4b95-8d07-1f4a6b3c9e28',
           credential_id: 'cred-1',
           signer_address: '0x1111111111111111111111111111111111111111',
           chain_id: 100,
@@ -256,7 +258,7 @@ describe('Passkey routes', () => {
           created_at: '2026-05-04T10:00:00.000Z',
         },
         {
-          id: 'passkey-2',
+          id: '9d2f5081-3b74-4ca6-9e18-2a5b7c4d0f39',
           credential_id: 'cred-2',
           signer_address: '0x2222222222222222222222222222222222222222',
           chain_id: 8453,
@@ -265,5 +267,6 @@ describe('Passkey routes', () => {
         },
       ],
     })
+    expectMatchesSpec('GET', '/passkeys', response.json())
   })
 })

@@ -1,6 +1,26 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { FastifyInstance } from 'fastify'
 import bcrypt from 'bcrypt'
+
+/**
+ * #1646: spy on the REAL bcrypt rather than replacing it. The property under
+ * test is that the password comparison happens on both login paths; a stub
+ * that never hashes could not distinguish a paid cost from a skipped one.
+ */
+const compareSpy = vi.fn()
+vi.mock('bcrypt', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('bcrypt')>()
+  return {
+    default: {
+      ...actual,
+      compare: (...args: Parameters<typeof actual.compare>) => {
+        compareSpy(...args)
+        return actual.compare(...args)
+      },
+    },
+  }
+})
 
 // Mock the db module
 const mockQuery = vi.fn()
@@ -11,6 +31,9 @@ vi.mock('../../db.js', () => ({
 }))
 
 import { buildApp } from '../../__tests__/helpers.js'
+
+/** users.id is a UUID column; fixtures must look like one (#1446). */
+const USER_UUID = '7a3c9e21-4b58-4d06-8f13-2e6a5c9d0b74'
 
 describe('Auth routes', () => {
   let app: FastifyInstance
@@ -34,7 +57,7 @@ describe('Auth routes', () => {
       mockQuery.mockResolvedValueOnce({ rows: [] })
       // Second query: insert user
       mockQuery.mockResolvedValueOnce({
-        rows: [{ id: 'user-1', name: 'Ada Lovelace', email: 'test@example.com', created_at: new Date().toISOString() }],
+        rows: [{ id: USER_UUID, name: 'Ada Lovelace', email: 'test@example.com', created_at: new Date().toISOString() }],
       })
 
       const response = await app.inject({
@@ -46,10 +69,11 @@ describe('Auth routes', () => {
       expect(response.statusCode).toBe(201)
       const body = response.json()
       expect(body.token).toBeDefined()
-      expect(body.user.id).toBe('user-1')
+      expect(body.user.id).toBe(USER_UUID)
       expect(body.user.name).toBe('Ada Lovelace')
       expect(body.user.email).toBe('test@example.com')
       expect(body.user.safes).toEqual([])
+      expectMatchesSpec('POST', '/auth/signup', body, '201')
     })
 
     it('returns 400 for invalid name', async () => {
@@ -148,7 +172,7 @@ describe('Auth routes', () => {
     it('returns 200 with token and user on valid credentials', async () => {
       mockQuery.mockResolvedValueOnce({
         rows: [{
-          id: 'user-1',
+          id: USER_UUID,
           name: 'Ada Lovelace',
           email: 'test@example.com',
           password_hash: testPasswordHash,
@@ -168,13 +192,14 @@ describe('Auth routes', () => {
       const body = response.json()
       expect(body.token).toBeDefined()
       expect(typeof body.token).toBe('string')
-      expect(body.user.id).toBe('user-1')
+      expect(body.user.id).toBe(USER_UUID)
       expect(body.user.name).toBe('Ada Lovelace')
       expect(body.user.email).toBe('test@example.com')
       expect(body.user.wallet_address).toBe('0x1234567890abcdef1234567890abcdef12345678')
       expect(body.user.safes).toEqual([])
       // password_hash should NOT be in the response
       expect(body.user.password_hash).toBeUndefined()
+      expectMatchesSpec('POST', '/auth/login', body)
     })
 
     it('returns 401 for non-existent email', async () => {
@@ -190,10 +215,53 @@ describe('Auth routes', () => {
       expect(response.json().error).toBe('Invalid email or password')
     })
 
+    it('#1646 MUTATION PROOF: an UNKNOWN email still runs the password comparison', async () => {
+      // Login answers the same 401 for an unknown email and a wrong password
+      // so it is not an account-enumeration oracle — true of the status and
+      // body, and previously FALSE of the timing: bcrypt.compare at cost
+      // factor 10 ran only when a row existed, so an unknown address returned
+      // after one fast SELECT and latency alone disclosed what the identical
+      // answer was hiding. Pinning the INVOCATION, not the clock: a latency
+      // assertion tests the machine and flakes in CI.
+      compareSpy.mockClear()
+      // SQL-keyed, not a positional once-call (#1227's sanctioned form).
+      mockQuery.mockImplementation(async () => ({ rows: [] }))
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'nobody@example.com', password: 'some-password' },
+      })
+
+      expect(response.statusCode).toBe(401)
+      // Against the previous shape this is 0 — that IS the bug.
+      expect(compareSpy).toHaveBeenCalledTimes(1)
+      // And it must be a REAL hash at the SAME cost factor: a call count alone
+      // would still pass if the absent-user hash were swapped for something
+      // cheap, which would reopen a smaller version of the same gap.
+      expect(compareSpy.mock.calls[0][1]).toMatch(/^\$2[aby]\$10\$/)
+    })
+
+    it('#1646: the absent-user hash can never match — it costs time, not security', async () => {
+      // Whatever is presented against a missing account, the comparison fails:
+      // the hash is of unguessable random bytes that are never stored.
+      mockQuery.mockImplementation(async () => ({ rows: [] }))
+      // (An EMPTY password never reaches the comparison — the shape check
+      // answers 400 before the lookup, on both paths alike.)
+      for (const attempt of ['admin', 'correct horse battery staple', 'x'.repeat(64)]) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: { email: 'nobody@example.com', password: attempt },
+        })
+        expect(res.statusCode).toBe(401)
+      }
+    })
+
     it('returns 401 for wrong password', async () => {
       mockQuery.mockResolvedValueOnce({
         rows: [{
-          id: 'user-1',
+          id: USER_UUID,
           name: null,
           email: 'test@example.com',
           password_hash: testPasswordHash,
@@ -220,15 +288,18 @@ describe('Auth routes', () => {
     }
 
     it('returns user data with valid JWT', async () => {
-      const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+      const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
 
       mockQuery.mockResolvedValueOnce({
         rows: [{
-          id: 'user-1',
+          id: USER_UUID,
           name: 'Ada Lovelace',
           email: 'test@example.com',
           wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
           safe_address: null,
+          // FIND_USER_PROFILE_BY_ID_SQL selects currency_preference too, so a
+          // real row always carries it (#1446).
+          currency_preference: 'USD',
           created_at: '2025-01-01T00:00:00.000Z',
         }],
       })
@@ -242,10 +313,11 @@ describe('Auth routes', () => {
 
       expect(response.statusCode).toBe(200)
       const body = response.json()
-      expect(body.id).toBe('user-1')
+      expect(body.id).toBe(USER_UUID)
       expect(body.name).toBe('Ada Lovelace')
       expect(body.email).toBe('test@example.com')
       expect(body.safes).toEqual([])
+      expectMatchesSpec('GET', '/auth/me', body)
     })
 
     it('returns 401 without token', async () => {

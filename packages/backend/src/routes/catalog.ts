@@ -13,6 +13,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 // dep-lint-exempt: the public listing assembles its WHERE at runtime from optional category/rail filters (no fixed statement to PREPARE); read-only discovery surface, extraction deferred with the catalog module's under #999
 import pool from '../db.js'
 import { agentAuthMiddleware } from '../middleware/agentAuth.js'
+import { authMiddleware } from '../middleware/auth.js'
 import type { CatalogRow } from '../modules/catalog/index.js'
 
 const VALID_RAILS = new Set(['x402', 'mpp'])
@@ -38,11 +39,11 @@ async function eitherAuth(request: FastifyRequest, reply: FastifyReply): Promise
   if (hasAgentKey) {
     return agentAuthMiddleware(request, reply)
   }
-  try {
-    await request.jwtVerify()
-  } catch {
-    reply.code(401).send({ error: 'Unauthorized' })
-  }
+  // #1640: the shared middleware, not a second hand-rolled jwtVerify. This
+  // route used to verify the token itself, which meant it silently missed the
+  // purpose-claim refusal — a single-purpose token was still accepted here
+  // after it had been locked out everywhere else. One JWT door, one guard.
+  return authMiddleware(request, reply)
 }
 
 function serialize(row: CatalogRow) {

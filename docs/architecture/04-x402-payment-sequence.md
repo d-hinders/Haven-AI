@@ -13,6 +13,12 @@ covers:
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/x402-protocol.ts
+  - packages/sdk/src/x402-funding-leg.ts
+  - packages/sdk/src/x402-erc7710.ts
+  - packages/sdk/src/merchant-completion.ts
+  - packages/sdk/src/mcp-merchant-transport.ts
+  - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
   - packages/sdk/src/merchant-discovery.ts
   - packages/mcp/src/tools.ts
@@ -26,7 +32,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-19" # #1496: verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-08-20" # #1640 re-verify: authMiddleware now refuses purpose-claim tokens and catalog.ts routes through it instead of a hand-rolled jwtVerify. Agent API-key auth (agentAuth.ts) is a separate credential type and untouched, so every x402 sequence claim here re-read against the diff stands. # #1496: verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -59,7 +65,34 @@ a facilitator/acquirer, hold merchant funds, or create the payment signature.
 Source of truth:
 
 - [`packages/sdk/src/x402.ts`](../../packages/sdk/src/x402.ts)
-- [`packages/sdk/src/client.ts`](../../packages/sdk/src/client.ts)
+- [`packages/sdk/src/client.ts`](../../packages/sdk/src/client.ts) — the public
+  `HavenClient` facade. Since #1618 (epic #1613) it delegates the x402 lifecycle
+  rather than implementing it.
+- [`packages/sdk/src/x402-protocol.ts`](../../packages/sdk/src/x402-protocol.ts) —
+  what BOTH settlement schemes share: quote/receipt/resume shapes, the merchant
+  request snapshot a resume replays, the `x402-wallet` header, and the checks
+  that decide whether a payment is resumable at all.
+- [`packages/sdk/src/x402-funding-leg.ts`](../../packages/sdk/src/x402-funding-leg.ts) —
+  what only the EIP-3009 two-hop scheme has: funding confirmation, the
+  delegate's fundability check (#1521), header minting from the local delegate
+  key, and the authorization-keyed receipt cache. The erc7710 direct-settlement
+  path has no funding leg and must not import this module; a test enforces that
+  the protocol layer never does either.
+- [`packages/sdk/src/x402-erc7710.ts`](../../packages/sdk/src/x402-erc7710.ts) —
+  the direct-settlement lifecycle (#1619): scheme and rail selection, the
+  authorize/settle halves the hosted topology drives with the local signer in
+  between, and the refusals that keep it from ever silently rerouting to the
+  3009 path. It asks no chain anything, because on this path there is no
+  funding transaction to confirm and no delegate balance to check.
+- [`packages/sdk/src/mcp-merchant-transport.ts`](../../packages/sdk/src/mcp-merchant-transport.ts) — bounded paid MCP/merchant HTTP delivery, sessions, and SSE framing.
+- [`packages/sdk/src/merchant-completion.ts`](../../packages/sdk/src/merchant-completion.ts) —
+  what must be true AROUND a merchant call once a payment exists (#1620): which
+  wallet the merchant sees, what the payment's live state permits, and the
+  evidence written afterwards. Scheme-neutral, so the erc7710 and 3009 paths
+  finish through the same door. Every write here is best-effort and swallows:
+  the resource is already paid for, and bookkeeping that threw would turn a
+  completed payment into a reported failure.
+- [`packages/sdk/src/payment-state.ts`](../../packages/sdk/src/payment-state.ts) — shared payment-state/status-error normalization.
 - [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts) — request
   validation, auth wiring, rate-limit config, and response serialization only.
   The authorize orchestration (scheme routing, funding-leg prep, erc7710 child

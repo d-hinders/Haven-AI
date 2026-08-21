@@ -16,6 +16,7 @@ covers:
   - packages/connect/src/signer-runtime.ts
   - packages/connect/src/storage.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/signer.ts
   - packages/sdk/src/sweep.ts
   - packages/sdk/src/x402.ts
@@ -27,7 +28,7 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-19" # #1547: the hosted tool prose stops asking agents to compare against the signer's initialize handshake (unperformable in most harnesses) — the documented default is now the structured signing-time refusal this doc already describes (#1309); the handshake surface itself is unchanged and stays advertised. Prior: #1355: the #1263 fetch also carries payment_required (persisted at authorize); haven_sign_x402 is { payment_id }-only with verbatim fallback for older backends; verification unchanged. Prior: #1352 Node floor, agent-prompt refresh
+last-verified: "2026-08-20" # #1615: re-verified after internal SDK transport/state/mapping extraction; signer, authority, and hosted/local flow claims unchanged. Prior: #1547 hosted-tool prose correction; #1355 payment_id-only signing; #1352 Node floor and agent-prompt refresh
 ---
 
 # Haven — Edge Signer

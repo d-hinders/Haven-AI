@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify from 'fastify'
 import agentPassportRoutes from '../agent-passports.js'
 
@@ -25,7 +26,17 @@ vi.mock('../../modules/passport/index.js', () => ({
   issuePassportBestEffort: (...a: unknown[]) => mockIssue(...a),
   getPassport: (...a: unknown[]) => mockGetPassport(...a),
   isPassportConfigured: () => true,
-  passportStanding: async () => ({ standing: 'revoked' }),
+  // A whole PassportStanding, as the real function returns one (#1446) — the
+  // route hands this straight to the client, so a partial mock would describe
+  // a response the module cannot produce.
+  passportStanding: async () => ({
+    agentId: 'a1',
+    standing: 'revoked',
+    anchor: 'anchored',
+    attestationUid: null,
+    chainLagging: true,
+    revocationConfirmedAt: null,
+  }),
   PASSPORT_CHAIN_IDS: new Set([84532]),
 }))
 
@@ -77,6 +88,7 @@ describe('POST /agents/:id/passport', () => {
     const res = await (await build()).inject({ method: 'POST', url: '/agents/a1/passport' })
     expect(res.statusCode).toBe(202)
     expect(mockRequest).toHaveBeenCalledWith('a1', 84532)
+  expectMatchesSpec('POST', '/agents/{id}/passport', res.json(), '202')
   })
 
   it('404s an agent that is not the caller’s', async () => {
@@ -86,12 +98,53 @@ describe('POST /agents/:id/passport', () => {
     expect(mockIssue).not.toHaveBeenCalled()
   })
 
+  it('#1446: the GET returns the documented passport + standing shape', async () => {
+    mockAgent({ chain_id: 84532, status: 'active' })
+    mockGetPassport.mockResolvedValue({
+      status: 'pending',
+      assurance_level: 0,
+      attestation_uid: null,
+      tx_hash: null,
+      chain_id: 84532,
+      attempts: 0,
+      last_error: null,
+      requested_at: '2026-08-01T10:00:00.000Z',
+      anchored_at: null,
+    })
+    const res = await (await build()).inject({ url: '/agents/a1/passport' })
+    expect(res.statusCode).toBe(200)
+    expectMatchesSpec('GET', '/agents/{id}/passport', res.json())
+  })
+
+  it('#1446: no passport is `passport: null` with a standing, not an error', async () => {
+    mockAgent({ chain_id: 84532, status: 'active' })
+    mockGetPassport.mockResolvedValue(null)
+    const res = await (await build()).inject({ url: '/agents/a1/passport' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().passport).toBeNull()
+    expectMatchesSpec('GET', '/agents/{id}/passport', res.json())
+  })
+
   it('is idempotent for an already-anchored passport', async () => {
     mockAgent({ chain_id: 84532, status: 'active' })
-    mockGetPassport.mockResolvedValue({ status: 'anchored', attestation_uid: '0xabc' })
+    // A whole row, as getPassport really returns one — serialize() reads all
+    // nine fields off it, so a partial fixture would describe a response the
+    // table cannot produce (#1446).
+    mockGetPassport.mockResolvedValue({
+      status: 'anchored',
+      assurance_level: 0,
+      attestation_uid: `0x${'ab'.repeat(32)}`,
+      tx_hash: `0x${'cd'.repeat(32)}`,
+      chain_id: 84532,
+      attempts: 1,
+      last_error: null,
+      requested_at: '2026-08-01T10:00:00.000Z',
+      anchored_at: '2026-08-01T10:00:30.000Z',
+    })
     const res = await (await build()).inject({ method: 'POST', url: '/agents/a1/passport' })
     expect(res.statusCode).toBe(200)
     expect(res.json().already_issued).toBe(true)
     expect(mockIssue).not.toHaveBeenCalled()
+    expectMatchesSpec('POST', '/agents/{id}/passport', res.json(), '200')
   })
 })

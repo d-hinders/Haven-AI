@@ -42,67 +42,9 @@ export interface UndocumentedRoute {
  */
 export const KNOWN_UNDOCUMENTED_ROUTES: UndocumentedRoute[] = [
   // ── agents.ts ──
-  {
-    method: 'PUT',
-    path: '/agents/{id}',
-    because:
-      'Dashboard-only mutation that uses dashboard JWT auth, not the agent API key. ' +
-      'Could be documented when the dashboard surface is folded into a separate dashboard spec.',
-  },
-  {
-    method: 'DELETE',
-    path: '/agents/{id}',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/pause',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/resume',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/rotate-key',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'DELETE',
-    path: '/agents/{id}/allowances/{tokenAddress}',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
-  {
-    method: 'POST',
-    path: '/agents/{id}/allowances',
-    because: 'Dashboard-only — see PUT /agents/{id}.',
-  },
   // ── transactions.ts ──
-  {
-    method: 'GET',
-    path: '/transactions/payment-intents/{paymentId}/evidence',
-    because: 'Dashboard-only audit view using dashboard JWT auth.',
-  },
   // ── index.ts (declared straight on the app, not via a routes/ module) ──
-  {
-    method: 'GET',
-    path: '/chains',
-    because:
-      'Public chain/token registry read, declared inline in index.ts next to /health. ' +
-      'It SHOULD be in the spec — it was simply invisible until #1443 taught the gate ' +
-      'to look at index.ts, and documenting it belongs to the #1446 backfill rather ' +
-      'than to the gate that found it.',
-  },
   // ── x402.ts ──
-  {
-    method: 'POST',
-    path: '/x402/{id}/settle',
-    because:
-      'Delegation-rail x402 settlement (#830, epic #821). Behind the /x402 ' +
-      'darkened rail; documented in the OpenAPI spec in the epic docs sweep (#834).',
-  },
 ]
 
 export interface UndocumentedModule {
@@ -119,58 +61,7 @@ export interface UndocumentedModule {
  */
 export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
   // ── Agent-facing / money-path — highest priority for #1446 ──
-  {
-    file: 'agent-delegations.ts',
-    because:
-      'The delegation rail\'s own lifecycle API (grant/activate/revoke/revoke-all, ' +
-      'signer management). Money-path and agent-facing, so this is the first module ' +
-      '#1446 should document — an external integrator cannot see how budgets are granted.',
-  },
-  {
-    file: 'x402-resources.ts',
-    because: 'The x402 demo-resource + receipts surface; agent-reachable, undocumented since it shipped.',
-  },
-  {
-    file: 'agent-passports.ts',
-    because: 'Agent Passport issuance/status (epic #970). Governance metadata, never spend authority.',
-  },
-  {
-    file: 'passport-verify.ts',
-    because: 'Public passport verification. A natural candidate for the published spec — nobody has written it up.',
-  },
-  {
-    file: 'hybrid-accounts.ts',
-    because: 'Delegation-rail account provisioning (#886). Dashboard-driven today; agent-facing once onboarding opens up.',
-  },
   // ── Dashboard-session surfaces (JWT auth, not the agent API key) ──
-  {
-    file: 'user.ts',
-    because: 'Dashboard account/profile surface on JWT auth. Belongs to the "separate dashboard spec" idea the per-route entries above reference.',
-  },
-  {
-    file: 'user-safes.ts',
-    because: 'Wallet linking/renaming plus the Safe approvers subsection. See the Safe-retirement decision in #1440 before documenting the approver half.',
-  },
-  {
-    file: 'auth.ts',
-    because: 'Login/session for the dashboard. Deliberately outside the agent-facing spec.',
-  },
-  {
-    file: 'passkeys.ts',
-    because: 'WebAuthn enrolment for dashboard sessions; credential handling, no payment surface.',
-  },
-  {
-    file: 'approvals.ts',
-    because: 'The legacy over-budget approval queue — a Safe/AllowanceModule-rail feature slated for retirement (#1440). Documenting a dying rail would be waste; revisit when #1440 lands.',
-  },
-  {
-    file: 'agent-activity.ts',
-    because: 'Dashboard activity feed for one agent; read-only projection of data already documented elsewhere.',
-  },
-  {
-    file: 'analytics.ts',
-    because: 'Internal product analytics; not part of any external contract.',
-  },
   {
     file: 'safe-deploy.ts',
     because: 'Safe deployment — the rail is being retired entirely (#1440). Do not document; expect deletion.',
@@ -180,18 +71,6 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
     because: 'Relayed Safe execution — same retirement as safe-deploy.ts (#1440).',
   },
   // ── Integrations ──
-  {
-    file: 'fortnox.ts',
-    because: 'Fortnox OAuth + connection management for the bookkeeping feed; vendor-specific, dashboard-driven.',
-  },
-  {
-    file: 'accounting.ts',
-    because: 'Accounting export surface behind the reporting entitlement.',
-  },
-  {
-    file: 'reporting.ts',
-    because: 'Reporting-feed status and backfill controls; dashboard-driven.',
-  },
 ]
 
 /**
@@ -208,5 +87,5 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
  * `index.ts` — and one of them (`GET /chains`) turned out to be undocumented.
  * That is the gate earning its keep on its first run, not slack being taken.
  */
-export const MAX_UNDOCUMENTED_MODULES = 17
-export const MAX_UNDOCUMENTED_ROUTES = 86
+export const MAX_UNDOCUMENTED_MODULES = 2
+export const MAX_UNDOCUMENTED_ROUTES = 2

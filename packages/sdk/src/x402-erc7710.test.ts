@@ -172,6 +172,49 @@ describe('settleX402Erc7710 (#1454)', () => {
     })
   })
 
+  describe('the absence is the feature: no funding leg is ever touched (#1619)', () => {
+    it('MUTATION PROOF: a full settle never asks the delegate balance and never waits on a funding tx', async () => {
+      // This is the property the whole scheme exists for. #1510/#1511/#1521
+      // were each a funding-leg assumption reaching a path that has none, so
+      // "erc7710 does not do that" is worth pinning rather than assuming.
+      // Wire a real client, spy on the funding leg's two on-chain reads, and
+      // drive the complete authorize → sign → settle. Route any of it through
+      // the funding leg and these counters move.
+      const { client } = harness()
+      const fundingLeg = (client as unknown as {
+        fundingLeg: {
+          delegateCanFund: (...args: never[]) => unknown
+          waitForFundingTx: (...args: never[]) => unknown
+          cachedReceipt: (...args: never[]) => unknown
+        }
+      }).fundingLeg
+      const canFund = vi.spyOn(fundingLeg, 'delegateCanFund')
+      const waitForFunding = vi.spyOn(fundingLeg, 'waitForFundingTx')
+      const cachedReceipt = vi.spyOn(fundingLeg, 'cachedReceipt')
+
+      // Every PUBLIC entry point of the scheme, not only settle(): settle
+      // drives the module's own prepare/submit, so exercising it alone would
+      // leave the facade's prepareX402Erc7710/submitX402Erc7710 wrappers
+      // unguarded — and the facade is exactly where a funding-leg call could
+      // be reintroduced, since it is the only side that can reach one.
+      const settlement = await client.settleX402Erc7710(paymentRequired([erc7710Option()]))
+      const prepared = await client.prepareX402Erc7710(paymentRequired([erc7710Option()]))
+      await client.submitX402Erc7710(prepared.paymentId, '0x' + 'ab'.repeat(65))
+
+      expect(settlement.paymentHeader).toBeTruthy()
+      expect(canFund).not.toHaveBeenCalled()
+      expect(waitForFunding).not.toHaveBeenCalled()
+      // Nor the 3009 receipt cache: this path mints no authorization to cache.
+      expect(cachedReceipt).not.toHaveBeenCalled()
+    })
+
+    it('settle posts exactly twice — authorize and settle, no third leg', async () => {
+      const { client, posts } = harness()
+      await client.settleX402Erc7710(paymentRequired([erc7710Option()]))
+      expect(posts.map((p) => p.path)).toEqual(['/x402', '/x402/pay_1/settle'])
+    })
+  })
+
   describe('refuses loudly instead of rerouting', () => {
     it('names the missing erc7710 entry on a delegation-rail account', async () => {
       const { client, posts } = harness()

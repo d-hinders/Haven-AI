@@ -1491,7 +1491,7 @@ describe('x402 helpers', () => {
 
   // ── v1 x402 path coverage (#324) ────────────────────────────────────────
   //
-  // `createStandardX402Header` re-wraps v2+ headers as
+  // The funding leg's `createPaymentHeader` re-wraps v2+ headers as
   // `{ x402Version, accepted, payload }` (the v2 spec shape, see PR #303's
   // regression guard above). v1 headers must pass through the x402 library's
   // output UNCHANGED — v1 facilitators reject the `accepted` wrap. These tests
@@ -1510,8 +1510,10 @@ describe('x402 helpers', () => {
     }
 
     const header = await (haven as unknown as {
-      createStandardX402Header(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
-    }).createStandardX402Header(v1PaymentRequired, accepted)
+      fundingLeg: {
+        createPaymentHeader(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
+      }
+    }).fundingLeg.createPaymentHeader(v1PaymentRequired, accepted)
 
     const decoded = JSON.parse(atob(header)) as Record<string, unknown>
 
@@ -1542,8 +1544,10 @@ describe('x402 helpers', () => {
     })
 
     const header = await (haven as unknown as {
-      createStandardX402Header(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
-    }).createStandardX402Header(paymentRequired, accepted)
+      fundingLeg: {
+        createPaymentHeader(pr: X402PaymentRequired, option: X402PaymentOption): Promise<string>
+      }
+    }).fundingLeg.createPaymentHeader(paymentRequired, accepted)
 
     const decoded = JSON.parse(atob(header)) as Record<string, unknown>
     expect(Object.keys(decoded).sort()).toEqual(['accepted', 'payload', 'x402Version'])

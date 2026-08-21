@@ -101,7 +101,7 @@
   },
   "packages/backend/src/routes/__tests__/agents-characterization.test.ts": {
     "db-mock": 1,
-    "positional": 33
+    "positional": 28
   },
   "packages/backend/src/routes/__tests__/agents.test.ts": {
     "db-mock": 1,

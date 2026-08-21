@@ -312,18 +312,28 @@ let VALID_PAYMENT_HEADER = ''
 let VALID_PAYMENT_HEADER_V2 = ''
 
 beforeAll(async () => {
-  VALID_PAYMENT_HEADER = await (headerSigner as unknown as {
-    createStandardX402Header(
-      paymentRequired: typeof PAYMENT_REQUIRED,
-      option: (typeof PAYMENT_REQUIRED.accepts)[number],
-    ): Promise<string>
-  }).createStandardX402Header(PAYMENT_REQUIRED, PAYMENT_REQUIRED.accepts[0])
-  VALID_PAYMENT_HEADER_V2 = await (headerSigner as unknown as {
-    createStandardX402Header(
-      paymentRequired: typeof PAYMENT_REQUIRED,
-      option: (typeof PAYMENT_REQUIRED.accepts)[number],
-    ): Promise<string>
-  }).createStandardX402Header({ ...PAYMENT_REQUIRED, x402Version: 2 }, PAYMENT_REQUIRED.accepts[0])
+  // Headers are minted by the SDK's real signing path so these fixtures
+  // cannot drift from what a client actually sends. #1618 moved that path
+  // off HavenClient onto its private `fundingLeg` module; still reaching
+  // through a real client is the point — a hand-rolled header here would
+  // stop testing the SDK and start testing this file.
+  type HeaderMinter = {
+    fundingLeg: {
+      createPaymentHeader(
+        paymentRequired: typeof PAYMENT_REQUIRED,
+        option: (typeof PAYMENT_REQUIRED.accepts)[number],
+      ): Promise<string>
+    }
+  }
+  const mint = (headerSigner as unknown as HeaderMinter).fundingLeg
+  VALID_PAYMENT_HEADER = await mint.createPaymentHeader(
+    PAYMENT_REQUIRED,
+    PAYMENT_REQUIRED.accepts[0],
+  )
+  VALID_PAYMENT_HEADER_V2 = await mint.createPaymentHeader(
+    { ...PAYMENT_REQUIRED, x402Version: 2 },
+    PAYMENT_REQUIRED.accepts[0],
+  )
 })
 
 function x402PreflightStatus(overrides: Record<string, unknown> = {}) {

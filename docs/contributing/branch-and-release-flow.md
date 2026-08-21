@@ -78,6 +78,27 @@ designated branch. If a PR is open, wait for its merge or escalate. This is
 long-lived pinned branch, is an environment setting owned by whoever
 configures them, not something a session can change from inside.
 
+**Whether any of this is working is a number, not an impression:**
+
+```bash
+npm run branch-hygiene
+```
+
+It reports, over a window of `dev`'s history, how many work branches went
+stale under `dev` and how many diverged between local and remote under one
+name — the two shapes this section exists to prevent. It counts every form a
+resync actually takes (`git merge dev` and `git pull origin dev` produce
+different subjects) and deliberately does not count `main` into a branch:
+that is release reconciliation, a different act with a different cause. Zero of
+both is the target state. It REPORTS rather than gates on purpose: these
+commits are evidence of a launch configuration, and the contributor who would
+trip a gate is never the one who can change it.
+
+Measure a specific window with `--since` / `--until` (ISO dates), or `--json`
+for a machine-readable summary. Against #1500's original evidence window it
+reproduces that issue's table exactly — 6 resyncs and 1 divergence in one day,
+four of the six from a single branch left open for 7.5 hours.
+
 ## Issue lifecycle (implementation, not promotion)
 
 | State | Meaning |

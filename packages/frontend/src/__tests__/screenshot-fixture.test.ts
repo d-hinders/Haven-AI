@@ -171,8 +171,13 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       for (const pk of signers.passkeys) {
         expect(pk.created_at).toMatch(/T12:00:00\.000Z$/)
       }
-      // A date long enough to wrap at 390px is the whole point of the capture.
-      expect(signers.passkeys.map((p) => p.created_at)).toContain('2026-03-03T12:00:00.000Z')
+      // Both dates are pinned, not just one: they are the wrap evidence, and a
+      // regression that quietly shortened either would still pass a one-date
+      // assertion while making the capture prove less than it claims.
+      expect(signers.passkeys.map((p) => p.created_at)).toEqual([
+        '2026-03-03T12:00:00.000Z',
+        '2026-09-12T12:00:00.000Z',
+      ])
     })
 
     it('leaves everything but the signer set to the shared fixture (#1693)', () => {

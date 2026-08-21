@@ -541,9 +541,13 @@ export const SCENARIOS = {
       // want from a capture whose entire purpose is trustworthy evidence.
       const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
 
-      // Wait for the rows themselves, not just the heading: the card renders
-      // its shell before the signer fetch resolves, so shooting on the heading
-      // alone would sometimes capture an empty card and call it evidence.
+      // Wait for the ROWS, not just the heading. The card short-circuits to
+      // null until the signer fetch settles, so there is no empty-shell phase
+      // to race — but the heading renders in the loadError branch too, where
+      // the rows and the button do not. Waiting on the heading alone would
+      // therefore accept "Haven could not load how this account is approved"
+      // as the capture. These two waits are what make the error state time
+      // out instead of quietly becoming the evidence.
       await card.getByText('Wallet', { exact: true }).waitFor({ timeout: 15_000 })
       await card.getByRole('button', { name: 'Add a backup passkey' }).waitFor({ timeout: 15_000 })
 

@@ -5,6 +5,7 @@ covers:
   - packages/backend/src/rails/allowance-nonce-coordinator.ts
   - packages/backend/src/infra/repositories/allowance-nonce-watermarks.ts
   - packages/backend/src/platform/leader-lock.ts
+  - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/infra/relayer.ts
 last-verified: "2026-08-21" # #1680: rate-limit counters join the list of things multiple replicas now handle — the plugin's in-process store made the real ceiling max × replicas, fixed with a shared Postgres tier (fail-open, 250 ms deadline, leader-gated sweep) on the same pattern as the #718 nonce watermark. Prior: #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
 ---

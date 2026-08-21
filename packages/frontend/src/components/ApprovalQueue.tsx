@@ -315,14 +315,12 @@ function ApprovalCard({
                 </div>
               </div>
             ) : (
-              {/*
-                gap-3 on the stacked (mobile) axis, not gap-2: Reject and Approve are
-                the one pair where a mis-tap rejects or approves a real payment, and at
-                8px their 44px tap targets (#1726) would meet with exactly zero slack.
-                The extra 4px buys margin against subpixel rounding rather than relying
-                on two targets tessellating perfectly. Desktop keeps sm:gap-2 — the row
-                is horizontal there and the targets never grow sideways.
-              */}
+              // gap-3 on the stacked (mobile) axis, not gap-2: Reject and Approve are
+              // the one pair where a mis-tap rejects or approves a real payment, and at
+              // 8px their 44px tap targets (#1726) would meet with exactly zero slack.
+              // The extra 4px buys margin against subpixel rounding rather than relying
+              // on two targets tessellating perfectly. Desktop keeps sm:gap-2 — the row
+              // is horizontal there and the targets never grow sideways.
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end sm:gap-2">
                 <Button
                   variant="ghost"

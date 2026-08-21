@@ -50,10 +50,9 @@ export function ConnectionVerificationFooter({
     return (
       <div className="flex items-start gap-2 text-[12px] text-[var(--v2-ink-2)]">
         {check}
-        <span>
-          {VERIFIED_LABEL}
-          {addressShort ? ` · ${addressShort}` : ''}
-        </span>
+        {/* No address to append: this branch is only reached when there is
+            none, which is also why there is nothing to disclose. */}
+        <span>{VERIFIED_LABEL}</span>
       </div>
     )
   }

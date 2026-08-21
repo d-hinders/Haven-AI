@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-08-19" # #1572: the connect flow's approval gate is named `agent budget` end to end (Review/Confirm/Approve agent budget) — recipe titles, primary actions, and a one-gate-one-name rule added to the vocabulary guidance; `agent rules` stays the broader authority concept. Body re-read against the connect-agent components. Prior: #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
+last-verified: "2026-08-21" # #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
 ---
 
 # Haven Screen Recipes
@@ -38,10 +38,14 @@ Use these recipes when designing or refactoring Haven product screens. They tran
 - Lead with what the user controls, not the crypto mechanism underneath.
 - Prefer `Haven account`, `Haven wallet`, `agent rules`, and `agent budget`.
 - One name for one gate: the connect flow's approval gate is the `agent budget`
-  (`Review agent budget` → `Confirm agent budget` → `Approve agent budget`,
-  matching the connector's own "approve the budget" narration, #1572). Keep
-  `agent rules` for the broader authority concept (detail pages, revoke/pause
-  copy) — never name the same gate with both words on one screen.
+  (`Review agent budget` → `Confirm agent budget` → the approval screen's
+  subtitle `Approve the agent budget`, matching the connector's own "approve
+  the budget" narration, #1572). Say it ONCE per viewport: the approval screen
+  carried the name as the modal subtitle *and* as the summary card's heading
+  about 40px below it, which is the same sentence twice on the screen that
+  grants spend authority (#1684). Keep `agent rules` for the broader authority
+  concept (detail pages, revoke/pause copy) — never name the same gate with
+  both words on one screen.
 - Hide Safe, module, signer, owner, relayer, raw hashes, and raw addresses unless the screen is an advanced/detail surface.
 - Money-moving, agent-authority-changing, or account-security screens need a
   review moment before execution. Show amount/rule, wallet/network, recipient

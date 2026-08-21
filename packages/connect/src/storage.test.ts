@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { preflightCredentialStorage, writeCredentialFiles } from './storage.js'
+import { assertServerSlugAvailable, defaultAgentDirectory, preflightCredentialStorage, writeCredentialFiles } from './storage.js'
 
 describe('writeCredentialFiles', () => {
   it('writes separated owner-only identity and signer credential files', async () => {
@@ -148,3 +148,44 @@ describe('writeCredentialFiles', () => {
     }
   })
 })
+
+describe('slug-keyed credential directories (#1696)', () => {
+  it('a NAMED agent lives at <root>/<slug>; unnamed keeps the agent-uuid path', async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), 'haven-storage-slug-'))
+    const named = await writeCredentialFiles({ ...credentialInput(), baseDir, serverName: 'work' })
+    expect(named.directory).toBe(join(baseDir, 'work'))
+
+    const unnamed = await writeCredentialFiles({ ...credentialInput('agt_other'), baseDir })
+    expect(unnamed.directory).toBe(join(baseDir, 'agt_other'))
+  })
+
+  it('MUTATION PROOF: the slug path is stable across a re-key — it never depends on a rotating credential', async () => {
+    // #1700's in-place rewrite depends on this: same slug, DIFFERENT keys,
+    // same directory.
+    const baseDir = await mkdtemp(join(tmpdir(), 'haven-storage-stable-'))
+    const first = await writeCredentialFiles({ ...credentialInput(), baseDir, serverName: 'work' })
+    const again = defaultAgentDirectory('work', baseDir)
+    expect(again).toBe(first.directory)
+  })
+
+  it('assertServerSlugAvailable refuses a slug whose directory holds credentials, allows a fresh or empty one', async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), 'haven-storage-avail-'))
+    await expect(assertServerSlugAvailable('work', baseDir)).resolves.toBeUndefined()
+    await writeCredentialFiles({ ...credentialInput(), baseDir, serverName: 'work' })
+    await expect(assertServerSlugAvailable('work', baseDir)).rejects.toThrow(/already wired/)
+    // An empty leftover directory does not count as taken.
+    await mkdir(join(baseDir, 'empty-slug'), { recursive: true })
+    await expect(assertServerSlugAvailable('empty-slug', baseDir)).resolves.toBeUndefined()
+  })
+})
+
+function credentialInput(agentId = 'agt_1696') {
+  return {
+    agentId,
+    apiKey: 'sk_agent_x',
+    delegateKey: '0x' + '11'.repeat(32),
+    delegateAddress: '0x' + 'ab'.repeat(20),
+    apiUrl: 'https://api.haven.example',
+    hostedMcpUrl: 'https://mcp.haven.example/mcp',
+  }
+}

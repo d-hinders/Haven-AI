@@ -7,6 +7,8 @@ export interface ParsedCli {
   /** #1589: diagnosis mode — no setup token required. */
   doctor: boolean
   repair: boolean
+  /** #1681: retire an agent credential directory in place — no token required. */
+  tombstone?: { directory: string; reason?: string; replacedBy?: string }
 }
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ParsedCli {
@@ -18,6 +20,9 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   let json = false
   let doctor = false
   let repair = false
+  let tombstoneDir: string | undefined
+  let tombstoneReason: string | undefined
+  let tombstoneReplacedBy: string | undefined
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -29,6 +34,12 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       doctor = true
     } else if (arg === '--repair') {
       repair = true
+    } else if (arg === '--tombstone') {
+      tombstoneDir = requireValue(argv, ++i, arg)
+    } else if (arg === '--reason') {
+      tombstoneReason = requireValue(argv, ++i, arg)
+    } else if (arg === '--replaced-by') {
+      tombstoneReplacedBy = requireValue(argv, ++i, arg)
     } else if (arg === '--setup' || arg === '--setup-token') {
       options.setupToken = requireValue(argv, ++i, arg)
     } else if (arg === '--api' || arg === '--api-url') {
@@ -56,8 +67,23 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     }
   }
 
+  const tombstone = tombstoneDir
+    ? { directory: tombstoneDir, reason: tombstoneReason, replacedBy: tombstoneReplacedBy }
+    : undefined
+
   if (help) {
-    return { options: options as ConnectOptions, help, json, doctor, repair }
+    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone }
+  }
+
+  if (!tombstoneDir && (tombstoneReason !== undefined || tombstoneReplacedBy !== undefined)) {
+    // Refuse rather than silently discard — the caller believed these did
+    // something. (#1681 review, finding 2)
+    throw new Error('--reason and --replaced-by require --tombstone <dir>.')
+  }
+
+  if (tombstone) {
+    // Retirement reuses STORED state, like --doctor — no token, no runtime.
+    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone }
   }
 
   if (doctor || repair) {
@@ -66,7 +92,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     if (!options.runtime) {
       throw new Error('--doctor/--repair need --runtime <runtime> (which config to examine).')
     }
-    return { options: options as ConnectOptions, help, json, doctor, repair }
+    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone }
   }
 
   if (!options.setupToken) {
@@ -77,7 +103,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   }
 
   options.apiBaseUrl = options.apiBaseUrl.replace(/\/+$/, '')
-  return { options: options as ConnectOptions, help, json, doctor, repair }
+  return { options: options as ConnectOptions, help, json, doctor, repair, tombstone }
 }
 
 export function helpText(): string {
@@ -109,6 +135,11 @@ export function helpText(): string {
     '  --repair                   Repair, then re-diagnose (implies --doctor): reinstall the pinned signer',
     '                             runtime, rewrite the wrapper and runtime config from stored credentials.',
     '                             Hosted topology only (refuses to touch a --local config). No keys, no token.',
+    '  --tombstone <dir>          Retire an agent credential directory in place (no token): replaces its signer',
+    '                             wrapper with a diagnostic that names the retirement in MCP stderr logs, and',
+    '                             writes TOMBSTONE.json. Touches NO key material and revokes nothing.',
+    '  --reason <text>            Reason recorded in the tombstone (with --tombstone).',
+    '  --replaced-by <agent-id>   Successor agent recorded in the tombstone (with --tombstone).',
     '  --help                     Show this help.',
     '',
     'The connector never prints the private key and never sends it to Haven. JSON output never includes credential contents or full credential paths.',

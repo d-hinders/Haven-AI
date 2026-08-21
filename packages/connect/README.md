@@ -52,6 +52,31 @@ spending authority.
    `haven_get_allowances` tools to confirm the Haven wallet and live budget.
    Do not sign, fund, or create a payment to verify setup.
 
+## Retiring an old agent directory
+
+Re-running setup creates a NEW agent and retires nothing. Long-lived MCP hosts
+(gateways, TUI workers, editors, desktop apps) load their MCP wiring once, at
+process start — a host started before your latest setup keeps spawning the OLD
+agent's signer path forever, and when that directory is later removed the spawn
+failure surfaces only as a masked "Connection closed" retried every few
+minutes. Two rules follow:
+
+1. **Restart EVERY long-lived host after a setup or retirement, not just one.**
+   Each process holds the snapshot from its own start time, so after a chain of
+   re-setups each host can be parked on a *different* old agent.
+2. **Tombstone a directory before (or instead of) deleting it:**
+
+   ```
+   npx @haven_ai/connect@alpha --tombstone ~/.haven/agents/<id> --reason "superseded"
+   ```
+
+   This replaces the directory's signer wrapper with a diagnostic that logs the
+   retirement (agent id, date, reason, restart guidance) to the host's MCP
+   stderr log on every probe, and records it in `TOMBSTONE.json` for
+   `--doctor`. It touches no key material and revokes nothing — revoke the
+   agent on the Haven agent page yourself. Delete the tombstone only once every
+   long-lived host has been restarted.
+
 ### Structured output for automation
 
 Pass `--json` when a launcher needs a machine-readable completion record. Connect
@@ -149,6 +174,23 @@ handshake — reporting its advertised compat versions. Every failing check
 prints one concrete repair action; the exit code is non-zero on any failure.
 Add `--json` for a machine-readable report. No secret material is ever
 printed.
+
+`--doctor` also probes every OTHER agent credential directory it did not
+select (#1688). A re-run of setup mints a NEW agent and retires nothing, so
+a directory from a previous setup can hold an API key that still
+authenticates — meaning any host that started before the re-run keeps
+spending as the agent you believe you replaced. A superseded directory
+whose key is still live is a FAILING check naming the agent id, with the
+repair spelled out: revoke it on the Haven agent page, then remove the
+directory. An already-revoked one reports as informational; an unreachable
+probe is a note, never a verdict. Connect never revokes or deletes
+credentials itself — it reports, you decide. The setup completion output
+names superseded agents the moment they are created, for the same reason.
+One honest limit: "newest" is decided by file mtime, so a restored backup or
+a sync tool that rewrites timestamps can make doctor examine the wrong
+directory as current — before revoking anything, confirm the agent id
+against the Haven agent page, which is the authority on which agent is
+which.
 
 `--repair` re-runs what setup already owns — reinstall the pinned signer
 runtime, rewrite the wrapper + sidecar, and re-write the runtime config from

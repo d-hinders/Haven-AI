@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/platform/leader-lock.ts
   - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/infra/relayer.ts
-last-verified: "2026-08-21" # #1722: the deploy lock's connection hold now has a real ceiling — the confirmation wait is `tx.wait(1, 120_000)`, bracketed under the bump worker's 180 s adoption age, and expiry hands the tx to that worker instead of marking the record failed. The rest of the accept (burst threshold, fail-open scoping, the 502 shape) re-read and unchanged. Prior: #1680: rate-limit counters join the list of things multiple replicas now handle — the plugin's in-process store made the real ceiling max × replicas, fixed with a shared Postgres tier (fail-open, 250 ms deadline, leader-gated sweep) on the same pattern as the #718 nonce watermark. Prior: #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
+last-verified: "2026-08-21" # #1735: the "self-healing on the queue lane" claim gains its exception — a stuck `passport_attest` is deliberately NOT fee-replaced (a replacement orphans the hash #1043 recovery is keyed off), so that lane blocks until an operator acts; cross-ref to the #1745 ordering constraint. Prior: #1722: the deploy lock's connection hold now has a real ceiling — the confirmation wait is `tx.wait(1, 120_000)`, bracketed under the bump worker's 180 s adoption age, and expiry hands the tx to that worker instead of marking the record failed. The rest of the accept (burst threshold, fail-open scoping, the 502 shape) re-read and unchanged. Prior: #1680: rate-limit counters join the list of things multiple replicas now handle — the plugin's in-process store made the real ceiling max × replicas, fixed with a shared Postgres tier (fail-open, 250 ms deadline, leader-gated sweep) on the same pattern as the #718 nonce watermark. Prior: #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
 ---
 
 # Backend Scaling
@@ -244,11 +244,30 @@ they queue behind the same key. Two consequences worth planning around:
 1. **Throughput ceiling.** Adding replicas raises how many requests you can
    accept, not how many transactions you can land. The bottleneck moves to the
    relayer, and past that point new replicas buy latency, not capacity.
-2. **Single point of stall — now self-healing on the queue lane.** One stuck
-   transaction blocks every later submission on that chain. Since #1558 the
-   leader-locked bump worker replaces a stuck queue-lane tx with bumped fees
-   (and alerts after 3 attempts); the Safe-bound legacy sites have no bump
-   path until they retire (#1440).
+2. **Single point of stall — self-healing on the queue lane, with one named
+   exception.** One stuck transaction blocks every later submission on that
+   chain. Since #1558 the leader-locked bump worker replaces a stuck
+   queue-lane tx with bumped fees (and alerts after 3 attempts); the
+   Safe-bound legacy sites have no bump path until they retire (#1440).
+
+   The exception, deliberate since [#1735](https://github.com/d-hinders/Haven-AI/issues/1735):
+   a stuck **`passport_attest`** is NOT replaced. A same-nonce replacement is
+   safe on-chain — at most one transaction per nonce mines — but it mints a
+   new tx hash, and the anchor's #1043 receipt recovery is keyed off the hash
+   it recorded; a replaced attest becomes unfindable and issuance re-mints,
+   producing a second live, revocable credential. So the worker alerts
+   (`outbound-bump: stuck broadcast from a non-idempotent submitter`) and the
+   **lane stays blocked until an operator intervenes**. That is the accepted
+   trade: a blocked lane is loud, bounded and human-recoverable; a duplicate
+   attestation is silent and permanent. See
+   [`delegation-rail-vendor-ops.md`](delegation-rail-vendor-ops.md) §3 for the
+   operator response — including the ordering constraint from
+   [#1745](https://github.com/d-hinders/Haven-AI/issues/1745), where the
+   passport's own retry sweep may already have queued a duplicate attest at the
+   next nonce that cancelling would release. Unblocking it automatically wants a same-nonce **cancel**
+   (a 0-value self-send), which would clear the lane *and* definitively kill
+   the attest so a fresh anchor is correct — a new mechanism, deliberately not
+   built under #1735.
 
 ### Multi-replica CORRECTNESS: closed for the queue lane (#1559)
 

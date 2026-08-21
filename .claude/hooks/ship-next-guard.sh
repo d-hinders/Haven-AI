@@ -170,6 +170,64 @@ This warning does not block. It is on you.'
 # file's own header warns about. Per-issue tokens keep the property that
 # motivated consuming (a hand-rolled PR in a ship-next session still warns)
 # without that cost.
+# BLOCKING: an independent reviewer pass must have run for this branch.
+#
+# Distinct from the warning below in both force and subject. The warning is
+# about which ROUTE you took and is non-blocking by owner decision (2026-07-26).
+# This is about whether review HAPPENED, and it blocks.
+#
+# > **Owner decision (recorded verbatim):** "I have told you many times that all
+# > prs should have the review run on it, it is in the claude file too. Why do
+# > you keep telling yourself it isn't needed? I want it to run on every PR,
+# > full stop." — the owner in-session 2026-08-21.
+#
+# The written rule was conditional before this ("when the change touches
+# user-facing UX, money movement, agent authority, shared behavior, or
+# meaningful risk", AGENTS.md), and that conditional was the licence: each skip
+# had its own plausible reason, so no skip felt like a pattern. Three happened
+# in one session. The rule is unconditional now, and this makes it so at the
+# only moment that matters.
+#
+# Fails OPEN on its own malfunction — missing jq, unreadable marker, a detached
+# HEAD. A guard that blocks all pull request creation when its own plumbing
+# breaks would be routed around within the hour, and then it guards nothing.
+require_reviewer_pass() {
+  rsession=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null) || return 0
+  [ -n "$rsession" ] || return 0
+  rsafe=$(printf '%s' "$rsession" | tr -c 'A-Za-z0-9_-' '_' 2>/dev/null) || return 0
+  [ -n "$rsafe" ] || return 0
+
+  rbranch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || return 0
+  [ -n "$rbranch" ] || return 0
+  [ "$rbranch" = "HEAD" ] && return 0
+
+  rmarker="${TMPDIR:-/tmp}/claude-reviewed-$rsafe"
+  if [ -f "$rmarker" ] && grep -Fxq "$rbranch" "$rmarker" 2>/dev/null; then
+    return 0
+  fi
+
+  printf '%s\n' 'BLOCKED: no independent reviewer pass recorded for this branch.
+
+Run haven-reviewer over the COMPLETE candidate diff against origin/dev, apply
+what it finds, then open the pull request.
+
+This is not a risk judgement to make per pull request. "The diff is
+script-generated", "it is docs-only", "it is a version bump" are the shapes the
+skip takes, and they are why the rule is unconditional: what needs an
+independent eye is rarely the lines, it is the judgement around them — whether
+a claim was tested or assumed, whether a doc says what you say it says.
+
+Self-review does not clear this. The author is the one person who cannot see the
+assumption they already made.
+
+For an area:frontend diff, haven-design-reviewer is a SECOND pass, not a
+substitute for haven-reviewer.
+
+If you genuinely need to bypass: unset the hook, and say in the PR that review
+was skipped and why. Do not do it silently.' >&2
+  exit 2
+}
+
 fire_unless_ship_next() {
   session=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null) || fire
   [ -n "$session" ] || fire
@@ -257,7 +315,11 @@ if [ -z "$tool" ]; then
   esac
   exit 0
 fi
-[ "$tool" = "mcp__github__create_pull_request" ] && fire_unless_ship_next
+if [ "$tool" = "mcp__github__create_pull_request" ]; then
+  pr_body=$(printf '%s' "$input" | jq -r '.tool_input.body // ""' 2>/dev/null) || pr_body=""
+  require_reviewer_pass
+  fire_unless_ship_next
+fi
 [ "$tool" = "Bash" ] || exit 0
 [ -n "$cmd" ] || exit 0
 
@@ -326,5 +388,6 @@ done
 unset IFS
 
 [ "$is_pr" -eq 1 ] || exit 0
+require_reviewer_pass
 fire_unless_ship_next
 exit 0

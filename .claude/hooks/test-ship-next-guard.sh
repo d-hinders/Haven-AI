@@ -36,6 +36,25 @@ check() { # name expected(fire|silent) payload
 }
 b() { printf '{"session_id":"testsess","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1"; }
 MARKER_DIR="${TMPDIR:-/tmp}"
+
+# --- reviewer gate: satisfy it for the ship-next cases ----------------------
+#
+# The guard now BLOCKS pull request creation unless an independent reviewer pass
+# is recorded for the branch (reviewer-marker.sh). That is a DIFFERENT policy
+# from the ship-next warning these cases measure, and it runs first — so without
+# this setup every warning case would be blocked before the warning is reached
+# and read as a false "silent". Record a pass for each session the suite uses;
+# the reviewer gate has its own cases at the end of this file.
+#
+# The sanitized names matter: session_id is mapped through
+# `tr -c 'A-Za-z0-9_-' '_'`, so `../../etc/passwd` becomes `______etc_passwd`.
+TEST_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || TEST_BRANCH=""
+reviewed() {
+  [ -n "$TEST_BRANCH" ] || return 0
+  printf '%s\n' "$TEST_BRANCH" > "$MARKER_DIR/claude-reviewed-$1" 2>/dev/null || true
+}
+unreviewed() { rm -f "$MARKER_DIR/claude-reviewed-$1" 2>/dev/null || true; }
+for _s in testsess sess1 sess2 wsess gatesess x ______etc_passwd; do reviewed "$_s"; done
 mkrm() { rm -f "$MARKER_DIR/claude-ship-next-$1"; }      # clear marker
 mkhas() { [ -f "$MARKER_DIR/claude-ship-next-$1" ]; }    # marker still there?
 # Write tokens, one per line: mktok sess1 1030 '*'
@@ -335,6 +354,61 @@ for needle in "CODEOWNERS" "coupling-gate.mjs" "origin/dev" "docs:check" "script
     *) fail=$((fail + 1)); printf '  FAIL  warning text is missing: %s\n' "$needle" ;;
   esac
 done
+
+
+# --- the reviewer gate (blocking) -------------------------------------------
+#
+# Distinct from every case above: those measure the ship-next WARNING on stdout,
+# this measures a BLOCK — exit 2 with a message on stderr. check() reads stdout,
+# so it cannot see this; these assert the exit status directly.
+WRITER_R="$(dirname "$0")/reviewer-marker.sh"
+rcheck() { # name expected_exit payload
+  printf '%s' "$3" | sh "$GUARD" >/dev/null 2>&1
+  actual=$?
+  if [ "$actual" = "$2" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf '  FAIL  %-52s expected exit %s, got %s\n' "$1" "$2" "$actual"
+  fi
+}
+
+unreviewed rgate
+rcheck "no reviewer pass -> PR creation BLOCKS" 2 "$(pr rgate 1)"
+rcheck "no reviewer pass -> gh pr create BLOCKS" 2 "$(bs rgate 'gh pr create --base dev --fill')"
+rcheck "no reviewer pass -> a non-PR command is untouched" 0 "$(bs rgate 'git status')"
+
+# A reviewer pass recorded by the real writer must clear it.
+printf '{"session_id":"rgate","hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"subagent_type":"haven-reviewer"}}' \
+  | sh "$WRITER_R" 2>/dev/null
+if [ -n "$TEST_BRANCH" ] && grep -Fxq "$TEST_BRANCH" "$MARKER_DIR/claude-reviewed-rgate" 2>/dev/null; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); printf '  FAIL  reviewer-marker.sh did not record the pass\n'
+fi
+rcheck "after a reviewer pass -> PR creation proceeds" 0 "$(pr rgate 1)"
+
+# The marker is NOT consumed. Unlike the ship-next token, this answers "did
+# review happen for this branch", which does not stop being true after one PR.
+rcheck "reviewer pass is not consumed by one PR" 0 "$(pr rgate 2)"
+
+# Only reviewer roles count.
+unreviewed rgate2
+printf '{"session_id":"rgate2","hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"subagent_type":"haven-explorer"}}' \
+  | sh "$WRITER_R" 2>/dev/null
+rcheck "a non-reviewer subagent does NOT clear the gate" 2 "$(pr rgate2 1)"
+
+# haven-design-reviewer is an independent pass too.
+unreviewed rgate3
+printf '{"session_id":"rgate3","hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"subagent_type":"haven-design-reviewer"}}' \
+  | sh "$WRITER_R" 2>/dev/null
+rcheck "haven-design-reviewer clears the gate" 0 "$(pr rgate3 1)"
+
+# Fail-open on its own malfunction: blocking every PR because the plumbing broke
+# would get the hook removed, and then it guards nothing.
+rcheck "missing session_id -> does NOT block" 0 '{"tool_name":"mcp__github__create_pull_request","tool_input":{}}'
+
+for _s in rgate rgate2 rgate3; do unreviewed "$_s"; done
 
 printf '\nship-next guard: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -76,3 +76,50 @@ Move the wiring into a committed `.claude/settings.json` once **both** hold:
 
 - the marker has been observed silencing a compliant PR in a fresh session, and
 - the `sh`/`jq`/`awk` assumption has been checked against the team's machines.
+
+## `reviewer-marker.sh` + the reviewer gate in `ship-next-guard.sh`
+
+**Blocking**, unlike everything else here. `ship-next-guard.sh` now enforces two
+separate policies at the same trigger point (pull-request creation), and the
+difference between them matters:
+
+| | subject | force |
+|---|---|---|
+| ship-next warning | which *route* opened the PR | warns, never blocks (owner decision 2026-07-26) |
+| reviewer gate | whether an independent review *happened* | **blocks** (owner decision 2026-08-21) |
+
+`reviewer-marker.sh` records a pass when a `haven-reviewer` or
+`haven-design-reviewer` subagent is actually launched; the gate blocks PR
+creation when no pass is recorded for the current branch.
+
+### Why blocking, when the sibling policy deliberately is not
+
+The warning already named independent review as its item 1, ending "This warning
+does not block. It is on you." It was walked past three times in one session,
+each time with a different plausible-sounding reason. The owner's instruction
+was unambiguous and repeated — "I want it to run on every PR, full stop" — so
+the gate stops being advice.
+
+This is the same argument `ship-next-marker.sh` makes about markers the model
+must remember to write, applied one level up: a rule the model re-derives per
+pull request is not a rule.
+
+### Design notes
+
+- **Keyed by branch, not commit.** A head-SHA key would demand a fresh pass
+  after every touch-up and train people to route around the gate. Branch scope
+  asks what the failure was actually about: did an independent pass ever look at
+  this work? Reviewing at one commit and then pushing unreviewed *fixes* is a
+  real gap this cannot see — the warning still names it, and it stays judgement.
+- **Not consumed.** Unlike the ship-next token, a recorded pass survives the
+  pull request. "Review happened for this branch" does not stop being true.
+- **Fails open** on its own malfunction — missing `jq`, unreadable marker,
+  detached HEAD. A guard that blocks all PR creation when its plumbing breaks
+  gets removed, and then it guards nothing. The asymmetry is deliberate and the
+  opposite of the ship-next marker's, because the failure modes are opposite: a
+  retained ship-next token means *silence*, while a missing reviewer marker
+  means *a block*.
+- **Bypass** by unsetting the hook — and say in the pull request that review was
+  skipped and why. Do not do it silently.
+
+Covered by `test-ship-next-guard.sh` (the reviewer-gate section at the end).

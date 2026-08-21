@@ -494,15 +494,24 @@ describe('hosted identity vs local signing key (#1697)', () => {
     expect(report.agents[0].checks.map((c) => c.id)).toContain('identity_match')
   })
 
-  it('an unreachable hosted API is SKIPPED, never passed as a match', async () => {
+  it('MUTATION PROOF: an unreachable hosted API does NOT pass — a comparison that did not happen is not a match', async () => {
+    // #1697 review, finding 1: the old code said "skipped, not passed" in the
+    // text while setting ok:true, so a real key mismatch coinciding with a
+    // network blip sailed through every consumer that reads the boolean —
+    // exit code, --json, CI. The earlier version of this test asserted only on
+    // detail text, so it did not back its own title.
     const { homeDir } = await healthyHome()
-    const deps = healthyDeps()
-    deps.probeHostedIdentity.mockResolvedValue({ status: 'network_error' })
+    for (const status of ['network_error', 'bad_response'] as const) {
+      const deps = healthyDeps()
+      deps.probeHostedIdentity.mockResolvedValue({ status })
 
-    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
-    const check = report.checks.find((c) => c.id === 'identity_match')
-    expect(check?.detail).toMatch(/comparison skipped, not passed/)
-    expect(check?.detail).not.toMatch(/matches/i)
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+      const check = report.checks.find((c) => c.id === 'identity_match')
+      expect(check?.ok, status).toBe(false)
+      expect(report.ok, status).toBe(false)
+      expect(check?.detail).toMatch(/cannot be reported as a match/)
+      expect(check?.repair).toBeTruthy()
+    }
   })
 
   it('a rejected API key fails the compare — it cannot be called a match', async () => {
@@ -656,5 +665,109 @@ describe('per-agent inventory (#1697)', () => {
     const dead = report.agents.find((a) => a.agentId === 'agent-dead')
     expect(dead?.classification).toBe('retired')
     expect(dead?.checks).toEqual([])
+  })
+})
+
+/**
+ * #1697 review — the three classification/attribution defects the independent
+ * pass found. Each test below exists because none of the tests written with
+ * the feature caught it.
+ */
+describe('classification correctness (#1697 review)', () => {
+  it('MUTATION PROOF: a live agent whose config still uses the retired npx launch is NOT called superseded', async () => {
+    // Finding 2. The directory has a prepared sidecar, but the config names no
+    // wrapper at all (the pre-#1586 npx shape, which runtime_config flags
+    // separately). Condemning it as superseded would tell the user to revoke
+    // the one agent that actually works.
+    const { homeDir } = await healthyHome()
+    await writeFile(join(homeDir, '.codex', 'config.toml'), [
+      '[mcp_servers.haven]',
+      `url = "${HOSTED}"`,
+      '[mcp_servers.haven_signer]',
+      'command = "npx"',
+      `args = ["-y", "@haven_ai/signer@${MCP_RUNTIME_MANIFEST.signerVersion}"]`,
+    ].join('\n'))
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+
+    const agent = report.agents.find((a) => a.agentId === 'agent-1')
+    expect(agent?.classification).toBe('wired')
+    // The stale config is reported as what it is — a config problem, not a
+    // reason to revoke a credential.
+    expect(report.checks.find((c) => c.id === 'runtime_config')?.ok).toBe(false)
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.repair ?? '').not.toMatch(/[Rr]evoke/)
+  })
+
+  it("MUTATION PROOF: a prefix-sharing agent id cannot borrow another agent's classification", async () => {
+    // Finding 3. Resolving a label back to its entry by string PREFIX picks
+    // the first sibling whose id is a prefix of the label — so with a
+    // superseded `agent-1` listed before a wired `agent-10`, the wired
+    // agent inherits the superseded one's verdict and the user is told to
+    // revoke the agent they are actively using.
+    //
+    // Both prefix-sharing agents must be NON-primary for this to bite: the
+    // primary is excluded from the scan, so a two-directory fixture leaves
+    // exactly one candidate and the wrong lookup cannot pick wrongly. An
+    // earlier version of this test made that mistake and passed against the
+    // reintroduced bug.
+    const { homeDir } = await healthyHome()
+
+    // Oldest first, so the newest (agent-main) is the primary.
+    const opsDir = join(homeDir, '.haven', 'agents', 'ops')
+    await mkdir(join(opsDir, 'bin'), { recursive: true })
+    const opsWrapper = join(opsDir, 'bin', 'haven-signer.mjs')
+    await writeFile(opsWrapper, '// wrapper')
+    await writeFile(join(opsDir, 'signer-runtime.json'), JSON.stringify({
+      server_name: 'ops', wrapper_path: opsWrapper,
+      signer_package: MCP_RUNTIME_MANIFEST.signerPackage,
+      signer_version: MCP_RUNTIME_MANIFEST.signerVersion,
+      sdk_package: MCP_RUNTIME_MANIFEST.sdkPackage,
+      sdk_version: MCP_RUNTIME_MANIFEST.sdkVersion,
+      runtime_directory: join(homeDir, '.haven', 'signer-runtime', MCP_RUNTIME_MANIFEST.signerVersion),
+      npm_cache_directory: join(homeDir, '.haven', 'npm-cache'),
+      cli_path: join(homeDir, 'cli.js'),
+    }))
+    await writeFile(join(opsDir, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_tensecret', agent_id: 'agent-10',
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+
+    const strayDir = join(homeDir, '.haven', 'agents', 'stray')
+    await mkdir(strayDir, { recursive: true })
+    await writeFile(join(strayDir, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_straysecret', agent_id: 'agent-1',
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+
+    const mainDir = join(homeDir, '.haven', 'agents', 'agent-main')
+    await mkdir(join(mainDir, 'bin'), { recursive: true })
+    const mainWrapper = join(mainDir, 'bin', 'haven-signer.mjs')
+    await writeFile(mainWrapper, '// wrapper')
+    await writeFile(join(mainDir, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_mainsecret', agent_id: 'agent-main',
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+
+    // agent-main owns the bare pair; ops is wired under its named entries;
+    // stray (agent-1) appears nowhere and is genuinely superseded.
+    await writeFile(join(homeDir, '.codex', 'config.toml'), [
+      '[mcp_servers.haven]', `url = "${HOSTED}"`,
+      '[mcp_servers.haven_signer]', `command = "${mainWrapper}"`,
+      '[mcp_servers.haven-ops]', `url = "${HOSTED}"`,
+      '[mcp_servers.haven-signer-ops]', `command = "${opsWrapper}"`,
+    ].join('\n'))
+
+    const deps = healthyDeps()
+    deps.probeHosted.mockImplementation(async () => ({ status: 'ok' as const }))
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+
+    expect(report.agents.find((a) => a.agentId === 'agent-10')?.classification).toBe('wired')
+    expect(report.agents.find((a) => a.agentId === 'agent-1')?.classification).toBe('superseded')
+    // The genuinely superseded agent is named...
+    expect(check?.repair).toContain('agent-1')
+    // ...and the WIRED agent whose id merely starts with it is not.
+    expect(check?.repair).not.toContain('agent-10')
   })
 })

@@ -193,8 +193,14 @@ function agentIsWired(
     }
     return false
   }
-  if (sidecar?.wrapper_path) return configText.includes(sidecar.wrapper_path)
-  // No sidecar, no slug: this directory cannot prove ownership of the bare
+  if (sidecar?.wrapper_path && configText.includes(sidecar.wrapper_path)) return true
+  // #1697 review, finding 2: a sidecar whose wrapper is NOT referenced is not
+  // proof of the opposite. A config still on the retired npx launch form
+  // (which the runtime_config check flags separately) names no wrapper at
+  // all, and condemning that directory as superseded would tell the user to
+  // revoke their only working agent. Fall through to the same ownership
+  // reasoning the sidecar-less case uses.
+  // No proof of ownership of the bare
   // pair. If some OTHER directory's wrapper is the one the config launches,
   // the bare pair is already owned and this one is not wired — even when it
   // is the newest. Only when nothing owns the bare pair does the pre-#1697
@@ -309,16 +315,22 @@ async function checksForAgent(
       identity.api_key, identity.api_url, deps.fetch,
     )
     if (probe.status !== 'ok') {
+      // #1697 review, finding 1: an unperformable comparison is NOT a pass.
+      // Saying "skipped, not passed" in the text while setting ok:true is the
+      // same green-check-proving-nothing defect this check exists to remove —
+      // and worse here, because a real key mismatch that coincides with a
+      // network blip would sail through. `hosted_mcp` already fails on
+      // network_error; identity_match matches it rather than contradicting it.
       checks.push({
         id: 'identity_match',
         label: 'Hosted identity matches the local signing key',
-        ok: probe.status === 'unauthorized' ? false : true,
+        ok: false,
         detail: probe.status === 'unauthorized'
           ? 'The stored API key was rejected, so the agent it authenticates as cannot be compared with the local signing key.'
-          : `Could not read the hosted identity (${probe.status}) — comparison skipped, not passed.`,
-        ...(probe.status === 'unauthorized'
-          ? { repair: `Re-run the full setup with a fresh token: ${RERUN} --setup <token>.` }
-          : {}),
+          : `Could not read the hosted identity (${probe.status}) — the comparison did not happen, so it cannot be reported as a match.`,
+        repair: probe.status === 'unauthorized'
+          ? `Re-run the full setup with a fresh token: ${RERUN} --setup <token>.`
+          : `Restore network access to the Haven API, then re-run: ${RERUN} --doctor --runtime ${input.runtime}`,
       })
     } else if (!localDelegate) {
       checks.push({
@@ -568,7 +580,12 @@ export async function runDoctor(
   // The doctor reports; the user decides — connect never revokes or deletes.
   const otherEntries = inventory.filter((entry) => entry.directory !== primaryDirectory)
   if (otherEntries.length > 0) {
-    const live: string[] = []
+    // Labels carry their SOURCE ENTRY (#1697 review, finding 3): resolving a
+    // label back to an entry by string prefix would attribute one agent's
+    // classification to another whenever one id is a prefix of the next
+    // (`agent-1` / `agent-10`), and the failure mode is telling the user to
+    // revoke the live agent.
+    const live: Array<{ label: string; entry: AgentInventoryEntry }> = []
     const revoked: string[] = []
     const unverifiable: string[] = []
     const retired: string[] = []
@@ -585,24 +602,23 @@ export async function runDoctor(
       }
       const suffix = tombstone ? ' [tombstoned — key material still present]' : ''
       const probe = await (deps.probeHosted ?? probeHostedMcpTools)(identity.api_key, otherUrl, deps.fetch)
-      if (probe.status === 'ok') live.push(`${otherAgent}${suffix}`)
+      if (probe.status === 'ok') live.push({ label: `${otherAgent}${suffix}`, entry })
       else if (probe.status === 'unauthorized') revoked.push(`${otherAgent}${suffix}`)
       // network_error / bad_response: neither a false "still live" failure
       // nor a false clean bill — a note, never a verdict.
       else unverifiable.push(`${otherAgent} (${probe.status})${suffix}`)
     }
     const parts: string[] = []
-    if (live.length > 0) parts.push(`STILL SPEND-CAPABLE: ${live.join(', ')}`)
+    if (live.length > 0) parts.push(`STILL SPEND-CAPABLE: ${live.map((item) => item.label).join(', ')}`)
     if (revoked.length > 0) parts.push(`already revoked: ${revoked.join(', ')}`)
     if (retired.length > 0) parts.push(`tombstoned (keys removed): ${retired.join(', ')}`)
     if (unverifiable.length > 0) parts.push(`could not verify: ${unverifiable.join(', ')}`)
     // #1697: a WIRED sibling is a legitimately live agent, not a superseded
     // one — several agents may share a runtime now. Only unwired credential
     // dirs make the check fail.
-    const supersededLive = live.filter((name) => {
-      const entry = otherEntries.find((candidate) => name.startsWith(candidate.agentId ?? basename(candidate.directory)))
-      return entry?.classification !== 'wired'
-    })
+    const supersededLive = live
+      .filter((item) => item.entry.classification !== 'wired')
+      .map((item) => item.label)
     checks.push({
       id: 'superseded_agents',
       label: 'Superseded agent credentials',

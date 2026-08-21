@@ -135,6 +135,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
 
   describe('scenarios (#1409)', () => {
     const connect = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent']
+    const approve = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve']
     const signerRemoval = (SCENARIOS as Record<string, ScenarioShape>)['account-signer-removal']
 
     it('overrides only the account signer set needed to reach the removal confirmation (#1199)', () => {
@@ -172,6 +173,51 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // only what is special about it.
       expect(connect.api('/agents', 'GET')).toBeUndefined()
       expect(connect.api('/auth/me', 'GET')).toBeUndefined()
+    })
+
+    // #1684: the APPROVE screen — the one between the other two connect
+    // scenarios' pins, and the screen that actually grants spend authority.
+    describe('connect-agent-approve (#1684)', () => {
+      it('pins the setup at connected_local with the runtime already configured', () => {
+        // `resolveConnectStepView` only reaches the approval step when the
+        // runtime reports configured; without both flags the capture would
+        // silently shoot the "Finishing setup" state instead.
+        const first = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET') as {
+          status: string
+          agent_id: string
+          install_status: Record<string, unknown>
+        }
+        const second = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET')
+        expect(first).toMatchObject({ status: 'connected_local', agent_id: 'agent-fixture-1' })
+        expect(first.install_status).toMatchObject({
+          local_mcp_configured: true,
+          local_mcp_acknowledged: true,
+        })
+        expect(second).toMatchObject({ status: 'connected_local' })
+      })
+
+      it('carries a real budget and delegate address — the two things the screen shows', () => {
+        const status = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET') as {
+          agent_budget: Array<{ allowance_amount: string }>
+          delegate_address: string
+        }
+        // An empty budget would render "Waiting for budget" and prove nothing
+        // about the row this issue trimmed the description in favour of.
+        expect(status.agent_budget).toHaveLength(1)
+        expect(status.agent_budget[0].allowance_amount).toBe('25000000')
+        // The collapsed verification row's whole point is showing this.
+        expect(status.delegate_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+      })
+
+      it('serves a reachable signer so the Approve button renders, not the connect fallback', () => {
+        // `pickSigningPath` returns null on an empty signer set, which flips
+        // BudgetGrantAction to its not-ready branch — a capture of the wrong
+        // screen under the approve screen's filename.
+        const signers = approve.api('/agents/agent-fixture-1/account-signers', 'GET') as {
+          passkeys: unknown[]
+        }
+        expect(signers.passkeys).toHaveLength(1)
+      })
     })
   })
 })

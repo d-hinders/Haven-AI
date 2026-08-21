@@ -1,11 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, Download, Info } from 'lucide-react'
+import { Check, Download } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { StatusBadge, type StatusTone } from '../ui/StatusBadge'
 import { describeBudgetGrant } from '@/lib/budget-period'
+import { ActionCallout } from './SetupNotices'
 import { restartCopyForRuntime } from './setup-copy'
 
 /** Loading state while the connector finishes local setup. */
@@ -134,8 +135,6 @@ export function SetupDoneState({
   // #1394: name the authority the user just granted, in the same words the
   // connector uses in the agent's own terminal. "Your agent can now spend
   // within budget" told the user nothing they had not already approved.
-  // Degrades to that generic line whenever any part is missing — a half-named
-  // authority ("can spend up to  from ") would be worse than the abstract one.
   const grantedName = agentName?.trim() || null
   const grants = (budgets ?? []).map((budget) =>
     describeBudgetGrant(budget, chainId, { form: 'sentence' }),
@@ -164,16 +163,21 @@ export function SetupDoneState({
           It used to go badge → body → list, which read as a fragment rather
           than the flow's conclusion. No StatusBadge here: the shell ticker
           says "Approved" and the header subtitle says what just happened —
-          a third copy made none of them authoritative. */}
-      <div className="mx-auto max-w-sm text-center">
-        <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
-          {canNameGrant ? `${grantedName} is ready to spend` : 'Your agent is ready to spend'}
-        </h3>
-        <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+          a third copy made none of them authoritative.
+
+          #1684: ONE line, not a heading plus a sentence repeating its subject
+          and verb ("X is ready to spend" / "X can now spend up to …"). The
+          grant itself is the heading, so the amount and the wallet stay in
+          the confirmation — deleting the sentence would have undone #1394.
+          Width: no `max-w-sm` cap. The column is set by the `Done` button
+          below (w-full inside a max-w-xl modal), and a 384px cap left the
+          button overhanging everything above it by ~150px. */}
+      <div className="text-center">
+        <h3 className="text-sm font-semibold leading-relaxed text-[var(--v2-ink)]">
           {canNameGrant ? (
             <>
               {/* .v2-tabular on the amount: design-system.md asks for tabular
-                  numerals on EVERY amount, and this sentence is the flow's
+                  numerals on EVERY amount, and this line is the flow's
                   money-clarity payoff. Wrapping the whole grant phrase rather
                   than splitting the digits out is deliberate — tabular-nums
                   only affects figures, so the symbol and period ride along
@@ -182,12 +186,14 @@ export function SetupDoneState({
               <span className="v2-tabular">{grants.join(', ')}</span> from {walletName}.
             </>
           ) : (
-            'Your agent can now spend within budget.'
+            // Degrades whenever any part is missing — a half-named authority
+            // ("can spend up to  from ") would be worse than the abstract one.
+            'Your agent is ready to spend'
           )}
-        </p>
+        </h3>
       </div>
 
-      <ul className="mx-auto max-w-sm space-y-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+      <ul className="space-y-1.5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
         <li className="flex items-start gap-1.5">
           <Icon icon={Check} className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--v2-success)]" />
           <span>Haven tools wired into your agent environment</span>
@@ -224,13 +230,13 @@ export function SetupDoneState({
             </span>
           </li>
         )}
-        {restartCopy && (
-          <li className="flex items-start gap-1.5">
-            <Icon icon={Info} className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--v2-ink-3)]" />
-            <span>{restartCopy}</span>
-          </li>
-        )}
       </ul>
+
+      {/* #1684: the restart is the only thing on this screen the user still
+          has to DO, and it sat third in a ticked done-list at 12px/ink-3 —
+          skip it and the tools never load, so setup looks silently broken.
+          A to-do and a done-list do not share a list. */}
+      {restartCopy && <ActionCallout>{restartCopy}</ActionCallout>}
 
       <Button onClick={onClose} className="w-full">
         Done

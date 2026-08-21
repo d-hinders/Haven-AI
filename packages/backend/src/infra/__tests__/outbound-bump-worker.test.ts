@@ -122,24 +122,36 @@ describe('runOutboundBumpTick — stale broadcast rows', () => {
     expect(d.markBroadcast).toHaveBeenCalledWith('replacement-1', expect.objectContaining({ nonce: 42n }))
   })
 
-  // CHARACTERIZATION (#1735) — the stale-broadcast scan is UNGATED by
-  // REBROADCAST_SAFE_SUBMITTERS today; that set guards only the orphan path
-  // below. A `passport_attest` row is therefore replaced like any other.
+  // #1735 — the stale-broadcast scan gates its REPLACEMENT step on
+  // REBROADCAST_SAFE_SUBMITTERS, not just the orphan path below.
   //
-  // On-chain that is survivable — a same-nonce replacement cannot mint a
-  // second attestation, because at most one transaction per nonce mines. The
-  // damage is to RECOVERY: the replacement carries a NEW tx hash, while
-  // `agent_passports.tx_hash` still holds the original. #1043's
-  // `recoverAnchorFromReceipt` is keyed off that stored hash, so it returns
-  // null forever and issuance falls through to a genuinely second attest at a
-  // fresh nonce.
-  it('TODAY: a stale passport_attest broadcast row is replaced like any other', async () => {
+  // On-chain a same-nonce replacement is survivable — at most one transaction
+  // per nonce mines, so no second attestation. The damage is to RECOVERY: the
+  // replacement carries a NEW tx hash, while `agent_passports.tx_hash` still
+  // holds the original. #1043's `recoverAnchorFromReceipt` is keyed off that
+  // stored hash, so it would return null forever and issuance would fall
+  // through to a genuinely second attest at a fresh nonce.
+  it('NEVER replaces a stuck passport_attest — that would orphan #1043 recovery', async () => {
     const d = deps({ listUnmined: vi.fn(async () => [row({ submitter: 'passport_attest' })]) })
     const result = await runOutboundBumpTick(84532, d, log)
 
-    expect(result.bumped).toBe(1)
-    expect(d.sendRaw).toHaveBeenCalledWith(84532, expect.objectContaining({ nonce: 42 }))
-    expect(d.markReplaced).toHaveBeenCalledWith('row-1', 'replacement-1')
+    expect(result.bumped).toBe(0)
+    expect(result.alerted).toBe(1)
+    expect(d.sendRaw).not.toHaveBeenCalled()
+    expect(d.enqueue).not.toHaveBeenCalled()
+    expect(d.markReplaced).not.toHaveBeenCalled()
+    // Left `broadcast` on purpose: a later tick's chain-first read is what
+    // closes it, once the chain has an answer.
+    expect(d.markFailed).not.toHaveBeenCalled()
+  })
+
+  it('a rebroadcast-safe submitter is still replaced — the gate is not a blanket stop', async () => {
+    for (const submitter of ['sweep', 'hybrid_deploy', 'passport_revoke']) {
+      vi.clearAllMocks()
+      const d = deps({ listUnmined: vi.fn(async () => [row({ submitter })]) })
+      const result = await runOutboundBumpTick(84532, d, log)
+      expect(result.bumped, submitter).toBe(1)
+    }
   })
 
   // The chain-first half must keep working for a non-rebroadcast-safe row:

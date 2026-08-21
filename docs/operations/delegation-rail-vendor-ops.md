@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-08-21" # #1722: §3 gains a third failure class — a deploy that broadcasts and does not confirm is bounded at 120 s and handed to the #1558 bump worker, NOT relayer exhaustion; §1's gas-payer claims re-read against the code and unchanged. Prior: #1721: §1 and §3 re-read against the code — the relayer-paid factory deploy now has TWO trigger sites (grant activation in routes/agent-delegations.ts and, since #1667, the first erc7710 authorize in modules/x402/delegation-authorize.ts), so the drained-relayer blast radius and the erc7710 "sponsors nothing" line were corrected and the 502/429 surfaces named. §2 credential claims spot-checked (delegationRailBundlerUrl, DELEGATION_RAIL_SPONSORSHIP_POLICY_ID); §§4-5 are policy/incident prose, unchanged. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-08-21" # #1735: §3 gains a FOURTH failure class — a passport attest that broadcasts and does not confirm, which unlike the deploy does not self-heal; numbered operator runbook added, sequenced around the #1745 re-mint race. Prior: #1722: §3 gains a third failure class — a deploy that broadcasts and does not confirm is bounded at 120 s and handed to the #1558 bump worker, NOT relayer exhaustion; §1's gas-payer claims re-read against the code and unchanged. Prior: #1721: §1 and §3 re-read against the code — the relayer-paid factory deploy now has TWO trigger sites (grant activation in routes/agent-delegations.ts and, since #1667, the first erc7710 authorize in modules/x402/delegation-authorize.ts), so the drained-relayer blast radius and the erc7710 "sponsors nothing" line were corrected and the 502/429 surfaces named. §2 credential claims spot-checked (delegationRailBundlerUrl, DELEGATION_RAIL_SPONSORSHIP_POLICY_ID); §§4-5 are policy/incident prose, unchanged. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -153,6 +153,61 @@ transaction that may still mine. The caller sees the same retryable 502 as any
 other deploy failure, so operationally this looks like grant activation (or a
 first erc7710 authorize) failing and succeeding on retry — check the bump
 worker's replacement logs before treating it as a relayer incident.
+
+A fourth class, and the only one that does **not** self-heal: a **passport
+attestation that broadcasts and does not confirm**
+([#1735](https://github.com/d-hinders/Haven-AI/issues/1735)). The anchor stops
+waiting after 120 s and leaves its outbound record `broadcast`, exactly like
+the deploy above — but unlike the deploy, the bump worker will **not**
+fee-replace it, because a replacement changes the tx hash the anchor's #1043
+receipt recovery is keyed off, and a lost hash means Haven re-mints and the
+agent ends up with two live credentials. The worker alerts instead:
+
+```
+outbound-bump: stuck broadcast from a non-idempotent submitter — NOT replacing it
+(its own recovery owns the retry); the relayer nonce lane stays blocked until an
+operator intervenes
+```
+
+**This blocks the relayer's whole nonce lane on that chain** — every later
+deploy, sweep and revoke queues behind it — so it is an incident, not a
+warning. Operator response:
+
+1. Read the row's `tx_hash` from the alert and check it on the explorer.
+   **Mined** (either status) → the next bump tick closes the record itself from
+   the receipt; nothing to do but confirm it cleared.
+2. **Still pending** → before touching the nonce, check whether the passport's
+   retry sweep has already queued a **second** attest behind it. Look for
+   another `passport_attest` row in `outbound_txs` for the same chain at a
+   later nonce, and for a newer `tx_hash` on the agent's `agent_passports` row.
+   This is likely: see the race note below.
+3. **If a duplicate is already queued**, do not cancel yet — cancelling the
+   stuck nonce releases the duplicate to mine. Stop the issuance sweep (or
+   revoke the newer attestation once it lands) before proceeding.
+4. **With no duplicate outstanding**, the lane needs a same-nonce replacement
+   that is NOT another attest: send a 0-value self-transfer from the relayer at
+   that nonce with bumped fees to cancel it. Once it is cancelled the attest is
+   definitively dead and a fresh anchor is correct.
+5. Do **not** re-broadcast the stored attest calldata by hand — that is the
+   duplicate-credential path this whole gate exists to prevent.
+
+> **Known race, NOT fixed by [#1735](https://github.com/d-hinders/Haven-AI/issues/1735)
+> ([#1745](https://github.com/d-hinders/Haven-AI/issues/1745)).** The passport
+> row's own retry is *not* gated on the outbound record. `issuePassport`'s
+> catch calls `markFailed`, which clears `anchoring_started_at`, and
+> `listRetryable`'s backoff is 60 s at the first attempt — so roughly **180 s**
+> after the original broadcast (120 s wait + 60 s backoff) the sweep reclaims
+> the row, calls `recoverAnchorFromReceipt`, and gets `null`. `null` means
+> "pending OR dropped" — ethers cannot tell them apart — and `issuance.ts`
+> presumes dropped, so it submits a **fresh attest at the next nonce**. If the
+> original then mines, both mine, and the agent holds two live credentials.
+> This predates #1735 and is unchanged by it; #1735 only stopped the *bump
+> worker* creating a second way into the same state. Steps 2–3 above exist
+> because of it.
+
+Automating step 4 is a known gap, deliberately left to an owner decision
+(#1743); see [`backend-scaling.md`](backend-scaling.md) § *Single point of
+stall*.
 
 Probes:
 - `ops:check-bundler` — bundler up + EntryPoint v0.7 + gas oracle. It resolves

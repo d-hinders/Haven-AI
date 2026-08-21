@@ -4,10 +4,16 @@
  *
  * `anchorOnChain` already BOUNDS its wait (`tx.wait(1, 120_000)`, #1556). The
  * half under test here is the DISPOSITION on expiry. ethers v6 rejects a
- * timed-out `wait()` with `code: 'TIMEOUT'`, and that rejection arrives in
+ * timed-out `wait()` with `code: 'TIMEOUT'`, and that rejection arrived in
  * the same `catch` as a genuine `CALL_EXCEPTION` revert — so a transaction
- * that merely has not mined yet, and may still mine, has its durable outbound
- * record (#1556) closed `failed` with a message that says "reverted".
+ * that merely had not mined yet, and might still mine, had its durable
+ * outbound record (#1556) closed `failed` with a message saying "reverted".
+ *
+ * Since #1735 an expiry leaves the record OPEN (`broadcast`) and raises a
+ * distinct {@link PassportAnchorUnconfirmedError}. That is not the deploy's
+ * hand-off (#1722): nothing may re-broadcast or replace a `passport_attest`,
+ * so `broadcast` here buys chain-first RECONCILIATION, not a bump. The retry
+ * owner stays #1043's receipt recovery, keyed off the persisted tx hash.
  *
  * Separate file from `passport-outbound-record.test.ts` for the reason #1722
  * split its own: these tests stall a transaction under fake timers, which
@@ -24,7 +30,7 @@ const TX_HASH = '0x' + 'cd'.repeat(32)
 const UID = '0x' + 'ab'.repeat(32)
 
 /** Which ending the stubbed transaction gets. */
-let waitOutcome: 'timeout' | 'revert' | 'mined' | 'null-receipt' = 'timeout'
+let waitOutcome: 'timeout' | 'revert' | 'mined' | 'null-receipt' | 'network-error' = 'timeout'
 let waitCalls: Array<[confirms: number | undefined, timeoutMs: number | undefined]> = []
 
 const minedSpy = vi.fn(async () => {})
@@ -45,6 +51,11 @@ const submitSpy = vi.fn(async (params: { recordId: string | null }) => {
       if (waitOutcome === 'revert') {
         const err = new Error('transaction execution reverted') as Error & { code: string }
         err.code = 'CALL_EXCEPTION'
+        throw err
+      }
+      if (waitOutcome === 'network-error') {
+        const err = new Error('could not reach the node') as Error & { code: string }
+        err.code = 'NETWORK_ERROR'
         throw err
       }
       if (waitOutcome === 'mined') return { status: 1 }
@@ -83,7 +94,8 @@ vi.mock('ethers', async () => {
   return { ...actual, Contract: FakeContract }
 })
 
-const { anchorOnChain } = await import('../attestation.js')
+const { anchorOnChain, PassportAnchorUnconfirmedError, PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS } =
+  await import('../attestation.js')
 
 const CLAIM = {
   agentEoa: '0x' + '22'.repeat(20),
@@ -113,7 +125,7 @@ async function anchorAndExpire(): Promise<unknown> {
   return await pending
 }
 
-describe('passport anchor wait timeout (#1735, characterization)', () => {
+describe('passport anchor wait timeout (#1735)', () => {
   it('the wait is bounded — one confirmation, a real deadline (#1556)', async () => {
     await anchorAndExpire()
     expect(waitCalls).toHaveLength(1)
@@ -123,25 +135,35 @@ describe('passport anchor wait timeout (#1735, characterization)', () => {
     expect(timeoutMs).toBeGreaterThan(0)
   })
 
-  // CHARACTERIZATION — this is the #1735 bug, pinned before it is fixed.
-  // A TIMEOUT cancels nothing: the transaction is still in the mempool and
-  // may still mine. Today its durable record is closed `failed` anyway, with
-  // a message asserting a revert that did not happen.
-  it('TODAY: a timed-out wait closes the outbound record as failed', async () => {
+  // #1735 — a TIMEOUT cancels nothing: the transaction is still in the
+  // mempool and may still mine. The record must stay `broadcast`, which is
+  // the only true state and the only one the bump worker's chain-first scan
+  // will reconcile.
+  it('a timed-out wait leaves the outbound record OPEN — neither failed nor mined', async () => {
     await anchorAndExpire()
-    expect(failedSpy).toHaveBeenCalledTimes(1)
+    expect(failedSpy).not.toHaveBeenCalled()
     expect(minedSpy).not.toHaveBeenCalled()
   })
 
-  it('TODAY: the failure reason claims the attestation "reverted"', async () => {
-    await anchorAndExpire()
-    expect(failedSpy.mock.calls[0][0]).toContain('reverted')
+  it('the caller gets a distinct unconfirmed error, not a revert', async () => {
+    const err = (await anchorAndExpire()) as Error
+    expect(err).toBeInstanceOf(PassportAnchorUnconfirmedError)
+    expect(err.message).not.toContain('reverted')
+    expect(err.message).toContain('may still mine')
   })
 
-  it('TODAY: the caller sees the raw ethers TIMEOUT error, undistinguished from a revert', async () => {
-    const err = (await anchorAndExpire()) as { code?: string }
-    expect(err).toBeInstanceOf(Error)
-    expect(err.code).toBe('TIMEOUT')
+  // The tx hash must reach the caller: #1043's recovery is keyed off the hash
+  // `onBroadcast` persisted, and that is what makes leaving the record open
+  // safe rather than merely optimistic.
+  it('the unconfirmed error carries the tx hash the recovery path needs', async () => {
+    const err = (await anchorAndExpire()) as InstanceType<typeof PassportAnchorUnconfirmedError>
+    expect(err.txHash).toBe(TX_HASH)
+  })
+
+  it('the deadline is the bracketed constant, below the 600s anchoring claim window', async () => {
+    await anchorAndExpire()
+    expect(waitCalls[0][1]).toBe(PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS)
+    expect(PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS).toBeLessThan(600_000)
   })
 
   // The branch that must NOT change: a genuine revert still closes failed.
@@ -155,14 +177,26 @@ describe('passport anchor wait timeout (#1735, characterization)', () => {
     expect(minedSpy).not.toHaveBeenCalled()
   })
 
-  // CHARACTERIZATION — #690 records that a lagging RPC can hand back a null
-  // receipt for a transaction that DID confirm. Today that is also called a
-  // revert.
-  it('TODAY: a null receipt closes the record as failed too', async () => {
+  // #690 records that a lagging RPC can hand back a null receipt for a
+  // transaction that DID confirm. "Not observed" is not "reverted", so it
+  // takes the same open branch as the timeout.
+  it('a null receipt is also unconfirmed, not a revert', async () => {
     waitOutcome = 'null-receipt'
-    await anchorAndExpire()
+    const err = (await anchorAndExpire()) as Error
+    expect(err).toBeInstanceOf(PassportAnchorUnconfirmedError)
+    expect(failedSpy).not.toHaveBeenCalled()
+    expect(minedSpy).not.toHaveBeenCalled()
+  })
+
+  // A non-TIMEOUT wait rejection is NOT given the benefit of the doubt: only
+  // the deadline (and a null receipt) mean "unobserved". Anything else keeps
+  // the pre-#1735 behaviour.
+  it('a non-timeout wait error still closes the record failed', async () => {
+    waitOutcome = 'network-error'
+    const err = (await anchorAndExpire()) as { code?: string }
+    expect(err).not.toBeInstanceOf(PassportAnchorUnconfirmedError)
+    expect((err as { code?: string }).code).toBe('NETWORK_ERROR')
     expect(failedSpy).toHaveBeenCalledTimes(1)
-    expect(failedSpy.mock.calls[0][0]).toContain('reverted')
   })
 
   it('a mined, successful attestation closes the record mined', async () => {

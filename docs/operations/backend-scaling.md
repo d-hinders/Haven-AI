@@ -103,51 +103,80 @@ may now run more than one, and the relayer is what still caps throughput.**
 `withKeyedAdvisoryLock` holds one connection from the **shared application
 pool** (`DB_POOL_MAX`, default 20) for as long as the work it serialises runs.
 For its only caller today that work spans `submitRecorded` and `tx.wait()`, so
-the hold is a chain round-trip: seconds, bounded by chain congestion rather
-than by anything Haven controls.
+the hold is a chain round-trip — normally seconds.
 
-**The burst that would hurt** is N distinct brand-new accounts deploying at
-once. Each holds a lock connection for seconds while, inside that same critical
-section, `assertRelayerBudget`, `recordRelayerSpend`, `openOutboundRecord` and
-the `submitRecorded` stamp compete for the *remaining* pool headroom. Near the
-ceiling, unrelated requests app-wide pay up to `DB_POOL_CONNECTION_TIMEOUT`
-(default 5 s) before their own `connect()` resolves or rejects.
+**That tail is not actually bounded.** `tx.wait()` is called bare
+(`rails/hybrid-provisioning.ts`), and ethers v6's `wait(confirms?, timeout?)`
+waits indefinitely without a timeout argument, so a tx that never mines — an
+RPC hiccup, or a base-fee spike past the doubled headroom `getRelayerFeeOverrides`
+applies — holds the connection for as long as it takes.
+[#1722](https://github.com/d-hinders/Haven-AI/issues/1722) tracks bounding it,
+which is worth doing whichever option below eventually wins: the accept rests
+on this hold being short, and nothing currently makes it so.
+
+**The burst that would hurt** is brand-new accounts deploying at once. Each
+holds a lock connection while, inside that same critical section, the relayer
+budget check, the spend row, the outbound record and the `submitRecorded` stamp
+compete for the *remaining* pool headroom. Near the ceiling, unrelated requests
+app-wide pay up to `DB_POOL_CONNECTION_TIMEOUT` (default 5 s) before their own
+`connect()` resolves or rejects.
+
+State the threshold carefully, because the crisp version flatters it. It is not
+"20 distinct new accounts": every entrant checks out a connection *before* the
+lock is attempted, so callers that merely block count too, as do client retries
+racing on the same account. And the pool is shared with all other traffic
+rather than reserved for this path — so the real threshold is 20 minus whatever
+else the backend is doing.
 
 **Why this is accepted rather than fixed.** Both call sites
 (`modules/x402/delegation-authorize.ts`, `routes/agent-delegations.ts`) pass
 `expectedAddress`, so the pre-lock `getBytecode` fast path short-circuits
-permanently once an account exists. The lock is therefore reached **once per
-account, ever** — never on the payment hot path. Exhausting a 20-connection
-pool needs on the order of 20 brand-new agents making their first-ever payment
-within the same few seconds, which is not reachable at dev-pilot volume. And
-the degradation is bounded: once `pool.connect()` starts rejecting, the lock
-fails open, so callers lose the *serialisation* and degrade to the pre-#1673
-duplicate deploy — wasted gas, never incorrectness.
+permanently once an account exists. The lock is therefore reached about **once
+per account** — never on the payment hot path. ("Ever" would overstate it: a
+deploy that reverts leaves bytecode absent, so a legitimate retry re-enters the
+critical section for that account again.) At dev-pilot volume the burst above
+is not reachable.
 
 **Be precise about what failing open does and does not promise**, because the
-distinction is most of the reason to write this down. It protects the LOCK, not
-the work the lock guards. The critical section's own writes —
-`assertRelayerBudget`, `recordRelayerSpend`, `openOutboundRecord` — go through
-this same shared pool (`infra/repositories/relayer-gas-events.ts` imports
-`db.js`), so under genuine exhaustion they can fail to acquire a connection too
-and the deploy throws. That surfaces as a retryable 502 at `POST /x402/authorize`
-or a 500 at grant activation. The honest worst case is therefore a failed
-payment *attempt*, not merely added latency. What stays safe is the part that
-matters: authorize fails closed BEFORE the intent row exists so nothing is left
-half-created, the factory deploy is permissionless and grants its deployer
-nothing, and no funds move. Wasted gas and a retry — never a loss.
+distinction is most of the reason to write this down: it protects the LOCK, not
+the work the lock guards. As it happens, almost all of that work protects
+itself. `assertRelayerBudget` and `recordRelayerSpend` are fail-open by
+construction — "Fail OPEN — availability guard" and "Never throws" in their own
+doc comments (`infra/relayer-spend-guard.ts`) — and `openOutboundRecord`
+catches, warns, and continues with a null id, which `infra/outbound-queue.ts`'s
+header states as deliberate policy.
+
+The **one** write in that section that is not fail-open is `submitRecorded`'s
+stamp, `markOutboundTxBroadcast`: it catches a unique violation to retry the
+nonce lane and rethrows everything else, because `infra/repositories/outbound-txs.ts`
+is fail-closed on purpose — post-#1559 the stamp IS the nonce fence, not an
+optimisation, so degrading it would trade a latency problem for a correctness
+one. That is the write a pool timeout can actually break, and it is the right
+one to have chosen. It surfaces as a retryable **502** at both call sites
+(`POST /x402/authorize` and grant activation; a 429 there means the relayer
+budget cap, not the pool).
+
+So the honest worst case is a failed payment *attempt*, not merely added
+latency. What stays safe is the part that matters: authorize fails closed
+BEFORE the intent row exists so nothing is left half-created, the factory
+deploy is permissionless and grants its deployer nothing, and no funds move.
+Wasted gas and a retry — never a loss.
 
 Stated plainly, because it is the uncomfortable part: **the mitigation for pool
 exhaustion is losing the mitigation.** That equilibrium is defensible while the
 only caller is once-per-account-rare. It is not one to leave undocumented,
 which is why it is written here rather than merely assumed.
 
-**Two build triggers, either of which reopens this as real work:**
+**Three triggers, any of which reopens this as real work:**
 
 1. A second, more frequent caller of `withKeyedAdvisoryLock`. Its doc comment
    names once-per-subject-rare as a constraint on new callers for exactly this
    reason.
 2. Onboarding volume where tens of first-ever payments land within seconds.
+3. An existing call site quietly ceasing to pass `expectedAddress`. This one
+   deserves naming separately because trigger 1 would not catch it: no caller
+   is added, `expectedAddress` is optional and unenforced beyond its `?`, and
+   the "once per account" guarantee erodes with nothing mechanical to flag it.
 
 **The shape to build when triggered** is shrinking the critical section: hold
 across the bytecode check and the *broadcast*, release before `tx.wait()`, and
@@ -158,9 +187,10 @@ is *mined*, so a queued caller re-checking inside the lock would still see
 nothing and broadcast a duplicate. A correct shrink needs in-flight detection
 via the durable `outbound_txs` record
 ([#1556](https://github.com/d-hinders/Haven-AI/issues/1556)), a polling path
-for the loser, and a degraded path past the poll deadline. The machinery
-already exists; the complexity is real and sits on a money-adjacent path, which
-is why it waits for evidence rather than preceding it.
+for the loser, and a degraded path past the poll deadline. The state machine
+for that exists (queued/broadcast/mined/failed) — but not a lookup scoped to
+"is there an in-flight row for this account", so the work includes writing and
+indexing that query, not just wiring a poll onto something ready-made.
 
 The alternative, if isolation is preferred over shrinking, is a **dedicated
 small pool for advisory locks** — lock holds then cannot starve request-serving

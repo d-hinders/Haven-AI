@@ -383,6 +383,10 @@ describe('HavenClient structural boundary', () => {
       'AgentPaymentRailDescriptions',
       'AgentPaymentRailSchema',
       'AgentPaymentWarningCode',
+      // #1756: the ONE confirmation deadline the payment poller and the
+      // delegate sweep share. Public so a consumer reading `unconfirmed` can
+      // see how long the SDK waited before saying so.
+      'DEFAULT_CONFIRMATION_TIMEOUT_MS',
       'DISCOVERY_MAX_BYTES',
       'ERC7710_ASSET_TRANSFER_METHOD',
       'HAVEN_MINIMUM_NODE_VERSION',
@@ -506,6 +510,7 @@ describe('HavenClient structural boundary', () => {
       'SharedToolKey',
       'SignData',
       'SweepAuthorization',
+      'SweepConfirmation', // #1756
       'SweepEip712Domain',
       'SweepEntry',
       'SweepExpectedAuth',

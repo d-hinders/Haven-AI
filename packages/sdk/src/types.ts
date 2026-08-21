@@ -729,6 +729,38 @@ export interface HavenPaymentReceipt {
 
 // ── Delegate Sweep Types ─────────────────────────────────────────
 
+/**
+ * How long this SDK waits for an on-chain confirmation before it stops
+ * waiting (#1756).
+ *
+ * Lives here rather than in `client.ts` so the payment-confirmation poller
+ * and the delegate sweep share ONE number instead of forking it. The SDK's
+ * other chain waits are already bounded (`waitForFundingTx` at 30 s), so a
+ * fourth independently chosen literal is exactly the drift this constant
+ * exists to prevent.
+ */
+export const DEFAULT_CONFIRMATION_TIMEOUT_MS = 90_000
+
+/**
+ * Whether a sweep transfer was observed to confirm (#1756).
+ *
+ * The distinction is the point: `unconfirmed` means the transfer was
+ * BROADCAST and may still land, which is neither success nor failure. It must
+ * never be collapsed into either — reporting a still-pending transaction as
+ * done, or as failed, are the same defect in opposite directions.
+ */
+export type SweepConfirmation =
+  /** A receipt was observed. The funds are in the Safe. */
+  | 'confirmed'
+  /**
+   * Broadcast, but no receipt within `DEFAULT_CONFIRMATION_TIMEOUT_MS` (or the
+   * node returned no receipt). The transaction is still in the mempool and may
+   * mine at any time. `txHash` is the broadcast hash — check it on the
+   * explorer before re-running the sweep, and expect a re-run to find nothing
+   * stranded if it has since landed.
+   */
+  | 'unconfirmed'
+
 /** One transferred asset in a delegate sweep. */
 export interface SweepEntry {
   /** 'USDC' or 'ETH' */
@@ -737,10 +769,24 @@ export interface SweepEntry {
   amount: string
   /** Atomic amount swept */
   amountAtomic: string
-  /** Transaction hash of the sweep transfer */
+  /**
+   * Transaction hash of the sweep transfer.
+   *
+   * The RECEIPT hash when `confirmation` is `confirmed`; the BROADCAST hash
+   * when it is `unconfirmed` — which is the whole reason the sweep returns
+   * instead of throwing on a deadline, since this hash is the only thing that
+   * lets a user recover the transfer by hand (#1756).
+   */
   txHash: string
   /** Block explorer URL for the tx */
   explorerUrl: string
+  /**
+   * Did this transfer confirm on-chain within the deadline? (#1756)
+   *
+   * `unconfirmed` entries have MOVED NOTHING YET and may still move. Do not
+   * report a sweep as complete without checking this on every entry.
+   */
+  confirmation: SweepConfirmation
 }
 
 /** Result of a `sweepDelegate()` call. */
@@ -753,6 +799,16 @@ export interface SweepResult {
   chainId: number
   /** One entry per transferred asset. Empty when nothing was stranded. */
   transfers: SweepEntry[]
+  /**
+   * True when ANY entry is `unconfirmed` — i.e. the sweep broadcast something
+   * it could not confirm within the deadline (#1756).
+   *
+   * Derived from `transfers`, and present anyway because the consumer most
+   * likely to misread this result is an LLM reading the JSON of the
+   * `haven_sweep_delegate` tool, which will otherwise see a populated
+   * `transfers` array and report the money as recovered.
+   */
+  unconfirmed: boolean
 }
 
 // ── Agent Payment State Types ────────────────────────────────────

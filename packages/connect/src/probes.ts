@@ -8,6 +8,50 @@ export interface HostedProbeResult {
   toolCount?: number
 }
 
+/**
+ * #1697: who does this API key actually authenticate as?
+ *
+ * The #1681 incident was only provable by hand: cross-checking the delegate
+ * address a live session reported against the `signer.json` on disk, a check
+ * nothing in the product performed. This is the knowable half — the doctor
+ * still cannot see inside a running host, but it CAN prove that the stored
+ * API key and the stored signing key belong to the same agent. The key read
+ * here is the same one the hosted MCP entry carries, which is what makes the
+ * comparison meaningful rather than incidental.
+ *
+ * Read-only: a GET of the agent's own identity, nothing else.
+ */
+export interface HostedIdentityProbeResult {
+  status: HostedProbeStatus
+  agentId?: string
+  delegateAddress?: string
+}
+
+export async function probeHostedAgentIdentity(
+  apiKey: string,
+  apiUrl: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<HostedIdentityProbeResult> {
+  let response: Response
+  try {
+    response = await fetchWithTimeout(fetchImpl, `${apiUrl.replace(/\/+$/, '')}/machine-payments/agent`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+    })
+  } catch {
+    return { status: 'network_error' }
+  }
+  if (response.status === 401 || response.status === 403) return { status: 'unauthorized' }
+  if (!response.ok) return { status: 'bad_response' }
+  try {
+    const payload = JSON.parse(await response.text()) as { id?: string; delegate_address?: string }
+    if (typeof payload?.delegate_address !== 'string') return { status: 'bad_response' }
+    return { status: 'ok', agentId: payload.id, delegateAddress: payload.delegate_address }
+  } catch {
+    return { status: 'bad_response' }
+  }
+}
+
 export type LocalMcpProbeStatus = 'ok' | 'timeout' | 'process_error' | 'bad_response' | 'missing_tools'
 
 export interface LocalMcpProbeResult {

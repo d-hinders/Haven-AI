@@ -20,7 +20,7 @@ covers:
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-21" # the haven-reviewer rule is unconditional (owner decision 2026-08-21) — this file scoped it to a risk list, which is the licence three skips in one session were drawn from. AGENTS.md is canonical. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven AI UX Review
@@ -125,8 +125,9 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
   test that covers the skipped risk.
 - Review generated credential and handoff artifacts and CASP/MiCA status when
   the changed surface affects them.
-- Run `haven-reviewer` for user-facing, money, authority, shared-behavior, or
-  meaningful-risk changes.
+- Run `haven-reviewer` on **every** pull request — not only user-facing, money,
+  authority, shared-behavior, or meaningful-risk changes. Unconditional since the
+  2026-08-21 owner decision; `AGENTS.md` is canonical.
 - Run `haven-design-reviewer` over the screenshots for `area:frontend` diffs —
   the rendered-UX pass alongside the code review; a finding from either pauses
   auto-merge (frontend ship-playbook §5–6).

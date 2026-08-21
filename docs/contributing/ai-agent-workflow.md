@@ -288,7 +288,7 @@ The canonical `ship-next` skill follows the narrower autonomous issue-to-PR loop
 7. Integrate after each meaningful slice.
 8. Run relevant build or test checks.
 9. Run the **Captain Self-Check Preflight** above for the surfaces the diff touches. Pair any skipped browser verification with a headless equivalent vitest.
-10. Ask `haven-reviewer` for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
+10. Ask `haven-reviewer` for a final diff review. Every pull request, unconditionally — the risk list this step used to carry was the licence for skipping it (owner decision 2026-08-21; `AGENTS.md` is canonical).
 11. Ask `haven-doc-reviewer` for a doc-accuracy pass when the diff touches code mapped by some doc's `covers:` front-matter (the coupling gate flags these). Update the implicated docs before opening the PR.
 12. Let the captain fix final issues, commit, push, and open the PR.
 13. Add the PR closeout contract and merge-readiness report before calling the work complete.
@@ -346,7 +346,7 @@ Follow the Haven agent workflow:
 11. Integrate each slice before starting broad follow-up work.
 12. Run relevant tests, type checks, builds, or browser checks when practical.
 13. Run the **Captain Self-Check Preflight** for every changed surface, including a headless equivalent when browser verification is skipped.
-14. Use haven-reviewer for a final diff review when the change touches user-facing UX, money movement, agent authority, shared behavior, SDK/API contracts, generated artifacts, or meaningful risk.
+14. Use haven-reviewer for a final diff review. Every pull request, unconditionally (owner decision 2026-08-21; `AGENTS.md` is canonical).
 15. Use haven-doc-reviewer when changed code matches a document's `covers:` front-matter, and update any stale claims it identifies.
 
 Gravity files the captain should usually own:

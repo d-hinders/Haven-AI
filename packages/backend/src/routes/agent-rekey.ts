@@ -45,12 +45,20 @@
  * deliberately no endpoint that accepts, stores or "restores" a key to a new
  * host — #1694 says that design is out of scope and should be refused, not
  * built.
+ *
+ * ## Where the SQL is
+ *
+ * Not here. Every query this flow needs lives in
+ * `infra/repositories/agent-rekeys.ts`, so the route reads as a sequence of
+ * decisions and every statement is reachable from the real-DB harness without
+ * standing up Fastify. The one exception is the completion transaction, which
+ * takes a dedicated client so the credential swap, the intent invalidation
+ * and the stage advance commit or roll back together — the same shape the
+ * grant lifecycle uses, and the reason for the `dep-lint-exempt` below.
  */
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import crypto from 'crypto'
 import type { Address, Hex } from '../domain/chain-client.js'
-// dep-lint-exempt: the re-key orchestration must keep its stage advance and its credential swap in one transaction on a dedicated client (pool.connect), exactly as the grant lifecycle does
-import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import { getChain } from '../domain/chains.js'
@@ -75,25 +83,33 @@ import {
 } from '../infra/repositories/delegation-budgets.js'
 import {
   abandonRekey,
+  completeRekey,
+  findDelegationTerms,
   findInFlightRekey,
+  findLiveAgentByDelegate,
+  findOwnedRekeyAgent,
   findRekey,
-  invalidateOldPayerIntents,
-  markCompleted,
+  insertRekeyDelegation,
+  listPendingRekeyDelegations,
   markIssued,
   markMetered,
   markRevoked,
+  nextDelegationVersion,
   openRekey,
-  rotateAgentCredentials,
   type AgentRekeyRow,
   type CarrySnapshotEntry,
+  type RekeyAgentRow,
 } from '../infra/repositories/agent-rekeys.js'
 import {
   assertStageAllows,
+  CarryRefusedError,
+  planCarry,
+  railRefusal,
+  refuseAgentCaller,
   RekeyOrderingError,
+  type DelegationTerms,
   type RekeyStage,
-} from '../modules/agents/rekey-stages.js'
-import { CarryRefusedError, planCarry, type DelegationTerms } from '../modules/agents/rekey-carry.js'
-import { railRefusal, refuseAgentCaller } from '../modules/agents/rekey-guards.js'
+} from '../modules/agents/index.js'
 
 function safeDetails(err: unknown): string {
   return redactVendorSecrets(err instanceof Error ? err.message : String(err))
@@ -104,28 +120,6 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /** Dispositions a caller may declare for a non-zero residual. */
 const RESIDUAL_DISPOSITIONS = ['swept', 'acknowledged_unrecoverable'] as const
 type ResidualDisposition = (typeof RESIDUAL_DISPOSITIONS)[number]
-
-interface RekeyAgentRow {
-  agent_id: string
-  delegate_address: string | null
-  chain_id: number
-  treasury_address: string | null
-  account_type: string | null
-  execution_rail: string | null
-  status: string
-}
-
-async function loadOwnedAgent(agentId: string, userId: string): Promise<RekeyAgentRow | null> {
-  const result = await pool.query<RekeyAgentRow>(
-    `SELECT a.id AS agent_id, a.delegate_address, a.status, us.chain_id,
-            us.safe_address AS treasury_address, us.account_type, us.execution_rail
-     FROM agents a
-     LEFT JOIN user_safes us ON us.id = a.safe_id
-     WHERE a.id = $1 AND a.user_id = $2`,
-    [agentId, userId],
-  )
-  return result.rows[0] ?? null
-}
 
 function orderingReply(reply: FastifyReply, err: RekeyOrderingError): FastifyReply {
   return reply.code(409).send({
@@ -153,7 +147,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       reply.code(400).send({ error: 'Invalid identifier' })
       return null
     }
-    const agent = await loadOwnedAgent(request.params.id, sub)
+    const agent = await findOwnedRekeyAgent(request.params.id, sub)
     if (!agent) {
       reply.code(404).send({ error: 'Agent not found' })
       return null
@@ -188,7 +182,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     if (!UUID_RE.test(request.params.id)) {
       return reply.code(400).send({ error: 'Invalid agent id' })
     }
-    const agent = await loadOwnedAgent(request.params.id, sub)
+    const agent = await findOwnedRekeyAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
 
     const refusal = railRefusal(agent)
@@ -221,13 +215,8 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     // The uniqueness rule the multi-agent model rests on: a user may hold
     // many agents, just not two non-revoked ones sharing a delegate address
     // (#1694, `017_agent_connection_setups.ts:54`).
-    const collision = await pool.query<{ id: string }>(
-      `SELECT id FROM agents
-        WHERE user_id = $1 AND LOWER(delegate_address) = LOWER($2)
-          AND status <> 'revoked' AND id <> $3`,
-      [sub, new_delegate_address, request.params.id],
-    )
-    if (collision.rows.length > 0) {
+    const collision = await findLiveAgentByDelegate(sub, new_delegate_address, request.params.id)
+    if (collision) {
       return reply.code(409).send({
         error: 'delegate_address_in_use',
         detail: 'Another live agent already uses that delegate address. Generate a fresh keypair.',
@@ -349,11 +338,35 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
 
       const targets = await listNonRevokedDelegationsForAgent(request.params.id)
       if (targets.length === 0) {
-        // Nothing to revoke on-chain. The stage still advances: the old
-        // authority is already gone, which is the state `revoked` names.
+        // Nothing to revoke on-chain — an agent connected but never granted a
+        // budget, or one whose grants were revoked earlier. A normal state,
+        // and the exact population re-key most needs to serve: a lost key
+        // with little history.
+        //
+        // This branch must walk BOTH stages, not just `revoked`. Found by the
+        // #1698 review: stopping at `revoked` wedged the re-key permanently,
+        // because the only code that advances `revoked → metered` lives in
+        // the submit handler this branch never reaches, and the migration's
+        // `agent_rekeys_metered_stage_check` then forbids every later stage
+        // for a row with no snapshot. The owner's only exit was to abandon —
+        // i.e. re-key was impossible for exactly the agent that needed it.
+        //
+        // The empty snapshot is the honest measurement, not a placeholder:
+        // there were no delegations, so there is nothing to carry, and the
+        // issue step will correctly build nothing.
         const advanced = await markRevoked(rekey.id, request.params.id, 'none')
         if (!advanced) return reply.code(409).send({ error: 'rekey_out_of_order' })
-        return { revoked: true, tx_hash: null, delegation_hashes: [], stage: advanced.stage }
+        const metered = await markMetered(rekey.id, request.params.id, [])
+        if (!metered) return reply.code(409).send({ error: 'rekey_out_of_order' })
+        return {
+          revoked: true,
+          tx_hash: null,
+          delegation_hashes: [],
+          stage: metered.stage,
+          carry: [],
+          agent_has_no_authority: true,
+          next_step: `POST /agents/${request.params.id}/rekey/${rekey.id}/issue`,
+        }
       }
 
       const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
@@ -481,19 +494,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     for (const hash of delegation_hashes) {
       const row = termsByHash.get(hash)
       if (!row) continue
-      const full = await pool.query<{
-        token_address: string
-        recipient_address: string | null
-        budget_atomic: string
-        period_seconds: number
-        start_date: string
-        expires_at: string
-      }>(
-        `SELECT token_address, recipient_address, budget_atomic, period_seconds, start_date, expires_at
-         FROM agent_delegations WHERE agent_id = $1 AND delegation_hash = $2`,
-        [request.params.id, hash],
-      )
-      const terms = full.rows[0]
+      const terms = await findDelegationTerms(request.params.id, hash)
       if (!terms) continue
       const meter = await readRemainingBudget(
         agent.chain_id,
@@ -629,14 +630,11 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         }
 
         for (const piece of pieces) {
-          const versionRow = await pool.query<{ next_version: number }>(
-            `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
-             FROM agent_delegations
-             WHERE agent_id = $1 AND token_address = LOWER($2)
-               AND recipient_address IS NOT DISTINCT FROM LOWER($3)`,
-            [request.params.id, entry.token_address, entry.recipient_address],
+          const version = await nextDelegationVersion(
+            request.params.id,
+            entry.token_address,
+            entry.recipient_address,
           )
-          const version = versionRow.rows[0].next_version
           const policy: HavenBudgetPolicy = {
             agentId: request.params.id,
             chainId: agent.chain_id,
@@ -659,29 +657,21 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
               .send({ error: 'Could not build the replacement delegation', details: safeDetails(err) })
           }
           const hash = delegationIdentity(delegation)
-          await pool.query(
-            `INSERT INTO agent_delegations (
-               agent_id, chain_id, token_address, recipient_address, delegation_hash,
-               delegation_json, version, status, budget_atomic, period_seconds,
-               start_date, expires_at, rekey_id, carry_role
-             ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13)
-             ON CONFLICT (delegation_hash) DO NOTHING`,
-            [
-              request.params.id,
-              agent.chain_id,
-              entry.token_address,
-              entry.recipient_address ? entry.recipient_address.toLowerCase() : null,
-              hash,
-              JSON.stringify(delegation),
-              version,
-              piece.terms.budgetAtomic.toString(),
-              piece.terms.periodSeconds,
-              piece.terms.startDate,
-              piece.terms.expiresAt,
-              rekey.id,
-              piece.role,
-            ],
-          )
+          await insertRekeyDelegation({
+            agentId: request.params.id,
+            chainId: agent.chain_id,
+            tokenAddress: entry.token_address,
+            recipientAddress: entry.recipient_address,
+            delegationHash: hash,
+            delegationJson: JSON.stringify(delegation),
+            version,
+            budgetAtomic: piece.terms.budgetAtomic.toString(),
+            periodSeconds: piece.terms.periodSeconds,
+            startDate: piece.terms.startDate,
+            expiresAt: piece.terms.expiresAt,
+            rekeyId: rekey.id,
+            carryRole: piece.role,
+          })
           built.push({
             delegation_hash: hash,
             carry_role: piece.role,
@@ -734,17 +724,13 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     if (!Array.isArray(signatures)) {
       return reply.code(400).send({ error: 'signatures[] (from the issue step) is required' })
     }
-    const pendingRows = await pool.query<{ id: string; delegation_hash: string; delegation_json: string }>(
-      `SELECT id, delegation_hash, delegation_json FROM agent_delegations
-        WHERE agent_id = $1 AND rekey_id = $2 AND status = 'pending'`,
-      [request.params.id, rekey.id],
-    )
+    const pendingRows = await listPendingRekeyDelegations(request.params.id, rekey.id)
     const signatureByHash = new Map(
       signatures
         .filter((s) => typeof s?.delegation_hash === 'string' && typeof s?.signature === 'string')
         .map((s) => [s.delegation_hash as string, s.signature as string]),
     )
-    for (const row of pendingRows.rows) {
+    for (const row of pendingRows) {
       const sig = signatureByHash.get(row.delegation_hash)
       // Every built delegation must be signed. A partial completion would
       // rotate the credentials while some of the replacement authority stayed
@@ -766,55 +752,34 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
     const newPrefix = newKey.slice(0, 12)
 
     let invalidatedIntents: string[] = []
-    const client = await pool.connect()
+    let superseded: string[] = []
     try {
-      await client.query('BEGIN')
-      for (const row of pendingRows.rows) {
-        const signed = {
-          ...JSON.parse(row.delegation_json),
-          signature: signatureByHash.get(row.delegation_hash),
-        }
-        await client.query(
-          `UPDATE agent_delegations
-              SET status = 'active', delegation_json = $1, updated_at = NOW()
-            WHERE id = $2`,
-          [JSON.stringify(signed), row.id],
-        )
-      }
-      // Both halves of the credential set retire together (#1694): the
-      // delegate key and the API key, in one statement, inside the same
-      // transaction as the grants that replace them. A stale API key is its
-      // own hazard — #1681's finding A — and rotating only one half is how
-      // the payer/signer mismatch arose in the first place.
-      const rotated = await rotateAgentCredentials(
-        {
-          agentId: request.params.id,
-          userId: sub,
-          oldDelegateAddress: rekey.old_delegate_address,
-          newDelegateAddress: rekey.new_delegate_address,
-          apiKeyHash: newKeyHash,
-          apiKeyPrefix: newPrefix,
-        },
-        client,
-      )
-      if (!rotated) throw new Error('delegate address changed underneath the re-key')
-
-      // In-flight intents quoted against the OLD payer die here, inside the
-      // same transaction as the rotation. #1690's signer guard is a backstop.
-      invalidatedIntents = await invalidateOldPayerIntents(
-        request.params.id,
-        rekey.old_delegate_address,
-        client,
-      )
-
-      const completed = await markCompleted(rekey.id, request.params.id, client)
-      if (!completed) throw new Error('rekey stage moved underneath the completion')
-      await client.query('COMMIT')
+      // One transaction, in the repository: the activation, the credential
+      // swap and the intent invalidation are only correct together, and the
+      // route should not be able to express anything else.
+      const result = await completeRekey({
+        agentId: request.params.id,
+        userId: sub,
+        rekeyId: rekey.id,
+        oldDelegateAddress: rekey.old_delegate_address,
+        newDelegateAddress: rekey.new_delegate_address,
+        apiKeyHash: newKeyHash,
+        apiKeyPrefix: newPrefix,
+        signedDelegations: pendingRows.map((row) => ({
+          id: row.id,
+          delegationJson: JSON.stringify({
+            ...JSON.parse(row.delegation_json),
+            signature: signatureByHash.get(row.delegation_hash),
+          }),
+        })),
+      })
+      superseded = result.superseded
+      invalidatedIntents = result.invalidatedIntents
     } catch (err) {
-      await client.query('ROLLBACK').catch(() => {})
+      // Nothing partial survives: the delegations stay `pending`, the
+      // credentials stay as they were, and the re-key stays at `issued`, so
+      // the owner can retry the completion with the signatures already held.
       return reply.code(409).send({ error: 'rekey_completion_failed', details: safeDetails(err) })
-    } finally {
-      client.release()
     }
 
     return {
@@ -828,6 +793,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       api_key_prefix: newPrefix,
       old_api_key_revoked: true,
       invalidated_intents: invalidatedIntents.length,
+      superseded_delegations: superseded.length,
       residual_on_old_delegate: {
         atomic: rekey.residual_atomic,
         recoverable: false,

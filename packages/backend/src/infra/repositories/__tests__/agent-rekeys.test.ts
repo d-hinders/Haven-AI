@@ -16,6 +16,7 @@ import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
   abandonRekey,
+  completeRekey,
   findInFlightRekey,
   findRekey,
   invalidateOldPayerIntents,
@@ -381,6 +382,209 @@ describeDb('agent_rekeys ledger (#1698)', () => {
       [theirs],
     )
     expect(row.rows[0].status).toBe('pending_signature')
+  })
+
+  // ── Completion, as one transaction ─────────────────────────────────────
+
+  async function seedRekeyDelegation(
+    seeded: Seeded,
+    rekeyId: string,
+    carryRole: 'carry' | 'steady' | 'reanchor',
+    status = 'pending',
+  ): Promise<{ id: string; hash: string }> {
+    const hash = `0x${String(++seq).padStart(64, '0')}`
+    const row = await db.query<{ id: string }>(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+          delegation_json, version, status, budget_atomic, period_seconds, start_date,
+          expires_at, rekey_id, carry_role)
+       VALUES ($1, 84532, $2, NULL, $3, '{"d":1}', 1, $4, '400000', 86400, 0, 9999999999, $5, $6)
+       RETURNING id`,
+      [seeded.agentId, USDC, hash, status, rekeyId, carryRole],
+    )
+    return { id: row.rows[0].id, hash }
+  }
+
+  async function reachIssued(seeded: Seeded) {
+    const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, '0xtx')
+    await markMetered(rekey.id, seeded.agentId, snapshot())
+    await markIssued(rekey.id, seeded.agentId)
+    return rekey
+  }
+
+  it('MUTATION TARGET — a carry and its steady partner do NOT retire each other', async () => {
+    // They share a (token, recipient) slot by construction. Dropping the
+    // `rekey_id <> $2` exclusion from REPLACE_SUPERSEDED_SIBLINGS_SQL would
+    // make the pair kill itself, and this is the test that catches it.
+    const seeded = await seedAgent()
+    const rekey = await reachIssued(seeded)
+    const carry = await seedRekeyDelegation(seeded, rekey.id, 'carry')
+    const steady = await seedRekeyDelegation(seeded, rekey.id, 'steady')
+
+    const result = await completeRekey({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      rekeyId: rekey.id,
+      oldDelegateAddress: OLD_DELEGATE,
+      newDelegateAddress: NEW_DELEGATE,
+      apiKeyHash: 'hash-new',
+      apiKeyPrefix: 'sk_agent_new',
+      signedDelegations: [
+        { id: carry.id, delegationJson: '{"d":1,"signature":"0xaa"}' },
+        { id: steady.id, delegationJson: '{"d":1,"signature":"0xbb"}' },
+      ],
+    })
+
+    expect(result.superseded).toEqual([])
+    const rows = await db.query<{ delegation_hash: string; status: string; carry_role: string }>(
+      `SELECT delegation_hash, status, carry_role FROM agent_delegations WHERE rekey_id = $1`,
+      [rekey.id],
+    )
+    // BOTH live. This is the shape the whole carry design depends on.
+    expect(rows.rows.map((r) => r.status).sort()).toEqual(['active', 'active'])
+  })
+
+  it('retires a grant made between the revoke and the completion', async () => {
+    const seeded = await seedAgent()
+    const rekey = await reachIssued(seeded)
+    // An ordinary owner grant in the same slot, with no re-key parent.
+    const strayHash = await seedDelegation(seeded.agentId, 'active')
+    const carry = await seedRekeyDelegation(seeded, rekey.id, 'carry')
+
+    const result = await completeRekey({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      rekeyId: rekey.id,
+      oldDelegateAddress: OLD_DELEGATE,
+      newDelegateAddress: NEW_DELEGATE,
+      apiKeyHash: 'hash-new',
+      apiKeyPrefix: 'sk_agent_new',
+      signedDelegations: [{ id: carry.id, delegationJson: '{"d":1,"signature":"0xaa"}' }],
+    })
+
+    // Left active, it would sit alongside the carried grant in one slot —
+    // two live authorities for the same budget.
+    expect(result.superseded).toEqual([strayHash])
+    const stray = await db.query<{ status: string }>(
+      `SELECT status FROM agent_delegations WHERE delegation_hash = $1`,
+      [strayHash],
+    )
+    expect(stray.rows[0].status).toBe('replaced')
+  })
+
+  it('rolls the WHOLE completion back when any part of it fails', async () => {
+    const seeded = await seedAgent()
+    const rekey = await reachIssued(seeded)
+    const carry = await seedRekeyDelegation(seeded, rekey.id, 'carry')
+    const stale = await seedIntent(seeded, OLD_DELEGATE)
+
+    // Move the delegate underneath the re-key: `rotateAgentCredentials` is
+    // predicated on the OLD address, so it flips nothing and completeRekey
+    // throws mid-transaction.
+    await db.query(`UPDATE agents SET delegate_address = $1 WHERE id = $2`, [
+      '0x00000000000000000000000000000000000000ff',
+      seeded.agentId,
+    ])
+
+    await expect(
+      completeRekey({
+        agentId: seeded.agentId,
+        userId: seeded.userId,
+        rekeyId: rekey.id,
+        oldDelegateAddress: OLD_DELEGATE,
+        newDelegateAddress: NEW_DELEGATE,
+        apiKeyHash: 'hash-new',
+        apiKeyPrefix: 'sk_agent_new',
+        signedDelegations: [{ id: carry.id, delegationJson: '{"d":1,"signature":"0xaa"}' }],
+      }),
+    ).rejects.toThrow(/changed underneath/)
+
+    // Nothing partial survives — the failure modes this guards against are a
+    // rotated delegate with pending grants, and a live old API key against a
+    // new delegate.
+    const del = await db.query<{ status: string }>(
+      `SELECT status FROM agent_delegations WHERE id = $1`,
+      [carry.id],
+    )
+    expect(del.rows[0].status).toBe('pending')
+
+    const agent = await db.query<{ api_key_hash: string }>(
+      `SELECT api_key_hash FROM agents WHERE id = $1`,
+      [seeded.agentId],
+    )
+    expect(agent.rows[0].api_key_hash).toBe(seeded.apiKeyHash)
+
+    const intent = await db.query<{ status: string }>(
+      `SELECT status FROM payment_intents WHERE id = $1`,
+      [stale],
+    )
+    expect(intent.rows[0].status).toBe('pending_signature')
+
+    const still = await findRekey(rekey.id, seeded.agentId)
+    // Still retryable with the signatures the owner already holds.
+    expect(still?.stage).toBe('issued')
+  })
+
+  it('does the activation, rotation, invalidation and stage advance together', async () => {
+    const seeded = await seedAgent()
+    const rekey = await reachIssued(seeded)
+    const carry = await seedRekeyDelegation(seeded, rekey.id, 'carry')
+    const stale = await seedIntent(seeded, OLD_DELEGATE)
+    const confirmed = await seedIntent(seeded, OLD_DELEGATE, 'confirmed')
+
+    const result = await completeRekey({
+      agentId: seeded.agentId,
+      userId: seeded.userId,
+      rekeyId: rekey.id,
+      oldDelegateAddress: OLD_DELEGATE,
+      newDelegateAddress: NEW_DELEGATE,
+      apiKeyHash: 'hash-new',
+      apiKeyPrefix: 'sk_agent_new',
+      signedDelegations: [{ id: carry.id, delegationJson: '{"d":1,"signature":"0xaa"}' }],
+    })
+
+    expect(result.invalidatedIntents).toEqual([stale])
+    const del = await db.query<{ status: string; delegation_json: string }>(
+      `SELECT status, delegation_json FROM agent_delegations WHERE id = $1`,
+      [carry.id],
+    )
+    expect(del.rows[0].status).toBe('active')
+    expect(JSON.parse(del.rows[0].delegation_json).signature).toBe('0xaa')
+
+    const agent = await db.query<{ delegate_address: string; api_key_hash: string }>(
+      `SELECT delegate_address, api_key_hash FROM agents WHERE id = $1`,
+      [seeded.agentId],
+    )
+    expect(agent.rows[0].delegate_address).toBe(NEW_DELEGATE)
+    expect(agent.rows[0].api_key_hash).toBe('hash-new')
+
+    expect((await findRekey(rekey.id, seeded.agentId))?.stage).toBe('completed')
+
+    const settled = await db.query<{ status: string }>(
+      `SELECT status FROM payment_intents WHERE id = $1`,
+      [confirmed],
+    )
+    expect(settled.rows[0].status).toBe('confirmed')
+  })
+
+  it('an EMPTY carry snapshot is a valid measurement — the zero-delegation agent', async () => {
+    // Found by the #1698 review: an agent with no delegations (connected but
+    // never granted a budget, or previously revoked) must still be able to
+    // complete a re-key. It is the population re-key most needs to serve — a
+    // lost key with little history. `[]` is the honest measurement here,
+    // not a placeholder, and the metered-stage CHECK accepts it because an
+    // empty array is not NULL.
+    const seeded = await seedAgent()
+    const rekey = await open(seeded)
+    await markRevoked(rekey.id, seeded.agentId, 'none')
+
+    const metered = await markMetered(rekey.id, seeded.agentId, [])
+    expect(metered?.stage).toBe('metered')
+    expect(metered?.carry_snapshot).toEqual([])
+    // And the rest of the path stays open — the wedge the review found was
+    // that it did not.
+    expect((await markIssued(rekey.id, seeded.agentId))?.stage).toBe('issued')
   })
 
   // ── Lineage ────────────────────────────────────────────────────────────

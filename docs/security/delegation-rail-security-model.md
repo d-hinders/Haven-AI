@@ -4,6 +4,8 @@ status: current
 contract: true
 covers:
   - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/routes/agent-rekey.ts
+  - packages/backend/src/modules/agents/rekey-*.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/backend/src/rails/hybrid-transfers.ts
@@ -12,7 +14,7 @@ covers:
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-21" # #1679: signers read gains per-credential created_at (read-only timestamp for UI labels) — read/management boundary and every invariant unchanged; the read-surface paragraph updated to match. Prior: #1605: comment-only tense corrections in hybrid-accounts route + migrations 041/043 (stale "until #829/#834" claims) — no executable code, SQL, or boundary moves; every claim in this doc re-read against the diff stands. Prior: #1436: archiving now requires dead budgets as well as a revoked credential (one statement, refusal-only), so "Removed" cannot hide a spendable agent. #1423: revoke-all prepare reconciles crash-window orphans against disabledDelegations() and caps batches at 25; #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
+last-verified: "2026-08-21" # #1698: new §6a — agent delegate-key rotation is a DIFFERENT layer from the account signer set, and its loss has the opposite answer (recoverable, because the delegate never held owner authority); revoke-before-issue, non-custody and no-self-rekey recorded as security properties; covers: widened to the re-key surface. Prior: #1679: signers read gains per-credential created_at (read-only timestamp for UI labels) — read/management boundary and every invariant unchanged; the read-surface paragraph updated to match. Prior: #1605: comment-only tense corrections in hybrid-accounts route + migrations 041/043 (stale "until #829/#834" claims) — no executable code, SQL, or boundary moves; every claim in this doc re-read against the diff stands. Prior: #1436: archiving now requires dead budgets as well as a revoked credential (one statement, refusal-only), so "Removed" cannot hide a spendable agent. #1423: revoke-all prepare reconciles crash-window orphans against disabledDelegations() and caps batches at 25; #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -312,6 +314,49 @@ structural: onboarding nudges a backup, the account itself refuses removal of
 its last signer, and the dashboard requires an explicit confirmation before an
 informed two-to-one transition. Copy never promises recovery Haven cannot
 deliver.
+
+### 6a. Agent delegate-key rotation — a DIFFERENT layer (#1698, epic #1694)
+
+Everything above is about the **account's signer set**: the passkeys and EOA
+owners that sign delegations. An **agent's delegate key** — the key that
+*redeems* delegations — is a separate layer, and its loss has the opposite
+answer, for a reason worth stating rather than leaving implicit.
+
+The delegate never held owner authority. It holds only what a signed
+delegation grants it, and that grant is revocable by the account owner. So a
+lost or exposed delegate key is **recoverable**, where a lost sole account
+signer is not: the owner revokes the old delegation and issues a new one to a
+new delegate, keeping the agent's id, name, history and passport. That is
+`POST /agents/:id/rekey…` (`routes/agent-rekey.ts`), and it is the reason the
+"no recovery" limit above is scoped to the *signer set* rather than to keys in
+general.
+
+Three properties of that flow belong in this document because they are
+security properties, not implementation detail:
+
+- **Revoke precedes issue, always.** Both halves are on-chain and
+  owner-signed, so partial failure is possible either way, and the two
+  orderings fail differently. Revoke-then-issue fails to *the agent has no
+  authority* — recoverable, and the right posture when a key is lost, since a
+  lost key is already inert. Issue-then-revoke fails to *two simultaneously
+  live keys* on a funded account, which nothing recovers by retrying. The
+  ordering is enforced by a stage machine AND by CHECK constraints on
+  `agent_rekeys`, so it holds across the several requests the flow spans.
+- **Non-custody is unchanged.** The new keypair is generated on the target
+  machine and Haven receives only its public address. Nothing in the flow
+  accepts, stores or transports private key material, and a design that
+  "restores" a key to a new host is out of scope by owner decision — refused,
+  not built.
+- **An agent can never re-key itself.** Authorisation is the account owner
+  through the dashboard; an agent presenting its own credential is refused
+  explicitly. An agent rotating its own credentials would be an agent editing
+  its own authority.
+
+One consequence the owner should hear before starting: re-key retires the key
+that could **sweep** any residual balance on the old delegate EOA, so the
+preflight reads that balance and refuses until the owner says what happened to
+it. After the rotation it is unrecoverable — by the user and by Haven alike —
+in the same structural sense as the single-signer limit above.
 
 ## 7. Two signers: a recommendation, not a gate (#1153)
 

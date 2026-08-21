@@ -11,8 +11,8 @@
  * would let both proceed.
  */
 import pool from '../../db.js'
-import type { Executor } from '../transaction.js'
-import type { RekeyStage } from '../../modules/agents/rekey-stages.js'
+import { withTransaction, type Executor } from '../transaction.js'
+import type { RekeyStage } from '../../modules/agents/index.js'
 
 export interface AgentRekeyRow {
   id: string
@@ -51,6 +51,179 @@ export interface CarrySnapshotEntry {
   remaining_atomic: string
   /** False means the read fell back; the carry refuses these (see rekey-carry). */
   from_chain: boolean
+}
+
+// ── Reads the re-key route needs, kept out of the route (#1698 review) ────
+//
+// `dep-lint`'s inline-SQL gauge is shrink-only and it was right to fire: an
+// orchestration route is exactly where SQL accretes, and every statement left
+// there is one the real-DB harness cannot reach without standing up Fastify.
+// These live here so the route reads as a sequence of decisions.
+
+export interface RekeyAgentRow {
+  agent_id: string
+  delegate_address: string | null
+  chain_id: number
+  treasury_address: string | null
+  account_type: string | null
+  execution_rail: string | null
+  status: string
+}
+
+export const FIND_OWNED_REKEY_AGENT_SQL = `SELECT a.id AS agent_id, a.delegate_address, a.status, us.chain_id,
+            us.safe_address AS treasury_address, us.account_type, us.execution_rail
+     FROM agents a
+     LEFT JOIN user_safes us ON us.id = a.safe_id
+     WHERE a.id = $1 AND a.user_id = $2`
+
+/** The agent joined to its account — owner-scoped, so another user's id misses. */
+export async function findOwnedRekeyAgent(
+  agentId: string,
+  userId: string,
+  db: Executor = pool,
+): Promise<RekeyAgentRow | null> {
+  const result = await db.query<RekeyAgentRow>(FIND_OWNED_REKEY_AGENT_SQL, [agentId, userId])
+  return result.rows[0] ?? null
+}
+
+/**
+ * Another LIVE agent of the same user already holding this delegate address.
+ *
+ * The uniqueness rule multi-agent rests on: a user may hold many agents, just
+ * not two non-revoked ones sharing a delegate address (#1694,
+ * `017_agent_connection_setups.ts`). Excludes the agent being re-keyed, whose
+ * own row still carries the OLD address at this point.
+ */
+export const FIND_LIVE_AGENT_BY_DELEGATE_SQL = `SELECT id FROM agents
+      WHERE user_id = $1 AND LOWER(delegate_address) = LOWER($2)
+        AND status <> 'revoked' AND id <> $3`
+
+export async function findLiveAgentByDelegate(
+  userId: string,
+  delegateAddress: string,
+  excludingAgentId: string,
+  db: Executor = pool,
+): Promise<string | null> {
+  const result = await db.query<{ id: string }>(FIND_LIVE_AGENT_BY_DELEGATE_SQL, [
+    userId,
+    delegateAddress,
+    excludingAgentId,
+  ])
+  return result.rows[0]?.id ?? null
+}
+
+export interface DelegationTermsRow {
+  token_address: string
+  recipient_address: string | null
+  budget_atomic: string
+  period_seconds: number
+  start_date: string
+  expires_at: string
+}
+
+export const FIND_DELEGATION_TERMS_SQL = `SELECT token_address, recipient_address, budget_atomic, period_seconds,
+            start_date, expires_at
+       FROM agent_delegations WHERE agent_id = $1 AND delegation_hash = $2`
+
+export async function findDelegationTerms(
+  agentId: string,
+  delegationHash: string,
+  db: Executor = pool,
+): Promise<DelegationTermsRow | null> {
+  const result = await db.query<DelegationTermsRow>(FIND_DELEGATION_TERMS_SQL, [
+    agentId,
+    delegationHash,
+  ])
+  return result.rows[0] ?? null
+}
+
+export const NEXT_DELEGATION_VERSION_SQL = `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
+       FROM agent_delegations
+      WHERE agent_id = $1 AND token_address = LOWER($2)
+        AND recipient_address IS NOT DISTINCT FROM LOWER($3)`
+
+/** Fresh identity per replacement (#827/#813) — same rule as the grant route. */
+export async function nextDelegationVersion(
+  agentId: string,
+  tokenAddress: string,
+  recipientAddress: string | null,
+  db: Executor = pool,
+): Promise<number> {
+  const result = await db.query<{ next_version: number }>(NEXT_DELEGATION_VERSION_SQL, [
+    agentId,
+    tokenAddress,
+    recipientAddress,
+  ])
+  return result.rows[0].next_version
+}
+
+export const INSERT_REKEY_DELEGATION_SQL = `INSERT INTO agent_delegations (
+         agent_id, chain_id, token_address, recipient_address, delegation_hash,
+         delegation_json, version, status, budget_atomic, period_seconds,
+         start_date, expires_at, rekey_id, carry_role
+       ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13)
+       ON CONFLICT (delegation_hash) DO NOTHING`
+
+export async function insertRekeyDelegation(
+  row: {
+    agentId: string
+    chainId: number
+    tokenAddress: string
+    recipientAddress: string | null
+    delegationHash: string
+    delegationJson: string
+    version: number
+    budgetAtomic: string
+    periodSeconds: number
+    startDate: number
+    expiresAt: number
+    rekeyId: string
+    carryRole: string
+  },
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(INSERT_REKEY_DELEGATION_SQL, [
+    row.agentId,
+    row.chainId,
+    row.tokenAddress,
+    row.recipientAddress ? row.recipientAddress.toLowerCase() : null,
+    row.delegationHash,
+    row.delegationJson,
+    row.version,
+    row.budgetAtomic,
+    row.periodSeconds,
+    row.startDate,
+    row.expiresAt,
+    row.rekeyId,
+    row.carryRole,
+  ])
+}
+
+export const LIST_PENDING_REKEY_DELEGATIONS_SQL = `SELECT id, delegation_hash, delegation_json FROM agent_delegations
+        WHERE agent_id = $1 AND rekey_id = $2 AND status = 'pending'`
+
+export async function listPendingRekeyDelegations(
+  agentId: string,
+  rekeyId: string,
+  db: Executor = pool,
+): Promise<Array<{ id: string; delegation_hash: string; delegation_json: string }>> {
+  const result = await db.query<{ id: string; delegation_hash: string; delegation_json: string }>(
+    LIST_PENDING_REKEY_DELEGATIONS_SQL,
+    [agentId, rekeyId],
+  )
+  return result.rows
+}
+
+export const ACTIVATE_REKEY_DELEGATION_SQL = `UPDATE agent_delegations
+          SET status = 'active', delegation_json = $1, updated_at = NOW()
+        WHERE id = $2`
+
+export async function activateRekeyDelegation(
+  delegationId: string,
+  signedDelegationJson: string,
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(ACTIVATE_REKEY_DELEGATION_SQL, [signedDelegationJson, delegationId])
 }
 
 export const INSERT_REKEY_SQL = `INSERT INTO agent_rekeys
@@ -200,6 +373,46 @@ export async function abandonRekey(
 }
 
 /**
+ * Retire any grant still ACTIVE in a slot this re-key is about to fill.
+ *
+ * The ordinary grant path does the same thing (`routes/agent-delegations.ts`,
+ * activate): a new grant marks the previous active one for its (token,
+ * recipient) slot `replaced`. Re-key needs it too, and the `rekey_id`
+ * exclusion is the part that is specific here — a carry and a steady grant
+ * from THIS re-key share a slot by construction and must not retire each
+ * other. Excluding the re-key's own rows says that precisely, where
+ * "everything active before now" would say it by accident.
+ *
+ * In the normal flow this matches nothing: the revoke step already flipped
+ * every prior grant to `revoked`. It matters for the grant an owner makes
+ * between the revoke and the completion, which is otherwise left active
+ * alongside the carried pair in the same slot.
+ */
+export const REPLACE_SUPERSEDED_SIBLINGS_SQL = `UPDATE agent_delegations
+       SET status = 'replaced', updated_at = NOW()
+     WHERE agent_id = $1
+       AND status = 'active'
+       AND (rekey_id IS NULL OR rekey_id <> $2)
+       AND (token_address, COALESCE(recipient_address, '')) IN (
+         SELECT token_address, COALESCE(recipient_address, '')
+           FROM agent_delegations
+          WHERE agent_id = $1 AND rekey_id = $2
+       )
+     RETURNING delegation_hash`
+
+export async function replaceSupersededSiblings(
+  agentId: string,
+  rekeyId: string,
+  db: Executor = pool,
+): Promise<string[]> {
+  const result = await db.query<{ delegation_hash: string }>(REPLACE_SUPERSEDED_SIBLINGS_SQL, [
+    agentId,
+    rekeyId,
+  ])
+  return result.rows.map((r) => r.delegation_hash)
+}
+
+/**
  * Swap the agent's delegate address and API key in ONE statement (#1698 step
  * 4). Both halves of the credential set retire together — the epic's
  * decision, and #1681's finding A is what a partial rotation looks like: a
@@ -260,6 +473,79 @@ export const INVALIDATE_OLD_PAYER_INTENTS_SQL = `UPDATE payment_intents
        AND LOWER(delegate_address) = LOWER($2)
        AND status = 'pending_signature'
      RETURNING id`
+
+/**
+ * The completion, as ONE transaction (#1698 steps 4 + 5).
+ *
+ * Lives here rather than in the route for the reason the whole re-key exists:
+ * these five writes are only correct together. Half of them applied means an
+ * agent whose delegate address moved but whose replacement grants are still
+ * `pending`, or whose old API key still authenticates against a new delegate
+ * — the two-live-credentials shapes this epic is made of. Either all of it
+ * commits or none of it does, and the route should not be able to express
+ * anything else.
+ *
+ * Throws on any inconsistency it finds, so the caller reports a failure
+ * rather than a partial success. On a throw nothing survives: the delegations
+ * stay `pending`, the credentials stay as they were, and the re-key stays at
+ * `issued` — so the owner retries with the signatures already in hand.
+ */
+export async function completeRekey(
+  input: {
+    agentId: string
+    userId: string
+    rekeyId: string
+    oldDelegateAddress: string
+    newDelegateAddress: string
+    apiKeyHash: string
+    apiKeyPrefix: string
+    /** The signed delegation JSON to activate, by row id. */
+    signedDelegations: Array<{ id: string; delegationJson: string }>
+  },
+  db: Executor = pool,
+): Promise<{ superseded: string[]; invalidatedIntents: string[] }> {
+  return withTransaction(db, async (tx) => {
+    // Retire any grant still ACTIVE in a slot this re-key is about to fill,
+    // excluding this re-key's OWN rows — a carry and its steady partner share
+    // a slot by construction and must not retire each other (#1698 review).
+    const superseded = await replaceSupersededSiblings(input.agentId, input.rekeyId, tx)
+
+    for (const row of input.signedDelegations) {
+      await activateRekeyDelegation(row.id, row.delegationJson, tx)
+    }
+
+    // Both halves of the credential set retire together (#1694): the delegate
+    // key and the API key, in one statement, inside the same transaction as
+    // the grants that replace them. A stale API key is its own hazard
+    // (#1681's finding A) — rotating only one half is how the payer/signer
+    // mismatch arose in the first place.
+    const rotated = await rotateAgentCredentials(
+      {
+        agentId: input.agentId,
+        userId: input.userId,
+        oldDelegateAddress: input.oldDelegateAddress,
+        newDelegateAddress: input.newDelegateAddress,
+        apiKeyHash: input.apiKeyHash,
+        apiKeyPrefix: input.apiKeyPrefix,
+      },
+      tx,
+    )
+    if (!rotated) throw new Error('delegate address changed underneath the re-key')
+
+    // In-flight intents quoted against the OLD payer die here, in the same
+    // transaction as the rotation. #1690's signer guard is a backstop.
+    const invalidatedIntents = await invalidateOldPayerIntents(
+      input.agentId,
+      input.oldDelegateAddress,
+      tx,
+    )
+
+    const completed = await markCompleted(input.rekeyId, input.agentId, tx)
+    if (!completed) throw new Error('rekey stage moved underneath the completion')
+
+    return { superseded, invalidatedIntents }
+  })
+}
 
 export const REKEY_INTENT_INVALIDATION_REASON =
   'Invalidated by an agent re-key: this intent was quoted against the previous delegate key. Re-quote with the new credentials.'

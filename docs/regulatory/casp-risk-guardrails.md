@@ -17,7 +17,7 @@ covers:
   - packages/backend/src/routes/fortnox.ts
   - packages/backend/src/modules/reporting/fortnox.ts
   - packages/backend/src/modules/reporting/fortnox-connection.ts
-  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/rails/**
   - packages/backend/src/infra/repositories/payment-intents.ts
   - packages/backend/src/infra/repositories/approval-requests.ts
   - packages/backend/src/infra/repositories/x402-authorizations.ts
@@ -28,9 +28,11 @@ covers:
   - packages/backend/src/modules/catalog/catalog-discovery.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/domain/payment-coverage.ts
-  - packages/backend/src/infra/relayer.ts
+  - packages/backend/src/infra/relayer*.ts
+  - packages/backend/src/infra/outbound-*.ts
   - packages/backend/src/modules/reporting/**
   - packages/backend/src/modules/accounts/safe-deployer.ts
+  - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/middleware/reportingFeed.ts
   - packages/backend/src/db/migrations/**
@@ -38,6 +40,10 @@ covers:
   - packages/backend/src/routes/passkeys.ts
   - packages/backend/src/routes/safe-deploy.ts
   - packages/backend/src/routes/user-safes.ts
+  - packages/backend/src/routes/safe-exec.ts
+  - packages/backend/src/routes/approvals.ts
+  - packages/backend/src/routes/hybrid-accounts.ts
+  - packages/backend/src/routes/agent-delegations.ts
   - packages/frontend/src/app/(authenticated)/accounting/**
   - packages/frontend/src/app/(authenticated)/reporting/**
   - packages/frontend/src/components/AddFundsModal.tsx
@@ -742,6 +748,44 @@ Haven must not be
   -> merchant acquirer
   -> fiat PSP
 ```
+
+## What `covers:` must span (#1736)
+
+The front-matter `covers:` list is not a bibliography — it is the **gate**. A
+money-path file absent from it is a file whose change is never asked the
+perimeter question, and the absence is invisible: the check is green because
+nothing was analysed, not because the analysis passed.
+
+The list is therefore maintained against one reference: the money-path file
+list in
+[`ship-next`'s Merge Gate](../../.agents/skills/ship-next/SKILL.md). If a path
+is money-path enough to route the [`money.md`](../contributing/ship-playbooks/money.md)
+playbook, it is money-path enough to owe a perimeter shard. **Adding a file to
+that list without adding it here re-opens this hole.**
+
+Two consequences worth stating outright:
+
+- **Directory globs beat file lists** where a whole layer is the boundary.
+  `rails/**` is the on-chain policy layer wholesale, so a new rail file is
+  covered on the day it is written; the previous single `rails/allowance-module.ts`
+  entry was correct when the legacy rail was the only rail and silently stopped
+  being correct when the delegation rail was built beside it (#1736: eleven
+  `rails/` files, including the counterfactual account deploy, were gated by
+  nothing at all).
+- **File granularity is the right granularity**, even where a file also hosts
+  read-only code — `hybrid-provisioning.ts`'s pure `computeHybridAccountAddress`
+  derives the address that will hold user funds, so "read-only" is not
+  "perimeter-irrelevant". The gate has no sub-file resolution and should not
+  grow one: the remedy it demands is a one-paragraph shard, which is cheap
+  enough that over-inclusion costs little and under-inclusion costs the whole
+  guarantee.
+
+Deliberately **out of scope**: `scripts/release-bump.mjs` and
+`.github/workflows/publish.yml`. They are money-path in `ship-next`'s sense —
+they ship spend-authority code to users — but they move no funds, hold no keys
+and shift no authority boundary, so a CASP perimeter analysis of a version bump
+would be ceremony. Tracked as a decision, not an omission, in
+[#1739](https://github.com/d-hinders/Haven-AI/issues/1739).
 
 ## Verification log
 

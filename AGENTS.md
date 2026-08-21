@@ -7,7 +7,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-08-10" # weekly #1248 audit: every release/skills claim re-verified against the repo; roster gained the two reviewer roles added since July (design-reviewer #904, doc-reviewer)
+last-verified: "2026-08-21" # the canonical `release` skill is added and linked from the release section — the release path (preflight, bump, the two contract docs the coupling gate blocks on, PR to dev, promotion, registry-verified closeout) now has one home. No release MECHANICS change: publish still fires only on the dev → main promotion, the bump script still owns versions and pins, and the promotion stays a human step. Prior: weekly #1248 audit: every release/skills claim re-verified against the repo; roster gained the two reviewer roles added since July (design-reviewer #904, doc-reviewer)
 ---
 
 # Haven Codex Instructions
@@ -91,7 +91,7 @@ Green CI is necessary but not sufficient for changes that touch money movement, 
 
 ## Releasing npm Packages
 
-`@haven_ai/sdk`, `signer`, `mcp`, `connect`, and `cli` publish to npm automatically when a version bump lands on `main` (the **Publish packages** workflow — one package's failure no longer aborts the rest; the run summary reports per-package outcomes, #1159). Never run `npm publish` by hand, and never hand-edit package versions or cross-package dep pins — run `npm run release:bump -- <version>`, which updates them atomically and verifies the connect bundle, then open a PR and merge. `mcp-server`/`backend`/`frontend` are not npm-published. Details: `scripts/README.md` and the README's "Releasing npm packages" section.
+`@haven_ai/sdk`, `signer`, `mcp`, `connect`, and `cli` publish to npm automatically when a version bump lands on `main` (the **Publish packages** workflow — one package's failure no longer aborts the rest; the run summary reports per-package outcomes, #1159). Never run `npm publish` by hand, and never hand-edit package versions or cross-package dep pins — run `npm run release:bump -- <version>`, which updates them atomically and verifies the connect bundle, then open a PR and merge. `mcp-server`/`backend`/`frontend` are not npm-published. Details: `scripts/README.md` and the README's "Releasing npm packages" section. To cut one end to end — including the two contract docs the coupling gate blocks every release PR on, and a closeout verified against the npm registry — follow the canonical `release` skill (`.agents/skills/release/SKILL.md`).
 
 ## Agentic Workflow
 

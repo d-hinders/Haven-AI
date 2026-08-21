@@ -39,12 +39,18 @@ case "$tool" in
   *) exit 0 ;;
 esac
 
-# Any reviewer role counts. haven-design-reviewer is a SECOND pass on frontend
-# diffs rather than a substitute, but it is still an independent look, and this
-# marker answers "did one happen", not "was it the right one".
+# ONLY haven-reviewer clears the gate.
+#
+# An earlier version accepted haven-design-reviewer too, on the reasoning that
+# the marker answers "did an independent look happen" rather than "was it the
+# right one". Review caught that this contradicts AGENTS.md in the same commit:
+# for area:frontend, haven-design-reviewer is a SECOND pass, NOT a replacement.
+# Accepting it would have let a pull request satisfy a rule written as
+# unconditional while never running haven-reviewer at all — precisely the
+# substitution the prose forbids, locked in by a test asserting it as intended.
 sub=$(printf '%s' "$input" | jq -r '.tool_input.subagent_type // ""' 2>/dev/null) || sub=""
 case "$sub" in
-  haven-reviewer|haven-design-reviewer) ;;
+  haven-reviewer) ;;
   *) exit 0 ;;
 esac
 

@@ -191,17 +191,54 @@ This warning does not block. It is on you.'
 # Fails OPEN on its own malfunction — missing jq, unreadable marker, a detached
 # HEAD. A guard that blocks all pull request creation when its own plumbing
 # breaks would be routed around within the hour, and then it guards nothing.
+#
+# $1 = "strict" makes an UNRESOLVABLE session block instead of fail open.
+#
+# The two modes exist because "cannot resolve the session" means different
+# things on the two paths. On a parseable payload it is a malfunction — jq
+# present, JSON valid, no session_id — and blocking on that would stop
+# legitimate work over a harness quirk. On the UNPARSEABLE path the payload
+# already matched `create_pull_request` / `gh pr create` in raw text: something
+# is opening a pull request and the guard cannot verify review. Failing open
+# there is a bypass, and a bypass that a malformed payload reaches on purpose.
+# Between "block a real PR whose payload is corrupt" and "let an unverifiable PR
+# through", a gate the owner asked for as a full stop has to take the first.
 require_reviewer_pass() {
-  rsession=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null) || return 0
-  [ -n "$rsession" ] || return 0
-  rsafe=$(printf '%s' "$rsession" | tr -c 'A-Za-z0-9_-' '_' 2>/dev/null) || return 0
-  [ -n "$rsafe" ] || return 0
+  rstrict="${1:-}"
+  rsession=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null) || rsession=""
+  if [ -z "$rsession" ]; then
+    [ "$rstrict" = "strict" ] || return 0
+    printf '%s\n' 'BLOCKED: this looks like a pull request creation, but the payload could not
+be parsed, so no reviewer pass can be verified for it.
+
+If this is a real pull request, open it with a well-formed call after running
+haven-reviewer. If the payload is corrupt, fix the caller — the guard cannot
+tell an unreviewed PR from an unparseable one, and on a pull-request-shaped
+payload it will not guess.' >&2
+    exit 2
+  fi
+  rsafe=$(printf '%s' "$rsession" | tr -c 'A-Za-z0-9_-' '_' 2>/dev/null) || rsafe=""
+  if [ -z "$rsafe" ]; then
+    [ "$rstrict" = "strict" ] || return 0
+    exit 2
+  fi
 
   rbranch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || return 0
   [ -n "$rbranch" ] || return 0
   [ "$rbranch" = "HEAD" ] && return 0
 
   rmarker="${TMPDIR:-/tmp}/claude-reviewed-$rsafe"
+
+  # A marker that EXISTS but cannot be read is a malfunction, not an unreviewed
+  # branch, and the documented contract is to fail open on malfunction. The
+  # earlier `[ -f ] && grep` conflated the two: -f succeeds without read
+  # permission, grep then fails, and control fell through to the BLOCK. Found by
+  # review, reproduced as a non-root user — it does NOT reproduce as root, which
+  # reads mode-000 files, so the first attempt to confirm it came back clean.
+  if [ -e "$rmarker" ] && [ ! -r "$rmarker" ]; then
+    return 0
+  fi
+
   if [ -f "$rmarker" ] && grep -Fxq "$rbranch" "$rmarker" 2>/dev/null; then
     return 0
   fi
@@ -310,8 +347,21 @@ if [ -z "$tool" ]; then
   # creation, route it through the gate anyway. Anything else is genuinely
   # unidentifiable and stays quiet, because warning on every unparseable
   # payload would fire on unrelated commands and mute the guard by noise.
+  #
+  # The reviewer gate must run here too. It was added only at the two PARSEABLE
+  # call sites, leaving this branch as a bypass: a PR-shaped payload that fails
+  # to parse reached the non-blocking warning and never the block. Found by
+  # review and reproduced —
+  #   printf '{"session_id":"x",BROKEN gh pr create' | sh ship-next-guard.sh
+  # exited 0. The suite missed it because the two cases covering this branch
+  # assert stdout ("fire"), and a block writes to stderr and exits 2, so they
+  # passed either way. That is the same defect class as a muted guard: a check
+  # that cannot observe the thing it is meant to protect.
   case "$input" in
-    *create_pull_request*|*"gh pr create"*) fire_unless_ship_next ;;
+    *create_pull_request*|*"gh pr create"*)
+      require_reviewer_pass strict
+      fire_unless_ship_next
+      ;;
   esac
   exit 0
 fi

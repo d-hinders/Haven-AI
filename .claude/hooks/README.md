@@ -123,3 +123,43 @@ pull request is not a rule.
   skipped and why. Do not do it silently.
 
 Covered by `test-ship-next-guard.sh` (the reviewer-gate section at the end).
+
+### Status: NOT wired, and the promotion criteria are not met
+
+This gate ships as scripts only, like everything else here. It enforces nothing
+until someone adds the wiring to their own `settings.local.json`, and the
+**Promotion criteria** above — marker observed working in a fresh session, and
+the `sh`/`jq`/`awk` assumption checked against the team's machines — are both
+still open. They matter *more* for this hook than for the warning they were
+written for: a warning that misfires is noise, but a blocking gate that misfires
+stops every pull request for whoever wired it, and one that is silently inert
+(Windows without Git Bash) tells them nothing while they believe they are
+covered.
+
+Do not read the rule as depending on this. The reviewer pass is unconditional
+either way; the hook is what stops the rule being re-litigated per pull request
+by whoever opts in.
+
+### One assumption not yet verified live
+
+`reviewer-marker.sh` keys on `tool_name` in `{Task, Agent}` with
+`tool_input.subagent_type`. No other hook here encodes that shape, and it cannot
+be exercised end to end without committed wiring. If the real field names differ,
+the marker is never written — and because "no marker" means *block*, every pull
+request would then block for whoever wired it. Verify with a positive control
+before relying on it: run a reviewer subagent, then confirm a
+`claude-reviewed-*` file appeared under `TMPDIR`.
+
+### On "enforce outcomes, never tooling"
+
+CLAUDE.md says exactly that, and deliberately builds no check for whether
+`ship-next` was used. This gate is a narrow, deliberate exception, and worth
+naming as one rather than letting the two statements quietly disagree.
+
+The distinction it rests on: the gate asks whether an independent review
+*happened*, never which workflow ran or which route opened the pull request.
+Both remain free. The honest limit is that it observes a reviewer being
+*launched*, not findings being *applied* — launch-and-ignore satisfies it. That
+is a real gap, it is judgement, and no hook is going to close it. What the hook
+removes is the step where the rule gets re-argued from scratch on each pull
+request, which is the failure that actually happened.

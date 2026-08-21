@@ -286,12 +286,30 @@ check "empty session_id -> warns" fire '{"session_id":"","tool_name":"mcp__githu
 check "path-traversal session_id -> warns" fire "$(pr '../../etc/passwd')"
 
 
+rcheck() { # name expected_exit payload
+  printf '%s' "$3" | sh "$GUARD" >/dev/null 2>&1
+  actual=$?
+  if [ "$actual" = "$2" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf '  FAIL  %-52s expected exit %s, got %s\n' "$1" "$2" "$actual"
+  fi
+}
+
 # --- the last silence path: an unparseable payload that IS a PR creation --
 # Found by review, outside the scope it was asked to check. The top-level jq
 # extraction used to `|| exit 0`, bypassing the marker gate entirely — so the
 # documented "can never fail toward silence" property was not actually true.
-check "malformed payload naming create_pull_request" fire '{"session_id":"x","tool_name":BROKEN,"create_pull_request"'
-check "malformed payload containing gh pr create" fire '{"session_id":"x",BROKEN gh pr create'
+#
+# These two now BLOCK rather than warn, which is a stronger form of the property
+# they were written to protect: a PR-shaped payload the guard cannot parse must
+# never pass unnoticed. Warning was the strongest response available before the
+# reviewer gate existed; with it, an unverifiable pull request is refused. The
+# assertions moved from stdout to exit status for the same reason the F2 bypass
+# survived the suite — a case that reads stdout cannot see a block.
+rcheck "malformed payload naming create_pull_request BLOCKS" 2 '{"session_id":"x","tool_name":BROKEN,"create_pull_request"'
+rcheck "malformed payload containing gh pr create BLOCKS" 2 '{"session_id":"x",BROKEN gh pr create'
 # ...but an unidentifiable payload must still stay quiet, or every unparseable
 # tool call becomes noise and the guard gets muted that way instead.
 check "malformed payload, nothing PR-shaped" silent 'not json at all'
@@ -362,16 +380,6 @@ done
 # this measures a BLOCK — exit 2 with a message on stderr. check() reads stdout,
 # so it cannot see this; these assert the exit status directly.
 WRITER_R="$(dirname "$0")/reviewer-marker.sh"
-rcheck() { # name expected_exit payload
-  printf '%s' "$3" | sh "$GUARD" >/dev/null 2>&1
-  actual=$?
-  if [ "$actual" = "$2" ]; then
-    pass=$((pass + 1))
-  else
-    fail=$((fail + 1))
-    printf '  FAIL  %-52s expected exit %s, got %s\n' "$1" "$2" "$actual"
-  fi
-}
 
 unreviewed rgate
 rcheck "no reviewer pass -> PR creation BLOCKS" 2 "$(pr rgate 1)"
@@ -398,17 +406,42 @@ printf '{"session_id":"rgate2","hook_event_name":"PreToolUse","tool_name":"Agent
   | sh "$WRITER_R" 2>/dev/null
 rcheck "a non-reviewer subagent does NOT clear the gate" 2 "$(pr rgate2 1)"
 
-# haven-design-reviewer is an independent pass too.
+# haven-design-reviewer is a SECOND pass, not a substitute (AGENTS.md), so it
+# must NOT clear the gate on its own. This case asserted the opposite until
+# review pointed out it locked in the very substitution the prose forbids.
 unreviewed rgate3
 printf '{"session_id":"rgate3","hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"subagent_type":"haven-design-reviewer"}}' \
   | sh "$WRITER_R" 2>/dev/null
-rcheck "haven-design-reviewer clears the gate" 0 "$(pr rgate3 1)"
+rcheck "haven-design-reviewer alone does NOT clear the gate" 2 "$(pr rgate3 1)"
 
 # Fail-open on its own malfunction: blocking every PR because the plumbing broke
 # would get the hook removed, and then it guards nothing.
 rcheck "missing session_id -> does NOT block" 0 '{"tool_name":"mcp__github__create_pull_request","tool_input":{}}'
 
-for _s in rgate rgate2 rgate3; do unreviewed "$_s"; done
+# F2 regression: an unparseable PR-shaped payload must still hit the gate. The
+# two pre-existing cases on this branch assert stdout, and a block writes to
+# stderr — so they passed while the bypass was live. Assert the exit code.
+unreviewed rgate4
+rcheck "unparseable payload that looks like a PR still BLOCKS" 2 '{"session_id":"rgate4",BROKEN gh pr create'
+
+# F3 regression: a marker that exists but cannot be read is a malfunction, and
+# the contract is to fail OPEN. Skipped as root, which can read mode-000 files
+# and would make the case pass vacuously.
+if [ "$(id -u 2>/dev/null || echo 0)" != "0" ]; then
+  unreviewed rgate5
+  printf '%s\n' "$TEST_BRANCH" > "$MARKER_DIR/claude-reviewed-rgate5" 2>/dev/null
+  chmod 000 "$MARKER_DIR/claude-reviewed-rgate5" 2>/dev/null
+  rcheck "unreadable marker fails OPEN, not closed" 0 "$(pr rgate5 1)"
+  chmod 644 "$MARKER_DIR/claude-reviewed-rgate5" 2>/dev/null
+  unreviewed rgate5
+else
+  printf '  SKIP  unreadable-marker case (running as root reads mode-000)\n'
+fi
+
+# F7: leave no stray markers behind, including the ones seeded at the top.
+for _s in rgate rgate2 rgate3 rgate4 rgate5 testsess sess1 sess2 wsess gatesess x ______etc_passwd; do
+  unreviewed "$_s"
+done
 
 printf '\nship-next guard: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

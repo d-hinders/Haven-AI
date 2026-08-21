@@ -406,6 +406,19 @@ export default function DesignSystemPage() {
               <Button variant="tertiary">Tertiary</Button>
               <Button variant="danger">Danger</Button>
             </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Button size="sm" variant="ghost">Small</Button>
+              <Button size="md" variant="ghost">Medium</Button>
+              <Button size="lg" variant="ghost">Large</Button>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              Sizes paint at 36 / 40 / 44px. Small and medium carry an invisible
+              44px-tall tap target that reaches past their painted edge, so a compact
+              button in a row list stays comfortable to hit on a phone without
+              loosening the layout around it. The target grows vertically only —
+              widening it would let a button steal taps from its neighbour in a tight
+              toolbar.
+            </p>
             <div className="mt-5 flex flex-wrap items-center gap-2">
               <StatusBadge tone="success">Received</StatusBadge>
               <StatusBadge tone="warning">Needs approval</StatusBadge>

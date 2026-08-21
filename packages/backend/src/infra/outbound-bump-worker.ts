@@ -10,7 +10,13 @@
  *     successfully → close mined; mined-and-reverted → close failed; truly
  *     unmined → re-broadcast the SAME nonce and calldata with bumped fees,
  *     recorded as a replacement row (`replaced`/`replaced_by`) — never a
- *     silent in-place rewrite.
+ *     silent in-place rewrite. The replacement step is gated on
+ *     {@link REBROADCAST_SAFE_SUBMITTERS} (#1735): a same-nonce replacement
+ *     is safe on-chain for anyone, but it mints a NEW tx hash, and a
+ *     submitter whose recovery is keyed off the hash it recorded (the
+ *     passport anchor, #1043) would then never find its own transaction. The
+ *     chain-first closes still apply to those rows — only the bump is
+ *     withheld, and the stuck lane is alerted instead.
  *  2. ORPHANED QUEUED rows (a submitter died between enqueue and broadcast):
  *     re-broadcast — but only for submitters whose payload is idempotent
  *     on-chain (see {@link REBROADCAST_SAFE_SUBMITTERS}); a passport attest
@@ -47,6 +53,14 @@ export const MAX_BUMPS_PER_NONCE = 3
  * moving nothing); a hybrid CREATE2 factory deploy of an existing account
  * reverts/no-ops; a second passport revoke of the same UID reverts. The
  * attest mints a NEW attestation each time — never listed here.
+ *
+ * Membership gates BOTH paths (#1735). For the orphan path it means what it
+ * says: may this payload be broadcast a second time. For the stale-broadcast
+ * path it carries a second, weaker meaning — may this worker take OWNERSHIP
+ * of the submission at all — because a replacement changes the tx hash the
+ * submitter recorded. The two happen to need the same list, so it is one
+ * list; if a submitter ever wants one and not the other, split it rather
+ * than widening this.
  */
 export const REBROADCAST_SAFE_SUBMITTERS: ReadonlySet<string> = new Set([
   'sweep',
@@ -152,6 +166,42 @@ export async function runOutboundBumpTick(
       if (status === 0) {
         await deps.markFailed(row.id, `mined and reverted (${row.tx_hash})`)
         result.closedFailed += 1
+        continue
+      }
+
+      // Truly unmined, and we are about to spend gas on it. A REPLACEMENT is
+      // safe on-chain for any submitter — same nonce, so at most one of the
+      // two can ever mine — but it is not safe for every submitter's RECOVERY
+      // (#1735). A replacement carries a new tx hash, and a submitter whose
+      // retry path is keyed off the hash it recorded (the passport anchor's
+      // #1043 receipt recovery) can no longer find its own transaction: it
+      // reads null forever and re-mints for real, which for `passport_attest`
+      // means a second live, revocable credential.
+      //
+      // Same set, same reason as the orphan path below — a payload we may not
+      // duplicate is also a payload whose owner we may not take. The
+      // chain-first closes ABOVE still apply to these rows, which is the
+      // point: `broadcast` remains a reconcilable state for them, just not a
+      // bumpable one.
+      //
+      // ACCEPTED COST, stated plainly because it is an outage shape: not
+      // bumping leaves the nonce lane blocked, and this worker exists to
+      // unblock exactly that. Every later relayer transaction on the chain
+      // queues behind the stuck attest until an operator acts. That is the
+      // deliberate trade — a blocked lane is loud, bounded and recoverable by
+      // a human, while a duplicate attestation is silent, permanent, and the
+      // precise failure #1042/#1043 were built to prevent. The clean fix is a
+      // same-nonce CANCEL (a 0-value self-send) that unblocks the lane AND
+      // definitively kills the attest, making a fresh anchor correct; that is
+      // a new mechanism and an owner decision, deliberately not taken here
+      // (#1735).
+      if (!REBROADCAST_SAFE_SUBMITTERS.has(row.submitter)) {
+        log.error(
+          { chainId, id: row.id, submitter: row.submitter, txHash: row.tx_hash, nonce: row.nonce },
+          'outbound-bump: stuck broadcast from a non-idempotent submitter — NOT replacing it (its own recovery owns the retry); ' +
+            'the relayer nonce lane stays blocked until an operator intervenes',
+        )
+        result.alerted += 1
         continue
       }
 

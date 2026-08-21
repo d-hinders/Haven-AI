@@ -421,6 +421,8 @@ export class HavenClient {
       asset: option.asset,
       network: option.network,
       expectedAuth: raw.x402_expected_auth,
+      payerDelegate: (raw as { payer_delegate?: string }).payer_delegate,
+      payerAgentId: (raw as { payer_agent_id?: string }).payer_agent_id,
       // #1138: the digest the delegation-rail expected context commits to.
       // Re-derived locally, exactly like every other context field the edge
       // signer is handed (amount, merchantTo, …) — none of them are trusted

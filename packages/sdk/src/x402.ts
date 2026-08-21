@@ -518,7 +518,12 @@ export function x402AuthorizationAmount(option: X402PaymentOption): string {
  * hash under a v2 binding and refuses to sign typed data without one.
  */
 export function buildX402ExpectedMessage(context: X402ExpectedContext): string {
-  const version = context.typedDataHash ? 2 : 1
+  // Contents-derived, never caller-chosen (#1138, #1690): payerDelegate ⇒ 3,
+  // else typedDataHash ⇒ 2, else 1. A v3 context still carries typedDataHash
+  // on the delegation rail — the MODE rules key on typedDataHash presence
+  // independently of the version, so v3 works in both hash and typed-data
+  // modes.
+  const version = context.payerDelegate ? 3 : context.typedDataHash ? 2 : 1
   const payload: Record<string, unknown> = {
     version,
     kind: 'haven.x402.expected',
@@ -535,6 +540,14 @@ export function buildX402ExpectedMessage(context: X402ExpectedContext): string {
   }
   if (context.typedDataHash) {
     payload.typedDataHash = context.typedDataHash.toLowerCase()
+  }
+  if (context.payerDelegate) {
+    payload.payerDelegate = context.payerDelegate.toLowerCase()
+    // Only meaningful alongside the delegate it identifies — an agent id with
+    // no payer claim would be diagnosis without a guard.
+    if (context.payerAgentId) {
+      payload.payerAgentId = context.payerAgentId
+    }
   }
   return `Haven x402 expected context v${version}\n${stableStringify(payload)}`
 }

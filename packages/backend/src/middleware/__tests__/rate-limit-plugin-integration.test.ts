@@ -17,6 +17,24 @@ import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
 import { SharedRateLimitStore } from '../shared-rate-limit-store.js'
 
+/**
+ * The production store, with the degradation deadline widened for THIS suite.
+ *
+ * The 250 ms production deadline is a fail-open bound: under a slow database
+ * the store deliberately falls back to per-replica counting rather than hang
+ * a request. Under a full parallel test run the local Postgres is exactly
+ * that slow, so the production constant made this suite assert monotonicity
+ * against a store that was CORRECTLY degrading — interleaved remaining
+ * series, ~1-in-3 full-suite runs. The degraded paths have their own unit
+ * suite; what THIS suite pins is the wiring when the database answers, so it
+ * gets a deadline the loaded harness cannot trip.
+ */
+class PatientStore extends SharedRateLimitStore {
+  constructor(options: ConstructorParameters<typeof SharedRateLimitStore>[0] = {}) {
+    super({ ...options, deadlineMs: 30_000 })
+  }
+}
+
 describeDb('rate-limit plugin + SharedRateLimitStore + real Postgres (#1680)', () => {
   let subject = 0
 
@@ -33,7 +51,7 @@ describeDb('rate-limit plugin + SharedRateLimitStore + real Postgres (#1680)', (
       // A fixed key per test: what is under test is the counting, not the
       // key derivation (rateLimitKeyFor has its own suite).
       keyGenerator: () => `integ:${subject}`,
-      store: SharedRateLimitStore as never,
+      store: PatientStore as never,
     })
     app.post('/probe', { config: { rateLimit: { max, timeWindow: '1 minute' } } }, async () => ({ ok: true }))
     return app

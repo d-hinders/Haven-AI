@@ -472,7 +472,9 @@ describe('the MCP tool-schema boundary (#1143)', () => {
     // message naming neither the cause nor the fix, and written by nobody at
     // Haven. The semantic refusal must own that error.
     const quote = await hostedQuote('delegation')
-    quote.x402.expected.auth.version = 3
+    // 4, not 3: #1690 claimed v3 (payer identity), so the future-version probe
+    // moves up — the property under test is any version PAST the supported set.
+    quote.x402.expected.auth.version = 4
     expect(
       z.object(signerToolSchemas.haven_sign_x402).safeParse({
         payload_hash: quote.payload_hash,

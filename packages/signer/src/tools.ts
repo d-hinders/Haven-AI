@@ -95,6 +95,14 @@ const x402ExpectedShape = {
     .string()
     .regex(/^0x[0-9a-fA-F]+$/, 'typed_data_hash must be a 0x-prefixed hex string')
     .optional(),
+  // #1690: present on a v3 context. The delegate this quote was created FOR —
+  // the signer refuses to sign when it is not its own. Inside the Haven-signed
+  // message, so stripping it here would only break the binding signature.
+  payer_delegate: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'payer_delegate must be a 0x-prefixed address')
+    .optional(),
+  payer_agent_id: z.string().min(1).optional(),
   auth: z.object({
     // Open at the boundary, enforced in the signer — see bindingVersionSchema.
     version: bindingVersionSchema,
@@ -286,12 +294,16 @@ function toExpectedX402(raw: {
   // optional because it skips the window check when absent.
   expires_at: string
   typed_data_hash?: string
+  payer_delegate?: string
+  payer_agent_id?: string
   auth: X402ExpectedPayment['auth']
 }): X402ExpectedPayment {
   return {
     paymentId: raw.payment_id,
     payloadHash: raw.payload_hash,
     typedDataHash: raw.typed_data_hash,
+    payerDelegate: raw.payer_delegate,
+    payerAgentId: raw.payer_agent_id,
     resourceUrl: raw.resource_url,
     merchantTo: raw.merchant_to,
     amount: raw.amount,

@@ -84,6 +84,20 @@ export const PAINTED_SLACK = 1.05
  * Returns the resulting document height. THROWS when the scroll root is
  * missing: a renamed `#main-content` must fail the run, because the fallback
  * is silently capturing the blank page this whole module exists to prevent.
+ *
+ * ── How to read the resulting PNG ────────────────────────────────────────────
+ * Chrome OUTSIDE `#main-content` does not stretch to the un-clipped height.
+ * The shell row goes from a definite `100vh` to `height: auto`, and the
+ * sidebar sizes itself with `lg:h-full` — a percentage against an auto-height
+ * parent resolves to `auto` — so its tint and right border stop at the bottom
+ * of the nav instead of running the full ~16,000px. Below that the sidebar
+ * column is plain white.
+ *
+ * That is expected, and it is not what a user sees (live, the sidebar stays
+ * pinned to the viewport while `<main>` scrolls under it). So: judge SHELL AND
+ * CHROME from the first viewport, and CONTENT from the whole image. A long
+ * white column beside the content is the capture technique, not a broken
+ * sidebar — do not file it as one.
  */
 export async function unclipScrollShell(page, { selector = SCROLL_SHELL_ROOT } = {}) {
   const height = await page.evaluate((sel) => {
@@ -155,8 +169,12 @@ export async function assertCaptureNotBlank(buffer, { label = 'capture', viewpor
     `${label}: capture is BLANK below the fold — ${result.width}×${result.height}, but the last ` +
       `painted row is y=${result.lastPaintedRow} (${pct}% of the image), which is within one ` +
       `${viewportDevicePx}px viewport. The image is the right SIZE and mostly empty, so it looks ` +
-      `like valid evidence and is not. Usual cause: the page was captured without un-clipping the ` +
-      `app shell (see unclipScrollShell in scripts/full-page-capture.mjs).`,
+      `like valid evidence and is not.\n` +
+      `Likeliest cause is the capture path — the app shell was not un-clipped before the shot ` +
+      `(see unclipScrollShell in scripts/full-page-capture.mjs). But the PAGE can put a capture ` +
+      `in this state too: a route that never hydrated, or one that stopped painting at an error ` +
+      `boundary, ends at the fold for its own reasons. Check what the route should render at ` +
+      `this height before assuming the capture is at fault.`,
   )
 }
 

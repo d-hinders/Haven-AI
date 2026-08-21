@@ -217,18 +217,42 @@ describe('inspectCapture', () => {
     })
   })
 
-  it('does not flag a capture just past the fold', async () => {
-    // TALL_FACTOR's job: a page one-and-a-bit viewports tall whose content
-    // stops at the fold is ordinary, not broken.
-    const viewportPx = 20
-    const height = Math.floor(viewportPx * TALL_FACTOR) // exactly at the bound
-    const png = encodePng(8, [
+  // The two cases below straddle TALL_FACTOR's boundary deliberately. Stated
+  // separately because the interesting one is the SECOND: the guard's bias
+  // there is a real trade-off, not an accident, and a single test sitting on
+  // the quiet side of the bound would hide it.
+  const foldOnly = (viewportPx: number, height: number) =>
+    encodePng(8, [
       ...Array.from({ length: viewportPx }, () => paintedRow(8)),
       ...Array.from({ length: height - viewportPx }, () => blankRow(8)),
     ])
-    await expect(inspectCapture(png, { viewportDevicePx: viewportPx })).resolves.toMatchObject({
-      blankBelowFold: false,
-    })
+
+  it('does not flag an image exactly at the tall/short boundary', async () => {
+    // The comparison is strict (`height > viewport * TALL_FACTOR`), so an image
+    // sitting exactly on the bound is SHORT and is never examined further,
+    // whatever it painted.
+    const viewportPx = 20
+    await expect(
+      inspectCapture(foldOnly(viewportPx, viewportPx * TALL_FACTOR), {
+        viewportDevicePx: viewportPx,
+      }),
+    ).resolves.toMatchObject({ blankBelowFold: false })
+  })
+
+  it('flags a barely-tall capture whose content stops at the fold — by design', async () => {
+    // One pixel past the bound the image counts as tall, and content ending at
+    // the fold is flagged. A page CAN legitimately end in a deep whitespace
+    // band and land here, so this is a narrow false-positive window, entered
+    // knowingly: a false positive fails loudly and gets looked at, while a
+    // false negative hands a reviewer blank pixels and says nothing. For a
+    // guard whose whole subject is silent bad evidence, that is the side to
+    // err on.
+    const viewportPx = 20
+    await expect(
+      inspectCapture(foldOnly(viewportPx, Math.floor(viewportPx * TALL_FACTOR) + 1), {
+        viewportDevicePx: viewportPx,
+      }),
+    ).resolves.toMatchObject({ blankBelowFold: true })
   })
 
   it('still flags a capture painted marginally past the fold', async () => {

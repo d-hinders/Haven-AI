@@ -398,5 +398,43 @@ describe('superseded agent credentials (#1688)', () => {
       'credentials', 'signer_runtime', 'runtime_config', 'hosted_mcp', 'signer_process', 'restart',
     ])
   })
+
+  /**
+   * #1681 — a tombstone changes how a directory READS, never whether a
+   * still-present key gets probed. Retired-with-keys-removed is an
+   * informational pass; tombstoned-with-live-key still fails the doctor.
+   */
+  it('a tombstoned dir with keys REMOVED reads as retired — informational pass, not "no stored key"', async () => {
+    const { homeDir, oldDir } = await homeWithSuperseded()
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    const { rm } = await import('node:fs/promises')
+    await writeAgentTombstone({
+      directory: oldDir, agentId: 'agent-old', reason: 'reset', retiredAt: '2026-08-21T10:00:00.000Z',
+    })
+    await rm(join(oldDir, 'identity.json'))
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain('tombstoned (keys removed)')
+    expect(check?.detail).toContain('agent-old')
+    expect(check?.detail).toContain('2026-08-21')
+    expect(check?.detail).not.toContain('no stored key/URL to probe')
+  })
+
+  it('MUTATION PROOF: a tombstone does NOT excuse a live key — still spend-capable, still a failure', async () => {
+    // A tombstone is a marker, not a revocation. If it silenced the probe, a
+    // retirement flow that forgot the revoke step would green-wash a key that
+    // still spends.
+    const { homeDir, oldDir } = await homeWithSuperseded()
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    await writeAgentTombstone({ directory: oldDir, agentId: 'agent-old', reason: 'reset' })
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('ok') })
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toMatch(/SPEND-CAPABLE/)
+    expect(check?.detail).toContain('tombstoned — key material still present')
+  })
 })
 

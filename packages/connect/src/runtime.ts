@@ -316,8 +316,11 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
           'still exist with their own keys, and any host that was already running keeps acting as them.',
       )
       log(
-        'If you meant to replace them: revoke them on the Haven agent page, restart long-lived hosts, ' +
-          `then remove their directories under ~/.haven/agents. Run ${RERUN_HINT} --doctor to check whether their keys are still live.`,
+        'If you meant to replace them: revoke them on the Haven agent page, then restart EVERY ' +
+          'long-lived host (gateways, TUI workers, editors) — each holds the MCP wiring snapshot from ' +
+          'its own start time, so after repeated setups each can be stuck on a DIFFERENT old agent. ' +
+          `Then remove their directories under ~/.haven/agents (or ${RERUN_HINT} --tombstone <dir> to ` +
+          `leave a diagnostic in their place). Run ${RERUN_HINT} --doctor to check whether their keys are still live.`,
       )
     }
   } catch {

@@ -82,7 +82,7 @@ export function AllowanceBar({
       </div>
       <div
         className={`w-full h-[3px] bg-[var(--v2-surface-2)] rounded-full overflow-hidden ${
-          nearLimit ? 'ring-1 ring-[var(--v2-danger)]/30 ring-offset-0' : ''
+          nearLimit ? 'ring-1 ring-danger/30 ring-offset-0' : ''
         }`}
       >
         <div

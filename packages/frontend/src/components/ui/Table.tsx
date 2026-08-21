@@ -134,7 +134,7 @@ function SortableHeaderCell({
       type="button"
       onClick={onSort}
       aria-label={`Sort by ${label}, currently ${directionWord}`}
-      className={`inline-flex items-center gap-0 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-1 ${
+      className={`inline-flex items-center gap-0 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:ring-offset-1 ${
         align === 'right' ? 'w-full justify-end' : ''
       }`.trim()}
     >

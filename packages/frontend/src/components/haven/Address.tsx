@@ -81,7 +81,7 @@ export function Address({
           type="button"
           onClick={handleCopy}
           aria-label={copied ? 'Address copied' : 'Copy address'}
-          className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+          className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
         >
           {copied ? (
             <Icon icon={Check} className="h-3 w-3 text-[var(--v2-success)]" />

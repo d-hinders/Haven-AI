@@ -77,7 +77,7 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
           Couldn&apos;t load passport status.{' '}
           <button
             type="button"
-            className="rounded-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            className="rounded-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             onClick={() => void refetch()}
           >
             Try again
@@ -138,7 +138,7 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
                     href={explorerHref}
                     target="_blank"
                     rel="noreferrer"
-                    className="rounded-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                    className="rounded-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
                   >
                     View transaction
                   </a>

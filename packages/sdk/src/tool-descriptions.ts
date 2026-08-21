@@ -177,9 +177,13 @@ export const toolDescriptions = {
     behavior:
       'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating Safe (hardcoded destination). ' +
       'The delegate key signs locally — Haven never sees it and the backend never constructs signed transactions (CASP/MiCA Red Line #2). ' +
-      'Returns tx hashes and recovered amounts. Returns an empty transfers list when nothing is stranded.',
+      'Returns tx hashes and recovered amounts. Returns an empty transfers list when nothing is stranded. ' +
+      'Each transfer carries confirmation: "confirmed" (a receipt was seen — the funds are in the Safe) or "unconfirmed" ' +
+      '(broadcast but not confirmed within 90 seconds — still in the mempool, may still land). The top-level unconfirmed flag is true when any transfer is unconfirmed.',
     nextActionGuidance:
-      'If transfers is non-empty, confirm the amounts with the user. No further action required — funds are on their way back to the Safe.',
+      'If transfers is non-empty, confirm the amounts with the user. ' +
+      'Report a transfer as recovered ONLY when its confirmation is "confirmed". ' +
+      'For an "unconfirmed" transfer, tell the user it was submitted but not yet confirmed, give them its txHash and explorerUrl to check, and do not re-run the sweep immediately — a re-run after it lands will simply find nothing stranded.',
   },
   send: {
     summary:

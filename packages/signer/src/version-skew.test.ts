@@ -428,10 +428,14 @@ describe('tool boundary surfaces the skew instead of a Zod string (#1143)', () =
       const handlers = createToolHandlers(signer)
       for (const version of SUPPORTED_X402_EXPECTED_VERSIONS) {
         const usesTypedData = version >= 2
-        const expected = await expectedWithVersion(
-          version,
-          usesTypedData ? { typedDataHash } : {},
-        )
+        // #1690: a v3 context CARRIES a payer claim, and the claim must be
+        // THIS signer's delegate or the guard (correctly) refuses — this loop
+        // proves compatibility, not the mismatch path.
+        const payerClaim = version >= 3 ? { payerDelegate: signer.delegateAddress } : {}
+        const expected = await expectedWithVersion(version, {
+          ...(usesTypedData ? { typedDataHash } : {}),
+          ...payerClaim,
+        })
         const result = await handlers.haven_sign_x402({
           payload_hash: FUNDING_HASH,
           payment_required: PAYMENT_REQUIRED,
@@ -446,6 +450,7 @@ describe('tool boundary surfaces the skew instead of a Zod string (#1143)', () =
             network: expected.network,
             expires_at: expected.expiresAt,
             typed_data_hash: usesTypedData ? typedDataHash : undefined,
+            payer_delegate: version >= 3 ? signer.delegateAddress : undefined,
             auth: expected.auth,
           },
         })
@@ -599,11 +604,13 @@ describe('signerInstructions is derived, not hand-maintained (#1155)', () => {
     // Cheap unit-level backstop for the handshake assertions above: the string
     // builder itself never hard-codes a version.
     const instructions = signerInstructions()
-    for (const version of SUPPORTED_X402_EXPECTED_VERSIONS) {
-      expect(instructions).toContain(String(version))
-    }
-    expect(instructions).not.toContain(
-      String(Math.max(...SUPPORTED_X402_EXPECTED_VERSIONS) + 1),
-    )
+    // Parse the rendered LIST, not the whole text: `toContain('4')` would trip
+    // on any stray character ('4337', '404'), which is exactly what happened
+    // when the supported set grew to include 3 and the probe became '4'.
+    const rendered = /x402 expected-context versions supported: ([0-9, ]+)/.exec(instructions)
+    expect(rendered).not.toBeNull()
+    const listed = rendered![1].split(',').map((v) => Number(v.trim()))
+    expect(listed).toEqual([...SUPPORTED_X402_EXPECTED_VERSIONS])
+    expect(listed).not.toContain(Math.max(...SUPPORTED_X402_EXPECTED_VERSIONS) + 1)
   })
 })

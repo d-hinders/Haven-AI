@@ -3081,14 +3081,24 @@ export type components = {
             /** Format: uri */
             resource_url?: string;
             x402_expected_auth: {
-                /** @enum {integer} */
-                version: 1;
+                /**
+                 * @description Contents-derived, never chosen: 1 = hash-only (legacy rail); 2 = commits to the EIP-712 typedDataHash (delegation rail, #1138); 3 = additionally binds the payer identity (#1690). The enum previously claimed [1] while v2 had shipped — corrected here.
+                 * @enum {integer}
+                 */
+                version: 1 | 2 | 3;
                 /** @description Haven-signed expected x402 context. Includes expiresAt when the funding window is time-bound. */
                 message: string;
                 signature: string;
                 /** @example 0x1111111111111111111111111111111111111111 */
                 signer: string;
             };
+            /**
+             * @description #1690: the delegate this quote was created FOR, bound inside the Haven-signed expected context (version 3). The edge signer refuses to sign when it is not its own delegate — the guard that turns a stale-host quote-as-A-sign-as-B into a named refusal instead of an on-chain revert. Emitted only when the deployment has flipped X402_EMIT_PAYER_CONTEXT (signer-first rollout).
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            payer_delegate?: string;
+            /** @description #1690: the paying agent's id, carried so the signer's refusal can name both sides. Same gate as payer_delegate. */
+            payer_agent_id?: string;
             /** @description #1355: the stored 402 PaymentRequired, present on GET /x402/{id}/sign-context responses when it was persisted at authorize time. Lets the local signer build the merchant header from the context fetch alone. */
             payment_required?: {
                 [key: string]: unknown;

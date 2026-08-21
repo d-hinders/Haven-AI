@@ -93,10 +93,10 @@ describe('pre-#1690 characterization: payer-less contexts sign', () => {
     expect(() => signer.signX402FundingHash(FUNDING_HASH, expected as never)).not.toThrow()
   })
 
-  it('v1 and v2 are the supported versions today — v3 is not yet claimed', () => {
-    // This test is EXPECTED to be updated by #1690 itself (to [1, 2, 3]).
-    // It exists so the widening is a visible, deliberate edit in the diff
+  it('v3 is now claimed alongside v1/v2 — the deliberate #1690 widening', () => {
+    // Written as [1, 2] in the characterization commit and updated HERE by
+    // #1690 itself, so the widening is a visible, deliberate edit in the diff
     // rather than a side effect nobody reviewed.
-    expect([...SUPPORTED_X402_EXPECTED_VERSIONS]).toEqual([1, 2])
+    expect([...SUPPORTED_X402_EXPECTED_VERSIONS]).toEqual([1, 2, 3])
   })
 })

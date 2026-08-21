@@ -129,6 +129,15 @@ export interface X402ExpectedPayment {
   network: string
   /** ISO expiry for the funding/quote window. When present, the signer refuses stale merchant headers. */
   expiresAt?: string
+  /**
+   * The delegate address this quote was created FOR (#1690). Present ⇒ the
+   * context is **version 3**, and the signer refuses to sign when it is not
+   * its own delegate. Inside the Haven-signed message, so it cannot be
+   * stripped or forged without breaking the binding signature.
+   */
+  payerDelegate?: string
+  /** The paying agent's id — carried for the refusal's diagnosis (#1690). */
+  payerAgentId?: string
   /** Haven signature over the expected funding context. */
   auth: X402ExpectedAuth
 }
@@ -150,6 +159,12 @@ export interface X402FundingSignatureResult {
 export interface EdgeSignerOptions {
   /** Address allowed to authenticate x402 expected-context messages from Haven. */
   x402BindingSigner?: string
+  /**
+   * This signer's OWN agent id, from the local credential (#1690). Used only
+   * to make the payer-mismatch refusal name both sides; the guard itself
+   * compares delegate addresses and works without it.
+   */
+  agentId?: string
 }
 
 export function createEdgeSigner(
@@ -194,6 +209,7 @@ export function createEdgeSigner(
 
     signX402FundingHash(hash: string, expected: X402ExpectedPayment): X402FundingSignatureResult {
       assertExpectedBinding(hash, expected, options.x402BindingSigner, 'hash')
+      assertPayerMatchesDelegate(expected, delegateAddress, options.agentId)
       const signature = signAndVerify(hash)
       const x402Binding = randomUUID()
       x402Bindings.set(x402Binding, { ...expected })
@@ -205,6 +221,7 @@ export function createEdgeSigner(
       expected: X402ExpectedPayment,
     ): Promise<X402FundingSignatureResult> {
       assertExpectedBinding(expected.payloadHash, expected, options.x402BindingSigner, 'typed-data')
+      assertPayerMatchesDelegate(expected, delegateAddress, options.agentId)
       // Recompute the digest from the typed data actually in hand and require it
       // to equal Haven's commitment. Everything upstream is untrusted input; this
       // equality is what makes the binding cover the bytes being signed rather
@@ -458,7 +475,7 @@ function assertExpectedShape(expected: X402ExpectedPayment): void {
  * Widening this array alone would admit a v3 context to the v1/v2 rule set:
  * the array announces what this signer can evaluate, it does not define it.
  */
-export const SUPPORTED_X402_EXPECTED_VERSIONS: readonly number[] = [1, 2]
+export const SUPPORTED_X402_EXPECTED_VERSIONS: readonly number[] = [1, 2, 3]
 export const SUPPORTED_SWEEP_BINDING_VERSIONS: readonly number[] = [1]
 
 /**
@@ -600,8 +617,13 @@ function assertExpectedBinding(
     network: expected.network,
     expiresAt: expected.expiresAt,
     typedDataHash: expected.typedDataHash,
+    payerDelegate: expected.payerDelegate,
+    payerAgentId: expected.payerAgentId,
   })
-  const expectedVersion = expected.typedDataHash ? 2 : 1
+  // Contents-derived, mirroring the builder (#1138, #1690): a tampered
+  // auth.version cannot select a different rule than the signed message
+  // encodes — the recomputed message simply stops matching.
+  const expectedVersion = expected.payerDelegate ? 3 : expected.typedDataHash ? 2 : 1
   if (expected.auth?.version !== expectedVersion || expected.auth.message !== message) {
     throw new HavenSigningError('x402 expected context authentication message is invalid.')
   }
@@ -611,6 +633,39 @@ function assertExpectedBinding(
   if (!verifySignature(hashMessage(message), expected.auth.signature, trustedSigner)) {
     throw new HavenSigningError('x402 expected context signature could not be verified.')
   }
+}
+
+/**
+ * Refuse to sign another agent's quote (#1690), mirroring the sweep guard's
+ * `authorization.from` check.
+ *
+ * Runs only AFTER `assertExpectedBinding` has verified the Haven signature —
+ * an unverified payer claim is attacker input, and refusing on it would let a
+ * forged context turn the guard into a denial-of-service. And only when the
+ * context CARRIES a payer claim: a v1/v2 context claims nothing, so there is
+ * nothing to mismatch (the characterization suite pins that).
+ *
+ * The message is the point. A payer mismatch in the field means a long-lived
+ * host cached one agent's wiring while the disk holds another's (#1681), and
+ * before this guard the operator discovered that as an on-chain revert three
+ * layers later. Naming both identities IS the diagnosis.
+ */
+function assertPayerMatchesDelegate(
+  expected: X402ExpectedPayment,
+  delegateAddress: string,
+  localAgentId: string | undefined,
+): void {
+  if (!expected.payerDelegate) return
+  if (sameAddress(expected.payerDelegate, delegateAddress)) return
+  const quoteAgent = expected.payerAgentId ?? 'unknown'
+  const localAgent = localAgentId ?? 'unknown'
+  throw new HavenSigningError(
+    `This quote belongs to a DIFFERENT agent: the quote was created for agent ${quoteAgent} ` +
+      `(delegate ${expected.payerDelegate}), but this signer holds agent ${localAgent} ` +
+      `(delegate ${delegateAddress}). A long-lived host is holding stale credentials — its ` +
+      'session authenticates as the old agent while the signer on disk belongs to the new ' +
+      'one. Nothing was signed. Restart the host so it re-reads its wiring, then re-quote.',
+  )
 }
 
 function assertX402PaymentWindowOpen(expected: X402ExpectedPayment): void {

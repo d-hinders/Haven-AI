@@ -91,3 +91,65 @@ describe('buildX402ExpectedMessage — v1/v2 (#1138)', () => {
     expect(v1).toContain('"version":1')
   })
 })
+
+/**
+ * #1690 — expected-context v3: the payer identity joins the signed message.
+ *
+ * Same discipline as the v1 lock above: the v3 message is a LITERAL, because
+ * a test that recomputes it the same way the code does passes through any
+ * change to both. Deployed signers recompute these bytes to verify the
+ * binding, so the literal is the wire contract.
+ */
+describe('buildX402ExpectedMessage — v3 payer identity (#1690)', () => {
+  const PAYER = '0xF278a857b981Ab00e2ad00cE0BdC595d05f1AB69'
+
+  it('v3 is byte-locked: payer fields inside the payload, version in header and body', () => {
+    expect(
+      buildX402ExpectedMessage({
+        ...BASE,
+        payerDelegate: PAYER,
+        payerAgentId: '4f67d16e',
+      }),
+    ).toBe(
+      'Haven x402 expected context v3\n' +
+        '{"amount":"40000","asset":"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",' +
+        '"kind":"haven.x402.expected","merchantTo":"0x000000000000000000000000000000000000dead",' +
+        '"network":"base","payerAgentId":"4f67d16e",' +
+        `"payerDelegate":"${PAYER.toLowerCase()}",` +
+        `"payloadHash":"0x${'cd'.repeat(32)}","paymentId":"pay_x402",` +
+        '"resourceUrl":"https://merchant.test/paid","version":3}',
+    )
+  })
+
+  it('payerDelegate is lower-cased so casing cannot split the binding', () => {
+    const upper = buildX402ExpectedMessage({ ...BASE, payerDelegate: PAYER.toUpperCase().replace('0X', '0x') })
+    const lower = buildX402ExpectedMessage({ ...BASE, payerDelegate: PAYER.toLowerCase() })
+    expect(upper).toBe(lower)
+  })
+
+  it('v3 still carries typedDataHash on the delegation rail — mode and version are independent', () => {
+    const message = buildX402ExpectedMessage({
+      ...BASE,
+      typedDataHash: `0x${'ab'.repeat(32)}`,
+      payerDelegate: PAYER,
+    })
+    expect(message).toContain('"version":3')
+    expect(message).toContain(`"typedDataHash":"0x${'ab'.repeat(32)}"`)
+    expect(message).toContain('"payerDelegate"')
+  })
+
+  it('a payerAgentId without payerDelegate is NOT bound — diagnosis without a guard is refused', () => {
+    // The id only means something next to the delegate it identifies; binding
+    // it alone would mint a v1/v2 message carrying an unverifiable claim.
+    const message = buildX402ExpectedMessage({ ...BASE, payerAgentId: 'orphan' })
+    expect(message).toContain('"version":1')
+    expect(message).not.toContain('payerAgentId')
+  })
+
+  it('makes a v3 context unrepresentable as v1/v2 — the downgrade rule extends', () => {
+    const v2 = buildX402ExpectedMessage({ ...BASE, typedDataHash: `0x${'ab'.repeat(32)}` })
+    const v3 = buildX402ExpectedMessage({ ...BASE, typedDataHash: `0x${'ab'.repeat(32)}`, payerDelegate: PAYER })
+    expect(v3).not.toBe(v2)
+    expect(v2).not.toContain('payerDelegate')
+  })
+})

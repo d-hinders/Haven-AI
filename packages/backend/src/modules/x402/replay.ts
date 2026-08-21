@@ -6,7 +6,7 @@
  * cap or the bundler budget.
  */
 import { expirePendingIntent } from '../../infra/repositories/payment-intents.js'
-import { signX402ExpectedContext } from '../../infra/chain/x402-binding-signer.js'
+import { signX402ExpectedContext, x402PayerContextFields, x402PayerWireFields } from '../../infra/chain/x402-binding-signer.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { getExplorerUrl } from '../../domain/chains.js'
 import { delegationSigningPayload } from '../../rails/delegation-policy.js'
@@ -173,6 +173,8 @@ export async function rebuildDelegationSignContext(
     network,
     expiresAt: existing.expires_at as string,
     typedDataHash,
+    // #1690: gated payer identity — {} until X402_EMIT_PAYER_CONTEXT=1.
+    ...x402PayerContextFields(agent),
   })
   // #1263: the COMPLETE expected context, field-for-field as signed above, in
   // the snake_case shape the edge signer's tool schema validates. The signer
@@ -189,6 +191,10 @@ export async function rebuildDelegationSignContext(
     network,
     expires_at: existing.expires_at,
     ...(typedDataHash ? { typed_data_hash: typedDataHash } : {}),
+    // #1690: mirror the signed context exactly — when the payer fields were
+    // bound above, the wire must carry them or no signer can rebuild the
+    // message. Same gate, same helper, so the two cannot diverge.
+    ...x402PayerWireFields(agent),
     auth: replayExpectedAuth,
   }
   return {

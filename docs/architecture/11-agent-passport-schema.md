@@ -217,11 +217,24 @@ true today:
   leaves the passport retryable.
 
   Two consequences worth stating, because they are the shape of the trade.
-  **The stall is bounded:** a genuinely dropped transaction stops reserving its
-  nonce, so the next thing the relayer broadcasts on that chain burns the slot
-  and the following sweep tick anchors correctly with no human involved; and
-  while it waits, the row keeps failing retryably and alarms through
-  `ISSUANCE_ATTENTION_ATTEMPTS`. **The time question is deliberately open:** how
+  **The stall ends when the nonce is burned, and in practice that is the
+  operator's cancel — not Haven's own traffic.** It is tempting to argue that a
+  dropped transaction stops reserving its nonce, so the relayer's next
+  broadcast takes the slot and issuance recovers by itself. It does not, and
+  the reason is worth knowing: `submitRecorded` allocates from
+  `getNonce('pending')`, but the stuck attest still holds a `broadcast` row at
+  that nonce, and migration 061's partial UNIQUE index on
+  `(chain_id, nonce) WHERE status = 'broadcast'` refuses the stamp — the queue
+  retries, re-reads the same nonce, and throws `could not win a nonce lane`.
+  So the lane #1735 already documents as blocked stays blocked, and what burns
+  the nonce is the same-nonce cancel in the
+  [vendor-ops runbook](../operations/delegation-rail-vendor-ops.md) §3. The
+  gain is that the cancel is now **sufficient on its own**: once it mines, the
+  burned nonce is exactly the evidence the sweep needs, so issuance completes
+  on its next tick with no further operator action and no duplicate to hunt
+  for first. While it waits, the row keeps failing retryably and alarms
+  through `ISSUANCE_ATTENTION_ATTEMPTS`. **The time question is deliberately
+  open:** how
   long an attest whose nonce is *still open* may sit before Haven declares it
   dead on its own is an owner decision with duplicate-credential consequences,
   tracked as [#1743](https://github.com/d-hinders/Haven-AI/issues/1743) and not

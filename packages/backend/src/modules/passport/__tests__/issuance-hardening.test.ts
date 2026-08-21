@@ -97,8 +97,11 @@ describe('lost-result recovery (#1043)', () => {
    * credential behind a merely fee-stuck attest. A re-mint now needs positive
    * evidence of death from the liveness probe, and there is none wired here.
    *
-   * What the test still owns is the broadcast hook, so the anchor path is
-   * exercised from the state where anchoring IS correct: no prior hash.
+   * The broadcast-hook half this test used to carry moved to
+   * `presumed-dropped-attest.test.ts`, where the anchor path is exercised
+   * from the state in which anchoring IS correct (no prior hash) — and
+   * against real Postgres, so "the hash was persisted" is read back from the
+   * row rather than pattern-matched against a mocked UPDATE.
    */
   it('does NOT fall through to a fresh anchor when recovery finds nothing (#1745)', async () => {
     const anchor = vi.fn()
@@ -117,31 +120,6 @@ describe('lost-result recovery (#1043)', () => {
 
     await issuePassport('agent-1', 'user-1')
     expect(anchor).not.toHaveBeenCalled()
-  })
-
-  it('anchors — and passes the broadcast hook — when there is no prior hash', async () => {
-    const anchor = vi.fn(async (_c: number, _claim: unknown, onBroadcast?: (h: string) => Promise<void>) => {
-      await onBroadcast?.('0x' + 'd'.repeat(64))
-      return { attestationUid: '0x' + 'e'.repeat(64), txHash: '0x' + 'd'.repeat(64) }
-    })
-    setAnchor(anchor)
-    setAnchorRecovery(vi.fn(async () => null))
-
-    mockQuery
-      .mockResolvedValueOnce(pendingRow({ tx_hash: null })) // getPassport — never broadcast
-      .mockResolvedValueOnce(FACTS)
-      .mockResolvedValueOnce({ rows: [] }) // BEGIN
-      .mockResolvedValueOnce({ rows: [] }) // lock
-      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // bound-check
-      .mockResolvedValueOnce({ rows: [], rowCount: 1 }) // claim
-      .mockResolvedValueOnce({ rows: [] }) // COMMIT
-      .mockResolvedValue({ rows: [], rowCount: 1 })
-
-    await issuePassport('agent-1', 'user-1')
-    expect(anchor).toHaveBeenCalled()
-    // The broadcast hook persisted the hash (recordBroadcast UPDATE ran).
-    const sqls = mockQuery.mock.calls.map(([sql]) => String(sql))
-    expect(sqls.some((sql) => sql.includes('SET tx_hash = $2'))).toBe(true)
   })
 
   it('refuses a revoked agent before claiming', async () => {

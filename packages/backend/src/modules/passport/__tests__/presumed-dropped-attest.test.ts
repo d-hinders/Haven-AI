@@ -268,20 +268,31 @@ describeDb('#1745 — the presumed-dropped re-mint, characterized on real Postgr
     expect(row.tx_hash).toBe(STUCK_TX)
   })
 
-  it('a passport that never broadcast anchors normally — no hash, nothing to presume about', async () => {
+  it('a passport that never broadcast anchors normally, and the broadcast hook persists the hash', async () => {
     const { agentId, userId } = await seedAgentWithPassport({ txHash: null })
     const recovery = vi.fn(async (): Promise<AnchorResult | null> => null)
     const minted: AnchorResult = {
       attestationUid: '0x' + 'd'.repeat(64),
       txHash: '0x' + '33'.repeat(32),
     }
+    let hashAtBroadcast: string | null = null
     setAnchorRecovery(recovery)
-    setAnchor(vi.fn(async () => minted))
+    setAnchor(
+      vi.fn(async (_c: number, _claim: unknown, onBroadcast?: (h: string) => Promise<void>) => {
+        await onBroadcast?.(minted.txHash)
+        // #1043 finding 2, read back from the ROW rather than pattern-matched
+        // against a mocked UPDATE: the hash must be durable BEFORE the wait,
+        // because it is the only handle a later tick has on this transaction.
+        hashAtBroadcast = (await repo.findByAgent(agentId))?.tx_hash ?? null
+        return minted
+      }),
+    )
 
     await issuePassport(agentId, userId)
 
     // Recovery is not even consulted: there is no prior hash.
     expect(recovery).not.toHaveBeenCalled()
+    expect(hashAtBroadcast).toBe(minted.txHash)
     expect((await readPassport(agentId)).status).toBe('anchored')
   })
 })

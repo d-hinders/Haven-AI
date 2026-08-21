@@ -269,7 +269,11 @@ they queue behind the same key. Two consequences worth planning around:
    never mine (its nonce consumed by something else), so no duplicate is queued
    while it is live. That also makes the cancel below self-completing — once it
    mines, the burned nonce is exactly the evidence the sweep needs, and
-   issuance recovers on its next tick without further operator action.
+   issuance recovers on its next tick without further operator action. The
+   cancel remains **necessary**, though: a dropped attest does not free its own
+   nonce here, because its row is still `broadcast` and 061's partial UNIQUE
+   `(chain_id, nonce) WHERE status = 'broadcast'` refuses the stamp, so the
+   queue cannot take the slot back by itself.
    Unblocking the lane automatically still wants that same-nonce **cancel**
    (a 0-value self-send), which would clear the lane *and* definitively kill
    the attest so a fresh anchor is correct — a new mechanism, deliberately not

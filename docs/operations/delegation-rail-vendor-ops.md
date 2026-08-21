@@ -176,12 +176,22 @@ warning. Operator response:
 1. Read the row's `tx_hash` from the alert and check it on the explorer.
    **Mined** (either status) → the next bump tick closes the record itself from
    the receipt; nothing to do but confirm it cleared.
-2. **Still pending** → the lane needs a same-nonce replacement that is NOT
-   another attest: send a 0-value self-transfer from the relayer at that nonce
-   with bumped fees to cancel it. Once that cancel mines, the stuck attest can
-   never mine — its nonce is spent — and issuance recovers **on its own**: the
-   next sweep tick sees the burned nonce, declares the old transaction dead and
-   anchors a fresh attestation. There is nothing further to do by hand.
+2. **Still pending, or dropped** → the lane needs a same-nonce replacement that
+   is NOT another attest: send a 0-value self-transfer from the relayer at that
+   nonce with bumped fees to cancel it. Once that cancel mines, the stuck
+   attest can never mine — its nonce is spent — and issuance recovers **on its
+   own**: the next sweep tick sees the burned nonce, declares the old
+   transaction dead and anchors a fresh attestation. There is nothing further
+   to do by hand.
+
+   **Do this even when the transaction has vanished from the mempool.** It is
+   tempting to assume a dropped transaction frees its own nonce and that
+   Haven's next broadcast will take the slot. It will not: the stuck row is
+   still `broadcast` at that nonce, and the partial UNIQUE index on
+   `(chain_id, nonce) WHERE status = 'broadcast'` (migration 061) refuses the
+   stamp, so `submitRecorded` re-reads the same nonce and fails with
+   `could not win a nonce lane`. The cancel is what unblocks both the lane and
+   the issuance.
 3. Do **not** re-broadcast the stored attest calldata by hand — that is the
    duplicate-credential path this whole gate exists to prevent. A hand-run
    *fee bump* is the same hazard wearing a different hat: it leaves no

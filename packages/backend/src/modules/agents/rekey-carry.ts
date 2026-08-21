@@ -167,8 +167,28 @@ export function planCarry(input: {
   const { old, meter, nowSec } = input
   assertTerms(old)
 
-  // The refusal that keeps a transient RPC failure from becoming a fresh
-  // full period. See the module header.
+  // ── The two cases that do not consult the meter AT ALL ─────────────────
+  //
+  // Decided FIRST, and the order is load-bearing rather than tidy. An expired
+  // grant carries nothing; a grant whose first period has not opened cannot
+  // have spent anything, so it is reissued verbatim. Neither reads
+  // `meter`, so neither may be refused for what the meter says.
+  //
+  // Putting the meter refusals ahead of these wedged a real case, found while
+  // re-checking the multi-delegation interaction after review: re-keying an
+  // agent that was ALREADY re-keyed means re-keying its dormant "steady"
+  // grant, and a period enforcer asked for the available amount of a
+  // delegation whose first period has not started can revert — which
+  // `readRemainingBudget` reports as `fromChain: false`. That fallback is
+  // meaningless here and would have 409'd the entire second re-key on a
+  // reading nothing was going to use.
+  if (nowSec >= old.expiresAt) return { kind: 'expired' }
+  if (nowSec < old.startDate) return { kind: 'dormant', reissue: { ...old } }
+
+  // ── From here the meter IS the input, so it must be trustworthy ────────
+  //
+  // The refusal that keeps a transient RPC failure from becoming a fresh full
+  // period. See the module header.
   if (!meter.fromChain) {
     throw new CarryRefusedError(
       'the remaining-budget read did not come from the chain — refusing to carry a fallback ' +
@@ -184,9 +204,6 @@ export function planCarry(input: {
       'remainder_exceeds_budget',
     )
   }
-
-  if (nowSec >= old.expiresAt) return { kind: 'expired' }
-  if (nowSec < old.startDate) return { kind: 'dormant', reissue: { ...old } }
 
   const boundary = currentPeriodBoundary(old, nowSec)
 

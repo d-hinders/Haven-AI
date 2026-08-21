@@ -240,6 +240,49 @@ describe('planCarry — edge shapes', () => {
     expect(plan).toEqual({ kind: 'dormant', reissue: future })
   })
 
+  it('MUTATION TARGET — a dormant grant is decided BEFORE the meter refusals', () => {
+    // The re-key-of-a-re-key case, found while re-checking the
+    // multi-delegation interaction after review. Re-keying an
+    // already-re-keyed agent means re-keying its dormant "steady" grant, and
+    // a period enforcer asked for the available amount of a delegation whose
+    // first period has not started can revert — reported as
+    // `fromChain: false`. That reading is meaningless for a grant nothing has
+    // spent from, and refusing on it would 409 the entire second re-key.
+    //
+    // Moving the meter refusals back above the dormant branch makes this
+    // throw instead of returning a plan.
+    const future = oldTerms({ startDate: T0 + 10 * DAY })
+    const plan = planCarry({
+      old: future,
+      meter: { remainingAtomic: BUDGET, fromChain: false },
+      nowSec: T0,
+    })
+    expect(plan).toEqual({ kind: 'dormant', reissue: future })
+  })
+
+  it('an expired grant is likewise decided before the meter refusals', () => {
+    const dead = oldTerms({ expiresAt: T0 + 100 })
+    expect(
+      planCarry({
+        old: dead,
+        meter: { remainingAtomic: BUDGET, fromChain: false },
+        nowSec: T0 + 200,
+      }),
+    ).toEqual({ kind: 'expired' })
+  })
+
+  it('still refuses a fallback reading for a LIVE grant — the refusal is not weakened', () => {
+    // The counterpart assertion. Reordering must not have turned the
+    // meter_not_from_chain refusal off for the case it exists to catch.
+    expect(() =>
+      planCarry({
+        old: oldTerms(),
+        meter: { remainingAtomic: BUDGET, fromChain: false },
+        nowSec: T0 + 3600,
+      }),
+    ).toThrow(CarryRefusedError)
+  })
+
   it('clips the carry to the grant expiry when the grant dies mid-period', () => {
     const dying = oldTerms({ expiresAt: T0 + DAY - 3600 })
     const plan = planCarry({ old: dying, meter: fromChain(400_000n), nowSec: T0 + 3600 })

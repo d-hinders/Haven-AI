@@ -91,6 +91,11 @@ const RUNTIME_ALIASES: Record<string, RuntimeId> = {
   'claude-code': 'claude-code',
   claudecode: 'claude-code',
   'claude_code': 'claude-code',
+  // #1682: Cowork runs Claude Code's config, so it resolves to the same
+  // profile. The dashboard's command carries no --runtime for it (it is a
+  // detected, command-path runtime), but an explicit `--runtime cowork` typed
+  // by hand must not fall through to the no-runtime refusal.
+  cowork: 'claude-code',
   codex: 'codex-cli',
   'codex-cli': 'codex-cli',
   codexcli: 'codex-cli',
@@ -120,6 +125,14 @@ const RUNTIME_ALIASES: Record<string, RuntimeId> = {
   'hermes-agent': 'hermes',
   hermes_agent: 'hermes',
   hermesagent: 'hermes',
+  // #1682: OpenClaw is a SNIPPET target — the user pastes an mcpServers entry
+  // into ~/.openclaw/openclaw.json and restarts the gateway. That is exactly
+  // the 'other' profile's behaviour (credentials written to disk, no config
+  // auto-written, manual finish), so it resolves there rather than earning a
+  // profile whose only distinguishing feature would be its label.
+  openclaw: 'other',
+  'open-claw': 'other',
+  'open_claw': 'other',
   other: 'other',
   manual: 'other',
 }

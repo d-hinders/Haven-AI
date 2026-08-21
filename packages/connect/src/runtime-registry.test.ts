@@ -42,4 +42,27 @@ describe('Hermes runtime registry', () => {
     expect(normalizeRuntime(undefined, { HERMES_AGENT: '1' })).toBe('hermes')
     expect(normalizeRuntime('codex-cli', { HERMES_HOME: '/tmp/hermes' })).toBe('codex-cli')
   })
+
+  // #1682: the name-first picker introduced two product names the connector
+  // had no word for. Without these, `--runtime cowork` / `--runtime openclaw`
+  // fell through to the #1672 no-runtime refusal — a hard failure before any
+  // side effect, which is the right behaviour for a value nobody understands
+  // and the wrong outcome for a row the dashboard itself offers.
+  it('resolves Cowork to the Claude Code profile whose config it shares', () => {
+    expect(normalizeRuntime('cowork', {})).toBe('claude-code')
+    expect(normalizeRuntime('Cowork', {})).toBe('claude-code')
+  })
+
+  it('resolves OpenClaw to the manual profile a snippet target needs', () => {
+    for (const alias of ['openclaw', 'open-claw', 'open_claw', 'OpenClaw']) {
+      expect(normalizeRuntime(alias, {}), alias).toBe('other')
+    }
+    // The 'other' profile is what makes this correct: Haven writes credentials
+    // to disk and does NOT auto-write a config, which is exactly the OpenClaw
+    // flow (paste the mcpServers entry into ~/.openclaw/openclaw.json).
+    expect(runtimeProfile('openclaw', {})).toMatchObject({
+      id: 'other',
+      canWriteRuntimeConfig: false,
+    })
+  })
 })

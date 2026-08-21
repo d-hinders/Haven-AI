@@ -37,9 +37,11 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
 
   // #1672: once the connector has run, the setup status carries the runtime it
   // DETECTED in the executing environment — more truthful than the picker's
-  // choice (which is now the collapsed 'agent' entry on the command path).
-  // Runtime-specific copy (restart guidance, the Codex Desktop note) keys off
-  // this; before the connector reports, it falls back to the picked value.
+  // choice, which on the command path names a product (#1682: claude-code /
+  // codex / cowork) without settling which client the command actually ran
+  // inside. Runtime-specific copy (restart guidance, the Codex Desktop note)
+  // keys off this; before the connector reports, it falls back to the picked
+  // value.
   const effectiveRuntime = setupStatus?.runtime ?? flow.runtime
 
   return (

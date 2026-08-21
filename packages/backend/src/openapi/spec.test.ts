@@ -8,6 +8,9 @@ import { openapiSpec } from './spec.js'
 // route-coverage gate reads the same ones instead of a second copy.
 import { ROUTES_DIR, extractRoutes, fastifyPathToOpenApi } from './route-inventory.js'
 import { KNOWN_UNDOCUMENTED_ROUTES } from './route-coverage.js'
+// #1705: the settlement-scheme contract is asserted against real payloads, not
+// only against its own description (#1446 discipline).
+import { matchSpec } from './response-shape.js'
 import {
   AgentPaymentNextAction,
   AgentPaymentPhase,
@@ -185,6 +188,120 @@ describe('openapiSpec', () => {
     expect(response.json()).toEqual(openapiSpec)
 
     await app.close()
+  })
+})
+
+/**
+ * #1705 (epic #1704). The settlement scheme on the transaction wire contract.
+ *
+ * Asserted against REAL payload shapes through `matchSpec`, not only against
+ * the schema's own description — the #1446 lesson: five spec bugs shipped
+ * because a field was only ever checked by restating it. Every case below
+ * hands a transaction row to the spec's own `TransactionBase` schema and lets
+ * it decide.
+ */
+describe('TransactionBase settlementScheme (#1705)', () => {
+  const TRANSACTION_BASE = { $ref: '#/components/schemas/TransactionBase' }
+
+  /**
+   * The spec is a `const` literal, so asking whether a property is ABSENT is a
+   * compile error rather than an assertion. Widen for the negative checks only
+   * — the positive ones keep their literal types.
+   */
+  const asProperties = (node: unknown) =>
+    (node as { properties: Record<string, unknown> }).properties
+
+  /** A minimal row carrying every required `TransactionBase` field. */
+  function transactionRow(overrides: Record<string, unknown> = {}) {
+    return {
+      hash: '0x5ca67847000000000000000000000000000000000000000000000000000000ab',
+      type: 'erc20',
+      from: '0x1111111111111111111111111111111111111111',
+      to: '0x2222222222222222222222222222222222222222',
+      value: '1000000',
+      valueFormatted: '1.00',
+      asset: 'USDC',
+      decimals: 6,
+      direction: 'out',
+      timestamp: 1755000000,
+      blockNumber: 34567890,
+      isError: false,
+      ...overrides,
+    }
+  }
+
+  it('declares the nullable three-value enum, camelCase like its neighbours', () => {
+    const properties = openapiSpec.components.schemas.TransactionBase.properties
+
+    expect(properties.settlementScheme).toMatchObject({
+      type: ['string', 'null'],
+      enum: ['eip3009', 'erc7710', null],
+    })
+    // Optional, never required: the field is absent on rows that predate it.
+    expect(openapiSpec.components.schemas.TransactionBase.required).not.toContain(
+      'settlementScheme',
+    )
+    // snake_case here would be a wire-contract break — the sibling enrichment
+    // fields (`valueFormatted`, `x402ResourceUrl`, `paymentProofStatus`) are
+    // all camelCase, and the frontend consumes this shape verbatim.
+    expect(asProperties(openapiSpec.components.schemas.TransactionBase).settlement_scheme)
+      .toBeUndefined()
+  })
+
+  it('keeps the three-way terminology split in the description', () => {
+    const description =
+      openapiSpec.components.schemas.TransactionBase.properties.settlementScheme.description
+
+    expect(description).toMatch(/settlement/i)
+    // Named as the neighbours it must NOT be collapsed into.
+    expect(description).toMatch(/`source`/)
+    expect(description).toMatch(/`execution_rail`/)
+    // And the legacy-rail null asymmetry, recorded on purpose (epic #1704
+    // review): a legacy row showing nothing is the contract, not a bug.
+    expect(description).toMatch(/legacy/i)
+    expect(description).toMatch(/null/i)
+  })
+
+  it('accepts both settlement schemes on a real transaction row', () => {
+    expect(matchSpec(TRANSACTION_BASE, transactionRow({ settlementScheme: 'erc7710' }))).toEqual([])
+    expect(matchSpec(TRANSACTION_BASE, transactionRow({ settlementScheme: 'eip3009' }))).toEqual([])
+  })
+
+  it('accepts null and absent — the legacy-rail asymmetry is in-contract', () => {
+    // Legacy-rail x402 never stamps `settlement_scheme` (structurally 3009), and
+    // non-machine transfers have no scheme at all. Null-in-null-out.
+    expect(matchSpec(TRANSACTION_BASE, transactionRow({ settlementScheme: null }))).toEqual([])
+    expect(matchSpec(TRANSACTION_BASE, transactionRow())).toEqual([])
+  })
+
+  it('rejects a value outside the enum', () => {
+    // Near-misses a mapper could plausibly emit from the raw metadata.
+    for (const bogus of ['eip-3009', 'ERC7710', 'erc7710 ', 'delegation', '']) {
+      expect(
+        matchSpec(TRANSACTION_BASE, transactionRow({ settlementScheme: bogus })),
+        `expected '${bogus}' to be rejected by the spec's enum`,
+      ).not.toEqual([])
+    }
+    // And the wrong type entirely.
+    expect(matchSpec(TRANSACTION_BASE, transactionRow({ settlementScheme: 7710 }))).not.toEqual([])
+  })
+
+  it('the aggregated Transaction inherits it through the existing allOf', () => {
+    const aggregated = openapiSpec.components.schemas.Transaction
+
+    // The field is declared once, on the base — not restated on the aggregate.
+    expect(aggregated.allOf[0]).toEqual({ $ref: '#/components/schemas/TransactionBase' })
+    expect(asProperties(aggregated.allOf[1]).settlementScheme).toBeUndefined()
+
+    // The base half of that composition is what carries the field, and it
+    // validates a real aggregated row's scheme value. The composed schema is
+    // NOT run through `matchSpec` here: the helper closes each component
+    // schema it registers, so a `$ref`'d member inside an `allOf` rejects the
+    // properties its siblings contribute (`safeId`, `chainId`, …) — the
+    // documented composition trap in `response-shape.ts`, not a spec defect.
+    expect(
+      matchSpec(TRANSACTION_BASE, transactionRow({ settlementScheme: 'erc7710' })),
+    ).toEqual([])
   })
 })
 

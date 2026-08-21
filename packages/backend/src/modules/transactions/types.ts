@@ -40,6 +40,26 @@ export interface EnrichedTransaction extends Transaction {
   safeName: string
   agentId?: string
   agentName?: string
+  /**
+   * Which settlement branch moved the money — `'eip3009' | 'erc7710'` — read
+   * from the intent's `machine_metadata` JSONB (#1705, epic #1704).
+   *
+   * NOT `source` (the payment protocol) and NOT the account's
+   * `execution_rail` (account architecture); the three axes stay unmerged.
+   *
+   * Null/absent whenever nothing was recorded: non-machine rows, and every
+   * legacy-rail row — that rail is structurally EIP-3009 and never stamps the
+   * key, so null-in-null-out leaves it blank rather than inferring a value.
+   * Typed as the open `string | null` the wire carries; the spec's enum is the
+   * contract. Populated by #1706.
+   *
+   * Note for #1706: this file's `Transaction` / `EnrichedTransaction` split
+   * does NOT mirror the spec's `TransactionBase` / `Transaction` split
+   * field-for-field. The field sits here, on the enriched shape, because that
+   * is what enrichment maps over — the same placement `agentName` already
+   * uses despite also living on the spec's `TransactionBase`.
+   */
+  settlementScheme?: string | null
 }
 
 /** Re-exported so route/module callers share one name for the Safe projection. */

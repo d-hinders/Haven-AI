@@ -3466,6 +3466,11 @@ export type components = {
             /** @enum {string} */
             activityType?: "delegate_sweep";
             agentName?: string;
+            /**
+             * @description Which settlement branch actually moved the money: `erc7710` (direct settlement, account → merchant, no funding leg) or `eip3009` (funded transfer — the budget delegation funds the delegate EOA, which then signs the standard EIP-3009 header). This is the settlement SCHEME and is three-way distinct from its neighbours: `source` is the payment PROTOCOL (x402, mpp_crypto, …), and the account's `execution_rail` is the ACCOUNT ARCHITECTURE (delegation vs the legacy AllowanceModule). Do not collapse them. Null when no scheme was recorded — non-machine transfers, and legacy-rail rows, which are structurally EIP-3009 but never stamp the key. Null-in-null-out: nothing is inferred or backfilled.
+             * @enum {string|null}
+             */
+            settlementScheme?: "eip3009" | "erc7710" | null;
             amountSek?: string | null;
         };
         /** @description Aggregated-feed transaction: the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. */

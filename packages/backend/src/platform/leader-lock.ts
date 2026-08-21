@@ -144,6 +144,13 @@ export function advisoryLockIdFor(subject: string): number {
  * cost: the deploy lock holds a pooled connection". Adding a caller that is
  * NOT once-per-subject-rare is one of them — read that section before you do.
  *
+ * That accept assumed a SHORT hold, and #1722 made the assumption true rather
+ * than hopeful: the deploy's confirmation wait now carries an explicit
+ * deadline (`HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS`), so the hold has a ceiling
+ * instead of inheriting an unbounded `tx.wait()`. A NEW caller inherits no
+ * such ceiling — `fn` is whatever you pass, and this lock bounds only the
+ * wait to acquire (below), never the work. Bound your own critical section.
+ *
  * **Bounded, and fail-open past the bound.** `lock_timeout` caps the wait; on
  * expiry `fn` runs anyway, WITHOUT the lock, and `onDegraded` reports it.
  * That direction is deliberate: this lock exists to stop duplicated work, not

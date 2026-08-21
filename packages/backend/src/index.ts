@@ -70,6 +70,10 @@ const app = Fastify({
   logger: {
     level: config.logLevel,
   },
+  // #1670: a hop COUNT, not `true` — see the note on trustProxyHops in
+  // config.ts. 0 → false → request.ip stays the socket peer, exactly as
+  // before this option existed.
+  trustProxy: config.trustProxyHops > 0 ? config.trustProxyHops : false,
 })
 
 // --- Global error handler (extracted for testability, #1464) ---
@@ -111,9 +115,10 @@ await app.register(fastifyJwt, {
 // limited; dashboard reads stay unthrottled. Keyed per presented credential
 // (Authorization or X-API-Key — see rateLimitKeyFor) so each agent gets its
 // own bucket regardless of network path; unauthenticated requests fall back
-// to per-IP (behind Railway's proxy that can collapse to the proxy IP —
-// acceptable for the public demo routes, where a shared throttle still beats
-// an open faucet).
+// to per-IP. With TRUST_PROXY_HOPS unset that per-IP fallback collapses to
+// the proxy address behind Railway — acceptable for the public demo routes,
+// where a shared throttle still beats an open faucet, and the reason the
+// auth tier (#1670) refuses to arm itself until the proxy is trusted.
 await app.register(rateLimit, {
   global: false,
   keyGenerator: (request: FastifyRequest) => rateLimitKeyFor(request),
@@ -145,6 +150,14 @@ app.get('/health', async (_request, reply) => {
   // when they curl /health, and losing it because Postgres is slow would repeat
   // the failure this field exists to end.
   const passport = passportReadiness()
+  // Trust-proxy state (#1670). The auth rate-limit tier arms only when the
+  // process actually READS a hop count > 0 — and whether it does is invisible
+  // from outside: on the first dev rollout the operator set the variable, the
+  // service kept answering, and 32 probe logins still went unthrottled because
+  // the running process predated the env change. This field ends that class of
+  // guessing. Not secret: the setting is documented in .env.example, and the
+  // hop count reveals topology no more than any traceroute would.
+  const trustProxy = { hops: config.trustProxyHops, authRateLimitArmed: config.trustProxyHops > 0 }
   try {
     await pool.query('SELECT 1')
     const dbLatencyMs = Date.now() - start
@@ -154,6 +167,7 @@ app.get('/health', async (_request, reply) => {
       db: { status: 'ok', latencyMs: dbLatencyMs },
       relayer,
       passport,
+      trustProxy,
     }
   } catch (err) {
     reply.status(503)
@@ -163,6 +177,7 @@ app.get('/health', async (_request, reply) => {
       db: { status: 'error', error: err instanceof Error ? err.message : String(err) },
       relayer,
       passport,
+      trustProxy,
     }
   }
 })

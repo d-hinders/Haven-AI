@@ -7,7 +7,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-08-10" # weekly #1248 audit: every release/skills claim re-verified against the repo; roster gained the two reviewer roles added since July (design-reviewer #904, doc-reviewer)
+last-verified: "2026-08-21" # the canonical `release` skill is added and linked from the release section — the release path (preflight, bump, the two contract docs the coupling gate blocks on, PR to dev, promotion, registry-verified closeout) now has one home. No release MECHANICS change: publish still fires only on the dev → main promotion, the bump script still owns versions and pins, and the promotion stays a human step. Prior: weekly #1248 audit: every release/skills claim re-verified against the repo; roster gained the two reviewer roles added since July (design-reviewer #904, doc-reviewer)
 ---
 
 # Haven Codex Instructions
@@ -91,7 +91,7 @@ Green CI is necessary but not sufficient for changes that touch money movement, 
 
 ## Releasing npm Packages
 
-`@haven_ai/sdk`, `signer`, `mcp`, `connect`, and `cli` publish to npm automatically when a version bump lands on `main` (the **Publish packages** workflow — one package's failure no longer aborts the rest; the run summary reports per-package outcomes, #1159). Never run `npm publish` by hand, and never hand-edit package versions or cross-package dep pins — run `npm run release:bump -- <version>`, which updates them atomically and verifies the connect bundle, then open a PR and merge. `mcp-server`/`backend`/`frontend` are not npm-published. Details: `scripts/README.md` and the README's "Releasing npm packages" section.
+`@haven_ai/sdk`, `signer`, `mcp`, `connect`, and `cli` publish to npm automatically when a version bump lands on `main` (the **Publish packages** workflow — one package's failure no longer aborts the rest; the run summary reports per-package outcomes, #1159). Never run `npm publish` by hand, and never hand-edit package versions or cross-package dep pins — run `npm run release:bump -- <version>`, which updates them atomically and verifies the connect bundle, then open a PR and merge. `mcp-server`/`backend`/`frontend` are not npm-published. Details: `scripts/README.md` and the README's "Releasing npm packages" section. To cut one end to end — including the two contract docs the coupling gate blocks every release PR on, and a closeout verified against the npm registry — follow the canonical `release` skill (`.agents/skills/release/SKILL.md`).
 
 ## Agentic Workflow
 
@@ -106,7 +106,7 @@ Agentic delivery is the default decision path for non-trivial Haven work. This f
 - Use `haven-explorer` for read-only discovery before implementation unless the change is trivial.
 - Use `haven-ui-worker` and `haven-backend-worker` only for clean, bounded, disjoint implementation slices.
 - Keep shared files, gravity files, git hygiene, final integration, and product judgment in the captain session.
-- Use `haven-reviewer` for final product, UX, security, regression, and test review when the change touches user-facing UX, money movement, agent authority, shared behavior, or meaningful risk.
+- **Run `haven-reviewer` on every pull request, without exception.** Not when the change looks risky — always. This was conditional until 2026-08-21 ("when the change touches user-facing UX, money movement, agent authority, shared behavior, or meaningful risk"), and the conditional was the whole problem: it is a risk judgement about your own work, so each skip arrives with its own plausible reason ("the diff is script-generated", "it is docs-only") and no skip feels like a pattern from the inside. Three happened in a single session, and the reviewer found real defects in the two that were checked. What needs an independent eye is rarely the lines — it is the judgement around them: whether a claim was tested or assumed, whether a doc says what you say it says. Self-review does not substitute; the author is the one person who cannot see the assumption they already made. For `area:frontend`, `haven-design-reviewer` is a SECOND pass, not a replacement. `.claude/hooks/ship-next-guard.sh` can block pull-request creation without a recorded pass, but it is **opt-in** (personal `settings.local.json`) and enforces nothing until wired. The rule binds regardless.
 - Use `haven-design-reviewer` in addition on `area:frontend` diffs — a rendered-UX pass over the `npm run screenshot` evidence (part of the #904 workflow; a finding from either reviewer pauses auto-merge).
 - Use `haven-doc-reviewer` after implementation to check whether the diff invalidated the docs that cover it (the `covers:` mapping) — a hard definition-of-done step in the autonomous loop.
 - Briefly tell the user which agents will be used and why, but do not ask for permission unless there is a real blocker, destructive action, credential risk, or tool limitation.

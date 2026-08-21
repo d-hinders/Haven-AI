@@ -30,6 +30,33 @@ function optionalEnv(key: string, fallback: string): string {
   return process.env[key] || fallback
 }
 
+/**
+ * Parse TRUST_PROXY_HOPS defensively (#1670). The failure mode this guards is
+ * SILENT disarming: the auth rate-limit tier deliberately returns no limit at
+ * 0 hops, so a value that fails to parse — pasted with quotes, a stray word,
+ * "true" — would leave the front door unthrottled while the operator believes
+ * it is protected, and nothing would say so. Quotes and whitespace are
+ * stripped (dashboard paste artefacts); anything else non-numeric warns
+ * LOUDLY at boot and disarms, because guessing a hop count is worse than
+ * refusing one — `true` in particular is the spoofable Fastify mode this
+ * setting exists to avoid, and must never be coerced into a count.
+ */
+export function parseTrustProxyHops(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return 0
+  const cleaned = raw.trim().replace(/^["']+|["']+$/g, '').trim()
+  const hops = Number(cleaned)
+  if (!Number.isFinite(hops) || !Number.isInteger(hops) || hops < 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `TRUST_PROXY_HOPS is set to ${JSON.stringify(raw)}, which is not a non-negative integer — ` +
+      'treating it as 0: the proxy stays UNTRUSTED and the per-IP auth rate limits stay DISARMED. ' +
+      'Set a plain hop count (e.g. 1), never "true".',
+    )
+    return 0
+  }
+  return hops
+}
+
 // Validate on import — fail fast at startup
 export const config = {
   // Required
@@ -41,6 +68,22 @@ export const config = {
   frontendUrl: optionalEnv('FRONTEND_URL', 'http://localhost:3000'),
   rpcUrl: optionalEnv('RPC_URL', 'https://rpc.gnosischain.com'),
   logLevel: optionalEnv('LOG_LEVEL', 'info'),
+
+  // #1670: how many proxy hops in front of this process are TRUSTED to have
+  // appended the real client address to X-Forwarded-For. 0 (the default)
+  // means "trust nothing": request.ip is the socket peer, which behind a
+  // deployment proxy is the proxy itself — every external caller collapses
+  // into one address. Railway terminates in exactly one edge proxy, so the
+  // operator sets TRUST_PROXY_HOPS=1 there. A HOP COUNT rather than `true`
+  // on purpose: Fastify's `trustProxy: true` takes the LEFTMOST
+  // X-Forwarded-For entry, which is whatever the client typed — with a
+  // count, proxy-addr walks from the right through exactly that many trusted
+  // hops, so a client-supplied header cannot spoof its own bucket.
+  // Per-IP rate limiting (routes/auth.ts) keys on request.ip ONLY when this
+  // is > 0; ungated it would be one shared bucket and a cheap global
+  // signup/login denial-of-service. Flipping this in an environment is an
+  // OPERATOR action, never an agent's.
+  trustProxyHops: parseTrustProxyHops(process.env.TRUST_PROXY_HOPS),
 
   // Chain-specific RPC URLs
   rpcUrlBase: optionalEnv('RPC_URL_BASE', 'https://mainnet.base.org'),

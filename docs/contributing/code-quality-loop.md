@@ -12,7 +12,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/loop-engineering.md
   - docs/contributing/loop-harness-index.md
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-21" # the haven-reviewer rule is unconditional (owner decision 2026-08-21) — this file scoped it to a risk list, which is the licence three skips in one session were drawn from. AGENTS.md is canonical. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven Code Quality Loop
@@ -35,7 +35,9 @@ differential campaigns in [`loop-engineering.md`](loop-engineering.md).
 4. Add a machine-checkable invariant where practical.
 5. Run focused and package checks, typecheck/build where relevant, and
    `git diff --check`.
-6. Use `haven-reviewer` for money, authority, shared contracts, and primary UX.
+6. Run `haven-reviewer` — on every pull request, not only for money, authority,
+   shared contracts, or primary UX. Unconditional since the 2026-08-21 owner
+   decision; `AGENTS.md` is canonical.
 7. Record actionable follow-up as a GitHub Issue, not an in-document queue.
 
 Promote findings that need migrations, custody/signing changes, or coordinated

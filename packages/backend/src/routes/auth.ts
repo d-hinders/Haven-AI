@@ -2,6 +2,8 @@ import { FastifyInstance } from 'fastify'
 import bcrypt from 'bcrypt'
 import { randomBytes } from 'node:crypto'
 import { authMiddleware } from '../middleware/auth.js'
+import { authRateLimit } from '../middleware/rate-limit.js'
+import { config } from '../config.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import {
   findUserCredentialsByEmail,
@@ -79,9 +81,18 @@ function normalizeName(name: unknown): string | null {
   return normalized
 }
 
-export default async function authRoutes(app: FastifyInstance): Promise<void> {
+export default async function authRoutes(
+  app: FastifyInstance,
+  opts: { trustProxyHops?: number } = {},
+): Promise<void> {
+  // #1670: the auth tier only arms when the deployment trusts its proxy —
+  // see authRateLimit for why an untrusted per-IP limit here is a DoS, not a
+  // protection. Injectable so tests can exercise both states; production
+  // callers never pass it and get the environment's value.
+  const trustProxyHops = opts.trustProxyHops ?? config.trustProxyHops
+
   // POST /auth/signup
-  app.post<{ Body: SignupBody }>('/signup', async (request, reply) => {
+  app.post<{ Body: SignupBody }>('/signup', { config: { ...authRateLimit(trustProxyHops, 'signup') } }, async (request, reply) => {
     const { name, email, password } = request.body
     const normalizedName = normalizeName(name)
     const normalizedEmail = normalizeEmail(email)
@@ -134,7 +145,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // POST /auth/login
-  app.post<{ Body: LoginBody }>('/login', async (request, reply) => {
+  app.post<{ Body: LoginBody }>('/login', { config: { ...authRateLimit(trustProxyHops, 'login') } }, async (request, reply) => {
     const { email, password } = request.body
     const normalizedEmail = normalizeEmail(email)
 

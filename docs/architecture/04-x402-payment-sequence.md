@@ -709,6 +709,22 @@ The flow is a two-call variant of `/x402/authorize`:
    delegation account it builds a **settlement child delegation** and returns the
    EIP-712 `typed_data` the agent must sign — not an AllowanceModule funding hash,
    and it never queues an approval (over-budget/wrong-recipient reverts on-chain).
+
+   Before the intent is created, authorize also **deploys the child's delegator —
+   the delegate hybrid account — if it is still counterfactual**
+   ([#1667](https://github.com/d-hinders/Haven-AI/issues/1667)): the
+   DelegationManager verifies the child's signature via EIP-1271 when the
+   delegator has code and ecrecover when it does not, so against an undeployed
+   account the delegate EOA's signature recovers to the EOA ≠ delegator and
+   redemption reverts `InvalidEOASignature`. The EIP-3009 bridge deploys the
+   account as a side effect of its first funding UserOp's initCode, which is why
+   the gap surfaced only for a fresh agent whose *first* payment is erc7710 —
+   and would have been permanent for recipient-pinned agents, which can never
+   run a 3009 leg. The deploy is the same permissionless, relayer-paid factory
+   call as treasury activation (#860, `ensureHybridDeployed`), short-circuits on
+   a single `getBytecode` once deployed, counts against the relayer gas budget
+   (#717 → 429), and fails closed with a retryable 502 before any intent row
+   exists.
 2. The agent signs that typed data VERBATIM with its delegate key (the #829
    lesson) and submits `{ signature }` to `POST /x402/:id/settle`. Settle
    **recovers the signer** from the child delegation's EIP-712 payload and

@@ -257,12 +257,30 @@ payload it will not guess.' >&2
   # `[ -f ]` is the right test throughout: false for a directory, a dangling
   # link and a symlink loop; true for an unreadable regular file, whose
   # unreadability `[ ! -r ]` then catches.
-  if [ -f "$rmarker" ] && [ ! -r "$rmarker" ]; then
-    return 0
-  fi
+  # A SYMLINK here is never a marker, whatever it points at.
+  #
+  # `-f` and `grep` both FOLLOW symlinks, so the previous shape accepted a link
+  # to any readable file containing the branch name — and the path is
+  # deterministic, the session id known to the calling agent, TMPDIR its own.
+  # Two commands silenced the gate with no review run:
+  #
+  #     echo "$(git rev-parse --abbrev-ref HEAD)" > /tmp/anything
+  #     ln -s /tmp/anything "$TMPDIR/claude-reviewed-$SESSION_ID"
+  #
+  # This is not a fail-open path — it is a false PASS through the branch that is
+  # supposed to PROVE a review happened, which is why narrowing the malfunction
+  # condition did not touch it and why the tests aimed at that condition could
+  # not see it. reviewer-marker.sh appends to a regular file and never creates
+  # or follows a link, so a symlink is not something a real pass can produce:
+  # absence, which blocks.
+  if [ ! -L "$rmarker" ]; then
+    if [ -f "$rmarker" ] && [ ! -r "$rmarker" ]; then
+      return 0
+    fi
 
-  if [ -f "$rmarker" ] && grep -Fxq "$rbranch" "$rmarker" 2>/dev/null; then
-    return 0
+    if [ -f "$rmarker" ] && grep -Fxq "$rbranch" "$rmarker" 2>/dev/null; then
+      return 0
+    fi
   fi
 
   printf '%s\n' 'BLOCKED: no independent reviewer pass recorded for this branch.
@@ -294,6 +312,11 @@ fire_unless_ship_next() {
   [ -n "$safe" ] || fire
 
   marker="${TMPDIR:-/tmp}/claude-ship-next-$safe"
+  # Same symlink reasoning as require_reviewer_pass: -f and grep follow links,
+  # and ship-next-marker.sh only ever appends to a regular file. Lower stakes —
+  # this one only silences a warning — but identical root cause, so it is closed
+  # here too rather than left as the next person's surprise.
+  [ -L "$marker" ] && fire
   [ -f "$marker" ] || fire
 
   # Which issue does this PR close? The source is deliberately NARROW: the MCP

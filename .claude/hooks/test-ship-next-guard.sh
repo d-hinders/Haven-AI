@@ -497,6 +497,26 @@ ln -s "$MARKER_DIR/definitely-not-there-$$" "$MARKER_DIR/claude-reviewed-dangles
 rcheck "marker path is a DANGLING SYMLINK -> still BLOCKS" 2 "$(pr danglesess 1)"
 rm -f "$MARKER_DIR/claude-reviewed-danglesess" 2>/dev/null
 
+# The symlink bypass: a link to a readable file containing the branch name is
+# NOT a review pass. `-f` and `grep` both follow links, so this sailed through
+# the branch meant to PROVE a review happened — not a fail-open path at all,
+# which is why narrowing the malfunction condition never touched it and the
+# cases aimed at that condition could not see it.
+unreviewed symsess
+printf '%s\n' "$TEST_BRANCH" > "$MARKER_DIR/sym-target-$$" 2>/dev/null
+ln -s "$MARKER_DIR/sym-target-$$" "$MARKER_DIR/claude-reviewed-symsess" 2>/dev/null
+rcheck "symlink to a readable branch-name file does NOT clear the gate" 2 "$(pr symsess 1)"
+rm -f "$MARKER_DIR/claude-reviewed-symsess" "$MARKER_DIR/sym-target-$$" 2>/dev/null
+
+# And the same trick against the ship-next token marker must still warn.
+mkrm symtok
+printf '%s\n' '*' > "$MARKER_DIR/ship-next-target-$$" 2>/dev/null
+ln -s "$MARKER_DIR/ship-next-target-$$" "$MARKER_DIR/claude-ship-next-symtok" 2>/dev/null
+reviewed symtok
+check "symlinked ship-next marker does not silence the warning" fire "$(pr symtok 1)"
+rm -f "$MARKER_DIR/claude-ship-next-symtok" "$MARKER_DIR/ship-next-target-$$" 2>/dev/null
+unreviewed symtok
+
 # The bypass itself, named, so it cannot be reintroduced quietly.
 unreviewed attacksess
 mkdir -p "$MARKER_DIR/claude-reviewed-attacksess" 2>/dev/null
@@ -504,7 +524,7 @@ rcheck "mkdir at the marker path does NOT silence the gate" 2 "$(pr attacksess 1
 rmdir "$MARKER_DIR/claude-reviewed-attacksess" 2>/dev/null
 
 # F7: leave no stray markers behind, including the ones seeded at the top.
-for _s in rgate rgate2 rgate3 rgate4 rgate5 strictsess dirsess loopsess danglesess attacksess testsess sess1 sess2 wsess gatesess x ______etc_passwd; do
+for _s in rgate rgate2 rgate3 rgate4 rgate5 strictsess dirsess loopsess danglesess attacksess symsess symtok testsess sess1 sess2 wsess gatesess x ______etc_passwd; do
   unreviewed "$_s"
 done
 

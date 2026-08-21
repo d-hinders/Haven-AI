@@ -88,6 +88,13 @@ difference between them matters:
 | ship-next warning | which *route* opened the PR | warns, never blocks (owner decision 2026-07-26) |
 | reviewer gate | whether an independent review *happened* | **blocks** (owner decision 2026-08-21) |
 
+> **Scope, stated honestly:** these gates raise the cost of skipping review;
+> they do not make it impossible. The marker path is writable by the same agent
+> the gate constrains, so a determined caller with shell access can always find
+> another way. They are worth having because the failure they were built for is
+> an agent *re-arguing the rule per pull request*, not an agent attacking its own
+> guard rails — and every hole found so far has been closed once named.
+
 `reviewer-marker.sh` records a pass when a `haven-reviewer` subagent is
 actually launched; the gate blocks PR creation when no pass is recorded for the
 current branch. **`haven-design-reviewer` does not clear it** — on
@@ -130,6 +137,23 @@ pull request is not a rule.
   calling agent, `mkdir -p "$TMPDIR/claude-reviewed-$SESSION_ID"` silenced the
   entire gate in one command — with three tests certifying it as intended. If
   you ever widen this condition, that is the case to think about first.
+- **A symlink at the marker path is rejected outright**, whatever it points at.
+  `-f` and `grep` both follow links, so a link to any readable file containing
+  the branch name passed the branch that is meant to *prove* a review happened:
+
+  ```sh
+  echo "$(git rev-parse --abbrev-ref HEAD)" > /tmp/anything
+  ln -s /tmp/anything "$TMPDIR/claude-reviewed-$SESSION_ID"
+  ```
+
+  Note where that sits: **not** on the malfunction/fail-open surface at all, but
+  on the success path. Narrowing the fail-open condition never touched it, and
+  the tests aimed at that condition could not see it — which is the lesson worth
+  keeping. The two marker gates here have been reasoned about mostly in terms of
+  "what counts as a malfunction", and the cheapest attacks have both been
+  *forgeries of success* instead. `ship-next-marker.sh` and `reviewer-marker.sh`
+  only ever append to a regular file, so anything else at those paths is
+  absence.
 - **Bypass** by unsetting the hook — and say in the pull request that review was
   skipped and why. Do not do it silently.
 

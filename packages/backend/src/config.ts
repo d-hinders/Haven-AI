@@ -30,6 +30,33 @@ function optionalEnv(key: string, fallback: string): string {
   return process.env[key] || fallback
 }
 
+/**
+ * Parse TRUST_PROXY_HOPS defensively (#1670). The failure mode this guards is
+ * SILENT disarming: the auth rate-limit tier deliberately returns no limit at
+ * 0 hops, so a value that fails to parse — pasted with quotes, a stray word,
+ * "true" — would leave the front door unthrottled while the operator believes
+ * it is protected, and nothing would say so. Quotes and whitespace are
+ * stripped (dashboard paste artefacts); anything else non-numeric warns
+ * LOUDLY at boot and disarms, because guessing a hop count is worse than
+ * refusing one — `true` in particular is the spoofable Fastify mode this
+ * setting exists to avoid, and must never be coerced into a count.
+ */
+export function parseTrustProxyHops(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return 0
+  const cleaned = raw.trim().replace(/^["']+|["']+$/g, '').trim()
+  const hops = Number(cleaned)
+  if (!Number.isFinite(hops) || !Number.isInteger(hops) || hops < 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `TRUST_PROXY_HOPS is set to ${JSON.stringify(raw)}, which is not a non-negative integer — ` +
+      'treating it as 0: the proxy stays UNTRUSTED and the per-IP auth rate limits stay DISARMED. ' +
+      'Set a plain hop count (e.g. 1), never "true".',
+    )
+    return 0
+  }
+  return hops
+}
+
 // Validate on import — fail fast at startup
 export const config = {
   // Required
@@ -56,7 +83,7 @@ export const config = {
   // is > 0; ungated it would be one shared bucket and a cheap global
   // signup/login denial-of-service. Flipping this in an environment is an
   // OPERATOR action, never an agent's.
-  trustProxyHops: Math.max(0, Math.trunc(Number(process.env.TRUST_PROXY_HOPS) || 0)),
+  trustProxyHops: parseTrustProxyHops(process.env.TRUST_PROXY_HOPS),
 
   // Chain-specific RPC URLs
   rpcUrlBase: optionalEnv('RPC_URL_BASE', 'https://mainnet.base.org'),

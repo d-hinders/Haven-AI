@@ -2526,6 +2526,11 @@ export type components = {
                 }[];
                 unverifiableChainIds: number[];
             };
+            /** @description Trust-proxy state (#1670): the hop count the process actually read, and whether the per-IP auth rate-limit tier is therefore armed. Exists because the armed/disarmed split is otherwise invisible from outside — the tier deliberately returns NO limit when the proxy is untrusted, which a probe cannot tell apart from a variable the process never saw. */
+            trustProxy?: {
+                hops: number;
+                authRateLimitArmed: boolean;
+            };
         };
         SuccessResponse: {
             success: boolean;

@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-19" # #1605: comment-only tense corrections in hybrid-accounts route + migrations 041/043 (stale "until #829/#834" claims) — no executable code, SQL, or boundary moves; every claim in this doc re-read against the diff stands. Prior: #1436: archiving now requires dead budgets as well as a revoked credential (one statement, refusal-only), so "Removed" cannot hide a spendable agent. #1423: revoke-all prepare reconciles crash-window orphans against disabledDelegations() and caps batches at 25; #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
+last-verified: "2026-08-21" # #1679: signers read gains per-credential created_at (read-only timestamp for UI labels) — read/management boundary and every invariant unchanged; the read-surface paragraph updated to match. Prior: #1605: comment-only tense corrections in hybrid-accounts route + migrations 041/043 (stale "until #829/#834" claims) — no executable code, SQL, or boundary moves; every claim in this doc re-read against the diff stands. Prior: #1436: archiving now requires dead budgets as well as a revoked credential (one statement, refusal-only), so "Removed" cannot hide a spendable agent. #1423: revoke-all prepare reconciles crash-window orphans against disabledDelegations() and caps batches at 25; #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -264,10 +264,12 @@ names the consequence and asks for confirmation, and the API does not refuse
 **Read surface (#1079).** The signer set is additionally readable at account
 level via `GET /accounts/hybrid/:address/signers` — owner-scoped (dashboard
 JWT + ownership check on `user_safes`) and returning **public-key material
-only** (`key_id`, P256 x/y, owner address). It powers login-time signer
-resolution and the account-level recovery card. It is a read: no route lets
-Haven — or this endpoint's caller — change a signer set without an existing
-signer's signature (invariant 13 unchanged).
+plus per-credential enrollment time** (`key_id`, P256 x/y, owner address, and
+`created_at` since #1679 — a timestamp the UI uses to label rows
+"Passkey · added {date}"; nothing secret, nothing spend-enabling). It powers
+login-time signer resolution and the account-level recovery card. It is a
+read: no route lets Haven — or this endpoint's caller — change a signer set
+without an existing signer's signature (invariant 13 unchanged).
 
 **Management surface (#1081).** Signer changes are reachable the same two ways:
 agent-scoped (`/agents/:id/account-signers/{prepare,submit}`, #888) and

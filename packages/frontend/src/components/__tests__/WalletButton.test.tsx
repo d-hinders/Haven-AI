@@ -319,7 +319,7 @@ describe('WalletButton', () => {
     const KEY_A = '0x' + '11'.repeat(32)
     const KEY_B = '0x' + '22'.repeat(32)
     const ACCOUNT = '0x' + 'aa'.repeat(20)
-    // Mark the SECOND passkey as the on-device credential (Backup 1). The
+    // Mark the SECOND passkey as the on-device credential. The
     // marker is keyed by the base64url CREDENTIAL id, not the raw key_id —
     // use the real conversion so this test exercises the same path signing
     // does.
@@ -334,8 +334,8 @@ describe('WalletButton', () => {
         chain_id: 84532,
         owner_address: null,
         passkeys: [
-          { key_id: KEY_A, x: '0x1', y: '0x2' },
-          { key_id: KEY_B, x: '0x3', y: '0x4' },
+          { key_id: KEY_A, x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+          { key_id: KEY_B, x: '0x3', y: '0x4', created_at: '2026-05-10T09:00:00.000Z' },
         ],
       },
     })
@@ -346,7 +346,9 @@ describe('WalletButton', () => {
     expect(within(dialog).getByText('Haven account')).toBeInTheDocument()
     expect(within(dialog).queryByText('Haven account (passkey)')).not.toBeInTheDocument()
     expect(within(dialog).getByText('Signing with')).toBeInTheDocument()
-    expect(within(dialog).getByText('Backup 1')).toBeInTheDocument()
+    // #1679: the credential is named by kind + enrollment date, never
+    // positionally ("Backup 1") and never by platform brand.
+    expect(within(dialog).getByText('Passkey · added May 10, 2026')).toBeInTheDocument()
     // The block identifies the credential by truncated key id, never an address:
     expect(within(dialog).getByText('0x2222…2222')).toBeInTheDocument()
     window.localStorage.removeItem('haven_passkey_device_' + credentialIdFromKeyId(KEY_B))

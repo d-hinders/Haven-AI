@@ -148,6 +148,41 @@ one device. Haven currently relies on local browser enrollment metadata before
 offering passkey approval. When approval is unavailable, state which enrolled
 device or browser the user should return to and give a concrete recovery action.
 
+### Name credentials “passkey”, never a platform brand ([#1679](https://github.com/d-hinders/Haven-AI/issues/1679))
+
+A platform name is an anchor, never the *name* of a credential. “Face ID /
+Touch ID” as a row label is wrong three ways: it inverts the anchor rule above,
+it is false on Windows and Android, and any positional variant (“Face ID for
+the first key, Backup N for the rest”) silently misnames the surviving key
+after a recovery removes the original.
+
+Credential rows (signer lists, “ways to approve”):
+
+- A passkey row is **“Passkey · added {date}”** — the kind plus when it was
+  enrolled, e.g. “Passkey · added March 3, 2026”. When a credential has no
+  stored date (it predates timestamp exposure), fall back to **“Passkey 1”**,
+  “Passkey 2”, … in enrollment order — never to a platform name.
+- An EOA row is **“Wallet”** with the address underneath — not “External
+  owner”, “signer”, or “owner” (the sign-in rule above already bans those).
+
+Action copy keeps the anchor pattern — passkey first, familiar examples second,
+ideally as subtext:
+
+- Button “Add a backup passkey” with subtext “Approve with Face ID, Touch ID,
+  Windows Hello, or your device PIN”
+- “Create account with a passkey”
+- “Waiting for your passkey…” / “The passkey prompt was cancelled.”
+
+Avoid:
+
+- “Face ID / Touch ID” as a row label or credential name
+- “Add a backup with Face ID / Touch ID”
+- “Waiting for Face ID or Touch ID...”
+- “a second Face ID” (say “a backup passkey”)
+
+User-editable credential nicknames are deliberately deferred (#1679) — date +
+kind is enough at two or three credentials; revisit if users accumulate more.
+
 ### Use “agent rules” or “agent budgets” instead of “spending policies”
 
 Preferred:
@@ -236,7 +271,7 @@ No wallet, no seed phrase, nothing to install.
 Network
 Base
 
-Create account with Face ID / Touch ID
+Create account with a passkey
 ```
 
 While it runs, the intro becomes the reassurance:

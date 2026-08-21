@@ -27,13 +27,13 @@ Do all three steps on the **stable dev URL** —
 the passkey you create stays reachable. (Not `haven-ai-frontend.vercel.app`,
 which is production.)
 
-1. **Sign up** with email + password, then create your account with Face ID /
-   Touch ID.
+1. **Sign up** with email + password, then create your account with a passkey
+   (Face ID, Touch ID, Windows Hello, or your device PIN).
 2. **Account page → Backup & recovery → add a wallet.** Paste your wallet's
-   address and approve with Face ID. You supply the address only — the wallet
+   address and approve with your passkey. You supply the address only — the wallet
    doesn't need to be connected, and you pay no gas.
-3. **Check the card now lists two ways to approve:** your wallet, and Face ID /
-   Touch ID.
+3. **Check the card now lists two ways to approve:** your wallet (labeled
+   "Wallet"), and your passkey (labeled "Passkey · added {date}", #1679).
 
 ## Testing on a PR preview
 
@@ -52,7 +52,7 @@ retry.
 the ownership check happens on-chain, so the wrong account fails with an unhelpful
 error. Check MetaMask's selected account first.
 
-The card may say *"This account's Face ID / Touch ID may be on another device"*.
+The card may say *"This account's passkey may be on another device"*.
 On a preview that's expected — ignore it, the wallet signs.
 
 ## Testing passkeys on a preview

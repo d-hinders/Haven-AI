@@ -19,15 +19,13 @@
 
 import { createPublicClient, http, type Address, type Hex } from 'viem'
 import { base, baseSepolia } from 'viem/chains'
+import type { ApiSchema } from '@haven_ai/core'
 import { base64UrlEncode } from './passkey'
 import { credentialIdFromKeyId, hasPasskeyCredentialOnDevice } from './signer'
 
-export interface AccountSigners {
-  account_address: string
-  chain_id: number
-  owner_address: string | null
-  passkeys: Array<{ key_id: string; x: string; y: string }>
-}
+// The spec is the source of truth for this wire shape (#1447/#1679):
+// GET /accounts/hybrid/{address}/signers.
+export type AccountSigners = ApiSchema<'HybridAccountSigners'>
 
 /** Delegation fields as the backend's signing payload carries them. */
 export interface DelegationMessage {

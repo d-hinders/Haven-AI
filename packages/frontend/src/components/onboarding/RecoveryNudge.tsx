@@ -50,7 +50,7 @@ export function RecoveryNudge({ rail = 'delegation' }: { rail?: RecoveryNudgeRai
         <div className="min-w-0">
           <p className="text-sm font-semibold text-[var(--v2-ink)]">Add a backup soon</p>
           <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Right now this account has one way to approve it. Add a backup — a second Face ID or a
+            Right now this account has one way to approve it. Add a backup — a backup passkey or a
             wallet — so a lost device never means a lost account.{' '}
             {rail === 'safe' ? (
               <>

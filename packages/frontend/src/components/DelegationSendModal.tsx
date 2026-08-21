@@ -128,7 +128,7 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
           // #1097: hint on a WORKING send — the ceremony may hand off to the
           // device that holds the passkey.
           <p className="text-xs text-[var(--v2-ink-muted)]">
-            This account&apos;s Face ID / Touch ID may be on another device — your browser will
+            This account&apos;s passkey may be on another device — your browser will
             guide you there when you approve.
           </p>
         ) : null}

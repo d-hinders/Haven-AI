@@ -71,7 +71,7 @@ export async function clearAccountOwnerAddress(
 
 // ── Owner-config passkey set (moved from rails/hybrid-account-config.ts, #999)
 
-export const LIST_ACCOUNT_PASSKEYS_SQL = `SELECT key_id, public_key_x, public_key_y
+export const LIST_ACCOUNT_PASSKEYS_SQL = `SELECT key_id, public_key_x, public_key_y, created_at
      FROM hybrid_account_passkeys
      WHERE user_safe_id = $1
      ORDER BY created_at ASC`
@@ -80,6 +80,12 @@ export interface AccountPasskeyRow {
   key_id: string
   public_key_x: string
   public_key_y: string
+  /**
+   * Enrollment time (#1679) — surfaced so the UI can label rows
+   * "Passkey · added {date}". Optional defensively: mapping tolerates rows
+   * without it (see passkeyEnrollmentDates).
+   */
+  created_at?: Date | string | null
 }
 
 /**
@@ -92,4 +98,22 @@ export async function listAccountPasskeys(
 ): Promise<AccountPasskeyRow[]> {
   const result = await executor.query<AccountPasskeyRow>(LIST_ACCOUNT_PASSKEYS_SQL, [userSafeId])
   return result.rows
+}
+
+/**
+ * key_id (lowercased) → enrollment time as an ISO string (#1679), for the
+ * signer-set reads to join onto the owner config. Defensive on purpose: a row
+ * with a missing or unparseable `created_at` is simply absent from the map —
+ * the API then serves `created_at: null` and the UI falls back to ordinal
+ * "Passkey N", never a fabricated date and never a 500.
+ */
+export function passkeyEnrollmentDates(rows: AccountPasskeyRow[]): Map<string, string> {
+  const byKey = new Map<string, string>()
+  for (const r of rows) {
+    if (r.created_at === null || r.created_at === undefined) continue
+    const date = new Date(r.created_at)
+    if (Number.isNaN(date.getTime())) continue
+    byKey.set(r.key_id.toLowerCase(), date.toISOString())
+  }
+  return byKey
 }

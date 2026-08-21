@@ -255,7 +255,7 @@ export function approvalErrorMessage(err: unknown, signerType?: string): string 
   const message = errorMessage(err)
   if (/user rejected|user denied/i.test(message)) {
     return signerType === 'passkey'
-      ? 'Face ID or Touch ID was cancelled.'
+      ? 'The passkey prompt was cancelled.'
       : 'Wallet approval was cancelled.'
   }
   if (message.includes('would revert on-chain')) {

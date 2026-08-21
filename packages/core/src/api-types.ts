@@ -2416,6 +2416,23 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
+        /** @description A hybrid account's signer set — the exact configuration the account address was derived from. Public key material plus per-credential enrollment time (#1679); nothing secret. */
+        HybridAccountSigners: {
+            account_address: string;
+            chain_id: number;
+            /** @description Null for a pure-passkey account. */
+            owner_address: string | null;
+            passkeys: {
+                key_id: string;
+                x: string;
+                y: string;
+                /**
+                 * Format: date-time
+                 * @description When this credential was enrolled (#1679) — the UI labels the row "Passkey · added {date}". Null only if the stored row is missing; clients fall back to ordinal "Passkey N" labels, never a platform name.
+                 */
+                created_at: string | null;
+            }[];
+        };
         /** @description One budget-delegation row (#828). start_date and expires_at are unix-second BIGINTs and arrive as digit STRINGS (node-postgres decodes int8 as string). The signed delegation object is never included here — the list is lifecycle metadata only. */
         Delegation: {
             /** Format: uuid */
@@ -5062,26 +5079,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The signer set. */
+            /** @description The signer set. Same shape as the account-scoped read (#1679). */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        account_address: string;
-                        chain_id: number;
-                        /** @description Null for a pure-passkey account. */
-                        owner_address: string | null;
-                        passkeys: {
-                            key_id: string;
-                            /** @description 0x-hex P256 public-key x coordinate. */
-                            x: string;
-                            /** @description 0x-hex P256 public-key y coordinate. */
-                            y: string;
-                        }[];
-                    };
+                    "application/json": components["schemas"]["HybridAccountSigners"];
                 };
             };
             /** @description Error response */
@@ -8810,18 +8814,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        account_address: string;
-                        chain_id: number;
-                        /** @description Null for a pure-passkey account. */
-                        owner_address: string | null;
-                        passkeys: {
-                            key_id: string;
-                            x: string;
-                            y: string;
-                        }[];
-                    };
+                    "application/json": components["schemas"]["HybridAccountSigners"];
                 };
             };
             /** @description Error response */

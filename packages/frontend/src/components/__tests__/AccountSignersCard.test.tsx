@@ -18,7 +18,7 @@ function base(overrides: Record<string, unknown> = {}) {
       account_address: '0x' + 'aa'.repeat(20),
       chain_id: 84532,
       owner_address: null,
-      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     },
     loadError: false,
     busy: false,
@@ -42,11 +42,11 @@ describe('AccountSignersCard (#888)', () => {
     expect((screen.getByText('Remove') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('enrolls a backup passkey via one Face ID action', async () => {
+  it('enrolls a backup passkey via one action', async () => {
     const enrollBackupPasskey = vi.fn().mockResolvedValue({ ok: true })
     mockUseSigners.mockReturnValue(base({ enrollBackupPasskey }))
     render(<AccountSignersCard {...PROPS} />)
-    fireEvent.click(screen.getByText(/Add a backup with Face ID/))
+    fireEvent.click(screen.getByText('Add a backup passkey'))
     await waitFor(() => expect(enrollBackupPasskey).toHaveBeenCalled())
   })
 
@@ -59,7 +59,7 @@ describe('AccountSignersCard (#888)', () => {
           account_address: '0x' + 'aa'.repeat(20),
           chain_id: 84532,
           owner_address: '0x' + 'ee'.repeat(20),
-          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         },
       }),
     )
@@ -88,7 +88,7 @@ describe('AccountSignersCard (#888)', () => {
           account_address: '0x' + 'aa'.repeat(20),
           chain_id: 84532,
           owner_address: '0x' + 'ee'.repeat(20),
-          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         },
       }),
     )
@@ -111,8 +111,8 @@ describe('AccountSignersCard (#888)', () => {
           chain_id: 84532,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [
-            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' },
-            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4' },
+            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: '2026-05-10T09:00:00.000Z' },
           ],
         },
       }),
@@ -134,7 +134,7 @@ describe('AccountSignersCard (#888)', () => {
           account_address: '0x' + 'aa'.repeat(20),
           chain_id: 84532,
           owner_address: '0x' + 'ee'.repeat(20),
-          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         },
       }),
     )
@@ -167,7 +167,7 @@ describe('AccountSignersCard (#888)', () => {
           account_address: '0x' + 'aa'.repeat(20),
           chain_id: 84532,
           owner_address: '0x' + 'ee'.repeat(20),
-          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         },
       }),
     )
@@ -191,8 +191,8 @@ describe('AccountSignersCard (#888)', () => {
           chain_id: 84532,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [
-            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' },
-            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4' },
+            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: '2026-05-10T09:00:00.000Z' },
           ],
         },
       }),
@@ -287,6 +287,67 @@ describe('AccountSignersCard (#888)', () => {
     mockUseSigners.mockReturnValue(base({ passkeyElsewhere: false }))
     render(<AccountSignersCard {...PROPS} />)
     expect(screen.queryByText(/may be on another device/)).toBeNull()
+  })
+
+  // ── #1679: credential naming — "Passkey · added {date}", never positional ──
+  it('labels every passkey row "Passkey · added {date}" and the EOA row "Wallet"', () => {
+    mockUseSigners.mockReturnValue(
+      base({
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [
+            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: '2026-05-10T09:00:00.000Z' },
+          ],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.getByText('Passkey · added March 3, 2026')).toBeTruthy()
+    expect(screen.getByText('Passkey · added May 10, 2026')).toBeTruthy()
+    expect(screen.getByText('Wallet')).toBeTruthy()
+    // The banned platform-brand label and role words never render as names:
+    expect(document.body.textContent).not.toMatch(/Face ID \/ Touch ID|External owner/)
+  })
+
+  it('REGRESSION (#1679): after a recovery removes the original key, the surviving backup keeps ITS OWN label', () => {
+    // The old positional rule (`i === 0 ? 'Face ID / Touch ID' : 'Backup N'`)
+    // relabeled the surviving backup as the primary the moment the original
+    // key was removed. With date-based labels the row is stable: the same
+    // credential carries the same label whatever its position.
+    const backupOnly = {
+      account_address: '0x' + 'aa'.repeat(20),
+      chain_id: 84532,
+      owner_address: null,
+      // Only the SECOND-enrolled credential remains (index 0 now).
+      passkeys: [{ key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: '2026-05-10T09:00:00.000Z' }],
+    }
+    mockUseSigners.mockReturnValue(base({ signers: backupOnly }))
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.getByText('Passkey · added May 10, 2026')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('Face ID / Touch ID')
+  })
+
+  it('a passkey without a stored date falls back to ordinal "Passkey N" — never a platform name (#1679)', () => {
+    mockUseSigners.mockReturnValue(
+      base({
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: null,
+          passkeys: [
+            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: null },
+            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: null },
+          ],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.getByText('Passkey 1')).toBeTruthy()
+    expect(screen.getByText('Passkey 2')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('Face ID / Touch ID')
   })
 
   it('copy is outcome language — no signer/passkey/addKey jargon leads', () => {

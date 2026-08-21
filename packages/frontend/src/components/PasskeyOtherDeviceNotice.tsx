@@ -16,7 +16,7 @@ export default function PasskeyOtherDeviceNotice({
             This account uses a passkey on another device.
           </p>
           <p className="mt-2 text-sm text-[var(--v2-ink-2)] leading-relaxed">
-            Sign in from the device where you set up Face ID / Touch ID to approve payments from this account.
+            Sign in from the device where you set up your passkey to approve payments from this account.
             Cross-device passkey support is coming soon.
           </p>
         </div>

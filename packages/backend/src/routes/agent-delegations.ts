@@ -36,6 +36,7 @@ import { getChain } from '../domain/chains.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../rails/hybrid-provisioning.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
+import { listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
 import type { HybridOwnerConfig } from '../rails/hybrid-provisioning.js'
 import {
   buildBudgetDelegation,
@@ -140,6 +141,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     }
     const owner = await loadHybridOwnerConfig(sub, agent.treasury_address, agent.chain_id)
     if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
+    // #1679: per-credential enrollment time, same join as the account-scoped
+    // read in hybrid-accounts.ts — this twin can hydrate the same stored
+    // signer set the UI labels ("Passkey · added {date}"), so the two reads
+    // must carry the same shape.
+    const createdByKey = passkeyEnrollmentDates(await listAccountPasskeys(owner.userSafeId))
     return {
       account_address: agent.treasury_address,
       chain_id: agent.chain_id,
@@ -148,6 +154,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         key_id: p.keyId,
         x: `0x${p.x.toString(16)}`,
         y: `0x${p.y.toString(16)}`,
+        created_at: createdByKey.get(p.keyId.toLowerCase()) ?? null,
       })),
     }
   })

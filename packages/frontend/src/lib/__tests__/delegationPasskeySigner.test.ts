@@ -37,8 +37,8 @@ const SIGNERS: AccountSigners = {
   chain_id: 84532,
   owner_address: null,
   passkeys: [
-    { key_id: FIRST_KEY_ID, x: `0x${'aa'.repeat(32)}`, y: `0x${'bb'.repeat(32)}` },
-    { key_id: BACKUP_KEY_ID, x: `0x${'cc'.repeat(32)}`, y: `0x${'dd'.repeat(32)}` },
+    { key_id: FIRST_KEY_ID, x: `0x${'aa'.repeat(32)}`, y: `0x${'bb'.repeat(32)}`, created_at: '2026-03-03T12:00:00.000Z' },
+    { key_id: BACKUP_KEY_ID, x: `0x${'cc'.repeat(32)}`, y: `0x${'dd'.repeat(32)}`, created_at: '2026-05-10T09:00:00.000Z' },
   ],
 }
 

@@ -3,8 +3,8 @@
 /**
  * Onboarding — one screen (#1162).
  *
- * Signup is passkey-only and single-screen: welcome + network + "create with
- * Face ID / Touch ID", then a success state IN PLACE that hands off to the
+ * Signup is passkey-only and single-screen: welcome + network + "Create
+ * account with a passkey", then a success state IN PLACE that hands off to the
  * dashboard, where `DashboardOnboardingGuide` takes over. There is no signer
  * fork here — the delegation rail (epic #821/#836) is passkey-first, and an
  * EOA is a later addition to an account's signer set, not a starting choice.

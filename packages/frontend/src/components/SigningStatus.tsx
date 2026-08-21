@@ -16,7 +16,7 @@ export function SigningStatus({ signer, stage, error }: SigningStatusProps) {
   if (stage === 'signing') {
     text =
       signer?.type === 'passkey'
-        ? 'Waiting for Face ID or Touch ID...'
+        ? 'Waiting for your passkey...'
         : 'Confirm the transaction in your wallet...'
   } else if (stage === 'executing') {
     text =

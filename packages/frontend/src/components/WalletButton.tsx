@@ -15,6 +15,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { getChainConfig, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
 import { useActiveSigner, hybridPasskeyOnDevice } from '@/lib/signer'
+import { passkeyRowLabel } from '@/lib/passkeyLabels'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { truncateAddress } from '@/components/haven'
 
@@ -422,9 +423,9 @@ export default function WalletButton() {
 
         if (delegatorSigner) {
           const accountAlias = getOwnerAlias(delegatorSigner.accountAddress)
-          // #1126: name the enrolled-on-this-device credential the same way
-          // AccountSignersCard does — Face ID / Touch ID for the primary,
-          // Backup {i} for later enrollments. No address: Hybrid passkeys
+          // #1126/#1679: name the enrolled-on-this-device credential the same
+          // way AccountSignersCard does — "Passkey · added {date}", never a
+          // platform brand or a positional label. No address: Hybrid passkeys
           // have none.
           const onDeviceKey = hybridPasskeyOnDevice(delegatorSigner.signers)
           const keyIndex = onDeviceKey
@@ -432,7 +433,7 @@ export default function WalletButton() {
             : -1
           const signingWith = onDeviceKey
             ? {
-                label: keyIndex === 0 ? 'Face ID / Touch ID' : `Backup ${keyIndex}`,
+                label: passkeyRowLabel(onDeviceKey.created_at, keyIndex),
                 keyId: onDeviceKey.key_id,
               }
             : undefined

@@ -42,8 +42,20 @@ describe('GET /accounts/hybrid/:address/signers (#1079)', () => {
   })
 
   it('returns the AccountSigners shape for an owned delegation account', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
+    // #1679: the route joins per-credential enrollment time from the
+    // hybrid_account_passkeys rows so the UI can label "Passkey · added {date}".
+    const ENROLLED_AT = new Date('2026-03-03T12:00:00.000Z')
+    mockQuery.mockImplementation((sql: string) => {
+      if (/FROM hybrid_account_passkeys/.test(String(sql))) {
+        return Promise.resolve({
+          rows: [{ key_id: '0xDEADBEEF', public_key_x: '0x7', public_key_y: '0x9', created_at: ENROLLED_AT }],
+        })
+      }
+      if (/FROM user_safes/.test(String(sql))) return Promise.resolve({ rows: [{ '?column?': 1 }] })
+      return Promise.resolve({ rows: [] })
+    })
     mockLoadOwner.mockResolvedValueOnce({
+      userSafeId: 'safe-1',
       config: {
         ownerAddress: null,
         passkeys: [{ keyId: '0xdeadbeef', x: 7n, y: 9n }],
@@ -55,13 +67,30 @@ describe('GET /accounts/hybrid/:address/signers (#1079)', () => {
       account_address: ACCOUNT,
       chain_id: 84532,
       owner_address: null,
-      passkeys: [{ key_id: '0xdeadbeef', x: '0x7', y: '0x9' }],
+      // Joined case-insensitively by key_id (the stored row above is upper-cased).
+      passkeys: [{ key_id: '0xdeadbeef', x: '0x7', y: '0x9', created_at: ENROLLED_AT.toISOString() }],
     })
     expectMatchesSpec('GET', '/accounts/hybrid/{address}/signers', res.json())
     // Ownership is in the SQL: user_id + address + chain + delegation rail.
     const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
     expect(sql).toMatch(/account_type = 'delegator_hybrid'/)
     expect(params).toEqual(['user-1', ACCOUNT, 84532])
+  })
+
+  it('a passkey with no stored row gets created_at: null — never a fabricated date (#1679)', async () => {
+    mockQuery.mockImplementation((sql: string) =>
+      /FROM user_safes/.test(String(sql))
+        ? Promise.resolve({ rows: [{ '?column?': 1 }] })
+        : Promise.resolve({ rows: [] }),
+    )
+    mockLoadOwner.mockResolvedValueOnce({
+      userSafeId: 'safe-1',
+      config: { ownerAddress: null, passkeys: [{ keyId: '0xdeadbeef', x: 7n, y: 9n }] },
+    })
+    const res = await app.inject({ method: 'GET', url: `/accounts/hybrid/${ACCOUNT}/signers?chain_id=84532` })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().passkeys).toEqual([{ key_id: '0xdeadbeef', x: '0x7', y: '0x9', created_at: null }])
+    expectMatchesSpec('GET', '/accounts/hybrid/{address}/signers', res.json())
   })
 
   it("404s another user's account and 400s bad input", async () => {

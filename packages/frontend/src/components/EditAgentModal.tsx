@@ -341,7 +341,7 @@ export default function EditAgentModal({
       if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
         setExecError(
           signer?.type === 'passkey'
-            ? 'Face ID or Touch ID was cancelled'
+            ? 'The passkey prompt was cancelled'
             : 'Transaction rejected in wallet',
         )
       } else if (

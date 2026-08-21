@@ -68,7 +68,7 @@ function stageLabel(stage: Stage): string {
 function stageHint(stage: Stage): string {
   switch (stage) {
     case 'creating_passkey':
-      return 'Approve the Face ID / Touch ID prompt to create a private key only this device can use.'
+      return "Approve your device's passkey prompt to create a private key only this device can use."
     case 'enrolling':
       return 'Saving your sign-in method to Haven so this device can authorise payments later.'
     case 'deploying':
@@ -80,7 +80,7 @@ function stageHint(stage: Stage): string {
     case 'error':
       return 'You can retry from this browser whenever you are ready.'
     default:
-      return 'Face ID / Touch ID will approve payments and changes for this account.'
+      return 'Your passkey — Face ID, Touch ID, Windows Hello, or your device PIN — will approve payments and changes for this account.'
   }
 }
 
@@ -305,7 +305,7 @@ export default function PasskeyEnrollFlow({
       let message = 'Passkey setup failed. Please try again.'
 
       if (err instanceof PasskeyCancelledError) {
-        message = 'Face ID prompt was cancelled.'
+        message = 'The passkey prompt was cancelled.'
       } else if (err instanceof PasskeyUnsupportedError) {
         message = PASSKEY_REQUIRED_MESSAGE
         setBlocked(true)
@@ -330,7 +330,7 @@ export default function PasskeyEnrollFlow({
           size="lg"
           className="w-full"
         >
-          Create account with Face ID / Touch ID
+          Create account with a passkey
         </Button>
       )}
 

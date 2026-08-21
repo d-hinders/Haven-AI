@@ -12,7 +12,7 @@ import { Checkbox } from '../ui/Checkbox'
 import { Icon } from '../ui/Icon'
 import { CopyBlock } from './CopyBlock'
 import { InlineErrorNote } from './SetupNotices'
-import { formatAbsoluteDate } from './setup-copy'
+import { formatAbsoluteDate, isCommandPathRuntime } from './setup-copy'
 
 export function WaitingForConnector({
   setup,
@@ -73,11 +73,13 @@ export function WaitingForConnector({
         <p className="mt-2 text-xs font-medium leading-relaxed text-[var(--v2-ink)]">
           Haven advances this screen automatically once the agent connects — no refresh, nothing else to click here.
         </p>
-        {/* #1672 review: with the collapsed picker the specific runtime is
-            unknown until the connector reports, so the approval heads-up must
-            show generically for the whole command path — a codex-desktop-only
-            gate would render AFTER the user already faced the dialog. */}
-        {(runtime === 'agent' || runtime === 'codex-desktop') && (
+        {/* #1672 review: on the command path the specific runtime is unknown
+            until the connector reports, so the approval heads-up must show
+            generically for the whole path — a codex-desktop-only gate would
+            render AFTER the user already faced the dialog. #1682 split that
+            one collapsed row into three named ones, so the condition asks
+            "is this the command path?" rather than naming a row. */}
+        {isCommandPathRuntime(runtime) && (
           <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
             {runtime === 'codex-desktop'
               ? 'Codex Desktop may ask you to approve running the setup command. That is expected.'

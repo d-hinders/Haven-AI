@@ -734,7 +734,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     ? body.runtime.trim().slice(0, 80)
     : null
   if (body.local_mcp === true && (!runtime || !LOCAL_MCP_RUNTIMES.has(runtime))) {
-    reply.code(400).send({ error: 'Local MCP is only available for Claude Code and Codex runtimes' })
+    reply.code(400).send({ error: 'Local MCP is only available for the Claude Code, Codex, and Cowork runtimes' })
     return null
   }
   return {
@@ -749,9 +749,19 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
   }
 }
 
-// 'agent' is the collapsed command-path picker entry (#1672) — it covers
-// Claude Code and Codex, the runtimes local MCP supports.
-const LOCAL_MCP_RUNTIMES = new Set(['agent', 'claude-code', 'codex-cli', 'codex-desktop'])
+// The command-path runtimes: Claude Code, Codex, and Cowork (which runs
+// Claude Code's config). #1682 replaced #1672's collapsed 'agent' entry with
+// named rows, and 'agent' stays accepted for the rollout window in which a
+// deployed frontend still sends it. The legacy per-client ids stay too, for
+// setups created before either change.
+const LOCAL_MCP_RUNTIMES = new Set([
+  'claude-code',
+  'codex',
+  'cowork',
+  'agent',
+  'codex-cli',
+  'codex-desktop',
+])
 
 async function resolveUserSafe(userId: string, safeId?: string): Promise<UserSafeRow | null> {
   return setups.findUserSafe(userId, safeId)
@@ -1172,11 +1182,31 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
 
 // #1672: command-path runtimes get NO --runtime flag — the connector detects
 // the environment it executes inside (CLAUDECODE/CODEX_*/… markers), and an
-// embedded wrong hint used to silently configure the wrong client. 'agent' is
-// the collapsed picker entry; the three legacy ids keep old clients flag-free
+// embedded wrong hint used to silently configure the wrong client. #1682's
+// named rows (claude-code / codex / cowork) are that same path; 'agent' and
+// the legacy per-client ids keep older clients and older setup rows flag-free
 // too. Snippet-only runtimes (claude-desktop, cursor, …) keep the flag: their
 // command is run from a plain terminal where nothing is detectable.
-const DETECTED_RUNTIMES = new Set(['agent', 'claude-code', 'codex-cli', 'codex-desktop'])
+const DETECTED_RUNTIMES = new Set([
+  'claude-code',
+  'codex',
+  'cowork',
+  'agent',
+  'codex-cli',
+  'codex-desktop',
+])
+
+// #1682 rollout shim. `openclaw` is a NEW picker row, and the connector that
+// `npx @haven_ai/connect@alpha` resolves to is whatever is on npm — which
+// refuses an unknown --runtime value before any side effect (#1672's
+// no-detection-no-flag rule). Until a connect release carries the openclaw
+// alias, the flag is downgraded to the id that already means exactly what
+// OpenClaw needs: 'other' — credentials on disk, no auto-written config, the
+// user pastes the snippet. Nothing is lost by the downgrade, because the
+// connector normalises openclaw to 'other' anyway; only the picked id, which
+// is stored on the setup row before the command is ever built, tells us the
+// row was chosen. Drop this once the alias is published.
+const CONNECTOR_FLAG_ALIASES: Record<string, string> = { openclaw: 'other' }
 
 function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: string | null, localMcp = false): string {
   const args = [
@@ -1185,7 +1215,9 @@ function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: stri
     `--api ${shellQuote(apiUrl)}`,
     '--ack-local-tools',
   ]
-  if (runtime && !DETECTED_RUNTIMES.has(runtime)) args.push(`--runtime ${shellQuote(runtime)}`)
+  if (runtime && !DETECTED_RUNTIMES.has(runtime)) {
+    args.push(`--runtime ${shellQuote(CONNECTOR_FLAG_ALIASES[runtime] ?? runtime)}`)
+  }
   if (localMcp) args.push('--local')
   return args.join(' ')
 }

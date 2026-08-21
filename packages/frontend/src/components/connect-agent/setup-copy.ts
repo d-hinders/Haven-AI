@@ -1,5 +1,5 @@
 import type { AgentConnectionSetupStatusResponse } from '@/hooks/useAgentConnectionSetupStatus'
-import { runtimeIsConfigured } from '@/hooks/useAgentConnectionSetup'
+import { COMMAND_PATH_RUNTIMES, runtimeIsConfigured } from '@/hooks/useAgentConnectionSetup'
 
 /** Presentation copy helpers for the connect-agent flow. */
 
@@ -12,6 +12,25 @@ export function formatAbsoluteDate(value: string): string {
     hour: 'numeric',
     minute: '2-digit',
   })
+}
+
+/**
+ * Is this a command-path runtime — one whose setup is a command pasted into
+ * the agent itself (#1682)?
+ *
+ * Deliberately accepts more than the picker's three row ids. The id reaching
+ * this helper is `setupStatus.runtime ?? flow.runtime`, so it can also be an
+ * id the CONNECTOR reported after detecting its environment (`codex-cli`,
+ * `codex-desktop`), or #1672's collapsed `agent` from a frontend still inside
+ * the rollout window.
+ */
+export function isCommandPathRuntime(runtime: string): boolean {
+  return (
+    COMMAND_PATH_RUNTIMES.has(runtime) ||
+    runtime === 'agent' ||
+    runtime === 'codex-cli' ||
+    runtime === 'codex-desktop'
+  )
 }
 
 export function restartCopyForRuntime(runtime: string): string | null {
@@ -28,8 +47,16 @@ export function restartCopyForRuntime(runtime: string): string | null {
       return 'Restart Codex Desktop now — it only loads Haven tools at app launch.'
     case 'claude-code':
       return "Haven tools appear in your next Claude Code message. If they don't, restart the session."
+    // #1682: `codex` and `cowork` are picker row ids. They normally lose to
+    // the id the connector reports, but this copy also renders on the rare
+    // path where no connector report arrived.
     case 'codex-cli':
+    case 'codex':
       return "Haven tools appear in your next Codex message. If they don't, restart the session."
+    case 'cowork':
+      return "Haven tools appear in your next Cowork message. If they don't, restart the session."
+    case 'openclaw':
+      return 'Restart the OpenClaw gateway so it loads Haven tools.'
     case 'hermes':
       return 'Restart Hermes in a new session. Gateway users should run /restart. If Haven tools do not appear, install the MCP SDK in Hermes: pip install mcp.'
     default:

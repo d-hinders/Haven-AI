@@ -6,7 +6,7 @@
  * the #717 spend-guard is the part worth pinning: the spend stamp lives in a
  * finally and must still run when the record closes as failed.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const TX_HASH = '0x' + 'ee'.repeat(32)
 const FACTORY = '0x' + '77'.repeat(20)
@@ -14,6 +14,10 @@ const FACTORY_DATA = '0x' + '88'.repeat(40)
 
 const trace: string[] = []
 let waitReverts = false
+/** #1722: the tx never mines — the wait settles only via its own timeout arg. */
+let waitStalls = false
+/** Exactly what the deploy passes to `wait()`, per call. */
+let waitCalls: Array<[confirms: number | undefined, timeoutMs: number | undefined]> = []
 
 type Stamp = { hash: string; nonce: number | bigint }
 const broadcastSpy = vi.fn(async (stamp: Stamp) => {
@@ -37,10 +41,21 @@ const submitSpy = vi.fn(async (params: { recordId: string | null }) => {
   return {
     hash: TX_HASH,
     nonce: 9,
-    wait: async () => {
+    wait: async (confirms?: number, timeoutMs?: number) => {
+      waitCalls.push([confirms, timeoutMs])
       if (waitReverts) {
         const err = new Error('transaction execution reverted') as Error & { code: string }
         err.code = 'CALL_EXCEPTION'
+        throw err
+      }
+      if (waitStalls) {
+        // Mirrors ethers v6 verbatim (`providers/provider.js` → `wait`): a tx
+        // that never mines settles ONLY through the caller's timeout argument,
+        // and with none it never settles at all.
+        if (timeoutMs == null) return await new Promise<never>(() => {})
+        await new Promise((resolve) => setTimeout(resolve, timeoutMs))
+        const err = new Error('wait for transaction timeout') as Error & { code: string }
+        err.code = 'TIMEOUT'
         throw err
       }
       return { status: 1, gasUsed: 100n, gasPrice: 5n }
@@ -93,12 +108,27 @@ vi.mock('@metamask/smart-accounts-kit', async () => {
   }
 })
 
-const { ensureHybridDeployed } = await import('../hybrid-provisioning.js')
+const { STALE_BROADCAST_SECONDS } = await import('../../infra/outbound-bump-worker.js')
+const { ensureHybridDeployed, HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS } = await import(
+  '../hybrid-provisioning.js'
+)
 const OWNER = { ownerAddress: ('0x' + 'aa'.repeat(20)) as `0x${string}` }
+
+// Warm the deploy path's LAZY imports (`relayer-spend-guard`, `relayer` and
+// `outbound-queue` are imported INSIDE the function) and the advisory lock's
+// first pool connection, so the first real test is not the one paying for
+// them. Both costs are harness artefacts, and on a loaded machine they were
+// enough to push that test past vitest's 5 s default on their own.
+beforeAll(async () => {
+  deployedBytecode = '0x'
+  await ensureHybridDeployed(84532, OWNER).catch(() => undefined)
+})
 
 beforeEach(() => {
   trace.length = 0
   waitReverts = false
+  waitStalls = false
+  waitCalls = []
   deployedBytecode = '0x'
   vi.clearAllMocks()
 })
@@ -175,5 +205,25 @@ describe('concurrent first payments deploy once (#1673)', () => {
     expect(result.alreadyDeployed).toBe(true)
     expect(submitSpy).not.toHaveBeenCalled()
     expect(openSpy).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * #1722 — the confirmation wait now carries an explicit bound.
+ *
+ * The characterization this replaces (previous commit) recorded the old call:
+ * `tx.wait()` bare, which in ethers v6 waits indefinitely. What EXPIRY does
+ * needs a stalled tx and fake timers, which do not mix with this file's live
+ * advisory lock — that half lives in `hybrid-provisioning-wait-bound.test.ts`.
+ */
+describe('the deploy confirmation wait is bounded (#1722)', () => {
+  it('passes ONE confirmation and an explicit deadline, below the bump worker s adoption age', async () => {
+    await ensureHybridDeployed(84532, OWNER)
+    expect(waitCalls).toEqual([[1, HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS]])
+
+    // The ceiling that makes the value defensible rather than round: the
+    // caller must be gone before the bump worker adopts the row, or the two
+    // own the same transaction at once.
+    expect(HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS).toBeLessThan(STALE_BROADCAST_SECONDS * 1_000)
   })
 })

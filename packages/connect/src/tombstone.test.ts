@@ -95,9 +95,9 @@ describe('the tombstone script, run as the host would run it (#1681)', () => {
     expect(await readFile(join(dir, 'signer.json'), 'utf8')).toBe(signerBefore)
   })
 
-  it('works on a directory whose bin/ was already deleted — the #1700 rekey shape', async () => {
+  it('works on a directory whose bin/ was already deleted — the keys-already-gone reset shape', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-tombstone-bare-'))
-    await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'rekey' })
+    await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset' })
 
     const script = await readFile(join(dir, 'bin', 'haven-signer.mjs'), 'utf8')
     expect(script).toContain(TOMBSTONE_MARKER)

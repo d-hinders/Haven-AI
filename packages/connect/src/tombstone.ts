@@ -1,5 +1,8 @@
 /**
- * Agent-directory tombstones (#1681; the mechanism #1700's --rekey reuses).
+ * Agent-directory tombstones (#1681) — for the RECREATION case, where an old
+ * directory is abandoned. (#1700's --rekey deliberately writes no tombstone:
+ * it rewrites credentials in place at a stable path, so no dead path exists —
+ * owner decision on epic #1694, 2026-08-21.)
  *
  * A long-lived MCP host loads its wiring snapshot once, at process start.
  * When an agent is recreated and its old directory is later removed, every
@@ -102,8 +105,8 @@ export async function writeAgentTombstone(input: WriteTombstoneInput): Promise<T
   const info: TombstoneInfo = {
     // reason / replaced_by are persisted to disk and re-emitted to the host's
     // MCP stderr log on EVERY stale probe, potentially for months — redact
-    // like every other output path, here at the write layer so #1700's rekey
-    // reuse inherits it. (#1681 review, finding 1)
+    // like every other output path, at the write layer so any future caller
+    // inherits it. (#1681 review, finding 1)
     agent_id: input.agentId,
     retired_at: input.retiredAt ?? new Date().toISOString(),
     reason: redactSecrets(input.reason),

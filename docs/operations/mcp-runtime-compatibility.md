@@ -682,7 +682,9 @@ what each server's instructions say and why they differ in length.
   tombstone: keys removed ⇒ informational "tombstoned (keys removed)"; key
   still present ⇒ the #1688 live-probe verdict stands unchanged (a tombstone
   is a marker, never a revocation). Optional `--reason` / `--replaced-by`.
-  No token, no `--runtime` needed. Reused by #1700's re-key flow.
+  No token, no `--runtime` needed. Recreation-case only: #1700's `--rekey`
+  rewrites credentials in place at a stable path and writes no tombstone
+  (owner decision on epic #1694, 2026-08-21).
 - **Signer verified by handshake (#1587):** in the hosted+signer topology the
   connector now proves the LOCAL signer with the same stdio handshake the
   hosted server gets (initialize → tools/list → required signer tools, the

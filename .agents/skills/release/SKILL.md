@@ -51,9 +51,10 @@ CASP shard. Name the issues.
 
 ## Choose The Version
 
-Pass an explicit `0.1.<N+1>-alpha.0`. Do **not** pass `prerelease` — it yields
-`0.1.<N>-alpha.1`, which is valid but breaks the convention the recent releases
-follow. Reserve `-alpha.N` for a retry of a version that failed to publish.
+Pass an explicit version string, never a bump type — `scripts/README.md`
+§ *Which version string* has the convention and the one case that departs from
+it. The judgement it does not make for you: if the last attempt at this version
+failed to publish, you are retrying, not releasing.
 
 ## Cut The Bump
 
@@ -121,19 +122,22 @@ publishes on this merge.
 
 ## Promotion To Production
 
-Publishing happens on the `dev → main` promotion, which is a deliberate human
-step. Confirm the user wants it before opening it.
+Publishing happens on the `dev → main` promotion. **Follow
+`branch-and-release-flow.md` § *Promotion to production*** — it owns the
+sequence, the BEHIND/sync-back rule, and why both merge with a merge commit
+rather than a squash. Do not restate it; read it.
 
-- A promotion PR that reports **BEHIND** needs `main`'s previous promotion merge
-  commit synced back into `dev` first. That sync is a separate PR carrying
-  `git merge origin/main`, with zero content change — verify the merged tree
-  hash equals `dev`'s before pushing it.
-- **Merge promotions and sync-backs with a merge commit, never a squash.** A
-  squashed sync silently fails to take effect and the next promotion is BEHIND
-  for the same reason.
-- If the promotion merges while a sync PR is still open, that sync is now stale:
-  re-point it at the new `main` before merging, or it leaves `dev` behind by the
-  newest promotion merge.
+Three things that section does not say, because they only show up while doing it:
+
+- The promotion is a deliberate human step. **Confirm the user wants it** before
+  opening it — cutting the release and shipping it to production are two
+  decisions, not one.
+- A sync-back claims zero content change, so **prove it**: the merged tree hash
+  must equal `dev`'s, and `git diff origin/dev` must be empty, before you push.
+  Test the merge in a throwaway worktree rather than on a shared branch.
+- **If the promotion merges while a sync PR is still open, that sync is stale.**
+  It carries the superseded `main` and will leave `dev` behind by the newest
+  promotion merge. Re-point it at current `main` before merging it.
 
 ## Closeout
 

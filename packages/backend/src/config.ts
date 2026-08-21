@@ -42,6 +42,22 @@ export const config = {
   rpcUrl: optionalEnv('RPC_URL', 'https://rpc.gnosischain.com'),
   logLevel: optionalEnv('LOG_LEVEL', 'info'),
 
+  // #1670: how many proxy hops in front of this process are TRUSTED to have
+  // appended the real client address to X-Forwarded-For. 0 (the default)
+  // means "trust nothing": request.ip is the socket peer, which behind a
+  // deployment proxy is the proxy itself — every external caller collapses
+  // into one address. Railway terminates in exactly one edge proxy, so the
+  // operator sets TRUST_PROXY_HOPS=1 there. A HOP COUNT rather than `true`
+  // on purpose: Fastify's `trustProxy: true` takes the LEFTMOST
+  // X-Forwarded-For entry, which is whatever the client typed — with a
+  // count, proxy-addr walks from the right through exactly that many trusted
+  // hops, so a client-supplied header cannot spoof its own bucket.
+  // Per-IP rate limiting (routes/auth.ts) keys on request.ip ONLY when this
+  // is > 0; ungated it would be one shared bucket and a cheap global
+  // signup/login denial-of-service. Flipping this in an environment is an
+  // OPERATOR action, never an agent's.
+  trustProxyHops: Math.max(0, Math.trunc(Number(process.env.TRUST_PROXY_HOPS) || 0)),
+
   // Chain-specific RPC URLs
   rpcUrlBase: optionalEnv('RPC_URL_BASE', 'https://mainnet.base.org'),
   rpcUrlBaseSepolia: optionalEnv('RPC_URL_BASE_SEPOLIA', 'https://sepolia.base.org'),

@@ -70,6 +70,10 @@ const app = Fastify({
   logger: {
     level: config.logLevel,
   },
+  // #1670: a hop COUNT, not `true` — see the note on trustProxyHops in
+  // config.ts. 0 → false → request.ip stays the socket peer, exactly as
+  // before this option existed.
+  trustProxy: config.trustProxyHops > 0 ? config.trustProxyHops : false,
 })
 
 // --- Global error handler (extracted for testability, #1464) ---
@@ -111,9 +115,10 @@ await app.register(fastifyJwt, {
 // limited; dashboard reads stay unthrottled. Keyed per presented credential
 // (Authorization or X-API-Key — see rateLimitKeyFor) so each agent gets its
 // own bucket regardless of network path; unauthenticated requests fall back
-// to per-IP (behind Railway's proxy that can collapse to the proxy IP —
-// acceptable for the public demo routes, where a shared throttle still beats
-// an open faucet).
+// to per-IP. With TRUST_PROXY_HOPS unset that per-IP fallback collapses to
+// the proxy address behind Railway — acceptable for the public demo routes,
+// where a shared throttle still beats an open faucet, and the reason the
+// auth tier (#1670) refuses to arm itself until the proxy is trusted.
 await app.register(rateLimit, {
   global: false,
   keyGenerator: (request: FastifyRequest) => rateLimitKeyFor(request),

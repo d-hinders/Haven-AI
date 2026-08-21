@@ -34,6 +34,51 @@ export async function runCli(
     io.stdout(`${helpText()}\n`)
     return 0
   }
+  if (parsed.tombstone) {
+    // #1681: retire a credential directory in place. Reads the stored
+    // identity for the agent id, replaces the wrapper with a truth-telling
+    // tombstone, touches NO key material, and tells the user what the
+    // tombstone cannot do for them: restart every long-lived host.
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    const { readFile } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    try {
+      let agentId = 'unknown'
+      try {
+        const identity = JSON.parse(
+          await readFile(join(parsed.tombstone.directory, 'identity.json'), 'utf8'),
+        ) as { agent_id?: string }
+        agentId = identity.agent_id ?? 'unknown'
+      } catch {
+        // A directory whose identity no longer parses can still be retired —
+        // the tombstone then names it as unknown, which is honest.
+      }
+      const info = await writeAgentTombstone({
+        directory: parsed.tombstone.directory,
+        agentId,
+        reason: parsed.tombstone.reason ?? 'retired by operator via --tombstone',
+        replacedBy: parsed.tombstone.replacedBy,
+      })
+      if (parsed.json) {
+        io.stdout(`${redactSecrets(JSON.stringify({ tombstoned: true, ...info }))}\n`)
+      } else {
+        io.stdout(redactSecrets(`Tombstoned agent ${info.agent_id} at ${parsed.tombstone.directory}.\n`))
+        io.stdout(
+          'Key files were NOT touched and nothing was revoked — revoke the agent on the Haven ' +
+            'agent page if you have not already.\n',
+        )
+        io.stdout(
+          'Restart EVERY long-lived MCP host (gateway, TUI workers, editors): each holds the ' +
+            'wiring snapshot from its own start time, and the tombstone only speaks when a stale ' +
+            'host next probes the old path.\n',
+        )
+      }
+      return 0
+    } catch (err) {
+      io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
+      return 1
+    }
+  }
   if (parsed.doctor || parsed.repair) {
     const { runDoctor, runRepair } = await import('./doctor.js')
     const runtime = parsed.options.runtime ?? ''

@@ -77,3 +77,62 @@ describe('CLI entrypoint detection (#1379)', () => {
     expect(isCliEntrypoint(undefined, pathToFileURL(realCliPath).href)).toBe(false)
   })
 })
+
+describe('--tombstone (#1681)', () => {
+  async function agentDir() {
+    tempDir = await mkdtemp(join(tmpdir(), 'haven-cli-tombstone-'))
+    const dir = join(tempDir, 'agent-old')
+    await mkdir(join(dir, 'bin'), { recursive: true })
+    await writeFile(join(dir, 'identity.json'), JSON.stringify({ agent_id: 'agent-old', api_key: 'sk_agent_x' }))
+    await writeFile(join(dir, 'bin', 'haven-signer.mjs'), '// real wrapper')
+    return dir
+  }
+
+  it('retires the directory: tombstone written, keys untouched, exit 0, no setup token needed', async () => {
+    const dir = await agentDir()
+    const stdout: string[] = []
+    const exitCode = await runCli(
+      ['--tombstone', dir, '--reason', 'superseded', '--replaced-by', 'agent-new'],
+      { stdout: (m) => stdout.push(m), stderr: () => undefined },
+    )
+
+    expect(exitCode).toBe(0)
+    const { readFile } = await import('node:fs/promises')
+    const script = await readFile(join(dir, 'bin', 'haven-signer.mjs'), 'utf8')
+    expect(script).toContain('HAVEN-TOMBSTONE')
+    const record = JSON.parse(await readFile(join(dir, 'TOMBSTONE.json'), 'utf8'))
+    expect(record).toMatchObject({ agent_id: 'agent-old', reason: 'superseded', replaced_by: 'agent-new' })
+    // identity.json survives byte-for-byte — connect never revokes or deletes.
+    expect(await readFile(join(dir, 'identity.json'), 'utf8')).toContain('sk_agent_x')
+    const out = stdout.join('')
+    expect(out).toMatch(/nothing was revoked/)
+    expect(out).toMatch(/Restart EVERY long-lived MCP host/)
+    // The agent API key must never surface in output.
+    expect(out).not.toContain('sk_agent_x')
+  })
+
+  it('--json emits one secret-free record', async () => {
+    const dir = await agentDir()
+    const stdout: string[] = []
+    const exitCode = await runCli(['--tombstone', dir, '--json'], {
+      stdout: (m) => stdout.push(m), stderr: () => undefined,
+    })
+    expect(exitCode).toBe(0)
+    expect(stdout).toHaveLength(1)
+    const record = JSON.parse(stdout[0])
+    expect(record).toMatchObject({ tombstoned: true, agent_id: 'agent-old' })
+    expect(stdout[0]).not.toContain('sk_agent_x')
+  })
+
+  it('a directory with unreadable identity is still retired, named unknown', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'haven-cli-tombstone-bare-'))
+    const dir = join(tempDir, 'mystery')
+    await mkdir(dir, { recursive: true })
+    const stdout: string[] = []
+    const exitCode = await runCli(['--tombstone', dir], {
+      stdout: (m) => stdout.push(m), stderr: () => undefined,
+    })
+    expect(exitCode).toBe(0)
+    expect(stdout.join('')).toContain('unknown')
+  })
+})

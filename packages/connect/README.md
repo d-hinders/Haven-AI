@@ -52,6 +52,31 @@ spending authority.
    `haven_get_allowances` tools to confirm the Haven wallet and live budget.
    Do not sign, fund, or create a payment to verify setup.
 
+## Retiring an old agent directory
+
+Re-running setup creates a NEW agent and retires nothing. Long-lived MCP hosts
+(gateways, TUI workers, editors, desktop apps) load their MCP wiring once, at
+process start — a host started before your latest setup keeps spawning the OLD
+agent's signer path forever, and when that directory is later removed the spawn
+failure surfaces only as a masked "Connection closed" retried every few
+minutes. Two rules follow:
+
+1. **Restart EVERY long-lived host after a setup or retirement, not just one.**
+   Each process holds the snapshot from its own start time, so after a chain of
+   re-setups each host can be parked on a *different* old agent.
+2. **Tombstone a directory before (or instead of) deleting it:**
+
+   ```
+   npx @haven_ai/connect@alpha --tombstone ~/.haven/agents/<id> --reason "superseded"
+   ```
+
+   This replaces the directory's signer wrapper with a diagnostic that logs the
+   retirement (agent id, date, reason, restart guidance) to the host's MCP
+   stderr log on every probe, and records it in `TOMBSTONE.json` for
+   `--doctor`. It touches no key material and revokes nothing — revoke the
+   agent on the Haven agent page yourself. Delete the tombstone only once every
+   long-lived host has been restarted.
+
 ### Structured output for automation
 
 Pass `--json` when a launcher needs a machine-readable completion record. Connect

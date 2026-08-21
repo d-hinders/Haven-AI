@@ -32,6 +32,7 @@ import {
 import { runtimeConfigPathFor, writeRuntimeConfig } from './config-writers.js'
 import { restartRequiredForRuntime, type RuntimeId } from './runtime-registry.js'
 import { getLocalSignerConsentStatus } from './signer-consent.js'
+import { TOMBSTONE_FILENAME, readAgentTombstone } from './tombstone.js'
 
 export interface DoctorCheck {
   id: string
@@ -95,21 +96,36 @@ async function discoverCredentialDirectory(
     return explicit ? { directory: explicit, others: [] } : { others: [] }
   }
   const candidates: Array<{ directory: string; mtimeMs: number }> = []
+  // #1681: a directory whose keys were removed but that carries TOMBSTONE.json
+  // is a deliberately retired agent — reportable in the superseded scan, but
+  // never selectable as the active credential directory.
+  const tombstonedOnly: string[] = []
   for (const entry of entries) {
     const directory = join(root, entry)
     try {
       const s = await stat(join(directory, 'identity.json'))
       candidates.push({ directory, mtimeMs: s.mtimeMs })
     } catch {
-      // not an agent credential dir
+      try {
+        await stat(join(directory, TOMBSTONE_FILENAME))
+        tombstonedOnly.push(directory)
+      } catch {
+        // not an agent credential dir
+      }
     }
   }
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
   if (explicit) {
-    return { directory: explicit, others: candidates.map((c) => c.directory).filter((d) => d !== explicit) }
+    return {
+      directory: explicit,
+      others: [...candidates.map((c) => c.directory), ...tombstonedOnly].filter((d) => d !== explicit),
+    }
   }
-  if (candidates.length === 0) return { others: [] }
-  return { directory: candidates[0].directory, others: candidates.slice(1).map((c) => c.directory) }
+  if (candidates.length === 0 && tombstonedOnly.length === 0) return { others: [] }
+  return {
+    directory: candidates[0]?.directory,
+    others: [...candidates.slice(1).map((c) => c.directory), ...tombstonedOnly],
+  }
 }
 
 export async function runDoctor(
@@ -275,6 +291,7 @@ export async function runDoctor(
     const live: string[] = []
     const revoked: string[] = []
     const unverifiable: string[] = []
+    const retired: string[] = []
     for (const other of others) {
       let otherIdentity: IdentityFile | undefined
       try {
@@ -282,23 +299,31 @@ export async function runDoctor(
       } catch {
         otherIdentity = undefined
       }
-      const otherAgent = otherIdentity?.agent_id ?? basename(other)
+      // #1681: a tombstone marks a deliberate retirement. It changes how a
+      // key-less directory READS (retired, not broken) — it never changes
+      // whether a still-present key gets probed, because a tombstone is a
+      // marker, not a revocation.
+      const tombstone = await readAgentTombstone(other)
+      const otherAgent = otherIdentity?.agent_id ?? tombstone?.agent_id ?? basename(other)
       const otherUrl = otherIdentity?.hosted_mcp_url
         ?? (otherIdentity?.api_url ? `${otherIdentity.api_url}/mcp` : undefined)
       if (!otherIdentity?.api_key || !otherUrl) {
-        unverifiable.push(`${otherAgent} (no stored key/URL to probe)`)
+        if (tombstone) retired.push(`${otherAgent} (retired ${tombstone.retired_at})`)
+        else unverifiable.push(`${otherAgent} (no stored key/URL to probe)`)
         continue
       }
+      const suffix = tombstone ? ' [tombstoned — key material still present]' : ''
       const probe = await (deps.probeHosted ?? probeHostedMcpTools)(otherIdentity.api_key, otherUrl, deps.fetch)
-      if (probe.status === 'ok') live.push(otherAgent)
-      else if (probe.status === 'unauthorized') revoked.push(otherAgent)
+      if (probe.status === 'ok') live.push(`${otherAgent}${suffix}`)
+      else if (probe.status === 'unauthorized') revoked.push(`${otherAgent}${suffix}`)
       // network_error / bad_response: neither a false "still live" failure
       // nor a false clean bill — a note, never a verdict.
-      else unverifiable.push(`${otherAgent} (${probe.status})`)
+      else unverifiable.push(`${otherAgent} (${probe.status})${suffix}`)
     }
     const parts: string[] = []
     if (live.length > 0) parts.push(`STILL SPEND-CAPABLE: ${live.join(', ')}`)
     if (revoked.length > 0) parts.push(`already revoked: ${revoked.join(', ')}`)
+    if (retired.length > 0) parts.push(`tombstoned (keys removed): ${retired.join(', ')}`)
     if (unverifiable.length > 0) parts.push(`could not verify: ${unverifiable.join(', ')}`)
     checks.push({
       id: 'superseded_agents',

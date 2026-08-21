@@ -3,6 +3,7 @@ import { homedir, platform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { isMap, parseDocument, stringify } from 'yaml'
 import { signerPackageSpec } from './runtime-manifest.js'
+import { serverNamesFor, type ServerNames } from './server-names.js'
 import { type RuntimeId } from './runtime-registry.js'
 
 export type RuntimeMcpMode = 'local_stdio' | 'hosted_plus_signer' | 'manual'
@@ -37,6 +38,13 @@ export interface RuntimeConfigInput {
    * runtimes that support it (explicit opt-in only).
    */
   mode?: 'hosted' | 'local'
+  /**
+   * #1695: wiring slug for a NAMED server pair (haven-<slug> /
+   * haven-signer-<slug>). Absent = the bare haven / haven-signer pair,
+   * byte-identical to the pre-#1695 output. A writer only ever touches the
+   * pair it owns, so named and unnamed pairs coexist in one config.
+   */
+  serverName?: string
 }
 
 export interface RuntimeConfigWriteResult {
@@ -154,6 +162,7 @@ export function mergeJsonMcpConfig(
   serverRoot: 'mcpServers' | 'servers',
   hostedServer: Record<string, unknown>,
   signerServer: Record<string, unknown>,
+  names: ServerNames = serverNamesFor(),
 ): string {
   const config = existingJson?.trim() ? parseJsonObject(existingJson) : {}
   const existingRoot = config[serverRoot]
@@ -162,8 +171,8 @@ export function mergeJsonMcpConfig(
     : {}
   config[serverRoot] = {
     ...servers,
-    haven: hostedServer,
-    'haven-signer': signerServer,
+    [names.hosted]: hostedServer,
+    [names.signer]: signerServer,
   }
   return `${JSON.stringify(config, null, 2)}\n`
 }
@@ -173,8 +182,11 @@ export function mergeHermesYaml(
   existingYaml: string | null,
   hostedServer: Record<string, unknown>,
   signerServer: Record<string, unknown>,
+  names: ServerNames = serverNamesFor(),
 ): string {
-  if (!existingYaml?.trim()) return renderHermesYaml({ haven: hostedServer, 'haven-signer': signerServer })
+  if (!existingYaml?.trim()) {
+    return renderHermesYaml({ [names.hosted]: hostedServer, [names.signer]: signerServer })
+  }
 
   const doc = parseDocument(existingYaml, { keepSourceTokens: true })
   if (doc.errors.length > 0 || !isMap(doc.contents)) {
@@ -186,8 +198,8 @@ export function mergeHermesYaml(
   const servers = isRecord(existingServers) ? existingServers : {}
   const mergedServers = {
     ...servers,
-    haven: hostedServer,
-    'haven-signer': signerServer,
+    [names.hosted]: hostedServer,
+    [names.signer]: signerServer,
   }
 
   if (!mcpPair) {
@@ -201,10 +213,14 @@ export function mergeHermesYaml(
  * Upsert the hosted MCP identity in Hermes's dotenv file without evaluating
  * arbitrary dotenv syntax or rewriting unrelated lines.
  */
-export function mergeHermesEnv(existingEnv: string | null, apiKey: string): string {
+export function mergeHermesEnv(
+  existingEnv: string | null,
+  apiKey: string,
+  envKey: string = HERMES_API_KEY_ENV,
+): string {
   if (/[\r\n]/.test(apiKey)) throw new Error('Hermes API key must be a single line')
 
-  const assignment = `${HERMES_API_KEY_ENV}=${apiKey}`
+  const assignment = `${envKey}=${apiKey}`
   if (!existingEnv) return `${assignment}\n`
 
   const lineEnding = existingEnv.includes('\r\n') ? '\r\n' : '\n'
@@ -214,12 +230,12 @@ export function mergeHermesEnv(existingEnv: string | null, apiKey: string): stri
 
   let found = false
   const merged = lines.flatMap((line) => {
-    if (isHermesEnvAssignment(line)) {
+    if (isHermesEnvAssignment(line, envKey)) {
       if (found) return []
       found = true
       return [assignment]
     }
-    if (isAmbiguousHermesEnvLine(line)) {
+    if (isAmbiguousHermesEnvLine(line, envKey)) {
       throw new Error('Hermes environment contains an ambiguous managed key')
     }
     return [line]
@@ -231,12 +247,14 @@ export function mergeHermesEnv(existingEnv: string | null, apiKey: string): stri
   return `${merged.join(lineEnding)}${hasTrailingNewline ? lineEnding : ''}`
 }
 
-function isHermesEnvAssignment(line: string): boolean {
-  return /^\s*(?:export[ \t]+)?MCP_HAVEN_API_KEY[ \t]*=/.test(line)
+function isHermesEnvAssignment(line: string, envKey: string): boolean {
+  return new RegExp(`^\\s*(?:export[ \\t]+)?${envKey}[ \\t]*=`).test(line)
 }
 
-function isAmbiguousHermesEnvLine(line: string): boolean {
-  return /^\s*(?:export[ \t]+)?MCP_HAVEN_API_KEY\b/.test(line)
+function isAmbiguousHermesEnvLine(line: string, envKey: string): boolean {
+  // The env keys are our own generated identifiers (no regex metacharacters),
+  // so embedding them in a pattern is safe by construction.
+  return new RegExp(`^\\s*(?:export[ \\t]+)?${envKey}\\b`).test(line)
 }
 
 function appendHermesMcpServers(source: string, servers: Record<string, unknown>): string {
@@ -312,11 +330,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-export function mergeCodexToml(existingToml: string, localMcpCommand: string): string {
-  let next = removeTomlTableTree(removeTomlTableTree(existingToml, 'mcp_servers.haven'), 'mcp_servers.haven_signer')
+export function mergeCodexToml(
+  existingToml: string,
+  localMcpCommand: string,
+  names: ServerNames = serverNamesFor(),
+): string {
+  let next = removeTomlTableTree(
+    removeTomlTableTree(existingToml, `mcp_servers.${names.codexHosted}`),
+    `mcp_servers.${names.codexSigner}`,
+  )
   next = next.trimEnd()
   const block = [
-    '[mcp_servers.haven]',
+    `[mcp_servers.${names.codexHosted}]`,
     `command = ${tomlString(localMcpCommand)}`,
     'args = []',
     'startup_timeout_sec = 120',
@@ -331,15 +356,19 @@ export function mergeCodexTomlHosted(
   hostedMcpUrl: string,
   apiKey: string,
   signerSpec: SignerLaunchSpec,
+  names: ServerNames = serverNamesFor(),
 ): string {
-  let next = removeTomlTableTree(removeTomlTableTree(existingToml, 'mcp_servers.haven'), 'mcp_servers.haven_signer')
+  let next = removeTomlTableTree(
+    removeTomlTableTree(existingToml, `mcp_servers.${names.codexHosted}`),
+    `mcp_servers.${names.codexSigner}`,
+  )
   next = next.trimEnd()
   const block = [
-    '[mcp_servers.haven]',
+    `[mcp_servers.${names.codexHosted}]`,
     `url = ${tomlString(hostedMcpUrl)}`,
     `http_headers = { "Authorization" = ${tomlString(`Bearer ${apiKey}`)} }`,
     '',
-    '[mcp_servers.haven_signer]',
+    `[mcp_servers.${names.codexSigner}]`,
     `command = ${tomlString(signerSpec.command)}`,
     `args = [${signerSpec.args.map((arg) => tomlString(arg)).join(', ')}]`,
     'startup_timeout_sec = 120',
@@ -361,6 +390,7 @@ async function writeJsonRuntimeConfig(
       serverRoot,
       buildHostedServer(input.hostedMcpUrl, input.apiKey, input.runtime),
       buildSignerServer(resolveSignerLaunchSpec(input), input.runtime),
+      serverNamesFor(input.serverName),
     )
     await writeOwnerOnlyText(target, merged)
     return {
@@ -393,8 +423,9 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
   const envTarget = hermesEnvPath(input.homeDir)
   try {
     const [existing, existingEnv] = await Promise.all([readOptional(target), readOptional(envTarget)])
+    const names = serverNamesFor(input.serverName)
     const hostedServer = {
-      ...buildHostedServer(input.hostedMcpUrl, `\${${HERMES_API_KEY_ENV}}`, input.runtime),
+      ...buildHostedServer(input.hostedMcpUrl, `\${${names.hermesEnvKey}}`, input.runtime),
       enabled: true,
     }
     const signerServer = {
@@ -405,8 +436,9 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
       existing,
       hostedServer,
       signerServer,
+      names,
     )
-    const mergedEnv = mergeHermesEnv(existingEnv, input.apiKey)
+    const mergedEnv = mergeHermesEnv(existingEnv, input.apiKey, names.hermesEnvKey)
     const writeText = deps.writeOwnerOnlyText ?? writeOwnerOnlyText
     await writeText(envTarget, mergedEnv)
     try {
@@ -489,7 +521,7 @@ async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfi
       if (!input.localMcpCommand) {
         throw new Error('local MCP wrapper command is required')
       }
-      const merged = mergeCodexToml(existing ?? '', input.localMcpCommand)
+      const merged = mergeCodexToml(existing ?? '', input.localMcpCommand, serverNamesFor(input.serverName))
       await writeOwnerOnlyText(target, merged)
       return {
         hostedConfigured: false,
@@ -504,7 +536,13 @@ async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfi
         ],
       }
     }
-    const merged = mergeCodexTomlHosted(existing ?? '', input.hostedMcpUrl, input.apiKey, resolveSignerLaunchSpec(input))
+    const merged = mergeCodexTomlHosted(
+      existing ?? '',
+      input.hostedMcpUrl,
+      input.apiKey,
+      resolveSignerLaunchSpec(input),
+      serverNamesFor(input.serverName),
+    )
     await writeOwnerOnlyText(target, merged)
     return {
       hostedConfigured: true,

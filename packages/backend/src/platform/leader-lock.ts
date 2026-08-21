@@ -1,5 +1,14 @@
 /**
- * Postgres advisory-lock leader election for periodic monitor ticks.
+ * Postgres advisory locks: leader election for periodic ticks, and keyed
+ * mutual exclusion for work that must happen once across replicas.
+ *
+ * Two mechanisms with OPPOSITE waiting behaviour, which is the thing to know
+ * before reaching for one. `runIfLeader` is non-blocking — a monitor tick
+ * that loses should be skipped, not queued. `withKeyedAdvisoryLock` (#1673)
+ * blocks — a caller that loses still needs an answer, so it waits and then
+ * re-checks what the winner did.
+ *
+ * Leader election for periodic monitor ticks.
  *
  * Every backend replica starts the same in-process `setInterval` monitors
  * (catalog refresh, delegate balance, schedule renewal, relayer balance), so
@@ -15,6 +24,7 @@
  * connections, leaking the lock).
  */
 
+import { createHash } from 'node:crypto'
 // dep-lint-exempt: pg advisory locks are session-scoped, so the lock must acquire and hold ONE dedicated connection (pool.connect) for its whole lease — connection lifecycle management, not repository SQL
 import pool from '../db.js'
 
@@ -31,6 +41,18 @@ export const LEADER_LOCK_KEYS = {
   passportSweep: 811005,
   /** Outbound-tx bump/replacement worker (#1558, epic #1554). */
   outboundBump: 811006,
+} as const
+
+/**
+ * Namespace for KEYED advisory locks — the two-argument
+ * `pg_advisory_lock(int4, int4)` form, where the first argument separates
+ * namespaces and the second identifies the subject inside one. Distinct from
+ * the single-argument keyspace above so a hashed subject id can never collide
+ * with a monitor's lock.
+ */
+export const KEYED_LOCK_NAMESPACES = {
+  /** One counterfactual account deploy at a time, per (chain, address) (#1673). */
+  accountDeploy: 811100,
 } as const
 
 export interface QueryableClientLike {
@@ -77,6 +99,120 @@ export async function runIfLeader(
     }
     return true
   } finally {
+    client.release(destroyConnection || undefined)
+  }
+}
+
+/**
+ * A stable signed 32-bit id for an arbitrary subject string.
+ *
+ * Postgres advisory-lock arguments are `int4`, so the subject has to be
+ * hashed into that range. A collision would only ever mean two unrelated
+ * accounts serialise against each other for a few seconds — no correctness
+ * loss, since the lock is an optimisation over a check-then-act that is
+ * already safe-but-wasteful when it races.
+ */
+export function advisoryLockIdFor(subject: string): number {
+  const digest = createHash('sha256').update(subject).digest()
+  // Signed, because int4 is; readInt32BE gives exactly that range.
+  return digest.readInt32BE(0)
+}
+
+/**
+ * Run `fn` while holding a keyed advisory lock, so concurrent callers across
+ * REPLICAS serialise rather than racing (#1673).
+ *
+ * Blocking, unlike `runIfLeader` — and the difference is the whole point. A
+ * monitor tick that loses the race should be skipped; a caller that loses the
+ * race here must WAIT and then observe what the winner did, because its own
+ * caller still needs an answer. Callers therefore re-check the condition they
+ * locked for after acquiring: the classic double-check, where the second
+ * check is the one that matters.
+ *
+ * **One connection, held for as long as `fn` runs.** Every caller must
+ * therefore be rare per subject — the only one today deploys a given account
+ * once in its lifetime. A frequent caller would hold shared-pool connections
+ * across its work and starve request-serving queries; #1686 tracks shrinking
+ * the critical section or isolating the pool before that becomes reachable.
+ *
+ * **Bounded, and fail-open past the bound.** `lock_timeout` caps the wait; on
+ * expiry `fn` runs anyway, WITHOUT the lock, and `onDegraded` reports it.
+ * That direction is deliberate: this lock exists to stop duplicated work, not
+ * to make the work safe, so failing to get it degrades to exactly the
+ * behaviour that shipped before the lock existed. Refusing instead would turn
+ * a wasted-gas problem into a failed request.
+ */
+export async function withKeyedAdvisoryLock<T>(
+  namespace: number,
+  subject: string,
+  fn: () => Promise<T>,
+  options: {
+    waitMs?: number
+    onDegraded?: (reason: 'timeout' | 'error') => void
+    db?: PoolLike
+  } = {},
+): Promise<T> {
+  const waitMs = options.waitMs ?? 30_000
+  const db = options.db ?? (pool as unknown as PoolLike)
+  const lockId = advisoryLockIdFor(subject)
+
+  let client: QueryableClientLike
+  try {
+    client = await db.connect()
+  } catch {
+    // Cannot even reach the pool — run unserialised rather than fail.
+    options.onDegraded?.('error')
+    return fn()
+  }
+
+  let held = false
+  let destroyConnection = false
+  try {
+    // Bound the WAIT, not the work: once acquired the lock is held for as
+    // long as `fn` runs. Without this a stuck holder would park every later
+    // caller indefinitely, and nothing else would time them out. `SET` takes
+    // no bind parameters in Postgres, so the bound is interpolated — it is a
+    // truncated number, never caller text.
+    let boundApplied = false
+    try {
+      await client.query(`SET lock_timeout = ${Math.max(1, Math.trunc(waitMs))}`)
+      boundApplied = true
+    } catch {
+      // A broken connection, not a contended lock. Reported separately
+      // because the two mean different things to whoever reads the log: this
+      // one says the database is unwell, not that another replica is busy.
+      options.onDegraded?.('error')
+    }
+
+    if (boundApplied) {
+      try {
+        await client.query('SELECT pg_advisory_lock($1, $2)', [namespace, lockId])
+        held = true
+      } catch {
+        // 55P03 lock_not_available — someone else is mid-deploy and outlasted
+        // the bound.
+        options.onDegraded?.('timeout')
+      }
+    }
+
+    return await fn()
+  } finally {
+    if (held) {
+      try {
+        await client.query('SELECT pg_advisory_unlock($1, $2)', [namespace, lockId])
+      } catch {
+        // Same reasoning as runIfLeader: a session that still holds the lock
+        // must not go back to the pool, or the next borrower inherits it.
+        destroyConnection = true
+      }
+    }
+    try {
+      // Reset the session setting before pooling the connection, so an
+      // unrelated later query does not inherit this lock_timeout.
+      if (!destroyConnection) await client.query('RESET lock_timeout')
+    } catch {
+      destroyConnection = true
+    }
     client.release(destroyConnection || undefined)
   }
 }

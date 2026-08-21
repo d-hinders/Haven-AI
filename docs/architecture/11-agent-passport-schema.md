@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-08-08"
+last-verified: "2026-08-21" # #1742: the sweep's phase isolation protects against a THROW, not a hang — `revokeOnChain`'s bare `tx.wait()` could park the revocation phase and the stuck-revoke alarm downstream of it indefinitely. The wait is now bounded; the retry/backoff model, the no-terminal-failed-state rule and the verifier precedence are unchanged
 ---
 
 # L0 Agent Passport — EAS schema
@@ -269,6 +269,21 @@ each of the three phases runs in its own try/catch so a failure in the issuance
 retry cannot silence the revocation reconciliation or the alarm. The alarm
 especially must run when everything above it is failing: that is when it
 matters.
+
+**A try/catch isolates a throw, not a hang** — and until [#1742](https://github.com/d-hinders/Haven-AI/issues/1742)
+that distinction was a real hole rather than a pedantic one. The sweep's phases
+and rows are sequential and `await`ed, so anything that never settles parks
+every row behind it, every later phase, and the pooled Postgres connection the
+leader lock holds for the whole tick. `revokeOnChain` awaited a bare
+`tx.wait()`, which in ethers v6 has no deadline at all, so **one revoke whose
+transaction never mined silenced the very alarm quoted above** — the one signal
+that reports "agents revoked in Haven still hold a live attestation on-chain"
+sat downstream of the stall that caused it. The wait is now bounded
+(`PASSPORT_REVOKE_CONFIRM_TIMEOUT_MS`, 120s, under both the bump worker's 180s
+adoption age and the 300s revocation lease), so a stuck revoke becomes a
+scheduled retry — which the isolation above then handles as designed — instead
+of a stalled sweep. Anything else added to this tick inherits no such ceiling
+and must bound its own chain waits.
 
 Two properties make that safe to run repeatedly and from more than one place:
 

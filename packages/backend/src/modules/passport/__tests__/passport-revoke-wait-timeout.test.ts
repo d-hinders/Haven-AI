@@ -31,8 +31,6 @@ type WaitMode =
   | 'revert'
   /** Never mines: settles only via the caller's timeout argument (faithful). */
   | 'stall'
-  /** Rejects TIMEOUT immediately, whatever the caller passed. */
-  | 'timeout'
   /** Resolves a null receipt — a lagging RPC for a tx that may have mined (#690). */
   | 'null-receipt'
 
@@ -70,7 +68,6 @@ const submitSpy = vi.fn(async (params: { recordId: string | null }) => {
         err.code = 'CALL_EXCEPTION'
         throw err
       }
-      if (waitMode === 'timeout') throw timeoutError()
       if (waitMode === 'null-receipt') return null
       if (waitMode === 'stall') {
         // Faithful to ethers v6 (`providers/provider.js` → `wait`): with no
@@ -105,7 +102,11 @@ vi.mock('ethers', async () => {
   return { ...actual, Contract: FakeContract }
 })
 
-const { revokeOnChain } = await import('../attestation.js')
+const { REBROADCAST_SAFE_SUBMITTERS, STALE_BROADCAST_SECONDS } = await import(
+  '../../../infra/outbound-bump-worker.js'
+)
+const { revokeOnChain, PASSPORT_REVOKE_CONFIRM_TIMEOUT_MS, PassportRevokeUnconfirmedError } =
+  await import('../attestation.js')
 
 beforeEach(() => {
   process.env.AGENT_PASSPORT_SCHEMA_UID_84532 = UID
@@ -115,69 +116,111 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-/**
- * CHARACTERIZATION (#1742) — today's behaviour, pinned before it changes.
- * Money-path playbook §2. Every expectation in this block records a defect,
- * not a desired property; the fix commit inverts them.
- */
-describe('CHARACTERIZATION: revokeOnChain today (#1742)', () => {
-  it('calls wait() BARE — no confirmations, no timeout, so it can wait forever', async () => {
+describe('an unconfirmed passport revoke (#1742)', () => {
+  it('bounds the wait — one confirmation, an explicit deadline', async () => {
     await revokeOnChain(84532, UID)
 
-    // The whole defect in one assertion: ethers v6 reads these two arguments
-    // as "however long it takes".
-    expect(waitCalls).toEqual([[undefined, undefined]])
+    // Was `[[undefined, undefined]]` before #1742, which ethers v6 reads as
+    // "however long it takes".
+    expect(waitCalls).toEqual([[1, PASSPORT_REVOKE_CONFIRM_TIMEOUT_MS]])
   })
 
-  it('never returns for a transaction that does not mine', async () => {
+  it('returns by the deadline instead of waiting forever', async () => {
     waitMode = 'stall'
     vi.useFakeTimers()
     try {
-      const settled = revokeOnChain(84532, UID).then(
-        () => 'resolved',
-        () => 'rejected',
-      )
+      const settled = revokeOnChain(84532, UID).catch((err: unknown) => err)
 
-      // An hour of chain time — well past the bump worker's 180s adoption age
-      // and past `listStuckRevocations`' 3600s alarm threshold — and the call
-      // is still parked. In production this is holding the passport sweep's
-      // leader lock and its pooled Postgres connection the entire time.
-      await vi.advanceTimersByTimeAsync(3_600_000)
+      // One tick short of the deadline it is still waiting, as it should be —
+      // the deadline is what ends the wait, not some earlier give-up.
+      await vi.advanceTimersByTimeAsync(PASSPORT_REVOKE_CONFIRM_TIMEOUT_MS - 1)
       expect(await Promise.race([settled, Promise.resolve('pending')])).toBe('pending')
 
-      // Neither terminal state was reached: the durable record is stuck open.
-      expect(minedSpy).not.toHaveBeenCalled()
-      expect(failedSpy).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      const err = await settled
+      expect(err).toBeInstanceOf(PassportRevokeUnconfirmedError)
+      expect((err as InstanceType<typeof PassportRevokeUnconfirmedError>).txHash).toBe(TX_HASH)
+      // The message must not claim a revert — an operator reading it is
+      // deciding whether an agent's credential is still live on-chain.
+      expect((err as Error).message).not.toMatch(/revert/)
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('calls a TIMEOUT a revert: closes the record failed and says "reverted"', async () => {
-    waitMode = 'timeout'
+  it('leaves the record BROADCAST for the bump worker — never failed', async () => {
+    waitMode = 'stall'
+    vi.useFakeTimers()
+    try {
+      const settled = revokeOnChain(84532, UID).catch((err: unknown) => err)
+      await vi.advanceTimersByTimeAsync(PASSPORT_REVOKE_CONFIRM_TIMEOUT_MS)
+      await settled
 
-    await expect(revokeOnChain(84532, UID)).rejects.toThrow(/timeout/)
+      // Neither close is called, so the row keeps the status `submitRecorded`
+      // stamped: `broadcast` — the state the bump worker's unmined scan adopts.
+      expect(failedSpy).not.toHaveBeenCalled()
+      expect(minedSpy).not.toHaveBeenCalled()
 
-    // The transaction may still mine, but the record is closed failed — so it
-    // leaves the bump worker's unmined scan and has no owner at all. And the
-    // reason string blames a revert that never happened.
-    expect(failedSpy).toHaveBeenCalledTimes(1)
-    expect(failedSpy.mock.calls[0][0]).toMatch(/revocation reverted/)
+      // Adoption is only safe because a second revoke of the same UID reverts
+      // on-chain, which the worker's own list records.
+      const submitter = openSpy.mock.calls[0][0].submitter
+      expect(submitter).toBe('passport_revoke')
+      expect(REBROADCAST_SAFE_SUBMITTERS.has(submitter)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('calls a NULL receipt a revert too (#690: a lagging RPC is not a revert)', async () => {
+  it('expires before either other owner can take the transaction', async () => {
+    // Two owners can take this revoke over: the bump worker at
+    // STALE_BROADCAST_SECONDS (180s), and another caller when the revocation
+    // lease expires (`claimRevocation`'s leaseSeconds, 300s). 180 < 300, so
+    // asserting the tighter one is what actually binds — and it is the one
+    // available as an imported constant rather than a literal that can drift.
+    expect(PASSPORT_REVOKE_CONFIRM_TIMEOUT_MS).toBeLessThan(STALE_BROADCAST_SECONDS * 1_000)
+  })
+
+  it('a NULL receipt takes the hand-off branch too (#690)', async () => {
     waitMode = 'null-receipt'
 
-    await expect(revokeOnChain(84532, UID)).rejects.toThrow(/revocation reverted/)
-    expect(failedSpy).toHaveBeenCalledTimes(1)
+    const err = await revokeOnChain(84532, UID).catch((e: unknown) => e)
+
+    // A lagging RPC returns null for transactions that did confirm, so "no
+    // receipt" is not "reverted" here either.
+    expect(err).toBeInstanceOf(PassportRevokeUnconfirmedError)
+    expect(failedSpy).not.toHaveBeenCalled()
   })
 
-  it('a genuine revert closes the record failed — the branch worth preserving', async () => {
+  it('a REVERT is still a revert — the hand-off branch does not swallow it', async () => {
     waitMode = 'revert'
 
-    await expect(revokeOnChain(84532, UID)).rejects.toThrow(/reverted/)
+    const err = await revokeOnChain(84532, UID).catch((e: unknown) => e)
+
+    expect(err).not.toBeInstanceOf(PassportRevokeUnconfirmedError)
+    expect((err as Error).message).toMatch(/reverted/)
+    // A mined-and-reverted revoke IS finished: handing it to the bump worker
+    // would re-broadcast a known-bad transaction.
     expect(failedSpy).toHaveBeenCalledTimes(1)
     expect(minedSpy).not.toHaveBeenCalled()
+  })
+
+  it('a non-timeout wait error still closes the record failed', async () => {
+    // Only a TIMEOUT (and a null receipt) take the hand-off. Any other
+    // rejection keeps the pre-#1742 disposition — this is the guard that
+    // stops `isWaitTimeout` being widened into "never fail anything".
+    waitMode = 'stall'
+    const boom = new Error('provider exploded') as Error & { code: string }
+    boom.code = 'NETWORK_ERROR'
+    submitSpy.mockImplementationOnce(async () => ({
+      hash: TX_HASH,
+      nonce: 77,
+      wait: async () => {
+        throw boom
+      },
+    }))
+
+    await expect(revokeOnChain(84532, UID)).rejects.toThrow('provider exploded')
+    expect(failedSpy).toHaveBeenCalledTimes(1)
   })
 
   it('a mined revoke still closes the record mined', async () => {

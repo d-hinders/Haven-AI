@@ -769,9 +769,9 @@ Two consequences worth stating outright:
   `rails/**` is the on-chain policy layer wholesale, so a new rail file is
   covered on the day it is written; the previous single `rails/allowance-module.ts`
   entry was correct when the legacy rail was the only rail and silently stopped
-  being correct when the delegation rail was built beside it (#1736: eleven
+  being correct when the delegation rail was built beside it (#1736: eight
   `rails/` files, including the counterfactual account deploy, were gated by
-  nothing at all).
+  no contract doc at all).
 - **File granularity is the right granularity**, even where a file also hosts
   read-only code — `hybrid-provisioning.ts`'s pure `computeHybridAccountAddress`
   derives the address that will hold user funds, so "read-only" is not
@@ -784,7 +784,9 @@ Deliberately **out of scope**: `scripts/release-bump.mjs` and
 `.github/workflows/publish.yml`. They are money-path in `ship-next`'s sense —
 they ship spend-authority code to users — but they move no funds, hold no keys
 and shift no authority boundary, so a CASP perimeter analysis of a version bump
-would be ceremony. Tracked as a decision, not an omission, in
+would be ceremony. (`publish.yml` is not ungoverned either way: `branch-and-release-flow.md`
+and `mcp-runtime-compatibility.md` both cover it. `release-bump.mjs` is covered by
+nothing, which is the part worth deciding.) Tracked as a decision, not an omission, in
 [#1739](https://github.com/d-hinders/Haven-AI/issues/1739).
 
 ## Verification log

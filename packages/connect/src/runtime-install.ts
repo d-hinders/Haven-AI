@@ -706,6 +706,7 @@ async function prepareRuntimeForLocalMcp(
     identityPath: input.identityPath,
     signerPath: input.signerPath,
     homeDir: deps.homeDir,
+    serverName: input.serverName,
   })
 }
 
@@ -723,6 +724,7 @@ async function prepareSignerForRuntime(
     credentialDirectory: input.credentialDirectory,
     signerPath: input.signerPath,
     homeDir: deps.homeDir,
+    serverName: input.serverName,
   })
 }
 

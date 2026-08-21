@@ -1210,6 +1210,248 @@ describe('waitForBudgetApproval (#1377 D)', () => {
 })
 
 /**
+ * #1696 — --name threading end to end through runConnect: the slug reaches
+ * the credential write and the runtime install (which #1695's writers key
+ * their entries on), and a TAKEN slug refuses BEFORE any key is minted or
+ * agent registered — connect never overwrites credentials, and failing after
+ * registration would orphan a live agent.
+ */
+describe('--name wiring slug through runConnect (#1696)', () => {
+  const SETUP = {
+    setup_id: 'setup-3',
+    status: 'awaiting_connection',
+    agent: { name: 'Named Agent' },
+    haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 84532, network: 'Base Sepolia' },
+    agent_budget: [],
+    hosted_mcp_url: 'https://mcp.haven.example/v1',
+    challenge: { id: 'challenge-3', message: 'sign me', expires_at: '2099-01-01T00:00:00.000Z' },
+  }
+
+  function namedApi() {
+    return {
+      resolveSetup: vi.fn(async () => SETUP),
+      registerSetup: vi.fn(async (input: { apiKeyPrefix: string; delegateAddress: string }) => ({
+        setup_id: 'setup-3',
+        agent_id: 'agent-named',
+        status: 'connected_local',
+        agent_status: 'pending_approval',
+        api_key_prefix: input.apiKeyPrefix,
+        api_key_scope: 'setup_pending',
+        delegate_address: input.delegateAddress.toLowerCase(),
+        hosted_mcp_url: 'https://mcp.haven.example/v1',
+        next_action: 'return_to_haven_for_wallet_approval',
+      })),
+      updateInstallStatus: vi.fn(async () => {}),
+      getConnectorStatus: vi.fn(),
+    }
+  }
+
+  const namedInstallMock = () => vi.fn(async () => ({
+    runtime: 'claude-code' as const,
+    runtimeMcpMode: 'hosted_plus_signer' as const,
+    hostedMcpConfigured: true,
+    localSignerConfigured: true,
+    localMcpConfigured: false,
+    probeResult: 'hosted_ok_local_signer_ready',
+    restartRequired: true,
+    nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
+    configTarget: 'Claude Code MCP config',
+    messages: [],
+  }))
+
+  it('MUTATION PROOF: the slug reaches the credential write AND the runtime install', async () => {
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1696-'))
+    const writeCredentials = vi.fn(async () => ({
+      directory: join(credentialsDir, 'work'),
+      identityPath: join(credentialsDir, 'work', 'identity.json'),
+      signerPath: join(credentialsDir, 'work', 'signer.json'),
+      agentPath: join(credentialsDir, 'work', 'agent.json'),
+    }))
+    const installRuntime = namedInstallMock()
+
+    await runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      serverName: 'work',
+      waitForApproval: false,
+    }, {
+      api: namedApi() as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      writeCredentials: writeCredentials as never,
+      installRuntime: installRuntime as never,
+      log: () => undefined,
+      redactPaths: true,
+    })
+
+    expect(writeCredentials).toHaveBeenCalledWith(expect.objectContaining({ serverName: 'work' }))
+    expect(installRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({ serverName: 'work' }),
+      expect.anything(),
+    )
+  })
+
+  it('MUTATION PROOF: runConnect validates the slug ITSELF — a library caller cannot register an agent under a reserved name', async () => {
+    // runConnect is exported (index.ts), so CLI-side validation is not the
+    // boundary. Before this guard a reserved slug passed the availability
+    // check, registered a LIVE agent, wrote the delegate private key to disk,
+    // and only then failed inside the config writer — an orphaned agent with
+    // real key material under a name --doctor does not scan.
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1696-reserved-'))
+    const api = namedApi()
+    const writeCredentials = vi.fn()
+
+    for (const slug of ['signer', 'haven', 'Bad Slug']) {
+      await expect(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'claude-code',
+        credentialsDir,
+        serverName: slug,
+        waitForApproval: false,
+      }, {
+        api: api as never,
+        nodeVersion: SUPPORTED_NODE,
+        generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+        generateApiKey: () => 'sk_agent_supersecret',
+        preflightStorage: vi.fn(async () => credentialsDir),
+        writeCredentials: writeCredentials as never,
+        installRuntime: namedInstallMock() as never,
+        log: () => undefined,
+        redactPaths: true,
+      })).rejects.toThrow(/Invalid server name/)
+    }
+
+    expect(api.registerSetup).not.toHaveBeenCalled()
+    expect(writeCredentials).not.toHaveBeenCalled()
+  })
+
+  it('MUTATION PROOF: a named FIRST run does not name its own directory as a superseded agent', async () => {
+    // The superseded scan excluded by AGENT ID, but a named agent's directory
+    // is its SLUG — never equal to the uuid — so a clean first run told the
+    // user to revoke the agent they had just created.
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1696-selfscan-'))
+    const directory = join(credentialsDir, 'work')
+    const logs: string[] = []
+
+    await runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      serverName: 'work',
+      waitForApproval: false,
+    }, {
+      api: namedApi() as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      // Writes for real, the way the production writer does — the superseded
+      // scan runs AFTER the write and must not find this directory.
+      writeCredentials: vi.fn(async () => {
+        await mkdir(directory, { recursive: true })
+        await writeFile(join(directory, 'identity.json'), JSON.stringify({
+          api_key: 'sk_agent_supersecret', agent_id: 'agent-named',
+        }))
+        return {
+          directory,
+          identityPath: join(directory, 'identity.json'),
+          signerPath: join(directory, 'signer.json'),
+          agentPath: join(directory, 'agent.json'),
+        }
+      }) as never,
+      installRuntime: namedInstallMock() as never,
+      log: (message: string) => logs.push(message),
+      redactPaths: true,
+    })
+
+    const output = logs.join('\n')
+    expect(output).not.toContain('Heads-up: this setup created a NEW agent')
+    expect(output).not.toContain('agent-named')
+  })
+
+  it('a SECOND named run names the FIRST named agent, and only it', async () => {
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1696-second-'))
+    const first = join(credentialsDir, 'work')
+    await mkdir(first, { recursive: true })
+    await writeFile(join(first, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_first', agent_id: 'agent-work',
+    }))
+    const second = join(credentialsDir, 'personal')
+    const logs: string[] = []
+
+    await runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      serverName: 'personal',
+      waitForApproval: false,
+    }, {
+      api: namedApi() as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      writeCredentials: vi.fn(async () => {
+        await mkdir(second, { recursive: true })
+        await writeFile(join(second, 'identity.json'), JSON.stringify({
+          api_key: 'sk_agent_second', agent_id: 'agent-personal',
+        }))
+        return {
+          directory: second,
+          identityPath: join(second, 'identity.json'),
+          signerPath: join(second, 'signer.json'),
+          agentPath: join(second, 'agent.json'),
+        }
+      }) as never,
+      installRuntime: namedInstallMock() as never,
+      log: (message: string) => logs.push(message),
+      redactPaths: true,
+    })
+
+    const output = logs.join('\n')
+    expect(output).toContain('agent-work')
+    expect(output).not.toContain('agent-personal')
+  })
+
+  it('MUTATION PROOF: a TAKEN slug refuses before registration — no key minted, no agent orphaned', async () => {
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1696-taken-'))
+    await mkdir(join(credentialsDir, 'work'), { recursive: true })
+    await writeFile(join(credentialsDir, 'work', 'identity.json'), JSON.stringify({ api_key: 'sk_agent_x' }))
+    const api = namedApi()
+    const writeCredentials = vi.fn()
+
+    await expect(runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      serverName: 'work',
+      waitForApproval: false,
+    }, {
+      api: api as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      writeCredentials: writeCredentials as never,
+      installRuntime: namedInstallMock() as never,
+      log: () => undefined,
+      redactPaths: true,
+    })).rejects.toThrow(/already wired/)
+
+    expect(api.registerSetup).not.toHaveBeenCalled()
+    expect(writeCredentials).not.toHaveBeenCalled()
+  })
+})
+
+/**
  * #1688 — the completion heads-up. A re-run mints a NEW agent; the moment the
  * user is watching is the completion output, so that is where the superseded
  * agents are named, with the one action only the user can take.

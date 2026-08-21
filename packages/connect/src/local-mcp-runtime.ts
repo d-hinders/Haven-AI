@@ -19,6 +19,8 @@ export interface PrepareLocalMcpRuntimeInput {
   signerPath: string
   homeDir?: string
   nodeVersion?: string
+  /** #1696: wiring slug, recorded in the sidecar for per-agent inventory (#1697). */
+  serverName?: string
 }
 
 export interface PreparedLocalMcpRuntime {
@@ -100,6 +102,7 @@ export async function prepareLocalMcpRuntime(
     runtimeDirectory,
     npmCacheDirectory,
     cliPath,
+    serverName: input.serverName,
   })
 
   messages.push(`Prepared stable local Haven MCP wrapper: ${wrapperPath}`)
@@ -239,8 +242,10 @@ async function writeRuntimeSidecar(input: {
   runtimeDirectory: string
   npmCacheDirectory: string
   cliPath: string
+  serverName?: string
 }): Promise<void> {
   const value = {
+    ...(input.serverName ? { server_name: input.serverName } : {}),
     mcp_package: MCP_RUNTIME_MANIFEST.mcpPackage,
     mcp_version: MCP_RUNTIME_MANIFEST.mcpVersion,
     sdk_package: MCP_RUNTIME_MANIFEST.sdkPackage,

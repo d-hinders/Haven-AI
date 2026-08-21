@@ -79,3 +79,35 @@ describe('parseArgs', () => {
     expect(helpText()).toContain('--runtime-force')
   })
 })
+
+describe('parseArgs --tombstone (#1681)', () => {
+  it('parses the retirement shape without a setup token or runtime', () => {
+    const parsed = parseArgs(
+      ['--tombstone', '/tmp/agents/agent-old', '--reason', 'superseded', '--replaced-by', 'agent-new'],
+      {},
+    )
+    expect(parsed.tombstone).toEqual({
+      directory: '/tmp/agents/agent-old',
+      reason: 'superseded',
+      replacedBy: 'agent-new',
+    })
+  })
+
+  it('takes precedence over --doctor: no --runtime requirement kicks in', () => {
+    // cli.ts dispatches on tombstone FIRST; parseArgs must not throw doctor's
+    // runtime-required error when both are passed.
+    const parsed = parseArgs(['--tombstone', '/tmp/agents/agent-old', '--doctor'], {})
+    expect(parsed.tombstone?.directory).toBe('/tmp/agents/agent-old')
+    expect(parsed.doctor).toBe(true)
+  })
+
+  it('REFUSES --reason / --replaced-by without --tombstone — never a silent no-op', () => {
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--reason', 'oops'], {})).toThrow(/require --tombstone/)
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--replaced-by', 'a'], {})).toThrow(/require --tombstone/)
+  })
+
+  it('--help still wins over a stray --reason', () => {
+    const parsed = parseArgs(['--help', '--reason', 'oops'], {})
+    expect(parsed.help).toBe(true)
+  })
+})

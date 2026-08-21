@@ -75,6 +75,12 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     return { options: options as ConnectOptions, help, json, doctor, repair, tombstone }
   }
 
+  if (!tombstoneDir && (tombstoneReason !== undefined || tombstoneReplacedBy !== undefined)) {
+    // Refuse rather than silently discard — the caller believed these did
+    // something. (#1681 review, finding 2)
+    throw new Error('--reason and --replaced-by require --tombstone <dir>.')
+  }
+
   if (tombstone) {
     // Retirement reuses STORED state, like --doctor — no token, no runtime.
     return { options: options as ConnectOptions, help, json, doctor, repair, tombstone }

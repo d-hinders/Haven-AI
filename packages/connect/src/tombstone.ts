@@ -29,8 +29,9 @@
  *   to get subtly wrong.
  */
 
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { redactSecrets } from './redact.js'
 
 export const TOMBSTONE_FILENAME = 'TOMBSTONE.json'
 
@@ -92,11 +93,21 @@ function tombstoneScript(info: TombstoneInfo): string {
  * re-run overwrites the tombstone with the same content shape.
  */
 export async function writeAgentTombstone(input: WriteTombstoneInput): Promise<TombstoneInfo> {
+  // The directory must already exist: a mistyped path would otherwise be
+  // silently created and reported as a successful retirement. (#1681 review)
+  const dirStat = await stat(input.directory).catch(() => null)
+  if (!dirStat?.isDirectory()) {
+    throw new Error(`Not a directory: ${input.directory} — nothing to tombstone.`)
+  }
   const info: TombstoneInfo = {
+    // reason / replaced_by are persisted to disk and re-emitted to the host's
+    // MCP stderr log on EVERY stale probe, potentially for months — redact
+    // like every other output path, here at the write layer so #1700's rekey
+    // reuse inherits it. (#1681 review, finding 1)
     agent_id: input.agentId,
     retired_at: input.retiredAt ?? new Date().toISOString(),
-    reason: input.reason,
-    ...(input.replacedBy ? { replaced_by: input.replacedBy } : {}),
+    reason: redactSecrets(input.reason),
+    ...(input.replacedBy ? { replaced_by: redactSecrets(input.replacedBy) } : {}),
   }
   const binDir = join(input.directory, 'bin')
   await mkdir(binDir, { recursive: true })

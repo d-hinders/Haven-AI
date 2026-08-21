@@ -122,3 +122,28 @@ describe('readAgentTombstone', () => {
     expect(await readAgentTombstone(dir)).toBeNull()
   })
 })
+
+describe('review hardening (#1681 findings 1 and 3)', () => {
+  it('MUTATION PROOF: a secret pasted into --reason is redacted before it is persisted or embedded', async () => {
+    const dir = await retiredDirectory()
+    await writeAgentTombstone({
+      directory: dir,
+      agentId: AGENT,
+      reason: 'leaked key sk_agent_leakedvalue123, rotated',
+      replacedBy: 'agent-new sk_agent_alsoleaked1',
+    })
+    for (const file of [join(dir, 'bin', 'haven-signer.mjs'), join(dir, TOMBSTONE_FILENAME)]) {
+      const content = await readFile(file, 'utf8')
+      expect(content).not.toContain('sk_agent_leakedvalue123')
+      expect(content).not.toContain('sk_agent_alsoleaked1')
+      expect(content).toContain('sk_agent_[redacted]')
+    }
+  })
+
+  it('refuses a directory that does not exist — a typo must not mint a fake retirement', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-tombstone-typo-'))
+    await expect(
+      writeAgentTombstone({ directory: join(dir, 'no-such-agent'), agentId: AGENT, reason: 'x' }),
+    ).rejects.toThrow(/Not a directory/)
+  })
+})

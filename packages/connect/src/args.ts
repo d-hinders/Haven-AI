@@ -1,4 +1,5 @@
 import { CONNECTOR_VERSION, type ConnectOptions } from './runtime.js'
+import { assertValidServerSlug } from './server-names.js'
 
 export interface ParsedCli {
   options: ConnectOptions
@@ -50,6 +51,12 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       options.runtimeForce = requireValue(argv, ++i, arg)
     } else if (arg === '--credentials-dir') {
       options.credentialsDir = requireValue(argv, ++i, arg)
+    } else if (arg === '--name') {
+      // Validated HERE, before any credential or config write can happen —
+      // the slug is immutable once wired (#1694 owner decision), so a bad one
+      // must die at the argument, not after files exist.
+      options.serverName = requireValue(argv, ++i, arg)
+      assertValidServerSlug(options.serverName)
     } else if (arg === '--environment-label') {
       options.environmentLabel = requireValue(argv, ++i, arg)
     } else if (arg === '--ack-local-tools') {
@@ -125,6 +132,10 @@ export function helpText(): string {
     '  --runtime-force <name>     Escape hatch: use exactly this runtime, ignoring environment detection.',
     '  --credentials-dir <path>   Credential directory fallback. Defaults to ~/.haven/agents.',
     '  --environment-label <text> Non-sensitive label shown in Haven setup review.',
+    '  --name <slug>              Wiring slug for a NAMED agent: writes haven-<slug> / haven-signer-<slug>',
+    '                             MCP entries and stores credentials at ~/.haven/agents/<slug>/, so several',
+    '                             agents can run side by side in one runtime. 1-32 lowercase letters, digits,',
+    '                             single hyphens; immutable once wired. Omit for the bare haven / haven-signer pair.',
     '  --ack-local-tools          Write the one-time local Haven tools acknowledgement during setup.',
     '  --ack-signer               Backward-compatible alias for --ack-local-tools.',
     '  --local                    Advanced: install the fully-local Haven MCP (no hosted dependency).',

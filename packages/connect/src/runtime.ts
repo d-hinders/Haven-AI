@@ -11,6 +11,7 @@ import {
 } from './key.js'
 import { redactSecrets, shortAddress } from './redact.js'
 import {
+  assertServerSlugAvailable,
   defaultCredentialRoot,
   preflightCredentialStorage,
   writeCredentialFiles,
@@ -36,6 +37,8 @@ export interface ConnectOptions {
   runtimeForce?: string
   credentialsDir?: string
   environmentLabel?: string
+  /** #1696: wiring slug for a named MCP pair + slug-keyed credential dir. */
+  serverName?: string
   connectorVersion?: string
   ackSigner?: boolean
   ackLocalTools?: boolean
@@ -175,6 +178,13 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   printSetupSummary(setup, log)
 
   await preflightStorage({ baseDir: options.credentialsDir, warn: log })
+  if (options.serverName) {
+    // #1696: the slug keys the credential directory, and connect never
+    // overwrites credential files — so a taken slug must refuse HERE, before
+    // a key is minted or an agent registered, not fail on the write and
+    // leave an orphaned registration behind.
+    await assertServerSlugAvailable(options.serverName, options.credentialsDir)
+  }
   log('Checked local credential storage — all clear.')
 
   const localKey = generateKey()
@@ -217,6 +227,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   const credentialPaths = await writeCredentials({
     baseDir: options.credentialsDir,
     agentId: registration.agent_id,
+    serverName: options.serverName,
     apiKey: localApiKey,
     delegateKey: localKey.privateKey,
     delegateAddress: localKey.address,
@@ -258,6 +269,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     ackSigner: options.ackSigner,
     ackLocalTools: options.ackLocalTools,
     localMcp: options.localMcp,
+    serverName: options.serverName,
   }, {
     onProgress: log,
     // #1543: report "runtime configured" the moment the config write settles,

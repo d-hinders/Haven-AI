@@ -5,10 +5,12 @@ covers:
   - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/rails/delegation-contracts.ts
   - packages/backend/src/rails/hybrid-provisioning.ts
+  - packages/backend/src/modules/x402/delegation-authorize.ts
+  - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-08-21" # #1721: §1 and §3 re-read against the code — the relayer-paid factory deploy now has TWO trigger sites (grant activation in routes/agent-delegations.ts and, since #1667, the first erc7710 authorize in modules/x402/delegation-authorize.ts), so the drained-relayer blast radius and the erc7710 "sponsors nothing" line were corrected and the 502/429 surfaces named. §2 credential claims spot-checked (delegationRailBundlerUrl, DELEGATION_RAIL_SPONSORSHIP_POLICY_ID); §§4-5 are policy/incident prose, unchanged. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -42,11 +44,31 @@ only one:
 
 - **Paymaster (Pimlico)** — every redemption UserOp: `/payments` on the rail,
   treasury ops (revoke), and the EIP-3009 funding leg below.
-- **Haven's relayer** — the delegator/treasury Hybrid's one-time factory
-  deploy at grant activation (#860, `ensureHybridDeployed`). A 4337 factory
-  call is permissionless, so this is a plain relayer transaction, NOT a
-  sponsored op: it draws relayer gas balance, and a drained relayer blocks
-  **grants**, not payments. Same alerting as every other relayer chain.
+- **Haven's relayer** — the delegator/treasury Hybrid's **one-time** factory
+  deploy (#860, `ensureHybridDeployed`). Two trigger sites, not one: grant
+  activation (`routes/agent-delegations.ts`) and — since #1667 — the **first
+  erc7710 authorize** for an account that is still counterfactual
+  (`modules/x402/delegation-authorize.ts`). The authorize call exists because
+  the erc7710 path has no 3009 funding leg to deploy the account as an
+  initCode side effect, and a recipient-pinned agent never can have one (those
+  budgets are erc7710-only). A 4337 factory call is permissionless, so this is
+  a plain relayer transaction, NOT a sponsored op: it draws relayer gas
+  balance. Same alerting as every other relayer chain.
+
+  **Blast radius of a drained relayer**: it blocks **grant activation** *and*
+  **the first erc7710 payment of any not-yet-deployed account** — not payments
+  in general. Payments on an already-deployed account are unaffected, which is
+  what keeps the exposure bounded: the deploy is once per account, ever, and
+  `ensureHybridDeployed` short-circuits afterwards on a single `getBytecode`.
+  Match the symptom by status code on `POST /x402/authorize`: **502**
+  ("Could not deploy the delegate account for erc7710 settlement — retry the
+  authorize") when the relayer transaction itself fails, e.g. an empty gas
+  balance; **429** when the relayer *budget cap* refuses first
+  (`RelayerBudgetExceededError` from the `hybrid_deploy` spend guard, #717 —
+  a cap, not a balance, so topping up the relayer will not clear it). The
+  affected population — brand-new accounts making their first payment — is
+  indistinguishable from onboarding simply not working, so do not
+  de-prioritise a drained-relayer alert as grants-only.
 - **The merchant / facilitator** — erc7710 x402 settlement, below.
 - Owner-initiated **sends** (#1083) and signer changes are also
   paymaster-sponsored account ops — roughly one warm-op cost each; they
@@ -56,9 +78,14 @@ only one:
 chosen per payment from the `payTo` shape (or an explicit `settlementScheme`)
 and recorded in `machine_metadata.settlement_scheme`:
 
-- **`erc7710`** (default and destination) — Haven sponsors **nothing**.
-  Authorize builds a narrowed child delegation and runs no bundler
-  estimation; the merchant redeems `[child, budget]` and pays that gas.
+- **`erc7710`** (default and destination) — Haven sponsors **no gas through
+  the paymaster**. Authorize builds a narrowed child delegation and runs no
+  bundler estimation; the merchant redeems `[child, budget]` and pays that
+  gas. It is not free to Haven on the *first* payment of a counterfactual
+  account, though: that authorize pays the one-time factory deploy out of
+  **relayer** gas (#1667, above). That cost is a relayer line, not a
+  sponsorship line — it is bounded at once per account and it does not scale
+  with erc7710 volume.
 - **`eip3009`** (interop fallback) — Haven sponsors **one extra redemption
   UserOp per payment**: the funding leg treasury → the agent's delegate EOA.
   Budget roughly one warm redemption (~303k gas) per 3009 x402 call, on top of
@@ -109,8 +136,11 @@ may be added (red line — see the security model).
 Blast radius since #946: `/payments` and **3009-mode** x402 pause; **erc7710
 x402 keeps working**, because it prepares no sponsored op — the merchant
 redeems. A separate outage class is a **drained relayer**, which pauses grant
-activation (the delegator deploy, §1) while payments on already-deployed
-accounts continue.
+activation *and* the first erc7710 payment of any not-yet-deployed account
+(the delegator deploy, §1 — both trigger sites since #1667), while payments
+on already-deployed accounts continue. Symptoms: authorize 502
+("Could not deploy the delegate account…") on an empty relayer balance, or
+429 when the `hybrid_deploy` budget cap refuses first.
 
 Probes:
 - `ops:check-bundler` — bundler up + EntryPoint v0.7 + gas oracle. It resolves

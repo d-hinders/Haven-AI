@@ -11,6 +11,16 @@
  *   npm run screenshot -w packages/frontend -- /dashboard,/agents
  *   npm run screenshot -w packages/frontend -- --scenario=connect-agent
  *
+ * ── Route captures are un-clipped, and checked (#1738) ───────────────────────
+ * The app shell is `h-screen` + `overflow-hidden` with `<main>` as the only
+ * scroller, so a plain `fullPage: true` capture paints ONE viewport and leaves
+ * a very long white tail — the PNG is the right size and looks fine. Route
+ * captures therefore go through `captureFullPage` (`full-page-capture.mjs`),
+ * which un-clips the shell first and then reads the PNG back to prove it is not
+ * blank below the fold. A blank capture is DELETED and fails the run, on the
+ * same reasoning as the mislabeled-PNG case below: evidence that cannot show a
+ * defect is worse than no evidence, because it gets reviewed anyway.
+ *
  * ── Scenarios (#1409) ────────────────────────────────────────────────────────
  * Some surfaces no URL can reach: the connect-agent modal lives behind a
  * four-step dialog AND a connection state machine that only advances on a
@@ -62,12 +72,18 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { VIEWPORTS } from './evidence-viewports.mjs'
+import { captureFullPage } from './full-page-capture.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = path.join(ROOT, '.screenshots')
 const PORT = Number(process.env.SCREENSHOT_PORT ?? 3111)
 const BASE_URL = process.env.SCREENSHOT_BASE_URL ?? `http://127.0.0.1:${PORT}`
 const OWN_SERVER = !process.env.SCREENSHOT_BASE_URL
+
+// Retina captures, so a reviewer can zoom into type and hairlines. Named
+// because the blank-capture guard needs it: it measures the fold in DEVICE
+// pixels, and a drift between the two would silently move the fold.
+const DEVICE_SCALE_FACTOR = 2
 
 
 // Exported for the parity test against src/lib/auth-storage.ts — a key rename
@@ -427,7 +443,7 @@ async function waitForServer(url, timeoutMs = 90_000) {
 async function newFixtureContext(browser, vp, scenario) {
   const context = await browser.newContext({
     viewport: { width: vp.width, height: vp.height },
-    deviceScaleFactor: 2,
+    deviceScaleFactor: DEVICE_SCALE_FACTOR,
     reducedMotion: 'reduce',
   })
 
@@ -1039,6 +1055,7 @@ async function main() {
   const consoleErrors = []
   const gotoFailures = []
   const clipped = []
+  const blankCaptures = []
   try {
     for (const vp of VIEWPORTS) {
       const context = await newFixtureContext(browser, vp, null)
@@ -1067,8 +1084,27 @@ async function main() {
         }
         await page.waitForTimeout(400) // settle late paints
         const file = path.join(OUT_DIR, `${slug(routePath)}-${vp.name}.png`)
-        await page.screenshot({ path: file, fullPage: true })
-        captured.push(path.relative(ROOT, file))
+        // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
+        // whole route, then reads the PNG back and refuses a blank one (#1738).
+        try {
+          await captureFullPage(page, {
+            path: file,
+            label: `${routePath} · ${vp.name}`,
+            viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
+          })
+          captured.push(path.relative(ROOT, file))
+        } catch (err) {
+          // Same stance as the navigation failure above: a PNG that looks like
+          // evidence and is not is worse than no PNG, so remove it rather than
+          // leave it for someone to attach to a PR.
+          await rm(file, { force: true })
+          blankCaptures.push({
+            route: routePath,
+            viewport: vp.name,
+            text: String(err?.message ?? err).slice(0, 400),
+          })
+          continue
+        }
       }
       await context.close()
 
@@ -1143,6 +1179,12 @@ async function main() {
     console.error(`\n✗ ${gotoFailures.length} capture(s) FAILED — their PNGs were NOT written:`)
     for (const e of gotoFailures) console.error(`  [${e.route} · ${e.viewport}] ${e.text}`)
   }
+  if (blankCaptures.length > 0) {
+    console.error(
+      `\n✗ ${blankCaptures.length} capture(s) came back BLANK below the fold — their PNGs were DELETED:`,
+    )
+    for (const e of blankCaptures) console.error(`  [${e.route} · ${e.viewport}] ${e.text}`)
+  }
   if (clipped.length > 0) {
     console.log(
       `\n⚠ ${clipped.length} capture(s) had content BELOW THE FOLD — the plain PNG shows only what a user sees without scrolling:`,
@@ -1156,8 +1198,10 @@ async function main() {
     console.log('  (a fixture-shape gap or a real client bug — fix before trusting these screenshots)')
   }
   console.log('\nAttach these to the PR (or reference them in the Browser Verification section).')
-  // Broken evidence must not exit 0 — a failed navigation means missing PNGs.
-  if (gotoFailures.length > 0) process.exit(1)
+  // Broken evidence must not exit 0 — a failed navigation means missing PNGs,
+  // and a blank capture means the run produced something that LOOKS like
+  // evidence (#1738).
+  if (gotoFailures.length > 0 || blankCaptures.length > 0) process.exit(1)
 }
 
 // Run only as a CLI (fixtureFor is imported by tests).

@@ -34,86 +34,13 @@ import { HavenApi } from '../lib/haven-api.js'
 import { merchant402Reason } from '../lib/merchant-402.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
+import { MCP_HEADERS, decodeChallenge, mcpBody, readMcpOutcome } from '../lib/merchant-mcp.js'
 
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 
 /** How long to wait for the MERCHANT's on-chain redemption to move balances. */
 const SETTLE_WAIT_MS = 90_000
 const POLL_MS = 3_000
-
-interface AcceptsEntry {
-  scheme?: string
-  amount?: string
-  payTo?: string
-  asset?: string
-  network?: string
-  maxTimeoutSeconds?: number
-  extra?: { assetTransferMethod?: string; facilitatorAddresses?: string[] }
-}
-interface PaymentRequired {
-  accepts?: AcceptsEntry[]
-  resource?: { url?: string }
-}
-
-function decodeChallenge(headerValue: string | null, bodyText: string): PaymentRequired | null {
-  if (headerValue) {
-    try {
-      return JSON.parse(Buffer.from(headerValue, 'base64').toString('utf8')) as PaymentRequired
-    } catch {
-      try {
-        return JSON.parse(headerValue) as PaymentRequired
-      } catch {
-        /* fall through to the body */
-      }
-    }
-  }
-  // MCP transport can carry the challenge in-band; find the first JSON object
-  // with an `accepts` array in the SSE data lines.
-  for (const line of bodyText.split('\n')) {
-    const idx = line.indexOf('{')
-    if (idx === -1) continue
-    try {
-      const parsed = JSON.parse(line.slice(idx)) as Record<string, unknown>
-      const candidate = JSON.stringify(parsed).includes('"accepts"')
-        ? (findAccepts(parsed) as PaymentRequired | null)
-        : null
-      if (candidate) return candidate
-    } catch {
-      /* not JSON — keep scanning */
-    }
-  }
-  return null
-}
-
-function findAccepts(node: unknown): unknown {
-  if (!node || typeof node !== 'object') return null
-  const record = node as Record<string, unknown>
-  if (Array.isArray(record.accepts)) return record
-  for (const value of Object.values(record)) {
-    const hit = findAccepts(value)
-    if (hit) return hit
-  }
-  return null
-}
-
-interface McpToolResult {
-  isError?: boolean
-  content?: Array<{ text?: string }>
-}
-
-function mcpBody(id: number): string {
-  return JSON.stringify({
-    jsonrpc: '2.0',
-    id,
-    method: 'tools/call',
-    params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
-  })
-}
-
-const MCP_HEADERS = {
-  'Content-Type': 'application/json',
-  Accept: 'application/json, text/event-stream',
-}
 
 export const x402Erc7710Settle: Scenario = {
   name: 'x402-erc7710-settle',
@@ -226,22 +153,11 @@ export const x402Erc7710Settle: Scenario = {
       return fail(`merchant still returned 402 with the erc7710 header${await merchant402Reason(paid)}`)
     }
     const paidText = await paid.text()
-    let served = false
-    for (const line of paidText.split('\n')) {
-      const idx = line.indexOf('{')
-      if (idx === -1) continue
-      try {
-        const parsed = JSON.parse(line.slice(idx)) as { result?: McpToolResult }
-        if (parsed.result && !parsed.result.isError) served = true
-        if (parsed.result?.isError) {
-          const reason = parsed.result.content?.[0]?.text ?? ''
-          return fail(`merchant rejected the erc7710 payment: ${reason.slice(0, 160)}`)
-        }
-      } catch {
-        /* keep scanning */
-      }
+    const outcome = readMcpOutcome(paidText)
+    if (outcome.rejection !== undefined) {
+      return fail(`merchant rejected the erc7710 payment: ${outcome.rejection.slice(0, 160)}`)
     }
-    if (!served) return fail(`merchant response unparseable: ${paidText.slice(0, 160)}`)
+    if (!outcome.served) return fail(`merchant response unparseable: ${paidText.slice(0, 160)}`)
 
     // ── 6. The money proof: direct settlement, no funding leg ────────────────
     const deadline = Date.now() + SETTLE_WAIT_MS

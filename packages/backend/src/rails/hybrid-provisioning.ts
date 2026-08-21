@@ -18,6 +18,7 @@
  */
 
 import { http, createPublicClient, zeroAddress, type Address, type LocalAccount } from 'viem'
+import { KEYED_LOCK_NAMESPACES, withKeyedAdvisoryLock } from '../platform/leader-lock.js'
 import { toAccount } from 'viem/accounts'
 import { Implementation, toMetaMaskSmartAccount } from '@metamask/smart-accounts-kit'
 import { getChain } from '../domain/chains.js'
@@ -138,6 +139,47 @@ export async function ensureHybridDeployed(
   }
   const { account, client } = await buildWatchOnlyAccount(chainId, owner)
 
+  // #1673: everything from the bytecode check to the mined receipt runs under
+  // a per-(chain, address) advisory lock, so two concurrent first payments
+  // from a brand-new agent cannot both pass the check and both broadcast a
+  // deploy to the same CREATE2 address. Before #1667 this was reachable only
+  // from grant activation — effectively once per account, serialised by the
+  // UI — but every erc7710 authorize now calls it, and two different
+  // merchants mean two different idempotency keys, so the #961 replay dedupe
+  // does not apply.
+  //
+  // The lock spans a chain round-trip, which is the trade: it holds one
+  // pooled connection for the deploy's duration. That is acceptable BECAUSE
+  // of how rare it is — an account is deployed once, ever, so this path runs
+  // at most once per account in the system's lifetime.
+  //
+  // Nothing here is fund safety. A 4337 factory deploy is permissionless and
+  // grants the deployer nothing; the loser of the race merely burns a second
+  // relayer gas spend and can record a spurious failure. So the lock is
+  // fail-open by construction (see withKeyedAdvisoryLock): if it cannot be
+  // acquired, this degrades to exactly the pre-#1673 behaviour.
+  return withKeyedAdvisoryLock(
+    KEYED_LOCK_NAMESPACES.accountDeploy,
+    `${chainId}:${account.address.toLowerCase()}`,
+    () => deployIfStillMissing(chainId, account, client, attribution),
+  )
+}
+
+/**
+ * The check-then-act half of `ensureHybridDeployed`, run under the lock.
+ *
+ * The bytecode read here is the SECOND check — the one that matters. A caller
+ * that queued behind the winner arrives after the winner's deploy is mined,
+ * sees code, and returns `alreadyDeployed` instead of broadcasting a
+ * duplicate. Reading before the lock would answer the question at the moment
+ * it was still racing.
+ */
+async function deployIfStillMissing(
+  chainId: number,
+  account: Awaited<ReturnType<typeof buildWatchOnlyAccount>>['account'],
+  client: Awaited<ReturnType<typeof buildWatchOnlyAccount>>['client'],
+  attribution?: { agentId?: string | null; userId?: string | null },
+): Promise<EnsureDeployedResult> {
   const code = await client.getBytecode({ address: account.address })
   if (code && code !== '0x') {
     return { address: account.address, alreadyDeployed: true }

@@ -6,7 +6,7 @@ covers:
   - packages/backend/src/infra/repositories/allowance-nonce-watermarks.ts
   - packages/backend/src/platform/leader-lock.ts
   - packages/backend/src/infra/relayer.ts
-last-verified: "2026-08-18" # #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
+last-verified: "2026-08-21" # #1680: rate-limit counters join the list of things multiple replicas now handle — the plugin's in-process store made the real ceiling max × replicas, fixed with a shared Postgres tier (fail-open, 250 ms deadline, leader-gated sweep) on the same pattern as the #718 nonce watermark. Prior: #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
 ---
 
 # Backend Scaling
@@ -57,6 +57,32 @@ may now run more than one, and the relayer is what still caps throughput.**
   [#693](https://github.com/d-hinders/Haven-AI/issues/693) preflight remains the
   thing that keeps the money safe under every failure mode; nothing here is
   load-bearing for correctness.
+
+- **Rate-limit counters** ([#1680](https://github.com/d-hinders/Haven-AI/issues/1680)).
+  `@fastify/rate-limit` ships an in-process LRU store, so every replica counted
+  only the requests routed to it: the effective ceiling was `max × replicas`,
+  and it ROSE with load, because more traffic means more replicas. That is the
+  worst direction for a control whose job is to bound automation, and it was
+  invisible from inside — live probing of dev read `x-ratelimit-remaining` back
+  as two interleaved descending series, which is what the defect looks like
+  from outside.
+
+  The store is now `rate_limit_counters`, one row per bucket key, incremented
+  by a single `ON CONFLICT DO UPDATE` so concurrent replicas serialise on the
+  row rather than racing. Same two obligations as the nonce watermark above,
+  and for sharper reasons: it is **fail-open** — a database error or a query
+  past the 250 ms deadline degrades to per-replica counting, because this
+  guards SIGNUP AND LOGIN and failing closed would lock every user out of the
+  product's front door over a hiccup. Every degradation is logged, since
+  falling back silently is the failure it was built to end.
+
+  It also does **not** consult the database for a client already over its
+  limit: the answer cannot change until the window ends, so it is cached in
+  memory. The table is written by unauthenticated traffic, so without that a
+  flood would cost one row-locked upsert per request — cheap HTTP amplified
+  into contention on a single hot row. Expired rows are swept on a
+  leader-gated tick; a missed sweep leaves dead rows, never a wrong count,
+  because every read filters on expiry.
 
 ## What still serialises: the relayer
 

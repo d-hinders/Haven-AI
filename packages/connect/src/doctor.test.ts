@@ -263,3 +263,140 @@ describe('runRepair (#1589)', () => {
     expect(repair.messages.join('\n')).toContain('--setup <token>')
   })
 })
+
+/**
+ * #1688 — the superseded_agents check. A re-run mints a new agent and retires
+ * nothing; these pin that a directory the doctor did NOT select is probed with
+ * ITS OWN key, and that the three probe outcomes map to exactly the right
+ * severities: live ⇒ failure with the revoke repair, revoked ⇒ informational
+ * pass, unreachable ⇒ note that is neither a false alarm nor a clean bill.
+ */
+describe('superseded agent credentials (#1688)', () => {
+  const OLD_KEY = 'sk_agent_oldsecret'
+
+  async function homeWithSuperseded() {
+    const { homeDir } = await healthyHome()
+    // The OLD directory: seeded after the selected one, so force ordering by
+    // touching the selected dir's identity.json to be newest.
+    const oldDir = join(homeDir, '.haven', 'agents', 'agent-old')
+    await mkdir(oldDir, { recursive: true })
+    await writeFile(join(oldDir, 'identity.json'), JSON.stringify({
+      api_key: OLD_KEY,
+      agent_id: 'agent-old',
+      api_url: 'https://api.haven.example',
+      hosted_mcp_url: HOSTED,
+    }))
+    // Make the ORIGINAL dir newest so discovery still selects agent-1.
+    const selected = join(homeDir, '.haven', 'agents', 'agent-1', 'identity.json')
+    const current = JSON.parse(await readFile(selected, 'utf8')) as Record<string, unknown>
+    await writeFile(selected, JSON.stringify(current))
+    return { homeDir, oldDir }
+  }
+
+  function depsWithOldKeyProbing(oldStatus: 'ok' | 'unauthorized' | 'network_error') {
+    const deps = healthyDeps()
+    deps.probeHosted.mockImplementation(async (apiKey: string) =>
+      apiKey === OLD_KEY ? { status: oldStatus } : { status: 'ok' },
+    )
+    return deps
+  }
+
+  it('MUTATION PROOF: a superseded dir whose key still authenticates FAILS the doctor, naming the agent', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('ok') })
+
+    expect(report.ok).toBe(false)
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toContain('agent-old')
+    expect(check?.detail).toMatch(/SPEND-CAPABLE/)
+    expect(check?.repair).toMatch(/[Rr]evoke/)
+    expect(check?.repair).toContain('agent-old')
+    // Connect reports; the user acts. The repair must never claim otherwise.
+    expect(check?.repair).toMatch(/never revokes or deletes/)
+  })
+
+  it('an already-revoked superseded dir is an informational pass, not a failure', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('unauthorized') })
+
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain('already revoked')
+    expect(report.ok).toBe(true)
+  })
+
+  it('a network error probing the OLD key is a note — never a false "still live", never a clean bill', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('network_error') })
+
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain('could not verify')
+    expect(check?.detail).not.toMatch(/SPEND-CAPABLE/)
+  })
+
+  it('the old cosmetic "N dirs found; examining the newest" note is gone — subsumed by the check', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('ok') })
+
+    const credentials = report.checks.find((c) => c.id === 'credentials')
+    expect(credentials?.detail).not.toContain('examining the newest')
+  })
+
+  it('no secret material reaches the report, in either state', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    for (const status of ['ok', 'unauthorized'] as const) {
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing(status) })
+      const serialized = JSON.stringify(report)
+      expect(serialized).not.toContain(OLD_KEY)
+      expect(serialized).not.toContain(API_KEY)
+      expect(serialized).not.toContain('11'.repeat(32))
+    }
+  })
+
+  it('REGRESSION (B2): an explicit --credentials-dir scans ITS OWN parent, never the default root', async () => {
+    // Pointing doctor at an explicit directory must not live-probe real keys
+    // under ~/.haven/agents — the location the caller explicitly moved away
+    // from. Siblings of the explicit dir are the only legitimate "others".
+    const { homeDir } = await homeWithSuperseded() // default root holds agent-1 + agent-old
+    const customRoot = await mkdtemp(join(tmpdir(), 'haven-custom-'))
+    const explicitDir = join(customRoot, 'agent-x')
+    await mkdir(explicitDir, { recursive: true })
+    await writeFile(join(explicitDir, 'identity.json'), JSON.stringify({
+      api_key: API_KEY, agent_id: 'agent-x', api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+    const sibling = join(customRoot, 'agent-sibling')
+    await mkdir(sibling, { recursive: true })
+    await writeFile(join(sibling, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_sibsecret', agent_id: 'agent-sibling', api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+
+    const deps = healthyDeps()
+    const probedKeys: string[] = []
+    deps.probeHosted.mockImplementation(async (apiKey: string) => {
+      probedKeys.push(apiKey)
+      return { status: 'ok' as const }
+    })
+
+    const report = await runDoctor(
+      { runtime: 'codex-cli', credentialsDir: explicitDir },
+      { homeDir, ...deps },
+    )
+
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.detail).toContain('agent-sibling')
+    // The default root's OLD key must never have been probed.
+    expect(probedKeys).not.toContain(OLD_KEY)
+    expect(check?.detail).not.toContain('agent-old')
+  })
+
+  it('a single credential directory adds NO superseded check — the id list stays the #1589 shape', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    expect(report.checks.map((c) => c.id)).toEqual([
+      'credentials', 'signer_runtime', 'runtime_config', 'hosted_mcp', 'signer_process', 'restart',
+    ])
+  })
+})
+

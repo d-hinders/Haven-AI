@@ -150,6 +150,23 @@ prints one concrete repair action; the exit code is non-zero on any failure.
 Add `--json` for a machine-readable report. No secret material is ever
 printed.
 
+`--doctor` also probes every OTHER agent credential directory it did not
+select (#1688). A re-run of setup mints a NEW agent and retires nothing, so
+a directory from a previous setup can hold an API key that still
+authenticates — meaning any host that started before the re-run keeps
+spending as the agent you believe you replaced. A superseded directory
+whose key is still live is a FAILING check naming the agent id, with the
+repair spelled out: revoke it on the Haven agent page, then remove the
+directory. An already-revoked one reports as informational; an unreachable
+probe is a note, never a verdict. Connect never revokes or deletes
+credentials itself — it reports, you decide. The setup completion output
+names superseded agents the moment they are created, for the same reason.
+One honest limit: "newest" is decided by file mtime, so a restored backup or
+a sync tool that rewrites timestamps can make doctor examine the wrong
+directory as current — before revoking anything, confirm the agent id
+against the Haven agent page, which is the authority on which agent is
+which.
+
 `--repair` re-runs what setup already owns — reinstall the pinned signer
 runtime, rewrite the wrapper + sidecar, and re-write the runtime config from
 the STORED credentials. It never touches keys and never needs a new token.

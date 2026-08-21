@@ -20,7 +20,7 @@
 
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { probeHostedMcpTools, probeLocalMcpTools, type LocalMcpProbeResult } from './probes.js'
 import {
@@ -71,18 +71,28 @@ interface IdentityFile {
 
 const RERUN = 'npx @haven_ai/connect@alpha'
 
-/** Newest agent directory that holds an identity.json, plus a multi-dir note. */
+/**
+ * Newest agent directory that holds an identity.json, plus every OTHER such
+ * directory (#1688). The others used to be a cosmetic note ("N dirs found;
+ * examining the newest") — which downgraded the exact fact that matters: a
+ * re-run mints a fresh agent and retires nothing, so a directory this doctor
+ * did NOT select can hold a key that still authenticates and still spends.
+ * The superseded_agents check now owns that fact; the note is gone.
+ */
 async function discoverCredentialDirectory(
   homeDir: string,
   explicit?: string,
-): Promise<{ directory?: string; note?: string }> {
-  if (explicit) return { directory: explicit }
-  const root = join(homeDir, '.haven', 'agents')
+): Promise<{ directory?: string; others: string[] }> {
+  // An explicit --credentials-dir names the agent DIRECTORY itself, so its
+  // siblings live in its parent — never in the default root. Scanning the
+  // default root under an explicit override would live-probe real keys in a
+  // location the caller explicitly pointed away from (#1688 review, B2).
+  const root = explicit ? dirname(explicit) : join(homeDir, '.haven', 'agents')
   let entries: string[] = []
   try {
     entries = await readdir(root)
   } catch {
-    return {}
+    return explicit ? { directory: explicit, others: [] } : { others: [] }
   }
   const candidates: Array<{ directory: string; mtimeMs: number }> = []
   for (const entry of entries) {
@@ -94,12 +104,12 @@ async function discoverCredentialDirectory(
       // not an agent credential dir
     }
   }
-  if (candidates.length === 0) return {}
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
-  return {
-    directory: candidates[0].directory,
-    note: candidates.length > 1 ? `${candidates.length} agent credential dirs found; examining the newest.` : undefined,
+  if (explicit) {
+    return { directory: explicit, others: candidates.map((c) => c.directory).filter((d) => d !== explicit) }
   }
+  if (candidates.length === 0) return { others: [] }
+  return { directory: candidates[0].directory, others: candidates.slice(1).map((c) => c.directory) }
 }
 
 export async function runDoctor(
@@ -110,7 +120,7 @@ export async function runDoctor(
   const checks: DoctorCheck[] = []
   let signerCapabilities: Record<string, unknown> | undefined
 
-  const { directory, note } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
+  const { directory, others } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
 
   // ── 1. Credentials ────────────────────────────────────────────────────────
   let identity: IdentityFile | undefined
@@ -141,7 +151,7 @@ export async function runDoctor(
       label: 'Agent credentials',
       ok,
       detail: ok
-        ? `identity.json and signer.json parse (agent ${identity?.agent_id ?? 'unknown'})${note ? ` — ${note}` : ''}`
+        ? `identity.json and signer.json parse (agent ${identity?.agent_id ?? 'unknown'})`
         : 'identity.json or signer.json is missing or unparseable.',
       ...(ok ? {} : { repair: `Re-run the full setup with a fresh token: ${RERUN} --setup <token>.` }),
     })
@@ -253,6 +263,62 @@ export async function runDoctor(
     })
   }
 
+  // ── 4b. Superseded agents (#1688) ────────────────────────────────────────
+  // A re-run mints a NEW agent and retires nothing: the connector never
+  // deletes old directories, registration only collides on delegate address,
+  // and cancel deliberately refuses to auto-revoke. Net effect: an MCP host
+  // that started before the re-run keeps spending as the agent the user
+  // believes they replaced — silently, because its old key still resolves.
+  // This check makes that state a FAILURE with a named repair. The doctor
+  // reports; the user decides — connect never revokes or deletes anything.
+  if (others.length > 0) {
+    const live: string[] = []
+    const revoked: string[] = []
+    const unverifiable: string[] = []
+    for (const other of others) {
+      let otherIdentity: IdentityFile | undefined
+      try {
+        otherIdentity = JSON.parse(await readFile(join(other, 'identity.json'), 'utf8')) as IdentityFile
+      } catch {
+        otherIdentity = undefined
+      }
+      const otherAgent = otherIdentity?.agent_id ?? basename(other)
+      const otherUrl = otherIdentity?.hosted_mcp_url
+        ?? (otherIdentity?.api_url ? `${otherIdentity.api_url}/mcp` : undefined)
+      if (!otherIdentity?.api_key || !otherUrl) {
+        unverifiable.push(`${otherAgent} (no stored key/URL to probe)`)
+        continue
+      }
+      const probe = await (deps.probeHosted ?? probeHostedMcpTools)(otherIdentity.api_key, otherUrl, deps.fetch)
+      if (probe.status === 'ok') live.push(otherAgent)
+      else if (probe.status === 'unauthorized') revoked.push(otherAgent)
+      // network_error / bad_response: neither a false "still live" failure
+      // nor a false clean bill — a note, never a verdict.
+      else unverifiable.push(`${otherAgent} (${probe.status})`)
+    }
+    const parts: string[] = []
+    if (live.length > 0) parts.push(`STILL SPEND-CAPABLE: ${live.join(', ')}`)
+    if (revoked.length > 0) parts.push(`already revoked: ${revoked.join(', ')}`)
+    if (unverifiable.length > 0) parts.push(`could not verify: ${unverifiable.join(', ')}`)
+    checks.push({
+      id: 'superseded_agents',
+      label: 'Superseded agent credentials',
+      ok: live.length === 0,
+      detail:
+        live.length > 0
+          ? `${others.length} other credential dir(s) found — ${parts.join('; ')}. A host started before ` +
+            'your latest setup keeps authenticating (and spending) as the old agent.'
+          : `${others.length} other credential dir(s) found — ${parts.join('; ')}.`,
+      ...(live.length > 0
+        ? {
+            repair:
+              `Revoke ${live.join(', ')} on the Haven agent page, then remove the old ` +
+              'director(y/ies) under ~/.haven/agents. Connect never revokes or deletes for you.',
+          }
+        : {}),
+    })
+  }
+
   // ── 5. Signer process handshake ───────────────────────────────────────────
   if (sidecar && directory) {
     const consent = await getLocalSignerConsentStatus(join(directory, 'signer.json'))
@@ -335,8 +401,12 @@ export async function runRepair(
 ): Promise<RepairResult> {
   const homeDir = deps.homeDir ?? homedir()
   const messages: string[] = []
-  const { directory, note } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
-  if (note) messages.push(`Note: ${note}`)
+  const { directory, others } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
+  if (others.length > 0) {
+    // Repair never touches the other directories — that is the doctor's
+    // superseded_agents check's job to REPORT and the user's to act on.
+    messages.push(`Note: ${others.length} other agent credential dir(s) exist — run --doctor for their status.`)
+  }
   if (!directory) {
     return {
       ok: false,

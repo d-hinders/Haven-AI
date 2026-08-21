@@ -134,6 +134,56 @@ export function normalizeRuntime(runtime: string | undefined, env: NodeJS.Proces
   return detectRuntime(env) ?? 'other'
 }
 
+/** The flag values a refusal message should offer. Mirrors RuntimeId. */
+export const RUNTIME_FLAG_VALUES =
+  'claude-code, codex-cli, codex-desktop, cursor, vscode, vscode-insiders, claude-desktop, hermes, other' as const
+
+export interface RuntimeSelection {
+  runtime: RuntimeId | null
+  source: 'force' | 'detected' | 'explicit' | 'none'
+  /** Set when a confident environment detection overrode a contradicting explicit hint (#1672). */
+  overrodeHint?: RuntimeId
+}
+
+/**
+ * Detection-first runtime resolution (#1672).
+ *
+ * The setup command no longer carries `--runtime`; the connector works out the
+ * runtime it is executing inside. Precedence:
+ *
+ * 1. `--runtime-force <name>` — always wins (unknown name throws).
+ * 2. Environment detection over a CONTRADICTING `--runtime` hint. Detection
+ *    only fires inside a real agent shell, where writing a different client's
+ *    config is almost surely wrong — the claude-desktop-hint-in-Claude-Code
+ *    dead end this exists to close.
+ * 3. An explicit `--runtime` with no contradicting detection (the legit
+ *    plain-terminal "configure Claude Desktop by hand" case — unchanged).
+ * 4. Detection alone.
+ * 5. Nothing known → `runtime: null`; the caller refuses BEFORE side effects
+ *    rather than guessing a config location.
+ */
+export function resolveRuntimeSelection(
+  explicit: string | undefined,
+  force: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): RuntimeSelection {
+  if (force !== undefined) {
+    const forced = normalizeRuntimeName(force)
+    if (!forced) {
+      throw new Error(`Unknown --runtime-force value "${force}". Valid values: ${RUNTIME_FLAG_VALUES}.`)
+    }
+    return { runtime: forced, source: 'force' }
+  }
+  const detected = detectRuntime(env)
+  const hint = normalizeRuntimeName(explicit)
+  if (detected && hint && detected !== hint) {
+    return { runtime: detected, source: 'detected', overrodeHint: hint }
+  }
+  if (hint) return { runtime: hint, source: 'explicit' }
+  if (detected) return { runtime: detected, source: 'detected' }
+  return { runtime: null, source: 'none' }
+}
+
 export function restartRequiredForRuntime(runtime: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
   const mode = runtimeProfile(runtime, env).restartMode
   return mode === 'restart-session' || mode === 'restart-app'

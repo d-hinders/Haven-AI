@@ -60,7 +60,7 @@ export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           ))}
         </Select>
         <p className="mt-1.5 text-xs text-[var(--v2-ink-3)]">
-          Haven tailors the setup prompt and restart steps to this environment. "Other" always works.
+          Haven tailors the setup prompt and restart steps to this environment. Using the Claude Desktop chat app? Pick "Claude Desktop". "Other" always works.
         </p>
         {flow.localMcpSupported && (
           /* #1411: footnote weight, not a technical essay. A power-user

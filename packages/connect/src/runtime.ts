@@ -19,7 +19,7 @@ import {
   supportsLocalMcp,
   type RuntimeInstallResult,
 } from './runtime-install.js'
-import { normalizeRuntime, runtimeProfile, runtimeVerificationInstruction, type RuntimeProfile } from './runtime-registry.js'
+import { normalizeRuntime, resolveRuntimeSelection, runtimeProfile, runtimeVerificationInstruction, RUNTIME_FLAG_VALUES, type RuntimeProfile } from './runtime-registry.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
@@ -29,6 +29,8 @@ export interface ConnectOptions {
   setupToken: string
   apiBaseUrl: string
   runtime?: string
+  /** #1672 escape hatch: use exactly this runtime, ignoring environment detection. */
+  runtimeForce?: string
   credentialsDir?: string
   environmentLabel?: string
   connectorVersion?: string
@@ -88,6 +90,8 @@ export interface ConnectDeps {
   redactPaths?: boolean
   /** Overridable so the Node-floor refusal is testable without spawning a Node. */
   nodeVersion?: string
+  /** Overridable so runtime detection (#1672) is testable without faking process.env. */
+  env?: NodeJS.ProcessEnv
 }
 
 export interface ConnectResult {
@@ -130,24 +134,39 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   const runRuntimeInstall = deps.installRuntime ?? installRuntime
   const generateKey = deps.generateKey ?? generateDelegateKey
   const generateLocalApiKey = deps.generateApiKey ?? generateAgentApiKey
-  const installCapabilities = runtimeInstallCapabilities(options.runtime)
+  // #1672: detection-first runtime resolution, BEFORE any side effect — the
+  // setup command no longer carries --runtime, and a hint that contradicts a
+  // confident detection must not write another client's config. Refusing here
+  // keeps the #1161 discipline: no half-created agent, no burned setup token.
+  const selection = resolveRuntimeSelection(options.runtime, options.runtimeForce, deps.env ?? process.env)
+  if (!selection.runtime) {
+    throw new Error(
+      'Could not determine the agent runtime: no runtime detected in this environment and no --runtime given. ' +
+      `Re-run with --runtime <name> (one of: ${RUNTIME_FLAG_VALUES}).`,
+    )
+  }
+  const runtime = selection.runtime
+  const installCapabilities = runtimeInstallCapabilities(runtime)
 
   if (options.localMcp) {
-    const resolvedRuntime = normalizeRuntime(options.runtime)
-    if (!supportsLocalMcp(resolvedRuntime)) {
+    if (!supportsLocalMcp(runtime)) {
       throw new Error(
         `--local (fully-local Haven MCP) is only available for Claude Code and Codex. ` +
-        `The detected runtime is ${runtimeProfile(resolvedRuntime).label}. ` +
+        `The detected runtime is ${runtimeProfile(runtime).label}. ` +
         'Re-run without --local to use the default hosted MCP + local signer setup.',
       )
     }
+  }
+
+  if (selection.overrodeHint) {
+    log(`runtime: ${runtime} (detected; ignoring the ${selection.overrodeHint} hint — pass --runtime-force ${selection.overrodeHint} to override)`)
   }
 
   log('Warming up your connection to Haven…')
   const setup = await api.resolveSetup({
     setupToken: options.setupToken,
     connectorVersion,
-    runtime: options.runtime,
+    runtime,
   })
   assertSetupChallengeIsUsable(setup.challenge.expires_at)
   printSetupSummary(setup, log)
@@ -166,7 +185,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     registration = await api.registerSetup({
       setupToken: options.setupToken,
       connectorVersion,
-      runtime: options.runtime,
+      runtime,
       challengeId: setup.challenge.id,
       delegateAddress: localKey.address,
       proofSignature,
@@ -226,7 +245,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   }
 
   const runtimeInstall = await runRuntimeInstall({
-    runtime: options.runtime,
+    runtime,
     hostedMcpUrl: registration.hosted_mcp_url,
     apiKey: localApiKey,
     signerPath: credentialPaths.signerPath,

@@ -69,4 +69,13 @@ describe('parseArgs', () => {
     expect(helpText()).toContain('hermes')
     expect(helpText()).toMatch(/never sends it to Haven/)
   })
+
+  it('parses --runtime-force into options.runtimeForce (#1672)', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test', '--runtime-force', 'claude-desktop'], {})
+
+    expect(parsed.options.runtimeForce).toBe('claude-desktop')
+    expect(parsed.options.runtime).toBeUndefined()
+    expect(() => parseArgs(['--setup', 'hv_setup_test', '--runtime-force'], {})).toThrow('Missing value for --runtime-force')
+    expect(helpText()).toContain('--runtime-force')
+  })
 })

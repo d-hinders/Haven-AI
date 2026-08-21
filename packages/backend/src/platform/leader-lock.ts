@@ -134,8 +134,15 @@ export function advisoryLockIdFor(subject: string): number {
  * **One connection, held for as long as `fn` runs.** Every caller must
  * therefore be rare per subject — the only one today deploys a given account
  * once in its lifetime. A frequent caller would hold shared-pool connections
- * across its work and starve request-serving queries; #1686 tracks shrinking
- * the critical section or isolating the pool before that becomes reachable.
+ * across its work and starve request-serving queries.
+ *
+ * #1686 assessed that hold and ACCEPTED it: the deploy path short-circuits on
+ * a pre-lock bytecode check, so it is reached roughly once per account — not
+ * "ever", since a reverted deploy leaves no bytecode and the retry re-enters.
+ * The burst scenario, the reasoning, and the THREE triggers that reopen it as
+ * real work are recorded in `docs/operations/backend-scaling.md` → "Accepted
+ * cost: the deploy lock holds a pooled connection". Adding a caller that is
+ * NOT once-per-subject-rare is one of them — read that section before you do.
  *
  * **Bounded, and fail-open past the bound.** `lock_timeout` caps the wait; on
  * expiry `fn` runs anyway, WITHOUT the lock, and `onDegraded` reports it.
@@ -143,6 +150,12 @@ export function advisoryLockIdFor(subject: string): number {
  * to make the work safe, so failing to get it degrades to exactly the
  * behaviour that shipped before the lock existed. Refusing instead would turn
  * a wasted-gas problem into a failed request.
+ *
+ * Read that last sentence as scoped to the LOCK, because it is: it is the
+ * lock's own failure that costs only gas. It does not make `fn` immune to
+ * whatever is causing the lock to fail — under real pool exhaustion the work's
+ * own fail-CLOSED writes can still reject, and the request fails with them.
+ * The doc section above works that through.
  */
 export async function withKeyedAdvisoryLock<T>(
   namespace: number,

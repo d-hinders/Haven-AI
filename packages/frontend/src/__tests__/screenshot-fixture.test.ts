@@ -21,6 +21,8 @@ type ScenarioShape = {
 }
 /** Kept in step with the scenario's own constant in screenshot.mjs. */
 const SETUP_ID = 'setup-screenshot'
+/** Likewise FIXTURE_SAFE.id — the legacy scenario must reuse the same account. */
+const FIXTURE_SAFE_ID = 'safe-fixture'
 
 describe('screenshot populated fixture (#896 follow-up)', () => {
   it('serves the populated shapes the hooks actually read', () => {
@@ -135,6 +137,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
 
   describe('scenarios (#1409)', () => {
     const connect = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent']
+    const approve = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve']
+    const approveLegacy = (SCENARIOS as Record<string, ScenarioShape>)['connect-agent-approve-legacy']
     const signerRemoval = (SCENARIOS as Record<string, ScenarioShape>)['account-signer-removal']
     const backupRecovery = (SCENARIOS as Record<string, ScenarioShape>)['account-backup-recovery']
 
@@ -211,6 +215,73 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // only what is special about it.
       expect(connect.api('/agents', 'GET')).toBeUndefined()
       expect(connect.api('/auth/me', 'GET')).toBeUndefined()
+    })
+
+    // #1684: the APPROVE screen — the one between the other two connect
+    // scenarios' pins, and the screen that actually grants spend authority.
+    describe('connect-agent-approve (#1684)', () => {
+      it('pins the setup at connected_local with the runtime already configured', () => {
+        // `resolveConnectStepView` only reaches the approval step when the
+        // runtime reports configured; without both flags the capture would
+        // silently shoot the "Finishing setup" state instead.
+        const first = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET') as {
+          status: string
+          agent_id: string
+          install_status: Record<string, unknown>
+        }
+        const second = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET')
+        expect(first).toMatchObject({ status: 'connected_local', agent_id: 'agent-fixture-1' })
+        expect(first.install_status).toMatchObject({
+          local_mcp_configured: true,
+          local_mcp_acknowledged: true,
+        })
+        expect(second).toMatchObject({ status: 'connected_local' })
+      })
+
+      it('carries a real budget and delegate address — the two things the screen shows', () => {
+        const status = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET') as {
+          agent_budget: Array<{ allowance_amount: string }>
+          delegate_address: string
+        }
+        // An empty budget would render "Waiting for budget" and prove nothing
+        // about the row this issue trimmed the description in favour of.
+        expect(status.agent_budget).toHaveLength(1)
+        expect(status.agent_budget[0].allowance_amount).toBe('25000000')
+        // The collapsed verification row's whole point is showing this.
+        expect(status.delegate_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+      })
+
+      it('puts the LEGACY twin on the other rail, and ONLY by account_type', () => {
+        // The rail branch reads `account_type` off /auth/me. Without this
+        // override the legacy scenario would silently capture the DELEGATION
+        // screen under the legacy filename — the exact wrong-screen failure
+        // the scenario's own copy-based wait exists to catch.
+        const me = approveLegacy.api('/auth/me', 'GET') as {
+          safes: Array<{ account_type: string; id: string }>
+          email: string
+        }
+        expect(me.safes[0].account_type).toBe('safe')
+        // Same account otherwise — a scenario states only what is special.
+        expect(me.email).toBe('fixture@haven.test')
+        expect(me.safes[0].id).toBe(FIXTURE_SAFE_ID)
+        const safes = approveLegacy.api('/user/safes', 'GET') as {
+          safes: Array<{ account_type: string }>
+        }
+        // Both readers must agree: `useAgentConnectionSetup` resolves the rail
+        // from /auth/me, but a disagreeing /user/safes would make the capture
+        // depend on which hook won.
+        expect(safes.safes[0].account_type).toBe('safe')
+      })
+
+      it('serves a reachable signer so the Approve button renders, not the connect fallback', () => {
+        // `pickSigningPath` returns null on an empty signer set, which flips
+        // BudgetGrantAction to its not-ready branch — a capture of the wrong
+        // screen under the approve screen's filename.
+        const signers = approve.api('/agents/agent-fixture-1/account-signers', 'GET') as {
+          passkeys: unknown[]
+        }
+        expect(signers.passkeys).toHaveLength(1)
+      })
     })
   })
 })

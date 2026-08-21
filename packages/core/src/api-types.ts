@@ -2384,7 +2384,7 @@ export type paths = {
         };
         /**
          * List curated payable services agents can discover and pay.
-         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures.
+         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly, and clients that pre-filter should treat the category as the structural signal.
          */
         get: operations["listCatalog"];
         put?: never;

@@ -498,6 +498,49 @@ const CONNECT_SETUP_TOKEN = 'hv_setup_screenshot'
 const CONNECT_COMMAND = `npx -y @haven_ai/connect@alpha --setup ${CONNECT_SETUP_TOKEN} --api https://api.haven.example --ack-local-tools --runtime claude-code`
 
 export const SCENARIOS = {
+  'design-system-buttons': {
+    description:
+      'The Buttons and badges card on /design-system — variants, the size scale, and the tap-target note',
+    // Route capture cannot evidence this card. `/design-system` is ~32000px
+    // tall at 1280 and ~52000px at 390, and a fullPage screenshot past
+    // Chromium's surface cap (~16384px) comes back BLANK below the fold — not
+    // truncated, blank, which is far worse because the PNG still looks like a
+    // real capture and its file size looks plausible. #1726's design review
+    // caught exactly that: the whole Primitives section was white canvas.
+    // An element capture sidesteps the cap entirely.
+    //
+    // No fixture overrides: `/design-system` renders static showcase markup, so
+    // the shared fixture is exactly right and this scenario has nothing special
+    // to say about the data. Stated explicitly rather than omitted, because
+    // `ScenarioShape` requires it — an absent `api` is indistinguishable from a
+    // forgotten one.
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/design-system`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      const heading = page.getByRole('heading', { name: 'Buttons and badges' })
+      await heading.waitFor({ timeout: 20_000 })
+
+      // The Card root owning the heading — same coupling to Card's radius class
+      // as account-backup-recovery, and the same intent: if Card's shape
+      // changes, this FAILS rather than quietly shooting the wrong box.
+      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+
+      // Wait for both button rows, not just the heading. The size row is the
+      // thing under review, so a capture that raced it would be evidence of
+      // nothing. `Small`/`Large` bracket the scale; `Primary` proves the
+      // variants row above it painted too.
+      await card.getByRole('button', { name: 'Primary' }).waitFor({ timeout: 20_000 })
+      await card.getByRole('button', { name: 'Small' }).waitFor({ timeout: 20_000 })
+      await card.getByRole('button', { name: 'Large' }).waitFor({ timeout: 20_000 })
+
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'card')
+    },
+  },
   'account-backup-recovery': {
     description:
       'Backup & recovery card unobstructed at both viewports — wallet + two dated passkeys',

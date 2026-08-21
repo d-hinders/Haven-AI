@@ -39,6 +39,7 @@ export {
   AgentPaymentNextActionSchema,
   AgentPaymentFailureCodeSchema,
   AgentPaymentRailSchema,
+  DEFAULT_CONFIRMATION_TIMEOUT_MS,
 } from './types.js'
 
 export type {
@@ -85,6 +86,7 @@ export type {
   HavenPaymentReceipt,
   SweepResult,
   SweepEntry,
+  SweepConfirmation,
   HavenCatalogEntry,
 } from './types.js'
 

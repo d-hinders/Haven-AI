@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DelegateSweepApi } from './delegate-sweep.js'
 import { createErc20Contract, createJsonRpcProvider, createWallet } from './provider.js'
-import type { HavenAgent } from './types.js'
+import { DEFAULT_CONFIRMATION_TIMEOUT_MS, type HavenAgent } from './types.js'
 
 vi.mock('./provider.js', () => ({
   createErc20Contract: vi.fn(),
@@ -92,68 +92,131 @@ beforeEach(() => {
 })
 
 /**
- * CHARACTERIZATION of `sweepDelegate()`'s confirmation waits BEFORE #1756.
+ * #1756 — `sweepDelegate()`'s confirmation waits are bounded, and expiry is a
+ * REPORTED outcome rather than a hang or a thrown failure.
  *
- * Every `it()` here describes what the SDK does **today**, defect included.
- * The fix inverts the first three and must preserve the last two.
+ * These began as characterization tests of the pre-fix behaviour (commit
+ * `82b611e8`); the first four are the same scenarios, inverted.
  */
-describe('#1756 characterization — DelegateSweepApi.sweepDelegate confirmation waits (pre-fix)', () => {
-  it('passes confirmations ONLY — there is no deadline argument on either leg', async () => {
+describe('#1756 — DelegateSweepApi.sweepDelegate confirmation waits', () => {
+  it('passes the shared 90 s deadline as the SECOND argument on both legs', async () => {
     const usdcTx = { hash: '0xusdc', wait: vi.fn().mockResolvedValue({ hash: '0xusdc-receipt' }) }
     const ethTx = { hash: '0xeth', wait: vi.fn().mockResolvedValue({ hash: '0xeth-receipt' }) }
     fundedDelegate(usdcTx, ethTx)
 
     await service().sweepDelegate()
 
-    // `wait(1)` reads as a deliberate bound. It is not one: in ethers v6 the
-    // FIRST argument is confirmations and the SECOND is the timeout, so this
-    // is exactly as unbounded as a bare `wait()`.
-    expect(usdcTx.wait).toHaveBeenCalledWith(1)
-    expect(ethTx.wait).toHaveBeenCalledWith(1)
-    expect(usdcTx.wait.mock.calls[0]).toHaveLength(1)
-    expect(ethTx.wait.mock.calls[0]).toHaveLength(1)
+    // In ethers v6 the FIRST argument is confirmations and the SECOND is the
+    // timeout, so `wait(1)` alone was as unbounded as a bare `wait()` while
+    // reading like a deliberate bound. Arity is asserted as well as value:
+    // "the deadline argument was dropped again" is how this regresses.
+    expect(usdcTx.wait).toHaveBeenCalledWith(1, DEFAULT_CONFIRMATION_TIMEOUT_MS)
+    expect(ethTx.wait).toHaveBeenCalledWith(1, DEFAULT_CONFIRMATION_TIMEOUT_MS)
+    expect(usdcTx.wait.mock.calls[0]).toHaveLength(2)
+    expect(ethTx.wait.mock.calls[0]).toHaveLength(2)
   })
 
-  it('THE DEFECT: a USDC transfer that never mines hangs sweepDelegate() forever — no result, no error, no tx hash', async () => {
+  it('reuses the SDK\'s existing confirmation default rather than inventing a fourth number', () => {
+    // Pinned against the constant `HavenClient` uses for `confirmationTimeout`
+    // — they are the same binding since #1756, so this cannot drift silently.
+    expect(DEFAULT_CONFIRMATION_TIMEOUT_MS).toBe(90_000)
+  })
+
+  it('a USDC transfer that never mines returns `unconfirmed` with its broadcast hash instead of hanging', async () => {
     const usdcTx = { hash: '0xusdc', wait: neverMinesWait() }
     const ethTx = { hash: '0xeth', wait: vi.fn().mockResolvedValue({ hash: '0xeth-receipt' }) }
     const { wallet } = fundedDelegate(usdcTx, ethTx)
 
-    expect(await settleWithin(service().sweepDelegate())).toBe(HUNG)
+    const result = await settleWithin(service().sweepDelegate())
 
-    // And the second leg never even starts, so the ETH this sweep exists to
-    // recover is stranded by the USDC leg's stall.
-    expect(wallet.sendTransaction).not.toHaveBeenCalled()
+    expect(result).not.toBe(HUNG)
+    if (result === HUNG) return
+    expect(result.transfers[0]).toMatchObject({
+      asset: 'USDC',
+      txHash: '0xusdc', // the BROADCAST hash — the only handle a user has for manual recovery
+      confirmation: 'unconfirmed',
+      explorerUrl: 'https://explorer.test/8453/0xusdc',
+    })
+    expect(result.unconfirmed).toBe(true)
+
+    // And the ETH leg still runs: a stuck ERC-20 transfer must not strand the
+    // native balance this sweep also exists to recover.
+    expect(wallet.sendTransaction).toHaveBeenCalledOnce()
+    expect(result.transfers[1]).toMatchObject({ asset: 'ETH', confirmation: 'confirmed' })
   })
 
-  it('THE DEFECT, native leg: a stuck ETH transfer hangs the caller after the USDC leg already moved money', async () => {
+  it('a stuck ETH transfer still reports the USDC transfer that DID confirm', async () => {
     const usdcTx = { hash: '0xusdc', wait: vi.fn().mockResolvedValue({ hash: '0xusdc-receipt' }) }
     const ethTx = { hash: '0xeth', wait: neverMinesWait() }
     fundedDelegate(usdcTx, ethTx)
 
-    // The USDC transfer confirmed. The caller is never told, because the
-    // return value that would carry it is behind the ETH leg's unbounded wait.
-    expect(await settleWithin(service().sweepDelegate())).toBe(HUNG)
+    const result = await settleWithin(service().sweepDelegate())
+
+    expect(result).not.toBe(HUNG)
+    if (result === HUNG) return
+    // The two legs are reported independently: one confirmed, one still in
+    // flight. A single thrown error could not express this.
+    expect(result.transfers.map((t) => [t.asset, t.confirmation])).toEqual([
+      ['USDC', 'confirmed'],
+      ['ETH', 'unconfirmed'],
+    ])
+    expect(result.unconfirmed).toBe(true)
   })
 
-  it('THE DEFECT: a null receipt is reported as a completed transfer, indistinguishable from a confirmed one', async () => {
+  it('a null receipt is `unconfirmed`, not a completed transfer', async () => {
     const usdcTx = { hash: '0xusdc', wait: vi.fn().mockResolvedValue(null) }
     const ethTx = { hash: '0xeth', wait: vi.fn().mockResolvedValue({ hash: '0xeth-receipt' }) }
     fundedDelegate(usdcTx, ethTx)
 
     const result = await service().sweepDelegate()
 
-    // `receipt?.hash ?? tx.hash` silently substitutes the broadcast hash, and
-    // the entry then looks exactly like the confirmed ETH one beside it.
-    expect(result.transfers[0]).toMatchObject({ asset: 'USDC', txHash: '0xusdc' })
-    expect(Object.keys(result.transfers[0]).sort()).toEqual(Object.keys(result.transfers[1]).sort())
+    // Pre-#1756 this substituted the broadcast hash and the entry was
+    // structurally identical to the confirmed one beside it. "No receipt" is
+    // not "confirmed" — the same distinction, one node-behaviour away.
+    expect(result.transfers[0]).toMatchObject({ asset: 'USDC', txHash: '0xusdc', confirmation: 'unconfirmed' })
+    expect(result.transfers[1]).toMatchObject({ asset: 'ETH', confirmation: 'confirmed' })
+    expect(result.unconfirmed).toBe(true)
   })
 
-  it('PRESERVE: a genuine revert propagates to the caller uncaught', async () => {
+  it('`unconfirmed` is false only when EVERY transfer confirmed', async () => {
+    const usdcTx = { hash: '0xusdc', wait: vi.fn().mockResolvedValue({ hash: '0xusdc-receipt' }) }
+    const ethTx = { hash: '0xeth', wait: vi.fn().mockResolvedValue({ hash: '0xeth-receipt' }) }
+    fundedDelegate(usdcTx, ethTx)
+
+    const result = await service().sweepDelegate()
+
+    expect(result.transfers.every((t) => t.confirmation === 'confirmed')).toBe(true)
+    expect(result.unconfirmed).toBe(false)
+  })
+
+  it('an empty sweep is not `unconfirmed` — nothing was broadcast', async () => {
+    const contract = { balanceOf: vi.fn().mockResolvedValue(0n), transfer: vi.fn() }
+    const provider = { getBalance: vi.fn().mockResolvedValue(0n), getFeeData: vi.fn() }
+    vi.mocked(createJsonRpcProvider).mockReturnValue(provider as never)
+    vi.mocked(createWallet).mockReturnValue({ sendTransaction: vi.fn() } as never)
+    vi.mocked(createErc20Contract).mockReturnValue(contract as never)
+
+    expect(await service().sweepDelegate()).toMatchObject({ transfers: [], unconfirmed: false })
+  })
+
+  it('PRESERVE: a genuine revert propagates to the caller uncaught — a timeout is not a revert, and a revert is not a timeout', async () => {
     const usdcTx = { hash: '0xusdc', wait: revertedWait() }
     fundedDelegate(usdcTx, { hash: '0xeth', wait: vi.fn() })
 
     await expect(service().sweepDelegate()).rejects.toMatchObject({ code: 'CALL_EXCEPTION' })
+  })
+
+  it('PRESERVE: a non-TIMEOUT wait error still throws — the hand-off branch must stay narrow', async () => {
+    // The way this fix decays is `isWaitTimeout` widening until nothing can
+    // fail. Without this, a predicate that stopped discriminating would pass
+    // every other test in the file.
+    const usdcTx = {
+      hash: '0xusdc',
+      wait: vi.fn(() => Promise.reject(Object.assign(new Error('rpc exploded'), { code: 'NETWORK_ERROR' }))),
+    }
+    fundedDelegate(usdcTx, { hash: '0xeth', wait: vi.fn() })
+
+    await expect(service().sweepDelegate()).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
   })
 
   it('PRESERVE: the confirmed path returns the RECEIPT hash, not the broadcast hash', async () => {

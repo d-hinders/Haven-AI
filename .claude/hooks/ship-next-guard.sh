@@ -273,6 +273,13 @@ payload it will not guess.' >&2
   # not see it. reviewer-marker.sh appends to a regular file and never creates
   # or follows a link, so a symlink is not something a real pass can produce:
   # absence, which blocks.
+  #
+  # KNOWN RESIDUAL, accepted: a HARD link is not caught here — `-L` cannot see
+  # one. It is left because it buys an attacker nothing: a hard link needs a
+  # file already containing the exact branch line, which is the same effort as
+  # writing the marker directly, and that is the irreducible limit stated in
+  # README.md. The symlink case was different in kind — it pointed at ANY
+  # pre-existing readable file, so it cost one `ln -s` and no authorship.
   if [ ! -L "$rmarker" ]; then
     if [ -f "$rmarker" ] && [ ! -r "$rmarker" ]; then
       return 0

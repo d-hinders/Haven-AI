@@ -88,6 +88,16 @@ difference between them matters:
 | ship-next warning | which *route* opened the PR | warns, never blocks (owner decision 2026-07-26) |
 | reviewer gate | whether an independent review *happened* | **blocks** (owner decision 2026-08-21) |
 
+> **When is this finished?** Not "no bypass remains" — against a shell-capable
+> caller that is unreachable, and chasing it produced five rounds of review each
+> finding another forgery at the marker path. The bar that actually terminates:
+> **the fail-open surface is test-verified safe, and every remaining bypass costs
+> at least as much effort as writing the marker's contents directly.** The
+> symlink case failed that bar (one `ln -s`, no authorship, any readable file
+> would do). The hard-link variant meets it, and is named in the code as
+> accepted. Further hardening here is better spent wiring the hook somewhere it
+> actually runs.
+>
 > **Scope, stated honestly:** these gates raise the cost of skipping review;
 > they do not make it impossible. The marker path is writable by the same agent
 > the gate constrains, so a determined caller with shell access can always find

@@ -52,6 +52,15 @@ export function assertValidServerSlug(slug: string): void {
   // (signer(A) === signer(B) and hosted(A) === hosted(B) already force A===B.)
   // Rejecting 'signer' and the 'signer-' prefix therefore closes the whole
   // family, not just the literal case — proven by the adversarial-pair test.
+  // #1696: the bare pair's own names are refused as slugs outright — not a
+  // collision ('haven' would yield 'haven-haven'), but an operator typing
+  // --name haven means the bare pair, and silently minting a doubled name
+  // would wire an agent nobody can find again.
+  if (slug === 'haven' || slug === 'haven-signer') {
+    throw new Error(
+      `Invalid server name ${JSON.stringify(slug)}: "haven" and "haven-signer" are the unnamed pair's own names — omit --name for the bare pair.`,
+    )
+  }
   if (slug === 'signer' || slug.startsWith('signer-')) {
     throw new Error(
       `Invalid server name ${JSON.stringify(slug)}: "signer" and "signer-*" are reserved — ` +

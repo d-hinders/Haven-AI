@@ -111,3 +111,24 @@ describe('parseArgs --tombstone (#1681)', () => {
     expect(parsed.help).toBe(true)
   })
 })
+
+describe('parseArgs --name (#1696)', () => {
+  it('parses the wiring slug into options.serverName', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_x', '--name', 'work'], {})
+    expect(parsed.options.serverName).toBe('work')
+  })
+
+  it('omitting --name leaves serverName undefined — the bare pair', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_x'], {})
+    expect(parsed.options.serverName).toBeUndefined()
+  })
+
+  it('MUTATION PROOF: an invalid slug dies AT THE ARGUMENT, before anything else runs', () => {
+    // parseArgs touches no filesystem, so a throw here proves validation
+    // precedes every write — the slug is immutable once wired (#1694).
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--name', 'Bad Slug'], {})).toThrow(/Invalid server name/)
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--name', 'haven'], {})).toThrow(/unnamed pair/)
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--name', 'haven-signer'], {})).toThrow(/unnamed pair/)
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--name', 'signer-ops'], {})).toThrow(/reserved/)
+  })
+})

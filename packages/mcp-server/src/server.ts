@@ -9,7 +9,7 @@ import {
 } from './tools.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.1.27-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.1.28-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at

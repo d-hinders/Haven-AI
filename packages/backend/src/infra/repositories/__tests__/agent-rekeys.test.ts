@@ -386,6 +386,19 @@ describeDb('agent_rekeys ledger (#1698)', () => {
 
   // ── Completion, as one transaction ─────────────────────────────────────
 
+  /** An ordinary owner grant, with no re-key parent. */
+  async function seedPlainDelegation(agentId: string, status = 'active'): Promise<string> {
+    const hash = `0x${String(++seq).padStart(64, '0')}`
+    await db.query(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+          delegation_json, version, status, budget_atomic, period_seconds, start_date, expires_at)
+       VALUES ($1, 84532, $2, NULL, $3, '{"signed":"capability"}', 1, $4, '1000000', 86400, 0, 9999999999)`,
+      [agentId, USDC, hash, status],
+    )
+    return hash
+  }
+
   async function seedRekeyDelegation(
     seeded: Seeded,
     rekeyId: string,
@@ -449,7 +462,7 @@ describeDb('agent_rekeys ledger (#1698)', () => {
     const seeded = await seedAgent()
     const rekey = await reachIssued(seeded)
     // An ordinary owner grant in the same slot, with no re-key parent.
-    const strayHash = await seedDelegation(seeded.agentId, 'active')
+    const strayHash = await seedPlainDelegation(seeded.agentId, 'active')
     const carry = await seedRekeyDelegation(seeded, rekey.id, 'carry')
 
     const result = await completeRekey({

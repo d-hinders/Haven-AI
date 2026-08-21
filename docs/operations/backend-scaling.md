@@ -130,6 +130,16 @@ it already gets for any other deploy failure, and a retry is safe because the
 factory deploy is permissionless, relayer-paid and idempotent on-chain: a
 duplicate costs gas and nothing else.
 
+Two residual costs, named because they are accepted rather than absent. Each
+retry after an expiry opens its OWN `outbound_txs` row at its own nonce, so a
+persistently stuck RPC can leave several `broadcast` rows for one account, each
+bumped independently once it ages past 180 s — relayer gas amplification,
+bounded by `MAX_BUMPS_PER_NONCE` per lane and by the relayer budget guard
+(#717), never a fund risk. And only a `TIMEOUT` takes the hand-off branch: any
+other wait error (a transient RPC exception mid-wait) still closes the record
+failed, exactly as before #1722 — unchanged behaviour, not a new gap, but the
+same ambiguity in a narrower window.
+
 **The burst that would hurt** is brand-new accounts deploying at once. Each
 holds a lock connection while, inside that same critical section, the relayer
 budget check, the spend row, the outbound record and the `submitRecorded` stamp

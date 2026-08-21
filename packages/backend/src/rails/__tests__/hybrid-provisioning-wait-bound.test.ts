@@ -10,12 +10,12 @@
  *
  * Separate file from `hybrid-provisioning-outbound.test.ts` for one concrete
  * reason: these tests stall a transaction under fake timers, and the #1673
- * advisory lock in that file is a REAL Postgres lock when a database is
- * reachable — a stalled holder would park every later caller in the file.
- * Here the pool is mocked unreachable, so `withKeyedAdvisoryLock` takes its
- * documented fail-open path and the deploy runs unserialised. That is the
- * right trade for this file: serialisation is proven next door, and what is
- * under test is the wait, not the lock.
+ * advisory lock is a REAL Postgres lock when a database is reachable — a
+ * stalled holder would park every later caller and hold a session across a
+ * clock that is not moving. Here the lock is stubbed to a pass-through, so
+ * the deploy runs unserialised. That is the right trade for this file:
+ * serialisation is proven next door and in the lock's own real-Postgres
+ * tests, and what is under test is the wait, not the lock.
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -83,18 +83,26 @@ vi.mock('../../infra/relayer.js', async () => {
   }
 })
 
-// Unreachable pool → withKeyedAdvisoryLock's documented fail-open branch (see
-// the file header). Nothing here touches Postgres, so fake timers are safe.
-vi.mock('../../db.js', () => ({
-  default: {
-    query: async () => {
-      throw new Error('no database in this test')
-    },
-    connect: async () => {
-      throw new Error('no database in this test')
-    },
-  },
-}))
+// The lock itself is a COLLABORATOR here, not the subject (see the file
+// header): run the critical section straight through, so no Postgres session
+// is held while these tests stall a transaction under fake timers. What the
+// lock does is proven — against real Postgres — in
+// `platform/__tests__/keyed-advisory-lock.test.ts` and next door in
+// `hybrid-provisioning-outbound.test.ts`. Note this is NOT a database mock:
+// no query behaviour is faked, the call simply does not reach a database.
+vi.mock('../../platform/leader-lock.js', async () => {
+  const actual = await vi.importActual<typeof import('../../platform/leader-lock.js')>(
+    '../../platform/leader-lock.js',
+  )
+  return {
+    ...actual,
+    withKeyedAdvisoryLock: async <T>(
+      _namespace: number,
+      _subject: string,
+      fn: () => Promise<T>,
+    ): Promise<T> => fn(),
+  }
+})
 
 vi.mock('viem', async () => {
   const actual = await vi.importActual<typeof import('viem')>('viem')

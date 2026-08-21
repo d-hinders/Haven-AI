@@ -8,7 +8,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-08-12" # re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-08-21" # #1722: §3 gains the third failure class — a deploy that broadcasts and does not confirm is bounded at 120 s and handed to the bump worker, NOT relayer exhaustion. §1's gas-payer claims re-read against the code and unchanged (the deploy is still a plain relayer tx, still blocks grants rather than payments when the relayer drains). Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -111,6 +111,18 @@ x402 keeps working**, because it prepares no sponsored op — the merchant
 redeems. A separate outage class is a **drained relayer**, which pauses grant
 activation (the delegator deploy, §1) while payments on already-deployed
 accounts continue.
+
+A third, quieter class is a deploy that **broadcasts fine and then does not
+confirm** — RPC lag, or a base-fee spike past the doubled headroom the relayer
+applies. That is not relayer exhaustion and does not read like it: gas was
+available and the transaction is in the mempool. Since
+[#1722](https://github.com/d-hinders/Haven-AI/issues/1722) the deploy stops
+waiting after 120 s and leaves its outbound record `broadcast` for the bump
+worker to adopt and fee-replace, rather than recording a failure for a
+transaction that may still mine. The caller sees the same retryable 502 as any
+other deploy failure, so operationally this looks like grant activation (or a
+first erc7710 authorize) failing and succeeding on retry — check the bump
+worker's replacement logs before treating it as a relayer incident.
 
 Probes:
 - `ops:check-bundler` — bundler up + EntryPoint v0.7 + gas oracle. It resolves

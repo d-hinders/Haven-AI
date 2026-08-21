@@ -17,6 +17,11 @@
  * - publicVerifyRateLimit / publicIssuerRateLimit — public passport
  *   verification (#974). These override the shared key generator entirely,
  *   because per-IP is meaningless behind an untrusted proxy; see below.
+ * - authRateLimit(trustProxyHops) — signup/login (#1670). SELF-DISARMING:
+ *   returns no limit at all unless the deployment trusts its proxy
+ *   (TRUST_PROXY_HOPS > 0), because these are the product's front door and a
+ *   per-IP limit whose "IP" is one shared proxy address is a cheap global
+ *   login denial-of-service, not a protection.
  *
  * Constants, not env: tuning is a code change with review, and the values are
  * deliberately generous — the goal is a ceiling, not throttling real use.
@@ -129,3 +134,46 @@ export const publicIssuerRateLimit = {
     keyGenerator: () => 'passport:issuer',
   },
 } as const
+
+/**
+ * Signup + login (#1670). Unauthenticated, so the shared key generator falls
+ * back to `ip:` — which is only meaningful when `request.ip` is the CLIENT.
+ * Behind an untrusted proxy it is the proxy, one bucket for every external
+ * caller, and a limit tight enough to slow bulk account-enumeration (#1654)
+ * or credential stuffing would be a cheap global denial-of-service on the
+ * front door: ~one attacker request per two seconds locks everyone out.
+ *
+ * So the tier arms itself ONLY when the operator has set TRUST_PROXY_HOPS
+ * (config.ts) — never partially, never with a fallback key. Returning `{}`
+ * rather than a looser limit is deliberate: a limit that exists but cannot
+ * bind to a caller is worse than none, because it reads as protection.
+ *
+ * Signup is tighter than login: a person signs up once, and signup is where
+ * the #1654 enumeration disclosure lives; login absorbs NAT'd offices and
+ * password managers retrying. Both are ceilings on automation, not throttles
+ * on people. Per-EMAIL keying on login was considered for single-account
+ * credential stuffing and deliberately NOT used here: it hands an attacker a
+ * one-request-per-window lockout of any victim's login (worse behind the
+ * LRU-eviction caveat documented on publicVerifyRateLimit), and it cannot
+ * touch enumeration anyway — every probed address is its own fresh bucket.
+ *
+ * ACCEPTED residual risk, named rather than implied: a shared IP means a
+ * shared fate. A workshop, an office NAT, or carrier-grade NAT putting many
+ * people behind one address will 429 the 11th signup in a minute — and
+ * anyone behind that NAT can be locked out deliberately by one abuser next
+ * to them. That is inherent to any per-IP limit; the ceilings are set where
+ * automation is throttled and a room of humans usually is not, and raising
+ * them is a reviewed constant change, not an env knob.
+ */
+export function authRateLimit(
+  trustProxyHops: number,
+  route: 'signup' | 'login',
+): { rateLimit?: { max: number; timeWindow: string } } {
+  if (trustProxyHops <= 0) return {}
+  return {
+    rateLimit: {
+      max: route === 'signup' ? 10 : 30,
+      timeWindow: '1 minute',
+    },
+  }
+}

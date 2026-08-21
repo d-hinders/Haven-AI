@@ -420,7 +420,12 @@ export const revokeOnChain: Revoker = async (chainId: number, attestationUid: st
     await record.failed(`passport revocation reverted (tx ${tx.hash})`)
     throw waitError
   }
-  if (receipt.status !== 1) {
+  // `!receipt` is unreachable here — the two branches above have taken every
+  // path that reaches this point with no receipt — but it is kept because the
+  // compiler cannot prove that, and an unchecked `receipt.status` would be a
+  // narrowing bug the moment a branch above is edited. Same defensive shape
+  // `anchorOnChain` uses next door.
+  if (!receipt || receipt.status !== 1) {
     await record.failed(`passport revocation reverted (tx ${tx.hash})`)
     throw new Error(`passport revocation reverted (tx ${tx.hash})`)
   }

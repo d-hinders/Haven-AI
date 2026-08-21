@@ -6,7 +6,7 @@
  * settlement-child construction. Behavior and ordering are unchanged from the
  * pre-#996 route.
  */
-import { signX402ExpectedContext } from '../../infra/chain/x402-binding-signer.js'
+import { signX402ExpectedContext, x402PayerContextFields, x402PayerWireFields } from '../../infra/chain/x402-binding-signer.js'
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { redactVendorSecrets } from '../../rails/execution-rail.js'
@@ -213,6 +213,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // #1138: commit to the typed data, not just the 4337 hash — the
       // signer signs the former and can only verify what is bound.
       typedDataHash: typedDataDigest(fundingAuth.prepared.signingTypedData),
+      // #1690: gated payer identity — {} until X402_EMIT_PAYER_CONTEXT=1.
+      ...x402PayerContextFields(agent),
     })
     return {
       code: 201,
@@ -229,6 +231,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         merchant_to: merchantPayTo.toLowerCase(),
         resource_url: url,
         x402_expected_auth: fundingExpectedAuth,
+        // #1690: gated payer identity on the wire, paired with the context above.
+        ...x402PayerWireFields(agent),
         sign_data: {
           hash: fundingAuth.prepared.userOpHash,
           signature_scheme: 'eip712_userop',
@@ -402,6 +406,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     network,
     expiresAt: intent.expires_at,
     typedDataHash: typedDataDigest(built.signingPayload),
+    // #1690: gated payer identity — {} until X402_EMIT_PAYER_CONTEXT=1.
+    ...x402PayerContextFields(agent),
   })
 
   return {
@@ -411,6 +417,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       status: intent.status,
       expires_at: intent.expires_at,
       x402_expected_auth: settlementExpectedAuth,
+      // #1690: gated payer identity on the wire, paired with the context above.
+      ...x402PayerWireFields(agent),
       sign_data: {
         hash: built.childHash,
         signature_scheme: 'eip712_delegation',

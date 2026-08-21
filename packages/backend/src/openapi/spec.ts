@@ -6634,7 +6634,12 @@ export const openapiSpec = {
                 type: 'object',
                 required: ['version', 'message', 'signature', 'signer'],
                 properties: {
-                  version: { type: 'integer', enum: [1] },
+                  version: {
+                    type: 'integer',
+                    enum: [1, 2, 3],
+                    description:
+                      'Contents-derived, never chosen: 1 = hash-only (legacy rail); 2 = commits to the EIP-712 typedDataHash (delegation rail, #1138); 3 = additionally binds the payer identity (#1690). The enum previously claimed [1] while v2 had shipped — corrected here.',
+                  },
                   message: {
                     type: 'string',
                     description: 'Haven-signed expected x402 context. Includes expiresAt when the funding window is time-bound.',
@@ -6643,6 +6648,15 @@ export const openapiSpec = {
                   signer: address,
                 },
                 additionalProperties: false,
+              },
+              payer_delegate: {
+                ...address,
+                description:
+                  "#1690: the delegate this quote was created FOR, bound inside the Haven-signed expected context (version 3). The edge signer refuses to sign when it is not its own delegate — the guard that turns a stale-host quote-as-A-sign-as-B into a named refusal instead of an on-chain revert. Emitted only when the deployment has flipped X402_EMIT_PAYER_CONTEXT (signer-first rollout).",
+              },
+              payer_agent_id: {
+                type: 'string',
+                description: "#1690: the paying agent's id, carried so the signer's refusal can name both sides. Same gate as payer_delegate.",
               },
               payment_required: {
                 type: 'object',

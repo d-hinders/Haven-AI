@@ -19,7 +19,7 @@ import {
 import { findX402ApprovalByIdempotencyKey } from '../../infra/repositories/approval-requests.js'
 import { hasTokenAllowanceConfigured } from '../../infra/repositories/agents.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
-import { signX402ExpectedContext } from '../../infra/chain/x402-binding-signer.js'
+import { signX402ExpectedContext, x402PayerContextFields, x402PayerWireFields } from '../../infra/chain/x402-binding-signer.js'
 import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../../domain/agent-payment-taxonomy.js'
 import { getExplorerUrl } from '../../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
@@ -190,6 +190,8 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
         asset: existing.token_address,
         network,
         expiresAt: existingExpiresAt,
+        // #1690: gated payer identity — {} until X402_EMIT_PAYER_CONTEXT=1.
+        ...x402PayerContextFields(agent),
       })
 
       return {
@@ -207,6 +209,8 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
           merchant_to: existing.x402_merchant_address,
           resource_url: existing.x402_resource_url,
           x402_expected_auth: x402ExpectedAuth,
+          // #1690: gated payer identity on the wire, paired with the context above.
+          ...x402PayerWireFields(agent),
           sign_data: {
             hash: existingHash,
             components: {
@@ -664,6 +668,8 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
     asset: tokenAddress,
     network,
     expiresAt: intent.expires_at,
+    // #1690: gated payer identity — {} until X402_EMIT_PAYER_CONTEXT=1.
+    ...x402PayerContextFields(agent),
   })
 
   // 12. No signature — return intent for client-side signing
@@ -682,6 +688,8 @@ export async function runLegacyAuthorize(input: LegacyAuthorizeInput): Promise<X
       merchant_to: merchantPayTo?.toLowerCase() ?? null,
       resource_url: url,
       x402_expected_auth: x402ExpectedAuth,
+      // #1690: gated payer identity on the wire, paired with the context above.
+      ...x402PayerWireFields(agent),
       sign_data: {
         hash: signHash,
         components: {

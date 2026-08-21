@@ -457,7 +457,7 @@ describe('auth rate limiting (#1670)', () => {
     return app
   }
 
-  it('MUTATION PROOF: with a trusted proxy, the 11th signup from one address is 429', async () => {
+  it('MUTATION PROOF: with a trusted proxy, the 11th signup from one address is 429', { timeout: 30_000 }, async () => {
     const app = await buildRateLimitedApp(1)
     // Free email on every probe — the enumeration shape the limit throttles.
     mockQuery.mockImplementation(async () => ({ rows: [] }))
@@ -477,7 +477,10 @@ describe('auth rate limiting (#1670)', () => {
     await app.close()
   })
 
-  it('login has its own, looser ceiling (30/min)', async () => {
+  it('login has its own, looser ceiling (30/min)', { timeout: 30_000 }, async () => {
+    // 31 probes × a REAL bcrypt compare each (#1646 makes the comparison run
+    // on the unknown-email path too, deliberately) is ~2s of hashing alone —
+    // under a loaded parallel suite the default 5s cap flakes.
     const app = await buildRateLimitedApp(1)
     mockQuery.mockImplementation(async () => ({ rows: [] }))
 
@@ -494,7 +497,7 @@ describe('auth rate limiting (#1670)', () => {
     await app.close()
   })
 
-  it('SELF-DISARMING: with no trusted proxy there is NO limit — a shared bucket would be a DoS, not a protection', async () => {
+  it('SELF-DISARMING: with no trusted proxy there is NO limit — a shared bucket would be a DoS, not a protection', { timeout: 30_000 }, async () => {
     // The property that makes shipping this safe before the operator flips
     // TRUST_PROXY_HOPS: ungated, every external caller behind the proxy is
     // one "IP", and a 10/min ceiling on that bucket lets a single attacker

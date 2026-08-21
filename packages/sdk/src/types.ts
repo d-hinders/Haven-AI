@@ -333,6 +333,13 @@ export interface X402Intent {
   /** Haven-authenticated binding over the x402 expected context. */
   expectedAuth: X402ExpectedAuth
   /**
+   * #1690: the payer identity Haven bound into the expected context (v3),
+   * relayed VERBATIM to the signer's wire shape. Absent until the backend
+   * flips X402_EMIT_PAYER_CONTEXT.
+   */
+  payerDelegate?: string
+  payerAgentId?: string
+  /**
    * EIP-712 digest of `signData.typed_data`, present on the delegation rail
    * (#1138). The edge signer needs it to reconstruct the v2 expected-context
    * message that Haven signed.
@@ -363,6 +370,16 @@ export interface X402ExpectedContext {
    * this digest makes Haven's declaration cover the real payload.
    */
   typedDataHash?: string
+  /**
+   * The DELEGATE ADDRESS this quote was created for (#1690). Present ⇒ the
+   * context is **version 3** and the signer refuses to sign when this is not
+   * its own delegate — the guard that turns "quote as agent A, sign as agent
+   * B" from an on-chain revert three layers later into a named refusal.
+   * Inside the Haven-signed message on purpose: outside it, it is forgeable.
+   */
+  payerDelegate?: string
+  /** The paying agent's id, for the refusal message's diagnosis (#1690). */
+  payerAgentId?: string
 }
 
 export interface X402ExpectedAuth {

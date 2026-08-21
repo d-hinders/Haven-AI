@@ -93,6 +93,60 @@ export async function computeHybridAccountAddress(
   return account.address
 }
 
+/**
+ * How long the deploy waits for its own receipt before handing the
+ * transaction off to the bump worker (#1722).
+ *
+ * Derived from the two things that actually constrain it, not picked round:
+ *
+ * - FLOOR — what a healthy deploy takes. The delegation rail runs on Base and
+ *   Base Sepolia, whose blocks are 2 s, and this waits ONE confirmation of a
+ *   single factory call broadcast with `getRelayerFeeOverrides`' doubled fee
+ *   headroom. That is one to a few blocks; 120 s is ~60 blocks of slack, so a
+ *   healthy deploy never reaches the deadline and no ordinary caller sees a
+ *   behaviour change.
+ * - CEILING — where the transaction stops being this caller's problem.
+ *   `STALE_BROADCAST_SECONDS` (180 s, `infra/outbound-bump-worker.ts`) is the
+ *   age at which the bump worker's unmined scan adopts a `broadcast` row and
+ *   starts replacing it with bumped fees. Waiting past that would leave this
+ *   caller waiting on a transaction another owner may already have replaced.
+ *   120 s < 180 s, so the request has released its advisory lock — and with
+ *   it its pooled connection — before the worker can take over.
+ *
+ * The same bracket-between-the-two-bounds reasoning fixes the passport
+ * anchor's wait at 120 s against its 600 s claim window
+ * (`modules/passport/attestation.ts`); the shared value is a coincidence of
+ * two independent derivations, not a copied constant.
+ */
+export const HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS = 120_000
+
+/**
+ * The deploy was broadcast but not confirmed within
+ * {@link HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS} (#1722).
+ *
+ * Deliberately distinct from a revert: nothing failed, the transaction may
+ * still mine, and its durable outbound record is intentionally left in
+ * `broadcast` for the bump worker (#1558) to adopt. Callers surface it as a
+ * retryable 502, exactly as they already do for any other deploy error.
+ */
+export class HybridDeployUnconfirmedError extends Error {
+  constructor(
+    readonly txHash: string,
+    timeoutMs: number,
+  ) {
+    super(
+      `hybrid deploy not confirmed within ${timeoutMs}ms (${txHash}) — ` +
+        'the transaction may still mine; its outbound record is left for the bump worker',
+    )
+    this.name = 'HybridDeployUnconfirmedError'
+  }
+}
+
+/** ethers v6 rejects a timed-out `wait()` with `code: 'TIMEOUT'`. */
+function isWaitTimeout(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'TIMEOUT'
+}
+
 export interface EnsureDeployedResult {
   address: Address
   alreadyDeployed: boolean
@@ -233,11 +287,17 @@ async function deployIfStillMissing(
   let receipt
   let waitError: unknown
   try {
-    receipt = await tx.wait()
+    // #1722: BOUNDED. `wait()` called bare waits forever in ethers v6, and
+    // this call sits inside the #1673 advisory-lock critical section — so the
+    // pooled-connection hold inherited that unboundedness, and the #1686
+    // accept ("a chain round-trip, seconds") rested on nothing.
+    receipt = await tx.wait(1, HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS)
   } catch (err) {
     // ethers v6 throws out of wait() on a mined-and-reverted tx — this catch,
     // not the status check below, is where a real revert closes the record
     // (#1556 review; same reason the spend-guard stamp sits in a finally).
+    // Since #1722 it also catches the deadline (`code: 'TIMEOUT'`), which is
+    // NOT a revert and must not be treated as one — see below.
     waitError = err
   } finally {
     // Stamp the hash whatever happened — a reverting deploy burned gas too,
@@ -247,6 +307,19 @@ async function deployIfStillMissing(
       gasUsed: receipt ? BigInt(receipt.gasUsed.toString()) : null,
       effectiveGasPrice: receipt?.gasPrice != null ? BigInt(receipt.gasPrice.toString()) : null,
     })
+  }
+  // NO RECEIPT IS NOT A REVERT (#1722). A wait timeout cancels nothing — the
+  // transaction stays in the mempool and may still mine — and #690 records
+  // that a lagging RPC can hand back a null receipt for a tx that confirmed.
+  // Both mean "not observed", so the record is left in `broadcast`, which is
+  // exactly the state the bump worker's unmined scan adopts (`hybrid_deploy`
+  // is on its rebroadcast-safe list, `infra/outbound-bump-worker.ts`).
+  // Marking it failed here would strand the tx between two owners and make a
+  // later-mined deploy look wrong. The caller still gets a retryable 502; a
+  // retry is safe because the deploy is permissionless, relayer-paid and
+  // idempotent on-chain — a duplicate costs gas and nothing else.
+  if (!receipt && (!waitError || isWaitTimeout(waitError))) {
+    throw new HybridDeployUnconfirmedError(tx.hash, HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS)
   }
   if (waitError || !receipt || receipt.status !== 1) {
     await record.failed(`hybrid deploy transaction reverted (${tx.hash})`)

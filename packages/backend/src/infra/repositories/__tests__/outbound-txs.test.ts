@@ -225,6 +225,35 @@ describeDb('outbound-txs repository (#1555)', () => {
     expect(await countLaneAttemptsAtNonce(CHAIN, 8n)).toBe(0)
   })
 
+  it('#1722: a hybrid deploy whose confirmation wait EXPIRED stays adoptable — and marking it failed is what would lose it', async () => {
+    // The disposition `deployIfStillMissing` chose on expiry, played out
+    // against real Postgres: the row keeps the status `submitRecorded`
+    // stamped, and nothing closes it. A wait timeout cancels no transaction,
+    // so this row may still mine.
+    const stuck = await enqueue('hybrid_deploy')
+    await markOutboundTxBroadcast(stuck.id, { txHash: TX, nonce: 3n })
+    await db.query(`UPDATE outbound_txs SET updated_at = NOW() - INTERVAL '4 minutes' WHERE id = $1`, [stuck.id])
+
+    // Past STALE_BROADCAST_SECONDS (180) the bump worker's scan owns it.
+    const adoptable = await listUnminedOutboundTxs(CHAIN, 180)
+    expect(adoptable.map((r) => r.id)).toEqual([stuck.id])
+    // Adoption re-broadcasts the stored calldata, which is only safe because
+    // a second CREATE2 deploy of an existing account is a no-op on-chain.
+    expect(adoptable[0].submitter).toBe('hybrid_deploy')
+    expect(adoptable[0].data).toBe(DATA.toLowerCase())
+
+    // The counterfactual, which is the whole reason the branch exists: had
+    // expiry closed the record failed, the scan would never see it again and
+    // a genuinely stuck deploy would have no owner at all.
+    await markOutboundTxFailed(stuck.id, 'hybrid deploy transaction reverted')
+    // Re-age it: `markOutboundTxFailed` stamps `updated_at`, so without this
+    // the row would drop out of the scan for being YOUNG rather than for
+    // being failed — and the assertion would pass without testing anything
+    // (caught by mutating the scan's status predicate).
+    await db.query(`UPDATE outbound_txs SET updated_at = NOW() - INTERVAL '4 minutes' WHERE id = $1`, [stuck.id])
+    expect(await listUnminedOutboundTxs(CHAIN, 180)).toEqual([])
+  })
+
   it('the status CHECK constraint is real — garbage states are rejected by Postgres', async () => {
     const row = await enqueue()
     await expect(

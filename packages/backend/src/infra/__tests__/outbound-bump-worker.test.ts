@@ -122,6 +122,51 @@ describe('runOutboundBumpTick — stale broadcast rows', () => {
     expect(d.markBroadcast).toHaveBeenCalledWith('replacement-1', expect.objectContaining({ nonce: 42n }))
   })
 
+  // CHARACTERIZATION (#1735) — the stale-broadcast scan is UNGATED by
+  // REBROADCAST_SAFE_SUBMITTERS today; that set guards only the orphan path
+  // below. A `passport_attest` row is therefore replaced like any other.
+  //
+  // On-chain that is survivable — a same-nonce replacement cannot mint a
+  // second attestation, because at most one transaction per nonce mines. The
+  // damage is to RECOVERY: the replacement carries a NEW tx hash, while
+  // `agent_passports.tx_hash` still holds the original. #1043's
+  // `recoverAnchorFromReceipt` is keyed off that stored hash, so it returns
+  // null forever and issuance falls through to a genuinely second attest at a
+  // fresh nonce.
+  it('TODAY: a stale passport_attest broadcast row is replaced like any other', async () => {
+    const d = deps({ listUnmined: vi.fn(async () => [row({ submitter: 'passport_attest' })]) })
+    const result = await runOutboundBumpTick(84532, d, log)
+
+    expect(result.bumped).toBe(1)
+    expect(d.sendRaw).toHaveBeenCalledWith(84532, expect.objectContaining({ nonce: 42 }))
+    expect(d.markReplaced).toHaveBeenCalledWith('row-1', 'replacement-1')
+  })
+
+  // The chain-first half must keep working for a non-rebroadcast-safe row:
+  // whatever we decide about bumping, a mined attest must still close mined.
+  it('a mined passport_attest row closes mined, with no replacement', async () => {
+    const d = deps({
+      listUnmined: vi.fn(async () => [row({ submitter: 'passport_attest' })]),
+      getReceiptStatus: vi.fn(async () => 1 as const),
+    })
+    const result = await runOutboundBumpTick(84532, d, log)
+
+    expect(result.closedMined).toBe(1)
+    expect(d.markMined).toHaveBeenCalledWith('row-1')
+    expect(d.sendRaw).not.toHaveBeenCalled()
+  })
+
+  it('a mined-and-reverted passport_attest row closes failed, with no replacement', async () => {
+    const d = deps({
+      listUnmined: vi.fn(async () => [row({ submitter: 'passport_attest' })]),
+      getReceiptStatus: vi.fn(async () => 0 as const),
+    })
+    const result = await runOutboundBumpTick(84532, d, log)
+
+    expect(result.closedFailed).toBe(1)
+    expect(d.sendRaw).not.toHaveBeenCalled()
+  })
+
   it(`a lane past ${MAX_BUMPS_PER_NONCE} replacements is an INCIDENT: alert, no more gas`, async () => {
     const d = deps({
       listUnmined: vi.fn(async () => [row({})]),

@@ -66,12 +66,12 @@ Never hand-edit a version field, a cross-package pin, or a source version
 constant — the script owns all of them atomically, and a missed one ships a
 package that lies about itself. Never run `npm publish`.
 
-Then check the lockfile before anything else: every changed line must be a
-version string or an `@haven_ai/*` pin. If npm also inserted `dev`/`peer`
-metadata, repair it per *Lockfile hygiene* in `scripts/README.md`. A polluted
-lockfile installs fine and fails no check, which is why it has survived three
-releases — and why the release diff, whose entire safety argument is *"nothing
-here is anything but a version string"*, is the wrong place to let it slide.
+The lockfile needs no attention from you: since #1663 the bump rewrites it
+structurally and fails loudly if the diff holds anything but version lines
+(`scripts/README.md` § *Lockfile hygiene*). **Do not hand-repair it** — a
+text-wide substitution can silently rewrite a third-party dep that happens to
+sit at the version you are leaving, which is why the shipped rewrite parses
+rather than greps. If the guard fires, read what it names.
 
 ## Satisfy The Contract-Doc Gate
 

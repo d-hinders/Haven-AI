@@ -207,29 +207,29 @@ entries block.
 
 ### Lockfile hygiene
 
-`npm install` (step 7 of the bump) regenerates `package-lock.json` and, on some
-npm versions, also inserts spurious `"dev": true` / `"peer": true` metadata on
-unrelated entries. Three consecutive releases (`0.1.26`, `0.1.27`, `0.1.28`)
-hand-repaired the same noise. Until [#1663](https://github.com/d-hinders/Haven-AI/issues/1663)
-fixes this in the script, check and repair by hand:
+**Handled by the bump since [#1663](https://github.com/d-hinders/Haven-AI/issues/1663) — do not hand-repair.**
 
-```sh
-# Every changed line must be a version string or an @haven_ai/* pin.
-git diff package-lock.json | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | sort | uniq -c
+`npm install` does not promise that a version bump moves only the version lines:
+on three consecutive cuts (`0.1.26` → `0.1.28`) the local npm also inserted
+`"dev"`/`"peer"` metadata on unrelated entries, and each release repaired the
+diff by hand at exactly the moment the repo is least able to absorb a hand-edit.
 
-# If it is polluted: restore and re-apply ONLY the version substitution.
-git show HEAD:package-lock.json | sed 's/<old-version>/<new-version>/g' > package-lock.json
-node -e "JSON.parse(require('fs').readFileSync('package-lock.json','utf8'))"  # still valid JSON
-npm ci --dry-run                                                              # still installs
-```
+Step 9 above now replays the version substitution **structurally** onto the
+pre-install lockfile (`scripts/release-lockfile.mjs`) and fails the release
+loudly if the final diff holds any line that is not a workspace `version` field
+or an `@haven_ai/*` pin. Self-tested by `npm run release:bump:test`.
 
-The substitution is safe because every occurrence of the old version in the
-lockfile is a workspace `version` field or an internal pin — verify that with
-`grep -c` before trusting it.
+So: if the bump completes, the lockfile is already correct — and if it doesn't,
+the guard names what is wrong. **Do not "fix" the lockfile by hand**, and in
+particular do not reach for a text-wide substitution of the old version string:
+a third-party dependency can legitimately sit at the version the workspace is
+leaving, and a textual replace would silently rewrite it. That hazard is why the
+shipped rewrite parses rather than greps.
 
-A noisy lockfile installs fine and fails nothing, which is exactly the problem:
-the release diff's whole safety argument is *"nothing here is anything but a
-version string"*, and the CASP shard asserts that in writing.
+Why any of this is worth a guard: a noisy lockfile installs fine and fails
+nothing, which is exactly the problem. The release diff's whole safety argument
+is *"nothing here is anything but a version string"*, and the CASP shard asserts
+that in writing — so churn in it is where a real change would hide.
 
 The workflow authenticates with **npm Trusted Publishing (OIDC)** — there is no
 `NPM_TOKEN` secret to manage. It grants the job `id-token: write` and upgrades

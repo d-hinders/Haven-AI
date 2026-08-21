@@ -43,6 +43,21 @@ export function assertValidServerSlug(slug: string): void {
       `Invalid server name ${JSON.stringify(slug)}: use 1-32 lowercase letters, digits, and single hyphens (e.g. "research").`,
     )
   }
+  // Collision-freedom (#1695 review, blocking finding): every derived name
+  // must be unique across ALL valid slugs and the bare pair, or "a writer
+  // touches only its own pair" is false. The only cross-collisions the
+  // haven-<slug> / haven-signer-<slug> scheme admits are:
+  //   hosted(A) === bare signer      ⇔ A === 'signer'
+  //   hosted(A) === signer(B), A≠B   ⇔ A === `signer-${B}`
+  // (signer(A) === signer(B) and hosted(A) === hosted(B) already force A===B.)
+  // Rejecting 'signer' and the 'signer-' prefix therefore closes the whole
+  // family, not just the literal case — proven by the adversarial-pair test.
+  if (slug === 'signer' || slug.startsWith('signer-')) {
+    throw new Error(
+      `Invalid server name ${JSON.stringify(slug)}: "signer" and "signer-*" are reserved — ` +
+        "they would collide with another pair's haven-signer-* entry.",
+    )
+  }
 }
 
 export function serverNamesFor(slug?: string): ServerNames {

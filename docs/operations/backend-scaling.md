@@ -123,10 +123,20 @@ app-wide pay up to `DB_POOL_CONNECTION_TIMEOUT` (default 5 s) before their own
 
 State the threshold carefully, because the crisp version flatters it. It is not
 "20 distinct new accounts": every entrant checks out a connection *before* the
-lock is attempted, so callers that merely block count too, as do client retries
-racing on the same account. And the pool is shared with all other traffic
-rather than reserved for this path — so the real threshold is 20 minus whatever
-else the backend is doing.
+lock is attempted, so callers that merely block count too. And the pool is
+shared with all other traffic rather than reserved for this path — so the real
+threshold is 20 minus whatever else the backend is doing.
+
+Worse, the retries are not independent of the burst. A deploy that fails leaves
+no bytecode, so the fast path does not engage and the retry re-enters the lock
+for the same account — and both call sites invite that retry by design
+(`delegation-authorize.ts` says so in as many words: "a failed deploy leaves
+nothing half created and authorize can simply be retried"). The failures that
+produce those retries — RPC trouble, a gas spike past the fee headroom, a
+relayer budget cap — are exactly the conditions a burst creates. So the same
+few accounts can re-enter concurrently, and the number of *distinct* accounts
+needed to threaten the pool is lower than the headline figure suggests. Treat
+"on the order of 20" as the optimistic end of the range, not the bar.
 
 **Why this is accepted rather than fixed.** Both call sites
 (`modules/x402/delegation-authorize.ts`, `routes/agent-delegations.ts`) pass
@@ -140,11 +150,13 @@ is not reachable.
 **Be precise about what failing open does and does not promise**, because the
 distinction is most of the reason to write this down: it protects the LOCK, not
 the work the lock guards. As it happens, almost all of that work protects
-itself. `assertRelayerBudget` and `recordRelayerSpend` are fail-open by
-construction — "Fail OPEN — availability guard" and "Never throws" in their own
-doc comments (`infra/relayer-spend-guard.ts`) — and `openOutboundRecord`
+itself. `assertRelayerBudget` and `recordRelayerSpend` are fail-open against a
+database error — "Fail OPEN — availability guard" and "Never throws" in their
+own doc comments (`infra/relayer-spend-guard.ts`) — and `openOutboundRecord`
 catches, warns, and continues with a null id, which `infra/outbound-queue.ts`'s
-header states as deliberate policy.
+header states as deliberate policy. (`assertRelayerBudget` does throw when the
+gas cap is genuinely exceeded; that is the guard working, not a pool symptom,
+and it surfaces as a 429.)
 
 The **one** write in that section that is not fail-open is `submitRecorded`'s
 stamp, `markOutboundTxBroadcast`: it catches a unique violation to retry the

@@ -498,6 +498,63 @@ const CONNECT_SETUP_TOKEN = 'hv_setup_screenshot'
 const CONNECT_COMMAND = `npx -y @haven_ai/connect@alpha --setup ${CONNECT_SETUP_TOKEN} --api https://api.haven.example --ack-local-tools --runtime claude-code`
 
 export const SCENARIOS = {
+  'account-backup-recovery': {
+    description:
+      'Backup & recovery card unobstructed at both viewports — wallet + two dated passkeys',
+    // The SHARED fixture serves one passkey and no wallet, which renders the
+    // "only one way to approve" state — the right default for route capture,
+    // but it shows neither the Wallet row nor a second passkey. This scenario
+    // serves the healthy multi-signer set instead, so one PNG carries every
+    // element the row layout has to get right: the Wallet row, the dated
+    // passkey labels that WRAP at 390px (#1679), and the enrolment button with
+    // its anchor subtext.
+    api(apiPath) {
+      if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: '0x' + 'ee'.repeat(20),
+          // Both dates are noon UTC so the rendered day cannot slide either
+          // way with the runner's timezone — the label IS the evidence here.
+          // March 3 is the exact case #1679's review saw wrap to two lines at
+          // 390px; September 12 is longer still, so a regression that unwraps
+          // one would have to unwrap both to go unnoticed.
+          passkeys: [
+            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: '2026-09-12T12:00:00.000Z' },
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      const heading = page.getByRole('heading', { name: 'Backup & recovery' })
+      await heading.waitFor({ timeout: 15_000 })
+
+      // The Card root that owns the heading. Card does not forward props, so
+      // there is no testid to target without changing a shared primitive;
+      // this couples to Card's own radius class instead. If that changes the
+      // locator finds nothing and the run FAILS — which is the behaviour you
+      // want from a capture whose entire purpose is trustworthy evidence.
+      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+
+      // Wait for the ROWS, not just the heading. The card short-circuits to
+      // null until the signer fetch settles, so there is no empty-shell phase
+      // to race — but the heading renders in the loadError branch too, where
+      // the rows and the button do not. Waiting on the heading alone would
+      // therefore accept "Haven could not load how this account is approved"
+      // as the capture. These two waits are what make the error state time
+      // out instead of quietly becoming the evidence.
+      await card.getByText('Wallet', { exact: true }).waitFor({ timeout: 15_000 })
+      await card.getByRole('button', { name: 'Add a backup passkey' }).waitFor({ timeout: 15_000 })
+
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'card')
+    },
+  },
   'account-signer-removal': {
     description: 'Account backup-removal consequence dialog with exactly two approval ways',
     api(apiPath) {

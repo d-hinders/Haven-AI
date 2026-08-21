@@ -16,6 +16,12 @@ interface SweepTx {
  * `code: 'CALL_EXCEPTION'` when the transaction mined and reverted. Only the
  * first is "still in flight" — collapsing them is the same defect this fix
  * exists to remove, one layer out.
+ *
+ * The one assumption: the code is read off the error's OWN `code` property.
+ * If a future ethers version nests it (e.g. under `info.error.code`) this
+ * predicate silently stops recognising timeouts and every expiry throws
+ * again. That fails loudly in the tests above — `neverMinesWait()` drives a
+ * real `code: 'TIMEOUT'` rejection — so the shape is pinned, not assumed.
  */
 function isWaitTimeout(err: unknown): boolean {
   return (err as { code?: unknown } | null)?.code === 'TIMEOUT'

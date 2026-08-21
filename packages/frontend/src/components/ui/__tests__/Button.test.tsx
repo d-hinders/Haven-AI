@@ -55,13 +55,23 @@ const tapTargetHeightPx = (classes: string[]) => {
   return remScaleToPx(cls.slice('after:h-'.length))
 }
 
+// The first render in this file pays for React + jsdom warm-up, which on a loaded
+// machine or a cold CI runner can exceed vitest's 5s default. These assertions are
+// pure string work, so a generous ceiling costs nothing and keeps the guard from
+// flaking — an intermittently red guard is one people learn to ignore.
+const COLD_START_TIMEOUT_MS = 30_000
+
 describe('Button tap targets (#1726)', () => {
-  it.each(SIZES)('size=%s offers a tap target of at least 44px', (size) => {
-    render(<Button size={size}>Remove</Button>)
-    expect(tapTargetHeightPx(classesOf('Remove'))).toBeGreaterThanOrEqual(
-      COMFORTABLE_TAP_TARGET_PX,
-    )
-  })
+  it.each(SIZES)(
+    'size=%s offers a tap target of at least 44px',
+    (size) => {
+      render(<Button size={size}>Remove</Button>)
+      expect(tapTargetHeightPx(classesOf('Remove'))).toBeGreaterThanOrEqual(
+        COMFORTABLE_TAP_TARGET_PX,
+      )
+    },
+    COLD_START_TIMEOUT_MS,
+  )
 
   it('leaves the painted heights alone, so no existing layout shifts', () => {
     // The whole point of the pseudo-element approach: these three numbers are

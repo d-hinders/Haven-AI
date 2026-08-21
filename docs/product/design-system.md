@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-07-13"
+last-verified: "2026-08-21" # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate
 ---
 
 # Haven Design System
@@ -206,8 +206,9 @@ Consequences worth knowing:
   call sites; growing it sideways would let a button in a `gap-2` toolbar swallow taps
   meant for its neighbour.
 - **Keep at least 8px between stacked controls.** The overhang is 4px per edge on `sm` and
-  2px on `md`, so at the system's 8px minimum gap adjacent targets meet but never overlap.
-  A tighter gap makes two buttons fight over the same pixels.
+  2px on `md`, so at the 8px (`gap-2`) spacing this system typically uses between stacked
+  controls, adjacent targets meet but never overlap. Tighter than that and two buttons
+  fight over the same pixels — this is the one new constraint the mechanism introduces.
 - Choosing `size` therefore stays a **density** decision, not an ergonomics one.
 
 ### Cards (`Card`)

@@ -20,7 +20,19 @@ const TX = '0x' + 'ab'.repeat(32)
 const getTransaction = vi.fn()
 const getTransactionReceipt = vi.fn()
 const getTransactionCount = vi.fn()
-let provider: unknown = { getTransaction, getTransactionReceipt, getTransactionCount }
+const getBlockNumber = vi.fn()
+const getBlock = vi.fn()
+let provider: unknown = {
+  getTransaction,
+  getTransactionReceipt,
+  getTransactionCount,
+  getBlockNumber,
+  getBlock,
+}
+
+/** Chain head, and the finalized block a healthy OP-stack node reports. */
+const HEAD = 1_000
+const FINALIZED = 900
 
 vi.mock('../../../infra/relayer.js', async () => {
   const actual = await vi.importActual<typeof import('../../../infra/relayer.js')>(
@@ -37,18 +49,37 @@ vi.mock('../../../infra/repositories/outbound-txs.js', async () => {
   return { ...actual, findOutboundTxByHash: (...a: unknown[]) => findOutboundTxByHash(...a) }
 })
 
-const { classifyAnchorTxLiveness } = await import('../attestation.js')
+const { classifyAnchorTxLiveness, ANCHOR_NONCE_READ_DEPTH_BLOCKS } = await import(
+  '../attestation.js'
+)
 
 /** A durable record stamped at broadcast: nonce 7, still open. */
 function record(overrides: Record<string, unknown> = {}) {
   return { chain_id: 84532, nonce: '7', status: 'broadcast', tx_hash: TX, ...overrides }
 }
 
+/**
+ * Nonce as of a given block. Defaults to "slot 7 still open everywhere"; a
+ * test that wants a burn says so per block, which is what lets the reorg case
+ * (burned at the head, open at the finalized block) be expressed at all.
+ */
+function nonceByBlock(counts: Record<number, number>, fallback = 7) {
+  return async (_addr: string, block: number) => counts[block] ?? fallback
+}
+
 beforeEach(() => {
-  provider = { getTransaction, getTransactionReceipt, getTransactionCount }
+  provider = {
+    getTransaction,
+    getTransactionReceipt,
+    getTransactionCount,
+    getBlockNumber,
+    getBlock,
+  }
   getTransaction.mockReset().mockResolvedValue(null)
   getTransactionReceipt.mockReset().mockResolvedValue(null)
   getTransactionCount.mockReset().mockResolvedValue(7)
+  getBlockNumber.mockReset().mockResolvedValue(HEAD)
+  getBlock.mockReset().mockResolvedValue({ number: FINALIZED })
   findOutboundTxByHash.mockReset().mockResolvedValue(record())
 })
 
@@ -56,9 +87,10 @@ describe('what earns a `dead` verdict (#1745)', () => {
   it('the ONLY path to dead: the nonce slot burned by something else, receipt still absent', async () => {
     getTransactionCount.mockResolvedValue(8) // nonce 7 consumed, not by us
     expect(await classifyAnchorTxLiveness(84532, TX)).toBe('dead')
-    // `latest`, never `pending` — a pending count includes the stuck
-    // transaction itself and could never show its own slot as consumed.
-    expect(getTransactionCount).toHaveBeenCalledWith(RELAYER, 'latest')
+    // Read as of the FINALIZED block, never the head and never `pending` — a
+    // pending count includes the stuck transaction itself and could never
+    // show its own slot as consumed.
+    expect(getTransactionCount).toHaveBeenCalledWith(RELAYER, FINALIZED)
   })
 
   it('the nonce still OPEN is live — this is the fee-stuck attest, and it may mine', async () => {
@@ -79,6 +111,66 @@ describe('what earns a `dead` verdict (#1745)', () => {
     findOutboundTxByHash.mockResolvedValue(record({ nonce: '10' }))
     getTransactionCount.mockResolvedValue(9)
     expect(await classifyAnchorTxLiveness(84532, TX)).toBe('live')
+  })
+})
+
+/**
+ * The reorg guard, and the fallback ladder underneath it (#1745 review).
+ *
+ * Nonce consumption is only as durable as the block that did the consuming.
+ * Read at the head, a since-orphaned block can momentarily show the slot
+ * taken — and acting on that re-mints while the original is still live, which
+ * is the duplicate this whole probe exists to prevent.
+ *
+ * The two fallback branches below never execute on Base or Base Sepolia,
+ * because those nodes answer `finalized` honestly. They are therefore the
+ * branches most likely to rot unnoticed, which is exactly why they are
+ * pinned here rather than left to a live RPC to exercise.
+ */
+describe('the nonce is read from settled state, not the head', () => {
+  it('a burn visible ONLY at the head is not death — this is the reorg case', async () => {
+    // Head says the slot is consumed; the finalized block says it is still
+    // open. The head is the one that can be taken back.
+    getTransactionCount.mockImplementation(nonceByBlock({ [HEAD]: 8, [FINALIZED]: 7 }))
+    expect(await classifyAnchorTxLiveness(84532, TX)).toBe('live')
+  })
+
+  it('a burn settled at the finalized block IS death', async () => {
+    getTransactionCount.mockImplementation(nonceByBlock({ [HEAD]: 8, [FINALIZED]: 8 }))
+    expect(await classifyAnchorTxLiveness(84532, TX)).toBe('dead')
+  })
+
+  it('an unsupported `finalized` tag falls back to a buried block, never the head', async () => {
+    getBlock.mockRejectedValue(new Error('unknown block tag "finalized"'))
+    const buried = HEAD - ANCHOR_NONCE_READ_DEPTH_BLOCKS
+    getTransactionCount.mockImplementation(nonceByBlock({ [buried]: 8 }))
+
+    expect(await classifyAnchorTxLiveness(84532, TX)).toBe('dead')
+    expect(getTransactionCount).toHaveBeenCalledWith(RELAYER, buried)
+    expect(getTransactionCount).not.toHaveBeenCalledWith(RELAYER, HEAD)
+  })
+
+  it('a node that ECHOES the head for `finalized` is not trusted', async () => {
+    // Some nodes accept the tag and return the head anyway. Believing that
+    // would silently reinstate the reorg exposure this function removes.
+    getBlock.mockResolvedValue({ number: HEAD })
+    const buried = HEAD - ANCHOR_NONCE_READ_DEPTH_BLOCKS
+    getTransactionCount.mockImplementation(nonceByBlock({ [buried]: 8, [HEAD]: 8 }))
+
+    expect(await classifyAnchorTxLiveness(84532, TX)).toBe('dead')
+    expect(getTransactionCount).toHaveBeenCalledWith(RELAYER, buried)
+    expect(getTransactionCount).not.toHaveBeenCalledWith(RELAYER, HEAD)
+  })
+
+  it('NO settled vantage point (chain shorter than the depth) is live, not dead', async () => {
+    getBlock.mockRejectedValue(new Error('unknown block tag "finalized"'))
+    getBlockNumber.mockResolvedValue(10) // 10 - 300 < 0
+    getTransactionCount.mockResolvedValue(9999) // would say "burned" if asked
+
+    expect(await classifyAnchorTxLiveness(84532, TX)).toBe('live')
+    // The point is that it never asks: with nowhere settled to read from
+    // there is no evidence, and no evidence is never death.
+    expect(getTransactionCount).not.toHaveBeenCalled()
   })
 })
 

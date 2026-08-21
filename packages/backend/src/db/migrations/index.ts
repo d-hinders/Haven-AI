@@ -62,6 +62,7 @@ import * as agentsArchivedAt from './060_agents_archived_at.js'
 import * as outboundTxs from './061_outbound_txs.js'
 import * as normalizePriceDisplay from './062_normalize_price_display.js'
 import * as rateLimitCounters from './063_rate_limit_counters.js'
+import * as labelStrandingFixture from './064_label_stranding_fixture.js'
 
 export interface Migration {
   version: string
@@ -137,4 +138,5 @@ export const migrations: Migration[] = [
   outboundTxs,
   normalizePriceDisplay,
   rateLimitCounters,
+  labelStrandingFixture,
 ]

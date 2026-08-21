@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-08-21" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate
+last-verified: "2026-08-21" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass
 ---
 
 # Haven Design System
@@ -137,6 +137,30 @@ Cards on hover get a brand‑tinted lift only when interactive:
 Raised card elevation is reserved for the few surfaces that anchor a page, such as the dashboard hero and account balance card. Popover shadow is for floating menus, tooltips, and toasts.
 
 **No glow shadows on text**, no colored shadows on buttons.
+
+### Layering (z-index) ([#1749](https://github.com/d-hinders/Haven-AI/issues/1749))
+
+Every stacking layer has a named token. **Reach for a token, never a fresh number.**
+
+```css
+--v2-z-content:        10;   /* in-flow overlaps: badges, gradient washes */
+--v2-z-sticky:         20;   /* sticky table headers */
+--v2-z-chrome:        100;   /* TopBar */
+--v2-z-chrome-popover: 110;  /* popovers anchored in the chrome */
+--v2-z-nav-scrim:     130;   /* mobile drawer scrim */
+--v2-z-nav-drawer:    140;   /* mobile drawer */
+--v2-z-nav-toggle:    150;   /* the Open / Close sidebar toggle */
+--v2-z-modal:         200;   /* Modal, SidePanel */
+--v2-z-tooltip:       210;
+--v2-z-panel:         250;   /* AgentPanel */
+--v2-z-toast:        9999;   /* Toast, skip-to-content link */
+```
+
+The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it slides over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top 56px with the bar, and its scrim exists to dim everything behind it — the bar included. Let the bar win and the drawer is decapitated, the scrim dims all but the top strip, and the toggle (which sits *inside* that strip by design, in the gap the bar reserves for it) cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
+
+Tiers are spaced by 10 so a new layer lands between two without renumbering. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
+
+That test reads source, so it cannot see stacking contexts or hit-testing. `e2e/mobile-nav-layering.spec.ts` is the half that can: it drives a real engine at four widths below `lg` and asserts `document.elementFromPoint` at the toggle's centre returns the toggle.
 
 ---
 

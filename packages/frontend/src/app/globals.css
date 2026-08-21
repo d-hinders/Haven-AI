@@ -131,6 +131,37 @@
   --v2-table-row-border: #e6ebf1;
   --v2-table-row-hover: #f0f4f9;
 
+  /* ── Layering scale (#1749) ────────────────────────────────────────────────
+     Named tiers for everything that stacks. Reach for a token, never a fresh
+     number: #1749 was a `z-[100]` header and a `z-[60]` sidebar toggle picked
+     independently, in different files, months apart — which left the mobile
+     navigation toggle painted AND hit-tested under the top bar on every
+     authenticated route.
+
+     The rule the numbers encode, in one sentence: the mobile navigation
+     overlay outranks the app chrome it slides over. That direction is not
+     arbitrary. The drawer is `inset-y-0`, so its own logo band occupies the
+     same 56px as TopBar; its scrim exists to dim everything behind it, and
+     "everything" includes the bar. Let the bar win and the drawer is
+     decapitated, the scrim dims all but the top strip, and the toggle — which
+     is positioned INSIDE that strip by design, in the gap TopBar reserves for
+     it — is unreachable. Modals and toasts in turn outrank the navigation,
+     because a dialog opened from a nav link must cover the drawer.
+
+     Tiers are spaced by 10 so a genuinely new layer has room to land between
+     two without renumbering the scale. */
+  --v2-z-content: 10; /* in-flow overlaps: badges, gradient washes */
+  --v2-z-sticky: 20; /* sticky table headers */
+  --v2-z-chrome: 100; /* TopBar — the app shell's own bar */
+  --v2-z-chrome-popover: 110; /* popovers anchored in the chrome (notifications, wallet) */
+  --v2-z-nav-scrim: 130; /* mobile drawer scrim — dims the chrome, hence > chrome */
+  --v2-z-nav-drawer: 140; /* mobile drawer itself */
+  --v2-z-nav-toggle: 150; /* the Open/Close toggle — above its own drawer, so one control does both */
+  --v2-z-modal: 200; /* Modal, SidePanel */
+  --v2-z-tooltip: 210;
+  --v2-z-panel: 250; /* AgentPanel */
+  --v2-z-toast: 9999; /* Toast, and the skip-to-content link */
+
   --v2-font-weight-medium: 500;
   --v2-font-weight-semibold: 600;
   --v2-font-weight-bold: 700;

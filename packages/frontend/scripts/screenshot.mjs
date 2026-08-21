@@ -502,7 +502,11 @@ async function dismissMobileSidebar(page, vp) {
   if (vp.width >= 1024) return
   const close = page.getByRole('button', { name: 'Close sidebar' })
   if (await close.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await close.click({ force: true })
+    // No `{ force: true }` (#1749) — see the note on the e2e twin in
+    // `e2e/fixtures/haven-api.ts`. The forced click was this bug's only
+    // footprint in the repo: the capture tooling had been routing around an
+    // unreachable navigation toggle for months without anyone naming it.
+    await close.click()
     await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible' })
   }
 }

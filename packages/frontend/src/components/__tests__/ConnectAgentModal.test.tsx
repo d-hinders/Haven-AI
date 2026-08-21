@@ -839,7 +839,7 @@ describe('ConnectAgentModal', () => {
     // The single anchor summary headline replaces the old stack of green
     // success / awaiting-approval / "Ready for Haven approval" / yellow
     // restart callouts. Restart guidance moves to the post-approval state.
-    expect(await screen.findByText('Approve agent budget')).toBeInTheDocument()
+    expect(await screen.findByText('Approve the agent budget')).toBeInTheDocument()
     // #1377 C: the legacy approval renders inside the one step-4 shell.
     expect(screen.getByLabelText('Connection progress')).toBeInTheDocument()
     // #1418: ONE status voice on step 4 — the shell ticker above is the only
@@ -847,6 +847,9 @@ describe('ConnectAgentModal', () => {
     expect(screen.queryByLabelText(/^Step \d+ of \d+$/)).not.toBeInTheDocument()
     expect(screen.getByText(/Local connection verified/i)).toBeInTheDocument()
     expect(screen.getByText(/You sign to give Research Agent authority to spend/i)).toBeInTheDocument()
+    // #1684: heading dropped on BOTH rails, so neither restates the subtitle.
+    expect(countOccurrences(document.body.textContent ?? '', 'the agent budget')).toBe(1)
+    expect(screen.queryByText('Approve agent budget')).not.toBeInTheDocument()
     expect(screen.queryByText('Connected locally')).not.toBeInTheDocument()
     expect(screen.queryByText('Ready for Haven approval')).not.toBeInTheDocument()
     expect(screen.queryByText('Agent restart prepared')).not.toBeInTheDocument()
@@ -873,7 +876,19 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    expect(await screen.findByText('Approve agent budget')).toBeInTheDocument()
+    expect(await screen.findByText('Approve the agent budget')).toBeInTheDocument()
+    // #1684: the gate is named ONCE per viewport. It used to be the modal
+    // subtitle AND the summary card's heading ~40px below it — the same
+    // sentence twice on the screen that grants spend authority.
+    expect(countOccurrences(document.body.textContent ?? '', 'the agent budget')).toBe(1)
+    expect(screen.queryByText('Approve agent budget')).not.toBeInTheDocument()
+    // #1684 trimmed that description to ONE line, and the two things it had
+    // to keep are pinned here rather than left to "it is short and visible":
+    // the refill, and the guarantee — which is stated NOWHERE else in the
+    // flow, on the screen that grants spend authority. A future trim that
+    // takes either now fails.
+    expect(screen.getByText(/refills every period/)).toBeInTheDocument()
+    expect(screen.getByText(/nothing executes outside it/)).toBeInTheDocument()
     // The budget is RESTATED from the setup — never an empty field to refill.
     expect(screen.getByText(/10\.00 USDC\.e per day/)).toBeInTheDocument()
     expect(screen.queryByPlaceholderText('Amount')).not.toBeInTheDocument()
@@ -937,7 +952,7 @@ describe('ConnectAgentModal', () => {
     expect(screen.getByText(/No signature yet — nothing changed/)).toBeInTheDocument()
     // Still on the approval step, still actionable.
     expect(screen.getByRole('button', { name: 'Approve budget' })).toBeEnabled()
-    expect(screen.getByText('Approve agent budget')).toBeInTheDocument()
+    expect(screen.getByText('Approve the agent budget')).toBeInTheDocument()
     // A cancelled signature is not a failure and not an approval.
     expect(document.body.textContent).not.toMatch(/could not set the budget/i)
     expect(mockApiPost).not.toHaveBeenCalledWith(
@@ -946,7 +961,7 @@ describe('ConnectAgentModal', () => {
     )
   })
 
-  it('after the budget is signed there is no "Cancel setup" left to offer (#1073)', async () => {
+  it('after the budget is signed there is no "Cancel" left to offer (#1073)', async () => {
     // The signature already activated the agent, in its own transaction. A
     // cancel here would promise a reversal Haven cannot perform and would
     // report the setup dead while a live, spending agent remained.
@@ -972,7 +987,7 @@ describe('ConnectAgentModal', () => {
 
     // Honest about what DID happen: the money authority is real.
     expect(await screen.findByText('Budget set — finishing up')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Cancel setup' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument()
     // A visible "Close" in the step footer — not the header's icon button,
     // which is aria-labelled the same way.
     expect(
@@ -995,7 +1010,7 @@ describe('ConnectAgentModal', () => {
     await fillAndCreateSetup()
 
     const approve = await screen.findByRole('button', { name: 'Approve budget' })
-    const cancel = screen.getByRole('button', { name: 'Cancel setup' })
+    const cancel = screen.getByRole('button', { name: 'Cancel' })
     // Same row...
     expect(approve.parentElement).toBe(cancel.parentElement)
     // ...both sharing the width, approve rendered last so it reads as primary.
@@ -1015,8 +1030,12 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    await screen.findByText('Approve agent budget')
-    expect(screen.getByText('Verification details')).toBeInTheDocument()
+    await screen.findByText('Approve the agent budget')
+    // #1684: the verified line IS the disclosure trigger — one row, not a
+    // check line with a second "Verification details" row beneath it.
+    const summary = screen.getByText(/Local connection verified/i).closest('summary')
+    expect(summary).not.toBeNull()
+    expect(screen.queryByText('Verification details')).not.toBeInTheDocument()
     expect(screen.getByText('0x3333333333333333333333333333333333333333')).toBeInTheDocument()
     // Safe-only row must NOT appear on this rail — one signature IS the approval.
     expect(screen.queryByText('Approvals required')).not.toBeInTheDocument()
@@ -1038,7 +1057,7 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    await screen.findByText('Approve agent budget')
+    await screen.findByText('Approve the agent budget')
     expect(screen.getByRole('button', { name: /^Switch to / })).toBeInTheDocument()
     expect(screen.getByText(/Switch networks to approve the budget/)).toBeInTheDocument()
   })
@@ -1061,7 +1080,7 @@ describe('ConnectAgentModal', () => {
     expect(screen.getByLabelText('Step 1 of 4')).toBeInTheDocument()
 
     await fillAndCreateSetup()
-    await screen.findByText('Approve agent budget')
+    await screen.findByText('Approve the agent budget')
     expect(screen.queryByLabelText(/^Step \d+ of \d+$/)).not.toBeInTheDocument()
   })
 
@@ -1121,22 +1140,24 @@ describe('ConnectAgentModal', () => {
     // every part of this sentence is derived, not hardcoded prose: a decimals
     // bug or a period-label regression breaks it.
     const grantLine = 'Research Agent can now spend up to 10.00 USDC.e per day from Operating wallet.'
-    // Matched on the whole paragraph: the amount is wrapped in a .v2-tabular
-    // span (design-system.md wants tabular numerals on every amount), and
-    // getByText's default only joins an element's DIRECT text-node children,
-    // so a plain string query would no longer see the sentence.
+    // #1684: the grant sentence IS the heading. It used to sit under
+    // "Research Agent is ready to spend" — same subject, same verb, twice —
+    // so the two merged into the one line that carries the amount and the
+    // wallet. Matched on the whole heading: the amount is wrapped in a
+    // .v2-tabular span (design-system.md wants tabular numerals on every
+    // amount), and getByText's default only joins an element's DIRECT text-node
+    // children, so a plain string query would no longer see the sentence.
     expect(
       await screen.findByText(
-        (_content, element) => element?.tagName === 'P' && element.textContent === grantLine,
+        (_content, element) => element?.tagName === 'H3' && element.textContent === grantLine,
       ),
     ).toBeInTheDocument()
     // The amount itself carries the tabular class, not the whole sentence.
     expect(document.querySelector('.v2-tabular')?.textContent).toBe('10.00 USDC.e per day')
     // Stated once, not once per render path.
     expect(countOccurrences(document.body.textContent ?? '', grantLine)).toBe(1)
-    // ...and it leads with a heading rather than a badge, so the ending reads
-    // as a conclusion instead of a fragment.
-    expect(screen.getByText('Research Agent is ready to spend')).toBeInTheDocument()
+    // ...and the merged-away heading does not come back alongside it.
+    expect(screen.queryByText(/is ready to spend/)).not.toBeInTheDocument()
 
     // ONE status voice. "Agent rules approved" used to appear twice in this
     // viewport — a success StatusBadge and the header subtitle — on top of the
@@ -1151,8 +1172,11 @@ describe('ConnectAgentModal', () => {
 
     // Runtime-specific restart copy: Claude Code (the default) is a session
     // runtime, so users are not told to restart needlessly.
-    expect(screen.getByText(/next Claude Code message/i)).toBeInTheDocument()
-    expect(screen.getByText(/Haven tools wired/i)).toBeInTheDocument()
+    // #1684: the runtime instruction is the one thing left to DO, so it is a
+    // callout — never a third bullet inside the ticked done-list.
+    const restart = screen.getByText(/next Claude Code message/i)
+    expect(restart.closest('ul')).toBeNull()
+    expect(screen.getByText(/Haven tools wired/i).closest('ul')).not.toBeNull()
     expect(screen.queryByText('Agent restart prepared')).not.toBeInTheDocument()
   })
 
@@ -1168,9 +1192,11 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    expect(await screen.findByText('Your agent is ready to spend')).toBeInTheDocument()
-    expect(screen.getByText('Your agent can now spend within budget.')).toBeInTheDocument()
-    expect(screen.queryByText(/can now spend up to/)).not.toBeInTheDocument()
+    // #1684: still ONE line after the merge — the generic heading survives,
+    // and nothing interpolates a half-named authority beneath it.
+    const heading = await screen.findByText('Your agent is ready to spend')
+    expect(heading.tagName).toBe('H3')
+    expect(screen.queryByText(/can now spend/)).not.toBeInTheDocument()
   })
 
   it('hides verification details behind a disclosure on the approval screen', async () => {
@@ -1183,13 +1209,20 @@ describe('ConnectAgentModal', () => {
     renderModal()
     await fillAndCreateSetup()
 
-    // The truncated form sits inline as a verification check; the disclosure
-    // exists so the full address + runtime status are one click away.
+    // #1684: ONE collapsed row. The check and the truncated address moved
+    // onto the disclosure trigger itself — and the truncated address must
+    // stay visible while collapsed: it is the user's only proof that the
+    // delegate about to get a budget is the one on their own machine.
     // (We don't assert the full address is removed when collapsed — `<details>`
     // hides via CSS in browsers but still mounts the children in JSDOM.)
-    expect(await screen.findByText(/Local connection verified/i)).toBeInTheDocument()
-    expect(screen.getByText('Verification details')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Verification details'))
+    const verified = await screen.findByText(/Local connection verified/i)
+    const summary = verified.closest('summary')
+    expect(summary).not.toBeNull()
+    expect(summary?.textContent).toContain('0x3333…3333')
+    // The second row is gone, not relabelled.
+    expect(screen.queryByText('Verification details')).not.toBeInTheDocument()
+
+    fireEvent.click(summary as HTMLElement)
     expect(
       screen.getByText('0x3333333333333333333333333333333333333333'),
     ).toBeInTheDocument()
@@ -1219,10 +1252,12 @@ describe('ConnectAgentModal', () => {
 
     await fillAndCreateSetup()
 
-    // Runtime status detail lives behind the "Verification details" disclosure
+    // Runtime status detail lives behind the verified-line disclosure
     // — the pre-approval screen is calm by default; install diagnostics are a
     // click away when needed.
-    fireEvent.click(await screen.findByText('Verification details'))
+    fireEvent.click(
+      (await screen.findByText(/Local connection verified/i)).closest('summary') as HTMLElement,
+    )
     expect(await screen.findByText('Needs attention')).toBeInTheDocument()
     expect(screen.getByText(/could not install Haven tools locally/i)).toBeInTheDocument()
   })
@@ -1386,7 +1421,7 @@ describe('ConnectAgentModal', () => {
     renderModal({ safeAddress: SAFE.safe_address, safeId: SAFE.id })
     await fillAndCreateSetup()
 
-    expect(await screen.findByText('Approve agent budget')).toBeInTheDocument()
+    expect(await screen.findByText('Approve the agent budget')).toBeInTheDocument()
     expect(screen.getByText('Base wallet on Base')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Submit approval' })).toBeInTheDocument()
     expect(mockUseSafeDetails).toHaveBeenLastCalledWith(BASE_SAFE.safe_address, { chainId: 8453 })
@@ -1453,7 +1488,7 @@ describe('ConnectAgentModal', () => {
     })
 
     expect(await screen.findByRole('button', { name: 'Approving...' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Cancel setup' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
 
     await act(async () => {
       resolveSignature(`0x${'1'.repeat(130)}`)
@@ -1758,7 +1793,7 @@ describe('ConnectAgentModal', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Continue to wallet approval' }))
       await Promise.resolve()
     })
-    expect(await screen.findByText('Approve agent budget')).toBeInTheDocument()
+    expect(await screen.findByText('Approve the agent budget')).toBeInTheDocument()
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))

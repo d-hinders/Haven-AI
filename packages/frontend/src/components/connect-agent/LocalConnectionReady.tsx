@@ -85,7 +85,10 @@ export function LocalConnectionReady({
   return (
     <>
       <AgentRulesSummary
-        title="Approve agent budget"
+        // #1684: no card heading — the modal subtitle already reads "Approve
+        // the agent budget" about 40px above this card. Dropped on BOTH rails
+        // so the two approve screens keep the same silhouette.
+        title={null}
         description={`You sign to give ${agentName} authority to spend within this budget. Nothing executes outside what you approve here.`}
         density="compact"
         items={[
@@ -144,8 +147,10 @@ export function LocalConnectionReady({
       {approvalError && <InlineErrorNote>{approvalError}</InlineErrorNote>}
 
       <div className="flex gap-3">
+        {/* #1684: "Cancel" on both rails — "Cancel setup" read ambiguously
+            beside the modal's own ✕. The primary keeps its object. */}
         <Button variant="ghost" onClick={onCancel} disabled={approving} className="flex-1">
-          Cancel setup
+          Cancel
         </Button>
         <Button
           onClick={onApprove}

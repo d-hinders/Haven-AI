@@ -57,7 +57,7 @@ export function DelegationApprovalStep({
   const [confirming, setConfirming] = useState(false)
   const [confirmFailed, setConfirmFailed] = useState(false)
   // Once the budget is signed the agent is live and spending — there is
-  // nothing left for "Cancel setup" to undo, and offering it would promise a
+  // nothing left for "Cancel" to undo, and offering it would promise a
   // reversal Haven cannot perform (#1073 review). The backend refuses it too.
   const [granted, setGranted] = useState(false)
 
@@ -99,8 +99,15 @@ export function DelegationApprovalStep({
   return (
     <>
       <AgentRulesSummary
-        title="Approve agent budget"
-        description={`You sign once to give ${status.agent.name ?? 'this agent'} authority to spend within this budget. It refills every period, and nothing executes outside what you approve here.`}
+        // #1684: no card heading — the modal subtitle already reads "Approve
+        // the agent budget" about 40px above this card. One sentence, once.
+        title={null}
+        // #1684: one line, not three sentences. What the table below cannot
+        // say is kept: the refill, and the guarantee that nothing executes
+        // outside this budget — the only statement of it anywhere in the
+        // flow, on the screen that grants spend authority. The per-period
+        // amount is dropped because the Budget row already carries it.
+        description={`You sign once to give ${status.agent.name ?? 'this agent'} a budget that refills every period — nothing executes outside it.`}
         density="compact"
         items={[
           {
@@ -146,7 +153,7 @@ export function DelegationApprovalStep({
         <div className="flex gap-3">
           {/* The budget is signed and the agent is live. Closing is all that
               is left — to stop it, the user pauses or revokes it on its own
-              page. Offering "Cancel setup" here would promise a reversal
+              page. Offering a cancel here would promise a reversal
               Haven cannot perform. */}
           <Button variant="ghost" onClick={onClose} disabled={confirming} className="flex-1">
             Close
@@ -174,7 +181,11 @@ export function DelegationApprovalStep({
                 disabled={busy || confirming}
                 className="flex-1"
               >
-                Cancel setup
+                {/* #1684: "Cancel" — "Cancel setup" read ambiguously beside
+                    the modal's own ✕. The primary keeps its object
+                    ("Approve budget"): the one click that grants money
+                    authority should name what it grants. */}
+                Cancel
               </Button>
             )
           }

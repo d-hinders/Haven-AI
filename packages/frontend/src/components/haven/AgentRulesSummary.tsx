@@ -14,7 +14,14 @@ export function AgentRulesSummary({
   density = 'normal',
   footer,
 }: {
-  title?: string
+  /**
+   * Card heading. Pass `null` to omit it — #1684: on the connect flow's
+   * approve step the modal subtitle already says "Approve the agent budget"
+   * about 40px above, and a card heading repeating it was the same sentence
+   * twice in one viewport. A blank string would still reserve the heading's
+   * line box, so the omission has to be explicit.
+   */
+  title?: string | null
   description?: string
   items: AgentRuleSummaryItem[]
   density?: 'normal' | 'compact'
@@ -30,8 +37,12 @@ export function AgentRulesSummary({
   return (
     <Card hover={false} className={compact ? 'p-4' : 'p-5'}>
       <div>
-        <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>
-        <p className={`${compact ? 'text-xs' : 'text-sm'} mt-1 leading-relaxed text-[var(--v2-ink-2)]`}>
+        {title !== null && (
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>
+        )}
+        <p
+          className={`${compact ? 'text-xs' : 'text-sm'} ${title !== null ? 'mt-1' : ''} leading-relaxed text-[var(--v2-ink-2)]`}
+        >
           {description}
         </p>
       </div>

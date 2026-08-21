@@ -21,6 +21,19 @@ may now run more than one, and the relayer is what still caps throughput.**
   advisory lock elects one executor per tick; the losers skip rather than queue.
   Without it, an N-replica deployment runs every scan N times and sends up to N
   copies of each alert.
+- **First-deploy races on one counterfactual account**
+  ([#1673](https://github.com/d-hinders/Haven-AI/issues/1673)). `runIfLeader`'s
+  blocking sibling, `withKeyedAdvisoryLock`, serialises the callers that must
+  WAIT and then observe what the winner did — a monitor tick that loses the
+  race should be skipped, but an account deploy that loses still owes its
+  caller an answer. `ensureHybridDeployed` holds it per `(chain, address)` from
+  the bytecode check through to the mined receipt, so two concurrent first
+  payments from a brand-new agent cannot both pass the check and both broadcast
+  a deploy to the same CREATE2 address. Fail-open by construction: an
+  unavailable lock degrades to the pre-#1673 duplicate deploy, which costs a
+  second relayer gas spend and never a failed payment. What that hold costs is
+  a pooled connection, which is a recorded accepted trade — see *Accepted cost*
+  below.
 - **Allowance-nonce coordination on every legacy-rail sign-hash builder**
   ([#718](https://github.com/d-hinders/Haven-AI/issues/718),
   [#1196](https://github.com/d-hinders/Haven-AI/issues/1196)). #692 wired the
@@ -83,6 +96,74 @@ may now run more than one, and the relayer is what still caps throughput.**
   into contention on a single hot row. Expired rows are swept on a
   leader-gated tick; a missed sweep leaves dead rows, never a wrong count,
   because every read filters on expiry.
+
+### Accepted cost: the deploy lock holds a pooled connection ([#1686](https://github.com/d-hinders/Haven-AI/issues/1686))
+
+`withKeyedAdvisoryLock` holds one connection from the **shared application
+pool** (`DB_POOL_MAX`, default 20) for as long as the work it serialises runs.
+For its only caller today that work spans `submitRecorded` and `tx.wait()`, so
+the hold is a chain round-trip: seconds, bounded by chain congestion rather
+than by anything Haven controls.
+
+**The burst that would hurt** is N distinct brand-new accounts deploying at
+once. Each holds a lock connection for seconds while, inside that same critical
+section, `assertRelayerBudget`, `recordRelayerSpend`, `openOutboundRecord` and
+the `submitRecorded` stamp compete for the *remaining* pool headroom. Near the
+ceiling, unrelated requests app-wide pay up to `DB_POOL_CONNECTION_TIMEOUT`
+(default 5 s) before their own `connect()` resolves or rejects.
+
+**Why this is accepted rather than fixed.** Both call sites
+(`modules/x402/delegation-authorize.ts`, `routes/agent-delegations.ts`) pass
+`expectedAddress`, so the pre-lock `getBytecode` fast path short-circuits
+permanently once an account exists. The lock is therefore reached **once per
+account, ever** — never on the payment hot path. Exhausting a 20-connection
+pool needs on the order of 20 brand-new agents making their first-ever payment
+within the same few seconds, which is not reachable at dev-pilot volume. And
+the degradation is bounded: once `pool.connect()` starts rejecting, the lock
+fails open, so callers lose the *serialisation* and degrade to the pre-#1673
+duplicate deploy — wasted gas, never incorrectness.
+
+**Be precise about what failing open does and does not promise**, because the
+distinction is most of the reason to write this down. It protects the LOCK, not
+the work the lock guards. The critical section's own writes —
+`assertRelayerBudget`, `recordRelayerSpend`, `openOutboundRecord` — go through
+this same shared pool (`infra/repositories/relayer-gas-events.ts` imports
+`db.js`), so under genuine exhaustion they can fail to acquire a connection too
+and the deploy throws. That surfaces as a retryable 502 at `POST /x402/authorize`
+or a 500 at grant activation. The honest worst case is therefore a failed
+payment *attempt*, not merely added latency. What stays safe is the part that
+matters: authorize fails closed BEFORE the intent row exists so nothing is left
+half-created, the factory deploy is permissionless and grants its deployer
+nothing, and no funds move. Wasted gas and a retry — never a loss.
+
+Stated plainly, because it is the uncomfortable part: **the mitigation for pool
+exhaustion is losing the mitigation.** That equilibrium is defensible while the
+only caller is once-per-account-rare. It is not one to leave undocumented,
+which is why it is written here rather than merely assumed.
+
+**Two build triggers, either of which reopens this as real work:**
+
+1. A second, more frequent caller of `withKeyedAdvisoryLock`. Its doc comment
+   names once-per-subject-rare as a constraint on new callers for exactly this
+   reason.
+2. Onboarding volume where tens of first-ever payments land within seconds.
+
+**The shape to build when triggered** is shrinking the critical section: hold
+across the bytecode check and the *broadcast*, release before `tx.wait()`, and
+have queued callers poll instead of waiting on the lock. Note the trap before
+reaching for it — releasing after broadcast does **not** close the
+duplicate-broadcast window on its own, because bytecode stays `0x` until the tx
+is *mined*, so a queued caller re-checking inside the lock would still see
+nothing and broadcast a duplicate. A correct shrink needs in-flight detection
+via the durable `outbound_txs` record
+([#1556](https://github.com/d-hinders/Haven-AI/issues/1556)), a polling path
+for the loser, and a degraded path past the poll deadline. The machinery
+already exists; the complexity is real and sits on a money-adjacent path, which
+is why it waits for evidence rather than preceding it.
+
+The alternative, if isolation is preferred over shrinking, is a **dedicated
+small pool for advisory locks** — lock holds then cannot starve request-serving
+queries, at the cost of a second pool to configure and monitor.
 
 ## What still serialises: the relayer
 

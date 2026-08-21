@@ -134,8 +134,16 @@ export function advisoryLockIdFor(subject: string): number {
  * **One connection, held for as long as `fn` runs.** Every caller must
  * therefore be rare per subject — the only one today deploys a given account
  * once in its lifetime. A frequent caller would hold shared-pool connections
- * across its work and starve request-serving queries; #1686 tracks shrinking
- * the critical section or isolating the pool before that becomes reachable.
+ * across its work and starve request-serving queries.
+ *
+ * #1686 assessed that hold and ACCEPTED it: the deploy path short-circuits on
+ * a pre-lock bytecode check, so it is reached once per account ever, and the
+ * fail-open below caps the LOCK's degraded case at wasted gas (it does not
+ * make the guarded work itself pool-independent — see the doc). The burst
+ * scenario, the reasoning, and the two triggers that reopen it are recorded
+ * in `docs/operations/backend-scaling.md` → "Accepted cost: the deploy lock
+ * holds a pooled connection". Adding a caller that is NOT once-per-subject-rare
+ * is one of those triggers — read that section before you do.
  *
  * **Bounded, and fail-open past the bound.** `lock_timeout` caps the wait; on
  * expiry `fn` runs anyway, WITHOUT the lock, and `onDegraded` reports it.

@@ -107,9 +107,9 @@ npm run release:bump -- prerelease --yes
 6. **Update** `packages/mcp/src/server.ts` — the `MCP_VERSION` constant.
 7. **Update** `packages/connect/src/runtime-manifest.ts` — `sdkVersion` and `signerVersion` string literals.
 8. **Wipe** all `packages/*/dist` directories — required to prevent tsup from bundling a stale constant from the previous build's output.
-9. **`npm install`** — regenerates `package-lock.json` with the new versions.
+9. **`npm install` + deterministic lockfile rewrite** ([#1663](https://github.com/d-hinders/Haven-AI/issues/1663)) — the install keeps `node_modules` consistent for the builds below, but its lockfile output is **not taken**: on three consecutive cuts (0.1.26 → 0.1.28) the local npm also inserted `"dev"`/`"peer"` metadata on unrelated entries, and each release hand-repaired the diff back to its 11 version lines. Instead the version substitution is replayed **structurally** onto the pre-install lockfile (`scripts/release-lockfile.mjs` — structural rather than textual so a third-party dep coincidentally at the old version is never touched), and the bump then **fails loudly** if the final `package-lock.json` diff contains any line that is not a workspace `version` field or an `@haven_ai/*` pin. The guard reads the file on disk, so removing the rewrite makes the guard see npm's polluted output and fail. Self-tested: `npm run release:bump:test`.
 10. **Build** in dependency order: `sdk → signer → mcp → connect`.
-    - Connect is built directly with tsup (skipping its internal pre-build of mcp/signer) so the already-built dist from step 10 is used — the exact scenario that surfaces the build-order bug.
+    - Connect is built directly with tsup (skipping its internal pre-build of mcp/signer) so the already-built dist from the previous step is used — the exact scenario that surfaces the build-order bug.
 11. **Verify** the built `packages/connect/dist/cli.cjs` contains the new version literal, and that `server.ts` has the correct `MCP_VERSION`.
 
 ### Why the dist-wipe is mandatory

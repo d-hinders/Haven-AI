@@ -101,6 +101,14 @@ jobs:
       - name: Branch-hygiene report self-test
         run: node --test scripts/branch-hygiene.test.mjs
 
+      # #1663: the release-bump lockfile logic is self-tested here for the
+      # same reason. The bump itself runs on a release-cutter's machine, not
+      # in CI — but its guard is what stands between npm's lockfile churn and
+      # a release diff that must be nothing but version strings, and a guard
+      # nobody tests can start passing vacuously.
+      - name: Release-bump lockfile self-test
+        run: node --test scripts/release-bump.test.mjs
+
   sdk_checks:
     name: SDK checks
     needs: changes

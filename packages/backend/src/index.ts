@@ -24,6 +24,7 @@ import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
 import agentDelegationRoutes from './routes/agent-delegations.js'
+import agentRekeyRoutes from './routes/agent-rekey.js'
 import agentPassportRoutes from './routes/agent-passports.js'
 import {
   setAnchor,
@@ -234,6 +235,7 @@ await app.register(safeDetailRoutes, { prefix: '/safe' })
 await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
+await app.register(agentRekeyRoutes, { prefix: '/agents' })
 await app.register(agentPassportRoutes, { prefix: '/agents' })
 // Public and unauthenticated (#974): the caller is a merchant deciding whether
 // to serve an agent, and it has no Haven account. Registered separately from

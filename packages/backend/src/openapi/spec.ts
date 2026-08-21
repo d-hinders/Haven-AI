@@ -85,6 +85,15 @@ const delegationHashParam = {
   description: 'Delegation hash from the build/list response.',
 } as const
 
+/** The re-key ledger row a step belongs to (#1698). Scoped by agent id. */
+const rekeyIdParam = {
+  name: 'rekeyId',
+  in: 'path',
+  required: true,
+  schema: { type: 'string', format: 'uuid' },
+  description: 'Re-key id from the preflight response.',
+} as const
+
 /** Arbitrary-length 0x-hex — an ECDSA signature or an ABI-encoded WebAuthn assertion. */
 const hexBytes = {
   type: 'string',
@@ -1271,6 +1280,397 @@ export const openapiSpec = {
           '404': errorResponse,
           '409': errorResponse,
           '502': errorResponse,
+        },
+      },
+    },
+    // ── Re-key (#1698, epic #1694) ────────────────────────────────────────
+    // Owner-authorised credential rotation. Ordering is a hard invariant:
+    // revoke precedes issue, and the meter is read AFTER the revoke.
+    '/agents/{id}/rekey': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'startAgentRekey',
+        summary: 'Re-key step 0: preflight — residual check, and open the re-key (#1698).',
+        description:
+          "Opens an owner-authorised re-key: same agent identity, new delegate key, new API key, old authority revoked. Delegation rail only — a legacy AllowanceModule account is refused 409 with re-onboarding named as the path. An agent API key is refused 403: an agent can never re-key itself. new_delegate_address is the PUBLIC address of a keypair generated on the target machine; Haven never receives the private half. Preflight reads the residual balance on the OLD delegate EOA and refuses 409 on a non-zero one until residual_disposition says what happened to it, because sweeping needs the old key's signature and after the rotation that balance is unrecoverable. A failed balance read is 503 rather than a shrug.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['new_delegate_address'],
+                properties: {
+                  new_delegate_address: {
+                    ...address,
+                    description:
+                      'PUBLIC address of the new delegate keypair, generated locally. Must differ from the current delegate and must not collide with another live agent.',
+                  },
+                  residual_disposition: {
+                    type: 'string',
+                    enum: ['swept', 'acknowledged_unrecoverable'],
+                    description:
+                      'Required only when the old delegate EOA holds a non-zero balance. "swept" after sweeping it with the old key; "acknowledged_unrecoverable" to proceed knowing the key is lost and the balance is written off.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Re-key opened at stage preflight.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: [
+                    'rekey_id',
+                    'stage',
+                    'old_delegate_address',
+                    'new_delegate_address',
+                    'residual',
+                    'delegations_to_revoke',
+                    'next_step',
+                  ],
+                  properties: {
+                    rekey_id: { type: 'string', format: 'uuid' },
+                    stage: { type: 'string', enum: ['preflight'] },
+                    old_delegate_address: address,
+                    new_delegate_address: address,
+                    residual: {
+                      type: 'object',
+                      description:
+                        'Reported whether or not it is recoverable — nothing about a stranded residual fails quietly.',
+                      required: ['atomic', 'recoverable_after_rekey'],
+                      properties: {
+                        atomic: { type: 'string' },
+                        token_address: { type: 'string', nullable: true },
+                        disposition: { type: 'string', nullable: true },
+                        recoverable_after_rekey: { type: 'boolean' },
+                        note: { type: 'string' },
+                      },
+                    },
+                    delegations_to_revoke: { type: 'array', items: delegationHash },
+                    next_step: { type: 'string' },
+                    ordering_note: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': {
+            ...errorResponse,
+            description: 'An agent credential was presented — an agent can never re-key itself.',
+          },
+          '404': errorResponse,
+          '409': {
+            ...errorResponse,
+            description:
+              'Not on the delegation rail, a re-key already in flight, a colliding delegate address, or an undispositioned residual balance.',
+          },
+          '503': {
+            ...errorResponse,
+            description:
+              'The residual balance read failed; proceeding would retire the only key that could sweep it.',
+          },
+        },
+      },
+    },
+    '/agents/{id}/rekey/{rekeyId}/revoke': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'prepareRekeyRevocation',
+        summary: 'Re-key step 1a: prepare the batched revoke of every live delegation (#1698).',
+        description:
+          'Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
+        responses: {
+          '200': {
+            description: 'Prepared revocation for the owner to sign.',
+            content: {
+              'application/json': {
+                schema: { type: 'object', additionalProperties: true },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'Wrong stage — this re-key is past the revoke.' },
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/rekey/{rekeyId}/revoke/submit': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'submitRekeyRevocation',
+        summary: 'Re-key steps 1b + 2: land the revoke, THEN read the now-frozen meter (#1698).',
+        description:
+          "Submits the owner-signed disableDelegation UserOp and, only once it has landed, reads each revoked delegation's remaining period budget and boundary into a frozen carry snapshot. The ordering is the point: reading before the revoke leaves a window in which a payment lands and the carried remainder over-counts it by that amount; after the revoke the on-chain state cannot move. It is safe because the revoke writes to the DelegationManager while the meter is read from the ERC20PeriodTransferEnforcer — two different contracts, and the read consults nothing the revoke writes. On a failed submit nothing is written and the old key is still live, so a retry is safe.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature', 'user_operation', 'delegation_hashes'],
+                properties: {
+                  signature: hexBytes,
+                  user_operation: preparedUserOperation,
+                  delegation_hashes: { type: 'array', items: delegationHash },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description:
+              'Revoked on-chain and metered. The agent now has NO authority until the issue step completes.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['revoked', 'stage', 'agent_has_no_authority'],
+                  properties: {
+                    revoked: { type: 'boolean' },
+                    tx_hash: { type: 'string', nullable: true },
+                    delegation_hashes: { type: 'array', items: delegationHash },
+                    stage: { type: 'string', enum: ['metered'] },
+                    carry: {
+                      type: 'array',
+                      description: 'The frozen measurement, one entry per revoked delegation.',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          delegation_hash: delegationHash,
+                          remaining_atomic: { type: 'string' },
+                          from_chain: {
+                            type: 'boolean',
+                            description:
+                              'False means the read fell back to the full budget. The carry REFUSES these rather than granting a fresh full period.',
+                          },
+                        },
+                      },
+                    },
+                    agent_has_no_authority: { type: 'boolean' },
+                    next_step: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/rekey/{rekeyId}/issue': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'issueRekeyDelegations',
+        summary: 'Re-key step 3: build the carried delegations for the new delegate (#1698).',
+        description:
+          'Refuses unless the re-key is at stage "metered" — which is only reachable through the revoke, so issue-before-revoke is forbidden structurally rather than by convention. Each replaced budget yields up to two grants: a "carry" capped at the frozen remainder and EXPIRING at the old period boundary, and a paired "steady" carrying the original budget and cadence starting at that same instant. The two never overlap, so no re-key can shorten a period or grant more than the original budget within one. Returns EIP-712 payloads for the owner to sign.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
+        responses: {
+          '201': {
+            description: 'Replacement delegations built, pending the owner signature.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['stage', 'delegate_account_address', 'delegations'],
+                  properties: {
+                    stage: { type: 'string', enum: ['issued'] },
+                    delegate_account_address: address,
+                    delegations: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          delegation_hash: delegationHash,
+                          carry_role: { type: 'string', enum: ['carry', 'steady', 'reanchor'] },
+                          token_address: address,
+                          recipient_address: { type: 'string', nullable: true },
+                          budget_atomic: { type: 'string' },
+                          period_seconds: { type: 'integer' },
+                          start_date: { type: 'integer' },
+                          expires_at: { type: 'integer' },
+                          signing_payload: eip712Payload,
+                        },
+                      },
+                    },
+                    skipped: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          delegation_hash: delegationHash,
+                          reason: { type: 'string' },
+                        },
+                      },
+                    },
+                    carry_note: { type: 'string' },
+                    next_step: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '409': {
+            ...errorResponse,
+            description:
+              'Wrong stage (issue may never precede the revoke), or the carry was refused because the meter read did not come from the chain.',
+          },
+          '502': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/rekey/{rekeyId}/complete': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'completeAgentRekey',
+        summary:
+          'Re-key steps 4 + 5: activate, rotate BOTH credentials, invalidate old-payer intents (#1698).',
+        description:
+          "Activates every signed replacement delegation and, in the same transaction, swaps the agent's delegate address AND mints a new API key — one operation retires the whole old credential set, because a stale API key is its own hazard (#1681 finding A). Every unexecuted intent stamped with the old payer is expired in that same transaction; #1690's signer-side payer guard is a backstop, not the primary defence. The new API key is returned ONCE, to the authenticated owner.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signatures'],
+                properties: {
+                  signatures: {
+                    type: 'array',
+                    description:
+                      'One entry per delegation from the issue step. Every one must be signed — a partial completion would rotate credentials while some replacement authority stayed unsigned.',
+                    items: {
+                      type: 'object',
+                      required: ['delegation_hash', 'signature'],
+                      properties: {
+                        delegation_hash: delegationHash,
+                        signature: hexBytes,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Re-key complete. The old API key stops authenticating immediately.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: [
+                    'completed',
+                    'stage',
+                    'agent_id',
+                    'new_delegate_address',
+                    'api_key',
+                    'api_key_prefix',
+                    'old_api_key_revoked',
+                  ],
+                  properties: {
+                    completed: { type: 'boolean' },
+                    stage: { type: 'string', enum: ['completed'] },
+                    agent_id: { type: 'string', format: 'uuid' },
+                    new_delegate_address: address,
+                    api_key: {
+                      type: 'string',
+                      description: 'Shown ONCE. Never stored in plaintext and never logged.',
+                    },
+                    api_key_prefix: { type: 'string' },
+                    old_api_key_revoked: { type: 'boolean' },
+                    invalidated_intents: { type: 'integer' },
+                    residual_on_old_delegate: {
+                      type: 'object',
+                      properties: {
+                        atomic: { type: 'string' },
+                        recoverable: { type: 'boolean' },
+                        note: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/agents/{id}/rekey/{rekeyId}/abandon': {
+      post: {
+        tags: ['Delegations'],
+        operationId: 'abandonAgentRekey',
+        summary:
+          'Record a stopped re-key, and say plainly if it left the agent without authority (#1698).',
+        description:
+          'Recorded, not deleted: an abandoned re-key that got past the revoke left the agent with no authority, and the dashboard has to be able to say so rather than letting it read as a mysterious 403.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: { type: 'object', properties: { reason: { type: 'string' } } },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Re-key abandoned.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['abandoned', 'stage', 'agent_has_no_authority'],
+                  properties: {
+                    abandoned: { type: 'boolean' },
+                    stage: { type: 'string', enum: ['abandoned'] },
+                    agent_has_no_authority: { type: 'boolean' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
         },
       },
     },

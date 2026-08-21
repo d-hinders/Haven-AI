@@ -177,7 +177,7 @@ function WalletPopover({
         <button
           type="button"
           onClick={() => handleCopy(section.address)}
-          className="px-2 py-1 rounded-md text-xs text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+          className="px-2 py-1 rounded-md text-xs text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
         >
           {copiedAddress === section.address ? 'Copied' : 'Copy'}
         </button>
@@ -229,7 +229,7 @@ function WalletPopover({
               onConnectWallet()
             }
           }}
-          className="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+          className="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
         >
           {switching
             ? 'Disconnecting…'
@@ -249,7 +249,7 @@ function WalletPopover({
                 /* ignore */
               }
             }}
-            className="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--v2-danger)] hover:bg-[var(--v2-danger-soft)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-danger)]/30"
+            className="w-full text-left px-3 py-2 rounded-md text-sm text-[var(--v2-danger)] hover:bg-[var(--v2-danger-soft)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/30"
           >
             Disconnect
           </button>
@@ -395,7 +395,7 @@ export default function WalletButton() {
                 onClick={() => setPopoverOpen((v) => !v)}
                 aria-haspopup="dialog"
                 aria-expanded={popoverOpen}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
               >
                 <AddressAvatar address={passkeySigner.address} />
                 <span>{passkeyAlias ?? 'Passkey'}</span>
@@ -455,7 +455,7 @@ export default function WalletButton() {
                 onClick={() => setPopoverOpen((v) => !v)}
                 aria-haspopup="dialog"
                 aria-expanded={popoverOpen}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
               >
                 <AddressAvatar address={delegatorSigner.accountAddress} />
                 <span>Passkey</span>
@@ -487,7 +487,7 @@ export default function WalletButton() {
             <button
               type="button"
               onClick={openConnectModal}
-              className="px-4 py-2 rounded-md text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white shadow-[var(--v2-shadow-button)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+              className="px-4 py-2 rounded-md text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white shadow-[var(--v2-shadow-button)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             >
               Connect wallet
             </button>
@@ -502,7 +502,7 @@ export default function WalletButton() {
             <button
               type="button"
               onClick={openChainModal}
-              className="px-3 py-2 rounded-md text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-[var(--v2-danger)]/25 hover:border-[var(--v2-danger)]/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-danger)]/30"
+              className="px-3 py-2 rounded-md text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-[var(--v2-danger)]/25 hover:border-[var(--v2-danger)]/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/30"
             >
               Wrong network
             </button>
@@ -519,7 +519,7 @@ export default function WalletButton() {
               onClick={() => setPopoverOpen((v) => !v)}
               aria-haspopup="dialog"
               aria-expanded={popoverOpen}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             >
               {account.ensAvatar ? (
                 // eslint-disable-next-line @next/next/no-img-element

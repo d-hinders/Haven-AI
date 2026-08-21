@@ -44,7 +44,7 @@ export function RecoveryNudge({ rail = 'delegation' }: { rail?: RecoveryNudgeRai
   return (
     <div className="mt-6 rounded-lg border border-[var(--v2-brand)]/25 bg-[var(--v2-brand-soft)] p-4 text-left">
       <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-white text-[var(--v2-brand)] ring-1 ring-[var(--v2-brand)]/20">
+        <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-white text-[var(--v2-brand)] ring-1 ring-brand/20">
           <Icon icon={ShieldCheck} className="h-4 w-4" />
         </span>
         <div className="min-w-0">

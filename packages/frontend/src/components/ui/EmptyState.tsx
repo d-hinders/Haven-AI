@@ -24,27 +24,27 @@ const TONE_CLASSES: Record<Tone, { iconBg: string; iconColor: string; halo: stri
   brand: {
     iconBg: 'bg-[var(--v2-brand-soft)]',
     iconColor: 'text-[var(--v2-brand)]',
-    halo: 'ring-[var(--v2-brand)]/10',
+    halo: 'ring-brand/10',
   },
   success: {
     iconBg: 'bg-[var(--v2-success-soft)]',
     iconColor: 'text-[var(--v2-success)]',
-    halo: 'ring-[var(--v2-success)]/10',
+    halo: 'ring-success/10',
   },
   warning: {
     iconBg: 'bg-[var(--v2-warning-soft)]',
     iconColor: 'text-[var(--v2-warning)]',
-    halo: 'ring-[var(--v2-warning)]/10',
+    halo: 'ring-warning/10',
   },
   danger: {
     iconBg: 'bg-[var(--v2-danger-soft)]',
     iconColor: 'text-[var(--v2-danger)]',
-    halo: 'ring-[var(--v2-danger)]/10',
+    halo: 'ring-danger/10',
   },
   neutral: {
     iconBg: 'bg-[var(--v2-surface-2)]',
     iconColor: 'text-[var(--v2-ink-2)]',
-    halo: 'ring-[var(--v2-border)]/40',
+    halo: 'ring-border/40',
   },
 }
 

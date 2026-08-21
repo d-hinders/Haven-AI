@@ -40,7 +40,7 @@ export function Checkbox({
     <label className={`flex items-start gap-2 ${className}`}>
       <input
         type="checkbox"
-        className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--v2-brand)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--v2-brand)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 disabled:cursor-not-allowed disabled:opacity-50"
         {...props}
       />
       <span className={props.disabled ? 'text-[var(--v2-ink-3)]' : undefined}>

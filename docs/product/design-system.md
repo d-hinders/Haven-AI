@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-07-13"
+last-verified: "2026-08-21" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass.
 ---
 
 # Haven Design System
@@ -77,6 +77,33 @@ Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do
 | `--v2-debit` | `#0369a1` | `--v2-debit-soft` `#f0f9ff` | Outgoing / sent money (sibling to success; never a warning) |
 | `--v2-warning` | `#b54708` | `--v2-warning-soft` `#fef3c7` | 402 Payment Required, pending review |
 | `--v2-danger` | `#b42318` | `--v2-danger-soft` `#fef2f2` | Failed, destructive |
+
+### Opacity on a token colour ([#1708](https://github.com/d-hinders/Haven-AI/issues/1708))
+
+**Want a token at partial opacity? Use the Tailwind alias, never the arbitrary
+value.** `ring-brand/30`, `border-danger/40`, `bg-warning/10` — not
+`ring-[var(--v2-brand)]/30`.
+
+The arbitrary-value form does not merely look worse; it **compiles to nothing**.
+Tailwind cannot re-compose a colour whose value is a bare `var()`, so it drops
+the utility from the output with no error, no warning and no class. That is how
+68 focus rings across 39 files spent months setting a ring *width* with no ring
+*colour*, leaving `--tw-ring-color` at Tailwind's preflight default and
+rendering blue-500/50 instead of brand indigo.
+
+The mechanism: every `--v2-<name>: #RRGGBB` in `globals.css` is paired with a
+channel form `--v2-<name>-rgb: R G B`, and `tailwind.config.js` reads the
+channels through an `<alpha-value>` placeholder. One theme entry then serves
+both the solid (`bg-brand`) and the translucent (`ring-brand/30`) use. Two rules
+follow, and `src/__tests__/design-token-alpha.test.ts` enforces both against the
+**compiled CSS**:
+
+- adding a colour means adding **both** forms — the hex stays, because
+  `token-contrast.test.ts` reads the hex to check WCAG contrast;
+- a theme colour is never a bare `var()`.
+
+A solid arbitrary value with **no** opacity modifier — `bg-[var(--v2-brand)]`,
+`text-[var(--v2-ink-2)]` — is still fine and still used widely.
 
 Same rule as v1: **never repurpose a semantic color**.
 
@@ -175,7 +202,7 @@ Do not use marketing hero typography for normal authenticated pages.
 Primary (`Button` `variant="primary"`):
 - `bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)]`
 - `shadow-[var(--v2-shadow-button)]`
-- focus ring: `ring-2 ring-[var(--v2-brand)]/30 ring-offset-2`
+- focus ring: `ring-2 ring-brand/30 ring-offset-2` (theme alias — see *Opacity on a token colour* below; the arbitrary-value form compiles to no ring colour at all)
 - Three sizes: `sm` (h‑9), `md` (h‑10), `lg` (h‑11)
 - Trailing arrow icon optional, slides 2px on hover via wrapper `group-hover:gap-2`
 

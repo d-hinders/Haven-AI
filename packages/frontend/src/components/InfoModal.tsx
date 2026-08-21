@@ -75,7 +75,7 @@ export function InfoStep({
 }) {
   return (
     <div className="flex items-start gap-3 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4 transition-colors hover:border-[var(--v2-border-strong)]">
-      <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] ring-1 ring-inset ring-[var(--v2-brand)]/20">
+      <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] ring-1 ring-inset ring-brand/20">
         <span className="text-xs font-semibold text-[var(--v2-brand)]">{number}</span>
       </div>
       <div className="min-w-0 flex-1">

@@ -548,7 +548,7 @@ function InvestorButton({
   return (
     <a
       href={href}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] ${sizeClass} ${variantClass}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] ${sizeClass} ${variantClass}`}
     >
       {children}
       <ArrowIcon />

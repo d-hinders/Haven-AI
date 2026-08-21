@@ -39,6 +39,6 @@ Follow [the full Haven agent workflow](../../../docs/contributing/ai-agent-workf
 Before completing non-trivial work:
 
 1. Run the surface-specific Captain Self-Check Preflight.
-2. Run an independent reviewer pass for user-facing UX, money movement, agent authority, shared behavior, public contracts, generated artifacts, or meaningful risk.
+2. Run an independent reviewer pass on every pull request — unconditionally, not by risk category. A rule re-derived per change is not a rule, and self-review does not substitute.
 3. Run documentation coupling and documentation review when mapped behavior changed.
 4. Report checks, review coverage, risk, why the change is safe, residual risk, and merge order.

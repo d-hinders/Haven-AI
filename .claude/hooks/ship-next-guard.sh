@@ -170,6 +170,148 @@ This warning does not block. It is on you.'
 # file's own header warns about. Per-issue tokens keep the property that
 # motivated consuming (a hand-rolled PR in a ship-next session still warns)
 # without that cost.
+# BLOCKING: an independent reviewer pass must have run for this branch.
+#
+# Distinct from the warning below in both force and subject. The warning is
+# about which ROUTE you took and is non-blocking by owner decision (2026-07-26).
+# This is about whether review HAPPENED, and it blocks.
+#
+# > **Owner decision (recorded verbatim):** "I have told you many times that all
+# > prs should have the review run on it, it is in the claude file too. Why do
+# > you keep telling yourself it isn't needed? I want it to run on every PR,
+# > full stop." — the owner in-session 2026-08-21.
+#
+# The written rule was conditional before this ("when the change touches
+# user-facing UX, money movement, agent authority, shared behavior, or
+# meaningful risk", AGENTS.md), and that conditional was the licence: each skip
+# had its own plausible reason, so no skip felt like a pattern. Three happened
+# in one session. The rule is unconditional now, and this makes it so at the
+# only moment that matters.
+#
+# Fails OPEN on its own malfunction — missing jq, unreadable marker, a detached
+# HEAD. A guard that blocks all pull request creation when its own plumbing
+# breaks would be routed around within the hour, and then it guards nothing.
+#
+# $1 = "strict" makes an UNRESOLVABLE session block instead of fail open.
+#
+# The two modes exist because "cannot resolve the session" means different
+# things on the two paths. On a parseable payload it is a malfunction — jq
+# present, JSON valid, no session_id — and blocking on that would stop
+# legitimate work over a harness quirk. On the UNPARSEABLE path the payload
+# already matched `create_pull_request` / `gh pr create` in raw text: something
+# is opening a pull request and the guard cannot verify review. Failing open
+# there is a bypass, and a bypass that a malformed payload reaches on purpose.
+# Between "block a real PR whose payload is corrupt" and "let an unverifiable PR
+# through", a gate the owner asked for as a full stop has to take the first.
+require_reviewer_pass() {
+  rstrict="${1:-}"
+  rsession=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null) || rsession=""
+  if [ -z "$rsession" ]; then
+    [ "$rstrict" = "strict" ] || return 0
+    printf '%s\n' 'BLOCKED: this looks like a pull request creation, but the payload could not
+be parsed, so no reviewer pass can be verified for it.
+
+If this is a real pull request, open it with a well-formed call after running
+haven-reviewer. If the payload is corrupt, fix the caller — the guard cannot
+tell an unreviewed PR from an unparseable one, and on a pull-request-shaped
+payload it will not guess.' >&2
+    exit 2
+  fi
+  rsafe=$(printf '%s' "$rsession" | tr -c 'A-Za-z0-9_-' '_' 2>/dev/null) || rsafe=""
+  if [ -z "$rsafe" ]; then
+    [ "$rstrict" = "strict" ] || return 0
+    exit 2
+  fi
+
+  rbranch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || return 0
+  [ -n "$rbranch" ] || return 0
+  [ "$rbranch" = "HEAD" ] && return 0
+
+  rmarker="${TMPDIR:-/tmp}/claude-reviewed-$rsafe"
+
+  # A marker that EXISTS but cannot be read is a malfunction, not an unreviewed
+  # branch, and the documented contract is to fail open on malfunction. The
+  # earlier `[ -f ] && grep` conflated the two: -f succeeds without read
+  # permission, grep then fails, and control fell through to the BLOCK. Found by
+  # review, reproduced as a non-root user — it does NOT reproduce as root, which
+  # reads mode-000 files, so the first attempt to confirm it came back clean.
+  # Fail open on EXACTLY ONE shape: an existing REGULAR FILE that cannot be
+  # read. That is a plausible accident — permissions, a prior process — and
+  # blocking on it would stop real work over plumbing.
+  #
+  # Everything else at this path is treated as ABSENCE, which blocks. An earlier
+  # version widened this to "any path malfunction" (directory, symlink loop,
+  # dangling link) on the reasoning that malfunctions are symmetric. They are
+  # not, and review caught it: `reviewer-marker.sh` only ever appends to a
+  # regular file, so a DIRECTORY at this name is not something a real pass can
+  # produce — it can only have been put there. The session id is known to the
+  # calling agent and the path is deterministic, which made
+  #
+  #     mkdir -p "$TMPDIR/claude-reviewed-$SESSION_ID"
+  #
+  # a one-command silencer for the gate the owner asked for as a full stop,
+  # certified by three of this file's own tests. It also REGRESSED behaviour
+  # that was already correct: before the widening a directory fell through to
+  # the block, because `[ -f ]` is false for one.
+  #
+  # `[ -f ]` is the right test throughout: false for a directory, a dangling
+  # link and a symlink loop; true for an unreadable regular file, whose
+  # unreadability `[ ! -r ]` then catches.
+  # A SYMLINK here is never a marker, whatever it points at.
+  #
+  # `-f` and `grep` both FOLLOW symlinks, so the previous shape accepted a link
+  # to any readable file containing the branch name — and the path is
+  # deterministic, the session id known to the calling agent, TMPDIR its own.
+  # Two commands silenced the gate with no review run:
+  #
+  #     echo "$(git rev-parse --abbrev-ref HEAD)" > /tmp/anything
+  #     ln -s /tmp/anything "$TMPDIR/claude-reviewed-$SESSION_ID"
+  #
+  # This is not a fail-open path — it is a false PASS through the branch that is
+  # supposed to PROVE a review happened, which is why narrowing the malfunction
+  # condition did not touch it and why the tests aimed at that condition could
+  # not see it. reviewer-marker.sh appends to a regular file and never creates
+  # or follows a link, so a symlink is not something a real pass can produce:
+  # absence, which blocks.
+  #
+  # KNOWN RESIDUAL, accepted: a HARD link is not caught here — `-L` cannot see
+  # one. It is left because it buys an attacker nothing: a hard link needs a
+  # file already containing the exact branch line, which is the same effort as
+  # writing the marker directly, and that is the irreducible limit stated in
+  # README.md. The symlink case was different in kind — it pointed at ANY
+  # pre-existing readable file, so it cost one `ln -s` and no authorship.
+  if [ ! -L "$rmarker" ]; then
+    if [ -f "$rmarker" ] && [ ! -r "$rmarker" ]; then
+      return 0
+    fi
+
+    if [ -f "$rmarker" ] && grep -Fxq "$rbranch" "$rmarker" 2>/dev/null; then
+      return 0
+    fi
+  fi
+
+  printf '%s\n' 'BLOCKED: no independent reviewer pass recorded for this branch.
+
+Run haven-reviewer over the COMPLETE candidate diff against origin/dev, apply
+what it finds, then open the pull request.
+
+This is not a risk judgement to make per pull request. "The diff is
+script-generated", "it is docs-only", "it is a version bump" are the shapes the
+skip takes, and they are why the rule is unconditional: what needs an
+independent eye is rarely the lines, it is the judgement around them — whether
+a claim was tested or assumed, whether a doc says what you say it says.
+
+Self-review does not clear this. The author is the one person who cannot see the
+assumption they already made.
+
+For an area:frontend diff, haven-design-reviewer is a SECOND pass, not a
+substitute for haven-reviewer.
+
+If you genuinely need to bypass: unset the hook, and say in the PR that review
+was skipped and why. Do not do it silently.' >&2
+  exit 2
+}
+
 fire_unless_ship_next() {
   session=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null) || fire
   [ -n "$session" ] || fire
@@ -177,6 +319,11 @@ fire_unless_ship_next() {
   [ -n "$safe" ] || fire
 
   marker="${TMPDIR:-/tmp}/claude-ship-next-$safe"
+  # Same symlink reasoning as require_reviewer_pass: -f and grep follow links,
+  # and ship-next-marker.sh only ever appends to a regular file. Lower stakes —
+  # this one only silences a warning — but identical root cause, so it is closed
+  # here too rather than left as the next person's surprise.
+  [ -L "$marker" ] && fire
   [ -f "$marker" ] || fire
 
   # Which issue does this PR close? The source is deliberately NARROW: the MCP
@@ -252,12 +399,60 @@ if [ -z "$tool" ]; then
   # creation, route it through the gate anyway. Anything else is genuinely
   # unidentifiable and stays quiet, because warning on every unparseable
   # payload would fire on unrelated commands and mute the guard by noise.
-  case "$input" in
-    *create_pull_request*|*"gh pr create"*) fire_unless_ship_next ;;
-  esac
+  #
+  # The reviewer gate must run here too. It was added only at the two PARSEABLE
+  # call sites, leaving this branch as a bypass: a PR-shaped payload that fails
+  # to parse reached the non-blocking warning and never the block. Found by
+  # review and reproduced —
+  #   printf '{"session_id":"x",BROKEN gh pr create' | sh ship-next-guard.sh
+  # exited 0. The suite missed it because the two cases covering this branch
+  # assert stdout ("fire"), and a block writes to stderr and exits 2, so they
+  # passed either way. That is the same defect class as a muted guard: a check
+  # that cannot observe the thing it is meant to protect.
+  # STRICT applies only on a STRUCTURAL signal, never a bare substring.
+  #
+  # The first version of this blocked on `*create_pull_request*` / `*gh pr
+  # create*` anywhere in the raw payload, which is a false-block generator:
+  # these very files contain dozens of literal occurrences, so a malformed
+  # payload from an unrelated tool that merely MENTIONS the phrase — editing
+  # this hook, a prompt discussing the workflow, a grep — was hard-blocked.
+  # Review reproduced it with a Write payload whose content said "See gh pr
+  # create docs". That contradicts the fail-open-on-malfunction contract
+  # directly, and traded a bypass for a worse defect in the other direction.
+  #
+  # So strict now requires the phrase to sit where a PR creation would actually
+  # put it: inside the tool_name, or inside a command field. Anything else with
+  # a coincidental mention falls through to the non-blocking warning, which is
+  # what it did before the gate existed.
+  #
+  # Residual, accepted and stated rather than hidden: a malformed Bash payload
+  # whose command merely QUOTES `gh pr create` (`grep "gh pr create"`) still
+  # blocks. Command-position parsing is not available here — that is precisely
+  # what could not be parsed — and between blocking a grep and letting an
+  # unverifiable PR through, this errs toward the grep. It is also recoverable
+  # in one step: re-run the command in a well-formed call.
+  strict_signal=0
+  if printf '%s' "$input" | grep -qE '"tool_name"[[:space:]]*:[[:space:]]*"[^"]*create_pull_request' 2>/dev/null; then
+    strict_signal=1
+  elif printf '%s' "$input" | grep -qE '"command"[[:space:]]*:[[:space:]]*"[^"]*gh[[:space:]]+pr[[:space:]]+create' 2>/dev/null; then
+    strict_signal=1
+  fi
+
+  if [ "$strict_signal" -eq 1 ]; then
+    require_reviewer_pass strict
+    fire_unless_ship_next
+  else
+    case "$input" in
+      *create_pull_request*|*"gh pr create"*) fire_unless_ship_next ;;
+    esac
+  fi
   exit 0
 fi
-[ "$tool" = "mcp__github__create_pull_request" ] && fire_unless_ship_next
+if [ "$tool" = "mcp__github__create_pull_request" ]; then
+  pr_body=$(printf '%s' "$input" | jq -r '.tool_input.body // ""' 2>/dev/null) || pr_body=""
+  require_reviewer_pass
+  fire_unless_ship_next
+fi
 [ "$tool" = "Bash" ] || exit 0
 [ -n "$cmd" ] || exit 0
 
@@ -326,5 +521,6 @@ done
 unset IFS
 
 [ "$is_pr" -eq 1 ] || exit 0
+require_reviewer_pass
 fire_unless_ship_next
 exit 0

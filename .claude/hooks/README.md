@@ -76,3 +76,135 @@ Move the wiring into a committed `.claude/settings.json` once **both** hold:
 
 - the marker has been observed silencing a compliant PR in a fresh session, and
 - the `sh`/`jq`/`awk` assumption has been checked against the team's machines.
+
+## `reviewer-marker.sh` + the reviewer gate in `ship-next-guard.sh`
+
+**Blocking**, unlike everything else here. `ship-next-guard.sh` now enforces two
+separate policies at the same trigger point (pull-request creation), and the
+difference between them matters:
+
+| | subject | force |
+|---|---|---|
+| ship-next warning | which *route* opened the PR | warns, never blocks (owner decision 2026-07-26) |
+| reviewer gate | whether an independent review *happened* | **blocks** (owner decision 2026-08-21) |
+
+> **When is this finished?** Not "no bypass remains" — against a shell-capable
+> caller that is unreachable, and chasing it produced five rounds of review each
+> finding another forgery at the marker path. The bar that actually terminates:
+> **the fail-open surface is test-verified safe, and every remaining bypass costs
+> at least as much effort as writing the marker's contents directly.** The
+> symlink case failed that bar (one `ln -s`, no authorship, any readable file
+> would do). The hard-link variant meets it, and is named in the code as
+> accepted. Further hardening here is better spent wiring the hook somewhere it
+> actually runs.
+>
+> **Scope, stated honestly:** these gates raise the cost of skipping review;
+> they do not make it impossible. The marker path is writable by the same agent
+> the gate constrains, so a determined caller with shell access can always find
+> another way. They are worth having because the failure they were built for is
+> an agent *re-arguing the rule per pull request*, not an agent attacking its own
+> guard rails — and every hole found so far has been closed once named.
+
+`reviewer-marker.sh` records a pass when a `haven-reviewer` subagent is
+actually launched; the gate blocks PR creation when no pass is recorded for the
+current branch. **`haven-design-reviewer` does not clear it** — on
+`area:frontend` it is a second pass, not a replacement (`AGENTS.md`), and
+accepting it would let a pull request satisfy an unconditional rule while never
+running `haven-reviewer` at all.
+
+### Why blocking, when the sibling policy deliberately is not
+
+The warning already named independent review as its item 1, ending "This warning
+does not block. It is on you." It was walked past three times in one session,
+each time with a different plausible-sounding reason. The owner's instruction
+was unambiguous and repeated — "I want it to run on every PR, full stop" — so
+the gate stops being advice.
+
+This is the same argument `ship-next-marker.sh` makes about markers the model
+must remember to write, applied one level up: a rule the model re-derives per
+pull request is not a rule.
+
+### Design notes
+
+- **Keyed by branch, not commit.** A head-SHA key would demand a fresh pass
+  after every touch-up and train people to route around the gate. Branch scope
+  asks what the failure was actually about: did an independent pass ever look at
+  this work? Reviewing at one commit and then pushing unreviewed *fixes* is a
+  real gap this cannot see — the warning still names it, and it stays judgement.
+- **Not consumed.** Unlike the ship-next token, a recorded pass survives the
+  pull request. "Review happened for this branch" does not stop being true.
+- **Fails open** on its own malfunction — missing `jq`, detached HEAD, or an
+  existing **regular file** at the marker path that cannot be read. A guard that
+  blocks all PR creation when its plumbing breaks gets removed, and then it
+  guards nothing.
+- **But "malfunction" is narrow, and that boundary is load-bearing.** Anything
+  at the marker path that is not a readable regular file — a directory, a
+  symlink loop, a dangling link — is treated as ABSENCE, and absence blocks.
+  A version of this hook briefly failed open on all of them, reasoning that path
+  malfunctions are symmetric. They are not: `reviewer-marker.sh` only ever
+  appends to a regular file, so a directory at that name cannot come from a real
+  pass. Since the path is deterministic and the session id is known to the
+  calling agent, `mkdir -p "$TMPDIR/claude-reviewed-$SESSION_ID"` silenced the
+  entire gate in one command — with three tests certifying it as intended. If
+  you ever widen this condition, that is the case to think about first.
+- **A symlink at the marker path is rejected outright**, whatever it points at.
+  `-f` and `grep` both follow links, so a link to any readable file containing
+  the branch name passed the branch that is meant to *prove* a review happened:
+
+  ```sh
+  echo "$(git rev-parse --abbrev-ref HEAD)" > /tmp/anything
+  ln -s /tmp/anything "$TMPDIR/claude-reviewed-$SESSION_ID"
+  ```
+
+  Note where that sits: **not** on the malfunction/fail-open surface at all, but
+  on the success path. Narrowing the fail-open condition never touched it, and
+  the tests aimed at that condition could not see it — which is the lesson worth
+  keeping. The two marker gates here have been reasoned about mostly in terms of
+  "what counts as a malfunction", and the cheapest attacks have both been
+  *forgeries of success* instead. `ship-next-marker.sh` and `reviewer-marker.sh`
+  only ever append to a regular file, so anything else at those paths is
+  absence.
+- **Bypass** by unsetting the hook — and say in the pull request that review was
+  skipped and why. Do not do it silently.
+
+Covered by `test-ship-next-guard.sh` (the reviewer-gate section at the end).
+
+### Status: NOT wired, and the promotion criteria are not met
+
+This gate ships as scripts only, like everything else here. It enforces nothing
+until someone adds the wiring to their own `settings.local.json`, and the
+**Promotion criteria** above — marker observed working in a fresh session, and
+the `sh`/`jq`/`awk` assumption checked against the team's machines — are both
+still open. They matter *more* for this hook than for the warning they were
+written for: a warning that misfires is noise, but a blocking gate that misfires
+stops every pull request for whoever wired it, and one that is silently inert
+(Windows without Git Bash) tells them nothing while they believe they are
+covered.
+
+Do not read the rule as depending on this. The reviewer pass is unconditional
+either way; the hook is what stops the rule being re-litigated per pull request
+by whoever opts in.
+
+### One assumption not yet verified live
+
+`reviewer-marker.sh` keys on `tool_name` in `{Task, Agent}` with
+`tool_input.subagent_type`. No other hook here encodes that shape, and it cannot
+be exercised end to end without committed wiring. If the real field names differ,
+the marker is never written — and because "no marker" means *block*, every pull
+request would then block for whoever wired it. Verify with a positive control
+before relying on it: run a reviewer subagent, then confirm a
+`claude-reviewed-*` file appeared under `TMPDIR`.
+
+### On "enforce outcomes, never tooling"
+
+CLAUDE.md says exactly that, and deliberately builds no check for whether
+`ship-next` was used. This gate is a narrow, deliberate exception, and worth
+naming as one rather than letting the two statements quietly disagree.
+
+The distinction it rests on: the gate asks whether an independent review
+*happened*, never which workflow ran or which route opened the pull request.
+Both remain free. The honest limit is that it observes a reviewer being
+*launched*, not findings being *applied* — launch-and-ignore satisfies it. That
+is a real gap, it is judgement, and no hook is going to close it. What the hook
+removes is the step where the rule gets re-argued from scratch on each pull
+request, which is the failure that actually happened.

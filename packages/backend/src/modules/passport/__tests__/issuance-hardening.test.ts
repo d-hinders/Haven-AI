@@ -89,7 +89,37 @@ describe('lost-result recovery (#1043)', () => {
     expect(anchor).not.toHaveBeenCalled() // the whole point: no second mint
   })
 
-  it('falls through to a fresh anchor when recovery finds nothing, passing the broadcast hook', async () => {
+  /**
+   * AMENDED BY #1745. This test used to assert the opposite — that a null
+   * from recovery FALLS THROUGH to a fresh anchor. That fall-through was the
+   * defect: `getTransactionReceipt` returns null for a pending transaction
+   * and a dropped one alike, so the fall-through minted a second live
+   * credential behind a merely fee-stuck attest. A re-mint now needs positive
+   * evidence of death from the liveness probe, and there is none wired here.
+   *
+   * What the test still owns is the broadcast hook, so the anchor path is
+   * exercised from the state where anchoring IS correct: no prior hash.
+   */
+  it('does NOT fall through to a fresh anchor when recovery finds nothing (#1745)', async () => {
+    const anchor = vi.fn()
+    setAnchor(anchor)
+    setAnchorRecovery(vi.fn(async () => null))
+
+    mockQuery
+      .mockResolvedValueOnce(pendingRow({ tx_hash: '0x' + '9'.repeat(64) })) // getPassport
+      .mockResolvedValueOnce(FACTS)
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // lock
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // bound-check
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 }) // claim
+      .mockResolvedValueOnce({ rows: [] }) // COMMIT
+      .mockResolvedValue({ rows: [], rowCount: 1 })
+
+    await issuePassport('agent-1', 'user-1')
+    expect(anchor).not.toHaveBeenCalled()
+  })
+
+  it('anchors — and passes the broadcast hook — when there is no prior hash', async () => {
     const anchor = vi.fn(async (_c: number, _claim: unknown, onBroadcast?: (h: string) => Promise<void>) => {
       await onBroadcast?.('0x' + 'd'.repeat(64))
       return { attestationUid: '0x' + 'e'.repeat(64), txHash: '0x' + 'd'.repeat(64) }
@@ -98,7 +128,7 @@ describe('lost-result recovery (#1043)', () => {
     setAnchorRecovery(vi.fn(async () => null))
 
     mockQuery
-      .mockResolvedValueOnce(pendingRow({ tx_hash: '0x' + '9'.repeat(64) })) // getPassport
+      .mockResolvedValueOnce(pendingRow({ tx_hash: null })) // getPassport — never broadcast
       .mockResolvedValueOnce(FACTS)
       .mockResolvedValueOnce({ rows: [] }) // BEGIN
       .mockResolvedValueOnce({ rows: [] }) // lock

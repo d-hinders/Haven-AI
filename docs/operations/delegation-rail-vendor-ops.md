@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-08-21" # #1735: §3 gains a FOURTH failure class — a passport attest that broadcasts and does not confirm, which unlike the deploy does not self-heal; numbered operator runbook added, sequenced around the #1745 re-mint race. Prior: #1722: §3 gains a third failure class — a deploy that broadcasts and does not confirm is bounded at 120 s and handed to the #1558 bump worker, NOT relayer exhaustion; §1's gas-payer claims re-read against the code and unchanged. Prior: #1721: §1 and §3 re-read against the code — the relayer-paid factory deploy now has TWO trigger sites (grant activation in routes/agent-delegations.ts and, since #1667, the first erc7710 authorize in modules/x402/delegation-authorize.ts), so the drained-relayer blast radius and the erc7710 "sponsors nothing" line were corrected and the 502/429 surfaces named. §2 credential claims spot-checked (delegationRailBundlerUrl, DELEGATION_RAIL_SPONSORSHIP_POLICY_ID); §§4-5 are policy/incident prose, unchanged. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-08-22" # #1745: §3's passport-attest procedure LOSES its duplicate-hunt steps — the re-mint is now guarded in code (a re-anchor needs the prior tx's nonce consumed by something else), so cancelling a stuck nonce can no longer release a queued duplicate, and the cancel is self-completing: the burned nonce IS the evidence the sweep needs. A hand-run fee bump is named as the remaining hazard, since it leaves no outbound record. Prior: #1735: §3 gains a FOURTH failure class — a passport attest that broadcasts and does not confirm, which unlike the deploy does not self-heal; numbered operator runbook added, sequenced around the #1745 re-mint race. Prior: #1722: §3 gains a third failure class — a deploy that broadcasts and does not confirm is bounded at 120 s and handed to the #1558 bump worker, NOT relayer exhaustion; §1's gas-payer claims re-read against the code and unchanged. Prior: #1721: §1 and §3 re-read against the code — the relayer-paid factory deploy now has TWO trigger sites (grant activation in routes/agent-delegations.ts and, since #1667, the first erc7710 authorize in modules/x402/delegation-authorize.ts), so the drained-relayer blast radius and the erc7710 "sponsors nothing" line were corrected and the 502/429 surfaces named. §2 credential claims spot-checked (delegationRailBundlerUrl, DELEGATION_RAIL_SPONSORSHIP_POLICY_ID); §§4-5 are policy/incident prose, unchanged. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -176,36 +176,37 @@ warning. Operator response:
 1. Read the row's `tx_hash` from the alert and check it on the explorer.
    **Mined** (either status) → the next bump tick closes the record itself from
    the receipt; nothing to do but confirm it cleared.
-2. **Still pending** → before touching the nonce, check whether the passport's
-   retry sweep has already queued a **second** attest behind it. Look for
-   another `passport_attest` row in `outbound_txs` for the same chain at a
-   later nonce, and for a newer `tx_hash` on the agent's `agent_passports` row.
-   This is likely: see the race note below.
-3. **If a duplicate is already queued**, do not cancel yet — cancelling the
-   stuck nonce releases the duplicate to mine. Stop the issuance sweep (or
-   revoke the newer attestation once it lands) before proceeding.
-4. **With no duplicate outstanding**, the lane needs a same-nonce replacement
-   that is NOT another attest: send a 0-value self-transfer from the relayer at
-   that nonce with bumped fees to cancel it. Once it is cancelled the attest is
-   definitively dead and a fresh anchor is correct.
-5. Do **not** re-broadcast the stored attest calldata by hand — that is the
-   duplicate-credential path this whole gate exists to prevent.
+2. **Still pending** → the lane needs a same-nonce replacement that is NOT
+   another attest: send a 0-value self-transfer from the relayer at that nonce
+   with bumped fees to cancel it. Once that cancel mines, the stuck attest can
+   never mine — its nonce is spent — and issuance recovers **on its own**: the
+   next sweep tick sees the burned nonce, declares the old transaction dead and
+   anchors a fresh attestation. There is nothing further to do by hand.
+3. Do **not** re-broadcast the stored attest calldata by hand — that is the
+   duplicate-credential path this whole gate exists to prevent. A hand-run
+   *fee bump* is the same hazard wearing a different hat: it leaves no
+   `outbound_txs` record, so the guard in step 2 cannot see it. Cancel, never
+   bump.
 
-> **Known race, NOT fixed by [#1735](https://github.com/d-hinders/Haven-AI/issues/1735)
-> ([#1745](https://github.com/d-hinders/Haven-AI/issues/1745)).** The passport
-> row's own retry is *not* gated on the outbound record. `issuePassport`'s
-> catch calls `markFailed`, which clears `anchoring_started_at`, and
-> `listRetryable`'s backoff is 60 s at the first attempt — so roughly **180 s**
-> after the original broadcast (120 s wait + 60 s backoff) the sweep reclaims
-> the row, calls `recoverAnchorFromReceipt`, and gets `null`. `null` means
-> "pending OR dropped" — ethers cannot tell them apart — and `issuance.ts`
-> presumes dropped, so it submits a **fresh attest at the next nonce**. If the
-> original then mines, both mine, and the agent holds two live credentials.
-> This predates #1735 and is unchanged by it; #1735 only stopped the *bump
-> worker* creating a second way into the same state. Steps 2–3 above exist
-> because of it.
+> **Fixed by [#1745](https://github.com/d-hinders/Haven-AI/issues/1745) — this
+> procedure used to be more dangerous, and the history is worth keeping.**
+> Until #1745, the passport row's own retry was not gated on the outbound
+> record: `markFailed` clears `anchoring_started_at` and `listRetryable`'s
+> backoff is 60 s at the first attempt, so roughly **180 s** after the original
+> broadcast the sweep reclaimed the row, read a `null` receipt — which means
+> "pending OR dropped", indistinguishable — presumed dropped, and submitted a
+> **fresh attest at the next nonce**. Two consequences this runbook had to
+> carry by hand: an operator had to hunt for an already-queued duplicate before
+> touching the nonce (because cancelling the stuck one would *release* the
+> duplicate to mine), and if the original later mined, the agent held two live
+> credentials. **Both are now guarded in code.** The re-mint requires positive
+> evidence that the prior transaction can never mine — its nonce consumed by
+> something else — so no duplicate is ever queued while the stuck attest is
+> live, and cancelling has nothing to release. The steps above are shorter
+> because the check they encoded is no longer a human's job.
 
-Automating step 4 is a known gap, deliberately left to an owner decision
+Step 2's cancel is still a manual action; automating it is a known gap,
+deliberately left to an owner decision
 (#1743); see [`backend-scaling.md`](backend-scaling.md) § *Single point of
 stall*.
 

@@ -70,6 +70,21 @@ export function setAnchorRecovery(recovery: AnchorRecovery | null): void {
   recoveryImpl = recovery
 }
 
+/**
+ * Can a previously broadcast attest still mine? (#1745)
+ *
+ * Separate from {@link AnchorRecovery} on purpose. Recovery answers "did it
+ * succeed", and its null means "no answer yet". This answers the different
+ * question the re-mint actually depends on — "can it still succeed" — and only
+ * `'dead'` may unlock a second attest. See `classifyAnchorTxLiveness`.
+ */
+export type AnchorLivenessProbe = (chainId: number, txHash: string) => Promise<'live' | 'dead'>
+
+let livenessImpl: AnchorLivenessProbe | null = null
+export function setAnchorLiveness(probe: AnchorLivenessProbe | null): void {
+  livenessImpl = probe
+}
+
 /** Default anchor — wired in `attestation.ts`; injectable for tests. */
 let anchorImpl: Anchor | null = null
 export function setAnchor(anchor: Anchor | null): void {
@@ -229,12 +244,44 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
     // Recover-before-re-mint (#1043): a prior attempt that broadcast but lost
     // its result (wait timeout, crash, failed anchored-write) left tx_hash set
     // with no UID. Re-minting would create a second real attestation with the
-    // first permanently invisible to Haven — read the receipt instead. null =
-    // unknown/still-pending tx: fall through to a fresh anchor (a pending tx
-    // older than the claim window is presumed dropped).
+    // first permanently invisible to Haven — read the receipt instead.
+    //
+    // A null from recovery is NOT permission to re-mint (#1745). It means the
+    // receipt read had no answer, and `getTransactionReceipt` is equally
+    // silent about a transaction still sitting in the mempool and one that was
+    // genuinely dropped. This used to presume dropped — and because markFailed
+    // clears `anchoring_started_at` (making the 600 s claim window vacuous)
+    // and the retry backoff is 60 s at attempt 1, that presumption fired
+    // ~180 s after the original broadcast. A fee-stuck attest would then be
+    // duplicated at the next relayer nonce, and if the original ever mined,
+    // both mined: two live credentials for one agent.
+    //
+    // So the re-mint now requires POSITIVE evidence that the prior
+    // transaction can never mine — its nonce burned by something else — and
+    // refuses on anything less. The asymmetry is the whole argument: a
+    // wrongly withheld re-mint stalls ONE issuance, retryably and with the
+    // attention counter alarming; a wrongly permitted one mints a second
+    // real, revocable credential that no later tick can take back.
     let result: AnchorResult | null = null
-    if (existing.tx_hash && !existing.attestation_uid && recoveryImpl) {
-      result = await recoveryImpl(chainId, existing.tx_hash)
+    if (existing.tx_hash && !existing.attestation_uid) {
+      if (recoveryImpl) result = await recoveryImpl(chainId, existing.tx_hash)
+      if (!result) {
+        // Fail-safe when no probe is wired: absent a way to prove death, the
+        // answer is "do not re-mint", never "assume dropped".
+        const liveness = livenessImpl ? await livenessImpl(chainId, existing.tx_hash) : 'live'
+        if (liveness !== 'dead') {
+          // Retryable, not terminal: markFailed clears the claim, so the next
+          // due tick re-reads the receipt and re-probes. Whichever way the
+          // chain eventually answers — mined, reverted, or nonce burned by an
+          // operator's cancel — a later tick resolves this row without ever
+          // having risked a duplicate.
+          await markFailed(
+            agentId,
+            `prior attestation ${existing.tx_hash} may still mine — not re-anchoring (#1745)`,
+          )
+          return getPassport(agentId)
+        }
+      }
     }
     if (!result) {
       result = await anchorImpl(chainId, claim, (txHash) => repo.recordBroadcast(agentId, txHash))

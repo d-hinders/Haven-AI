@@ -21,6 +21,7 @@
 import { AbiCoder, Contract, Interface } from 'ethers'
 import { getRelayer } from '../../infra/relayer.js'
 import { openOutboundRecord, submitRecorded } from '../../infra/outbound-queue.js'
+import { findOutboundTxByHash } from '../../infra/repositories/outbound-txs.js'
 import { getEasDeployment, getPassportSchemaUid } from './schema.js'
 import type { Anchor, AnchorResult, PassportClaim } from './issuance.js'
 import type { Revoker } from './revocation.js'
@@ -217,13 +218,15 @@ export const anchorOnChain: Anchor = async (
   // (retryable), and the next sweep tick re-reads THIS tx's receipt rather
   // than minting a second attestation.
   //
-  // KNOWN LIMIT of that owner, named rather than implied (#1745, found by
-  // #1735's review): the sweep re-mints when the receipt read returns null,
-  // and null means "pending OR dropped" — it presumes dropped, ~180 s after
-  // this broadcast. So a fee-stuck attest can still be duplicated by the
-  // PASSPORT-level retry. That race predates #1735 and is untouched by it;
-  // what #1735 removed is the second, independent route into the same state
-  // (the bump worker replacing this row out from under the stored hash).
+  // That owner USED to have a limit here (#1745, found by #1735's review):
+  // the sweep re-minted whenever the receipt read returned null, and null
+  // means "pending OR dropped" — so a merely fee-stuck attest was duplicated
+  // ~180 s after this broadcast. It no longer is. The re-mint now needs
+  // positive evidence that this transaction can never mine, and the only
+  // thing that counts is its nonce being consumed by something else; see
+  // `classifyAnchorTxLiveness` below. Leaving the record `broadcast` is what
+  // makes that evidence available at all — the nonce this branch stamped is
+  // the fact the probe reads.
   if (!receipt && (!waitError || isWaitTimeout(waitError))) {
     throw new PassportAnchorUnconfirmedError(tx.hash, PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS)
   }
@@ -267,6 +270,96 @@ export async function recoverAnchorFromReceipt(
   }
   // Mined, successful, but no Attested event from EAS — not our attestation.
   throw new Error(`tx ${txHash} succeeded but contains no EAS Attested event`)
+}
+
+/**
+ * Can the attestation at `txHash` still mine? (#1745)
+ *
+ * ## The question this answers, and the one it refuses to answer
+ *
+ * `recoverAnchorFromReceipt` returns null for a pending transaction and for a
+ * dropped one alike, and `issuePassport` used to read that null as "dropped"
+ * and mint a second attestation. A null receipt is not evidence of death — it
+ * is the ABSENCE of evidence, and the two readings have wildly asymmetric
+ * costs: reading a dropped tx as live stalls one issuance, loudly and
+ * recoverably; reading a live tx as dropped mints a second real, revocable
+ * credential, silently and permanently.
+ *
+ * So this probe never declares death from silence. It declares death from ONE
+ * positive fact: **the transaction's nonce slot has been consumed by something
+ * else.** A transaction can only ever mine into its own nonce, and a nonce can
+ * only be used once — so once the relayer's mined nonce has moved past it and
+ * the receipt is still absent, that transaction is not pending, it is
+ * impossible. That is arithmetic, not a timeout.
+ *
+ * What this deliberately does NOT decide is the time question: how long an
+ * unmined attest whose nonce is still open may sit before Haven declares it
+ * dead on its own. That is #1743's owner call ("when is an attest dead"), and
+ * it is not derivable from the code. Until it is answered, an attest holding
+ * its own nonce is `live` for as long as it holds it.
+ *
+ * ## Why that is not a permanent stall
+ *
+ * A genuinely dropped transaction stops reserving its nonce: the relayer's
+ * pending count falls back, so the NEXT transaction it broadcasts on that
+ * chain takes the slot and burns it. The stall therefore resolves itself as
+ * soon as the relayer does anything else on that chain — and if it never
+ * does, the passport row keeps failing retryably and alarms through
+ * `ISSUANCE_ATTENTION_ATTEMPTS`. A fee-stuck transaction, by contrast, keeps
+ * its slot for as long as it sits in the mempool, which is exactly the case
+ * that must never be re-minted.
+ *
+ * ## Ordering of the reads
+ *
+ * The mempool read comes first and can only ever say `live`, so it costs
+ * nothing to be wrong about: a node that has never heard of the transaction
+ * simply falls through to the nonce test. The receipt re-read comes LAST,
+ * after the burn is observed, because it is the one guard against a
+ * load-balanced RPC fleet answering the two reads from nodes at different
+ * heights — a node that says "nonce consumed" while holding our receipt
+ * contradicts itself, and we believe the receipt.
+ */
+export type AnchorTxLiveness = 'live' | 'dead'
+
+export async function classifyAnchorTxLiveness(
+  chainId: number,
+  txHash: string,
+): Promise<AnchorTxLiveness> {
+  const relayer = getRelayer(chainId)
+  const provider = relayer.provider
+  // No provider means no evidence, and no evidence means no re-mint.
+  if (!provider) return 'live'
+
+  // 1. Does any node still hold it? A known transaction — pending in the
+  //    mempool, or mined with a receipt this caller has not seen yet (#690's
+  //    lagging RPC) — is not dropped, and settles the question on its own.
+  const known = await provider.getTransaction(txHash)
+  if (known) return 'live'
+
+  // 2. Unknown to this node. That is still not death: mempools are per-node
+  //    and eviction is local. The durable record (#1556) is what survives it,
+  //    and the nonce it stamped at broadcast is the fact we need.
+  const record = await findOutboundTxByHash(chainId, txHash)
+  if (!record || record.nonce === null) return 'live'
+  // A replaced row means another transaction at the SAME nonce carries this
+  // payload forward; re-minting at a fresh nonce would duplicate it rather
+  // than replace it. (`passport_attest` is withheld from replacement by
+  // #1735, so this is defence for a hand-run bump, not a live path.)
+  if (record.status === 'replaced' || record.status === 'mined') return 'live'
+
+  // 3. Has the slot been consumed by something else? `latest` counts MINED
+  //    transactions only — `pending` would include the stuck transaction
+  //    itself and could never answer this.
+  const minedNonce = await provider.getTransactionCount(relayer.address, 'latest')
+  if (BigInt(minedNonce) <= BigInt(record.nonce)) return 'live'
+
+  // 4. The slot is burned. One last receipt read: if this provider both
+  //    reports the nonce consumed AND now hands back our receipt, the
+  //    consumer was our own transaction and it MINED. Believe the receipt.
+  const confirming = await provider.getTransactionReceipt(txHash)
+  if (confirming) return 'live'
+
+  return 'dead'
 }
 
 

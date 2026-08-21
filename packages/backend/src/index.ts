@@ -28,8 +28,10 @@ import agentPassportRoutes from './routes/agent-passports.js'
 import {
   setAnchor,
   setAnchorRecovery,
+  setAnchorLiveness,
   anchorOnChain,
   recoverAnchorFromReceipt,
+  classifyAnchorTxLiveness,
   setRevoker,
   revokeOnChain,
   setReceiptSigningKey,
@@ -207,6 +209,11 @@ app.get('/chains', async () => {
 // (#972 / #973). Both are governance metadata: EAS-only targets, zero value.
 setAnchor(anchorOnChain)
 setAnchorRecovery(recoverAnchorFromReceipt)
+// A null receipt is not evidence the attest was dropped (#1745). The re-mint
+// is unlocked only by this probe finding the transaction's nonce burned by
+// something else; anything less leaves the passport retryable rather than
+// minting a second live credential.
+setAnchorLiveness(classifyAnchorTxLiveness)
 setRevoker(revokeOnChain)
 // Receipts the merchant-facing verifier hands out (#974) are signed with a
 // DEDICATED key, never the relayer's: the relayer pays gas for user-authorised

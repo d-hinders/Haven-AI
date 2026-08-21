@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DelegateSweepApi } from './delegate-sweep.js'
 import { createErc20Contract, createJsonRpcProvider, createWallet } from './provider.js'
@@ -117,9 +118,18 @@ describe('#1756 — DelegateSweepApi.sweepDelegate confirmation waits', () => {
   })
 
   it('reuses the SDK\'s existing confirmation default rather than inventing a fourth number', () => {
-    // Pinned against the constant `HavenClient` uses for `confirmationTimeout`
-    // — they are the same binding since #1756, so this cannot drift silently.
     expect(DEFAULT_CONFIRMATION_TIMEOUT_MS).toBe(90_000)
+
+    // The value pin above is not enough on its own, and saying so is the
+    // point: `toHaveBeenCalledWith(1, DEFAULT_CONFIRMATION_TIMEOUT_MS)` cannot
+    // fail on a value change, because both sides read the SAME binding. What
+    // has to be guarded is that `HavenClient` keeps reading that binding too —
+    // re-forking a literal into `client.ts` is exactly how the sweep and the
+    // payment poller would silently start disagreeing about how long the SDK
+    // waits, which is the drift #1756 moved the constant to prevent.
+    const clientSource = readFileSync(new URL('./client.ts', import.meta.url), 'utf8')
+    expect(clientSource).toContain('config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT_MS')
+    expect(clientSource).not.toMatch(/DEFAULT_CONFIRMATION_TIMEOUT\s*=\s*\d/)
   })
 
   it('a USDC transfer that never mines returns `unconfirmed` with its broadcast hash instead of hanging', async () => {

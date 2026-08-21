@@ -52,6 +52,32 @@ spending authority.
    `haven_get_allowances` tools to confirm the Haven wallet and live budget.
    Do not sign, fund, or create a payment to verify setup.
 
+### `--doctor` reports every agent, not just one (#1697)
+
+With several agents wired into one runtime (`--name`), the doctor enumerates
+every credential directory on the machine and classifies each one:
+
+| Classification | Meaning |
+| --- | --- |
+| `wired` | Its MCP pair is present in this runtime's config. Fully checked. |
+| `superseded` | It holds credentials, but no config entry points at it. Reported, never silently skipped — its API key may still spend. |
+| `retired` | Tombstoned (see below); key material removed. |
+| `orphaned` | No usable identity and no tombstone. |
+
+The exit code is non-zero if **any** wired agent fails **any** check — not
+only the one the report's main section describes. In `--json`, the same
+information is on `agents[]`, each entry carrying `slug`, `agentId`,
+`directory`, `classification` and its own `checks[]`; the flat `checks` array
+is retained and still describes one agent, so a single-agent install reads as
+it always did.
+
+One check is worth calling out: **`identity_match`** compares the agent the
+stored API key actually authenticates as against the `delegate_address` in
+that directory's `signer.json`. A mismatch means the runtime would quote as
+one agent and sign as another, and it fails hard. This is the half of that
+hazard a local tool can know — the doctor still cannot see inside an
+already-running host, which is why the restart guidance below matters.
+
 ## Retiring an old agent directory
 
 Re-running setup creates a NEW agent and retires nothing. Long-lived MCP hosts

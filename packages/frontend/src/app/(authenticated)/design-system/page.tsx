@@ -406,6 +406,19 @@ export default function DesignSystemPage() {
               <Button variant="tertiary">Tertiary</Button>
               <Button variant="danger">Danger</Button>
             </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Button size="sm" variant="ghost">Small</Button>
+              <Button size="md" variant="ghost">Medium</Button>
+              <Button size="lg" variant="ghost">Large</Button>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              Sizes paint at 36 / 40 / 44px. Small and medium carry an invisible
+              44px-tall tap target that reaches past their painted edge, so a compact
+              button in a row list stays comfortable to hit on a phone without
+              loosening the layout around it. The target grows vertically only —
+              widening it would let a button steal taps from its neighbour in a tight
+              toolbar.
+            </p>
             <div className="mt-5 flex flex-wrap items-center gap-2">
               <StatusBadge tone="success">Received</StatusBadge>
               <StatusBadge tone="warning">Needs approval</StatusBadge>
@@ -445,7 +458,7 @@ export default function DesignSystemPage() {
               <Tooltip label={sampleAddress} mono>
                 <button
                   type="button"
-                  className="rounded font-mono text-xs text-[var(--v2-ink-2)] underline decoration-[var(--v2-border-strong)] underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                  className="rounded font-mono text-xs text-[var(--v2-ink-2)] underline decoration-[var(--v2-border-strong)] underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
                 >
                   0x8f4F...a6f4
                 </button>
@@ -687,7 +700,7 @@ export default function DesignSystemPage() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Account options"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
               >
                 <Icon icon={EllipsisVertical} className="h-4 w-4" />
               </DropdownMenuTrigger>

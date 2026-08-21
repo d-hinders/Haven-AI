@@ -22,7 +22,12 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
-import { probeHostedMcpTools, probeLocalMcpTools, type LocalMcpProbeResult } from './probes.js'
+import {
+  probeHostedAgentIdentity,
+  probeHostedMcpTools,
+  probeLocalMcpTools,
+  type LocalMcpProbeResult,
+} from './probes.js'
 import {
   installedRuntimeMatches,
   prepareSignerRuntime,
@@ -33,6 +38,8 @@ import { runtimeConfigPathFor, writeRuntimeConfig } from './config-writers.js'
 import { restartRequiredForRuntime, type RuntimeId } from './runtime-registry.js'
 import { getLocalSignerConsentStatus } from './signer-consent.js'
 import { TOMBSTONE_FILENAME, readAgentTombstone } from './tombstone.js'
+import { serverNamesFor, type ServerNames } from './server-names.js'
+import { shortAddress } from './redact.js'
 
 export interface DoctorCheck {
   id: string
@@ -50,6 +57,8 @@ export interface DoctorReport {
   runtime: string
   credentialDirectory?: string
   checks: DoctorCheck[]
+  /** #1697: one entry per credential directory found on this machine. */
+  agents: AgentInventoryEntry[]
   /** Signer compat surface from the live handshake, when it succeeded. */
   signerCapabilities?: Record<string, unknown>
 }
@@ -59,6 +68,7 @@ export interface DoctorDeps {
   fetch?: typeof fetch
   probeSignerTools?: typeof probeLocalMcpTools
   probeHosted?: typeof probeHostedMcpTools
+  probeHostedIdentity?: typeof probeHostedAgentIdentity
   runCommand?: (command: string, args: string[]) => Promise<void>
   env?: NodeJS.ProcessEnv
 }
@@ -128,131 +138,143 @@ async function discoverCredentialDirectory(
   }
 }
 
-export async function runDoctor(
-  input: { runtime: string; credentialsDir?: string },
-  deps: DoctorDeps = {},
-): Promise<DoctorReport> {
-  const homeDir = deps.homeDir ?? homedir()
+/**
+ * #1697: one entry per credential directory on this machine.
+ *
+ * "Newest wins" was a single-agent heuristic: it named one directory the real
+ * one and demoted the rest to a note. Multi-agent (#1696) makes several
+ * agents legitimately live at once, so the doctor enumerates instead of
+ * choosing, and says which of four things each directory IS.
+ */
+export type AgentClassification = 'wired' | 'superseded' | 'retired' | 'orphaned'
+
+export interface AgentInventoryEntry {
+  /** Wiring slug (#1696); absent for the bare haven / haven-signer pair. */
+  slug?: string
+  agentId?: string
+  directory: string
+  classification: AgentClassification
+  /** Per-agent checks — empty for entries that are not wired. */
+  checks: DoctorCheck[]
+}
+
+/**
+ * Is this agent's MCP pair actually present in the runtime's config?
+ *
+ * The answer depends on whether the pair is NAMED, because only a named pair
+ * has a name of its own:
+ * - NAMED (#1696): its entry name is unique, so the name in the config text
+ *   settles it.
+ * - UNNAMED: every unnamed agent claims the same bare `haven` /
+ *   `haven-signer` names, so the name proves nothing — exactly one of them
+ *   can be wired, and the tell is which signer wrapper path the config
+ *   actually references.
+ * - No readable config at all (Claude Code is CLI-managed, or the file is
+ *   missing): this module cannot tell. Guessing "orphaned" would accuse every
+ *   agent on the most common runtime, so it falls back to the pre-#1697
+ *   heuristic — the selected directory is wired, the rest are not — which is
+ *   the honest degradation rather than a fabricated verdict.
+ */
+function agentIsWired(
+  configText: string | null,
+  names: ServerNames,
+  slug: string | undefined,
+  identity: IdentityFile | undefined,
+  sidecar: SignerRuntimeSidecar | null,
+  isPrimary: boolean,
+  bareOwnerExists: boolean,
+): boolean {
+  if (configText === null) return isPrimary
+  if (slug) {
+    // Match the NAME with a boundary so `haven-ops` cannot match
+    // `haven-ops-2` and `haven` cannot match `haven-ops`.
+    for (const name of [names.hosted, names.codexHosted, names.signer, names.codexSigner]) {
+      if (new RegExp(`(^|[."'\\s\\[])${name}(["'\\]:\\s]|$)`, 'm').test(configText)) return true
+    }
+    return false
+  }
+  if (sidecar?.wrapper_path && configText.includes(sidecar.wrapper_path)) return true
+  // #1697 review, finding 2: a sidecar whose wrapper is NOT referenced is not
+  // proof of the opposite. A config still on the retired npx launch form
+  // (which the runtime_config check flags separately) names no wrapper at
+  // all, and condemning that directory as superseded would tell the user to
+  // revoke their only working agent. Fall through to the same ownership
+  // reasoning the sidecar-less case uses.
+  // No proof of ownership of the bare
+  // pair. If some OTHER directory's wrapper is the one the config launches,
+  // the bare pair is already owned and this one is not wired — even when it
+  // is the newest. Only when nothing owns the bare pair does the pre-#1697
+  // heuristic apply.
+  if (bareOwnerExists) return false
+  return isPrimary && Boolean(identity?.hosted_mcp_url && configText.includes(identity.hosted_mcp_url))
+}
+
+async function readIdentity(directory: string): Promise<IdentityFile | undefined> {
+  try {
+    return JSON.parse(await readFile(join(directory, 'identity.json'), 'utf8')) as IdentityFile
+  } catch {
+    return undefined
+  }
+}
+
+/** Every per-agent check for ONE credential directory. */
+async function checksForAgent(
+  entry: { directory: string; identity?: IdentityFile; sidecar: SignerRuntimeSidecar | null },
+  input: { runtime: string },
+  deps: DoctorDeps,
+): Promise<{ checks: DoctorCheck[]; signerCapabilities?: Record<string, unknown> }> {
+  const { directory, identity, sidecar } = entry
   const checks: DoctorCheck[] = []
   let signerCapabilities: Record<string, unknown> | undefined
 
-  const { directory, others } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
+  // ── Credentials ───────────────────────────────────────────────────────────
+  let signerFile: Record<string, unknown> | undefined
+  try {
+    const parsed = JSON.parse(await readFile(join(directory, 'signer.json'), 'utf8')) as Record<string, unknown>
+    signerFile = typeof parsed === 'object' && parsed !== null ? parsed : undefined
+  } catch {
+    signerFile = undefined
+  }
+  const credentialsOk = Boolean(identity?.api_key) && signerFile !== undefined
+  checks.push({
+    id: 'credentials',
+    label: 'Agent credentials',
+    ok: credentialsOk,
+    detail: credentialsOk
+      ? `identity.json and signer.json parse (agent ${identity?.agent_id ?? 'unknown'})`
+      : 'identity.json or signer.json is missing or unparseable.',
+    ...(credentialsOk ? {} : { repair: `Re-run the full setup with a fresh token: ${RERUN} --setup <token>.` }),
+  })
 
-  // ── 1. Credentials ────────────────────────────────────────────────────────
-  let identity: IdentityFile | undefined
-  let signerParses = false
-  if (!directory) {
+  // ── Signer runtime install ────────────────────────────────────────────────
+  if (!sidecar) {
     checks.push({
-      id: 'credentials',
-      label: 'Agent credentials',
+      id: 'signer_runtime',
+      label: 'Signer runtime (preinstalled wrapper)',
       ok: false,
-      detail: 'No agent credential directory with an identity.json under ~/.haven/agents.',
-      repair: `Run the full setup once: ${RERUN} --setup <token from the Haven dashboard>.`,
+      detail: 'No signer-runtime.json sidecar — the pinned signer runtime was never prepared (or a pre-#1586 npx config).',
+      repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}`,
     })
   } else {
-    try {
-      identity = JSON.parse(await readFile(join(directory, 'identity.json'), 'utf8')) as IdentityFile
-    } catch {
-      identity = undefined
-    }
-    try {
-      const signer = JSON.parse(await readFile(join(directory, 'signer.json'), 'utf8')) as Record<string, unknown>
-      signerParses = typeof signer === 'object' && signer !== null
-    } catch {
-      signerParses = false
-    }
-    const ok = Boolean(identity?.api_key) && signerParses
+    const matches = await installedRuntimeMatches(sidecar.runtime_directory, sidecar.cli_path)
+    const versionOk = sidecar.signer_version === MCP_RUNTIME_MANIFEST.signerVersion
+    const ok = matches && versionOk
     checks.push({
-      id: 'credentials',
-      label: 'Agent credentials',
+      id: 'signer_runtime',
+      label: 'Signer runtime (preinstalled wrapper)',
       ok,
       detail: ok
-        ? `identity.json and signer.json parse (agent ${identity?.agent_id ?? 'unknown'})`
-        : 'identity.json or signer.json is missing or unparseable.',
-      ...(ok ? {} : { repair: `Re-run the full setup with a fresh token: ${RERUN} --setup <token>.` }),
+        ? `Installed ${sidecar.signer_package}@${sidecar.signer_version} at ${sidecar.runtime_directory}`
+        : matches
+          ? `Installed version ${sidecar.signer_version} does not match the connector's pinned ${MCP_RUNTIME_MANIFEST.signerVersion}.`
+          : `Runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
+      ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}` }),
     })
   }
 
-  // ── 2. Signer runtime install ─────────────────────────────────────────────
-  let sidecar: SignerRuntimeSidecar | null = null
-  if (directory) {
-    sidecar = await readRuntimeSidecar(directory)
-    if (!sidecar) {
-      checks.push({
-        id: 'signer_runtime',
-        label: 'Signer runtime (preinstalled wrapper)',
-        ok: false,
-        detail: 'No signer-runtime.json sidecar — the pinned signer runtime was never prepared (or a pre-#1586 npx config).',
-        repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}`,
-      })
-    } else {
-      const matches = await installedRuntimeMatches(sidecar.runtime_directory, sidecar.cli_path)
-      const versionOk = sidecar.signer_version === MCP_RUNTIME_MANIFEST.signerVersion
-      const ok = matches && versionOk
-      checks.push({
-        id: 'signer_runtime',
-        label: 'Signer runtime (preinstalled wrapper)',
-        ok,
-        detail: ok
-          ? `Installed ${sidecar.signer_package}@${sidecar.signer_version} at ${sidecar.runtime_directory}`
-          : matches
-            ? `Installed version ${sidecar.signer_version} does not match the connector's pinned ${MCP_RUNTIME_MANIFEST.signerVersion}.`
-            : `Runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
-        ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}` }),
-      })
-    }
-  }
-
-  // ── 3. Runtime config ─────────────────────────────────────────────────────
-  const configPath = runtimeConfigPathFor(input.runtime, homeDir)
-  if (configPath === null) {
-    checks.push({
-      id: 'runtime_config',
-      label: 'Runtime MCP config',
-      ok: true,
-      detail: `Runtime '${input.runtime}' has no file-based config the connector owns (CLI-managed) — skipping the file check.`,
-    })
-  } else {
-    let configText: string | null = null
-    try {
-      configText = await readFile(configPath, 'utf8')
-    } catch {
-      configText = null
-    }
-    if (configText === null) {
-      checks.push({
-        id: 'runtime_config',
-        label: 'Runtime MCP config',
-        ok: false,
-        detail: `No runtime config at ${configPath}.`,
-        repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}`,
-      })
-    } else {
-      const hasHaven = identity?.hosted_mcp_url
-        ? configText.includes(identity.hosted_mcp_url)
-        : configText.includes('haven')
-      // The wrapper form never writes the package spec into the config; only
-      // the retired npx launch does — so the spec's presence IS the tell.
-      const signerViaNpx = configText.includes('@haven_ai/signer')
-      const wrapperReferenced = sidecar ? configText.includes(sidecar.wrapper_path) : false
-      const ok = hasHaven && !signerViaNpx && (sidecar ? wrapperReferenced : true)
-      checks.push({
-        id: 'runtime_config',
-        label: 'Runtime MCP config',
-        ok,
-        detail: ok
-          ? `Config at ${configPath} references the hosted server and the prepared signer wrapper.`
-          : signerViaNpx
-            ? `Config at ${configPath} still launches the signer via npx — the pre-#1586 shape that cannot start under a 120s startup timeout.`
-            : `Config at ${configPath} is missing the Haven entries${sidecar && !wrapperReferenced ? ' (or references a different signer wrapper)' : ''}.`,
-        ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}` }),
-      })
-    }
-  }
-
-  // ── 4. Hosted MCP ─────────────────────────────────────────────────────────
-  if (identity?.api_key && (identity.hosted_mcp_url || identity.api_url)) {
-    const hostedUrl = identity.hosted_mcp_url ?? `${identity.api_url}/mcp`
+  // ── Hosted MCP ────────────────────────────────────────────────────────────
+  const hostedUrl = identity?.hosted_mcp_url ?? (identity?.api_url ? `${identity.api_url}/mcp` : undefined)
+  if (identity?.api_key && hostedUrl) {
     const probe = await (deps.probeHosted ?? probeHostedMcpTools)(identity.api_key, hostedUrl, deps.fetch)
     checks.push({
       id: 'hosted_mcp',
@@ -279,77 +301,70 @@ export async function runDoctor(
     })
   }
 
-  // ── 4b. Superseded agents (#1688) ────────────────────────────────────────
-  // A re-run mints a NEW agent and retires nothing: the connector never
-  // deletes old directories, registration only collides on delegate address,
-  // and cancel deliberately refuses to auto-revoke. Net effect: an MCP host
-  // that started before the re-run keeps spending as the agent the user
-  // believes they replaced — silently, because its old key still resolves.
-  // This check makes that state a FAILURE with a named repair. The doctor
-  // reports; the user decides — connect never revokes or deletes anything.
-  if (others.length > 0) {
-    const live: string[] = []
-    const revoked: string[] = []
-    const unverifiable: string[] = []
-    const retired: string[] = []
-    for (const other of others) {
-      let otherIdentity: IdentityFile | undefined
-      try {
-        otherIdentity = JSON.parse(await readFile(join(other, 'identity.json'), 'utf8')) as IdentityFile
-      } catch {
-        otherIdentity = undefined
-      }
-      // #1681: a tombstone marks a deliberate retirement. It changes how a
-      // key-less directory READS (retired, not broken) — it never changes
-      // whether a still-present key gets probed, because a tombstone is a
-      // marker, not a revocation.
-      const tombstone = await readAgentTombstone(other)
-      const otherAgent = otherIdentity?.agent_id ?? tombstone?.agent_id ?? basename(other)
-      const otherUrl = otherIdentity?.hosted_mcp_url
-        ?? (otherIdentity?.api_url ? `${otherIdentity.api_url}/mcp` : undefined)
-      if (!otherIdentity?.api_key || !otherUrl) {
-        if (tombstone) retired.push(`${otherAgent} (retired ${tombstone.retired_at})`)
-        else unverifiable.push(`${otherAgent} (no stored key/URL to probe)`)
-        continue
-      }
-      const suffix = tombstone ? ' [tombstoned — key material still present]' : ''
-      const probe = await (deps.probeHosted ?? probeHostedMcpTools)(otherIdentity.api_key, otherUrl, deps.fetch)
-      if (probe.status === 'ok') live.push(`${otherAgent}${suffix}`)
-      else if (probe.status === 'unauthorized') revoked.push(`${otherAgent}${suffix}`)
-      // network_error / bad_response: neither a false "still live" failure
-      // nor a false clean bill — a note, never a verdict.
-      else unverifiable.push(`${otherAgent} (${probe.status})${suffix}`)
+  // ── Hosted-vs-local identity (#1697) ──────────────────────────────────────
+  // The #1681 incident, made mechanical: the API key and the signing key must
+  // belong to the SAME agent. A mismatch means the runtime would quote as one
+  // agent and sign as another — the exact shape #1690 refuses at signing time.
+  // This proves the on-disk pair is self-consistent, which is the half a local
+  // tool can know; it still cannot see inside an already-running host.
+  const localDelegate = typeof signerFile?.delegate_address === 'string'
+    ? (signerFile.delegate_address as string)
+    : undefined
+  if (identity?.api_key && identity.api_url) {
+    const probe = await (deps.probeHostedIdentity ?? probeHostedAgentIdentity)(
+      identity.api_key, identity.api_url, deps.fetch,
+    )
+    if (probe.status !== 'ok') {
+      // #1697 review, finding 1: an unperformable comparison is NOT a pass.
+      // Saying "skipped, not passed" in the text while setting ok:true is the
+      // same green-check-proving-nothing defect this check exists to remove —
+      // and worse here, because a real key mismatch that coincides with a
+      // network blip would sail through. `hosted_mcp` already fails on
+      // network_error; identity_match matches it rather than contradicting it.
+      checks.push({
+        id: 'identity_match',
+        label: 'Hosted identity matches the local signing key',
+        ok: false,
+        detail: probe.status === 'unauthorized'
+          ? 'The stored API key was rejected, so the agent it authenticates as cannot be compared with the local signing key.'
+          : `Could not read the hosted identity (${probe.status}) — the comparison did not happen, so it cannot be reported as a match.`,
+        repair: probe.status === 'unauthorized'
+          ? `Re-run the full setup with a fresh token: ${RERUN} --setup <token>.`
+          : `Restore network access to the Haven API, then re-run: ${RERUN} --doctor --runtime ${input.runtime}`,
+      })
+    } else if (!localDelegate) {
+      checks.push({
+        id: 'identity_match',
+        label: 'Hosted identity matches the local signing key',
+        ok: false,
+        detail: 'signer.json holds no delegate_address to compare against the hosted identity.',
+        repair: `Re-run the full setup with a fresh token: ${RERUN} --setup <token>.`,
+      })
+    } else {
+      const same = probe.delegateAddress?.toLowerCase() === localDelegate.toLowerCase()
+      checks.push({
+        id: 'identity_match',
+        label: 'Hosted identity matches the local signing key',
+        ok: same,
+        detail: same
+          ? `The stored API key authenticates as the agent whose signing key is in this directory (${shortAddress(localDelegate)}).`
+          : `MISMATCH: the stored API key authenticates as agent ${probe.agentId ?? 'unknown'} with delegate ` +
+            `${shortAddress(probe.delegateAddress ?? 'unknown')}, but signer.json here holds ${shortAddress(localDelegate)}. ` +
+            'This runtime would quote as one agent and sign as another.',
+        ...(same
+          ? {}
+          : {
+              repair: 'Re-run setup for this agent so its API key and signing key come from one run: ' +
+                `${RERUN} --setup <token>. Do not hand-edit either file.`,
+            }),
+      })
     }
-    const parts: string[] = []
-    if (live.length > 0) parts.push(`STILL SPEND-CAPABLE: ${live.join(', ')}`)
-    if (revoked.length > 0) parts.push(`already revoked: ${revoked.join(', ')}`)
-    if (retired.length > 0) parts.push(`tombstoned (keys removed): ${retired.join(', ')}`)
-    if (unverifiable.length > 0) parts.push(`could not verify: ${unverifiable.join(', ')}`)
-    checks.push({
-      id: 'superseded_agents',
-      label: 'Superseded agent credentials',
-      ok: live.length === 0,
-      detail:
-        live.length > 0
-          ? `${others.length} other credential dir(s) found — ${parts.join('; ')}. A host started before ` +
-            'your latest setup keeps authenticating (and spending) as the old agent.'
-          : `${others.length} other credential dir(s) found — ${parts.join('; ')}.`,
-      ...(live.length > 0
-        ? {
-            repair:
-              `Revoke ${live.join(', ')} on the Haven agent page, then remove the old ` +
-              'director(y/ies) under ~/.haven/agents. Connect never revokes or deletes for you.',
-          }
-        : {}),
-    })
   }
 
-  // ── 5. Signer process handshake ───────────────────────────────────────────
-  if (sidecar && directory) {
+  // ── Signer stdio handshake ────────────────────────────────────────────────
+  if (sidecar) {
     const consent = await getLocalSignerConsentStatus(join(directory, 'signer.json'))
     if (!consent.acknowledged) {
-      // #1587 review: an un-acknowledged consent gate exits 1 and would read
-      // as process_error — report the true cause instead of "signer broken".
       checks.push({
         id: 'signer_process',
         label: 'Signer stdio handshake',
@@ -363,8 +378,6 @@ export async function runDoctor(
         [],
         MCP_RUNTIME_MANIFEST.requiredSignerTools,
       )
-      // Real signer shape nests MCP capabilities under `experimental`
-      // (signerCapabilityAdvertisement); accept both for robustness.
       const experimental = (probe.capabilities?.experimental ?? probe.capabilities) as
         | Record<string, unknown>
         | undefined
@@ -383,7 +396,7 @@ export async function runDoctor(
         ...(probe.status === 'ok' ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}` }),
       })
     }
-  } else if (directory) {
+  } else {
     checks.push({
       id: 'signer_process',
       label: 'Signer stdio handshake',
@@ -393,7 +406,242 @@ export async function runDoctor(
     })
   }
 
-  // ── 6. Restart still required? (informational, never fails the doctor) ────
+  return { checks, ...(signerCapabilities ? { signerCapabilities } : {}) }
+}
+
+export async function runDoctor(
+  input: { runtime: string; credentialsDir?: string },
+  deps: DoctorDeps = {},
+): Promise<DoctorReport> {
+  const homeDir = deps.homeDir ?? homedir()
+  const checks: DoctorCheck[] = []
+  let signerCapabilities: Record<string, unknown> | undefined
+
+  const { directory, others } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
+
+  // ── Runtime config (read once; every agent's wiring is judged against it) ─
+  const configPath = runtimeConfigPathFor(input.runtime, homeDir)
+  let configText: string | null = null
+  if (configPath !== null) {
+    try {
+      configText = await readFile(configPath, 'utf8')
+    } catch {
+      configText = null
+    }
+  }
+
+  // ── Inventory ─────────────────────────────────────────────────────────────
+  const allDirectories = directory ? [directory, ...others] : others
+  // Which directory (if any) owns the BARE haven / haven-signer pair? The
+  // config launches exactly one signer wrapper for it, and that path is the
+  // only unambiguous tell — the bare NAMES are claimed by every unnamed
+  // agent, so they identify nobody.
+  let bareOwnerExists = false
+  for (const dir of allDirectories) {
+    const sidecar = await readRuntimeSidecar(dir)
+    if (!sidecar?.server_name && sidecar?.wrapper_path && configText?.includes(sidecar.wrapper_path)) {
+      bareOwnerExists = true
+      break
+    }
+  }
+  const inventory: AgentInventoryEntry[] = []
+  const capabilitiesByDirectory = new Map<string, Record<string, unknown> | undefined>()
+  const primaryChecksById = new Map<string, DoctorCheck>()
+  for (const dir of allDirectories) {
+    const identity = await readIdentity(dir)
+    const sidecar = await readRuntimeSidecar(dir)
+    const tombstone = await readAgentTombstone(dir)
+    const slug = sidecar?.server_name
+    const names = serverNamesFor(slug)
+    if (!identity?.api_key) {
+      inventory.push({
+        ...(slug ? { slug } : {}),
+        ...(tombstone?.agent_id ? { agentId: tombstone.agent_id } : {}),
+        directory: dir,
+        classification: tombstone ? 'retired' : 'orphaned',
+        checks: [],
+      })
+      continue
+    }
+    const wired = agentIsWired(configText, names, slug, identity, sidecar, dir === directory, bareOwnerExists)
+    const entry: AgentInventoryEntry = {
+      ...(slug ? { slug } : {}),
+      ...(identity.agent_id ? { agentId: identity.agent_id } : {}),
+      directory: dir,
+      classification: wired ? 'wired' : 'superseded',
+      checks: [],
+    }
+    if (wired) {
+      const result = await checksForAgent({ directory: dir, identity, sidecar }, input, deps)
+      entry.checks = result.checks
+      capabilitiesByDirectory.set(dir, result.signerCapabilities)
+    }
+    inventory.push(entry)
+  }
+
+  // Which agent does the flat `checks` array describe? An explicitly given
+  // --credentials-dir always wins. Otherwise it is the first WIRED agent —
+  // not merely the newest directory, because a newly created but unwired
+  // credential set would otherwise hijack the report and describe an agent
+  // the runtime is not even using (#1697).
+  const wiredDirectories = inventory
+    .filter((entry) => entry.classification === 'wired')
+    .map((entry) => entry.directory)
+  const primaryDirectory = input.credentialsDir
+    ? directory
+    : (wiredDirectories.includes(directory ?? '') ? directory : wiredDirectories[0] ?? directory)
+  if (primaryDirectory) {
+    const primaryEntry = inventory.find((entry) => entry.directory === primaryDirectory)
+    signerCapabilities = capabilitiesByDirectory.get(primaryDirectory)
+    for (const check of primaryEntry?.checks ?? []) primaryChecksById.set(check.id, check)
+  }
+
+  // ── The historical single-agent check list, for the PRIMARY directory ─────
+  // A single-agent install must read exactly as it did before (#1697 AC), so
+  // the flat `checks` array keeps its order and ids; `agents` is the new,
+  // additive per-agent shape.
+  if (!primaryDirectory) {
+    checks.push({
+      id: 'credentials',
+      label: 'Agent credentials',
+      ok: false,
+      detail: 'No agent credential directory with an identity.json under ~/.haven/agents.',
+      repair: `Run the full setup once: ${RERUN} --setup <token from the Haven dashboard>.`,
+    })
+  } else {
+    const primaryIdentity = await readIdentity(primaryDirectory)
+    const primarySidecar = await readRuntimeSidecar(primaryDirectory)
+    if (primaryChecksById.size === 0) {
+      // The primary directory is not wired (or has no key): run its checks
+      // anyway — the user pointed the doctor at this machine, and silence
+      // about the selected directory would be the old heuristic's failure.
+      const result = await checksForAgent(
+        { directory: primaryDirectory, identity: primaryIdentity, sidecar: primarySidecar }, input, deps,
+      )
+      signerCapabilities = result.signerCapabilities
+      for (const check of result.checks) primaryChecksById.set(check.id, check)
+    }
+    for (const id of ['credentials', 'signer_runtime']) {
+      const check = primaryChecksById.get(id)
+      if (check) checks.push(check)
+    }
+  }
+
+  if (configPath === null) {
+    checks.push({
+      id: 'runtime_config',
+      label: 'Runtime MCP config',
+      ok: true,
+      detail: `Runtime '${input.runtime}' has no file-based config the connector owns (CLI-managed) — skipping the file check.`,
+    })
+  } else if (configText === null) {
+    checks.push({
+      id: 'runtime_config',
+      label: 'Runtime MCP config',
+      ok: false,
+      detail: `No runtime config at ${configPath}.`,
+      repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}`,
+    })
+  } else {
+    const primaryIdentity = await readIdentity(primaryDirectory ?? '')
+    const primarySidecar = primaryDirectory ? await readRuntimeSidecar(primaryDirectory) : null
+    const hasHaven = primaryIdentity?.hosted_mcp_url
+      ? configText.includes(primaryIdentity.hosted_mcp_url)
+      : configText.includes('haven')
+    // The wrapper form never writes the package spec into the config; only
+    // the retired npx launch does — so the spec's presence IS the tell.
+    const signerViaNpx = configText.includes('@haven_ai/signer')
+    const wrapperReferenced = primarySidecar ? configText.includes(primarySidecar.wrapper_path) : false
+    const ok = hasHaven && !signerViaNpx && (primarySidecar ? wrapperReferenced : true)
+    checks.push({
+      id: 'runtime_config',
+      label: 'Runtime MCP config',
+      ok,
+      detail: ok
+        ? `Config at ${configPath} references the hosted server and the prepared signer wrapper.`
+        : signerViaNpx
+          ? `Config at ${configPath} still launches the signer via npx — the pre-#1586 shape that cannot start under a 120s startup timeout.`
+          : `Config at ${configPath} is missing the Haven entries${primarySidecar && !wrapperReferenced ? ' (or references a different signer wrapper)' : ''}.`,
+      ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}` }),
+    })
+  }
+
+  for (const id of ['hosted_mcp', 'identity_match']) {
+    const check = primaryChecksById.get(id)
+    if (check) checks.push(check)
+  }
+
+  // ── Superseded agents (#1688, now inventory-driven) ───────────────────────
+  // A re-run mints a NEW agent and retires nothing: the connector never
+  // deletes old directories, registration only collides on delegate address,
+  // and cancel deliberately refuses to auto-revoke. Net effect: an MCP host
+  // that started before the re-run keeps spending as the agent the user
+  // believes they replaced — silently, because its old key still resolves.
+  // The doctor reports; the user decides — connect never revokes or deletes.
+  const otherEntries = inventory.filter((entry) => entry.directory !== primaryDirectory)
+  if (otherEntries.length > 0) {
+    // Labels carry their SOURCE ENTRY (#1697 review, finding 3): resolving a
+    // label back to an entry by string prefix would attribute one agent's
+    // classification to another whenever one id is a prefix of the next
+    // (`agent-1` / `agent-10`), and the failure mode is telling the user to
+    // revoke the live agent.
+    const live: Array<{ label: string; entry: AgentInventoryEntry }> = []
+    const revoked: string[] = []
+    const unverifiable: string[] = []
+    const retired: string[] = []
+    for (const entry of otherEntries) {
+      const identity = await readIdentity(entry.directory)
+      const tombstone = await readAgentTombstone(entry.directory)
+      const otherAgent = identity?.agent_id ?? tombstone?.agent_id ?? basename(entry.directory)
+      const otherUrl = identity?.hosted_mcp_url
+        ?? (identity?.api_url ? `${identity.api_url}/mcp` : undefined)
+      if (!identity?.api_key || !otherUrl) {
+        if (tombstone) retired.push(`${otherAgent} (retired ${tombstone.retired_at})`)
+        else unverifiable.push(`${otherAgent} (no stored key/URL to probe)`)
+        continue
+      }
+      const suffix = tombstone ? ' [tombstoned — key material still present]' : ''
+      const probe = await (deps.probeHosted ?? probeHostedMcpTools)(identity.api_key, otherUrl, deps.fetch)
+      if (probe.status === 'ok') live.push({ label: `${otherAgent}${suffix}`, entry })
+      else if (probe.status === 'unauthorized') revoked.push(`${otherAgent}${suffix}`)
+      // network_error / bad_response: neither a false "still live" failure
+      // nor a false clean bill — a note, never a verdict.
+      else unverifiable.push(`${otherAgent} (${probe.status})${suffix}`)
+    }
+    const parts: string[] = []
+    if (live.length > 0) parts.push(`STILL SPEND-CAPABLE: ${live.map((item) => item.label).join(', ')}`)
+    if (revoked.length > 0) parts.push(`already revoked: ${revoked.join(', ')}`)
+    if (retired.length > 0) parts.push(`tombstoned (keys removed): ${retired.join(', ')}`)
+    if (unverifiable.length > 0) parts.push(`could not verify: ${unverifiable.join(', ')}`)
+    // #1697: a WIRED sibling is a legitimately live agent, not a superseded
+    // one — several agents may share a runtime now. Only unwired credential
+    // dirs make the check fail.
+    const supersededLive = live
+      .filter((item) => item.entry.classification !== 'wired')
+      .map((item) => item.label)
+    checks.push({
+      id: 'superseded_agents',
+      label: 'Superseded agent credentials',
+      ok: supersededLive.length === 0,
+      detail:
+        supersededLive.length > 0
+          ? `${otherEntries.length} other credential dir(s) found — ${parts.join('; ')}. A host started before ` +
+            'your latest setup keeps authenticating (and spending) as the old agent.'
+          : `${otherEntries.length} other credential dir(s) found — ${parts.join('; ')}.`,
+      ...(supersededLive.length > 0
+        ? {
+            repair:
+              `Revoke ${supersededLive.join(', ')} on the Haven agent page, then remove the old ` +
+              'director(y/ies) under ~/.haven/agents. Connect never revokes or deletes for you.',
+          }
+        : {}),
+    })
+  }
+
+  const signerProcess = primaryChecksById.get('signer_process')
+  if (signerProcess) checks.push(signerProcess)
+
+  // ── Restart still required? (informational, never fails the doctor) ───────
   const restart = restartRequiredForRuntime(input.runtime, deps.env)
   checks.push({
     id: 'restart',
@@ -404,12 +652,19 @@ export async function runDoctor(
       : 'No restart requirement known for this runtime.',
   })
 
+  // #1697: exit non-zero if ANY wired agent fails ANY check — not just the
+  // one the old heuristic happened to select.
+  const wiredOk = inventory
+    .filter((entry) => entry.classification === 'wired')
+    .every((entry) => entry.checks.every((check) => check.ok))
+
   return {
     version: 1,
-    ok: checks.every((check) => check.ok),
+    ok: checks.every((check) => check.ok) && wiredOk,
     runtime: input.runtime,
-    credentialDirectory: directory,
+    credentialDirectory: primaryDirectory,
     checks,
+    agents: inventory,
     ...(signerCapabilities ? { signerCapabilities } : {}),
   }
 }

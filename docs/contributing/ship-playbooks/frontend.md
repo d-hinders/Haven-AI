@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-08-15" # #1447: wire-type ratchet is a blocking frontend gate — import ApiSchema types rather than hand-rolling wire shapes
+last-verified: "2026-08-21" # #1738: full-page captures un-clip the shell and fail on a blank PNG — §4 re-read against the capture scripts
 ---
 
 # Frontend playbook
@@ -49,6 +49,8 @@ npm run screenshot -w packages/frontend -- --scenario=all             # every sc
 `connect-agent` captures step 4 at all three connection stages (`starting` → `slow` → `recovery`) at both viewports, writing `connect-agent-waiting-<stage>-<viewport>.png`. It pins the setup at `awaiting_connection` and drives Playwright's virtual clock past the staging bounds, so a three-minute state is reached in milliseconds. A scenario that cannot reach its state **fails the command** rather than writing fewer PNGs — a missing stage is the evidence gap, not a smaller run. Add new scenarios to the `SCENARIOS` registry in `scripts/screenshot.mjs`; their fixture contract is pinned by `src/__tests__/screenshot-fixture.test.ts`.
 
 **Two PNGs when a dialog scrolls.** An element screenshot captures only the visible box, so a dialog that caps its own height drops everything below the fold — and its rounded bottom edge makes the clipped capture look complete, which would have a reviewer judge a screen they have only partly seen. When a capture overflows, the run says so (`⚠ … had content BELOW THE FOLD`, with the pixel shortfall) and writes a second `…-full.png` at a viewport tall enough to show all of it. **Judge the content from the `-full` PNG; judge what is reachable without scrolling from the other** — the fold itself is often the finding.
+
+**A blank capture fails the run ([#1738](https://github.com/d-hinders/Haven-AI/issues/1738)).** The app shell is `h-screen` + `overflow-hidden` with `<main>` as its only scroller, so a naive `fullPage` capture paints one viewport and leaves a very long white tail — the PNG is the right size and looks fine. Route captures therefore un-clip the shell first (`scripts/full-page-capture.mjs`), then read the PNG back: a capture more than a viewport tall with nothing painted below the fold is **deleted** and fails the command, with the measured painted ratio in the message. This is not hypothetical — the committed `/design-system` baselines were 95% (desktop) and 97% (mobile) blank until that fix, so the pixel gate had been comparing white against white below the fold and the design-reviewer pass was reading empty pixels. If you see the failure, the usual cause is a layout change to the shell's overflow; do not work around it by capturing less.
 
 **If Chromium fails to launch** with an error naming a `chromium_headless_shell-<n>` path that does not exist, the cached browser build does not match the pinned Playwright version. Point `PLAYWRIGHT_CHROMIUM_PATH` at the Chromium that *is* installed rather than running `playwright install`:
 

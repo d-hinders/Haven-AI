@@ -46,6 +46,52 @@ const EAS_ABI = [
 
 const ZERO_BYTES32 = '0x' + '00'.repeat(32)
 
+/**
+ * How long to wait for the attestation to confirm before handing it off
+ * (#1556, disposition fixed by #1735).
+ *
+ * Bracketed, not round. The anchoring claim's stale window is 600 s
+ * (`claimForAnchoring`), and a wait that outlived it would let the retry
+ * sweep reclaim the passport while this call is still in flight — so the
+ * deadline must sit comfortably below it. 120 s is also many multiples of a
+ * single EAS `attest()` on 2 s Base blocks, so a healthy anchor never
+ * reaches it.
+ *
+ * The hybrid deploy's `HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS` is the same number
+ * from an independent derivation (#1722 bracketed it against the bump
+ * worker's 180 s stale threshold). Coincidence, not a shared constant — do
+ * not couple them.
+ */
+export const PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS = 120_000
+
+/**
+ * The attestation was broadcast but not confirmed within
+ * {@link PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS} (#1735).
+ *
+ * Deliberately distinct from a revert: nothing failed, the transaction may
+ * still mine, and its durable outbound record is intentionally left in
+ * `broadcast`. `issuePassport` records this as a retryable failure on the
+ * passport row, where the next sweep tick reaches #1043's receipt recovery
+ * with the tx hash `onBroadcast` already persisted.
+ */
+export class PassportAnchorUnconfirmedError extends Error {
+  constructor(
+    readonly txHash: string,
+    timeoutMs: number,
+  ) {
+    super(
+      `passport attestation not confirmed within ${timeoutMs}ms (tx ${txHash}) — ` +
+        'the transaction may still mine; its outbound record is left broadcast for receipt recovery (#1043)',
+    )
+    this.name = 'PassportAnchorUnconfirmedError'
+  }
+}
+
+/** ethers v6 rejects a timed-out `wait()` with `code: 'TIMEOUT'`. */
+function isWaitTimeout(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'TIMEOUT'
+}
+
 /** ABI-encode the claim in schema order. Exported for the encoding test. */
 export function encodeClaim(claim: PassportClaim): string {
   return AbiCoder.defaultAbiCoder().encode([...SCHEMA_TYPES], [
@@ -137,20 +183,53 @@ export const anchorOnChain: Anchor = async (
   // process dies here, the retry recovers this attestation from its receipt
   // instead of minting a second one.
   await onBroadcast?.(tx.hash)
-  // Bounded: the anchoring claim's stale window is 600s — an unbounded wait
-  // could outlive it and let another worker reclaim mid-flight. 120s < 600s.
-  // ethers v6 THROWS out of wait() on a mined-and-reverted tx (#1556 review:
-  // the post-wait status check alone was dead code for exactly the failure
-  // mode it named) — the catch is where a revert actually closes the record.
+  // Bounded: see PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS. ethers v6 THROWS out of
+  // wait() on a mined-and-reverted tx (#1556 review: the post-wait status
+  // check alone was dead code for exactly the failure mode it named) — the
+  // catch is where a revert actually closes the record. Since #1735 it also
+  // catches the deadline (`code: 'TIMEOUT'`), which is NOT a revert.
   let receipt
+  let waitError: unknown
   try {
-    receipt = await tx.wait(1, 120_000)
+    receipt = await tx.wait(1, PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS)
   } catch (err) {
-    await record.failed(`passport attestation reverted (tx ${tx.hash})`)
-    throw err
+    waitError = err
   }
-  if (!receipt || receipt.status !== 1) {
+  // NO RECEIPT IS NOT A REVERT (#1735). A wait timeout cancels nothing — the
+  // transaction stays in the mempool and may still mine — and #690 records
+  // that a lagging RPC can hand back a null receipt for a tx that confirmed.
+  //
+  // So the record is left `broadcast`, which is the only state that is TRUE
+  // here and the only one the bump worker's chain-first unmined scan will
+  // ever reconcile: it closes the row `mined` or `failed` from the receipt
+  // once the chain answers. Closing it `failed` now would assert a revert
+  // that did not happen, drop the row out of that scan, and leave the
+  // database permanently disagreeing with the chain.
+  //
+  // This is NOT the deploy's hand-off (#1722). `passport_attest` must never
+  // be RE-BROADCAST — a second attestation is a second real, revocable
+  // credential — and it must never be REPLACED either, even at the same
+  // nonce: a replacement mints a new tx hash, while #1043's recovery is keyed
+  // off the hash `onBroadcast` persisted above. The bump worker declines both
+  // for non-rebroadcast-safe submitters and alerts instead (#1735).
+  //
+  // The retry owner is #1043: `issuePassport` marks the passport row failed
+  // (retryable), and the next sweep tick re-reads THIS tx's receipt rather
+  // than minting a second attestation.
+  //
+  // KNOWN LIMIT of that owner, named rather than implied (#1745, found by
+  // #1735's review): the sweep re-mints when the receipt read returns null,
+  // and null means "pending OR dropped" — it presumes dropped, ~180 s after
+  // this broadcast. So a fee-stuck attest can still be duplicated by the
+  // PASSPORT-level retry. That race predates #1735 and is untouched by it;
+  // what #1735 removed is the second, independent route into the same state
+  // (the bump worker replacing this row out from under the stored hash).
+  if (!receipt && (!waitError || isWaitTimeout(waitError))) {
+    throw new PassportAnchorUnconfirmedError(tx.hash, PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS)
+  }
+  if (waitError || !receipt || receipt.status !== 1) {
     await record.failed(`passport attestation reverted (tx ${tx.hash})`)
+    if (waitError) throw waitError
     throw new Error(`passport attestation reverted (tx ${tx.hash})`)
   }
   await record.mined()
@@ -250,10 +329,11 @@ export class PassportRevokeUnconfirmedError extends Error {
   }
 }
 
-/** ethers v6 rejects a timed-out `wait()` with `code: 'TIMEOUT'`. */
-function isWaitTimeout(err: unknown): boolean {
-  return (err as { code?: unknown } | null)?.code === 'TIMEOUT'
-}
+// `isWaitTimeout` is defined once at the top of this file. #1742 introduced a
+// second copy here because #1735 had not landed yet; #1735 landed first, so
+// this one is gone and both halves share the anchor's definition. #1757 tracks
+// hoisting it out of this module entirely — it exists a third time, unexported,
+// in `rails/hybrid-provisioning.ts`.
 
 /** The one revoke request object — record and broadcast share it (#1556). */
 export function buildRevokeRequest(chainId: number, attestationUid: string) {

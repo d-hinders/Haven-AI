@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-07-13"
+last-verified: "2026-08-21" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate
 ---
 
 # Haven Design System
@@ -81,6 +81,34 @@ Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do
 Same rule as v1: **never repurpose a semantic color**.
 
 **Contrast guarantee:** every ink and semantic text token meets WCAG AA (≥4.5:1) against white, its own `-soft` background, and the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover). Guarded by `packages/frontend/src/__tests__/token-contrast.test.ts` — if you change a token, that test tells you whether it still clears the bar.
+
+### Opacity on a token colour ([#1708](https://github.com/d-hinders/Haven-AI/issues/1708))
+
+**Want a token at partial opacity? Use the Tailwind alias, never the arbitrary
+value.** `ring-brand/30`, `border-danger/40`, `bg-warning/10` — not
+`ring-[var(--v2-brand)]/30`.
+
+The arbitrary-value form does not merely look worse; it **compiles to nothing**.
+Tailwind cannot re-compose a colour whose value is a bare `var()`, so it drops
+the utility from the output with no error, no warning and no class. That is how
+68 focus rings across 39 files spent months setting a ring *width* with no ring
+*colour*, leaving `--tw-ring-color` at Tailwind's preflight default and
+rendering blue-500/50 instead of brand indigo.
+
+The mechanism: every `--v2-<name>: #RRGGBB` above is paired with a channel form
+`--v2-<name>-rgb: R G B`, and `tailwind.config.js` reads the channels through an
+`<alpha-value>` placeholder. One theme entry then serves both the solid
+(`bg-brand`) and the translucent (`ring-brand/30`) use. Two rules follow, and
+`src/__tests__/design-token-alpha.test.ts` enforces both against the **compiled
+CSS** — source-level checking cannot see this defect, which is the whole reason
+it survived 68 call-sites:
+
+- adding a colour means adding **both** forms — the hex stays, because the
+  contrast guarantee above is checked by parsing those hex values;
+- a theme colour is never a bare `var()`.
+
+A solid arbitrary value with **no** opacity modifier — `bg-[var(--v2-brand)]`,
+`text-[var(--v2-ink-2)]` — is still fine and still used widely.
 
 ### Chain identity
 
@@ -175,7 +203,7 @@ Do not use marketing hero typography for normal authenticated pages.
 Primary (`Button` `variant="primary"`):
 - `bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)]`
 - `shadow-[var(--v2-shadow-button)]`
-- focus ring: `ring-2 ring-[var(--v2-brand)]/30 ring-offset-2`
+- focus ring: `ring-2 ring-brand/30 ring-offset-2` (theme alias — see *Opacity on a token colour* below; the arbitrary-value form compiles to no ring colour at all)
 - Three sizes: `sm` (h‑9), `md` (h‑10), `lg` (h‑11)
 - Trailing arrow icon optional, slides 2px on hover via wrapper `group-hover:gap-2`
 
@@ -188,6 +216,28 @@ White‑on‑brand (used inside dark CTA band):
 - `bg-white/10 text-white border border-white/20 backdrop-blur` for secondary
 
 **No gradient buttons. No glow shadows.**
+
+**Tap targets ([#1726](https://github.com/d-hinders/Haven-AI/issues/1726)).** `sm` paints
+36px tall and `md` 40px — both under the ~44px usually cited as comfortable for touch.
+(Not an accessibility failure: WCAG 2.2 AA *Target Size (Minimum)* floors at 24px. It is
+mis-tap rate, and it bites hardest in row lists of destructive actions.) `Button` closes
+the gap without moving any pixels: `sm` and `md` carry a transparent pseudo-element that
+extends the **hit area** to 44px while the button still renders at its declared height.
+`lg` is already 44px and carries nothing.
+
+Consequences worth knowing:
+
+- **Do not "fix" this by raising `h-9`/`h-10`.** The compact sizes are compact on purpose
+  — tables, toolbars and row lists chose them for density — and changing them moves the
+  rhythm of every one of those surfaces and invalidates the `/design-system` baselines.
+- **The target grows vertically only.** An `sm` button's width already clears 44px at real
+  call sites; growing it sideways would let a button in a `gap-2` toolbar swallow taps
+  meant for its neighbour.
+- **Keep at least 8px between stacked controls.** The overhang is 4px per edge on `sm` and
+  2px on `md`, so at the 8px (`gap-2`) spacing this system typically uses between stacked
+  controls, adjacent targets meet but never overlap. Tighter than that and two buttons
+  fight over the same pixels — this is the one new constraint the mechanism introduces.
+- Choosing `size` therefore stays a **density** decision, not an ergonomics one.
 
 ### Cards (`Card`)
 

@@ -197,7 +197,7 @@ function FlowRow({
         ? 'bg-[var(--v2-success)] text-white'
         : 'bg-[var(--v2-brand)] text-white'
       : state === 'active'
-      ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] ring-2 ring-[var(--v2-brand)]/30'
+      ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] ring-2 ring-brand/30'
       : 'bg-[var(--v2-surface)] text-[var(--v2-ink-3)] border border-[var(--v2-border)]'
 
   return (

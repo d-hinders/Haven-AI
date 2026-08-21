@@ -508,6 +508,15 @@ export const SCENARIOS = {
     // real capture and its file size looks plausible. #1726's design review
     // caught exactly that: the whole Primitives section was white canvas.
     // An element capture sidesteps the cap entirely.
+    //
+    // No fixture overrides: `/design-system` renders static showcase markup, so
+    // the shared fixture is exactly right and this scenario has nothing special
+    // to say about the data. Stated explicitly rather than omitted, because
+    // `ScenarioShape` requires it — an absent `api` is indistinguishable from a
+    // forgotten one.
+    api() {
+      return undefined
+    },
     async run({ page, vp, shoot }) {
       await page.goto(`${BASE_URL}/design-system`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)

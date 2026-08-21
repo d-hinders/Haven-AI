@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-07-13"
+last-verified: "2026-08-21" # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate
 ---
 
 # Haven Design System
@@ -188,6 +188,28 @@ White‑on‑brand (used inside dark CTA band):
 - `bg-white/10 text-white border border-white/20 backdrop-blur` for secondary
 
 **No gradient buttons. No glow shadows.**
+
+**Tap targets ([#1726](https://github.com/d-hinders/Haven-AI/issues/1726)).** `sm` paints
+36px tall and `md` 40px — both under the ~44px usually cited as comfortable for touch.
+(Not an accessibility failure: WCAG 2.2 AA *Target Size (Minimum)* floors at 24px. It is
+mis-tap rate, and it bites hardest in row lists of destructive actions.) `Button` closes
+the gap without moving any pixels: `sm` and `md` carry a transparent pseudo-element that
+extends the **hit area** to 44px while the button still renders at its declared height.
+`lg` is already 44px and carries nothing.
+
+Consequences worth knowing:
+
+- **Do not "fix" this by raising `h-9`/`h-10`.** The compact sizes are compact on purpose
+  — tables, toolbars and row lists chose them for density — and changing them moves the
+  rhythm of every one of those surfaces and invalidates the `/design-system` baselines.
+- **The target grows vertically only.** An `sm` button's width already clears 44px at real
+  call sites; growing it sideways would let a button in a `gap-2` toolbar swallow taps
+  meant for its neighbour.
+- **Keep at least 8px between stacked controls.** The overhang is 4px per edge on `sm` and
+  2px on `md`, so at the 8px (`gap-2`) spacing this system typically uses between stacked
+  controls, adjacent targets meet but never overlap. Tighter than that and two buttons
+  fight over the same pixels — this is the one new constraint the mechanism introduces.
+- Choosing `size` therefore stays a **density** decision, not an ergonomics one.
 
 ### Cards (`Card`)
 

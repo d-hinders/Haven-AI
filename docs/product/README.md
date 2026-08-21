@@ -21,7 +21,7 @@ covers:
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-21" # #1726: the §8 "Known implementation gap" note on 36/40px Button sizes was stale once the hit area reached 44px — rewritten to point at the tap-target rule and to scope the manual check to non-Button controls. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven Product & UX Guide
@@ -274,7 +274,11 @@ At minimum:
 - Run `haven-doc-reviewer` when changed paths match any document's `covers:`
   mapping, and resolve stale claims before opening the PR.
 
-Known implementation gap: the shared `Button` primitive's common small/default
-sizes are 36px and 40px high. Until those controls or their hit areas are
-updated, verify mobile placement and spacing explicitly; do not treat the
-current dimensions as the target standard for primary or risk-bearing actions.
+The shared `Button` primitive's small and default sizes still *paint* 36px and
+40px high — deliberately, for density — but they no longer under-serve touch:
+since [#1726](https://github.com/d-hinders/Haven-AI/issues/1726) both extend an
+invisible hit area to 44px, so a `Button` meets the rule above whatever size you
+pick. See [design-system.md](./design-system.md) § Buttons → Tap targets for the
+mechanism and its one constraint (keep stacked controls ~8px apart, or two
+targets fight over the same pixels). Controls that are **not** a `Button` inherit
+nothing from this — verify their mobile placement and spacing explicitly.

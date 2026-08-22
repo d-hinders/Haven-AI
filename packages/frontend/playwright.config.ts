@@ -56,14 +56,45 @@ export default defineConfig({
       PORT: String(PORT),
     },
   },
+  // Both projects GATE on every frontend pull request (#1768). Before that,
+  // `chromium-mobile` existed but only a `workflow_dispatch` with
+  // `ui_suite=full` ever ran it, so no mobile viewport was exercised on a PR —
+  // which is a large part of why #1749 (primary navigation unreachable below
+  // `lg`) survived review.
+  //
+  // The two projects run DISJOINT spec sets, keyed on the `*.mobile.spec.ts`
+  // filename convention. That is deliberate, not an optimisation:
+  //
+  //   1. Specs that iterate viewports THEMSELVES must not be re-run under
+  //      device emulation. `design-system.visual.spec.ts` loops
+  //      `scripts/evidence-viewports.mjs` and writes baselines named
+  //      `design-system-{desktop,mobile}.png` with NO project suffix, captured
+  //      at deviceScaleFactor 1. Pixel 5 emulates DSF 3, so the same spec run
+  //      under `chromium-mobile` would compare 3x captures against 1x
+  //      baselines and fail for a reason unrelated to any real defect. (Today
+  //      `testIgnore` already keeps `*.visual.spec.ts` out unless
+  //      VISUAL_REGRESSION=1, and `test:visual` pins `--project=chromium-desktop`
+  //      — so this is defence in depth, not the only thing standing between us
+  //      and that failure.)
+  //   2. Running the whole desktop suite a second time under Pixel 5 would
+  //      roughly double `browser_smoke` wall time to re-assert behaviour that
+  //      is not viewport-dependent. The mobile risk is layout, hit-testing and
+  //      touch — write it into a `*.mobile.spec.ts` where it gates honestly,
+  //      rather than into a project that never runs (the #1768 trap) or into
+  //      the desktop project behind a `test.use({ viewport })` override (the
+  //      #1749 workaround, which yields no touch points and no mobile UA).
   projects: [
     {
       name: 'chromium-desktop',
       use: { ...devices['Desktop Chrome'] },
+      testIgnore: ['**/*.mobile.spec.ts'],
     },
     {
       name: 'chromium-mobile',
+      // Real device emulation — touch points, mobile UA, DSF 3 — not a bare
+      // viewport override. Anything touch-dependent is only provable here.
       use: { ...devices['Pixel 5'] },
+      testMatch: ['**/*.mobile.spec.ts'],
     },
   ],
 })

@@ -37,6 +37,21 @@ Run the matching items from the **Captain Self-Check Preflight** in [`../ai-agen
 
 Verify the change in the **browser**, or — when the browser path is unavailable/flaky — add a **named headless equivalent** (vitest) that covers the skipped animation, layout, routing, loading, or interaction risk. Include empty, loading, error, and success states when the screen can enter them; check mobile and desktop.
 
+**Which viewports actually gate ([#1768](https://github.com/d-hinders/Haven-AI/issues/1768)).** The *Frontend browser smoke* job runs **both** Playwright projects on every frontend PR, with no dispatch required:
+
+| Project | Emulation | Runs | Gates a PR |
+|---|---|---|---|
+| `chromium-desktop` | Desktop Chrome, 1280×720, mouse pointer | every `e2e/*.spec.ts` **except** `*.mobile.spec.ts` | yes |
+| `chromium-mobile` | **Pixel 5** — 393×851, touch pointer, mobile UA, DSF 3 | `e2e/*.mobile.spec.ts` only | yes |
+
+Plus the separate *Design visual regression* job, which pixel-compares `/design-system` at **1280** and **390** (`scripts/evidence-viewports.mjs`) — but under `chromium-desktop` at DSF 1, by setting the viewport inside the spec. That is a pixel gate, not a device gate: it sees layout, never touch or hit-testing.
+
+Before #1768, `chromium-mobile` existed but only a `workflow_dispatch` with `ui_suite=full` ever ran it — so **no mobile viewport gated anything**, which is a large part of why [#1749](https://github.com/d-hinders/Haven-AI/issues/1749) (primary navigation unopenable below `lg`) shipped. That input is now removed and both projects are unconditional.
+
+**Writing a mobile test:** name the file `*.mobile.spec.ts` and it runs under real Pixel 5 emulation. Do **not** reach for `test.use({ viewport: … })` inside a desktop spec — it narrows the window but leaves `maxTouchPoints` at 0, the pointer fine and the UA desktop, so touch and hit-testing behaviour is not actually covered. Conversely, keep viewport-independent behaviour out of `*.mobile.spec.ts`: the two projects run disjoint spec sets on purpose, and duplicating a spec buys nothing but CI minutes. `e2e/navigation.mobile.spec.ts` is the reference, including the meta-guard that fails if the project ever stops being device-emulated.
+
+Run them locally with `npm run test:e2e:mobile -w packages/frontend`, or both with `npm run test:e2e:gate -w packages/frontend` (exactly what CI runs).
+
 **Rendered-screen evidence is REQUIRED** for any diff that touches a rendered route or a shared UI primitive (`components/ui/*`, `components/haven/*`). Run `npm run screenshot -w packages/frontend -- <routes>` (see [#896](https://github.com/d-hinders/Haven-AI/issues/896)); it captures desktop (1280) + mobile (390) PNGs of `/design-system` plus the routes you pass, using a known auth/data fixture and the pre-installed browser. The fixture serves a deterministic **populated** dataset (a funded account, agents on both rails, transactions, a pending approval, contacts, agent activity and spend stats) so lists, tables and amounts render realistically — set `SCREENSHOT_FIXTURE=empty` when you specifically want empty states. The script also summarises any **console errors** per route; a red console means a fixture-shape gap or a real client bug — fix it before trusting the PNGs. **Attach the PNGs to the PR, or reference them in the Browser Verification section** — "browser or headless equivalent" is no longer sufficient on its own for a visual surface. A primitive change means shooting `/design-system` (where it's documented) *and* a route that consumes it. Screenshots live in the gitignored `.screenshots/`; the fixture is documented at the top of `scripts/screenshot.mjs`.
 
 **Surfaces no URL can reach — use a scenario ([#1409](https://github.com/d-hinders/Haven-AI/issues/1409)).** Route capture cannot see a screen that lives behind a multi-step dialog or a state machine that only advances on a timer; the connect-agent modal is both, which is why [#1399](https://github.com/d-hinders/Haven-AI/issues/1399) shipped with its rendered-evidence criterion unmet and its two review passes disagreeing about a layout question neither could see. A **scenario** drives the UI there and holds it at each state:

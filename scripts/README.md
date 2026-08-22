@@ -269,20 +269,47 @@ Only if the workflow is unavailable mid-incident and a release is urgent,
 publish by hand from a clean checkout of the merged commit — the same versions
 the workflow would have published. This path uses your own npm credentials
 (`npm login`) and **does not produce provenance** (provenance requires the CI
-OIDC flow), so prefer re-running the workflow whenever possible:
+OIDC flow), so prefer re-running the workflow whenever possible.
+
+It mirrors `publish.yml`'s build-and-publish step deliberately: the same five
+packages, the same dist-wipe, and the same build **order** — connect's tsup
+inlines `MCP_VERSION`, so building it before a fresh `mcp` bundles a stale one.
+
+Two things the workflow does that this path cannot, and one you must decide:
+you get no per-package summary table, no provenance, and **the tag is
+hardcoded below**. `publish.yml` derives it from the version (prerelease →
+`alpha`, stable → `latest`). Every release to date has been a prerelease, so
+`--tag alpha` is right today — but if you are hand-publishing the first
+**stable** release, change it to `--tag latest`, or `npm install` keeps
+resolving the old version with nothing reporting an error.
 
 ```sh
 npm ci
-rm -rf packages/{sdk,signer,mcp,connect}/dist
+rm -rf packages/{sdk,signer,mcp,connect,cli}/dist
 npm run build -w packages/sdk
 npm run build -w packages/signer
 npm run build -w packages/mcp
 npm run build -w packages/connect   # runs verify-connect-bundle.mjs
-npm publish -w packages/sdk     --tag alpha
-npm publish -w packages/signer  --tag alpha
-npm publish -w packages/mcp     --tag alpha
-npm publish -w packages/connect --tag alpha
+npm run build -w packages/cli
+for pkg in sdk signer mcp connect cli; do
+  npm publish -w "packages/$pkg" --tag alpha --access public
+done
 ```
+
+**Then verify on the registry, package by package.** This path prints no
+summary and does not stop on a partial failure, so a package that did not go
+out is silent:
+
+```sh
+for pkg in sdk signer mcp connect cli; do
+  npm view "@haven_ai/$pkg" dist-tags --json
+done
+```
+
+All five must show the new version on `alpha`, and `latest` must be unchanged
+for a prerelease. Anything missing is a partial publish — the state
+[#1159](https://github.com/d-hinders/Haven-AI/issues/1159) exists to surface,
+which this path cannot do for you.
 
 ### If verification fails
 

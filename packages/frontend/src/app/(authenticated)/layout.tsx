@@ -20,9 +20,26 @@ export default function AuthenticatedLayout({
     <ProtectedRoute>
       <OwnerDirectoryProvider>
         <ToastProvider>
+          {/*
+            Two deliberate departures from the one focus-ring treatment (#1746),
+            both because this control is unlike every other one:
+
+            1. `focus:`, not `focus-visible:`. The link is `sr-only` until
+               focused, so it is only ever reachable by keyboard — the two
+               selectors coincide here — and splitting the ring onto a different
+               selector from the dozen `focus:` layout utilities that reveal the
+               pill would leave one element with two focus states.
+            2. A WHITE ring, not brand. The ring sits on the `--v2-ink` pill, and
+               brand indigo on that fill measures 2.10:1 at /80 and only 2.58:1
+               at full opacity — it can never reach 3:1 on a dark surface (#1741).
+               White reaches 10.76:1. Same rule as CodeBlock on `--v2-surface-code`.
+
+            The real focus indicator here is the pill appearing at all (16.24:1
+            against the page); the ring is reinforcement on top of that.
+          */}
           <a
             href="#main-content"
-            className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[var(--v2-z-toast)] focus:rounded-md focus:bg-[var(--v2-ink)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-[var(--v2-shadow-popover)] focus:outline-none focus:ring-2 focus:ring-brand/30"
+            className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[var(--v2-z-toast)] focus:rounded-md focus:bg-[var(--v2-ink)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-[var(--v2-shadow-popover)] focus:outline-none focus:ring-2 focus:ring-white/80"
           >
             Skip to main content
           </a>

@@ -222,7 +222,7 @@ function ApprovalCard({
           <Card.Section className="pt-3 pb-3">
             <button
               type="button"
-              className="flex w-full items-center gap-1.5 text-left text-xs font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:ring-offset-1 rounded-sm"
+              className="flex w-full items-center gap-1.5 text-left text-xs font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 rounded-sm"
               aria-expanded={disclosureOpen}
               onClick={toggleDisclosure}
             >

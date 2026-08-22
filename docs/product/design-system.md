@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-08-22" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1767: § Buttons' Tap targets rule — the toggle is `top-3` (centred in the 56px band); the documented 14px clearance to `NetworkSwitcher` was true only at >=768px, because TopBar's `w-8` spacer was shrinkable and collapsed to 0 on phones, and three bullets now record that, how a neighbour is damaged without moving, and why the concentric `left-6` was measured and rejected. § Buttons re-read against Button.tsx, TopBar.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass
+last-verified: "2026-08-22" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1741/#1746: new "Focus rings" § under Accessibility — one treatment (focus-visible: + ring-2 + /80), the measured 3:1 rationale, and the dark-fill rule that a brand ring can never satisfy. § Buttons focus-ring line corrected to the shipped value and the § Inputs "one family … same focus ring" claim re-read against Input/Select/Textarea/Checkbox — it is now TRUE, having been false since the two families diverged. Nothing else re-verified in this pass # #1767: § Buttons' Tap targets rule — the toggle is `top-3` (centred in the 56px band); the documented 14px clearance to `NetworkSwitcher` was true only at >=768px, because TopBar's `w-8` spacer was shrinkable and collapsed to 0 on phones, and three bullets now record that, how a neighbour is damaged without moving, and why the concentric `left-6` was measured and rejected. § Buttons re-read against Button.tsx, TopBar.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass
 ---
 
 # Haven Design System
@@ -85,8 +85,8 @@ Same rule as v1: **never repurpose a semantic color**.
 ### Opacity on a token colour ([#1708](https://github.com/d-hinders/Haven-AI/issues/1708))
 
 **Want a token at partial opacity? Use the Tailwind alias, never the arbitrary
-value.** `ring-brand/30`, `border-danger/40`, `bg-warning/10` — not
-`ring-[var(--v2-brand)]/30`.
+value.** `ring-brand/80`, `border-danger/40`, `bg-warning/10` — not
+`ring-[var(--v2-brand)]/80`.
 
 The arbitrary-value form does not merely look worse; it **compiles to nothing**.
 Tailwind cannot re-compose a colour whose value is a bare `var()`, so it drops
@@ -98,7 +98,7 @@ rendering blue-500/50 instead of brand indigo.
 The mechanism: every `--v2-<name>: #RRGGBB` above is paired with a channel form
 `--v2-<name>-rgb: R G B`, and `tailwind.config.js` reads the channels through an
 `<alpha-value>` placeholder. One theme entry then serves both the solid
-(`bg-brand`) and the translucent (`ring-brand/30`) use. Two rules follow, and
+(`bg-brand`) and the translucent (`ring-brand/80`) use. Two rules follow, and
 `src/__tests__/design-token-alpha.test.ts` enforces both against the **compiled
 CSS** — source-level checking cannot see this defect, which is the whole reason
 it survived 68 call-sites:
@@ -227,7 +227,7 @@ Do not use marketing hero typography for normal authenticated pages.
 Primary (`Button` `variant="primary"`):
 - `bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)]`
 - `shadow-[var(--v2-shadow-button)]`
-- focus ring: `ring-2 ring-brand/30 ring-offset-2` (theme alias — see *Opacity on a token colour* below; the arbitrary-value form compiles to no ring colour at all)
+- focus ring: `focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2` — the one treatment, see *Focus rings* below
 - Three sizes: `sm` (h‑9), `md` (h‑10), `lg` (h‑11)
 - Trailing arrow icon optional, slides 2px on hover via wrapper `group-hover:gap-2`
 
@@ -480,6 +480,57 @@ Accessibility expectations for production primitives:
 - Tooltip triggers are keyboard focusable when the tooltip is needed for non-mouse users.
 - Loading regions that replace content use `role="status"`, `aria-busy`, and `aria-live`.
 - The authenticated shell includes a skip link to `main#main-content`.
+
+### Focus rings
+
+There is **one** focus-ring treatment ([#1746](https://github.com/d-hinders/Haven-AI/issues/1746)):
+
+```
+focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-<tone>/80
+```
+
+Three parts, each decided rather than inherited:
+
+- **`focus-visible:`, never `focus:`.** Form fields used to fire on mouse click
+  as well. Switching them costs nothing, and that was **measured in a real
+  browser rather than reasoned from the selector name**: in Chromium a
+  mouse-clicked `<input>`, `<textarea>` *and* `<select>` all match
+  `:focus-visible` and keep their ring, because the heuristic covers any control
+  that accepts keyboard input once focused — not only text entry. A
+  mouse-clicked `<button>`, measured the same way on the same page, does **not**
+  match and shows no ring, which is both the desired behaviour and the control
+  that proves the others were not a stuck keyboard modality. The heuristic is
+  UA-defined, so a browser that declined to match on a clicked select would only
+  drop a ring on mouse click — never a keyboard regression.
+- **`ring-2`, and `/80` opacity.** `/80` is the lowest 10%-step alpha at which
+  every ring/background pair in the product clears WCAG's **3:1** non-text
+  contrast bar ([1.4.11](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast),
+  [2.4.11](https://www.w3.org/WAI/WCAG22/Understanding/focus-appearance)). The
+  binding pair is `ring-success` on `--v2-success-soft`: 2.99:1 at `/70`, 3.58:1
+  at `/80`. The old values were far under — `ring-brand/30` is **1.60:1** on
+  white and the form family's `/20` was **1.36:1**
+  ([#1741](https://github.com/d-hinders/Haven-AI/issues/1741)).
+- **Tone follows the surface, not the brand.** On a light surface the ring is
+  `brand` (or `danger` on a destructive control). **On a dark fill it is
+  `white`** — brand indigo reaches only 2.99:1 on `--v2-surface-code` and 2.58:1
+  on `--v2-ink` at *full* opacity, so no alpha can rescue it. That is why
+  `CodeBlock`'s copy button and the shell's skip-link pill use `ring-white/80`.
+
+**Offset is contextual, its size is not.** Use `focus-visible:ring-offset-2
+focus-visible:ring-offset-[var(--v2-bg)]` whenever the ring would otherwise abut
+the control's *own* fill — on a brand-filled button an un-offset brand ring
+composites brand-over-brand and measures ~1.0:1, i.e. invisible at any opacity.
+Full-bleed rows use `ring-inset` instead, because an outset ring would be
+clipped. Where an offset is used at all it is always `-2`.
+
+`Input`, `Select`, `Textarea` and `Checkbox` share this ring, so the "one family"
+claim under *Inputs* is now true on focus ring as well as on radius and padding.
+
+`src/__tests__/focus-ring.test.ts` enforces all of the above against the
+**compiled** CSS and re-derives every ratio from `globals.css` — a class-string
+check cannot see a ring that compiles to nothing, which is how both
+`ring-[var(--v2-brand)]/30` (#1708) and `ring-current/30` (#1741) rendered
+Tailwind's default blue for months.
 
 ---
 

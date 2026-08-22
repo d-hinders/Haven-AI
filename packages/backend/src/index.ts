@@ -34,6 +34,8 @@ import {
   classifyAnchorTxLiveness,
   setRevoker,
   revokeOnChain,
+  setRevocationProbe,
+  readRevocationAnchor,
   setReceiptSigningKey,
   passportReadiness,
   logPassportReadiness,
@@ -215,6 +217,13 @@ setAnchorRecovery(recoverAnchorFromReceipt)
 // minting a second live credential.
 setAnchorLiveness(classifyAnchorTxLiveness)
 setRevoker(revokeOnChain)
+// A revoke that mines after its 120 s wait expired has no other way to close
+// (#1758): EAS reverts every later revoke of the same UID, so the only fresh
+// attempt that could observe success can never succeed. This probe reads the
+// attestation's revoked bit as of a settled block instead, which converges the
+// row without broadcasting anything. Unwired, it degrades to the pre-#1758
+// behaviour — a stuck `pending` row, never a wrong `confirmed` one.
+setRevocationProbe(readRevocationAnchor)
 // Receipts the merchant-facing verifier hands out (#974) are signed with a
 // DEDICATED key, never the relayer's: the relayer pays gas for user-authorised
 // transactions, while this one signs public assertions and its address is

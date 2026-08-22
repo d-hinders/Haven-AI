@@ -49,7 +49,17 @@ export {
 
 // The real on-chain anchor. Imported here (not inside issuance.ts) so the
 // issuance state machine stays testable without ethers or a relayer.
-export { anchorOnChain, revokeOnChain, recoverAnchorFromReceipt, classifyAnchorTxLiveness, buildAttestCall, buildRevokeCall, encodeClaim } from './attestation.js'
+export {
+  anchorOnChain,
+  revokeOnChain,
+  recoverAnchorFromReceipt,
+  classifyAnchorTxLiveness,
+  readRevocationAnchor,
+  buildAttestCall,
+  buildRevokeCall,
+  encodeClaim,
+  PASSPORT_REVOKE_SUBMITTER,
+} from './attestation.js'
 
 // The merchant-facing verifier (#974). Haven's DB is the authority here; the
 // attestation UID rides along as an evidence pointer, never as the decision.
@@ -98,10 +108,14 @@ export {
   listStuckRevocations,
   revocationBackoffSeconds,
   setRevoker,
+  setRevocationProbe,
   type Standing,
   type AnchorState,
   type PassportStanding,
   type Revoker,
+  type RevocationAnchorProbe,
+  type RevocationAnchorReading,
+  type RevocationAnchorState,
 } from './revocation.js'
 
 // x402 passport-reference delivery (#976, `X-Agent-Passport` header) — #998

@@ -487,7 +487,10 @@ export default function WalletButton() {
             <button
               type="button"
               onClick={openConnectModal}
-              className="px-4 py-2 rounded-md text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white shadow-[var(--v2-shadow-button)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+              // Offset against the page, as ui/Button does: on a brand-FILLED
+              // control an un-offset brand ring composites brand-over-brand and
+              // measures ~1.0:1 — invisible at any opacity (#1741).
+              className="px-4 py-2 rounded-md text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white shadow-[var(--v2-shadow-button)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
             >
               Connect wallet
             </button>

@@ -249,6 +249,18 @@ therefore pinned by a test (`scripts/docs/coupling-gate.test.mjs`): a bump-only
 diff with no shard must still fail the strict gate. Deleting CASP's
 published-package coverage fails that test rather than quietly going green.
 
+Since [#1739](https://github.com/d-hinders/Haven-AI/issues/1739) that dependency
+is also **deliberate rather than incidental**: `casp-risk-guardrails.md` now
+covers `scripts/release-bump.mjs` and `.github/workflows/publish.yml` outright,
+so the release path is named in the list that guarantees it. Note what that does
+and does not cost — `covers:` gates *edits to* the release plumbing, not release
+cuts, so **a release PR is unaffected by it**; a PR that changes the bump script
+or the publish workflow now owes a shard saying which of {version fields,
+cross-package pins, connect's pinned `sdkVersion`/`signerVersion`, dist-tag
+selection, publish trigger and ref, build order, credential path} moved. And the
+shard stays hand-written **always**: the gate excuses a doc on file presence, so
+a generated shard would excuse it with content nobody read.
+
 **The verification is independent of the write, and this is load-bearing.** A
 script that writes a value and then checks it wrote that value has built a guard
 that cannot fail. So the check is never told the version the run computed: it

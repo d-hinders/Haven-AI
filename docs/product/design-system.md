@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-08-22" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1741/#1746: new "Focus rings" § under Accessibility — one treatment (focus-visible: + ring-2 + /80), the measured 3:1 rationale, and the dark-fill rule that a brand ring can never satisfy. § Buttons focus-ring line corrected to the shipped value and the § Inputs "one family … same focus ring" claim re-read against Input/Select/Textarea/Checkbox — it is now TRUE, having been false since the two families diverged. Nothing else re-verified in this pass # #1767: § Buttons' Tap targets rule — the toggle is `top-3` (centred in the 56px band); the documented 14px clearance to `NetworkSwitcher` was true only at >=768px, because TopBar's `w-8` spacer was shrinkable and collapsed to 0 on phones, and three bullets now record that, how a neighbour is damaged without moving, and why the concentric `left-6` was measured and rejected. § Buttons re-read against Button.tsx, TopBar.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass
+last-verified: "2026-08-22" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1741/#1746: new "Focus rings" § under Accessibility — one treatment (focus-visible: + ring-2 + /80), the measured 3:1 rationale, and the dark-fill rule that a brand ring can never satisfy. § Buttons focus-ring line corrected to the shipped value and the § Inputs "one family … same focus ring" claim re-read against Input/Select/Textarea/Checkbox — it is now TRUE, having been false since the two families diverged. Nothing else re-verified in this pass # #1767: § Buttons' Tap targets rule — the toggle is `top-3` (centred in the 56px band); the documented 14px clearance to `NetworkSwitcher` was true only at >=768px, because TopBar's `w-8` spacer was shrinkable and collapsed to 0 on phones, and three bullets now record that, how a neighbour is damaged without moving, and why the concentric `left-6` was measured and rejected. § Buttons re-read against Button.tsx, TopBar.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1817/#1809: § Buttons gains the previously undocumented Danger variant and the rule that ring TONE lives per-variant in VARIANT_CLASS while ring GEOMETRY stays in the base string — the co-location is what makes the fill/ring pair checkable at all. § Focus rings' offset paragraph gains the inversion it did not record: fixing a solid control's tone makes its offset MORE load-bearing, not less (danger-on-danger un-offset is 1.00:1, against 1.08:1 when it wrongly wore brand). § Buttons and § Focus rings re-read against Button.tsx and globals.css; the token tables and everything else NOT re-verified in this pass
 ---
 
 # Haven Design System
@@ -234,6 +234,21 @@ Primary (`Button` `variant="primary"`):
 Ghost (`variant="ghost"`):
 - `bg-white text-[var(--v2-ink)] border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]`
 - Same sizes, same focus ring
+
+Danger (`variant="danger"`, used for destructive confirmations — the approval
+queue's reject, agent revoke/remove, delete contact):
+- `bg-[var(--v2-danger)] text-white hover:bg-[var(--v2-danger)]/90 shadow-[var(--v2-shadow-button)]`
+- focus ring `focus-visible:ring-danger/80` — its own tone, per *Focus rings* below
+- Same sizes
+
+**Ring tone lives with the fill ([#1817](https://github.com/d-hinders/Haven-AI/issues/1817)).**
+The ring's *geometry* (`ring-2`, `ring-offset-2`, the offset colour) is uniform and lives in
+`Button`'s base class string; its *colour* lives per-variant in `VARIANT_CLASS`, next to the
+fill it has to agree with. That is not a stylistic preference — it is what makes the pair
+**checkable**. While the colour sat in the base string, `variant="danger"` wore `ring-brand/80`
+across four destructive confirmations, and no guard could see it: a per-class-string rule
+cannot pair a fill in one declaration with a ring in another. Do not consolidate the three
+repeated `ring-brand/80` values back into the base string to deduplicate them.
 
 White‑on‑brand (used inside dark CTA band):
 - `bg-white text-[var(--v2-ink)] hover:bg-white/95` for primary
@@ -522,6 +537,16 @@ the control's *own* fill — on a brand-filled button an un-offset brand ring
 composites brand-over-brand and measures ~1.0:1, i.e. invisible at any opacity.
 Full-bleed rows use `ring-inset` instead, because an outset ring would be
 clipped. Where an offset is used at all it is always `-2`.
+
+The rule bites hardest exactly where the tone rule has just been satisfied, and
+that is worth stating because it reads as a paradox. Getting a **solid**
+control's ring tone right puts the ring in its fill's own hue, so an un-offset
+ring would paint the fill onto itself: `Button variant="danger"` un-offset now
+measures **1.00:1**, against 1.08:1 back when it wrongly wore brand. Correcting
+the tone made the offset load-bearing rather than merely tidy. What ships is
+legible because of the offset — the ring lands on the page at 4.64:1 with a
+white moat reading 6.57:1 against the fill. **So never copy a tone fix without
+its offset**, and never drop an offset on the grounds that the tones now match.
 
 `Input`, `Select`, `Textarea` and `Checkbox` share this ring, so the "one family"
 claim under *Inputs* is now true on focus ring as well as on radius and padding.

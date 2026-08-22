@@ -199,6 +199,75 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(second).toMatchObject({ status: 'awaiting_connection' })
     })
 
+    it('serves a safe WITHOUT chain_id for the unresolved-chain capture (#1844)', () => {
+      // The capture's whole claim is that the modal reached the fallback path
+      // through the wire, not through a hand-edited component. That only holds
+      // if the served safe genuinely lacks `chain_id` — a scenario that quietly
+      // kept the field would shoot the resolved screen under the unresolved
+      // filename, which is exactly the confidently-wrong-evidence shape #1800
+      // exists to prevent.
+      const unresolved = (SCENARIOS as Record<string, ScenarioShape>)['add-funds-unresolved-chain']
+      const me = unresolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
+      const list = unresolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
+      for (const { safes } of [me, list]) {
+        expect(safes).toHaveLength(1)
+        expect(safes[0]).not.toHaveProperty('chain_id')
+        // Still a real, addressable safe — the hazard is a MISSING chain beside
+        // a PRESENT address, so an empty safe would prove something else.
+        expect(safes[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(safes[0].id).toBe(FIXTURE_SAFE_ID)
+        expect(safes[0]).not.toHaveProperty('account_type')
+      }
+      expect(unresolved.api('/agents', 'GET')).toBeUndefined()
+    })
+
+    it('keeps the resolved add-funds capture on the shared chain_id (#1844)', () => {
+      // The pair is only evidence about the CHAIN if the chain is the only
+      // thing that differs. The resolved half must therefore still carry
+      // chain_id 84532 — the shared fixture's — while sharing its counterpart's
+      // rail override (dropping `account_type`, which exists purely so the hero
+      // renders its action buttons instead of the passkey-on-another-device
+      // notice).
+      const resolved = (SCENARIOS as Record<string, ScenarioShape>)['add-funds']
+      const me = resolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
+      expect(me.safes).toHaveLength(1)
+      expect(me.safes[0].chain_id).toBe(84532)
+      expect(me.safes[0]).not.toHaveProperty('account_type')
+      // Both safe endpoints must agree — a fixture where one says 84532 and the
+      // other says nothing is a trap for the next scenario that reads the other.
+      const list = resolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
+      expect(list.safes[0].chain_id).toBe(84532)
+      expect(resolved.api('/agents', 'GET')).toBeUndefined()
+    })
+
+    it('serves the receive-funds pair differing by chain_id and nothing else (#1852)', () => {
+      // Same contract as the #1844 pair above, asserted for the receive
+      // surface. The pair is only evidence about the CHAIN if the chain is the
+      // only thing that differs — and the unresolved capture only proves
+      // suppression if its safe genuinely lacks `chain_id` on BOTH endpoints.
+      const resolved = (SCENARIOS as Record<string, ScenarioShape>)['receive-funds']
+      const unresolved = (SCENARIOS as Record<string, ScenarioShape>)['receive-funds-unresolved-chain']
+
+      for (const endpoint of ['/auth/me', '/user/safes']) {
+        const r = resolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
+        const u = unresolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
+        expect(r.safes).toHaveLength(1)
+        expect(u.safes).toHaveLength(1)
+        expect(r.safes[0].chain_id).toBe(84532)
+        expect(u.safes[0]).not.toHaveProperty('chain_id')
+        // A MISSING chain beside a PRESENT address is the hazard; an empty safe
+        // would prove something else entirely.
+        expect(u.safes[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(u.safes[0].id).toBe(FIXTURE_SAFE_ID)
+        // The rail override is the ONLY other difference from the shared
+        // fixture, and both halves carry it, so `chain_id` is the sole variable.
+        expect(r.safes[0]).not.toHaveProperty('account_type')
+        expect(u.safes[0]).not.toHaveProperty('account_type')
+      }
+      expect(resolved.api('/agents', 'GET')).toBeUndefined()
+      expect(unresolved.api('/agents', 'GET')).toBeUndefined()
+    })
+
     it('answers the setup CREATE that the shared fixture does not key', () => {
       // Without this the modal's create step falls into the empty fallback and
       // never reaches step 4 — the capture would silently shoot the wrong screen.

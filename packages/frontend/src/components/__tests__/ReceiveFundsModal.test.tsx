@@ -16,6 +16,31 @@ import ReceiveFundsModal from '@/components/ReceiveFundsModal'
 import ComingSoonModal from '@/components/ComingSoonModal'
 import AddFundsModal from '@/components/AddFundsModal'
 
+/**
+ * Every text node under `el`, joined with a space.
+ *
+ * NOT `el.textContent`, and the difference is load-bearing. `textContent`
+ * concatenates across element boundaries with no separator, so a chain name at
+ * the end of one element and the next element's copy fuse into one word:
+ * "Probably Base" + "We can't confirm…" reads as `…ProbablyBaseWe…`, where
+ * `\bBase\b` has no boundary to match. The M4 mutation in this suite's battery
+ * did exactly that and SURVIVED against a `textContent` scan — a negative
+ * assertion that could not fail, which is the defect #1844 warns about seen
+ * from the other side (there a loose matcher fired on unrelated copy; here a
+ * strict one could not fire at all).
+ *
+ * Joining text nodes restores a boundary at every element edge while leaving
+ * each node intact, so "Based" stays one word and does not match `\bBase\b`.
+ */
+function textNodesJoined(el: HTMLElement): string {
+  const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  const parts: string[] = []
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    parts.push(node.textContent ?? '')
+  }
+  return parts.join(' ')
+}
+
 const SAFE: UserSafe = {
   id: 'safe-id',
   safe_address: '0xa0e99A227fc546017Fd68D49711C1857208F0eB9',
@@ -60,6 +85,13 @@ describe('ReceiveFundsModal', () => {
     expect(screen.getByText('Use the Base network.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'View on explorer' })).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
+
+    // #1852 — the PAIRED half of the unresolved-state negatives below. Without
+    // this line, a mutation that renders the refusal unconditionally would still
+    // satisfy every assertion in the unresolved tests. It is what makes those
+    // absences mean "suppressed", not "never built".
+    expect(screen.queryByRole('button', { name: 'Refresh page' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/can't confirm which network/)).not.toBeInTheDocument()
   })
 
   it('copies the receive address and can reveal a QR code', async () => {
@@ -74,6 +106,68 @@ describe('ReceiveFundsModal', () => {
 
     await waitFor(() => {
       expect(screen.getByAltText('QR code for Based on Base')).toBeInTheDocument()
+    })
+  })
+
+  /**
+   * #1852 — an unresolved chain must degrade, not crash, and must name no
+   * network when it does.
+   *
+   * Two shapes, asserted identically because they ARE the same condition from
+   * the user's side: `chain_id` absent, and `chain_id` present but outside the
+   * frontend registry. `getChainConfig` threw for both.
+   *
+   * On the network negative: `\bBase\b`, case-sensitive, NOT `/Base/i`. The
+   * fixture's own account name is "Based", and this suite renders `AddFundsModal`
+   * with its "Coinbase" copy — a loose `/Base/i` matches both and would go red
+   * on unrelated text, recording a pass for something it never tested (#1844's
+   * mutation caught exactly that). Everything else here is role-based rather
+   * than a text scan, for the same reason.
+   */
+  describe.each([
+    ['a chain_id that is absent', { ...SAFE, chain_id: undefined as unknown as number }],
+    ['a chain_id that is present but unregistered', { ...SAFE, chain_id: 999_999 }],
+  ])('with %s', (_label, unresolvedSafe: UserSafe) => {
+    it('renders without throwing and refuses to name a network or reveal an address', () => {
+      // A1 — does not throw. Today's code takes the whole screen down through
+      // the error boundary here; the throw is a distinguishable failure from an
+      // assertion failing, which is what the issue asks to be checked.
+      expect(() =>
+        render(<ReceiveFundsModal open safe={unresolvedSafe} onClose={vi.fn()} />),
+      ).not.toThrow()
+
+      const dialog = screen.getByRole('dialog')
+
+      // A2 — the dialog is actually on screen, so the negatives below are about
+      // a rendered refusal and not about an empty tree.
+      expect(screen.getByRole('heading', { name: 'Receive funds' })).toBeInTheDocument()
+
+      // A3 — no network named anywhere in the dialog, word-anchored, over
+      // text nodes rather than concatenated `textContent` (see the helper).
+      const words = textNodesJoined(dialog)
+      expect(words).not.toMatch(/\bBase\b/)
+      expect(words).not.toMatch(/\bSepolia\b/)
+      // …and the fixture name is still there, proving the anchor is doing work
+      // rather than the string being empty: "Based" must NOT trip `\bBase\b`.
+      expect(words).toMatch(/\bBased\b/)
+
+      // A4 — no address, in any of the four ways this screen offers one.
+      expect(screen.queryByText(SAFE.safe_address)).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Copy address' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Show QR code' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'View on explorer' })).not.toBeInTheDocument()
+
+      // A5 — no token list and no send instructions.
+      expect(screen.queryByText('Before you send')).not.toBeInTheDocument()
+      expect(screen.queryByText('USDC')).not.toBeInTheDocument()
+
+      // A6 — it says so, and offers the one honest next action.
+      expect(screen.getByText(/can't confirm which network this account uses/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Refresh page' })).toBeInTheDocument()
+
+      // A7 — the account is still identified. Deliberate: the refusal has to be
+      // about something, and the name is true on every chain.
+      expect(screen.getByText('Based')).toBeInTheDocument()
     })
   })
 })

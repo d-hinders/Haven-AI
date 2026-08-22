@@ -173,6 +173,56 @@ export async function findOutboundTxByHash(
   return rows[0] ?? null
 }
 
+/**
+ * The transaction that carried one exact payload, newest-useful first (#1758).
+ *
+ * The passport revoke's convergence path needs an EVIDENCE POINTER: migration
+ * 049 refuses `revocation_status = 'confirmed'` without a
+ * `revocation_tx_hash`, so "the chain says this UID is revoked" is not by
+ * itself a representable conclusion. This is where the hash comes from.
+ *
+ * Keyed on the CALLDATA rather than on an agent id, because `outbound_txs`
+ * deliberately knows nothing about agents — the revoke's calldata encodes the
+ * attestation UID, so it identifies the intent exactly without inventing a
+ * join. `to_address` is not in the predicate: the same submitter on the same
+ * chain has one EAS deployment, and adding it would only let a lowercase
+ * mismatch silently drop the row.
+ *
+ * `status = 'mined'` sorts FIRST and that ordering is the whole point.
+ * `markOutboundTxMined` is called only after a status-1 receipt read (see
+ * `outbound-bump-worker.ts`), so a mined row is a transaction PROVEN to have
+ * succeeded. A `broadcast` row is weaker — it says only "we sent this" — and
+ * is accepted second, for the window between the transaction mining and the
+ * bump worker's next scan closing the row. `failed` and `replaced` rows are
+ * excluded outright: a reverted or superseded transaction is precisely the
+ * hash we must not record as the one that did the work.
+ *
+ * No index backs this, for the same reason `FIND_OUTBOUND_TX_BY_HASH_SQL` has
+ * none: the only caller is a cold recovery path that runs at most once per
+ * stuck revoke per backoff tick, and a migration for it would gate this fix on
+ * CODEOWNERS review. Add the index when a hot path wants the read.
+ */
+export const FIND_OUTBOUND_EVIDENCE_TX_HASH_SQL = `SELECT tx_hash FROM outbound_txs
+   WHERE chain_id = $1 AND submitter = $2 AND data = $3
+     AND tx_hash IS NOT NULL
+     AND status IN ('mined', 'broadcast')
+   ORDER BY (status = 'mined') DESC, created_at DESC, id
+   LIMIT 1`
+
+export async function findOutboundEvidenceTxHash(
+  chainId: number,
+  submitter: string,
+  data: string,
+  db: Executor = pool,
+): Promise<string | null> {
+  const { rows } = await db.query<{ tx_hash: string }>(FIND_OUTBOUND_EVIDENCE_TX_HASH_SQL, [
+    chainId,
+    submitter,
+    data.toLowerCase(),
+  ])
+  return rows[0]?.tx_hash ?? null
+}
+
 export async function enqueueOutboundTx(
   params: {
     chainId: number

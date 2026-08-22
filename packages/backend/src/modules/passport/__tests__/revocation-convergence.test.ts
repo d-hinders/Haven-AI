@@ -39,11 +39,14 @@ import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import * as repo from '../../../infra/repositories/agent-passports.js'
 import {
+  passportStanding,
   reconcileRevocation,
   revocationBackoffSeconds,
   setRevoker,
+  setRevocationProbe,
   listStuckRevocations,
 } from '../revocation.js'
+import type { RevocationAnchorReading } from '../revocation.js'
 
 const CHAIN = 84532
 const DELEGATE = '0x' + 'a'.repeat(40)
@@ -113,17 +116,28 @@ async function readPassport(agentId: string) {
   return row
 }
 
-describeDb('#1758 — the revoke that mined too late, characterized on real Postgres', () => {
+/**
+ * The pre-#1758 behaviour, which is now what happens when NO probe is wired.
+ *
+ * These assertions were the characterization commit and they still hold
+ * verbatim — deliberately. The fix adds a way OUT of the stuck state; it does
+ * not change what happens without one. An unwired, throwing or unreadable
+ * probe leaves this module doing exactly what it did before, which is why the
+ * probe can only ever remove a stuck row and never create a wrong one.
+ */
+describeDb('#1758 — the revoke that mined too late, with no probe wired', () => {
   beforeAll(async () => {
     await initDbHarness()
   })
   beforeEach(async () => {
     await resetDb()
     setRevoker(null)
+    setRevocationProbe(null)
     process.env.AGENT_PASSPORT_SCHEMA_UID_84532 = UID
   })
   afterEach(() => {
     setRevoker(null)
+    setRevocationProbe(null)
     vi.restoreAllMocks()
   })
 
@@ -213,16 +227,168 @@ describeDb('#1758 — the revoke that mined too late, characterized on real Post
   })
 })
 
-describe('#1758 — the residual is PERMANENT, not merely unresolved', () => {
-  it('markRevocationConfirmed is reachable only from a fresh successful revoke', async () => {
-    // A source assertion, and the reason the state above cannot self-heal: the
-    // one call site sits after `await revokerImpl(...)` resolves, and once the
-    // UID is revoked on-chain that call can never resolve again.
+describeDb('#1758 — convergence from the chain, on real Postgres', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+    setRevoker(null)
+    setRevocationProbe(null)
+    process.env.AGENT_PASSPORT_SCHEMA_UID_84532 = UID
+  })
+  afterEach(() => {
+    setRevoker(null)
+    setRevocationProbe(null)
+    vi.restoreAllMocks()
+  })
+
+  /** The chain's answer, mocked — this module owns the state machine, not EAS. */
+  function probeReturning(reading: RevocationAnchorReading) {
+    const probe = vi.fn(async () => reading)
+    setRevocationProbe(probe)
+    return probe
+  }
+
+  it('ACCEPTANCE: the revoke that mined too late converges on the next tick, without broadcasting', async () => {
+    const agentId = await seedRevokedAgentWithAnchoredPassport()
+    const revoker = vi.fn(async () => {
+      throw alreadyRevoked()
+    })
+    setRevoker(revoker)
+    probeReturning({ state: 'revoked', txHash: REVOKE_TX })
+
+    await makeDue(agentId)
+    expect(await reconcileRevocation(agentId)).toBe('revoked_onchain')
+
+    const row = await readPassport(agentId)
+    expect(row.revocation_status).toBe('confirmed')
+    // The evidence pointer migration 049 requires — the transaction that did it.
+    expect(row.revocation_tx_hash).toBe(REVOKE_TX)
+    expect(row.revocation_confirmed_at).not.toBeNull()
+    expect(row.revocation_last_error).toBeNull()
+    expect(row.revocation_next_attempt_at).toBeNull()
+    // No gas: the doomed transaction is not sent at all, rather than sent and
+    // then reinterpreted after it reverts.
+    expect(revoker).not.toHaveBeenCalled()
+  })
+
+  it('the false alarm CLEARS, and the row leaves the queue', async () => {
+    const agentId = await seedRevokedAgentWithAnchoredPassport()
+    probeReturning({ state: 'revoked', txHash: REVOKE_TX })
+    await makeDue(agentId)
+    await reconcileRevocation(agentId)
+
+    await db.query(
+      `UPDATE agent_passports SET revocation_requested_at = NOW() - INTERVAL '2 hours'
+        WHERE agent_id = $1`,
+      [agentId],
+    )
+    expect((await listStuckRevocations(3600)).map((r) => r.agent_id)).not.toContain(agentId)
+    expect((await repo.listRevocationsDue(50)).map((r) => r.agent_id)).not.toContain(agentId)
+  })
+
+  it('the merchant-facing anchor stops lagging', async () => {
+    // What the divergence actually looked like from outside: `chainLagging`
+    // true forever for an agent whose attestation was already dead.
+    const agentId = await seedRevokedAgentWithAnchoredPassport()
+    probeReturning({ state: 'revoked', txHash: REVOKE_TX })
+    await makeDue(agentId)
+    await reconcileRevocation(agentId)
+
+    const standing = await passportStanding(agentId)
+    expect(standing.standing).toBe('revoked')
+    expect(standing.anchor).toBe('revoked_onchain')
+    expect(standing.chainLagging).toBe(false)
+  })
+
+  it('a LIVE attestation still gets its revoke — the probe must not stall a real revocation', async () => {
+    const agentId = await seedRevokedAgentWithAnchoredPassport()
+    const revoker = vi.fn(async () => ({ txHash: REVOKE_TX }))
+    setRevoker(revoker)
+    probeReturning({ state: 'live', txHash: null })
+
+    await makeDue(agentId)
+    expect(await reconcileRevocation(agentId)).toBe('revoked_onchain')
+
+    expect(revoker).toHaveBeenCalledTimes(1)
+    expect((await readPassport(agentId)).revocation_tx_hash).toBe(REVOKE_TX)
+  })
+
+  it('UNKNOWN behaves exactly like LIVE — absence of evidence concludes nothing', async () => {
+    const agentId = await seedRevokedAgentWithAnchoredPassport()
+    const revoker = vi.fn(async () => ({ txHash: REVOKE_TX }))
+    setRevoker(revoker)
+    probeReturning({ state: 'unknown', txHash: null })
+
+    await makeDue(agentId)
+    await reconcileRevocation(agentId)
+
+    expect(revoker).toHaveBeenCalledTimes(1)
+  })
+
+  it('a THROWING probe falls through to the revoke, never to a conclusion', async () => {
+    const agentId = await seedRevokedAgentWithAnchoredPassport()
+    const revoker = vi.fn(async () => ({ txHash: REVOKE_TX }))
+    setRevoker(revoker)
+    setRevocationProbe(
+      vi.fn(async () => {
+        throw new Error('rpc down')
+      }),
+    )
+
+    await makeDue(agentId)
+    expect(await reconcileRevocation(agentId)).toBe('revoked_onchain')
+    expect(revoker).toHaveBeenCalledTimes(1)
+  })
+
+  it('revoked with NO evidence pointer: no confirmation, no broadcast, and the alarm keeps its right to fire', async () => {
+    // The chain agrees but Haven has no record of the transaction that made it
+    // agree. Migration 049 makes `confirmed` unrepresentable without one, and
+    // inventing a hash would put a fiction in an audit column — so this stays
+    // pending, deliberately, with a reason that says why. It still refuses to
+    // broadcast: the revoke would revert and change nothing.
+    const agentId = await seedRevokedAgentWithAnchoredPassport()
+    const revoker = vi.fn(async () => ({ txHash: REVOKE_TX }))
+    setRevoker(revoker)
+    probeReturning({ state: 'revoked', txHash: null })
+
+    await makeDue(agentId)
+    expect(await reconcileRevocation(agentId)).toBe('revocation_pending')
+
+    const row = await readPassport(agentId)
+    expect(row.revocation_status).toBe('pending')
+    expect(revoker).not.toHaveBeenCalled()
+    expect(row.revocation_last_error).toContain('no revoke transaction is recorded')
+  })
+
+  it('an already-confirmed row is never re-probed', async () => {
+    const agentId = await seedRevokedAgentWithAnchoredPassport()
+    probeReturning({ state: 'revoked', txHash: REVOKE_TX })
+    await makeDue(agentId)
+    await reconcileRevocation(agentId)
+
+    const probe = probeReturning({ state: 'revoked', txHash: REVOKE_TX })
+    await makeDue(agentId)
+    expect(await reconcileRevocation(agentId)).toBe('revoked_onchain')
+    expect(probe).not.toHaveBeenCalled()
+  })
+})
+
+describe('#1758 — the residual is no longer permanent', () => {
+  it('markRevocationConfirmed is reachable WITHOUT a fresh successful revoke', async () => {
+    // The characterization commit asserted the opposite: exactly one call
+    // site, downstream of `await revokerImpl(...)` resolving — which, once the
+    // UID is revoked on-chain, can never resolve again. That is what made the
+    // stuck state permanent rather than merely unresolved.
     const { readFileSync } = await import('node:fs')
     const { fileURLToPath } = await import('node:url')
     const src = readFileSync(fileURLToPath(new URL('../revocation.ts', import.meta.url)), 'utf8')
     const callSites = src.match(/markRevocationConfirmed\(/g) ?? []
-    expect(callSites).toHaveLength(1)
-    expect(src).toMatch(/const \{ txHash \} = await revokerImpl\([\s\S]*?markRevocationConfirmed/)
+    expect(callSites).toHaveLength(2)
+    // The new one sits in the probe branch, ABOVE the revoker call.
+    const probeConfirm = src.indexOf('markRevocationConfirmed(agentId, reading.txHash)')
+    expect(probeConfirm).toBeGreaterThan(-1)
+    expect(probeConfirm).toBeLessThan(src.indexOf('await revokerImpl('))
   })
 })

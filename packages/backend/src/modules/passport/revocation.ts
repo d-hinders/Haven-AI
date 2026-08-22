@@ -22,6 +22,23 @@
  * 2026-07-24). There is deliberately no terminal `failed` revocation state —
  * a struggling revoke stays `pending` and due, and one that stays unreconciled
  * past a threshold is surfaced as an operational incident, never dropped.
+ *
+ * ## What CLOSES a revocation (#1758)
+ *
+ * "Retries until they agree" needs something that can observe agreement.
+ * Until #1758 only one thing could: a fresh `revokeOnChain` returning a
+ * status-1 receipt. That is unreachable in the case that matters — once the
+ * attestation is revoked on-chain, EAS reverts every later revoke of the same
+ * UID — so a revoke that mined after #1742's bounded wait expired left the row
+ * `pending` FOREVER, alarming about a credential that was already dead and
+ * burning gas hourly on a doomed transaction.
+ *
+ * `reconcileRevocation` now asks the chain directly, before it spends
+ * anything: **is this attestation already revoked, as of a settled block?**
+ * That fact closes the row regardless of which transaction set it or whether
+ * Haven ever saw a receipt. Every other answer — live, unreadable, no probe
+ * wired — behaves exactly as this module did before, so the probe can only
+ * ever remove a stuck state, never create one.
  */
 
 import * as repo from '../../infra/repositories/agent-passports.js'
@@ -140,6 +157,37 @@ export function setRevoker(revoker: Revoker | null): void {
 }
 
 /**
+ * What the chain says about an attestation's revoked bit (#1758).
+ *
+ * `revoked` is POSITIVE EVIDENCE, read as of a settled block: the attestation
+ * is revoked and will stay revoked. `live` is the attestation existing with
+ * `revocationTime = 0`. `unknown` is the absence of an answer — no provider,
+ * no settled vantage point, an unreadable UID — and is deliberately NOT a
+ * third behaviour at the call site: it takes the same branch as `live`, which
+ * is the branch this code took before the probe existed. Only `revoked`
+ * concludes anything.
+ *
+ * `txHash` is the evidence pointer migration 049 requires before a row may
+ * read `confirmed`; it is null when the chain agrees but Haven has no record
+ * of the transaction that did it. Injected like {@link Revoker} so this module
+ * stays free of ethers and the relayer.
+ */
+export type RevocationAnchorState = 'revoked' | 'live' | 'unknown'
+export interface RevocationAnchorReading {
+  state: RevocationAnchorState
+  txHash: string | null
+}
+export type RevocationAnchorProbe = (
+  chainId: number,
+  attestationUid: string,
+) => Promise<RevocationAnchorReading>
+
+let revocationProbeImpl: RevocationAnchorProbe | null = null
+export function setRevocationProbe(probe: RevocationAnchorProbe | null): void {
+  revocationProbeImpl = probe
+}
+
+/**
  * Exponential backoff, capped. Attempt 0 → 30s, then 1m, 2m, 4m … up to 1h.
  * Capped rather than unbounded because revocation must keep trying: a schedule
  * that grows forever is indistinguishable from giving up.
@@ -181,7 +229,67 @@ export async function reconcileRevocation(agentId: string): Promise<AnchorState>
     return row.revocation_status === 'pending' ? 'revocation_pending' : 'anchored'
   }
 
-  if (!isPassportConfigured(row.chain_id) || !revokerImpl) {
+  if (!isPassportConfigured(row.chain_id)) {
+    await repo.scheduleRevocationRetry(
+      agentId,
+      'revocation anchor unavailable (schema unregistered or no revoker configured)',
+      revocationBackoffSeconds(row.revocation_attempts),
+    )
+    return 'revocation_pending'
+  }
+
+  // ── Converge before spending gas (#1758) ────────────────────────────────
+  //
+  // Ask the chain whether this attestation is ALREADY revoked, before
+  // submitting a revoke that would be doomed if it is. This is the only path
+  // that can close a revoke which mined after #1742's 120 s wait expired: the
+  // bump worker closes the `outbound_txs` row and stops there, and a fresh
+  // `revokeOnChain` can never succeed again once the UID is revoked, because
+  // EAS reverts it `AlreadyRevoked`. Without this the row stayed `pending`
+  // permanently — false stuck-revoke alarm, hourly gas burn, no self-heal.
+  //
+  // A PULL, not a push. Nothing teaches the passport row from the outbound
+  // side: `outbound_txs` is the relayer's ledger and holds no agent id, so a
+  // push would mean inventing a join and coupling the generic queue to this
+  // module. The pull also covers what a push never could — an attestation
+  // revoked by an operator by hand, by another deployment, or by a
+  // transaction whose receipt Haven never saw.
+  //
+  // FAIL-SAFE, like #1745's liveness probe: unwired, throwing, or answering
+  // `unknown` all fall through to the submit below, which is exactly what this
+  // function did before the probe existed. Nothing here can conclude
+  // `confirmed` from a read that did not happen.
+  if (revocationProbeImpl) {
+    let reading: RevocationAnchorReading = { state: 'unknown', txHash: null }
+    try {
+      reading = await revocationProbeImpl(row.chain_id, row.attestation_uid)
+    } catch {
+      // An unreadable chain is not an answer. Fall through and submit.
+    }
+    if (reading.state === 'revoked') {
+      // Migration 049: `confirmed` is unrepresentable without a tx hash. The
+      // row's own `revocation_tx_hash` is no help — it is written only BY the
+      // confirmation, in the same statement, so on a pending row it is always
+      // null — which leaves the probe's pointer as the only source. With none,
+      // we do NOT invent one, and we do NOT broadcast a revoke the chain has
+      // already made pointless: the row stays pending and keeps alarming,
+      // which is the honest state for "the chain agrees, but Haven cannot say
+      // what made it agree".
+      if (!reading.txHash) {
+        await repo.scheduleRevocationRetry(
+          agentId,
+          'attestation already revoked on-chain, but no revoke transaction is recorded for it — ' +
+            'cannot record a confirmation without its evidence pointer (#1758)',
+          revocationBackoffSeconds(row.revocation_attempts),
+        )
+        return 'revocation_pending'
+      }
+      await repo.markRevocationConfirmed(agentId, reading.txHash)
+      return 'revoked_onchain'
+    }
+  }
+
+  if (!revokerImpl) {
     await repo.scheduleRevocationRetry(
       agentId,
       'revocation anchor unavailable (schema unregistered or no revoker configured)',

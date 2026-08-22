@@ -398,11 +398,31 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           safeAddress: FIXTURE_SAFE_ADDRESS,
           chainId: FIXTURE_CHAIN_ID,
         })
-        // `type: 'passkey'` is not incidental — it is what makes the captured
-        // screen say "Approve with · Device approval" and "fees are paid by
-        // Haven", which is the copy a passkey user actually reads. An `eoa`
-        // signer would render a different screen under the same filename.
-        expect(signer).toMatchObject({ type: 'passkey', chainId: FIXTURE_CHAIN_ID })
+        // `toEqual` against a shape DERIVED from the seed, not `toMatchObject`
+        // against a couple of hand-copied fields: the claim being made is that
+        // the parser round-trips every field the seed writes, and a partial
+        // matcher would let `credentialId` or the public-key pair drift out of
+        // the seed without reddening anything.
+        //
+        // `type: 'passkey'` is the one field with no counterpart in the seed,
+        // and it is not incidental — it is what makes the captured screen say
+        // "Approve with · Device approval" and "fees are paid by Haven", which
+        // is the copy a passkey user actually reads. An `eoa` signer would
+        // render a different screen under the same filename.
+        const record = JSON.parse(seeded[key]) as {
+          address: string
+          credentialId: string
+          publicKey: { x: string; y: string }
+          chainId: number
+        }
+        expect(record.chainId).toBe(FIXTURE_CHAIN_ID)
+        expect(signer).toEqual({
+          type: 'passkey',
+          address: record.address,
+          credentialId: record.credentialId,
+          publicKey: record.publicKey,
+          chainId: record.chainId,
+        })
         window.localStorage.clear()
       })
 

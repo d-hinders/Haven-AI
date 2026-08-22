@@ -1305,9 +1305,11 @@ export const SCENARIOS = {
       // every field and returns null on anything it does not recognise — a
       // wrong `schemaVersion`, a non-address `address`, a public-key half
       // without its twin — and a null there puts the gate silently back on
-      // `no_signer`. Pinned field-by-field by `screenshot-fixture.test.ts`
-      // against the real parser, so a schema bump fails the test rather than
-      // quietly un-reaching this capture.
+      // `no_signer`. `screenshot-fixture.test.ts` runs this record through
+      // that parser and asserts it round-trips every field, so a schema bump
+      // or a dropped field fails a test rather than quietly un-reaching this
+      // capture. It does NOT pin the literal values below — they are fixture
+      // data, free to change, as long as the parser still accepts them.
       return {
         [`haven_passkey_${FIXTURE_SAFE.safe_address.toLowerCase()}_${FIXTURE_SAFE.chain_id}`]:
           JSON.stringify({

@@ -1388,12 +1388,45 @@ export default function DesignSystemPage() {
                 },
               ].map((row) => (
                 <tr key={row.title}>
-                  <td className="px-4 py-4 align-middle">
+                  {/* Narrow gutters below md mirror TransactionsTable (#1772).
+                      Without them this showcase rendered 375px wide inside a
+                      343px Card at 393px — clipped by the Card's
+                      `overflow-hidden`, i.e. the very defect the table below
+                      is meant to document the correct shape of. */}
+                  <td className="px-2 py-4 align-middle md:px-4">
                     <DirectionMark direction={row.direction} />
                   </td>
-                  <td className="px-4 py-4 align-middle">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-[var(--v2-ink)]">{row.title}</p>
+                  {/* `max-w-0` BELOW md ONLY. Unconditional, it squashed the
+                      Activity column on DESKTOP too — the visual-regression
+                      gate caught "Recei…" / "x402 …" / "Faile…" at 1280px.
+                      TransactionsTable survives it unconditionally because
+                      every other column there carries an explicit `w-[…]`, so
+                      the leftover flows to Activity; this showcase sizes its
+                      columns purely from content, so capping one collapses it.
+                      Do not drop the `md:` here. */}
+                  <td className="max-w-0 px-4 py-4 align-middle md:max-w-none">
+                    {/* `truncate` + `flex-wrap` mirror TransactionsTable
+                        exactly (#1772). Without `truncate` the `max-w-0`
+                        above word-wraps instead of ellipsising, so the
+                        showcase would teach a shape the real component does
+                        not have. */}
+                    {/* `md:flex-nowrap` for the same reason as `md:max-w-none`
+                        above: this showcase's desktop titles WRAP to two
+                        lines, so a wrapping flex row pushed the Failed badge
+                        onto a third and grew the page by 12px. The visual
+                        gate measured it — 17746 -> 17758 — after the first
+                        attempt at this fix. Desktop must not move at all. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
+                      {/* Ellipsise below md, wrap normally at md and up — the
+                          `md:` half restores this showcase's original desktop
+                          rendering byte for byte, so only the mobile baseline
+                          moves. */}
+                      <p
+                        className="truncate text-sm font-semibold text-[var(--v2-ink)] md:overflow-visible md:whitespace-normal md:text-clip"
+                        title={row.title}
+                      >
+                        {row.title}
+                      </p>
                       {row.failed ? <StatusBadge tone="danger">Failed</StatusBadge> : null}
                     </div>
                     <div className="mt-1 md:hidden">
@@ -1409,13 +1442,13 @@ export default function DesignSystemPage() {
                   <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] md:table-cell">
                     {row.date}
                   </td>
-                  <td className="px-4 py-4 align-middle text-right">
+                  <td className="px-2 py-4 align-middle text-right md:px-4">
                     <p>
                       <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
                     </p>
                     <p className="mt-1 text-xs text-[var(--v2-ink-3)] md:hidden">{row.date}</p>
                   </td>
-                  <td className="px-4 py-4 align-middle text-right">
+                  <td className="px-2 py-4 align-middle text-right md:px-4">
                     <ExternalDetailsLink href="#" />
                   </td>
                 </tr>

@@ -76,7 +76,7 @@ Two traps this generalises into, both paid for already. **Deliberately do not co
 
 Two things that measurement showed and reasoning would not, both worth knowing before you reuse a desktop proof at mobile width:
 
-- **The same mutation is a different size.** A `w-[120vw]` block inside `ReceiveFundsModal` reads `overlayOverflowBy: 1026` at 1280 and **137** at 393 — `120vw` is viewport-relative and the panel's own scroll box clamps it. A proof at one width is not evidence at the other, and the gap is roughly 8×.
+- **The same mutation is a different size.** A `w-[120vw]` block inside `ReceiveFundsModal` reads `overlayOverflowBy: 1026` at 1280 and **137** at 393 — `120vw` is viewport-relative and the panel's own scroll box clamps it. A proof at one width is not evidence at the other, and the gap is roughly 7.5×.
 - **The viewport-absolute pins catch what the overflow metric structurally cannot.** At 393 the panel is `mx-4 w-full` with `max-w-lg` no longer binding, so `dialogLeft`/`dialogRight` are a *knowable* 16 → 377 and can be asserted — unlike at desktop, where the three overlays have three different correct positions. Mutating `mx-4` → `mx-0` turns `dialogLeft` red while `overlayOverflows` stays false: a panel flush against both bezels overflows nothing. That is [#1779](https://github.com/d-hinders/Haven-AI/issues/1779)'s rule one layer down — `scrollWidth` vs `clientWidth` compares a box to itself and cannot see the box move.
 
 Run them locally with `npm run test:e2e:mobile -w packages/frontend`, or both with `npm run test:e2e:gate -w packages/frontend` (exactly what CI runs).

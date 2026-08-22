@@ -148,11 +148,23 @@ export function isIncidentalPath(file) {
  * was re-read — while the gate read the date and concluded the whole file was
  * current against every diff that day.
  *
- * Measured before removing rather than argued: over the last 40 merges into
- * `dev`, the heuristic hid 13 advisories across 8 merges (~0.33 per merge),
- * including `design-system.md` on a change to `TransactionMovement.tsx`, a file
- * it `covers:` by exact path. So removal buys back 13 real coupling checks at a
- * cost of one extra advisory line every third PR. That is not a noise problem.
+ * Measured before removing rather than argued: over 40 merges into `dev`
+ * (window ending 0d299034), the heuristic hid 22 advisories across 15 merges —
+ * about 0.55 per merge — including `design-system.md` on a change to
+ * `TransactionMovement.tsx`, a file it `covers:` by exact path. So removal buys
+ * back 22 real coupling checks for roughly one extra advisory line every other
+ * PR. That is not a noise problem.
+ *
+ * It hid ZERO blocking findings, which is the same claim the code makes
+ * structurally (contract docs already bypassed the suppression under `strict`)
+ * arrived at by measurement instead. Both should agree; that they do is the
+ * point of checking.
+ *
+ * The exact counts move as `dev` moves — they are a description of this
+ * repository's traffic, not a constant. Re-derive rather than cite if the
+ * number ever has to carry an argument again; an earlier run of a buggier
+ * script reported 13/8, low because it skipped ROOT_DOCS entirely and merged
+ * `satisfied-by:` globs into `covers:`.
  *
  * The `today` parameter is REMOVED rather than left accepted-and-ignored. It
  * had no other reader in this function, and an unused knob that used to change

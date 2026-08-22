@@ -279,17 +279,46 @@ test1366('a changed shard satisfies the contract doc in strict mode (#1366)', ()
   const f = implicatedDocs(
     ['packages/signer/src/core.ts', 'docs/regulatory/casp-changelog/2026-08-12-1399.md'],
     [SHARDED_DOC],
-    undefined,
     { strict: true },
   )
   assert1366.deepStrictEqual(f, [])
+})
+
+/**
+ * #1824 review: the three tests in this block used to be called as
+ * `implicatedDocs(changed, docs, undefined, { strict: true })` — the pre-#1824
+ * four-argument form. After the signature lost its `today` parameter, that
+ * `undefined` landed in the options slot and `{ strict: true }` was dropped
+ * silently by JS, so every test here ran in ADVISORY mode while its name said
+ * strict. They still passed, because their fixtures produce the same answer in
+ * both postures.
+ *
+ * Fixing the call form alone would have been cosmetic. `filterIncidental` is
+ * the ONLY strict-dependent branch in `implicatedDocs`, and none of these
+ * fixtures reach it — their changed file is ordinary source. So this test is
+ * added to make the distinction real: the changed file is a TEST file, which
+ * advisory mode filters as incidental and strict mode deliberately does not
+ * (the #1076 carve-out — a contract doc whose covered paths are all incidental
+ * would otherwise pass `--strict` silently).
+ *
+ * With this fixture the two postures disagree, so passing the wrong one is no
+ * longer invisible. Verified by re-breaking the call to the four-argument form:
+ * this test goes red, and only this one.
+ */
+test1366('#1824: strict vs advisory actually diverge on a sharded contract doc', () => {
+  const changed = ['packages/signer/src/core.test.ts']
+  const strictFindings = implicatedDocs(changed, [SHARDED_DOC], { strict: true })
+  assert1366.strictEqual(strictFindings.length, 1, 'strict must not filter incidental paths for a contract doc')
+  assert1366.strictEqual(strictFindings[0].contract, true)
+
+  const advisoryFindings = implicatedDocs(changed, [SHARDED_DOC])
+  assert1366.strictEqual(advisoryFindings.length, 0, 'advisory mode filters a test file as incidental')
 })
 
 test1366('MUTATION PROOF: the same change WITHOUT a shard still blocks (#1366)', () => {
   const f = implicatedDocs(
     ['packages/signer/src/core.ts'],
     [SHARDED_DOC],
-    undefined,
     { strict: true },
   )
   assert1366.strictEqual(f.length, 1)
@@ -307,7 +336,6 @@ test1366('a shard satisfies ONLY docs that declare it — not every contract doc
   const f = implicatedDocs(
     ['packages/signer/src/core.ts', 'docs/regulatory/casp-changelog/2026-08-12-1399.md'],
     [SHARDED_DOC, other],
-    undefined,
     { strict: true },
   )
   assert1366.strictEqual(f.length, 1)

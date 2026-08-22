@@ -42,23 +42,61 @@ export function TransactionActivityRow({
   action?: ReactNode
   /**
    * `comfortable` (default) is for the dedicated transactions screen.
-   * `compact` matches the height of the shared `<Row>` primitive (~56px) so
-   * the dashboard's agents + transactions columns sit on the same rhythm.
-   * Compact also hides the description line on the desktop layout.
+   * `compact` is the dashboard preview, tightened so the agents and
+   * transactions columns sit on the same rhythm. Compact also hides the
+   * description line on the desktop layout.
+   *
+   * This used to say compact "matches the height of the shared `<Row>`
+   * primitive (~56px)", which was wrong twice over and about the one property
+   * #1833 turned out to hinge on: compact is pinned to **72px** (at `sm` and
+   * up — see `containerPadding`), and 56px is `Row`'s *comfortable* density,
+   * its compact being ~44px (`ui/Row.tsx`). Corrected rather than left, since
+   * a stale number about row height is exactly what sends the next reader to
+   * the wrong conclusion here.
    */
   density?: Density
 }) {
   const isCompact = density === 'compact'
-  // Compact density pins to a fixed row height (h-[72px]) so the dashboard's
-  // agents and transactions columns sit on identical rhythm regardless of
-  // line-height nuances inside the title row (badge + text mixed heights).
-  // Horizontal padding only — vertical centering does the rest.
+  // Compact density pins the row to 72px so the dashboard's agents and
+  // transactions columns sit on identical rhythm regardless of line-height
+  // nuances inside the title row (badge + text mixed heights).
+  //
+  // The pin is `sm:` ONLY, and the breakpoint is the whole point (#1833). The
+  // height was measured against the two-column arrangement below
+  // (`sm:grid-cols-[minmax(0,1fr)_auto]`), which does not exist under 640px:
+  // there the two children STACK, so title+description and amount+timestamp
+  // occupy two bands inside a box still clamped to 72px, and the overflow
+  // spilled onto the following row. Rows visibly overlapped on /dashboard at
+  // 390px — found independently by two rendered review passes, neither
+  // looking for it.
+  //
+  // Below `sm` the row therefore sizes to its content, with `py-3` supplying
+  // the vertical breathing room the fixed height used to provide. At `sm` and
+  // up `sm:py-0` hands it back, so the desktop rhythm this pin exists for is
+  // byte-identical to before.
+  //
+  // Sizing to content rather than raising the number on purpose: the content
+  // is variable-height (a wrapping <TransactionMovement>, an optional status
+  // badge), so any fixed value is a new overlap waiting for the first string
+  // long enough to exceed it.
   const containerPadding = isCompact
-    ? 'gap-3 px-4 sm:px-5 h-[72px]'
+    ? 'gap-3 px-4 py-3 sm:px-5 sm:py-0 sm:h-[72px]'
     : 'gap-3 px-4 py-4 sm:px-5'
   return (
     <div className={`grid transition-colors hover:bg-[var(--v2-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${containerPadding}`}>
-      <div className="flex min-w-0 items-center gap-3">
+      {/* `items-start` below `sm`, centred at `sm` and up (#1833 review).
+          Centring the mark against the WHOLE text block reads correctly while
+          that block is one or two lines, and wrongly once it wraps to three or
+          four: the mark drifts down beside the status badge or the "From …"
+          line, away from the title it marks. Below `sm` that wrap is now the
+          common case rather than the exception, because the row sizes to its
+          content instead of clipping at 72px — so this fix and the height fix
+          are the same change seen from two sides.
+
+          Same shape as the height pin above: an alignment chosen for the
+          arrangement at one breakpoint, applied where that arrangement does
+          not exist. `sm:items-center` keeps `sm`+ byte-identical. */}
+      <div className="flex min-w-0 items-start gap-3 sm:items-center">
         <DirectionMark direction={direction} density={density} />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

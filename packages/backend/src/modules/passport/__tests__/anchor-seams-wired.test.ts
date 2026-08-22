@@ -27,9 +27,19 @@ const INDEX = readFileSync(
   'utf8',
 )
 
-/** Comments mention these names constantly — assert on the CALL, not the word. */
+/**
+ * Comments mention these names constantly — assert on the CALL, not the word.
+ *
+ * Comments are STRIPPED before matching, which is not belt and braces: the
+ * file's own note below says the call surviving as a comment would still pass,
+ * and a #1758 mutation confirmed it — commenting out `setRevocationProbe(...)`
+ * left every assertion here green. The separate import check catches a deleted
+ * import, not a commented-out call, so this is the half that was missing.
+ */
+const CODE = INDEX.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+
 function callsWith(fn: string, arg: string): boolean {
-  return new RegExp(`\\b${fn}\\s*\\(\\s*${arg}\\s*\\)`).test(INDEX)
+  return new RegExp(`\\b${fn}\\s*\\(\\s*${arg}\\s*\\)`).test(CODE)
 }
 
 describe('passport anchor seams are wired in index.ts', () => {
@@ -37,6 +47,12 @@ describe('passport anchor seams are wired in index.ts', () => {
     ['setAnchor', 'anchorOnChain'],
     ['setAnchorRecovery', 'recoverAnchorFromReceipt'],
     ['setAnchorLiveness', 'classifyAnchorTxLiveness'],
+    ['setRevoker', 'revokeOnChain'],
+    // #1758: unwired, `reconcileRevocation` cannot converge a revoke that
+    // mined after its wait expired, and the row alarms forever while the
+    // relayer re-broadcasts a doomed transaction hourly. Same silent-failure
+    // shape as the liveness probe: every unit test injects its own.
+    ['setRevocationProbe', 'readRevocationAnchor'],
   ])('%s(%s)', (fn, arg) => {
     expect(callsWith(fn, arg)).toBe(true)
   })
@@ -46,6 +62,18 @@ describe('passport anchor seams are wired in index.ts', () => {
     // which would be a compile error, but the assertion above alone would
     // still pass on a commented-out call.
     expect(INDEX).toMatch(/^\s*classifyAnchorTxLiveness,\s*$/m)
+    expect(INDEX).toMatch(/^\s*readRevocationAnchor,\s*$/m)
+  })
+
+  it('a COMMENTED-OUT call does not count as wired', () => {
+    // The mutation that found this: `// setRevocationProbe(readRevocationAnchor)`
+    // used to satisfy every assertion above. Proven on a synthetic source
+    // rather than by editing the real file, so the guard is pinned even if
+    // `index.ts` is later reformatted.
+    const commented = '// setAnchorLiveness(classifyAnchorTxLiveness)\n/* setAnchor(anchorOnChain) */'
+    const stripped = commented.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    expect(/\bsetAnchorLiveness\s*\(\s*classifyAnchorTxLiveness\s*\)/.test(stripped)).toBe(false)
+    expect(/\bsetAnchor\s*\(\s*anchorOnChain\s*\)/.test(stripped)).toBe(false)
   })
 
   it('the helper itself can fail — a seam that is NOT wired reads as false', () => {

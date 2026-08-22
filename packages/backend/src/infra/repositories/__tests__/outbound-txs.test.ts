@@ -14,6 +14,7 @@ import {
   claimOrphanedOutboundTx,
   countLaneAttemptsAtNonce,
   enqueueOutboundTx,
+  findOutboundEvidenceTxHash,
   findOutboundTxByHash,
   listUnminedOutboundTxs,
   markOutboundTxBroadcast,
@@ -416,5 +417,100 @@ describeDb('findOutboundTxByHash (#1745)', () => {
     await markOutboundTxBroadcast(newer.id, { txHash: TX, nonce: 2n })
 
     expect(await findOutboundTxByHash(CHAIN, TX)).toMatchObject({ id: newer.id, nonce: '2' })
+  })
+
+  // ── The evidence pointer for a converged revocation (#1758) ─────────────
+  //
+  // `findOutboundEvidenceTxHash` answers "which transaction carried THIS
+  // payload, and can we stand behind it". Migration 049 refuses
+  // `revocation_status = 'confirmed'` without a hash, so this read is what
+  // makes a chain-observed revocation representable at all — and a wrong
+  // answer here writes a wrong transaction into an audit column.
+
+  const OTHER_TX = '0x' + 'ef'.repeat(32)
+
+  it('takes the MINED row and ignores an unresolved broadcast sibling', async () => {
+    // A `mined` row is only ever written after a status-1 receipt read
+    // (`outbound-bump-worker.ts`), so it is a transaction proven to have
+    // succeeded. The still-open sibling is a retry that has not been closed.
+    const sent = await enqueue('passport_revoke')
+    await markOutboundTxBroadcast(sent.id, { txHash: OTHER_TX, nonce: 1n })
+    const mined = await enqueue('passport_revoke')
+    await markOutboundTxBroadcast(mined.id, { txHash: TX, nonce: 2n })
+    await markOutboundTxMined(mined.id)
+    // Older, so a newest-first ordering alone would return the wrong one.
+    await db.query(
+      `UPDATE outbound_txs SET created_at = NOW() - INTERVAL '1 hour' WHERE id = $1`,
+      [mined.id],
+    )
+
+    expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', DATA)).toBe(TX)
+  })
+
+  it('refuses a BROADCAST row — "we sent this" is not "this is what did it"', async () => {
+    // Review finding (#1758). SEVERAL broadcast rows for one calldata is the
+    // normal state, not an exotic one: every revoke retry opens a fresh record
+    // and migration 061's partial unique key only stops two sharing a nonce.
+    // Once the chain says the UID is revoked, exactly ONE of these did it and
+    // the rest are reverts nothing has closed yet — and this query cannot tell
+    // which. Returning the newest would put a plausible-looking wrong hash in
+    // an audit column; waiting for the bump worker to close the real one costs
+    // a backoff tick.
+    const first = await enqueue('passport_revoke')
+    await markOutboundTxBroadcast(first.id, { txHash: TX, nonce: 1n })
+    const retry = await enqueue('passport_revoke')
+    await markOutboundTxBroadcast(retry.id, { txHash: OTHER_TX, nonce: 2n })
+
+    expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', DATA)).toBeNull()
+  })
+
+  it('never returns a FAILED or REPLACED transaction', async () => {
+    // A reverted or superseded transaction is precisely the hash we must not
+    // record as the one that did the work.
+    const failed = await enqueue('passport_revoke')
+    await markOutboundTxBroadcast(failed.id, { txHash: TX, nonce: 1n })
+    await markOutboundTxFailed(failed.id, 'mined and reverted')
+    const replaced = await enqueue('passport_revoke')
+    await markOutboundTxBroadcast(replaced.id, { txHash: OTHER_TX, nonce: 2n })
+    const replacement = await enqueue('passport_revoke')
+    await markOutboundTxReplaced(replaced.id, replacement.id)
+
+    expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', DATA)).toBeNull()
+  })
+
+  it('is scoped by chain, submitter AND calldata — the calldata is the join key', async () => {
+    // `outbound_txs` holds no agent id by design. The revoke's calldata
+    // encodes the attestation UID, so it identifies the intent exactly; a
+    // match on chain+submitter alone would hand back another agent's revoke.
+    const ours = await enqueue('passport_revoke')
+    await markOutboundTxBroadcast(ours.id, { txHash: TX, nonce: 1n })
+    await markOutboundTxMined(ours.id)
+
+    const otherPayload = await enqueueOutboundTx({
+      chainId: CHAIN,
+      submitter: 'passport_revoke',
+      toAddress: TO,
+      data: '0x' + 'ba'.repeat(200),
+    })
+    await markOutboundTxBroadcast(otherPayload.id, { txHash: OTHER_TX, nonce: 2n })
+    await markOutboundTxMined(otherPayload.id)
+
+    expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', DATA)).toBe(TX)
+    expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_attest', DATA)).toBeNull()
+    expect(await findOutboundEvidenceTxHash(++chainCounter, 'passport_revoke', DATA)).toBeNull()
+  })
+
+  it('matches calldata case-insensitively — the writer lower-cases, a caller may not', async () => {
+    const row = await enqueue('passport_revoke')
+    await markOutboundTxBroadcast(row.id, { txHash: TX, nonce: 1n })
+    await markOutboundTxMined(row.id)
+
+    const upper = '0x' + DATA.slice(2).toUpperCase()
+    expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', upper)).toBe(TX)
+  })
+
+  it('returns null when the payload was queued but never stamped', async () => {
+    await enqueue('passport_revoke') // queued, no hash
+    expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', DATA)).toBeNull()
   })
 })

@@ -7,7 +7,7 @@ covers:
   - package.json
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
-last-verified: "2026-08-21" # the haven-reviewer rule is unconditional (owner decision 2026-08-21); the risk list this file carried was the licence for skipping it. AGENTS.md is canonical. Prior: #1227: lint:db-mocks added to the Backend/API verification row
+last-verified: "2026-08-22" # #1768: the Browser UX row now points at `test:e2e:gate` (desktop + mobile), not desktop-only. Prior: the haven-reviewer rule is unconditional (owner decision 2026-08-21); the risk list this file carried was the licence for skipping it. AGENTS.md is canonical. Prior: #1227: lint:db-mocks added to the Backend/API verification row
 ---
 
 # PR Workflow Checklist
@@ -135,7 +135,7 @@ Use the smallest reliable set that matches the change.
 | Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run design:lint -w packages/frontend`, `npm run lint:copy`, `npm run test -w packages/frontend`, and `npm run build -w packages/frontend` |
 | SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, and `npm run build -w packages/sdk` |
 | Cross-package or release-risk | `npm run quality` |
-| Browser UX or routing | Relevant unit/build checks plus `npm run test:e2e:desktop -w packages/frontend` when the local Playwright server is working |
+| Browser UX or routing | Relevant unit/build checks plus `npm run test:e2e:gate -w packages/frontend` when the local Playwright server is working — that is both gating projects, desktop **and** mobile (#1768); `test:e2e:desktop` / `test:e2e:mobile` narrow it to one while iterating |
 
 Notes:
 

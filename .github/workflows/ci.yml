@@ -5,16 +5,12 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+  # #1768: the `ui_suite` choice input is gone. Its only purpose was to select
+  # between the desktop-only browser suite and "desktop + mobile"; both
+  # projects now gate on every pull request, so the input selected between a
+  # thing and itself — a control that looks like it widens coverage while
+  # doing nothing is the same defect this issue closed one layer up.
   workflow_dispatch:
-    inputs:
-      ui_suite:
-        description: Browser test suite to run
-        required: true
-        default: full
-        type: choice
-        options:
-          - desktop
-          - full
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -511,16 +507,21 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: packages/frontend
 
-      - name: Run frontend browser smoke tests
-        if: github.event_name != 'workflow_dispatch' || inputs.ui_suite != 'full'
-        run: npm run test:e2e:desktop -w packages/frontend
-        env:
-          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
-          NEXT_TELEMETRY_DISABLED: 1
-
-      - name: Run full frontend browser tests
-        if: github.event_name == 'workflow_dispatch' && inputs.ui_suite == 'full'
-        run: npm run test:e2e:full -w packages/frontend
+      # #1768: BOTH Playwright projects gate here, unconditionally — desktop
+      # (Desktop Chrome) and mobile (Pixel 5 device emulation). This step used
+      # to run `test:e2e:desktop` only, with `chromium-mobile` reachable solely
+      # via a `workflow_dispatch` with `ui_suite=full`. That meant no mobile
+      # viewport was exercised on any pull request, while a configured project
+      # made it look like one was — which is how #1749 shipped a primary
+      # navigation that could not be opened below `lg`.
+      #
+      # The projects run disjoint spec sets (`*.mobile.spec.ts` → mobile,
+      # everything else → desktop), so this is one browser project more, not
+      # the whole suite twice; the reasoning lives in `playwright.config.ts`
+      # next to the `testMatch`/`testIgnore` that implement it. One command,
+      # not two steps, so a single Next server boot serves both projects.
+      - name: Run frontend browser smoke tests (desktop + mobile)
+        run: npm run test:e2e:gate -w packages/frontend
         env:
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
           NEXT_TELEMETRY_DISABLED: 1

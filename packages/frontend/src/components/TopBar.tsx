@@ -39,7 +39,7 @@ export default function TopBar({ actionSlot }: TopBarProps) {
     // bar's own band (see the `w-8 lg:hidden` spacer below, which reserves the
     // room for it), so a bar that outranks the toggle covers the control it is
     // making space for. That was #1749.
-    <header className="relative z-[var(--v2-z-chrome)] h-14 flex items-center px-6 lg:px-8 border-b border-[var(--v2-border)] bg-[var(--v2-bg)]/85 backdrop-blur-md flex-shrink-0">
+    <header className="relative z-[var(--v2-z-chrome)] h-14 flex items-center px-6 lg:px-8 border-b border-[var(--v2-border)] bg-[var(--v2-surface-2)]/85 backdrop-blur-md flex-shrink-0">
       {/*
         Left region: hamburger spacer + optional back-link.
 

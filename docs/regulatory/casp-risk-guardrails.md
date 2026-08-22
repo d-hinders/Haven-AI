@@ -36,6 +36,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/middleware/reportingFeed.ts
   - packages/backend/src/db/migrations/**
+  - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/passkeys.ts
   - packages/backend/src/routes/safe-deploy.ts
@@ -53,6 +54,7 @@ covers:
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/UsingYourAgentInfo.tsx
   - packages/sdk/src/**
+  - packages/cli/src/**
   - packages/connect/src/**
   - packages/mcp/src/**
   - packages/mcp-server/src/**
@@ -858,6 +860,76 @@ the rest did not: version fields, cross-package dep pins, connect's pinned
 `sdkVersion`/`signerVersion`, dist-tag selection, the publish trigger and the ref
 it builds from, build order, and the credential path — plus whether the
 wildcard-pin re-check is intact.
+
+### The agent-authority surface is in scope (#1826)
+
+`packages/cli/src/**` and `packages/backend/src/routes/agents.ts` are **covered**.
+[#1826](https://github.com/d-hinders/Haven-AI/issues/1826) asked whether the
+published `@haven_ai/cli` belongs in the perimeter, on the reasoning that it can
+`agents revoke`, `agents rotate-key` and `agents pause`, and persists a user JWT
+to disk. The conclusion is yes — but **not for that reason**, and the correction
+matters more than the verdict, because the stated reason would justify covering
+`curl`.
+
+**The CLI decides nothing.** It is a thin HTTP client with **zero runtime
+dependencies** — no `viem`, no `ethers`, no crypto, no signing path, no key
+material of any kind. Every authority command is one bare call to a backend
+route that enforces its own checks: `cmdAgentRevoke` is `api.post('/agents/:id/revoke')`,
+`cmdAgentRotateKey` is `api.post('/agents/:id/rotate-key')`. The rotated API key
+is generated **server-side** in the route, and every route re-derives ownership
+from the JWT's `sub` rather than trusting anything the client sends. A CLI edit
+cannot grant authority the backend does not already grant. That is a materially
+different risk from `packages/signer/src/**`, which holds a delegate key, or
+`packages/sdk/src/signer.ts`, where "signing schemes are spend authority".
+
+**What is actually ungated is the decision point, and #1826 walked past it.**
+`routes/agents.ts` is where revoke, rotate-key, pause and resume are decided and
+enforced — and it sat under **no contract doc at all**. Measured, not asserted:
+`node scripts/docs/coupling-gate.mjs --strict --changed=packages/backend/src/routes/agents.ts`
+exited **0** with four advisory findings (`CLAUDE.md` and three architecture
+docs) across **28 commits in ninety days**. The same run for
+`packages/cli/src/commands.ts` exited **0** with two advisory findings across
+19 commits. #1736's rule decides both: *coverage by some other doc is a
+different obligation, not a substitute for a perimeter analysis* — the
+architecture docs describe the API shape, none of them asks the authority
+question. Covering the client while leaving its decision point outside would
+have been worse than covering neither: it would look like the authority surface
+was inside the perimeter.
+
+**The CLI is covered on the narrower argument that survives.** Applying #1739's
+discipline — name the event coverage gates — the gated event is an *edit to the
+CLI's command surface*, never a user running `haven agents revoke`. Two things
+about that edit are perimeter-relevant even for a thin client. It holds a **user
+JWT, the same credential the dashboard holds** (`session.ts` says so), owner-only
+at 0600, and sends it as a Bearer token to whatever `baseUrlFor` resolves —
+which reads a user-supplied `--api-url` flag first. An edit that logged the
+token, loosened those perms, or widened where it is sent is a credential change,
+and Red Line 3 treats a credential as a payment instrument. And it prints a
+freshly rotated agent API key to stdout. That is a real, bounded surface, and it
+is the honest one — not "the CLI can retire an agent's authority".
+
+**The money-path list did not need widening, and #1826's blocker dissolves on
+inspection.** The issue held that this doc "binds its `covers:` maintenance to
+one reference", so a path absent from
+[`ship-next`'s money-path list](../../.agents/skills/ship-next/SKILL.md) could
+not be added without widening that list first. The binding above is a **floor,
+not a ceiling** — it says adding a file *to the money-path list* without adding
+it here re-opens the hole; it never said this list may contain nothing else.
+Empirically it already contains a great deal else: `connect/**`, `mcp/**`,
+`signer/**`, `mcp-server/**`, `demo-merchant-mcp/**`, the whole of `sdk/**`
+(the money-path list names only `sdk/src/signer.ts`), `routes/passkeys.ts`,
+`routes/catalog.ts`, `routes/reporting.ts`, `routes/accounting.ts` and
+`config.ts` — none of them on that list. Absence from it was never a bar, so no
+new judgement about the money-path list is required and none is made here.
+`routes/agents.ts` is a reasonable future candidate for that list, but it is a
+separate question with a separate blast radius (it changes the *testing bar* for
+every agent-lifecycle PR), and this decision does not pre-empt it.
+
+When this surface changes, the shard states whether the authority set moved:
+which lifecycle transitions exist and what may trigger them, whether ownership
+is still re-derived server-side from the authenticated subject, whether API-key
+generation stays server-side, where the user JWT is stored and sent, and whether
+anything in the client began deciding rather than relaying.
 
 ## Verification log
 

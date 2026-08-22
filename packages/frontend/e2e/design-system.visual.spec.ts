@@ -48,8 +48,17 @@ const APP_TOP_BAR = 'xpath=//*[@id="main-content"]/preceding-sibling::header[1]'
  * id="main-content"/></div></div>`, so the sidebar is a sibling of
  * `#main-content`'s PARENT, not of `#main-content` itself. That one level is
  * the whole difference between this locator and the top bar's, and getting it
- * wrong yields a locator that matches nothing — which `toHaveCount(1)` catches,
- * where a locator matching the wrong element would not.
+ * wrong yields a locator that matches nothing — which `toHaveCount(1)` catches.
+ *
+ * Be honest about what that assertion does and does not buy. It closes the
+ * "matches nothing" and "matches several" failures. It does NOT make the
+ * locator immune to matching a plausible-but-wrong element: `[1]` on the
+ * reverse `preceding-sibling` axis takes the NEAREST preceding `<aside>`, so a
+ * future right-rail or notifications panel inserted between the sidebar and the
+ * main column would be selected instead, still at count 1. The backstop then is
+ * the baseline itself — a different element will not match a 240x800 render of
+ * the sidebar — but it fails as "the sidebar drifted" rather than as "the
+ * locator moved", so read a surprising failure here with that in mind.
  */
 const APP_SIDEBAR = 'xpath=//*[@id="main-content"]/parent::*/preceding-sibling::aside[1]'
 
@@ -62,10 +71,20 @@ const APP_SIDEBAR = 'xpath=//*[@id="main-content"]/parent::*/preceding-sibling::
  * viewport added to `evidence-viewports.mjs` later is covered or excluded by
  * what it actually renders instead of by what it is called.
  *
- * Verified against the committed baselines rather than assumed: in
- * `design-system-mobile.png` the x=0..239 band is `#ffffff` at every sampled
- * row — the drawer is genuinely not in the pristine mobile capture, so there is
- * nothing there to scope.
+ * Measured rather than assumed — and measured on the ELEMENT, because the
+ * obvious pixel check is wrong here in a way that looks right. At 390px the
+ * aside reports `position: fixed`, `transform: matrix(1,0,0,1,-240,0)` and a
+ * bounding rect of `x: -240, width: 240, right: 0`: its right edge is exactly
+ * the viewport's left edge, so it contributes nothing to the capture and there
+ * is nothing there to scope. At 1280px it is `position: static`, untransformed,
+ * `x: 0, width: 240` — in flow, part of the shell.
+ *
+ * The tempting shortcut is to assert the mobile baseline's x=0..239 band is
+ * white. It is NOT: because the drawer is `fixed`, it reserves no space, so
+ * `<main>` paints straight through that band and the pixels there are ordinary
+ * page content. An earlier draft of this comment claimed whiteness off a
+ * too-sparse sample and was wrong — the band being non-white is a CONSEQUENCE
+ * of the sidebar being absent, not evidence against it. Measure the element.
  */
 const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
 
@@ -195,11 +214,15 @@ const TOP_BAR_MAX_DIFF_PIXELS = 100
  *
  * ── The number, measured rather than chosen ──────────────────────────────────
  *
- * #1811's method, repeated: committed at `0`, pushed, and the exact count read
- * off the failure a CI run printed against a baseline generated in a DIFFERENT
- * run. See the PR for the run ids.
+ * #1811's method, repeated: committed at `0`, pushed, and the count read off
+ * what CI did with it — against a baseline generated in a DIFFERENT run
+ * (baseline from run 32594037862, compared in run 32594208821, both
+ * ubuntu-latest with the same cached Chromium).
  *
  *   run-to-run jitter, scoped sidebar capture, threshold 0.02:   0 pixels
+ *
+ * At a budget of 0 the job went GREEN, which is the strongest form this
+ * measurement takes: not "under budget" but literally zero differing pixels.
  *
  * Consistent with the four existing captures, and for the same reason one layer
  * down (pixelmatch runs with `includeAA: false`, so antialiased pixels are
@@ -242,7 +265,7 @@ const TOP_BAR_MAX_DIFF_PIXELS = 100
  * region. Recorded here so the next reader does not infer coverage from the
  * fact that a sidebar capture exists.
  */
-const SIDEBAR_MAX_DIFF_PIXELS = 0 // MEASURING (#1811 method) — restored to 100 before review
+const SIDEBAR_MAX_DIFF_PIXELS = 100
 
 const PIXEL_THRESHOLD = 0.02
 

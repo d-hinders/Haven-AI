@@ -296,3 +296,73 @@ test('a satisfied-by shard suppresses the strict contract finding (#1496)', () =
   )
   assert.equal(withoutShard.length, 1)
 })
+
+/**
+ * #1790: a release bump now WRITES the Supported Runtime Manifest table in
+ * `docs/operations/mcp-runtime-compatibility.md`, which it previously left a
+ * human to re-pin by hand.
+ *
+ * That changes something subtle about this gate, and the change is worth
+ * pinning rather than reasoning about again later. Satisfaction here is
+ * FILE PRESENCE — `if (changedSet.has(doc)) continue` — with no opinion about
+ * who wrote the diff or whether `last-verified` moved. Before #1790, the only
+ * way that doc could appear in a release diff was a human editing it, so
+ * "touched" and "read by a human" were the same event. They are not any more.
+ *
+ * The acceptance criterion #1790 must keep is that **a bump alone cannot
+ * produce a release PR that satisfies the gate with zero human input**. It
+ * still holds — but via `casp-risk-guardrails.md`, whose `covers:` spans the
+ * published packages every release touches and which is satisfied only by a
+ * hand-written shard. That is a real guarantee resting on another doc's
+ * `covers:` breadth, which nothing else would notice being narrowed.
+ *
+ * So: assert it directly, against the repo's REAL front-matter. If someone ever
+ * narrows CASP's coverage (entirely plausible — "connect isn't money-path"),
+ * this fails instead of the human-read requirement disappearing silently.
+ */
+test('a bump-only release diff still FAILS the strict gate — no shard, no green (#1790)', async () => {
+  const { execFile } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  const { dirname, join } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const run = promisify(execFile)
+
+  const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
+
+  // Exactly what `npm run release:bump` produces and nothing more: the version
+  // constants it rewrites, plus the contract-doc table it now writes itself.
+  // Deliberately NO casp-changelog shard and NO other hand edit.
+  const bumpOnly = [
+    'packages/sdk/package.json',
+    'packages/connect/src/runtime-manifest.ts',
+    'packages/connect/src/runtime.ts',
+    'packages/mcp/src/server.ts',
+    'packages/signer/src/server.ts',
+    'packages/mcp-server/src/server.ts',
+    'docs/operations/mcp-runtime-compatibility.md',
+  ].join(',')
+
+  let failed = false
+  let output = ''
+  try {
+    const { stdout } = await run(
+      'node',
+      [join(ROOT, 'scripts', 'docs', 'coupling-gate.mjs'), '--strict', `--changed=${bumpOnly}`, '--out=/dev/null'],
+      { cwd: ROOT },
+    )
+    output = stdout
+  } catch (err) {
+    failed = true
+    output = `${err.stdout ?? ''}${err.stderr ?? ''}`
+  }
+
+  assert.ok(
+    failed,
+    'the strict coupling gate went GREEN on a bump-only diff — a release could now be opened with no human-written contract-doc content at all (#1790)',
+  )
+  assert.match(
+    output,
+    /casp-risk-guardrails\.md/,
+    'the blocking finding should be the CASP guardrails doc, which only a hand-written shard satisfies',
+  )
+})

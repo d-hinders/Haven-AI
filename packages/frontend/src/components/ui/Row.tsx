@@ -78,7 +78,7 @@ export function Row(props: RowProps) {
   const gapClass = density === 'compact' ? 'gap-2.5' : 'gap-3'
 
   const hoverClass = isInteractive
-    ? 'hover:bg-[var(--v2-surface-hover)] focus-visible:bg-[var(--v2-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/30'
+    ? 'hover:bg-[var(--v2-surface-hover)] focus-visible:bg-[var(--v2-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80'
     : ''
 
   const rootClass = `relative flex items-center ${gapClass} ${paddingClass} transition-colors duration-150 ${hoverClass} ${className}`

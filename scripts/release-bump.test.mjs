@@ -304,6 +304,26 @@ test('the manual fallback builds and wipes every package it publishes (#1791)', 
   }
 })
 
+test('the manual fallback builds in the order publish.yml builds in (#1791)', async () => {
+  // Membership is not enough, and the block's own prose says why: connect's
+  // tsup INLINES MCP_VERSION, so building connect before a fresh mcp bundles a
+  // stale one. Review on #1791 proved the point — swapping the mcp and connect
+  // build lines left every other guard here passing.
+  const block = await manualFallbackBlock()
+  const workflow = await readFile(join(ROOT, '.github', 'workflows', 'publish.yml'), 'utf8')
+  const order = (text) =>
+    [...text.matchAll(/npm run build -w packages\/(\S+)/g)].map((m) => m[1])
+
+  const documented = order(block)
+  const actual = order(workflow)
+  assert.ok(actual.length > 0, 'publish.yml no longer builds packages with `npm run build -w`')
+  assert.deepEqual(
+    documented,
+    actual,
+    'the manual fallback build ORDER has drifted from publish.yml — a stale dist gets bundled',
+  )
+})
+
 test('the manual fallback tells the operator to verify on the registry (#1791)', async () => {
   const block = await manualFallbackBlock()
   // This path has no per-package summary and does not stop on a partial

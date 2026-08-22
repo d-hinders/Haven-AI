@@ -272,9 +272,16 @@ the workflow would have published. This path uses your own npm credentials
 OIDC flow), so prefer re-running the workflow whenever possible.
 
 It mirrors `publish.yml`'s build-and-publish step deliberately: the same five
-packages, the same dist-wipe, the same build order — connect's tsup inlines
-`MCP_VERSION`, so a leftover dist bundles a stale one. The publish loop is the
-workflow's, minus the per-package summary table you no longer get here.
+packages, the same dist-wipe, and the same build **order** — connect's tsup
+inlines `MCP_VERSION`, so building it before a fresh `mcp` bundles a stale one.
+
+Two things the workflow does that this path cannot, and one you must decide:
+you get no per-package summary table, no provenance, and **the tag is
+hardcoded below**. `publish.yml` derives it from the version (prerelease →
+`alpha`, stable → `latest`). Every release to date has been a prerelease, so
+`--tag alpha` is right today — but if you are hand-publishing the first
+**stable** release, change it to `--tag latest`, or `npm install` keeps
+resolving the old version with nothing reporting an error.
 
 ```sh
 npm ci
@@ -285,7 +292,7 @@ npm run build -w packages/mcp
 npm run build -w packages/connect   # runs verify-connect-bundle.mjs
 npm run build -w packages/cli
 for pkg in sdk signer mcp connect cli; do
-  npm publish -w "packages/$pkg" --tag alpha
+  npm publish -w "packages/$pkg" --tag alpha --access public
 done
 ```
 

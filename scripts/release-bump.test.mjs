@@ -156,3 +156,73 @@ test('MUTATION PROOF: a corrupted unrelated version cannot wear a version line a
   const violations = lockfileDiffViolations(before, corrupted, { currentVersion: CUR, newVersion: NEXT })
   assert.ok(violations.some((v) => v.includes('9.9.9')), `garbage version passed the guard: ${violations}`)
 })
+
+/**
+ * #1788: the script used to sign off by printing `npm publish` invocations —
+ * the one action CLAUDE.md and the release skill forbid in three separate
+ * places. The rule was prose in three files and the tool contradicted it at
+ * the moment of maximum trust, right after the bump had succeeded.
+ *
+ * Prose cannot guard a script. These tests do, scoped to the sign-off block so
+ * the prohibition sentence itself (which necessarily contains the words
+ * "npm publish") is not mistaken for an instruction to run it.
+ */
+async function doneBlock() {
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const start = source.indexOf("header('Done')")
+  assert.notEqual(start, -1, "release-bump.mjs no longer has a header('Done') sign-off block")
+  const end = source.indexOf('\nmain().catch', start)
+  assert.notEqual(end, -1, 'could not find the end of main() after the Done block')
+  return source.slice(start, end)
+}
+
+/**
+ * What the script PRINTS, not what its source says. The block carries a
+ * comment explaining the #1788 defect — which necessarily names @haven_ai/cli
+ * and the words "npm publish" — and a guard that read the raw source would
+ * trip on the very explanation of why it exists.
+ */
+function emitted(block) {
+  return block
+    .split('\n')
+    .filter((line) => line.trim().startsWith('log('))
+    .join('\n')
+}
+
+test('MUTATION PROOF: the sign-off never emits an npm publish instruction (#1788)', async () => {
+  const printed = emitted(await doneBlock())
+  // Every legitimate mention is the backtick-quoted one inside the
+  // prohibition sentence. Strip those, and NOTHING may remain — this catches
+  // a bare `npm publish` with no flags, which an earlier flag-shaped regex
+  // let through (review finding on #1788).
+  const leftover = printed.replace(/`npm publish`/g, '').match(/npm publish/g)
+  assert.equal(
+    leftover,
+    null,
+    `release-bump.mjs must not instruct a manual publish; found ${leftover?.length} unquoted mention(s)`,
+  )
+})
+
+test('the sign-off enumerates no packages, in flags or in prose (#1788)', async () => {
+  const printed = emitted(await doneBlock())
+  // Doc paths legitimately contain package-ish substrings
+  // (mcp-runtime-compatibility.md), and they are not enumerations.
+  const prose = printed.replace(/\S*\/\S*/g, '').replace(/publish\.yml/g, '')
+  // The original defect listed four of the five published packages. Catch that
+  // shape however it is written — `-w packages/sdk` or "sdk, signer, mcp,
+  // connect and cli" — because the second form slipped past a flag-only regex.
+  const named = prose.match(/\b(sdk|signer|mcp|connect|cli)\b/gi)
+  assert.equal(
+    named,
+    null,
+    `the sign-off must not name packages — the published set is derived, not restated; found: ${JSON.stringify(named)}`,
+  )
+})
+
+test('the sign-off still tells the operator publishing is not theirs to do (#1788)', async () => {
+  const block = await doneBlock()
+  // Removing the defect must not also remove the guidance: silence would let
+  // the next reader assume publishing is a manual step nobody wrote down.
+  assert.match(block, /Never run `npm publish` by hand/)
+  assert.match(block, /promotion/)
+})

@@ -34,11 +34,15 @@ function resolvePort(): number {
   const stamped = process.env[RESOLVED_PORT_ENV]
   if (stamped) return Number(stamped)
 
-  // An external target starts no server of ours, so there is no port to
-  // reserve. The identity probe still runs against it — see
-  // PLAYWRIGHT_ALLOW_UNVERIFIED_SERVER for the one honest way past that.
-  if (process.env.PLAYWRIGHT_BASE_URL) return Number(process.env.PLAYWRIGHT_PORT ?? 0)
-
+  // Note there is no early return for `PLAYWRIGHT_BASE_URL`. An external
+  // target normally starts no server of ours, so the port looks irrelevant —
+  // but Playwright still falls back to spawning `webServer` if that target is
+  // unreachable, and the port it would spawn on has to be a real one. The
+  // first draft returned `Number(PLAYWRIGHT_PORT ?? 0)` there, which is a
+  // silent behaviour change from the old code's 3000 and would have spawned
+  // Next on port 0. Resolving normally costs a few milliseconds and gives
+  // that fallback this worktree's own port instead of either wrong answer.
+  //
   // `--exclusive` mirrors `reuseExistingServer` below: when this run may not
   // adopt anything, a busy port has to be walked past (Next would silently hop
   // to another one while Playwright kept polling this one). When it MAY adopt,

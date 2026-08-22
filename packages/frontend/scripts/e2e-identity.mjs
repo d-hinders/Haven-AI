@@ -42,10 +42,10 @@
  *
  * 1. `playwright.config.ts` (module scope, synchronous) shells out to this
  *    file's `reserve-port` command for the port, BEFORE the `webServer`
- *    command string is built. It has to be a subprocess: `defineConfig` is
- *    synchronous and binding a socket is not, and a port that is merely
- *    *derived* rather than *proven free* is the half of #1800 that lets Next
- *    hop to another port while the harness keeps polling the first.
+ *    command string is built. It has to be a subprocess because `defineConfig`
+ *    is synchronous and binding a socket is not. Whether the port is merely
+ *    derived or also PROVEN free depends on whether this run may reuse a
+ *    server — see `resolveE2ePort` for why, and why that is the safe way round.
  * 2. Playwright starts (or adopts) the web server — `webServer` is a plugin,
  *    and plugin setup runs BEFORE `globalSetup`.
  * 3. `globalSetup` (this file's default export) writes the marker into
@@ -79,6 +79,20 @@
  * standalone/production server ever becomes something local runs adopt, that
  * gap has to close — the honest fix is for the server to carry its build's
  * identity, not for the probe to try harder.
+ *
+ * Two smaller residuals, named by review rather than left to be rediscovered:
+ *
+ * - **A non-HTTP squatter on the derived port.** If some unrelated process
+ *   holds it without speaking HTTP, Playwright's reuse health-check fails, it
+ *   spawns `next dev` on that port anyway, and Next hops — the narrow tail of
+ *   the very defect this closes. The probe only rules out a server that
+ *   *answers*. Rare enough not to justify reintroducing the unconditional walk
+ *   (whose cost is measured and constant); the busy-port warning is the hint.
+ * - **A run that never becomes readable waits out the retry budget** — up to
+ *   ~130s with the settings below — before refusing. That is a slow refusal,
+ *   not a hang, and it is deliberate: the alternative is refusing a server that
+ *   was merely slow, which is how a guard trains people to reach for the
+ *   escape hatch.
  */
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -95,7 +109,7 @@ import {
 } from './capture-identity.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-export const FRONTEND_ROOT = path.resolve(HERE, '..')
+const FRONTEND_ROOT = path.resolve(HERE, '..')
 const PUBLIC_DIR = path.join(FRONTEND_ROOT, 'public')
 
 /**
@@ -117,15 +131,27 @@ export const E2E_IDENTITY_FILENAME = 'e2e-identity.json'
  */
 export const E2E_PORT_RANGE = { start: 3300, span: 120 }
 
+/** Escape hatch for a genuinely remote target. Loud, and it is not a default. */
+const ALLOW_UNVERIFIED_ENV = 'PLAYWRIGHT_ALLOW_UNVERIFIED_SERVER'
+
 export const E2E_REFUSAL = {
   verb: 'run the e2e suite against',
   consequence:
     'its results would be a pass or a failure for a branch this run never loaded. No tests were run.',
-  fix: 'stop the other server, or let this run start its own (unset PLAYWRIGHT_BASE_URL / PLAYWRIGHT_PORT).',
+  // Three fixes because there are three ways to get here, and the right one
+  // depends on which. Review found the first draft offering only "unset
+  // PLAYWRIGHT_BASE_URL", which is precisely backwards for the developer who
+  // set it on purpose to test a deployed environment — that target can NEVER
+  // serve this run's token, so the escape hatch is their only honest route and
+  // it went unmentioned. Likewise "unset PLAYWRIGHT_PORT" re-derives the same
+  // port on a genuine hash collision, where SETTING it is the answer.
+  fix: [
+    'stop the other server and let this run start its own;',
+    '    or set PLAYWRIGHT_PORT to a free port if two worktrees derived the same one;',
+    `    or, for a deliberately remote target that cannot serve this run's token, ${ALLOW_UNVERIFIED_ENV}=1`,
+    '    — which means the result may belong to a different branch, so say so wherever you report it.',
+  ].join('\n'),
 }
-
-/** Escape hatch for a genuinely remote target. Loud, and it is not a default. */
-export const ALLOW_UNVERIFIED_ENV = 'PLAYWRIGHT_ALLOW_UNVERIFIED_SERVER'
 
 /**
  * The port this run's app server will use: derived from the worktree path,
@@ -165,10 +191,14 @@ export async function resolveE2ePort({ cwd = FRONTEND_ROOT, exclusive = false } 
     ? Number(process.env.PLAYWRIGHT_PORT)
     : derivePort(identity.worktree, E2E_PORT_RANGE)
 
-  if (exclusive) return reserveFreePort(preferred, { label: 'e2e', log: (m) => console.error(m) })
+  // `console.warn`, not `console.error`: both go to stderr — which is what
+  // keeps the stdout port handshake clean — but this is the ordinary case
+  // (reusing a warm dev server is the point of this branch), and dressing the
+  // common path in red is how a notice stops being read.
+  if (exclusive) return reserveFreePort(preferred, { label: 'e2e', log: (m) => console.warn(m) })
 
   if (!(await isPortFree(preferred))) {
-    console.error(
+    console.warn(
       `e2e: something is already listening on :${preferred} — it will be used ONLY if it can ` +
         "prove it is this worktree's app (a 200 is not proof of identity).",
     )

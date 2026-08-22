@@ -19,7 +19,14 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs, shared with the Playwright config
-import { IDENTITY_FILENAME, PORT_RANGE, derivePort } from '../../scripts/capture-identity.mjs'
+import {
+  ForeignServerError,
+  IDENTITY_FILENAME,
+  PORT_RANGE,
+  buildRunIdentity,
+  derivePort,
+  verifyServerIdentity,
+} from '../../scripts/capture-identity.mjs'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs, loaded by Playwright as `globalSetup`
 import { E2E_IDENTITY_FILENAME, E2E_PORT_RANGE, E2E_REFUSAL } from '../../scripts/e2e-identity.mjs'
@@ -74,6 +81,86 @@ describe('the refusal says what was NOT done', () => {
     expect(E2E_REFUSAL.consequence).toMatch(/never loaded/)
     expect(E2E_REFUSAL.consequence).toMatch(/No tests were run/)
     expect(E2E_REFUSAL.consequence).not.toMatch(/screenshot/i)
+  })
+})
+
+/**
+ * The retry is the one piece of NEW state-machine logic this change adds to
+ * the shared probe, and #1816 is its first caller with `attempts > 1`. It is
+ * small enough to read and be sure of, which is exactly the situation this
+ * repo's standing lesson is about — a guard you reasoned through is not a
+ * guard you proved. Both halves are asserted: that a slow server is waited
+ * for, and that a foreign one is NOT.
+ */
+describe('the identity probe retries slowness but never a foreign server', () => {
+  const own = buildRunIdentity(
+    { worktree: '/Users/dev/Haven-AI', branch: 'fix/1816', commit: 'c'.repeat(40), dirty: false },
+    { token: 'run-token-1816-aaaa-bbbb-cccc' },
+  )
+  const marker = (token: string, worktree = '/Users/dev/Haven-AI') => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ token, worktree, branch: 'other', commit: 'd'.repeat(40) }),
+  })
+  const probe = (impl: () => Promise<unknown>) => impl as unknown as typeof fetch
+
+  it('waits out a server that is merely slow, then accepts it', async () => {
+    // The measured case: `next dev` under load took 14.5s to serve a static
+    // file, which one 10s attempt reports as a foreign server.
+    let call = 0
+    const served = await verifyServerIdentity('http://127.0.0.1:3402', own, {
+      fetchImpl: probe(async () => {
+        call += 1
+        if (call < 3) throw new Error('The operation was aborted due to timeout')
+        return marker(own.token)
+      }),
+      attempts: 5,
+      retryDelayMs: 1,
+    })
+    expect(call).toBe(3)
+    expect((served as { token: string }).token).toBe(own.token)
+  })
+
+  it('still refuses when every attempt is unreadable — patience is not a pass', async () => {
+    let call = 0
+    await expect(
+      verifyServerIdentity('http://127.0.0.1:3402', own, {
+        fetchImpl: probe(async () => {
+          call += 1
+          return { ok: false, status: 404, json: async () => null }
+        }),
+        attempts: 4,
+        retryDelayMs: 1,
+      }),
+    ).rejects.toThrow(ForeignServerError)
+    expect(call).toBe(4)
+  })
+
+  it('refuses ANOTHER worktree on the first read, without spending the budget', async () => {
+    // No amount of waiting turns somebody else's token into this run's, and a
+    // guard that retries a decided refusal just delays it — and would report
+    // the LAST attempt's reason rather than the real one.
+    let call = 0
+    let message = ''
+    try {
+      await verifyServerIdentity('http://127.0.0.1:3402', own, {
+        fetchImpl: probe(async () => {
+          call += 1
+          return marker('run-token-other-aaaa-bbbb-dddd', '/Users/dev/Haven-AI/.claude/worktrees/agent-other')
+        }),
+        attempts: 6,
+        retryDelayMs: 10_000,
+      })
+    } catch (err) {
+      message = String((err as Error).message)
+    }
+    expect(call).toBe(1)
+    expect(message).toMatch(/DIFFERENT capture run/)
+    expect(message).toMatch(/agent-other/)
+    // The refusal names the e2e consequence only when the caller asked for it;
+    // here the default is fine — what matters is that no stale "could not be
+    // read" detail from a retry leaked into a decided verdict.
+    expect(message).not.toMatch(/could not be read/)
   })
 })
 
@@ -136,6 +223,8 @@ describe('the e2e global setup wires the guard in', () => {
     // `playwright.config.ts` parses stdout. A progress line on the same stream
     // makes `Number(out)` NaN and the whole suite unrunnable.
     const source = await read('scripts/e2e-identity.mjs')
-    expect(source).toMatch(/reserveFreePort\(preferred, \{ label: 'e2e', log: \(m\) => console\.error\(m\) \}\)/)
+    expect(source).toMatch(/reserveFreePort\(preferred, \{ label: 'e2e', log: \(m\) => console\.warn\(m\) \}\)/)
+    // …and nothing on the busy-port path writes to stdout either.
+    expect(source).not.toMatch(/console\.log\([\s\S]{0,80}already listening/)
   })
 })

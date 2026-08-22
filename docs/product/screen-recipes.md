@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-08-21" # #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
+last-verified: "2026-08-22" # #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
 ---
 
 # Haven Screen Recipes
@@ -132,15 +132,19 @@ Money and risk clarity:
 
 ## Connect And Approve Agent
 
-Use after the user reviews the agent budget and needs to pair a runtime and approve
-the agent's on-chain authority.
+Use after the user reviews the agent budget and needs to pair an agent runtime
+and approve the agent's on-chain authority. The user is never asked WHICH
+runtime: the connector resolves that itself (#1720), so this flow has one
+setup prompt for every environment.
 
 Structure:
-1. Create and copy a setup prompt for the selected runtime.
+1. Create and copy a single setup prompt — identical for every environment.
 2. Wait for the local connector to generate the signing key and API key, then
    register the public signing address and proof with Haven.
    If Haven still reports no connection after a bounded wait, say only that it
-   has not received one yet; tell the user not to approve the budget, offer the same
+   has not received one yet; tell the user not to approve the budget, point them
+   at the connector's own output first (it can refuse locally without ever
+   contacting Haven, and then it is the only place naming why), offer the same
    local command, and let them cancel before creating a fresh one-time prompt.
 3. Show the registered public address and reviewed agent budget before wallet
    approval.

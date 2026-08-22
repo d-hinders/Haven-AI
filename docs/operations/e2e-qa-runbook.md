@@ -23,7 +23,7 @@ covers:
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-08-22" # #1771: corrected the "Already automated" row that credited `hosted-mcp.spec.ts` with mobile-overflow coverage — that test asserted a helper which could not fail inside the app shell and was removed; mobile overflow is covered by `navigation.mobile.spec.ts` under Pixel 5 emulation. Scope of this re-verification: the "Already automated" table only; the hand-test steps were NOT re-run. Prior: #1682: the per-environment run list notes the name-first picker (a row per environment again); steps themselves unchanged. Prior: #1672: noted the collapsed AI-agent picker entry in the per-environment run list; steps themselves unchanged. Prior: #1346 runtime-specific activation + read-only Connect verification re-checked; #1330 Hermes .env credential-reference verification
+last-verified: "2026-08-22" # #1720: the per-environment run list is no longer a picker-row list — there is no picker, so per-environment coverage now checks that the CONNECTOR resolves each environment from an identical command, and a deliberately-undetectable environment becomes a case worth running rather than an unreachable one. Step 1 rewritten (nothing to pick; commands must match across environments) and a new step 1b added for confirming which resolution rung fired. Other steps and the "Already automated" table NOT re-run. Prior: #1771: corrected the "Already automated" row that credited `hosted-mcp.spec.ts` with mobile-overflow coverage — that test asserted a helper which could not fail inside the app shell and was removed; mobile overflow is covered by `navigation.mobile.spec.ts` under Pixel 5 emulation. Scope of this re-verification: the "Already automated" table only; the hand-test steps were NOT re-run. Prior: #1682: the per-environment run list notes the name-first picker (a row per environment again); steps themselves unchanged. Prior: #1672: noted the collapsed AI-agent picker entry in the per-environment run list; steps themselves unchanged. Prior: #1346 runtime-specific activation + read-only Connect verification re-checked; #1330 Hermes .env credential-reference verification
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
@@ -69,15 +69,30 @@ workflows.
 ## #419 — Agent connection, end to end
 
 Run per environment: **Claude Code, Claude Desktop, Cursor, VS Code MCP, Hermes
-Agent, custom SDK runtime**, plus any others available. (Since #1682 the
-dashboard picker is a flat list of product names — Claude Code, Claude Desktop,
-Codex, Cowork, Cursor, Hermes Agent, OpenClaw, VS Code, "Not listed / other" —
-so a row exists per environment again. The three command-path rows still send
-the same flag-free command and the connector detects the runtime it executes
-inside, so covering one of them exercises the others' plumbing.)
+Agent, custom SDK runtime**, plus any others available.
 
-1. **Create the setup** in the dashboard (Connect agent) and pick the target
-   environment. Expect a single paste-able setup prompt; no private key shown.
+Since [#1720](https://github.com/d-hinders/Haven-AI/issues/1720) this list is
+**no longer a picker-row list** — there is no picker, and the dashboard emits a
+byte-identical command for every environment. That changes what per-environment
+coverage is FOR. It is no longer checking that a row sends the right flag;
+it is checking that the connector, given the same command everywhere, resolves
+each environment correctly on its own. That is the riskier half, so the list
+gets longer rather than shorter: an environment where detection is expected to
+fail (a plain terminal driving a desktop app) is now a case worth running
+deliberately, not an unreachable one.
+
+1. **Create the setup** in the dashboard (Connect agent). There is nothing to
+   pick — expect a single paste-able setup prompt with no runtime question
+   anywhere in the flow, and no private key shown. The command must be
+   identical to the one the previous environment's run produced.
+1b. **Confirm resolution, per environment.** In the connector's output, check
+   which rung resolved the runtime — detection, an agent self-report, or the
+   installed-client prompt (#1719). In an environment where nothing is
+   detectable and stdin is not a TTY, expect a refusal naming `--runtime`
+   values and NO side effects, then re-run once with `--runtime <name>`. The
+   dashboard cannot show this failure (it fires before Haven is contacted), so
+   the connector's output is the only evidence — the waiting screen's recovery
+   block now says so.
 2. **Run the connector** in that environment (`npx @haven_ai/connect@alpha …` or
    the pasted prompt). Expect: credentials written under `~/.haven/agents/<id>/`,
    hosted MCP + `haven-signer` entries written to that runtime's config, and the

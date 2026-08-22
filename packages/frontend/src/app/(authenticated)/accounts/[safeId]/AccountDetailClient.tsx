@@ -719,7 +719,7 @@ function RenameModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center">
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={loading ? undefined : onClose} />
       <div className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">

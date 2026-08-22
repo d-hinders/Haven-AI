@@ -137,6 +137,42 @@ export const CLAIM_ORPHANED_OUTBOUND_TX_SQL = `UPDATE outbound_txs
 export const COUNT_LANE_ATTEMPTS_AT_NONCE_SQL = `SELECT COUNT(*)::int AS n FROM outbound_txs
    WHERE chain_id = $1 AND nonce = $2 AND status IN ('replaced', 'failed')`
 
+/**
+ * The durable record for one broadcast hash (#1745).
+ *
+ * Chain-scoped because `tx_hash` is only unique WITHIN a chain — the same
+ * relayer key signing identical calldata at the same nonce on two chains
+ * produces the same hash, and an unscoped read would hand back the wrong
+ * chain's nonce, which is the one fact the caller is here for.
+ *
+ * `ORDER BY created_at DESC` is not decoration: a bump writes a NEW row for
+ * the replacement, and while `passport_attest` is never replaced (#1735),
+ * this read is generic. Newest-first means the caller sees the row that
+ * describes the current attempt.
+ *
+ * No index backs this (061 indexes the lane, the unmined scan and the live
+ * nonce, not the hash). Deliberate — the only caller is the passport
+ * recovery path, which runs at most once per stuck anchor per backoff tick,
+ * and a migration for it would gate this fix on CODEOWNERS review. If a hot
+ * path ever wants this read, add the index then.
+ */
+export const FIND_OUTBOUND_TX_BY_HASH_SQL = `SELECT * FROM outbound_txs
+   WHERE chain_id = $1 AND tx_hash = $2
+   ORDER BY created_at DESC, id
+   LIMIT 1`
+
+export async function findOutboundTxByHash(
+  chainId: number,
+  txHash: string,
+  db: Executor = pool,
+): Promise<OutboundTxRow | null> {
+  const { rows } = await db.query<OutboundTxRow>(FIND_OUTBOUND_TX_BY_HASH_SQL, [
+    chainId,
+    txHash.toLowerCase(),
+  ])
+  return rows[0] ?? null
+}
+
 export async function enqueueOutboundTx(
   params: {
     chainId: number

@@ -109,7 +109,7 @@ export function Modal({
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center p-4"
     >
       <div
         className="absolute inset-0 v2-modal-backdrop"

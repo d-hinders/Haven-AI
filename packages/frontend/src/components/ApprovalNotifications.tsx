@@ -48,7 +48,7 @@ export default function ApprovalNotifications() {
   }, [open])
 
   return (
-    <div className="relative z-[110]">
+    <div className="relative z-[var(--v2-z-chrome-popover)]">
       <button
         ref={triggerRef}
         type="button"

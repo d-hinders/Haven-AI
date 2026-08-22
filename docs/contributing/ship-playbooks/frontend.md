@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-08-21" # #1738: full-page captures un-clip the shell and fail on a blank PNG — §4 re-read against the capture scripts
+last-verified: "2026-08-22" # #1771: §4's overflow paragraph rewritten — the shared helper now measures `<main>`'s scroll box too and CAN fail inside the shell; separates `documentOverflows` (unreachable) from `contentOverflows` (whole pane forced into horizontal scroll), and names the two-scroll-box measurement's structural limits. Prior: #1768: §4 gains the viewport-coverage table — both Playwright projects gate on every PR now, and `*.mobile.spec.ts` is how you write a mobile test. Prior: #1738: full-page captures un-clip the shell and fail on a blank PNG — §4 re-read against the capture scripts
 ---
 
 # Frontend playbook
@@ -36,6 +36,31 @@ Run the matching items from the **Captain Self-Check Preflight** in [`../ai-agen
 ## 4. Verification
 
 Verify the change in the **browser**, or — when the browser path is unavailable/flaky — add a **named headless equivalent** (vitest) that covers the skipped animation, layout, routing, loading, or interaction risk. Include empty, loading, error, and success states when the screen can enter them; check mobile and desktop.
+
+**Which viewports actually gate ([#1768](https://github.com/d-hinders/Haven-AI/issues/1768)).** The *Frontend browser smoke* job runs **both** Playwright projects on every frontend PR, with no dispatch required:
+
+| Project | Emulation | Runs | Gates a PR |
+|---|---|---|---|
+| `chromium-desktop` | Desktop Chrome — 1280×720 viewport, fine pointer, no touch, DSF 1 | every `e2e/*.spec.ts` **except** `*.mobile.spec.ts` | yes |
+| `chromium-mobile` | **Pixel 5** — 393×727 viewport, coarse pointer, touch, Android UA, DSF 2.75 | `e2e/*.mobile.spec.ts` only | yes |
+
+(Numbers read off Playwright's own `devices` table at the pinned version, not from memory. Pixel 5's `screen` is 393×851; the **viewport** — what the page actually gets — is 393×727.)
+
+Both projects also inherit `SUITE_IGNORE` (`e2e/live/**`, and `*.visual.spec.ts` unless `VISUAL_REGRESSION=1`). That constant exists because a project-level `testIgnore` **replaces** the config-level one instead of extending it — a project that declares its own must spread `SUITE_IGNORE` back in, or the unmocked live smoke silently rejoins the fast suite.
+
+Plus the separate *Design visual regression* job, which pixel-compares `/design-system` at **1280** and **390** (`scripts/evidence-viewports.mjs`) — but under `chromium-desktop` at DSF 1, by setting the viewport inside the spec. That is a pixel gate, not a device gate: it sees layout, never touch or hit-testing.
+
+Before #1768, `chromium-mobile` existed but only a `workflow_dispatch` with `ui_suite=full` ever ran it — so **no mobile viewport gated anything**, which is a large part of why [#1749](https://github.com/d-hinders/Haven-AI/issues/1749) (primary navigation unopenable below `lg`) shipped. That input is now removed and both projects are unconditional.
+
+**Writing a mobile test:** name the file `*.mobile.spec.ts` and it runs under real Pixel 5 emulation. Do **not** reach for `test.use({ viewport: … })` inside a desktop spec — it narrows the window but leaves `maxTouchPoints` at 0, the pointer fine and the UA desktop, so touch and hit-testing behaviour is not actually covered. Conversely, keep viewport-independent behaviour out of `*.mobile.spec.ts`: the two projects run disjoint spec sets on purpose, and duplicating a spec buys nothing but CI minutes. `e2e/navigation.mobile.spec.ts` is the reference, including the meta-guard that fails if the project ever stops being device-emulated.
+
+**Measure overflow on the scroll box, not the document.** The authenticated shell is `overflow-hidden`, so content wider than the screen never grows `documentElement.scrollWidth` — which meant the page-level `expectNoHorizontalOverflow` helper **could not fail** on any authenticated route. Found by the #1768 mutation, not by reading, and fixed in [#1771](https://github.com/d-hinders/Haven-AI/issues/1771): the shared helper now measures `<main id="main-content">`'s own scroll box alongside the document, and `hasOverflow` is the union, so every caller gates for real. Assert `contentRegionFound: true` on authenticated routes — otherwise a `<main>` that is missing or not yet laid out measures `0` and reads as "fits".
+
+Two failure modes, and they are not the same defect: `documentOverflows` means content escaped the page box and — under the shell's `overflow-hidden` — is genuinely **unreachable**; `contentOverflows` means `<main>` (which is `overflow-y-auto`, so `overflow-x` computes to `auto`) is wider than its box, dragging the **whole content pane into horizontal scroll** instead of the offending element scrolling inside its own `overflow-x-auto` wrapper. The second is reachable but wrong — it is the [#1772](https://github.com/d-hinders/Haven-AI/issues/1772) shape. Note the measurement compares two scroll boxes rather than walking ancestors, so an `overflow-hidden` *between* them still hides evidence; `position: fixed` overlays are invisible to both ([#1773](https://github.com/d-hinders/Haven-AI/issues/1773)).
+
+**A known, filed defect is exempted by name, never by deletion.** `navigation.mobile.spec.ts` keeps a `KNOWN_CONTENT_OVERFLOW` map: the route still runs and still asserts rendering and console cleanliness, only the one known-failing assertion is skipped, and only with an issue number and the measured numbers next to it. Dropping the route instead is how a gate quietly stops covering things — which is the defect #1768 exists to close. Delete the entry in the PR that fixes the issue.
+
+Run them locally with `npm run test:e2e:mobile -w packages/frontend`, or both with `npm run test:e2e:gate -w packages/frontend` (exactly what CI runs).
 
 **Rendered-screen evidence is REQUIRED** for any diff that touches a rendered route or a shared UI primitive (`components/ui/*`, `components/haven/*`). Run `npm run screenshot -w packages/frontend -- <routes>` (see [#896](https://github.com/d-hinders/Haven-AI/issues/896)); it captures desktop (1280) + mobile (390) PNGs of `/design-system` plus the routes you pass, using a known auth/data fixture and the pre-installed browser. The fixture serves a deterministic **populated** dataset (a funded account, agents on both rails, transactions, a pending approval, contacts, agent activity and spend stats) so lists, tables and amounts render realistically — set `SCREENSHOT_FIXTURE=empty` when you specifically want empty states. The script also summarises any **console errors** per route; a red console means a fixture-shape gap or a real client bug — fix it before trusting the PNGs. **Attach the PNGs to the PR, or reference them in the Browser Verification section** — "browser or headless equivalent" is no longer sufficient on its own for a visual surface. A primitive change means shooting `/design-system` (where it's documented) *and* a route that consumes it. Screenshots live in the gitignored `.screenshots/`; the fixture is documented at the top of `scripts/screenshot.mjs`.
 

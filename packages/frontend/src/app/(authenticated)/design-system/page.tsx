@@ -572,6 +572,77 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Layering — the z-index scale"
+        description="Every stacking layer has a named token in globals.css. Reach for a token, never a fresh number: two independently chosen values (a z-[100] top bar over a z-[60] navigation toggle) left the mobile sidebar toggle painted and hit-tested under the top bar on every authenticated route, and a third ad-hoc number is how that recurs. Tiers are spaced by 10 so a genuinely new layer lands between two without renumbering."
+      >
+        {/* `collapseBelowMd={false}` + `overflow-x-auto`: Table.Head hides the
+            header below md on the assumption that mobile rows carry their own
+            labels. These rows are a bare token, a bare integer and a
+            description — nothing self-labelling — so at 390px the table would
+            otherwise open on "--v2-z-content / 10 / …" with no way to tell
+            which column is which. This is exactly the case the primitive's own
+            docstring names, and it is paired with the horizontal scroll that
+            docstring asks for. */}
+        <Card hover={false} className="overflow-hidden">
+          <div className="overflow-x-auto">
+          <Table className="min-w-[560px]">
+            <Table.Head collapseBelowMd={false}>
+              <tr>
+                <Table.HeaderCell align="left">Token</Table.HeaderCell>
+                <Table.HeaderCell align="left">Value</Table.HeaderCell>
+                <Table.HeaderCell align="left">What lives here</Table.HeaderCell>
+              </tr>
+            </Table.Head>
+            <Table.Body>
+              {[
+                ['--v2-z-content', '10', 'In-flow overlaps: badges, gradient washes'],
+                ['--v2-z-sticky', '20', 'Sticky table headers'],
+                ['--v2-z-chrome', '100', 'TopBar — the app shell’s own bar'],
+                ['--v2-z-chrome-popover', '110', 'Popovers anchored in the chrome (notifications, wallet, user menu)'],
+                ['--v2-z-nav-scrim', '130', 'Mobile drawer scrim'],
+                ['--v2-z-nav-drawer', '140', 'Mobile drawer itself'],
+                ['--v2-z-nav-toggle', '150', 'The Open / Close sidebar toggle'],
+                ['--v2-z-modal', '200', 'Modal, SidePanel'],
+                ['--v2-z-tooltip', '210', 'Tooltip'],
+                ['--v2-z-panel', '250', 'AgentPanel'],
+                ['--v2-z-toast', '9999', 'Toast, and the skip-to-content link'],
+              ].map(([token, value, what]) => (
+                <tr key={token}>
+                  <td className="px-4 py-2.5 align-top">
+                    <code className="rounded bg-[var(--v2-surface)] px-1 text-xs text-[var(--v2-ink)]">{token}</code>
+                  </td>
+                  <td className="px-4 py-2.5 align-top text-sm text-[var(--v2-ink-2)] v2-tabular">{value}</td>
+                  <td className="px-4 py-2.5 align-top text-sm text-[var(--v2-ink-2)]">{what}</td>
+                </tr>
+              ))}
+            </Table.Body>
+          </Table>
+          </div>
+        </Card>
+        <Card hover={false} className="p-5">
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
+            The rule the numbers encode
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            The mobile navigation overlay outranks the app chrome it slides over, and modals
+            outrank the navigation. That direction is not arbitrary. The drawer is{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">inset-y-0</code>, so its
+            own logo band shares the top 56px with the bar; its scrim exists to dim everything
+            behind it, and “everything” includes the bar. Let the bar win and the drawer is
+            decapitated, the scrim dims all but the top strip, and the toggle — which sits inside
+            that strip by design, in the gap the bar reserves for it — cannot be tapped at all.
+            Modals sit above both, because a dialog opened from a nav link has to cover the drawer.
+          </p>
+          <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            Adding a layer means picking the tier it belongs to, not picking a number. If none of
+            the tiers fits, add one to the scale here first — a raw{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">z-[…]</code> in a shell
+            component is the failure this table exists to prevent.
+          </p>
+        </Card>
+      </Section>
+
+      <Section
         title="Card.Header — the titled grey band"
         description="Give a Card a titled header with Card.Header — never hand-roll the border-b + bg-surface band. Slots: `title` (heading level via `as`, default h3), optional `description`, optional right-aligned `actions`. Pass `children` instead for bespoke content (badges, balances). Padding: default (px-5 py-4), `spacious` (px-6 py-5) for page-level section cards, `none` when the caller owns padding. Parent Card needs `overflow-hidden` (or add `rounded-t-[10px]` via className)."
       >

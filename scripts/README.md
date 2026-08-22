@@ -224,13 +224,30 @@ constants the bump has already written. It was copied by hand on every release
 anyway — four numbers, out of a file the script had just written and already
 verified. Since #1790 the bump writes it (`scripts/release-manifest-doc.mjs`).
 
-**What that deliberately does NOT do is satisfy the coupling gate for you.** The
-gate needs *both* contract docs, and the CASP shard is wholly hand-written — as
-is this doc's `last-verified` note. Those are the parts that carry an argument:
+**What that deliberately does NOT do is satisfy the coupling gate for you.** A
+bump alone cannot produce a green release PR, because the gate needs *both*
+contract docs and the CASP shard is wholly hand-written. The `last-verified`
+note is a required hand edit too. Those are the parts that carry an argument —
 what the release contains, and why the perimeter is unaffected. A table of four
 identical version strings carries none, which is the whole reason it could be
-generated. So the doc is still opened, still read, still edited by a human — and
-a bump alone still cannot produce a green release PR.
+generated.
+
+**Be precise about what enforces that, because it is not what you would
+assume** (review finding on #1790). The gate's per-doc satisfaction test is
+**file presence** — a doc that merely appears in the changed set is excused,
+with no check on whether `last-verified` moved or who wrote the diff. Before
+#1790, the only way `mcp-runtime-compatibility.md` could appear in a release
+diff was a human editing it, so *touched* and *read* were the same event. They
+are not any more: the bump's own write now excuses that doc by itself.
+
+What still forces human content into a release PR is
+`casp-risk-guardrails.md` — its `covers:` spans the published packages every
+release touches, and only a hand-written shard satisfies it. That is a real
+guarantee, but it rests on **another doc's `covers:` breadth**, so narrowing
+that list would silently remove the human-read requirement here. It is
+therefore pinned by a test (`scripts/docs/coupling-gate.test.mjs`): a bump-only
+diff with no shard must still fail the strict gate. Deleting CASP's
+published-package coverage fails that test rather than quietly going green.
 
 **The verification is independent of the write, and this is load-bearing.** A
 script that writes a value and then checks it wrote that value has built a guard

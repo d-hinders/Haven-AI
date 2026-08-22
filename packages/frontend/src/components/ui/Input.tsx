@@ -15,7 +15,7 @@ export function MaxButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="text-xs font-semibold uppercase tracking-wide text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] px-1.5 py-0.5 rounded-md hover:bg-[var(--v2-brand-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+      className="text-xs font-semibold uppercase tracking-wide text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] px-1.5 py-0.5 rounded-md hover:bg-[var(--v2-brand-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:opacity-40 disabled:pointer-events-none transition-colors"
     >
       Max
     </button>
@@ -48,7 +48,7 @@ export function PasteButton({
       type="button"
       onClick={() => { void handleClick() }}
       disabled={disabled}
-      className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] px-1.5 py-0.5 rounded-md hover:bg-[var(--v2-brand-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+      className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] px-1.5 py-0.5 rounded-md hover:bg-[var(--v2-brand-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:opacity-40 disabled:pointer-events-none transition-colors"
     >
       <Icon icon={Copy} className="w-3.5 h-3.5" />
       Paste
@@ -72,9 +72,15 @@ export function Input({
   helperText,
   ...props
 }: InputProps) {
+  // `focus-visible:`, not `focus:` (#1746). A text field is the one control
+  // where the two are NOT a behavioural trade-off: per the Selectors-4
+  // heuristic every browser implements, a focused text input matches
+  // `:focus-visible` however it was focused, mouse click included. So the ring
+  // still marks the field you are typing in — the behaviour the `focus:` form
+  // was there to buy — while the family now matches Button/Row/Modal.
   const borderClass = invalid
-    ? 'border-[var(--v2-danger)] focus:border-[var(--v2-danger)] focus:ring-danger/20'
-    : 'border-[var(--v2-border)] focus:border-[var(--v2-brand)] focus:ring-brand/20'
+    ? 'border-[var(--v2-danger)] focus-visible:border-[var(--v2-danger)] focus-visible:ring-danger/80'
+    : 'border-[var(--v2-border)] focus-visible:border-[var(--v2-brand)] focus-visible:ring-brand/80'
 
   const inputEl = (
     <div className="relative">
@@ -84,7 +90,7 @@ export function Input({
         </span>
       )}
       <input
-        className={`w-full rounded-md border bg-[var(--v2-bg)] px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] transition-colors focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-[var(--v2-surface)] disabled:text-[var(--v2-ink-3)] ${borderClass} ${leftIcon ? 'pl-9' : ''} ${rightAction ? 'pr-24' : ''} ${className}`}
+        className={`w-full rounded-md border bg-[var(--v2-bg)] px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-[var(--v2-surface)] disabled:text-[var(--v2-ink-3)] ${borderClass} ${leftIcon ? 'pl-9' : ''} ${rightAction ? 'pr-24' : ''} ${className}`}
         {...props}
       />
       {rightAction && (

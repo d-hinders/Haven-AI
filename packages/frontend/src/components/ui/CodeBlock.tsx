@@ -60,7 +60,7 @@ export function CodeBlock({
                 type="button"
                 onClick={() => void handleCopy()}
                 aria-label={copied ? 'Copied' : 'Copy to clipboard'}
-                className="inline-flex items-center justify-center h-6 w-6 rounded transition-colors text-white/50 hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                className="inline-flex items-center justify-center h-6 w-6 rounded transition-colors text-white/50 hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
               >
                 {copied ? (
                   <Icon icon={Check} className="h-3.5 w-3.5 text-[var(--v2-success)]" />

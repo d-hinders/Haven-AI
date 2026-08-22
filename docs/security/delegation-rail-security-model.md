@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-08-21" # #1698: new §6a — agent delegate-key rotation is a DIFFERENT layer from the account signer set, and its loss has the opposite answer (recoverable, because the delegate never held owner authority); revoke-before-issue, non-custody and no-self-rekey recorded as security properties; covers: widened to the re-key surface. Prior: #1679: signers read gains per-credential created_at (read-only timestamp for UI labels) — read/management boundary and every invariant unchanged; the read-surface paragraph updated to match. Prior: #1605: comment-only tense corrections in hybrid-accounts route + migrations 041/043 (stale "until #829/#834" claims) — no executable code, SQL, or boundary moves; every claim in this doc re-read against the diff stands. Prior: #1436: archiving now requires dead budgets as well as a revoked credential (one statement, refusal-only), so "Removed" cannot hide a spendable agent. #1423: revoke-all prepare reconciles crash-window orphans against disabledDelegations() and caps batches at 25; #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
+last-verified: "2026-08-22" # #1702 (carve-out): §6a gains a FOURTH security property — the budget meter carries amount AND period boundary across a re-key, as the defence against using rotation to refill a budget. Re-read §6 and §6a in full against `modules/agents/rekey-carry.ts` and `routes/agent-rekey.ts` as merged by #1698; every existing claim stands, and the three recorded owner decisions (revoke before issue, meter read AFTER revoke, period carries over) match the code. Scope: §6/§6a only — no signer-set, enrolment, removal, threshold or recovery claim re-tested beyond what #1709 covered the same day. Prior: #1709: pulled in only because the border-token sweep touched `AccountSignersCard.tsx`. That change is a class-string rename (`border-[var(--v2-warning)]/25` -> `border-warning/25`) on one advisory callout — no signer-set, enrolment, removal, threshold, or recovery claim in this document is affected, and the diff for that file contains no logic, prop or copy change. Re-read the signer-management sections against it; they stand unchanged. Scope: that verification only — no other claim re-tested. Prior: #1698: new §6a — agent delegate-key rotation is a DIFFERENT layer from the account signer set, and its loss has the opposite answer (recoverable, because the delegate never held owner authority); revoke-before-issue, non-custody and no-self-rekey recorded as security properties; covers: widened to the re-key surface. Prior: #1679: signers read gains per-credential created_at (read-only timestamp for UI labels) — read/management boundary and every invariant unchanged; the read-surface paragraph updated to match. Prior: #1605: comment-only tense corrections in hybrid-accounts route + migrations 041/043 (stale "until #829/#834" claims) — no executable code, SQL, or boundary moves; every claim in this doc re-read against the diff stands. Prior: #1436: archiving now requires dead budgets as well as a revoked credential (one statement, refusal-only), so "Removed" cannot hide a spendable agent. #1423: revoke-all prepare reconciles crash-window orphans against disabledDelegations() and caps batches at 25; #1400: batch revoke-all — one owner-signed UserOp disables N delegations atomically (BatchDefault); DB write only after the UserOp lands; invariants unchanged. Prior: #1199 passkey/wallet removal two-to-one rule
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -331,7 +331,7 @@ new delegate, keeping the agent's id, name, history and passport. That is
 "no recovery" limit above is scoped to the *signer set* rather than to keys in
 general.
 
-Three properties of that flow belong in this document because they are
+Four properties of that flow belong in this document because they are
 security properties, not implementation detail:
 
 - **Revoke precedes issue, always.** Both halves are on-chain and
@@ -342,6 +342,28 @@ security properties, not implementation detail:
   live keys* on a funded account, which nothing recovers by retrying. The
   ordering is enforced by a stage machine AND by CHECK constraints on
   `agent_rekeys`, so it holds across the several requests the flow spans.
+- **The budget meter carries across the rotation — amount AND period
+  boundary.** A re-key is not a way to refill a budget. The remainder frozen by
+  the revoke is issued as a **carry** grant, anchored inside the old period and
+  expiring at the old boundary — or at the old grant's own expiry, if that
+  falls first — paired with a **steady** grant starting at that same instant on
+  the original budget and cadence (`modules/agents/rekey-carry.ts`). Either
+  piece may be absent rather than wrong: a fully spent period yields no carry,
+  and a grant that dies at or before the boundary yields no steady. The two
+  never overlap, so total spend before the boundary is capped at the remainder
+  and every later period is the original grant untouched. Carrying only the
+  *amount* is the bypass this
+  defends against: each re-key would restart the clock, so an agent on a daily
+  budget could be handed its remainder hourly — the period is half the grant,
+  and dropping it turns a rate limit into a tally. The defence composes rather
+  than being separately checked, which is why it holds for repeats: re-keying a
+  carry grant reads a grant whose boundary is that same instant, so no number
+  of re-keys inside one period can sum to more than the original budget. Two
+  refusals belong to the same invariant — a remainder larger than the granted
+  budget is refused rather than clamped, and a remaining-budget reading that
+  did not come from the chain is refused rather than carried, because
+  `readRemainingBudget` falls back to the FULL budget on a failed read and
+  carrying that fallback would hand the new key a fresh full period.
 - **Non-custody is unchanged.** The new keypair is generated on the target
   machine and Haven receives only its public address. Nothing in the flow
   accepts, stores or transports private key material, and a design that

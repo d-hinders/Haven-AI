@@ -551,10 +551,15 @@ The five npx-installed packages — `@haven_ai/sdk`, `@haven_ai/signer`, `@haven
 #    and source version constants) and verify the connect bundle.
 npm run release:bump -- <new-version>   # e.g. 0.1.17-alpha.0
 
-# 2. Commit on a release branch, open a PR, get it green, merge to main.
+# 2. Commit on a release branch and open the PR into `dev` — NOT `main`.
+#    `dev-gate` only lets `dev` or `hotfix/*` into `main`, so a release/*
+#    branch aimed at `main` fails by design. Get it green, merge to `dev`.
+
+# 3. Promote `dev → main` (a merge commit, never a squash). Publishing fires
+#    on THIS step, not on the dev merge — the promotion stays a human step.
 ```
 
-On merge, the **Publish packages** workflow (`.github/workflows/publish.yml`) rebuilds `dist` in dependency order and publishes only the packages whose `package.json` version is not yet on npm. The dist-tag is derived from the version: a prerelease like `0.1.17-alpha.0` publishes under `--tag alpha`, a stable `0.2.0` under `latest`. The connector install command the dashboard hands out is pinned to `@alpha`, so the prerelease line is what real users get.
+On the promotion to `main`, the **Publish packages** workflow (`.github/workflows/publish.yml`) rebuilds `dist` in dependency order and publishes only the packages whose `package.json` version is not yet on npm. The dist-tag is derived from the version: a prerelease like `0.1.17-alpha.0` publishes under `--tag alpha`, a stable `0.2.0` under `latest`. The connector install command the dashboard hands out is pinned to `@alpha`, so the prerelease line is what real users get.
 
 - **Trigger model:** version bump = the gate. npm rejects republishing an existing version, so a normal (non-bump) commit is a no-op.
 - **Auth:** [npm Trusted Publishing (OIDC)](https://docs.npmjs.com/trusted-publishers) — there is **no `NPM_TOKEN` secret**. The workflow grants the job `id-token: write` and upgrades npm to ≥ 11.5.1; npm then authenticates the short-lived GitHub Actions OIDC token against a *trusted publisher* configured per package on npm (pointing at `d-hinders/Haven-AI` + workflow `publish.yml`). Nothing to leak or rotate, and it's exempt from the 2FA one-time-password prompt that blocks token-based publishes.

@@ -65,7 +65,7 @@ export default function ProtocolsPage() {
             <Card
               key={protocol.name}
               hover={false}
-              className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group"
+              className="p-7 hover:border-brand/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group"
             >
               <Link href={protocol.href} className="block">
                 <div className="text-[12px] font-medium tracking-tight text-[var(--v2-brand)] mb-4">

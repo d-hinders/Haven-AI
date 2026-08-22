@@ -238,7 +238,7 @@ export default function OnboardingClient() {
               {error && (
                 <div
                   role="alert"
-                  className="rounded-md border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]"
+                  className="rounded-md border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]"
                 >
                   {error}
                 </div>

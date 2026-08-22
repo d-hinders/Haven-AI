@@ -103,16 +103,30 @@ export function buildRunIdentity(base, { token = randomUUID(), now = () => new D
   }
 }
 
-export function identityMarkerPath(publicDir) {
-  return path.join(publicDir, IDENTITY_FILENAME)
+/**
+ * Every marker function takes the FILENAME as a parameter (#1816).
+ *
+ * Two harnesses now publish a marker out of the same `public/` directory — the
+ * capture run (`npm run screenshot`) and the e2e run (`npm run test:e2e`) — and
+ * a single worktree can be running both at once. Sharing one filename would
+ * make each run's marker overwrite the other's, so each would then refuse a
+ * server that really was its own: a guard whose false positives arrive exactly
+ * when you are working hardest. The default keeps every existing call site
+ * unchanged; the e2e harness passes `E2E_IDENTITY_FILENAME`.
+ *
+ * The two names must stay distinct and the two PORT RANGES must stay disjoint —
+ * both are asserted by tests rather than left to the reader.
+ */
+export function identityMarkerPath(publicDir, filename = IDENTITY_FILENAME) {
+  return path.join(publicDir, filename)
 }
 
-export async function writeIdentityMarker(publicDir, identity) {
-  await writeFile(identityMarkerPath(publicDir), `${JSON.stringify(identity, null, 2)}\n`, 'utf8')
+export async function writeIdentityMarker(publicDir, identity, filename = IDENTITY_FILENAME) {
+  await writeFile(identityMarkerPath(publicDir, filename), `${JSON.stringify(identity, null, 2)}\n`, 'utf8')
 }
 
-export async function removeIdentityMarker(publicDir) {
-  await rm(identityMarkerPath(publicDir), { force: true })
+export async function removeIdentityMarker(publicDir, filename = IDENTITY_FILENAME) {
+  await rm(identityMarkerPath(publicDir, filename), { force: true })
 }
 
 /**
@@ -121,8 +135,8 @@ export async function removeIdentityMarker(publicDir) {
  * before the process goes away, which left the marker behind in `public/` on
  * the very first refusal this guard produced.
  */
-export function removeIdentityMarkerSync(publicDir) {
-  rmSync(identityMarkerPath(publicDir), { force: true })
+export function removeIdentityMarkerSync(publicDir, filename = IDENTITY_FILENAME) {
+  rmSync(identityMarkerPath(publicDir, filename), { force: true })
 }
 
 /**
@@ -132,10 +146,10 @@ export function removeIdentityMarkerSync(publicDir) {
  */
 export function identityMismatch(expected, served) {
   if (served === null || served === undefined || typeof served !== 'object') {
-    return 'the server did not serve a capture identity marker (a 200 is not proof of identity)'
+    return 'the server did not serve an identity marker (a 200 is not proof of identity)'
   }
   if (typeof served.token !== 'string' || served.token.length === 0) {
-    return 'the served capture identity marker carries no token'
+    return 'the served identity marker carries no token'
   }
   if (served.token !== expected.token) {
     const where = [
@@ -166,37 +180,79 @@ export class ForeignServerError extends Error {
 }
 
 /**
+ * What a refusal is ABOUT, so the guard can be reused by a harness that is not
+ * taking screenshots (#1816) without either lying about what it was doing or
+ * growing a second copy of the probe. Prose only — the decision itself is
+ * `identityMismatch`, and it is shared verbatim.
+ */
+export const CAPTURE_REFUSAL = {
+  verb: 'capture',
+  consequence: 'its screenshots would be evidence for a branch nobody reviewed. Nothing was captured.',
+  fix: 'stop the other server, or let this run start its own (unset SCREENSHOT_BASE_URL).',
+}
+
+/**
  * Fetch the marker from the server about to be captured and refuse anything
  * that is not provably this run's own app. Never returns "probably ours".
+ *
+ * `attempts` retries ONLY the unreadable cases — a timeout, a connection
+ * error, a 404, a non-JSON body (#1816). A marker that was served and belongs
+ * to somebody else is refused on the first read, because no amount of waiting
+ * turns another worktree's token into this run's. The retry exists because
+ * "could not read it" and "it is not ours" are different facts and only the
+ * first one is about timing: on a loaded machine `next dev` took **14.5s** to
+ * serve a static file out of `public/`, which a single 10s attempt reports as
+ * a foreign server. A guard that cries wolf under load is a guard people
+ * learn to pass with the escape hatch.
  */
-export async function verifyServerIdentity(baseUrl, expected, { fetchImpl = fetch, timeoutMs = 10_000 } = {}) {
-  const url = `${baseUrl.replace(/\/$/, '')}/${IDENTITY_FILENAME}`
+export async function verifyServerIdentity(
+  baseUrl,
+  expected,
+  {
+    fetchImpl = fetch,
+    timeoutMs = 10_000,
+    filename = IDENTITY_FILENAME,
+    refusal = CAPTURE_REFUSAL,
+    attempts = 1,
+    retryDelayMs = 1_000,
+  } = {},
+) {
+  const url = `${baseUrl.replace(/\/$/, '')}/${filename}`
   let served = null
   let detail = null
-  try {
-    const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) })
-    if (!res.ok) {
-      detail = `${url} responded ${res.status}`
-    } else {
-      served = await res.json().catch(() => {
-        detail = `${url} did not return JSON`
-        return null
-      })
+  let reason = null
+
+  for (let attempt = 1; attempt <= Math.max(1, attempts); attempt += 1) {
+    served = null
+    detail = null
+    try {
+      const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) })
+      if (!res.ok) {
+        detail = `${url} responded ${res.status}`
+      } else {
+        served = await res.json().catch(() => {
+          detail = `${url} did not return JSON`
+          return null
+        })
+      }
+    } catch (err) {
+      detail = `${url} could not be read: ${String(err?.message ?? err)}`
     }
-  } catch (err) {
-    detail = `${url} could not be read: ${String(err?.message ?? err)}`
+
+    reason = identityMismatch(expected, served)
+    // Answered with SOMETHING parseable — the verdict is final either way.
+    if (reason === null || served !== null) break
+    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
   }
 
-  const reason = identityMismatch(expected, served)
   if (reason === null) return served
 
   throw new ForeignServerError(
     [
-      `REFUSING to capture: ${reason}.`,
+      `REFUSING to ${refusal.verb}: ${reason}.`,
       detail ? `  (${detail})` : null,
-      `  The server at ${baseUrl} is NOT provably this worktree's app, so its screenshots would be`,
-      '  evidence for a branch nobody reviewed. Nothing was captured.',
-      '  Fix: stop the other server, or let this run start its own (unset SCREENSHOT_BASE_URL).',
+      `  The server at ${baseUrl} is NOT provably this worktree's app, so ${refusal.consequence}`,
+      `  Fix: ${refusal.fix}`,
     ]
       .filter(Boolean)
       .join('\n'),
@@ -219,13 +275,16 @@ export function isPortFree(port, host = '127.0.0.1') {
  * assumed to be ours, it is simply skipped, and the chosen port is PRINTED so
  * the run is reproducible by hand.
  */
-export async function reserveFreePort(preferred, { host = '127.0.0.1', attempts = 40, log = console.log } = {}) {
+export async function reserveFreePort(
+  preferred,
+  { host = '127.0.0.1', attempts = 40, log = console.log, label = 'screenshot' } = {},
+) {
   for (let i = 0; i < attempts; i += 1) {
     const port = preferred + i
     if (await isPortFree(port, host)) {
       if (i > 0) {
         log(
-          `screenshot: port ${preferred} is already bound by something else — using :${port} instead ` +
+          `${label}: port ${preferred} is already bound by something else — using :${port} instead ` +
             '(never reusing a server this run did not start)',
         )
       }
@@ -233,6 +292,6 @@ export async function reserveFreePort(preferred, { host = '127.0.0.1', attempts 
     }
   }
   throw new Error(
-    `no free port for the capture server in ${preferred}..${preferred + attempts - 1} — stop some servers and retry`,
+    `no free port for the ${label} server in ${preferred}..${preferred + attempts - 1} — stop some servers and retry`,
   )
 }

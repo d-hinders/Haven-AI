@@ -39,7 +39,14 @@ export default function TopBar({ actionSlot }: TopBarProps) {
     // bar's own band (see the `w-8 lg:hidden` spacer below, which reserves the
     // room for it), so a bar that outranks the toggle covers the control it is
     // making space for. That was #1749.
-    <header className="relative z-[var(--v2-z-chrome)] h-14 flex items-center px-6 lg:px-8 border-b border-[var(--v2-border)] bg-[var(--v2-bg)]/85 backdrop-blur-md flex-shrink-0">
+    //
+    // bg-bg/85, not bg-[var(--v2-bg)]/85 (#1818). The arbitrary-value form put an
+    // opacity modifier on a bare var(), which Tailwind v3.4 drops silently — this
+    // bar had NO background rule at all, and `backdrop-blur-md` had nothing to
+    // composite. It looked fine only because --v2-bg is white and the page behind
+    // it is the same white. `bg-bg` reads the channel token --v2-bg-rgb through
+    // <alpha-value>, so the modifier compiles. See tailwind.config.js's colours.
+    <header className="relative z-[var(--v2-z-chrome)] h-14 flex items-center px-6 lg:px-8 border-b border-[var(--v2-border)] bg-bg/85 backdrop-blur-md flex-shrink-0">
       {/*
         Left region: hamburger spacer + optional back-link.
 

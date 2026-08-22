@@ -8,7 +8,7 @@ export default function PasskeyOtherDeviceNotice({
   className = '',
 }: PasskeyOtherDeviceNoticeProps) {
   return (
-    <div className={`rounded-xl border border-[var(--v2-brand)]/20 bg-white px-5 py-4 shadow-[var(--v2-shadow-card)] ${className}`.trim()}>
+    <div className={`rounded-xl border border-brand/20 bg-white px-5 py-4 shadow-[var(--v2-shadow-card)] ${className}`.trim()}>
       <div className="flex gap-3">
         <div className="mt-1 h-2 w-2 rounded-full bg-[var(--v2-brand)] flex-shrink-0" />
         <div>

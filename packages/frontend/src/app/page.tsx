@@ -284,7 +284,7 @@ export default function Home() {
         lede="Stablecoins give agents money that moves at their speed. Haven speaks the open standards that ride on those rails: x402 for pay‑per‑request flows and Stripe MPP for broader agent commerce, all under the same rule set."
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <Card hover={false} className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group">
+          <Card hover={false} className="p-7 hover:border-brand/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group">
             <Link href="/protocols/x402" className="block">
               <div className="text-[12px] font-medium tracking-tight text-[var(--v2-brand)] mb-3">
                 HTTP paywalls
@@ -305,7 +305,7 @@ export default function Home() {
             </Link>
           </Card>
 
-          <Card hover={false} className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(124,58,237,0.30)] transition-all group">
+          <Card hover={false} className="p-7 hover:border-brand/40 hover:shadow-[0_12px_32px_-16px_rgba(124,58,237,0.30)] transition-all group">
             <Link href="/protocols/mpp" className="block">
               <div className="text-[12px] font-medium tracking-tight text-[var(--v2-brand)] mb-3">
                 Stablecoin checkout

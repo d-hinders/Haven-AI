@@ -5,6 +5,7 @@ import {
   expectNoHorizontalOverflow,
   measureDialogOverflow,
   mockHavenApi,
+  openReceiveFundsModal,
   seedAuthenticatedSession,
   testSafeAddress,
   unexpectedBrowserErrors,
@@ -19,18 +20,11 @@ test.describe('dashboard browser UX', () => {
   test('opens the receive flow with clear account and network context', async ({ page }) => {
     const browserErrors = collectBrowserErrors(page)
 
-    await page.goto('/dashboard')
-    await dismissMobileSidebar(page)
-    // The hero CTA renders as "Receive" for funded accounts and "Receive funds"
-    // only after the dashboard knows the account is unfunded. The onboarding
-    // checklist can also expose "Receive funds", so pin to the first exact
-    // match in DOM order.
-    await page
-      .getByRole('button', { name: /^Receive( funds)?$/ })
-      .first()
-      .click()
-
-    const modal = page.getByRole('dialog', { name: 'Receive funds' })
+    // Shared with `receive-modal.mobile.spec.ts` (#1797) — getting to the
+    // screen is not viewport-dependent, so a second copy would only let the
+    // two drift. The MEASUREMENT below stays written out here; see the
+    // helper's JSDoc for why that split is deliberate.
+    const modal = await openReceiveFundsModal(page)
     await expect(modal).toBeVisible()
     await expect(modal.getByText('Operations')).toBeVisible()
     await expect(modal.getByText('Base', { exact: true })).toBeVisible()

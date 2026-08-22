@@ -63,13 +63,13 @@ function LoginForm() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {justRegistered && !error && (
-          <div className="rounded-md border border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] px-4 py-3 text-sm text-[var(--v2-success)]">
+          <div className="rounded-md border border-success/20 bg-[var(--v2-success-soft)] px-4 py-3 text-sm text-[var(--v2-success)]">
             Account created. Log in to continue.
           </div>
         )}
 
         {error && (
-          <div className="rounded-md border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+          <div className="rounded-md border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
             {error}
           </div>
         )}

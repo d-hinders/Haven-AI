@@ -141,7 +141,7 @@ export function ConfiguredAllowanceRow({
         </span>
       </div>
       <div className="h-[3px] w-full rounded-full bg-[var(--v2-surface-2)]">
-        <div className="h-full w-full rounded-full bg-[var(--v2-brand)]/25" />
+        <div className="h-full w-full rounded-full bg-brand/25" />
       </div>
       <p className="text-xs text-[var(--v2-ink-3)]">Configured in Haven</p>
     </div>

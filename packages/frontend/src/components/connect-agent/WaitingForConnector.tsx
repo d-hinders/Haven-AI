@@ -61,7 +61,7 @@ export function WaitingForConnector({
           Approved) already says where you are, and saying it twice on one
           screen made neither instance authoritative. Status is the ticker's
           job; this block's job is what to DO. */}
-      <div className="rounded-[10px] border border-[var(--v2-brand)]/15 bg-[var(--v2-brand-soft)] p-4">
+      <div className="rounded-[10px] border border-brand/15 bg-[var(--v2-brand-soft)] p-4">
         {/* #1393 type scale: the modal has ONE title — the Modal primitive's
             own `text-sm font-semibold` (ui/Modal.tsx). Every heading inside
             the connect flow, including this one, plays a SECTION role and
@@ -124,7 +124,7 @@ export function WaitingForConnector({
           </p>
         )}
         {connectionStage === 'recovery' && (
-          <div className="rounded-[10px] border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] p-3 text-xs text-[var(--v2-ink-2)]">
+          <div className="rounded-[10px] border border-warning/25 bg-[var(--v2-warning-soft)] p-3 text-xs text-[var(--v2-ink-2)]">
             <p className="font-semibold text-[var(--v2-ink)]">Haven has not received a connection yet</p>
             {/* #1720: the connector can refuse LOCALLY — it stops before
                 contacting Haven when it cannot work out which agent client to
@@ -216,7 +216,7 @@ export function WaitingForConnector({
                 </Button>
               )}
               {manualPathRevealed && (<>
-              <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
+              <div className="rounded-[10px] border border-warning/20 bg-[var(--v2-warning-soft)] p-3">
                 <p className="font-semibold text-[var(--v2-ink)]">Before creating a manual credential</p>
                 <ul className="mt-2 list-disc space-y-1 pl-4 leading-relaxed text-[var(--v2-ink-2)]">
                   <li>Use it only in a trusted agent workspace.</li>

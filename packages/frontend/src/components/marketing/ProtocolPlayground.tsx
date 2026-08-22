@@ -339,7 +339,7 @@ function StageCard({
     <div
       className={`rounded-[10px] border p-5 transition-all duration-200 ${
         active
-          ? 'border-[var(--v2-brand)]/45 bg-[var(--v2-brand-soft)]/55 shadow-[0_12px_32px_-18px_rgba(79,70,229,0.34)]'
+          ? 'border-brand/45 bg-brand-soft/55 shadow-[0_12px_32px_-18px_rgba(79,70,229,0.34)]'
           : done
           ? 'border-[var(--v2-border)] bg-white'
           : 'border-[var(--v2-border)] bg-white'

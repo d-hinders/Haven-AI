@@ -76,7 +76,7 @@ const VARIANT_CLASS: Record<Variant, string> = {
   tertiary:
     'bg-transparent text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)] focus-visible:ring-brand/80',
   danger:
-    'bg-[var(--v2-danger)] text-white hover:bg-[var(--v2-danger)]/90 shadow-[var(--v2-shadow-button)] focus-visible:ring-danger/80',
+    'bg-[var(--v2-danger)] text-white hover:bg-danger/90 shadow-[var(--v2-shadow-button)] focus-visible:ring-danger/80',
 }
 
 type ButtonProps = {

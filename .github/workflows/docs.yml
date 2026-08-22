@@ -59,15 +59,33 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `docs:check` now includes the #1843 chain-integrity check, which
+          # compares each changed doc's `last-verified` line against the merge
+          # base. A shallow clone has no base commit to read, and the check
+          # fails closed in CI rather than reporting a clean bill of health.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
 
-      # Every doc has valid front-matter, every `covers` glob resolves, and
+      # Every doc has valid front-matter, every `covers` glob resolves, no
+      # changed doc dropped an entry from its `last-verified` chain, and
       # portable agent skills plus client adapters stay aligned.
       # Dependency-free, so no `npm ci` is needed.
+      #
+      # BASE_SHA/HEAD_SHA are set only for `pull_request`. On a `push` to
+      # main/dev the chain check sees neither and skips loudly: there is no
+      # base to compare against and nobody to act on a finding. Adding it to this job
+      # rather than to a new one is deliberate: **Docs front-matter & agent
+      # skills** is already a required check, so the rule is enforced the day
+      # it merges instead of the day someone remembers to edit the ruleset
+      # (the #933 shape, one step removed).
       - name: Validate docs and agent skills
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: npm run docs:check
 
       # Unit tests for the documentation and agent-skill validators.

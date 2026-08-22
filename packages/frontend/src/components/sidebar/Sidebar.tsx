@@ -400,7 +400,7 @@ export default function Sidebar() {
                         setMenuOpen(false)
                         setCollapsed(true)
                       }}
-                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
                     >
                       <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">
                         {icons.profile}
@@ -414,7 +414,7 @@ export default function Sidebar() {
                         setMenuOpen(false)
                         setCollapsed(true)
                       }}
-                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
                     >
                       <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">
                         {icons.settings}
@@ -429,7 +429,7 @@ export default function Sidebar() {
                         logout()
                         router.push('/')
                       }}
-                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-danger)] hover:bg-[var(--v2-danger-soft)] w-full text-left transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-danger)] hover:bg-[var(--v2-danger-soft)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-danger/80"
                     >
                       <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">
                         {icons.logout}

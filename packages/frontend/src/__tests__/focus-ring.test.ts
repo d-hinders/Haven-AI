@@ -387,17 +387,20 @@ describe('brand-filled controls carry a ring offset (#1741)', () => {
  * string to "deduplicate" it fails loudly rather than silently restoring the
  * blind spot. Two assertions, two different claims.
  *
- * Two known limits remain, named here so the list is honest rather than ending
+ * One known limit remains, named here so the list is honest rather than ending
  * at the cheapest entry:
  *
  *   1. `DropdownMenu`'s `tone="danger"` item, whose focus indicator is a
- *      background swap rather than a ring — outside a ring rule's domain
- *      entirely.
- *   2. Controls with NO focus ring at all (`Sidebar` logout, `AgentCard`'s
- *      revoke/remove links, #1819). This rule only fires on a class string that
- *      already contains a `focus-visible:ring-*` utility, which is right for a
- *      TONE rule — a missing indicator is a different defect needing its own
- *      guard, not a widened version of this one.
+ *      background swap rather than a ring — outside a *ring* rule's domain
+ *      entirely. It is not unguarded: the indicator rule below covers it, and
+ *      deliberately accepts a `focus-visible:bg-` swap as a valid indicator.
+ *
+ * The other limit this comment used to carry — controls with NO focus ring at
+ * all — is gone, because #1819 built the guard for it rather than widening this
+ * one. That was the right split: this rule only fires on a class string that
+ * ALREADY contains a `focus-visible:ring-*` utility, which is correct for a TONE
+ * rule and structurally blind to an absent indicator. Two rules, two questions:
+ * this one asks "what colour", the one below asks "is there one at all".
  */
 const DESTRUCTIVE_HOVER =
   /hover:(?:bg-\[var\(--v2-danger(?:-soft)?\)\]|text-\[var\(--v2-danger\)\])/
@@ -470,6 +473,130 @@ describe('destructive controls focus in their own tone (#1792)', () => {
     // measured against. Named so a future sweep cannot quietly flip it back.
     const modal = readFileSync(join(FRONTEND, 'src/components/EditAgentModal.tsx'), 'utf8')
     expect(modal).toMatch(/hover:bg-\[var\(--v2-danger-soft\)\][^"'`]*focus-visible:ring-danger\/\d+/)
+  })
+})
+
+/**
+ * A destructive control has a focus indicator AT ALL (#1819).
+ *
+ * The inverse question from the tone rule above, and a strictly more serious
+ * one. A wrong tone is a consistency defect on a control that can still be
+ * perceived; **no indicator is a WCAG 2.4.7 (Focus Visible) failure** — a
+ * keyboard user cannot tell which control Enter will fire, on an action that
+ * destroys something. `Sidebar`'s "Log out" was the worst case: the popover
+ * *programmatically* moves focus to its first item on open (`Sidebar.tsx`'s
+ * open-effect), so focus landed on an element with nothing to show for it.
+ *
+ * Why this could not be a widened version of the tone rule: that rule matches
+ * class strings that already contain a `focus-visible:ring-*` utility, so a
+ * call-site with none contributes nothing to scan and is invisible BY
+ * CONSTRUCTION. #1741's sweep had the same blind spot for the same reason. The
+ * population has to be enumerated from the other end — every destructive
+ * control — and then checked for an indicator.
+ *
+ * **A ring is not the only valid indicator, and this rule says so in code rather
+ * than in an exemption list.** `DropdownMenu`'s `tone="danger"` item indicates
+ * focus with a `focus-visible:bg-` swap. Exempting that file by name would have
+ * been the cheap move and would have encoded the wrong rule; accepting a
+ * background swap encodes the actual requirement — *indicate focus somehow* —
+ * and keeps the file guarded against losing its indicator later. Mutation-proven
+ * by removing that swap and watching this rule name the file.
+ *
+ * Scope, stated because the number is smaller than it looks: across 139
+ * hover-bearing class strings in `src/`, 99 carry no focus ring, but only these
+ * few are destructive. Scoped to destructive controls the rule closes at ZERO
+ * offenders and stays closed — a stronger guarantee than a shrink-only ratchet,
+ * which is why #1819 needed neither a ratchet nor a further split. The other ~95
+ * are mostly non-focusable elements that merely tint on hover; they are a
+ * separate, noisier question and are NOT covered here.
+ *
+ * **Two known limits, named rather than assumed away** — this file's whole
+ * argument is that a guard cannot be trusted because it passes, so its holes
+ * belong in writing:
+ *
+ *   1. **The `bg-` branch checks presence, not distinctness.** It asks whether a
+ *      `focus-visible:bg-` exists, never whether it DIFFERS from the control's
+ *      own `hover:bg-`. `DropdownMenu` currently sets both to
+ *      `--v2-danger-soft`, so its focused and hovered states are identical —
+ *      still an indicator against the resting state, so not a 2.4.7 failure, but
+ *      a hovering mouse user gets no focus signal. Worse, nothing here would
+ *      reject a `focus-visible:bg-white` on a white popover, which would satisfy
+ *      this rule while being invisible. Tightening it means comparing the two
+ *      values in the same string, not just matching one.
+ *   2. **A ring reachable only through `${}` interpolation is invisible to the
+ *      scan.** `QUOTED_STRINGS` reads raw source text, so a destructive hover in
+ *      a template literal whose ring arrives via an interpolated variable would
+ *      be reported as an offender. Note the direction: that is a false POSITIVE,
+ *      the safe failure — a noisy red, not a silent green. No call-site does
+ *      this today (`Button.tsx` and `entityCardStyles.ts` were both checked), so
+ *      it is theoretical; it is written down so the next person meets it as a
+ *      known limit rather than a mystery.
+ */
+const FOCUS_INDICATOR = /focus-visible:(?:ring-[a-z]+\/\d+|bg-)/
+
+/**
+ * Every quoted string in a source file, whatever quote encloses it.
+ *
+ * NOT `className="…"`. That was this rule's first shape and it had a hole big
+ * enough to hide the very case the rule documents: `DropdownMenu` builds its
+ * tone classes in a TERNARY of single-quoted strings, and `Button` keeps its
+ * variants in a lookup table, so neither is ever written as a `className="…"`
+ * literal and neither was scanned. The mutation that removed `DropdownMenu`'s
+ * indicator therefore left this rule green — a guard cannot be trusted because
+ * it passes, only because it fails when it should.
+ *
+ * Splitting on quote characters is the same granularity the tone rules above
+ * use, and it inherits their property: one class STRING at a time, so a file
+ * with several controls is never excused because one of its others is correct.
+ */
+const QUOTED_STRINGS = /[^"'`\n]+/g
+
+describe('destructive controls have a focus indicator at all (#1819)', () => {
+  it('every destructive control indicates focus somehow', () => {
+    const offenders: string[] = []
+    for (const file of sourceFiles(join(FRONTEND, 'src'))) {
+      const text = readFileSync(file, 'utf8')
+      for (const cls of text.match(QUOTED_STRINGS) ?? []) {
+        if (!DESTRUCTIVE_HOVER.test(cls)) continue
+        if (!FOCUS_INDICATOR.test(cls)) {
+          offenders.push(`${relative(FRONTEND, file)}: ${cls.trim().slice(0, 80)}…`)
+        }
+      }
+    }
+    expect(
+      offenders,
+      'a destructive control with no focus indicator is a WCAG 2.4.7 failure — add ' +
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 ' +
+        '(ring-inset on a full-bleed row, which would clip an outset ring)',
+    ).toEqual([])
+  }, SCAN_TIMEOUT)
+
+  it('the indicator scan is looking at a real population', () => {
+    // Same anti-vacuity reasoning as the tone rule: a regex that silently stops
+    // matching turns the assertion above into a green over an empty list.
+    const seen = new Set<string>()
+    for (const file of sourceFiles(join(FRONTEND, 'src'))) {
+      const text = readFileSync(file, 'utf8')
+      for (const cls of text.match(QUOTED_STRINGS) ?? []) {
+        if (DESTRUCTIVE_HOVER.test(cls)) seen.add(relative(FRONTEND, file))
+      }
+    }
+    expect(
+      seen.size,
+      'the destructive-control scan matched nothing — the rule above is passing vacuously',
+    ).toBeGreaterThanOrEqual(5)
+  }, SCAN_TIMEOUT)
+
+  it('a background-swap indicator counts, and DropdownMenu relies on it', () => {
+    // Pins the deliberate design choice above. If someone "tidies" DropdownMenu's
+    // focus-visible:bg- away, the rule must catch it rather than shrug — and if
+    // someone narrows FOCUS_INDICATOR to rings only, this documents what breaks.
+    const menu = readFileSync(join(FRONTEND, 'src/components/ui/DropdownMenu.tsx'), 'utf8')
+    expect(
+      menu,
+      "DropdownMenu's danger item indicates focus with a background swap, not a ring",
+    ).toMatch(/focus-visible:bg-\[var\(--v2-danger-soft\)\]/)
+    expect(FOCUS_INDICATOR.test('focus-visible:bg-[var(--v2-danger-soft)]')).toBe(true)
   })
 })
 

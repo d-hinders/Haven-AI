@@ -304,8 +304,8 @@ justified by future work outlives the work unless something re-checks it. That
 allowlist is now empty. Deep model:
 [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
-**How much of the API the spec actually describes (#1443, measured 2026-08-15):**
-138 registered routes, **2 of them undocumented** — only safe-deploy.ts and safe-exec.ts, deliberately, under the #1440 Safe-rail retirement.
+**How much of the API the spec actually describes (#1443, measured 2026-08-15; total re-counted 2026-08-21 for #1698):**
+144 registered routes, **2 of them undocumented** — only safe-deploy.ts and safe-exec.ts, deliberately, under the #1440 Safe-rail retirement. (#1698's six re-key routes were documented in the same PR that added them, which is the gate working as intended: the undocumented count is shrink-only, so a new route module has nowhere to hide. Note that only the undocumented count is enforced — the TOTAL here is prose and goes stale silently with every route added, so re-count it rather than trusting it.)
 (#1446 is working the backfill one domain at a time: `contacts.ts` came off the
 list first, then the whole `agent-delegations.ts` lifecycle — grant, activate,
 per-hash and batch revocation, signer management — then the x402 demo-resource

@@ -44,6 +44,9 @@ covers:
   - packages/backend/src/routes/approvals.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/routes/agent-rekey.ts
+  - packages/backend/src/modules/agents/rekey-*.ts
+  - packages/backend/src/infra/repositories/agent-rekeys.ts
   - packages/frontend/src/app/(authenticated)/accounting/**
   - packages/frontend/src/app/(authenticated)/reporting/**
   - packages/frontend/src/components/AddFundsModal.tsx

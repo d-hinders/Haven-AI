@@ -1388,10 +1388,15 @@ export default function DesignSystemPage() {
                 },
               ].map((row) => (
                 <tr key={row.title}>
-                  <td className="px-4 py-4 align-middle">
+                  {/* Narrow gutters below md mirror TransactionsTable (#1772).
+                      Without them this showcase rendered 375px wide inside a
+                      343px Card at 393px — clipped by the Card's
+                      `overflow-hidden`, i.e. the very defect the table below
+                      is meant to document the correct shape of. */}
+                  <td className="px-2 py-4 align-middle md:px-4">
                     <DirectionMark direction={row.direction} />
                   </td>
-                  <td className="px-4 py-4 align-middle">
+                  <td className="max-w-0 px-4 py-4 align-middle">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-semibold text-[var(--v2-ink)]">{row.title}</p>
                       {row.failed ? <StatusBadge tone="danger">Failed</StatusBadge> : null}
@@ -1409,13 +1414,13 @@ export default function DesignSystemPage() {
                   <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] md:table-cell">
                     {row.date}
                   </td>
-                  <td className="px-4 py-4 align-middle text-right">
+                  <td className="px-2 py-4 align-middle text-right md:px-4">
                     <p>
                       <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
                     </p>
                     <p className="mt-1 text-xs text-[var(--v2-ink-3)] md:hidden">{row.date}</p>
                   </td>
-                  <td className="px-4 py-4 align-middle text-right">
+                  <td className="px-2 py-4 align-middle text-right md:px-4">
                     <ExternalDetailsLink href="#" />
                   </td>
                 </tr>

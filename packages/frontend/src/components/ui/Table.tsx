@@ -55,6 +55,21 @@ function Head({
    * Headers collapse below md by default — mobile rows carry their own
    * labels. Pass `false` for dense admin tables whose rows don't (pair the
    * table with an `overflow-x-auto` wrapper so mobile scrolls horizontally).
+   *
+   * ⚠️ The `overflow-x-auto` wrapper and `sticky` are MUTUALLY EXCLUSIVE
+   * (#1772). `overflow-x: auto` forces the computed `overflow-y` to `auto`
+   * too, which makes the wrapper the sticky scroll ancestor — the pinned
+   * header then sticks to a box that never scrolls vertically, i.e. it stops
+   * pinning. Measured on `/transactions`: thead held at y=56 while scrolling
+   * without the wrapper, scrolled off to y=-303 with it.
+   *
+   * So a collapsing table (`collapseBelowMd` left true, usually `sticky`) has
+   * to FIT rather than scroll. If it overflows at 393px, the cause is almost
+   * always a `truncate`d cell: `truncate` is `white-space: nowrap`, and an
+   * auto-layout column can never be narrower than its min-content, so the
+   * untruncated text widens the table instead of ellipsising. Put `max-w-0`
+   * on the one flexible cell — a cell `max-width` IS allowed below
+   * min-content — and the `truncate` starts working.
    */
   collapseBelowMd?: boolean
   className?: string

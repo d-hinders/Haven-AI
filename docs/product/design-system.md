@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-08-21" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass
+last-verified: "2026-08-21" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass
 ---
 
 # Haven Design System
@@ -263,6 +263,39 @@ Consequences worth knowing:
   fight over the same pixels — this is the one new constraint the mechanism introduces.
 - Choosing `size` therefore stays a **density** decision, not an ergonomics one.
 
+**The rule outlives the primitive ([#1766](https://github.com/d-hinders/Haven-AI/issues/1766)).**
+A control that is not a `Button` inherits none of the above automatically, and the
+first one to need it was the mobile sidebar toggle — a hand-rolled 32px square that
+#1749 had just made reachable, so an undersized target went from moot to load-bearing
+on the entry point to primary navigation. It borrows the same mechanism (transparent
+`::after`, paint unchanged) with two deviations worth knowing before you copy it:
+
+- **An icon-only square grows in BOTH axes.** "Vertical only" is not the rule; it is a
+  consequence of a labelled `sm` Button's width already clearing 44px. A 32px square
+  has no long axis, so the overlay is `h-11 w-11` and centred on both. What still
+  applies is the *reason* behind the original rule — check what the widened target now
+  reaches, in **both** states the control has. For the toggle, closed: right box edge
+  x=54, nearest interactive control (`NetworkSwitcher`) at x=68, 14px of clearance.
+  Open: the target floats over the drawer's own logo band, which it already did at 32px
+  — what is asserted there is that the logo link is still reachable at its centre, not
+  that nothing overlaps. Both are pinned in `e2e/mobile-nav-tap-target.mobile.spec.ts`.
+- **Do not add `relative` to an already-positioned element.** `Button` needs it because
+  it is static. A `fixed` or `absolute` control is already a positioning context, and
+  adding `relative` un-fixes it — on the toggle that shifts the whole app shell 32px
+  and drops the control back under `TopBar`, which was #1749. Do not take this on the
+  prose's word: it is a claim about which of two same-property utilities the cascade
+  keeps, so it is pinned by a test rather than by this paragraph —
+  `e2e/mobile-nav-tap-target.mobile.spec.ts` asserts `header.left === 0` as an absolute
+  anchor, and that assertion exists **because** the mutation passed three other mobile
+  specs first.
+
+**Prove it rendered, not in the class string.** A pseudo-element overlay has several
+silent no-op failure modes (a clipping ancestor, a positioning context resolving
+elsewhere, another element winning the band), and none of them exist in jsdom — which
+has no layout, no stacking contexts and no hit-testing. Measure the hit rectangle by
+walking `elementFromPoint` outward from the centre in a real engine; `getBoundingClientRect`
+returns the border box and reports 32×32 even when the overlay works perfectly.
+
 ### Cards (`Card`)
 
 `bg-white border border-[var(--v2-border)] rounded-[10px] shadow-[var(--v2-shadow-card)]`. Padding by use: `p-7` standard, `p-5` compact, `p-7 md:p-10` hero‑adjacent.
@@ -324,6 +357,8 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 - Empty state renders inside the table with the correct column span.
 
 Use `TransactionActivityRow` for compact dashboard, account detail, or agent detail previews.
+
+A collapsing table like this one has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
 
 ### Sections (`Section`)
 

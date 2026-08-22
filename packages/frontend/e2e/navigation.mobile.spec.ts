@@ -40,28 +40,28 @@ const ROUTES = ['/dashboard', '/agents', '/transactions', '/approvals'] as const
  * rendering and console errors are still asserted — only the overflow
  * assertion is exempted, and only with an issue number.
  *
- * `/transactions` was found by this gate on its first real run, which is the
- * gate working. It is exempted rather than fixed here because fixing it is a
- * rendered-UI change (the table wants an `overflow-x-auto` wrapper) with its
- * own review and its own evidence, and folding that into a CI-plumbing PR
- * would bury it.
+ * **Currently empty, and that is the point.** `/transactions` was the first
+ * and so far only entry: found by this gate on its own first real run, filed
+ * as #1772, exempted by name rather than dropped, and removed again when the
+ * fix landed. The assertion below now gates every route in `ROUTES`.
  *
- * Deliberately NOT a dropped route — that is how a gate quietly stops covering
- * things. Deliberately NOT `test.fail()` either: the measurement proved
- * timing-sensitive on a slow render (see the `found` assertion below), and a
- * `test.fail()` that flips to "expected to fail, but passed" on an unrelated
- * slow frame is a false alarm pointed at the wrong person.
+ * Rules for adding one back, learned from that round trip:
  *
- * Delete the entry when the issue closes; the assertion below is already
- * written and will start gating that route again the moment it goes.
+ *   - Only with an issue number AND the measured numbers, so the next reader
+ *     inherits the diagnosis instead of re-measuring it.
+ *   - Never drop the route instead. That is how a gate quietly stops covering
+ *     things, which is the failure #1768 exists to close.
+ *   - Never `test.fail()` either: the measurement is timing-sensitive on a
+ *     slow render (see the `contentRegionFound` assertion below), and a
+ *     `test.fail()` that flips to "expected to fail, but passed" on an
+ *     unrelated slow frame is a false alarm pointed at the wrong person.
+ *   - Delete the entry in the pull request that fixes the issue — not later.
+ *
+ * Note that this exempts the CONTENT half only. `documentOverflows` is
+ * asserted unconditionally above it and never had an exemption, so a route
+ * listed here is still gated against escaping the shell entirely.
  */
-const KNOWN_CONTENT_OVERFLOW: Partial<Record<(typeof ROUTES)[number], string>> = {
-  '/transactions':
-    '#1772 — transactions table renders without an overflow-x-auto wrapper, ' +
-    'so it drags the WHOLE content pane into horizontal scroll instead of ' +
-    'scrolling itself. Measured 94-124px past a 393px box (it varies with ' +
-    'how many rows render) — on CI and locally alike.',
-}
+const KNOWN_CONTENT_OVERFLOW: Partial<Record<(typeof ROUTES)[number], string>> = {}
 
 /**
  * The local `measureContentOverflow` that used to live here was folded into the

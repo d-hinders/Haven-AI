@@ -104,15 +104,18 @@ interface TransactionsTableProps {
 function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY: string }) {
   const renders: Record<TransactionColumnId, (key: string) => ReactNode> = {
     direction: (key) => (
-      <td key={key} className={`w-9 px-4 ${padY}`}>
+      <td key={key} className={`w-9 px-2 ${padY} md:px-4`}>
         <Skeleton className="h-9 w-9 rounded-[10px]" />
       </td>
     ),
     activity: (key) => (
-      <td key={key} className={`px-4 ${padY}`}>
+      // `max-w-0` for the same reason as the real activity cell below (#1772),
+      // and the skeletons cap at the cell rather than at a fixed 160/224px —
+      // a 224px bar inside a ~109px cell is the loading state's own overflow.
+      <td key={key} className={`max-w-0 px-4 ${padY}`}>
         <div className="space-y-1.5">
-          <Skeleton variant="text" className="h-3 w-40" />
-          <Skeleton variant="text" className="h-2 w-56" />
+          <Skeleton variant="text" className="h-3 w-40 max-w-full" />
+          <Skeleton variant="text" className="h-2 w-56 max-w-full" />
         </div>
       </td>
     ),
@@ -132,12 +135,12 @@ function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY:
       </td>
     ),
     amount: (key) => (
-      <td key={key} className={`px-4 ${padY} text-right`}>
+      <td key={key} className={`px-2 ${padY} text-right md:px-4`}>
         <Skeleton className="h-4 w-20 ml-auto" />
       </td>
     ),
     link: (key) => (
-      <td key={key} className={`w-8 px-4 ${padY} text-center`}>
+      <td key={key} className={`w-8 px-2 ${padY} text-center md:px-4`}>
         <Skeleton className="h-6 w-6 mx-auto" />
       </td>
     ),
@@ -334,15 +337,50 @@ export default function TransactionsTable({
                   : {})}
               >
                 {showCol('direction') ? (
-                  <td className={`w-9 px-4 ${padY} text-center`}>
+                  // Narrower gutter below md (#1772): `px-4` spent 32px of a
+                  // 343px row on padding around a 36px icon, and every pixel
+                  // here comes straight out of the activity column, which is
+                  // the only one that can flex.
+                  <td className={`w-9 px-2 ${padY} text-center md:px-4`}>
                     <DirectionMark direction={tx.direction} />
                   </td>
                 ) : null}
 
                 {showCol('activity') ? (
-                  <td className={`px-4 ${padY}`}>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-[var(--v2-ink)] truncate">
+                  // `max-w-0` is what makes the `truncate` below actually
+                  // truncate (#1772). In an auto-layout table a column can
+                  // never be narrower than its MIN-CONTENT width, and
+                  // `truncate` sets `white-space: nowrap` — so the untruncated
+                  // title measured 257px of min-content and simply widened the
+                  // table instead of ellipsising. Measured at 393px: the table
+                  // rendered 462px wide inside a 343px card, overflowing
+                  // `<main>` by 94px locally / 106px on CI. A `max-width` on a
+                  // cell IS allowed to sit below min-content, so this is the
+                  // idiom that lets the flexible column absorb the leftover
+                  // width and ellipsise. It is the ONLY flexible column here;
+                  // every other one is fixed-width or `hidden md:table-cell`.
+                  //
+                  // Deliberately NOT an `overflow-x-auto` wrapper (the fix the
+                  // issue guessed at): `overflow-x: auto` forces `overflow-y`
+                  // to `auto` as well, which makes the wrapper the sticky
+                  // scroll ancestor and unpins `Table.Head sticky` on desktop.
+                  // Measured — thead pinned at y=56 while scrolling before,
+                  // scrolled off to y=-303 after.
+                  <td className={`max-w-0 px-4 ${padY}`}>
+                    {/* `flex-wrap` so a status badge drops BELOW the title
+                        instead of competing with it for a ~141px line — a
+                        failed row used to ellipsise all the way down to
+                        "Age…" next to its Failed badge. `title` carries the
+                        untruncated string for the two `variant="card"` call
+                        sites (agent detail, account detail) that render
+                        non-selectable rows: on `/transactions` the row is a
+                        button whose `aria-label` already holds it, but there
+                        the truncation would otherwise be unrecoverable. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <p
+                        className="truncate text-sm font-medium text-[var(--v2-ink)]"
+                        title={transactionTitle(tx)}
+                      >
                         {transactionTitle(tx)}
                       </p>
                       {statusBadge ? (
@@ -380,7 +418,12 @@ export default function TransactionsTable({
                 ) : null}
 
                 {showCol('amount') ? (
-                  <td className={`w-[110px] px-4 ${padY} text-right`}>
+                  // Same narrower gutter below md (#1772). Here it does not
+                  // widen the activity column — the width is fixed — it gives
+                  // the amount itself 94px of content box instead of 78, which
+                  // is the difference between "-25.00 USDC" on one line and
+                  // wrapped onto two.
+                  <td className={`w-[110px] px-2 ${padY} text-right md:px-4`}>
                     <Amount
                       value={tx.valueFormatted}
                       symbol={tx.asset}
@@ -392,7 +435,7 @@ export default function TransactionsTable({
 
                 {showCol('link') ? (
                   <td
-                    className={`w-8 px-4 ${padY} text-center`}
+                    className={`w-8 px-2 ${padY} text-center md:px-4`}
                     onClick={selectable ? (e) => e.stopPropagation() : undefined}
                   >
                     {tx.explorerUrl !== null ? (

@@ -27,19 +27,27 @@ const TOKEN = ('0x' + '33'.repeat(20)) as `0x${string}`
  * Elements shaped like a progress track: a pill-rounded rule with a fixed
  * small height, or one carrying an explicit percentage width.
  *
+ * The height test is written against whitespace, NOT `\b`. Tailwind's
+ * arbitrary-value syntax ends in `]`, and `]` followed by a space is two
+ * non-word characters — so a trailing `\b` can never match `h-[3px]`. The
+ * first draft of this helper had exactly that bug, which made it structurally
+ * unable to see the one shape it exists to catch; the M1 mutation (restoring
+ * the removed bar verbatim) went green and exposed it.
+ *
  * Known limit, stated rather than pretended away: this is a shape detector,
- * not a semantic one. A track drawn with some height class outside the list
+ * not a semantic one. A track drawn with some height class outside the set
  * below would slip past it. It is written wide enough to catch the shape the
  * removed code actually used and its near neighbours, which is what a
  * convergence guard needs to do.
  */
+const FIXED_SMALL_HEIGHT = /(?:^|\s)h-(?:\[\d+(?:px|rem)\]|px|0\.5|1|1\.5|2|2\.5|3)(?=\s|$)/
+
 function meterShapedElements(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>('*')).filter((el) => {
     const cls = el.getAttribute('class') ?? ''
-    if (!/\brounded-full\b/.test(cls)) return false
-    const fixedSmallHeight = /\bh-(?:\[\d+(?:px|rem)\]|px|0\.5|1|1\.5|2|2\.5|3)\b/.test(cls)
+    if (!/(?:^|\s)rounded-full(?=\s|$)/.test(cls)) return false
     const percentageWidth = /^\d+(?:\.\d+)?%$/.test(el.style.width ?? '')
-    return fixedSmallHeight || percentageWidth
+    return FIXED_SMALL_HEIGHT.test(cls) || percentageWidth
   })
 }
 
@@ -80,15 +88,25 @@ function configured(overrides: Partial<AgentAllowance> = {}): AgentAllowance {
 }
 
 describe('AllowanceBar — the real on-chain meter (#1846)', () => {
-  it('renders exactly one meter-shaped track [presence: positive control]', () => {
+  it('renders a track and a proportional fill [presence: positive control]', () => {
     const { container } = render(
       <AllowanceBar info={onChainInfo()} chainTimeSec={null} chainId={CHAIN_ID} />,
     )
+    const found = meterShapedElements(container)
+
+    // Two distinct reasons to match, asserted separately so this control
+    // cannot pass on one of them while the other is silently broken — which
+    // is how the first draft of the detector hid its own dead regex.
+    const tracks = found.filter((el) => FIXED_SMALL_HEIGHT.test(el.getAttribute('class') ?? ''))
+    const fills = found.filter((el) => /%$/.test(el.style.width ?? ''))
+
     expect(
-      meterShapedElements(container).length,
-      'the real on-chain meter must render a track — this is the positive ' +
-        'control that gives the configured row\'s absence assertion meaning',
+      tracks.length,
+      'the real on-chain meter must render a fixed-height rounded track — ' +
+        "this is the positive control that gives the configured row's " +
+        'absence assertion meaning',
     ).toBe(1)
+    expect(fills.length, 'the real on-chain meter must render a width-driven fill').toBe(1)
   })
 
   it('fill width differs when spend differs [proportionality]', async () => {

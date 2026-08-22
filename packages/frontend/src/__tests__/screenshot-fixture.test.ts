@@ -8,6 +8,7 @@ import {
   SCENARIOS,
 } from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
+import { getStoredPasskeySigner, passkeyStorageKey } from '../lib/signer'
 import {
   isMcpToolCallActivityItem,
   isPaymentActivityItem,
@@ -19,6 +20,13 @@ const fx = fixtureFor as (apiPath: string, mode?: string) => Record<string, unkn
 type ScenarioShape = {
   api: (apiPath: string, method: string) => Record<string, unknown> | undefined
 }
+/** A scenario that also seeds device-local state before app code runs (#1856). */
+type SeedingScenarioShape = ScenarioShape & {
+  seed: () => Record<string, string> | undefined
+}
+/** Kept in step with FIXTURE_SAFE in screenshot.mjs. */
+const FIXTURE_SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
+const FIXTURE_CHAIN_ID = 84532
 /** Kept in step with the scenario's own constant in screenshot.mjs. */
 const SETUP_ID = 'setup-screenshot'
 /** Likewise FIXTURE_SAFE.id — the legacy scenario must reuse the same account. */
@@ -350,6 +358,84 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           passkeys: unknown[]
         }
         expect(signers.passkeys).toHaveLength(1)
+      })
+    })
+
+    // #1856: the send-review capture — the first `TransactionMovement`
+    // consumer reached by driving a gate rather than by a URL. Its fixture
+    // contract is one field wider than the others', because one of its two
+    // overrides lives in localStorage rather than in an API answer.
+    describe('send-review (#1856)', () => {
+      // Narrowed from the shared shape rather than casting the whole registry:
+      // `seed` is optional across scenarios (only this one needs it), so a
+      // registry-wide cast would claim every entry has one.
+      const sendReview = (SCENARIOS as Record<string, ScenarioShape>)[
+        'send-review'
+      ] as SeedingScenarioShape
+
+      it('seeds a passkey record the REAL parser accepts, under the key the app computes', () => {
+        // The whole capture hangs on this. `SendModal.tsx:821` disables
+        // Continue while `signingUnavailable`, and `useSafeOperationGate` only
+        // leaves that state when `getStoredPasskeySigner` returns a signer —
+        // so the seed is asserted against the parser ITSELF, not against a
+        // hand-copied shape. A schema bump (`PASSKEY_SCHEMA_VERSION`, a new
+        // required field, a tightened regex) fails here, loudly, instead of
+        // silently un-reaching the review step months later.
+        const seeded = sendReview.seed() as Record<string, string>
+        const key = passkeyStorageKey(FIXTURE_SAFE_ADDRESS, FIXTURE_CHAIN_ID)
+        expect(Object.keys(seeded)).toEqual([key])
+
+        window.localStorage.clear()
+        // Paired evidence, in the order that makes it evidence: the parser
+        // must say NO before the seed and YES after it. Asserting only the
+        // second half would pass against a parser that accepts anything.
+        expect(
+          getStoredPasskeySigner({ safeAddress: FIXTURE_SAFE_ADDRESS, chainId: FIXTURE_CHAIN_ID }),
+        ).toBeNull()
+
+        for (const [k, v] of Object.entries(seeded)) window.localStorage.setItem(k, v)
+        const signer = getStoredPasskeySigner({
+          safeAddress: FIXTURE_SAFE_ADDRESS,
+          chainId: FIXTURE_CHAIN_ID,
+        })
+        // `type: 'passkey'` is not incidental — it is what makes the captured
+        // screen say "Approve with · Device approval" and "fees are paid by
+        // Haven", which is the copy a passkey user actually reads. An `eoa`
+        // signer would render a different screen under the same filename.
+        expect(signer).toMatchObject({ type: 'passkey', chainId: FIXTURE_CHAIN_ID })
+        window.localStorage.clear()
+      })
+
+      it('puts the account on the Safe rail — the same override as the funding pair', () => {
+        // Not about signing: the dashboard hero hides Send entirely when no
+        // Safe-rail account exists (`DashboardClient.tsx:907`), so without this
+        // the run never opens the modal at all. Both safe endpoints agree, for
+        // the same reason the #1844/#1852 pairs do.
+        for (const endpoint of ['/auth/me', '/user/safes']) {
+          const res = sendReview.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
+          expect(res.safes).toHaveLength(1)
+          expect(res.safes[0]).not.toHaveProperty('account_type')
+          expect(res.safes[0].chain_id).toBe(FIXTURE_CHAIN_ID)
+        }
+      })
+
+      it('pins threshold 1 rather than inheriting the empty fallback by accident', () => {
+        // The generic empty fallback is TRUTHY, so `!safeDetails` passes and
+        // Continue enables without this key — but `threshold` would then read
+        // `undefined ?? 1`. A threshold of 2 renders an extra "will wait for
+        // approval" banner on the very screen under capture, so the layout
+        // would depend on an accident rather than on a stated fixture.
+        const details = sendReview.api(`/safe/${FIXTURE_SAFE_ADDRESS}/details`, 'GET') as {
+          threshold: number
+          owners: string[]
+        }
+        expect(details.threshold).toBe(1)
+        expect(details.owners).toHaveLength(1)
+      })
+
+      it('leaves every other endpoint to the shared fixture', () => {
+        expect(sendReview.api('/agents', 'GET')).toBeUndefined()
+        expect(sendReview.api('/balances/0x1111', 'GET')).toBeUndefined()
       })
     })
   })

@@ -8,6 +8,12 @@ import {
   bumpLockfileText,
   lockfileDiffViolations,
 } from './release-lockfile.mjs'
+import {
+  MANIFEST_ROWS,
+  documentedVersions,
+  manifestTableViolations,
+  rewriteManifestTable,
+} from './release-manifest-doc.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -425,5 +431,177 @@ test('no surviving prose calls the published set "four" (#1795)', async () => {
     stale,
     null,
     `scripts/README.md still describes a package set as "four": ${JSON.stringify(stale)}`,
+  )
+})
+
+/**
+ * #1790: the Supported Runtime Manifest table in
+ * docs/operations/mcp-runtime-compatibility.md re-pins four rows to the new
+ * version on every release. It was written by hand, next to a script that
+ * already knew the number, already wrote it into the source, and already
+ * verified the built bundle against it.
+ *
+ * The bump now writes it. The hazard that creates is the one this repo has
+ * produced a dozen times in two days: a script that writes a value and then
+ * verifies its own write is a guard that cannot fail. So the verification never
+ * receives the version the bump computed — `manifestTableViolations` reads each
+ * row's OWN source constant and compares the doc against that.
+ *
+ * These tests therefore prove two different things:
+ *   - the rewrite does what it claims (and refuses when the table shape moves);
+ *   - the CHECK fails on a table the script did not just write — a hand-edited
+ *     doc, or one that drifted because a constant moved without a re-pin. That
+ *     is the property that makes it a guard rather than a receipt, and the last
+ *     test runs it against the REAL repo files on every CI run.
+ */
+
+const MANIFEST_DOC = join(ROOT, 'docs', 'operations', 'mcp-runtime-compatibility.md')
+
+/** A minimal table in the real doc's shape. */
+function docFixture(versions = {}) {
+  const v = {
+    connect: CUR, mcp: CUR, sdk: CUR, signer: CUR, ...versions,
+  }
+  return [
+    '## Supported Runtime Manifest',
+    '',
+    'Keep this table in sync with that file.',
+    '',
+    '| Component | Supported version |',
+    '| --- | --- |',
+    '| Node.js | >= 22.0.0 (`engines` floor) |',
+    '| `@haven_ai/connect` | `' + v.connect + '` |',
+    '| `@haven_ai/mcp` | `' + v.mcp + '` |',
+    '| `@haven_ai/sdk` | `' + v.sdk + '` |',
+    '| `@haven_ai/signer` | `' + v.signer + '` |',
+    '| Claude Code | local stdio MCP |',
+    '',
+  ].join('\n')
+}
+
+function sourceFixture(versions = {}) {
+  const v = { connect: CUR, mcp: CUR, sdk: CUR, signer: CUR, ...versions }
+  return {
+    'packages/connect/src/runtime.ts': `export const CONNECTOR_VERSION = '${v.connect}'\n`,
+    'packages/mcp/src/server.ts': `export const MCP_VERSION = '${v.mcp}'\n`,
+    'packages/connect/src/runtime-manifest.ts':
+      `export const M = {\n  sdkVersion: '${v.sdk}',\n  signerVersion: '${v.signer}',\n}\n`,
+  }
+}
+
+test('the rewrite re-pins every owned row and touches nothing else (#1790)', () => {
+  const before = docFixture()
+  const after = rewriteManifestTable(before, NEXT)
+  assert.deepEqual(documentedVersions(after), {
+    '@haven_ai/connect': NEXT,
+    '@haven_ai/mcp': NEXT,
+    '@haven_ai/sdk': NEXT,
+    '@haven_ai/signer': NEXT,
+  })
+  // The Node.js and client rows are not version-pinned and must survive intact.
+  assert.match(after, /\| Node\.js \| >= 22\.0\.0/)
+  assert.match(after, /\| Claude Code \| local stdio MCP \|/)
+  assert.equal(after.split('\n').length, before.split('\n').length)
+})
+
+test('the rewrite REFUSES a table whose shape moved, rather than no-oping (#1790)', () => {
+  // A silent skip here is how a release ships a stale contract doc while every
+  // check stays green — the table is the one thing the gate does not read.
+  const withoutSigner = docFixture().replace(/^\| `@haven_ai\/signer`.*$\n/m, '')
+  assert.throws(
+    () => rewriteManifestTable(withoutSigner, NEXT),
+    /no row for: @haven_ai\/signer/,
+  )
+})
+
+test('a table matching its sources has no violations (#1790)', () => {
+  assert.deepEqual(manifestTableViolations(docFixture(), sourceFixture()), [])
+})
+
+test('MUTATION PROOF: the check catches a HAND-EDITED table (#1790)', () => {
+  // The defect class this guard exists for: the script did not write this
+  // table, a human did, and got one row wrong. Nothing else in the repo reads
+  // the table, so without this the doc simply lies from then on.
+  const tampered = docFixture({ sdk: '0.1.27-alpha.0' })
+  const violations = manifestTableViolations(tampered, sourceFixture())
+  assert.equal(violations.length, 1)
+  assert.match(violations[0], /@haven_ai\/sdk: table says '0\.1\.27-alpha\.0'/)
+  assert.match(violations[0], /sdkVersion in packages\/connect\/src\/runtime-manifest\.ts is '0\.1\.28-alpha\.0'/)
+})
+
+test('MUTATION PROOF: the check catches a DRIFTED source, doc untouched (#1790)', () => {
+  // The other direction, and the one a release-time-only check would miss: the
+  // doc is exactly what the last release wrote, but a constant moved since.
+  const violations = manifestTableViolations(docFixture(), sourceFixture({ mcp: NEXT }))
+  assert.equal(violations.length, 1)
+  assert.match(violations[0], /@haven_ai\/mcp: table says/)
+})
+
+test('MUTATION PROOF: the check does not accept its own writer as evidence (#1790)', () => {
+  // The heart of #1790. Rewriting the doc to a version NO SOURCE carries must
+  // still fail — if the check took the bump's word for the version, this would
+  // pass and the guard would be a receipt for its own write.
+  const written = rewriteManifestTable(docFixture(), '9.9.9-invented.0')
+  const violations = manifestTableViolations(written, sourceFixture())
+  assert.equal(violations.length, 4, 'every row must be reported, not just the first')
+  for (const v of violations) assert.match(v, /9\.9\.9-invented\.0/)
+})
+
+test('a renamed source constant FAILS rather than passing quietly (#1790)', () => {
+  const renamed = sourceFixture()
+  renamed['packages/mcp/src/server.ts'] = "export const MCP_SERVER_VERSION = '0.1.28-alpha.0'\n"
+  const violations = manifestTableViolations(docFixture(), renamed)
+  assert.equal(violations.length, 1)
+  assert.match(violations[0], /MCP_VERSION not found/)
+})
+
+test('a missing table row FAILS rather than passing quietly (#1790)', () => {
+  const withoutConnect = docFixture().replace(/^\| `@haven_ai\/connect`.*$\n/m, '')
+  const violations = manifestTableViolations(withoutConnect, sourceFixture())
+  assert.equal(violations.length, 1)
+  assert.match(violations[0], /has no `@haven_ai\/connect` row/)
+})
+
+test('the bump verifies the table WITHOUT being told what it just wrote (#1790)', async () => {
+  // The property everything else here rests on, pinned structurally so a later
+  // "tidy-up" cannot quietly undo it. The moment `verifyManifestDoc` is handed
+  // the version this run computed, it stops being able to disagree with the
+  // write that preceded it — a guard that confirms its own output, which is the
+  // defect class this repo has produced repeatedly.
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+
+  const declaration = source.match(/async function verifyManifestDoc\(([^)]*)\)/)
+  assert.ok(declaration, 'release-bump.mjs no longer declares verifyManifestDoc')
+  assert.equal(
+    declaration[1].trim(),
+    '',
+    'verifyManifestDoc must take NO arguments — it compares the doc against the source constants on disk, never against the version this run computed',
+  )
+
+  const calls = [...source.matchAll(/await verifyManifestDoc\(([^)]*)\)/g)]
+  assert.equal(calls.length, 1, 'expected exactly one verifyManifestDoc() call in the release path')
+  assert.equal(calls[0][1].trim(), '', 'verifyManifestDoc must be called with no arguments')
+
+  // And it must actually run after the write, not instead of it.
+  assert.ok(
+    source.indexOf('await updateManifestDoc(') < source.indexOf('await verifyManifestDoc()'),
+    'the manifest doc must be written before it is verified',
+  )
+})
+
+test('the REAL manifest table agrees with the REAL source constants (#1790)', async () => {
+  // This is the one that runs on every pull request (ci.yml → "Release-bump
+  // lockfile self-test", an unconditional job). It is what makes the check a
+  // drift guard rather than a release-time formality: a hand-edited or drifted
+  // table fails here, with no release in sight.
+  const doc = await readFile(MANIFEST_DOC, 'utf8')
+  const sources = {}
+  for (const spec of MANIFEST_ROWS) {
+    sources[spec.file] = await readFile(join(ROOT, spec.file), 'utf8')
+  }
+  assert.deepEqual(
+    manifestTableViolations(doc, sources),
+    [],
+    'the Supported Runtime Manifest table has drifted from the version constants it mirrors',
   )
 })

@@ -116,13 +116,13 @@ npm run release:bump -- prerelease --yes
 4. **Update** the `version` field of every lockstep package — the five published ones (`sdk`, `signer`, `mcp`, `connect`, `cli`) **plus `mcp-server`**, which is `private: true` and never published but version-locksteps for coherence with its `HOSTED_SERVER_VERSION` constant. Six in total (`VERSIONED_PACKAGES` = `PUBLISHED_PACKAGES` + `mcp-server`); only the five published ones are pin-managed.
 5. **Update** cross-package dep pins: `mcp → @haven_ai/sdk`, `connect → @haven_ai/sdk / @haven_ai/mcp / @haven_ai/signer`.
 6. **Update** `packages/mcp/src/server.ts` — the `MCP_VERSION` constant.
-7. **Update** `packages/connect/src/runtime-manifest.ts` — `sdkVersion` and `signerVersion` string literals.
+7. **Update** `packages/connect/src/runtime-manifest.ts` — `sdkVersion` and `signerVersion` string literals, then re-pin the *Supported Runtime Manifest* table in `docs/operations/mcp-runtime-compatibility.md` to match ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)). The table is verified in step 11 against the constants themselves, never against the value this run wrote — see *The manifest table writes itself*.
 8. **Wipe** all `packages/*/dist` directories — required to prevent tsup from bundling a stale constant from the previous build's output.
 9. **`npm install` + deterministic lockfile rewrite** ([#1663](https://github.com/d-hinders/Haven-AI/issues/1663)) — the install keeps `node_modules` consistent for the builds below, but its lockfile output is **not taken**: on three consecutive cuts (0.1.26 → 0.1.28) the local npm also inserted `"dev"`/`"peer"` metadata on unrelated entries, and each release hand-repaired the diff back to its 11 version lines. Instead the version substitution is replayed **structurally** onto the pre-install lockfile (`scripts/release-lockfile.mjs` — structural rather than textual so a third-party dep coincidentally at the old version is never touched), and the bump then **fails loudly** if the final `package-lock.json` diff contains any line that is not a workspace `version` field or an `@haven_ai/*` pin. The guard reads the file on disk, so removing the rewrite makes the guard see npm's polluted output and fail. Self-tested: `npm run release:bump:test`.
 10. **Build** in dependency order: `sdk → signer → mcp → connect`.
     - Connect is built directly with tsup (skipping its internal pre-build of mcp/signer) so the already-built dist from the previous step is used — the exact scenario that surfaces the build-order bug.
     - **`cli` is deliberately absent here, and this is not the count drift fixed above — do not "correct" it.** These builds exist to *verify the connect bundle*, which is the one artifact that inlines version literals at build time; `cli` inlines nothing connect depends on and nothing this step checks. Publishing does not rely on it either: `publish.yml` rebuilds every published package from a clean checkout at publish time, so a `cli` dist produced here would be discarded. Whether the bump should build `cli` anyway — as a cheap "does it still compile at the new version" signal — is a real question, but it is a **behaviour change** and belongs in its own issue rather than in a doc edit.
-11. **Verify** the built `packages/connect/dist/cli.cjs` contains the new version literal, and that `server.ts` has the correct `MCP_VERSION`.
+11. **Verify** the built `packages/connect/dist/cli.cjs` contains the new version literal, that `server.ts` has the correct `MCP_VERSION`, and that the *Supported Runtime Manifest* table matches every constant it mirrors.
 
 ### Why the dist-wipe is mandatory
 
@@ -200,11 +200,11 @@ Two **contract docs** are coupled to the published packages, and the blocking
 touches them. A version bump touches all five, so **every release PR needs
 both** — this is not optional and not conditional:
 
-1. **`docs/operations/mcp-runtime-compatibility.md`** — re-pin the *Supported
-   Runtime Manifest* table to the new version (it must match
-   `packages/connect/src/runtime-manifest.ts`), and prepend a note to
+1. **`docs/operations/mcp-runtime-compatibility.md`** — the *Supported Runtime
+   Manifest* table is **re-pinned by the bump** ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)),
+   so do not copy those four numbers by hand. Still yours: prepend a note to
    `last-verified` saying what the release carries and that no tool, capability,
-   or version-skew surface moved.
+   or version-skew surface moved. See *The manifest table writes itself* below.
 2. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md`** — a new
    shard, named for the **version** and not the PR number (#1789): the gate
    blocks the PR until the shard exists, so the shard has to be written *before*
@@ -216,6 +216,54 @@ both** — this is not optional and not conditional:
    gate without touching the shared parent (which is what stops concurrent PRs
    conflicting — #1366). State what changed, the authority/custody argument for
    why the CASP perimeter is unaffected, and end with `Perimeter unchanged.`
+
+#### The manifest table writes itself, and the check does not trust the write
+
+The *Supported Runtime Manifest* table's stated job is to mirror the version
+constants the bump has already written. It was copied by hand on every release
+anyway — four numbers, out of a file the script had just written and already
+verified. Since #1790 the bump writes it (`scripts/release-manifest-doc.mjs`).
+
+**What that deliberately does NOT do is satisfy the coupling gate for you.** A
+bump alone cannot produce a green release PR, because the gate needs *both*
+contract docs and the CASP shard is wholly hand-written. The `last-verified`
+note is a required hand edit too. Those are the parts that carry an argument —
+what the release contains, and why the perimeter is unaffected. A table of four
+identical version strings carries none, which is the whole reason it could be
+generated.
+
+**Be precise about what enforces that, because it is not what you would
+assume** (review finding on #1790). The gate's per-doc satisfaction test is
+**file presence** — a doc that merely appears in the changed set is excused,
+with no check on whether `last-verified` moved or who wrote the diff. Before
+#1790, the only way `mcp-runtime-compatibility.md` could appear in a release
+diff was a human editing it, so *touched* and *read* were the same event. They
+are not any more: the bump's own write now excuses that doc by itself.
+
+What still forces human content into a release PR is
+`casp-risk-guardrails.md` — its `covers:` spans the published packages every
+release touches, and only a hand-written shard satisfies it. That is a real
+guarantee, but it rests on **another doc's `covers:` breadth**, so narrowing
+that list would silently remove the human-read requirement here. It is
+therefore pinned by a test (`scripts/docs/coupling-gate.test.mjs`): a bump-only
+diff with no shard must still fail the strict gate. Deleting CASP's
+published-package coverage fails that test rather than quietly going green.
+
+**The verification is independent of the write, and this is load-bearing.** A
+script that writes a value and then checks it wrote that value has built a guard
+that cannot fail. So the check is never told the version the run computed: it
+re-reads the doc and each row's own constant from disk and compares them to each
+other — `@haven_ai/sdk` and `@haven_ai/signer` against
+`connect/src/runtime-manifest.ts`, `@haven_ai/mcp` against `MCP_VERSION`,
+`@haven_ai/connect` against `CONNECTOR_VERSION`. Row by row, never against one
+shared string, so a table that agrees with itself and with nothing else fails.
+
+That makes it meaningful in the two situations the writer is absent from — a
+hand-edited doc, and a doc that drifted because a constant moved without a
+re-pin — which is why **the same check also runs on every pull request** (in
+`scripts/release-bump.test.mjs`, from `ci.yml`'s unconditional job). Drift fails
+there, with no release in sight. Remove the writer and the check does not go
+quiet; it reads the stale table and fails.
 
 Check locally before pushing: `npm run docs:coupling` must exit 0. It will still
 list ~14 **advisory** docs; those are architecture prose a version bump does not

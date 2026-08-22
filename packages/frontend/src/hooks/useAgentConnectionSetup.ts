@@ -59,48 +59,6 @@ export interface ManualCredential {
   delegateAddress: string
 }
 
-/**
- * The rows whose setup is a COMMAND pasted into the agent itself, rather than
- * a config snippet pasted into an app's settings (#1682).
- *
- * All three produce the identical flag-free command — #1672's detection
- * decides what actually gets configured — so they differ only in label and in
- * what they record. Kept as distinct ids on purpose: the collapsed `agent`
- * entry threw away which harnesses people actually connect from.
- */
-export const COMMAND_PATH_RUNTIMES = new Set(['claude-code', 'codex', 'cowork'])
-
-/**
- * #1682: name-first. The user picks their product BY NAME, and whether that
- * row yields a command or a snippet is a property of the row — never a
- * question put to the user.
- *
- * #1672's collapsed "AI agent (Claude Code, Codex, Cowork)" row asked exactly
- * that question, and it read wrong from both sides: a Hermes or OpenClaw user
- * would rightly call theirs an AI agent too, and nobody can recognise a row
- * whose label never names their harness. Alphabetical by product name, with
- * the catch-all last because it is the only row that isn't a name.
- */
-export const RUNTIME_OPTIONS = [
-  { id: 'claude-code', label: 'Claude Code' },
-  { id: 'claude-desktop', label: 'Claude Desktop' },
-  { id: 'codex', label: 'Codex (CLI or Desktop)' },
-  { id: 'cowork', label: 'Cowork' },
-  { id: 'cursor', label: 'Cursor' },
-  { id: 'hermes', label: 'Hermes Agent' },
-  { id: 'openclaw', label: 'OpenClaw' },
-  { id: 'vscode', label: 'VS Code (incl. Insiders)' },
-  { id: 'other', label: 'Not listed / other' },
-]
-
-/**
- * The row the picker opens on. Declared ONCE and used by both the initial
- * state and `resetForm`: when those two held separate literals, renaming the
- * default left `resetForm` pointing at an id with no matching `<option>`, so
- * reopening the modal showed an EMPTY picker and posted the stale id.
- */
-export const DEFAULT_RUNTIME = RUNTIME_OPTIONS[0].id
-
 export interface UseAgentConnectionSetupOptions {
   open: boolean
   onClose: () => void
@@ -236,7 +194,10 @@ export function headerSubtitle(step: SetupStep, status: string | undefined, runt
     if (status === 'cancelled') return 'This setup was cancelled'
     return 'Paste the setup prompt into your agent environment'
   }
-  if (step === 'details') return 'Name the agent and choose where it runs'
+  // #1720: no longer "choose where it runs" — there is nothing to choose.
+  // A subtitle that names an action the step does not offer is worse than a
+  // vague one, and this was the last place the removed picker still spoke.
+  if (step === 'details') return 'Name the agent and describe what it does'
   if (step === 'policy') return 'Set agent budget and approval boundaries'
   return 'Review before creating the local setup prompt'
 }
@@ -446,7 +407,6 @@ export function useAgentConnectionSetup({
   const [step, setStep] = useState<SetupStep>('details')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [runtime, setRuntime] = useState(DEFAULT_RUNTIME)
   const [localMcp, setLocalMcp] = useState(false)
   const [issuePassport, setIssuePassport] = useState(false)
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
@@ -595,7 +555,6 @@ export function useAgentConnectionSetup({
     setStep('details')
     setName('')
     setDescription('')
-    setRuntime(DEFAULT_RUNTIME)
     setLocalMcp(false)
     setIssuePassport(false)
     setAllowances([])
@@ -644,7 +603,6 @@ export function useAgentConnectionSetup({
       ? addAmountValidation.message
       : '')
   const walletUnavailable = !safeId
-  const localMcpSupported = COMMAND_PATH_RUNTIMES.has(runtime)
 
   async function handleCreateSetup() {
     if (!safeId) {
@@ -663,8 +621,7 @@ export function useAgentConnectionSetup({
         name: name.trim(),
         description: description.trim() || undefined,
         safe_id: safeId,
-        runtime,
-        local_mcp: localMcpSupported && localMcp ? true : undefined,
+        local_mcp: localMcp ? true : undefined,
         allowances: allowances.map((allowance) => ({
           token_address:
             allowance.tokenAddress ?? '0x0000000000000000000000000000000000000000',
@@ -795,7 +752,6 @@ export function useAgentConnectionSetup({
       const resolved = await api.post<ResolveSetupResponse>('/agent-connection-setups/resolve', {
         setup_token: setup.setup_token,
         connector_version: 'browser-manual-fallback',
-        runtime,
       })
       const delegatePrivateKey = generatePrivateKey()
       const account = privateKeyToAccount(delegatePrivateKey)
@@ -808,7 +764,6 @@ export function useAgentConnectionSetup({
         proof_signature: proofSignature,
         api_key_hash: await sha256Hex(apiKey),
         api_key_prefix: apiKey.slice(0, 12),
-        runtime,
         connector_version: 'browser-manual-fallback',
         connector_context: {
           environment_label: 'Manual browser fallback',
@@ -875,11 +830,8 @@ export function useAgentConnectionSetup({
     setName,
     description,
     setDescription,
-    runtime,
-    setRuntime,
     localMcp,
     setLocalMcp,
-    localMcpSupported,
     // Wallet selection
     hasMultipleSafes,
     selectableSafes,

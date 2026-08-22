@@ -733,10 +733,11 @@ export const SCENARIOS = {
       // capture reaches. Disclosures are opened first — a control nobody can
       // see is a control nobody reviewed (#1410).
       // Not guarded: the same principle as the manual-credential reveal below.
-      // This scenario pins runtime=claude-code, for which the Advanced
-      // disclosure always renders, so a missing one means the flow changed and
-      // the capture should fail rather than quietly omit the control it exists
-      // to show.
+      // #1720: this used to pin runtime=claude-code, the one row for which the
+      // Advanced disclosure rendered. There is no runtime to pin now and the
+      // disclosure renders for everyone, so a missing one means the flow
+      // changed and the capture should fail rather than quietly omit the
+      // control it exists to show.
       await dialog.getByText('Advanced', { exact: true }).click()
       await shoot(dialog, 'step1-details')
 

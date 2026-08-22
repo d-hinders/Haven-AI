@@ -1,5 +1,5 @@
 import type { AgentConnectionSetupStatusResponse } from '@/hooks/useAgentConnectionSetupStatus'
-import { COMMAND_PATH_RUNTIMES, runtimeIsConfigured } from '@/hooks/useAgentConnectionSetup'
+import { runtimeIsConfigured } from '@/hooks/useAgentConnectionSetup'
 
 /** Presentation copy helpers for the connect-agent flow. */
 
@@ -12,25 +12,6 @@ export function formatAbsoluteDate(value: string): string {
     hour: 'numeric',
     minute: '2-digit',
   })
-}
-
-/**
- * Is this a command-path runtime — one whose setup is a command pasted into
- * the agent itself (#1682)?
- *
- * Deliberately accepts more than the picker's three row ids. The id reaching
- * this helper is `setupStatus.runtime ?? flow.runtime`, so it can also be an
- * id the CONNECTOR reported after detecting its environment (`codex-cli`,
- * `codex-desktop`), or #1672's collapsed `agent` from a frontend still inside
- * the rollout window.
- */
-export function isCommandPathRuntime(runtime: string): boolean {
-  return (
-    COMMAND_PATH_RUNTIMES.has(runtime) ||
-    runtime === 'agent' ||
-    runtime === 'codex-cli' ||
-    runtime === 'codex-desktop'
-  )
 }
 
 export function restartCopyForRuntime(runtime: string): string | null {

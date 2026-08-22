@@ -82,6 +82,17 @@ something you *say* you accept (one env var, named in the error), not
 something a probe timeout decides for you. The acknowledgement is deliberately
 powerless in CI: it is a statement by a human at a terminal, not an override.
 
+Two consequences worth knowing before you meet them:
+
+- **It fires on scoped runs too.** The check runs before collection, so it
+  cannot know your file selection — `vitest run one-pure-unit.test.ts` fails on
+  a database-free machine exactly like a full run. Export
+  `HAVEN_SKIP_DB_TESTS=1` in your shell once if you iterate that way.
+- **`npm run quality` at the repo root includes the backend leg**, so a
+  frontend-only contributor with no Postgres now hits this. That is the trade
+  #1763 accepted: the alternative is a run that reports green having proven
+  nothing about the data layer. The error text names both remedies.
+
 The policy is one pure function, `decideDbMode` in
 `src/infra/__tests__/helpers/db-availability.ts`, pinned by ordinary mocked
 tests that need no database — a guard against silent skipping must not itself

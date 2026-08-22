@@ -103,6 +103,11 @@ export function redactDatabaseUrl(url: string): string {
 const REMEDIES = [
   'Start one:   docker compose up -d postgres   (repo root)',
   `Or accept a narrowed run:   ${SKIP_ACK_ENV}=1 npm run test -w packages/backend`,
+  '',
+  'This fires on EVERY backend run, including a scoped `vitest run <one-file>`',
+  'against a file that touches no database: the check runs before collection, so',
+  `it cannot know your selection. For database-free iteration, export ${SKIP_ACK_ENV}=1`,
+  'in your shell once.',
 ]
 
 /**

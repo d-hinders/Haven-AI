@@ -1,8 +1,17 @@
+import { DEFAULT_TEST_DATABASE_URL } from './src/infra/__tests__/helpers/db-availability.js'
+
 // Default matches `docker compose up -d postgres` AND the ci.yml service
 // container (the old postgres:postgres/haven_test default matched neither —
 // it predated both and no test ever connected). CI sets DATABASE_URL
 // explicitly, so this only fills in locally.
-process.env.DATABASE_URL ??= 'postgres://haven:haven@localhost:5432/haven'
+//
+// IMPORTED, not restated (#1763 review finding). `vitest.global-setup.ts`
+// probes before setup files run and so resolves this default independently;
+// two hand-copied literals that merely happen to match would let global setup
+// probe one host while the workers connect to another — the guard reporting on
+// a database nobody used. One constant makes that impossible rather than
+// unlikely.
+process.env.DATABASE_URL ??= DEFAULT_TEST_DATABASE_URL
 process.env.JWT_SECRET ??= 'test-secret'
 
 // Cap the per-worker pool under vitest (#1222). The production default (20)

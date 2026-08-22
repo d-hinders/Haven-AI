@@ -12,6 +12,8 @@
  * #1763: flipping any single return value below turns at least one of these
  * red.
  */
+import { readFile } from 'node:fs/promises'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -94,6 +96,21 @@ describe('resolveTestDatabaseUrl', () => {
   it('falls back to the same default vitest.setup.ts applies', () => {
     expect(resolveTestDatabaseUrl({})).toBe(DEFAULT_TEST_DATABASE_URL)
   })
+
+  it('vitest.setup.ts IMPORTS that default rather than restating it', async () => {
+    // The assertion above is a tautology on its own (the function against its
+    // own constant) and could never catch the drift that matters: global setup
+    // probes before setup files run, so a second hand-copied literal in
+    // vitest.setup.ts would let the guard report on a host the workers never
+    // connect to. Structural, because the value equality cannot be checked —
+    // importing the setup file here would mutate this worker's env.
+    const setup = await readFile(
+      new URL('../../../../../vitest.setup.ts', import.meta.url),
+      'utf8',
+    )
+    expect(setup).toContain('DEFAULT_TEST_DATABASE_URL')
+    expect(setup).not.toMatch(/DATABASE_URL \?\?= ['"]postgres:/)
+  })
 })
 
 describe('redactDatabaseUrl', () => {
@@ -121,6 +138,14 @@ describe('failure messages', () => {
     const message = unacknowledgedFailureMessage(DEFAULT_TEST_DATABASE_URL)
     expect(message).toContain('docker compose up -d postgres')
     expect(message).toContain(SKIP_ACK_ENV)
+  })
+
+  it('the local message warns that a SCOPED run fails too (#1763 review nit 3)', () => {
+    // Global setup runs before collection and cannot see the file selection, so
+    // `vitest run one-pure-unit.test.ts` fails on a database-free machine as
+    // well. Surprising enough to belong in the message rather than only in the
+    // docs — pinned so a future edit cannot quietly drop it.
+    expect(unacknowledgedFailureMessage(DEFAULT_TEST_DATABASE_URL)).toContain('scoped')
   })
 
   it('neither message leaks a password', () => {

@@ -68,6 +68,7 @@ import {
   readDbModeInputs,
   resolveTestDatabaseUrl,
   SKIP_ACK_ENV,
+  unacknowledgedFailureMessage,
 } from './db-availability.js'
 
 export const WORKER_SCHEMA = `test_w${process.env.VITEST_WORKER_ID ?? '0'}`
@@ -90,12 +91,11 @@ if (mode === 'fail-ci') throw new Error(ciFailureMessage(resolveTestDatabaseUrl(
 // run before collection. If it somehow does (a config without globalSetup),
 // treat it the same as CI: refusing is the safe direction, and the message
 // names the way out.
+// The SAME message global setup uses, not a second wording of it (#1763
+// review finding) — this module's whole premise is that one decision must not
+// exist in two forms that can drift apart.
 if (mode === 'fail-unacknowledged') {
-  throw new Error(
-    'db-harness: no database reachable. Set ' +
-      `${SKIP_ACK_ENV}=1 to accept a narrowed run, or start one with ` +
-      '`docker compose up -d postgres` (repo root). See #1763.',
-  )
+  throw new Error(unacknowledgedFailureMessage(resolveTestDatabaseUrl()))
 }
 
 const dbAvailable = mode === 'run'

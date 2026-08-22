@@ -469,8 +469,10 @@ seemed to work" is exactly the evidence that cannot be trusted there.
 ## Release Checklist
 
 > Publishing itself is automated: `npm run release:bump -- <version>` produces
-> the bump, and merging that to `main` triggers the **Publish packages**
-> workflow (`.github/workflows/publish.yml`), which builds and publishes the
+> the bump, the release PR goes into `dev` (never `main` — `dev-gate` rejects a
+> `release/*` branch aimed at `main`), and the later `dev → main` promotion
+> triggers the **Publish packages** workflow
+> (`.github/workflows/publish.yml`), which builds and publishes the
 > changed packages. Do not run `npm publish` by hand. See
 > [`scripts/README.md`](../../scripts/README.md) and the README's
 > [Releasing npm packages](../../README.md#releasing-npm-packages) section. The

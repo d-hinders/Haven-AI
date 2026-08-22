@@ -101,17 +101,36 @@ test('dev-gate permits exactly the branches the canonical doc claims', () => {
   const OPEN = 'The `dev-gate` workflow'
   const CLOSE = 'merge into `main`'
   const from = doc.indexOf(OPEN)
-  const to = doc.indexOf(CLOSE, from)
-  assert.ok(
-    from !== -1 && to !== -1,
-    `${CANONICAL_DOC} no longer contains the "${OPEN} … ${CLOSE}" claim this ` +
-      `test pins. If it was reworded, re-point the test; if it was deleted, ` +
-      `the canonical claim is gone and that is the bug.`,
+  assert.notEqual(
+    from,
+    -1,
+    `${CANONICAL_DOC} no longer contains the "${OPEN} …" claim this test ` +
+      `pins. If it was reworded, re-point the test; if it was deleted, the ` +
+      `canonical claim is gone and that is the bug.`,
+  )
+
+  // Bound the search to the paragraph the opening anchor sits in, not to the
+  // rest of the file. `indexOf(CLOSE, from)` finds the FIRST later occurrence,
+  // not the one belonging to this sentence — so a reworded claim ("permits
+  // merges from `dev` and `hotfix/*` into `main`") plus any later occurrence of
+  // the literal phrase would silently widen the span across unrelated prose and
+  // fail with a token diff that says nothing about the real mismatch. Still
+  // loud, but misleading, which is worse than loud and clear.
+  const paragraphEnd = doc.indexOf('\n\n', from)
+  const paragraph = doc.slice(from, paragraphEnd === -1 ? doc.length : paragraphEnd)
+  const closeAt = paragraph.indexOf(CLOSE)
+  assert.notEqual(
+    closeAt,
+    -1,
+    `${CANONICAL_DOC} still opens the claim with "${OPEN}" but that paragraph ` +
+      `no longer contains "${CLOSE}". The sentence was reworded — re-point ` +
+      `this test at its new shape rather than widening the search, which is ` +
+      `how this assertion would start reporting unrelated tokens.`,
   )
 
   // Everything backticked between those anchors, minus the two tokens that are
   // the workflow's own name and path rather than branches.
-  const namedInClaim = [...doc.slice(from, to).matchAll(/`([A-Za-z0-9_./*-]+)`/g)]
+  const namedInClaim = [...paragraph.slice(0, closeAt).matchAll(/`([A-Za-z0-9_./*-]+)`/g)]
     .map((m) => m[1])
     .filter((n) => n !== '.github/workflows/dev-gate.yml' && n !== 'dev-gate')
 

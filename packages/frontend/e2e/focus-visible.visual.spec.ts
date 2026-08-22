@@ -76,11 +76,20 @@
  * ── Tab traversal, and why the count is never hard-coded ─────────────────────
  *
  * The driver is real keyboard `Tab`, because that is the path the user whose
- * bug this is actually takes. `.focus()` was measured as a fallback and was not
- * needed: all six controls are reachable by traversal (see `tabToTarget`'s
- * note). A control reachable by script and not by tab order would itself be a
- * finding, so the two are not interchangeable and one is never silently
- * substituted for the other.
+ * bug this is actually takes. **All six controls are reachable by traversal**,
+ * so the `.focus()` fallback the issue allows was never needed and nothing is
+ * silently substituted. A control reachable by script and not by tab order
+ * would itself be a WCAG 2.4.3 finding, so the two are not interchangeable.
+ *
+ * `.focus()` was measured side by side on the three popover items (it lands on
+ * the same nodes, and `:focus-visible` matched there too) — but do not read
+ * that as "the two are equivalent". `:focus-visible` is decided by the last
+ * INPUT MODALITY, and in that probe the modality was already keyboard because
+ * tabbing is how the menu had been opened. Call `.focus()` after a mouse
+ * interaction and the same element can take focus with no ring at all — at
+ * which point the capture silently becomes a resting-state one. That is the
+ * failure this whole file exists to catch, so the substitution is the one
+ * shortcut that would quietly undo it.
  *
  * `tabToTarget` presses Tab until `document.activeElement` IS the target node,
  * bounded, and throws naming the control if it never arrives. It does NOT press

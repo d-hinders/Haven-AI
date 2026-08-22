@@ -15,22 +15,31 @@ import { defineConfig, devices } from '@playwright/test'
  * cannot serve THIS run's own identity token. The refusal is the part that
  * matters; the port arithmetic only makes the happy path likely.
  *
- * The reservation is a subprocess because `defineConfig` is synchronous and
- * binding a socket is not. It shells out ONCE per run: the resolved port is
- * stamped into the environment, and Playwright's workers inherit that
- * environment when they re-load this config. Without the stamp each worker
- * would reserve its own (different, because this run's server now holds the
- * first one) port and point `baseURL` at nothing.
+ * The prepare step is a subprocess because `defineConfig` is synchronous while
+ * binding a socket and writing the marker are not. It runs ONCE per run and
+ * both of its results — the port and the run's identity token — are stamped
+ * into the environment, which Playwright's workers inherit when they re-load
+ * this config. Without the stamp each worker would reserve its own (different,
+ * because this run's server now holds the first one) port and point `baseURL`
+ * at nothing, and would republish the marker under a token of its own.
+ *
+ * **The marker is written here rather than in `globalSetup` because it has to
+ * exist before the web server starts.** Locally that is invisible — `next dev`
+ * serves `public/` from disk per request — but CI copies `public/.` into the
+ * standalone tree and only then boots `server.js`, so a marker written later
+ * was never copied and the run refused its own server. Proven the hard way on
+ * this PR's first `Frontend browser smoke`.
  */
 const RESOLVED_PORT_ENV = 'PLAYWRIGHT_RESOLVED_PORT'
+const RUN_TOKEN_ENV = 'PLAYWRIGHT_RUN_TOKEN'
 const REUSE_EXISTING_SERVER = !process.env.CI
-const PORT = resolvePort()
+const PORT = prepareRun()
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${PORT}`
 // Read back by `scripts/e2e-identity.mjs` in `globalSetup`, so the identity
 // probe targets exactly what the tests target rather than re-deriving it.
 process.env.PLAYWRIGHT_RESOLVED_BASE_URL = baseURL
 
-function resolvePort(): number {
+function prepareRun(): number {
   const stamped = process.env[RESOLVED_PORT_ENV]
   if (stamped) return Number(stamped)
 
@@ -49,17 +58,19 @@ function resolvePort(): number {
   // walking past would step over this worktree's own warm dev server and
   // cold-start a second Next on every run — so the derived port is used as is
   // and the identity probe decides whether what answers is ours.
-  const args = [path.join(__dirname, 'scripts', 'e2e-identity.mjs'), 'reserve-port']
+  const args = [path.join(__dirname, 'scripts', 'e2e-identity.mjs'), 'prepare']
   if (!REUSE_EXISTING_SERVER) args.push('--exclusive')
   const out = execFileSync(process.execPath, args, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
   }).trim()
-  const port = Number(out)
-  if (!Number.isInteger(port) || port <= 0) {
-    throw new Error(`e2e: could not reserve a port for the app server (got ${JSON.stringify(out)})`)
+  const [rawPort, token] = out.split('\t')
+  const port = Number(rawPort)
+  if (!Number.isInteger(port) || port <= 0 || !token) {
+    throw new Error(`e2e: could not prepare the run (expected "port<TAB>token", got ${JSON.stringify(out)})`)
   }
   process.env[RESOLVED_PORT_ENV] = String(port)
+  process.env[RUN_TOKEN_ENV] = token
   return port
 }
 const webServerCommand = process.env.CI

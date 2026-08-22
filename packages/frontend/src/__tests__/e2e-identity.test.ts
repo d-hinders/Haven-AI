@@ -168,7 +168,7 @@ describe('the Playwright config wires the guard in', () => {
   it('derives and reserves the port instead of hardcoding one', async () => {
     const source = await read('playwright.config.ts')
     expect(source).toMatch(/globalSetup:\s*'\.\/scripts\/e2e-identity\.mjs'/)
-    expect(source).toMatch(/'e2e-identity\.mjs'\),\s*'reserve-port'/)
+    expect(source).toMatch(/'e2e-identity\.mjs'\),\s*'prepare'/)
     // The old fixed default. `PLAYWRIGHT_PORT` survives as a PREFERENCE that
     // still goes through the bind proof, so what must not come back is the
     // literal fallback.
@@ -201,7 +201,7 @@ describe('the e2e global setup wires the guard in', () => {
     // a cleanup path that cannot clean up.
     const source = await read('scripts/e2e-identity.mjs')
     expect(source).toMatch(
-      /const publicDirs = [\s\S]*?const teardown = \(\) => \{[\s\S]*?removeIdentityMarkerSync[\s\S]*?process\.on\('exit', teardown\)/,
+      /const teardown = \(\) => \{[\s\S]*?removeIdentityMarkerSync[\s\S]*?process\.on\('exit', teardown\)/,
     )
     expect(source).toMatch(/process\.once\('SIGINT'/)
     expect(source).toMatch(/process\.once\('SIGTERM'/)
@@ -210,13 +210,32 @@ describe('the e2e global setup wires the guard in', () => {
     expect(source).toMatch(/\} catch \(err\) \{\s*\n\s*teardown\(\)\s*\n\s*throw err/)
   })
 
-  it('writes the marker where the CI standalone server serves it from too', async () => {
-    // In CI the webServer command copies `public/.` into the standalone tree
-    // BEFORE booting `server.js`, and that copy is finished by the time global
-    // setup runs — so a marker written only to the source `public/` would 404
-    // and the run would refuse its own server.
+  it('publishes the marker BEFORE the web server starts, not in globalSetup', async () => {
+    // The ordering CI actually enforces, and the one this change got wrong
+    // first: the CI `webServer` command copies `public/.` into the standalone
+    // tree and only THEN boots `server.js`. A marker written in `globalSetup`
+    // — which runs after the server is up — is never copied, so the probe 404s
+    // and the run refuses its own server. `Frontend browser smoke` proved it.
+    //
+    // Locally this is invisible (`next dev` serves `public/` per request),
+    // which is exactly why it needs a test rather than a comment.
     const source = await read('scripts/e2e-identity.mjs')
-    expect(source).toMatch(/\.next\/standalone\/packages\/frontend\/public/)
+    expect(source).toMatch(/export async function prepareRun\([\s\S]{0,400}?writeIdentityMarker\(PUBLIC_DIR/)
+    // `globalSetup` must NOT be where the marker is written.
+    const globalSetupBody = source.slice(source.indexOf('export default async function globalSetup'))
+    expect(globalSetupBody).not.toMatch(/writeIdentityMarker/)
+  })
+
+  it('takes the run token from the environment so workers cannot mint their own', async () => {
+    // Every Playwright worker re-loads the config in its own process. A token
+    // generated per load would have each worker overwrite the marker this run
+    // is being verified against, mid-run.
+    const config = await read('playwright.config.ts')
+    expect(config).toMatch(/process\.env\[RUN_TOKEN_ENV\] = token/)
+    const source = await read('scripts/e2e-identity.mjs')
+    expect(source).toMatch(/const token = process\.env\[RUN_TOKEN_ENV\]/)
+    // …and an absent stamp is a loud refusal, never a quietly skipped check.
+    expect(source).toMatch(/if \(!token\) \{[\s\S]{0,300}?throw new Error/)
   })
 
   it('keeps stdout clean for the port handshake', async () => {

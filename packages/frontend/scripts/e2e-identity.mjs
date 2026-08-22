@@ -41,19 +41,21 @@
  * ## What runs when
  *
  * 1. `playwright.config.ts` (module scope, synchronous) shells out to this
- *    file's `reserve-port` command for the port, BEFORE the `webServer`
- *    command string is built. It has to be a subprocess because `defineConfig`
- *    is synchronous and binding a socket is not. Whether the port is merely
+ *    file's `prepare` command, BEFORE the `webServer` command string is built.
+ *    That step resolves the port AND writes this run's marker into `public/`,
+ *    returning `port<TAB>token` for the config to stamp into the environment.
+ *    It has to be a subprocess because `defineConfig` is synchronous while
+ *    binding a socket and writing a file are not. Whether the port is merely
  *    derived or also PROVEN free depends on whether this run may reuse a
  *    server — see `resolveE2ePort` for why, and why that is the safe way round.
  * 2. Playwright starts (or adopts) the web server — `webServer` is a plugin,
- *    and plugin setup runs BEFORE `globalSetup`.
- * 3. `globalSetup` (this file's default export) writes the marker into
- *    `public/`, fetches it back from whatever Playwright is about to test, and
- *    THROWS unless the served token is this run's own. Next serves `public/`
- *    from disk per request, so writing the marker after the server booted is
- *    fine — and a foreign worktree's server serves its own `public/`, which is
- *    exactly what makes the probe an identity check.
+ *    and plugin setup runs BEFORE `globalSetup`. **The marker must already
+ *    exist by here**, which is the whole reason step 1 writes it: see
+ *    `prepareRun` for the CI failure that proved it.
+ * 3. `globalSetup` (this file's default export) fetches the marker back from
+ *    whatever Playwright is about to test and THROWS unless the served token
+ *    is this run's own. A foreign worktree's server serves its own `public/`,
+ *    which is exactly what makes the probe an identity check.
  * 4. The teardown returned from `globalSetup` removes the marker again, as do
  *    `exit`/`SIGINT`/`SIGTERM` handlers, because a marker left in `public/` is
  *    a worktree path and commit hash that `next build` would ship at the site
@@ -96,7 +98,6 @@
  */
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { existsSync } from 'node:fs'
 import {
   buildRunIdentity,
   derivePort,
@@ -113,13 +114,11 @@ const FRONTEND_ROOT = path.resolve(HERE, '..')
 const PUBLIC_DIR = path.join(FRONTEND_ROOT, 'public')
 
 /**
- * Where the Next standalone build serves `public/` from in CI. The CI
- * `webServer` command copies `public/.` in there before booting `server.js`,
- * and that copy has already happened by the time `globalSetup` runs — so the
- * marker is written to BOTH locations rather than only the source one. Without
- * this the probe would 404 in CI and the run would refuse its own server.
+ * Where `playwright.config.ts` stamps this run's token so Playwright's workers
+ * — which re-load the config in their own processes — inherit it instead of
+ * each minting a new one and overwriting the marker mid-run.
  */
-const STANDALONE_PUBLIC_DIR = path.join(FRONTEND_ROOT, '.next/standalone/packages/frontend/public')
+export const RUN_TOKEN_ENV = 'PLAYWRIGHT_RUN_TOKEN'
 
 /** Served at `${baseURL}/e2e-identity.json` out of the app's `public/`. */
 export const E2E_IDENTITY_FILENAME = 'e2e-identity.json'
@@ -207,9 +206,43 @@ export async function resolveE2ePort({ cwd = FRONTEND_ROOT, exclusive = false } 
 }
 
 /**
- * Playwright `globalSetup`. Returns its own teardown — Playwright calls a
- * returned function after the run (`runner/tasks.js`), which keeps the write
- * and the removal in one place instead of in two files that can drift.
+ * Publish this run's marker into `public/`, and report the identity as one
+ * line of `port<TAB>token` on stdout for `playwright.config.ts` to stamp.
+ *
+ * ## Why this is a `prepare` step and not part of `globalSetup`
+ *
+ * The marker HAS to be on disk before the web server starts, and the first
+ * draft wrote it in `globalSetup` — which runs after. Locally that is
+ * invisible, because `next dev` serves `public/` from disk per request, so a
+ * file that appears afterwards is served anyway. **CI proved it is not
+ * invisible there** (`Frontend browser smoke` on PR #1832): the CI web-server
+ * command copies `public/.` into the standalone tree and only then boots
+ * `server.js`, so a marker written after boot was never copied, `404`d, and
+ * the run refused its own server.
+ *
+ * Writing at prepare time fixes both halves at once — the CI `cp` picks the
+ * marker up as part of `public/`, and there is no second write into
+ * `.next/standalone/...` to keep in sync with a shell command in a YAML file.
+ * That earlier belt-and-braces write is gone: it was compensating for the
+ * ordering rather than fixing it, and it was the thing that looked correct
+ * while being wrong.
+ *
+ * The token is generated here, ONCE per run, and travels back to the config in
+ * stdout so it can be stamped into the environment. Playwright workers re-load
+ * the config, and a token regenerated per load would mean each worker
+ * publishing a different marker over this run's own.
+ */
+export async function prepareRun({ cwd = FRONTEND_ROOT, exclusive = false } = {}) {
+  const port = await resolveE2ePort({ cwd, exclusive })
+  const identity = buildRunIdentity(worktreeIdentity(cwd))
+  await writeIdentityMarker(PUBLIC_DIR, identity, E2E_IDENTITY_FILENAME)
+  return { port, identity }
+}
+
+/**
+ * Playwright `globalSetup` — verification only; the marker was published at
+ * prepare time (see above). Returns its own teardown, which Playwright calls
+ * after the run (`runner/tasks.js`).
  */
 export default async function globalSetup(config) {
   const baseURL =
@@ -220,32 +253,34 @@ export default async function globalSetup(config) {
     throw new Error('e2e identity: no baseURL on the Playwright config — cannot verify the server under test')
   }
 
-  const identity = buildRunIdentity(worktreeIdentity(FRONTEND_ROOT))
+  const token = process.env[RUN_TOKEN_ENV]
+  if (!token) {
+    throw new Error(
+      `e2e identity: ${RUN_TOKEN_ENV} is not set — the config's prepare step did not run, so there is ` +
+        'no marker to verify against and nothing would be proven by continuing.',
+    )
+  }
+
+  // Rebuilt rather than passed: `globalSetup` is a fresh entry point. Only
+  // `token` and `worktree` are consulted by `identityMismatch`, and both are
+  // stable for the run — the token because it came from the env stamp, the
+  // worktree because it is this directory.
+  const base = worktreeIdentity(FRONTEND_ROOT)
+  const identity = { ...base, token }
   console.log(`e2e: worktree ${identity.worktree}`)
   console.log(
     `e2e: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty working tree)' : ''}`,
   )
-
-  // Every directory this run published a marker into. Collected BEFORE the
-  // handlers that have to reach it are registered — a handler closing over a
-  // binding declared after it is a handler that can never do its job, which is
-  // the bug review caught in #1800's first draft.
-  const publicDirs = [PUBLIC_DIR, ...(existsSync(STANDALONE_PUBLIC_DIR) ? [STANDALONE_PUBLIC_DIR] : [])]
-  for (const dir of publicDirs) {
-    await writeIdentityMarker(dir, identity, E2E_IDENTITY_FILENAME)
-  }
 
   // Sync on purpose: an awaited promise does not settle before the process
   // leaves on a throw or a signal, and `public/` is copied verbatim into a
   // production build — a marker that outlives its run is this worktree's path
   // and commit hash served at the site root.
   const teardown = () => {
-    for (const dir of publicDirs) {
-      try {
-        removeIdentityMarkerSync(dir, E2E_IDENTITY_FILENAME)
-      } catch {
-        /* nothing to clean up */
-      }
+    try {
+      removeIdentityMarkerSync(PUBLIC_DIR, E2E_IDENTITY_FILENAME)
+    } catch {
+      /* nothing to clean up */
     }
   }
   process.on('exit', teardown)
@@ -286,13 +321,14 @@ export default async function globalSetup(config) {
   return teardown
 }
 
-// `reserve-port`: the synchronous seam `playwright.config.ts` needs. The port
-// goes to stdout and NOTHING else does — the caller parses stdout — so
-// `reserveFreePort`'s progress line is routed to stderr above.
-if (process.argv[2] === 'reserve-port') {
-  resolveE2ePort({ exclusive: process.argv.includes('--exclusive') })
-    .then((port) => {
-      process.stdout.write(`${port}\n`)
+// `prepare`: the synchronous seam `playwright.config.ts` needs. One
+// tab-separated line of `port<TAB>token` goes to stdout and NOTHING else does
+// — the caller parses stdout — which is why every progress and warning line in
+// this file is routed to stderr.
+if (process.argv[2] === 'prepare') {
+  prepareRun({ exclusive: process.argv.includes('--exclusive') })
+    .then(({ port, identity }) => {
+      process.stdout.write(`${port}\t${identity.token}\n`)
     })
     .catch((err) => {
       console.error(String(err?.message ?? err))

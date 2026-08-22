@@ -6,7 +6,7 @@ import { useRef, useState, useCallback } from 'react'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { Button } from '@/components/ui/Button'
-import { getChainConfig } from '@/lib/chains'
+import { resolveChainOrNull } from '@/lib/chains'
 
 interface Props {
   open: boolean
@@ -29,27 +29,11 @@ function buildOnrampUrl(safeAddress: string, chainShortName: string): string {
   return `https://pay.coinbase.com/buy/select-asset?${params.toString()}`
 }
 
-/**
- * The chain, or null — never a guess, and never a thrown render.
- *
- * `getChainConfig` THROWS for any id outside the registry, so a bare
- * `chainId != null` test covers only one of the two ways a chain can fail to
- * resolve. The other — a `chain_id` that is present but unregistered, e.g. a
- * chain the API serves before the frontend registry catches up — would take the
- * whole modal down through the error boundary instead of reaching the refusal
- * below. Both shapes are "we do not know this account's network", and a funding
- * surface should answer them the same way. Deliberately local rather than a
- * change to `getChainConfig`: seventeen other call sites rely on it throwing,
- * and quietly making it total is a different decision than this issue's.
- */
-function resolveChainOrNull(chainId?: number) {
-  if (chainId == null) return null
-  try {
-    return getChainConfig(chainId)
-  } catch {
-    return null
-  }
-}
+// `resolveChainOrNull` was introduced here by #1844 and lifted into
+// `lib/chains.ts` by #1852, when `ReceiveFundsModal` needed the same answer to
+// the same question. A second local copy would have drifted; what stays
+// deliberately unchanged is `getChainConfig`'s throwing contract, which ~20
+// other call sites depend on. See the doc comment on the lifted function.
 
 export default function AddFundsModal({ open, onClose, onReceive, safeAddress, chainId }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -212,16 +196,18 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
             {/*
               The receive handoff is offered ONLY when there is no address at
               all — its original condition, restored after the rendered review
-              caught the regression. Offering it when an address exists but the
-              chain does not sends the user to `ReceiveFundsModal`, which calls
-              `getChainConfig(safe.chain_id)` unconditionally and THROWS on a
-              missing chain: the refusal screen's own way out would be a crash.
-              Nor is it a real out — that modal names the network with full
-              confidence in four places, so a crash-safe version would just
-              reintroduce the unconfirmed-network claim one click away
-              (#1852 covers making the receive surface unresolved-aware). With
-              no chain we have nothing honest to offer beyond saying so, and
-              a dead end the user can read beats a dead end that throws.
+              It stays removed after #1852, but for a DIFFERENT reason than the
+              one written here first — recorded rather than quietly rewritten,
+              because the change of reason is the interesting part. Originally:
+              `ReceiveFundsModal` called `getChainConfig(safe.chain_id)` on an
+              unconditional path and THREW on a missing chain, so the refusal
+              screen's own way out was a crash, and it named the network with
+              full confidence in four places besides. #1852 fixed both. The
+              handoff would therefore no longer be dangerous — it would merely
+              be pointless: it sends a user from one refusal to an identical
+              refusal, which reads as the product forgetting what it just told
+              them. With no chain there is still nothing honest to offer beyond
+              saying so.
             */}
           </div>
 

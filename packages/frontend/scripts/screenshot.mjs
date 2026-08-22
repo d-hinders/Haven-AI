@@ -1169,6 +1169,74 @@ export const SCENARIOS = {
       await shoot(dialog, 'unresolved')
     },
   },
+  'receive-funds': {
+    description: 'Receive funds modal with a RESOLVED chain — the normal path (#1852)',
+    // The resolved half of the #1852 pair. Same construction as `add-funds`
+    // above and for the same reasons: the chain data is the shared fixture's
+    // (84532), and the ONE override is dropping `account_type` so the hero
+    // renders its action buttons instead of `PasskeyOtherDeviceNotice`.
+    api(apiPath) {
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE }] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      // The hero labels this button "Receive" when funded and "Receive funds"
+      // when not — both branches exist and which one renders depends on the
+      // fixture's balances, which this scenario deliberately does not pin.
+      await page.getByRole('button', { name: /^Receive( funds)?$/ }).first().click()
+      const dialog = page.getByRole('dialog')
+      // Confirmed by the RESOLVED sentence rather than by a bare timeout, so a
+      // run that lands on the refusal fails here instead of being shot under
+      // the resolved filename.
+      await dialog
+        .getByText('Send supported tokens to this Haven wallet on Base Sepolia.')
+        .waitFor({ timeout: 20_000 })
+      // The QR is half of what this screen refuses in the other state, so the
+      // resolved capture has to actually show one for the pair to be evidence
+      // about the QR at all.
+      await dialog.getByRole('button', { name: 'Show QR code' }).click()
+      await dialog.getByAltText(/^QR code for /).waitFor({ timeout: 20_000 })
+      await shoot(dialog, 'resolved')
+    },
+  },
+  'receive-funds-unresolved-chain': {
+    description:
+      'Receive funds modal with an UNRESOLVED chain — names no network, shows no address or QR (#1852)',
+    // Separate scenario rather than a second state of `receive-funds`, for the
+    // same reason as the add-funds pair: the two need opposite pins on the SAME
+    // endpoints for their whole run.
+    //
+    // The state is not reachable through the UI today (`chain_id` is
+    // non-nullable in `UserSafe`, and the hero only offers Receive when an
+    // account exists). What IS reachable is the wire condition: a safe that
+    // arrives WITHOUT `chain_id`. That is what this serves — at the API
+    // boundary, with no component code mutated — so the capture evidences the
+    // real refusal path rather than a hand-edited render.
+    //
+    // Same rail override as its twin, so the two differ by EXACTLY one field.
+    api(apiPath) {
+      const safeWithoutChain = { ...FIXTURE_SAFE }
+      delete safeWithoutChain.chain_id
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
+      if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: /^Receive( funds)?$/ }).first().click()
+      const dialog = page.getByRole('dialog')
+      await dialog
+        .getByText(/can't confirm which network this account uses/)
+        .waitFor({ timeout: 20_000 })
+      await shoot(dialog, 'unresolved')
+    },
+  },
 }
 
 function resolveScenarios(names) {

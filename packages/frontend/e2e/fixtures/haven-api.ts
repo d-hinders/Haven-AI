@@ -558,8 +558,9 @@ export async function dismissMobileSidebar(page: Page) {
  * block inside `ReceiveFundsModal` left `dashboard.spec.ts`' assertion green.
  * Call sites that open a dialog before asserting are therefore measuring the
  * page BEHIND the dialog — still a real assertion, but not a check on the
- * dialog's own layout. Filed as #1773 rather than widened here: it wants its
- * own selector, its own call-site changes and its own mutation proof.
+ * dialog's own layout. That is now covered by `measureDialogOverflow` below
+ * (#1773), which is a SIBLING rather than a widening of this helper — see its
+ * JSDoc for why the union was the wrong shape the second time.
  *
  * ## The viewport-absolute fields, and why they are REPORTED and not asserted
  *
@@ -645,4 +646,183 @@ export async function expectNoHorizontalOverflow(page: Page) {
       contentRight: contentBox ? Math.round(contentBox.right) : null,
     }
   })
+}
+
+/**
+ * Measure horizontal overflow INSIDE a fixed-position overlay (#1773).
+ *
+ * `expectNoHorizontalOverflow` above cannot see any of this. A `position:
+ * fixed` element is laid out against the viewport, so it contributes to the
+ * scrollable overflow of neither the document nor `<main>`, and an ancestor's
+ * `overflow-hidden` does not clip it either. Measured, not inferred: a
+ * `w-[120vw]` block inside `ReceiveFundsModal` left `dashboard.spec.ts`'
+ * assertion green while the same mutation on the page behind it turned it red.
+ * Three specs opened a dialog and then asserted overflow, which reads as "and
+ * the panel does not break layout"; all three were measuring the route behind
+ * the overlay.
+ *
+ * ## Why a sibling helper and NOT a widened `hasOverflow`
+ *
+ * #1771 unioned its two page-level boxes because EVERY caller wanted both.
+ * That is not true here — five of the call sites (`auth` x3 and `hosted-mcp`
+ * x4, plus `navigation.mobile`) never open a dialog at all. Folding an overlay
+ * metric into `hasOverflow` would make "no dialog is open" and "the dialog
+ * fits" the same reading, which is the silent-no-op shape `contentRegionFound`
+ * exists to prevent, reintroduced one layer up. So this follows #1779's split:
+ * shared MEASUREMENT here, the assertion written at each call site that knows
+ * it has an overlay open. `dialogFound` is the loud-no-op guard and callers
+ * must assert it.
+ *
+ * ## Why it scans the SUBTREE, not the dialog's own scroll box
+ *
+ * The issue proposed measuring `[role="dialog"]`'s own scroll box. Measuring
+ * it falsified that: it fires on ONE of the three dialogs.
+ *
+ *   dialog        primitive     role="dialog" is        own box    subtree
+ *   ------------- ------------- ----------------------- ---------- --------
+ *   Receive funds bespoke       the panel itself           1026       1026
+ *   x402 detail   ui/SidePanel  panel; body scrolls           0       1129
+ *   Connect agent ui/Modal      the fixed inset-0 box         0       1010
+ *
+ * (`scrollWidth - clientWidth` in px under the same 120vw mutation; every
+ * clean reading is 0.)
+ *
+ * Two of the three nest an `overflow-y-auto` body inside the dialog node, and
+ * per CSS Overflow §3 a non-`visible` value on one axis computes the OTHER to
+ * `auto` — so that body is itself a horizontal scroll box, absorbs the
+ * overflow, and never propagates it outward. Measuring only the dialog node
+ * would have shipped a guard that is green on two of the three call sites it
+ * was written for: the family's own defect, third instance. Scanning every box
+ * in the subtree also removes the reliance on upward propagation that makes an
+ * intermediate `overflow-hidden` a blind spot for the sibling helper.
+ *
+ * ## The viewport-absolute fields are REPORTED, not asserted
+ *
+ * Same split as #1779, for a reason measured here rather than inherited. The
+ * three overlays have three different CORRECT positions at 1280px — the
+ * centred modal spans 384 to 896, the right-anchored side panel 834 to 1282,
+ * the full-viewport overlay 0 to 1280 — so no single anchor holds for all
+ * three. And the side panel sits flush against the right edge, where its
+ * rounded `right` read 1280, 1281 and 1282 across three runs at a viewport of
+ * 1280; an `=== viewportWidth` assertion would flake on sub-pixel layout. The
+ * numbers are returned so a failure is diagnosable and so a call site that
+ * knows its overlay's geometry can pin it.
+ *
+ * ## Known limit, stated rather than papered over
+ *
+ * A box that overflows is reported whether or not it MEANT to. None of the
+ * three dialogs currently contains a legitimate horizontal scroller (every
+ * clean run found zero offenders), so nothing is excluded today. Deliberately
+ * no class-name heuristic exempting `overflow-x-auto`: it would silently
+ * exempt a real defect that happened to carry the class, and the repo already
+ * has an honest convention for this — exempt a known case BY NAME at the call
+ * site with an issue number, the way `KNOWN_CONTENT_OVERFLOW` does, so the
+ * exemption is visible rather than inferred.
+ */
+export async function measureDialogOverflow(page: Page, selector = '[role="dialog"]') {
+  return page.evaluate((sel) => {
+    const matches = Array.from(document.querySelectorAll(sel))
+    const dialog = matches[0] ?? null
+    const viewportWidth = window.innerWidth
+
+    if (!dialog) {
+      return {
+        dialogAttached: false,
+        dialogFound: false,
+        dialogCount: 0,
+        dialogScrollWidth: null,
+        dialogClientWidth: null,
+        dialogOverflowBy: 0,
+        dialogOverflows: false,
+        overlayOverflowBy: 0,
+        overlayOverflows: false,
+        offenderCount: 0,
+        worstOffender: null,
+        viewportWidth,
+        dialogLeft: null,
+        dialogRight: null,
+        contentMinLeft: null,
+        contentMaxRight: null,
+      }
+    }
+
+    const describe = (el: Element) => {
+      const cls = (el.getAttribute('class') ?? '').trim().replace(/\s+/g, ' ')
+      const id = el.id ? `#${el.id}` : ''
+      const testId = el.getAttribute('data-testid')
+      return `${el.tagName.toLowerCase()}${id}${testId ? `[data-testid=${testId}]` : ''}${
+        cls ? `.${cls.slice(0, 120)}` : ''
+      }`
+    }
+
+    // The dialog node's own box, kept alongside the subtree figure. When a
+    // failure arrives, seeing `dialogOverflowBy: 0` next to a non-zero
+    // `overlayOverflowBy` is what tells the reader the offender is a nested
+    // scroll box rather than the dialog itself.
+    const dialogScrollWidth = dialog.scrollWidth
+    const dialogClientWidth = dialog.clientWidth
+    // Presence is NOT enough, exactly as for `<main>`: an attached but
+    // unlaid-out dialog measures `0 - 0 = 0`, which reads as "fits".
+    const dialogFound = dialogClientWidth > 0
+    const dialogOverflowBy = dialogFound ? dialogScrollWidth - dialogClientWidth : 0
+
+    // 1px of tolerance for sub-pixel layout rounding, matching the sibling
+    // helper. The measured mutations were 1010-1129px, so the tolerance is
+    // nowhere near the decision boundary for a real defect.
+    let overlayOverflowBy = dialogFound && dialogOverflowBy > 1 ? dialogOverflowBy : 0
+    let worstOffender = overlayOverflowBy > 0 ? describe(dialog) : null
+    let offenderCount = overlayOverflowBy > 0 ? 1 : 0
+
+    let contentMinLeft = Infinity
+    let contentMaxRight = -Infinity
+
+    for (const el of Array.from(dialog.querySelectorAll('*'))) {
+      const style = getComputedStyle(el)
+      if (style.display === 'none' || style.visibility === 'hidden') continue
+
+      const clientWidth = el.clientWidth
+      if (clientWidth > 0) {
+        const by = el.scrollWidth - clientWidth
+        if (by > 1) {
+          offenderCount += 1
+          if (by > overlayOverflowBy) {
+            overlayOverflowBy = by
+            worstOffender = describe(el)
+          }
+        }
+      }
+
+      const box = el.getBoundingClientRect()
+      // A zero-area box has no meaningful position — a collapsed wrapper would
+      // otherwise drag `contentMinLeft` to 0 on every dialog.
+      if (box.width === 0 && box.height === 0) continue
+      if (box.left < contentMinLeft) contentMinLeft = box.left
+      if (box.right > contentMaxRight) contentMaxRight = box.right
+    }
+
+    const dialogBox = dialog.getBoundingClientRect()
+
+    return {
+      dialogAttached: true,
+      dialogFound,
+      // A second overlay open at once means this measured whichever came first
+      // in DOM order. Reported so that is visible instead of silent.
+      dialogCount: matches.length,
+      dialogScrollWidth,
+      dialogClientWidth,
+      dialogOverflowBy,
+      dialogOverflows: dialogOverflowBy > 1,
+      overlayOverflowBy,
+      overlayOverflows: overlayOverflowBy > 1,
+      offenderCount,
+      worstOffender,
+      // Viewport-absolute — reported, never asserted here. See the JSDoc.
+      // Rounded for legibility only; nothing branches on these.
+      viewportWidth,
+      dialogLeft: Math.round(dialogBox.left),
+      dialogRight: Math.round(dialogBox.right),
+      contentMinLeft: Number.isFinite(contentMinLeft) ? Math.round(contentMinLeft) : null,
+      contentMaxRight: Number.isFinite(contentMaxRight) ? Math.round(contentMaxRight) : null,
+    }
+  }, selector)
 }

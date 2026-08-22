@@ -3,6 +3,7 @@ import {
   collectBrowserErrors,
   dismissMobileSidebar,
   expectNoHorizontalOverflow,
+  measureDialogOverflow,
   mockHavenApi,
   seedAuthenticatedSession,
   unexpectedBrowserErrors,
@@ -61,11 +62,27 @@ test.describe('Connect agent setup acceptance', () => {
 
     // Measures `/agents` BEHIND the dialog, not the dialog. A fixed-position
     // overlay contributes to neither scroll box — see the blind spot noted on
-    // `expectNoHorizontalOverflow` (#1771). Checking the dialog's own box is
-    // #1773.
+    // `expectNoHorizontalOverflow` (#1771). The dialog's own box is asserted
+    // separately below (#1773).
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,
       contentRegionFound: true,
+    })
+    // ...and now the dialog's OWN layout (#1773). Asserted on the LAST screen
+    // of the flow on purpose: this is where the modal carries a setup prompt,
+    // a delegate address and a budget summary — the long unbreakable strings
+    // that make a modal overflow in the first place.
+    //
+    // `ui/Modal` puts `role="dialog"` on the `fixed inset-0` container, whose
+    // `clientWidth` is the whole viewport, and its body is
+    // `min-h-0 flex-1 overflow-y-auto`. So the dialog node's own scroll box is
+    // doubly blind here: it is viewport-sized AND the body absorbs the
+    // overflow. Under a 120vw mutation the dialog node read 0 and the body
+    // read 1010 — see the helper's JSDoc table.
+    const connectOverlay = await measureDialogOverflow(page)
+    expect(connectOverlay, `connect modal overflows: ${JSON.stringify(connectOverlay)}`).toMatchObject({
+      dialogFound: true,
+      overlayOverflows: false,
     })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })

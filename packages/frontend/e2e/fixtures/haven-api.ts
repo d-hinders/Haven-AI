@@ -480,6 +480,41 @@ export async function dismissMobileSidebar(page: Page) {
 }
 
 /**
+ * Navigate to the receive dialog and return its locator (#1797).
+ *
+ * Shared because two specs now open it — `dashboard.spec.ts` at 1280 and
+ * `receive-modal.mobile.spec.ts` at 393 — and the *navigation* to a screen is
+ * not viewport-dependent, so a second hand-written copy would only create room
+ * for the two to drift on how the dialog is reached.
+ *
+ * Note what this deliberately does NOT share: the MEASUREMENT and its
+ * assertions. Those stay written out at each call site, because #1779's rule
+ * is that one shared reference frame every suite trusts is itself the defect —
+ * two independent measurements can disagree, one cannot. Getting to the screen
+ * is not a measurement, so it is not covered by that rule; folding
+ * `measureDialogOverflow` in here would be.
+ *
+ * `dismissMobileSidebar` no-ops at or above `lg`, so this is correct at both
+ * viewports without a branch.
+ */
+export async function openReceiveFundsModal(page: Page) {
+  await page.goto('/dashboard')
+  await dismissMobileSidebar(page)
+  // The hero CTA renders as "Receive" for funded accounts and "Receive funds"
+  // only after the dashboard knows the account is unfunded. The onboarding
+  // checklist can also expose "Receive funds", so pin to the first exact match
+  // in DOM order.
+  await page
+    .getByRole('button', { name: /^Receive( funds)?$/ })
+    .first()
+    .click()
+
+  const modal = page.getByRole('dialog', { name: 'Receive funds' })
+  await modal.waitFor({ state: 'visible' })
+  return modal
+}
+
+/**
  * Horizontal overflow, measured on BOTH scroll boxes that can hold it.
  *
  * ## Why there are two metrics (#1771)

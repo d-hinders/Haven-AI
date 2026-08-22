@@ -32,6 +32,17 @@ describe('runtimeStatusHelper for config failures (#1719)', () => {
     expect(helper).toContain('Fix the file')
   })
 
+  it('sends an unreadable config to --repair, never back through setup', () => {
+    // #1719 review: this failure happens after the agent is registered, so the
+    // setup token is spent. Telling the user to "run the setup command again"
+    // lands on a 409; starting a fresh connection mints a SECOND agent (#1688).
+    const helper = runtimeStatusHelper(installWith('runtime_config_unreadable'))
+
+    expect(helper).toContain('--doctor --repair')
+    expect(helper).toContain('already connected')
+    expect(helper).not.toMatch(/run the setup command again/i)
+  })
+
   it('keeps the retry wording for a genuine write failure', () => {
     const helper = runtimeStatusHelper(installWith('runtime_config_write_failed'))
 

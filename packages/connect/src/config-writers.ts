@@ -89,6 +89,12 @@ export class InvalidCodexTomlError extends Error {
  * `runtime_config_write_failed` told the user to retry a thing that cannot
  * succeed.
  */
+/**
+ * Mirrors `RERUN` in doctor.ts — the moving alpha tag, so the advice resolves
+ * to a connector that has `--repair` regardless of what is cached locally.
+ */
+const REPAIR_COMMAND_PREFIX = 'npx @haven_ai/connect@alpha --doctor --repair --runtime'
+
 export class UnreadableRuntimeConfigError extends Error {
   readonly configPath: string
   constructor(configPath: string, detail: string) {
@@ -434,7 +440,12 @@ async function writeJsonRuntimeConfig(
     // #1719: the parse runs BEFORE the write, so an unreadable config leaves
     // the file untouched — no half-merged config, nothing to roll back. The
     // separate code exists so the message can say "fix this file" instead of
-    // "run setup again", which would never succeed.
+    // "run setup again", which would never succeed — this fires AFTER
+    // registerSetup consumed the one-shot setup token, so the pasted command
+    // now 409s at /resolve. `--repair` is the recovery that actually works:
+    // it rewrites this exact config from the credentials already on disk,
+    // needs no token, and mints no second agent (the #1688 orphaning a fresh
+    // connection would cause).
     const unreadable = err instanceof UnreadableRuntimeConfigError
     return {
       hostedConfigured: false,
@@ -447,7 +458,7 @@ async function writeJsonRuntimeConfig(
       messages: unreadable
         ? [
             `Could not update ${configTargetLabel(input.runtime)}: ${err.message}.`,
-            `Nothing was written to ${err.configPath}. Fix the JSON there (or move the file aside), then run the Haven setup command again.`,
+            `Nothing was written to ${err.configPath}. Fix the JSON there (or move the file aside), then run \`${REPAIR_COMMAND_PREFIX} ${input.runtime}\` to write the Haven entries from the credentials already stored on this machine. Do not re-run the setup command: its token is already used.`,
           ]
         : [`Could not update ${configTargetLabel(input.runtime)}: ${err instanceof Error ? err.message : String(err)}`],
       errorCode: unreadable ? 'runtime_config_unreadable' : 'runtime_config_write_failed',
@@ -515,7 +526,7 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
       messages: unreadable
         ? [
             `Could not update Hermes Agent config: ${err.message}.`,
-            `Nothing was written to ${err.configPath}. Fix the YAML there (or move the file aside), then run the Haven setup command again.`,
+            `Nothing was written to ${err.configPath}. Fix the YAML there (or move the file aside), then run \`${REPAIR_COMMAND_PREFIX} hermes\` to write the Haven entries from the credentials already stored on this machine. Do not re-run the setup command: its token is already used.`,
           ]
         : [recoveryIncomplete
           ? 'Could not update Hermes Agent config. Recovery did not complete; inspect the Hermes configuration before retrying.'

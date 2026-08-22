@@ -162,7 +162,7 @@ additive and never renamed.
 | `runtime_force_unrecognized` | `--runtime-force` names something unknown | Re-run with a valid name |
 | `runtime_no_installed_clients` | Interactive terminal, but no client Haven can configure is installed | Re-run with `--runtime <name>`, or `other` |
 | `runtime_prompt_aborted` | Ctrl-C / EOF at the prompt, or three invalid answers | Re-run and choose, or pass `--runtime` to skip the prompt |
-| `runtime_config_unreadable` | The chosen client's config file exists but is not parseable JSON/YAML | Fix (or move aside) the named file, then re-run setup |
+| `runtime_config_unreadable` | The chosen client's config file exists but is not parseable JSON/YAML | Fix (or move aside) the named file, then `--doctor --repair --runtime <name>` — **not** the setup command |
 
 The first five refuse **before any side effect**, so there is nothing to
 recover from: no agent registered, no key minted, no credential written, and
@@ -175,10 +175,18 @@ to report them on, so they never appear in the dashboard's `install_status`.
 reaches the dashboard (`runtimeStatusHelper`): it happens after credentials
 exist, during the config write. It is deliberately distinct from its
 retryable sibling `runtime_config_write_failed` — an unparseable config fails
-identically on every re-run until the file itself is fixed, so telling the user
-to "run setup again" was advice that could not work. Parsing happens **before**
-the write, so the file is left byte-identical. Codex keeps its own older
-`codex_config_invalid` for the same class.
+identically on every re-run until the file itself is fixed. Parsing happens
+**before** the write, so the file is left byte-identical. Codex keeps its own
+older `codex_config_invalid` for the same class.
+
+Its recovery is `--repair`, **not** a re-run of the setup command, and the
+reason is the ordering: this failure lands after `registerSetup` consumed the
+one-shot setup token, so the pasted command now 409s at `/resolve`, and
+starting a fresh connection instead would mint a SECOND agent
+([#1688](https://github.com/d-hinders/Haven-AI/issues/1688)). `--repair`
+rewrites exactly this config from the credentials already on disk — no token,
+no new agent — so it is what both the connector's message and the dashboard's
+status helper point at.
 
 Accordingly, the dashboard's generated setup command carries **no `--runtime`
 flag** for command-path runtimes; snippet-based runtimes keep the flag because

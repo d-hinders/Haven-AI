@@ -120,9 +120,9 @@ function StatusPill({
 }) {
   const classes = {
     neutral: 'bg-[var(--v2-surface)] text-[var(--v2-ink-2)] border-[var(--v2-border)]',
-    success: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)] border-[var(--v2-success)]/20',
-    brand: 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] border-[var(--v2-brand)]/20',
-    warning: 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] border-[var(--v2-warning)]/20',
+    success: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)] border-success/20',
+    brand: 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] border-brand/20',
+    warning: 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] border-warning/20',
   }
 
   return (

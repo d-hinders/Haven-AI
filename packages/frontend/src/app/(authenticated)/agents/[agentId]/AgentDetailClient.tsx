@@ -630,7 +630,7 @@ export default function AgentDetailClient({ agentId }: Props) {
       ) : null}
 
       {errorMessage ? (
-        <div className="mt-4 rounded-xl border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3">
+        <div className="mt-4 rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
           <p className="text-sm font-medium text-[var(--v2-danger)]">Action failed</p>
           <p className="mt-1 text-sm text-[var(--v2-danger)]">{errorMessage}</p>
         </div>

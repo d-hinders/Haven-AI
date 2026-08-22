@@ -151,13 +151,13 @@ const TONE_STYLES: Record<Tone, { container: string; close: string; icon: React.
   },
   success: {
     container:
-      'bg-[var(--v2-success-soft)] border border-[var(--v2-success)]/20 text-[var(--v2-success)]',
+      'bg-[var(--v2-success-soft)] border border-success/20 text-[var(--v2-success)]',
     close: 'text-[var(--v2-success)]/50 hover:text-[var(--v2-success)] focus-visible:ring-success/80',
     icon: <Icon icon={Check} className="h-4 w-4 flex-shrink-0" />,
   },
   error: {
     container:
-      'bg-[var(--v2-danger-soft)] border border-[var(--v2-danger)]/20 text-[var(--v2-danger)]',
+      'bg-[var(--v2-danger-soft)] border border-danger/20 text-[var(--v2-danger)]',
     close: 'text-[var(--v2-danger)]/50 hover:text-[var(--v2-danger)] focus-visible:ring-danger/80',
     icon: <Icon icon={TriangleAlert} className="h-4 w-4 flex-shrink-0" />,
   },

@@ -58,7 +58,7 @@ export default function ApprovalNotifications() {
         aria-label={`Notifications${actionableCount > 0 ? `, ${actionableCount} payments need action` : ''}`}
         className={`relative inline-flex items-center justify-center w-10 h-10 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 ${
           actionableCount > 0
-            ? 'border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] hover:border-[var(--v2-warning)]/40'
+            ? 'border-warning/25 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)] hover:border-warning/40'
             : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]'
         }`}
       >

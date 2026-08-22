@@ -83,7 +83,7 @@ export default function NetworkGate({
         type="button"
         onClick={() => switchChain({ chainId: requiredChainId })}
         disabled={isPending}
-        className="h-10 w-full rounded-md border border-[var(--v2-border-strong)] bg-white px-4 text-sm font-medium text-[var(--v2-ink)] transition-colors hover:border-[var(--v2-brand)]/40 hover:bg-[var(--v2-surface)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+        className="h-10 w-full rounded-md border border-[var(--v2-border-strong)] bg-white px-4 text-sm font-medium text-[var(--v2-ink)] transition-colors hover:border-brand/40 hover:bg-[var(--v2-surface)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
       >
         {isPending ? `Switching to ${chainName}…` : `Switch wallet to ${chainName}`}
       </button>

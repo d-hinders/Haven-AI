@@ -114,7 +114,7 @@ export default function BudgetGrantAction({
       )}
 
       {outcome === 'failed' && (
-        <p className="mb-3 rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
+        <p className="mb-3 rounded-[10px] border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
           Haven could not set the budget. Nothing changed — try again.
         </p>
       )}

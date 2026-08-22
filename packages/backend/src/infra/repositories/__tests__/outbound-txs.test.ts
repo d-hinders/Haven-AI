@@ -14,6 +14,7 @@ import {
   claimOrphanedOutboundTx,
   countLaneAttemptsAtNonce,
   enqueueOutboundTx,
+  findOutboundTxByHash,
   listUnminedOutboundTxs,
   markOutboundTxBroadcast,
   markOutboundTxFailed,
@@ -342,5 +343,78 @@ describeDb('bump tick end-to-end over the REAL repository (#1559 review)', () =>
     expect(rows.rows[0]).toMatchObject({ id: stuck.id, status: 'replaced' })
     expect(rows.rows[0].replaced_by).toBe(rows.rows[1].id)
     expect(rows.rows[1]).toMatchObject({ status: 'broadcast', nonce: '33' })
+  })
+})
+
+/**
+ * #1745: the by-hash read. It exists to hand the passport recovery path ONE
+ * fact — the nonce a broadcast was stamped with — because that is what
+ * separates "this attest can still mine" from "its slot is already gone". A
+ * wrong answer here becomes a duplicate live credential, so the scoping and
+ * the normalisation are the tests.
+ */
+describeDb('findOutboundTxByHash (#1745)', () => {
+  beforeAll(() => initDbHarness())
+  beforeEach(async () => {
+    CHAIN = ++chainCounter
+    await resetDb()
+  })
+
+  it('returns the row with its stamped nonce, and normalises a MIXED-CASE hash', async () => {
+    const row = await enqueue('passport_attest')
+    await markOutboundTxBroadcast(row.id, { txHash: TX, nonce: 7n })
+
+    expect(await findOutboundTxByHash(CHAIN, TX)).toMatchObject({
+      id: row.id,
+      nonce: '7',
+      status: 'broadcast',
+    })
+
+    // Hashes are stored lowercased. A caller holding the checksummed form
+    // must not silently get "no record" — the probe reads that as "no
+    // evidence", which turns a recoverable stall into a permanent one.
+    const upper = '0x' + TX.slice(2).toUpperCase()
+    expect(await findOutboundTxByHash(CHAIN, upper)).toMatchObject({ id: row.id })
+  })
+
+  it('is CHAIN-SCOPED — the same hash on another chain is a different record', async () => {
+    const row = await enqueue('passport_attest')
+    await markOutboundTxBroadcast(row.id, { txHash: TX, nonce: 7n })
+
+    // The same relayer key signing the same calldata at the same nonce on a
+    // second chain produces the SAME hash. An unscoped read would hand back
+    // the other chain's nonce — the one fact the caller is here for.
+    const otherChain = ++chainCounter
+    const twin = await enqueueOutboundTx({
+      chainId: otherChain,
+      submitter: 'passport_attest',
+      toAddress: TO,
+      data: DATA,
+    })
+    await markOutboundTxBroadcast(twin.id, { txHash: TX, nonce: 99n })
+
+    expect(await findOutboundTxByHash(CHAIN, TX)).toMatchObject({ nonce: '7' })
+    expect(await findOutboundTxByHash(otherChain, TX)).toMatchObject({ nonce: '99' })
+  })
+
+  it('returns null for a hash nothing broadcast', async () => {
+    await enqueue('passport_attest') // queued, never stamped
+    expect(await findOutboundTxByHash(CHAIN, TX)).toBeNull()
+  })
+
+  it('returns the NEWEST row when one hash appears twice', async () => {
+    // Not reachable for `passport_attest` (never replaced, #1735), but the
+    // read is generic and an ambiguous answer here is an arbitrary nonce.
+    const older = await enqueue('sweep')
+    await markOutboundTxBroadcast(older.id, { txHash: TX, nonce: 1n })
+    await markOutboundTxMined(older.id)
+    await db.query(
+      `UPDATE outbound_txs SET created_at = NOW() - INTERVAL '1 hour' WHERE id = $1`,
+      [older.id],
+    )
+    const newer = await enqueue('sweep')
+    await markOutboundTxBroadcast(newer.id, { txHash: TX, nonce: 2n })
+
+    expect(await findOutboundTxByHash(CHAIN, TX)).toMatchObject({ id: newer.id, nonce: '2' })
   })
 })

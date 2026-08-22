@@ -38,6 +38,38 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
 const APP_TOP_BAR = 'xpath=//*[@id="main-content"]/preceding-sibling::header[1]'
 
 /**
+ * The app shell's sidebar — the other half of the same chrome (#1820), located
+ * the same structural way and for the same reason.
+ *
+ * `<aside>` alone is no safer than `<header>` alone was, and a class string is
+ * again the thing under test rather than something to locate by. The sidebar is
+ * the `<aside>` immediately preceding the COLUMN that holds the scroll root:
+ * the shell is `<div class="flex h-screen"><aside/><div><TopBar/><main
+ * id="main-content"/></div></div>`, so the sidebar is a sibling of
+ * `#main-content`'s PARENT, not of `#main-content` itself. That one level is
+ * the whole difference between this locator and the top bar's, and getting it
+ * wrong yields a locator that matches nothing — which `toHaveCount(1)` catches,
+ * where a locator matching the wrong element would not.
+ */
+const APP_SIDEBAR = 'xpath=//*[@id="main-content"]/parent::*/preceding-sibling::aside[1]'
+
+/**
+ * Below this width the sidebar is an off-canvas drawer (`fixed`,
+ * `-translate-x-full`), not shell chrome — `Sidebar.tsx`'s own
+ * `DESKTOP_BREAKPOINT_PX`, and the `lg:` breakpoint its classes are gated on.
+ *
+ * Keyed on the viewport WIDTH rather than on `vp.name === 'desktop'`, so a
+ * viewport added to `evidence-viewports.mjs` later is covered or excluded by
+ * what it actually renders instead of by what it is called.
+ *
+ * Verified against the committed baselines rather than assumed: in
+ * `design-system-mobile.png` the x=0..239 band is `#ffffff` at every sampled
+ * row — the drawer is genuinely not in the pristine mobile capture, so there is
+ * nothing there to scope.
+ */
+const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
+
+/**
  * ── Why these are absolute pixel counts and not a ratio (#1805) ──────────────
  *
  * This gate used `maxDiffPixelRatio: 0.005` and nothing else, with the comment
@@ -127,6 +159,91 @@ const APP_TOP_BAR = 'xpath=//*[@id="main-content"]/preceding-sibling::header[1]'
  */
 const FULL_PAGE_MAX_DIFF_PIXELS = 500
 const TOP_BAR_MAX_DIFF_PIXELS = 100
+
+/**
+ * ── The sidebar's budget (#1820) ─────────────────────────────────────────────
+ *
+ * Same reasoning as the top bar's, with the arithmetic recomputed rather than
+ * copied — and the arithmetic is the point, because the sidebar's position in
+ * the whole-page capture is worse than the top bar's in a way its raw area
+ * hides.
+ *
+ * Measured off the committed `design-system-desktop.png` (1,280 x 17,746) by
+ * scanning the x=0..239 band row by row:
+ *
+ *   the sidebar's tint (--v2-surface #f6f9fc) and right border
+ *   (--v2-border #e6ebf1) run from y=0 to y=663; every row below
+ *   is #ffffff, all the way to y=17,745.
+ *
+ *   non-white pixels in the whole band:  159,329
+ *   as a share of the 22,714,880-pixel capture:  0.70%
+ *
+ * That white tail is the documented consequence of `unclipScrollShell`, not a
+ * defect: `lg:h-full` against a now-auto-height parent resolves to `auto`, so
+ * the column stops at the bottom of the nav (`full-page-capture.mjs` spells
+ * this out and tells reviewers not to file it). Structural, and it means the
+ * sidebar contributes signal to only 663 of 17,746 rows.
+ *
+ * So the whole-page budget of 500 is not a second line of defence here in the
+ * way its size suggests. It catches a change that repaints the sidebar wholesale
+ * — 159,329 pixels is 318x the budget — but the drifts that actually happen are
+ * small and local: an active-state highlight recoloured (one nav row, ~200px of
+ * glyph and label), a group heading's weight or tracking, a nav label truncating
+ * one character earlier, an icon swapped for a neighbour in the same lucide set.
+ * Each of those is a few hundred pixels inside a 500-pixel page-wide allowance
+ * that every other primitive on the page is also drawing against.
+ *
+ * ── The number, measured rather than chosen ──────────────────────────────────
+ *
+ * #1811's method, repeated: committed at `0`, pushed, and the exact count read
+ * off the failure a CI run printed against a baseline generated in a DIFFERENT
+ * run. See the PR for the run ids.
+ *
+ *   run-to-run jitter, scoped sidebar capture, threshold 0.02:   0 pixels
+ *
+ * Consistent with the four existing captures, and for the same reason one layer
+ * down (pixelmatch runs with `includeAA: false`, so antialiased pixels are
+ * excluded before any budget is consulted).
+ *
+ * 100 is then the same absolute slack the top bar carries, which on this region
+ * is far tighter proportionally — 0.05% of the 240 x 800 capture against the top
+ * bar's 0.17% of its desktop band. It is not zero for the reason the top bar's
+ * is not: a runner-image or Chromium bump may legitimately nudge a few pixels,
+ * and a gate that goes flat red every week is a gate someone turns off.
+ *
+ * ── What 100 buys, from the mutation this shipped with ───────────────────────
+ *
+ * Recolouring the three nav GROUP HEADINGS one token sideways — `--v2-ink-3`
+ * #5d6c85 to `--v2-ink-2` #525f7f, both solid tokens, deliberately not the
+ * `/85`-on-a-bare-`var()` shape that compiles to nothing on Tailwind v3.4 and
+ * made #1811's first mutation inert (#1818) — moves **282 pixels**.
+ *
+ *   this scoped capture, budget 100:   282 px  ->  RED   (2.8x over)
+ *   the whole-page capture, budget 500: 282 px ->  GREEN (absorbed)
+ *
+ * Both captures report the SAME 282, which is the check that the scoped region
+ * is really the region: every changed pixel on the page is inside it. And the
+ * second line is the counterfactual — this is a real, sidebar-confined design
+ * regression that the pre-existing gate passes, which is the coverage hole
+ * #1820 is about, demonstrated rather than argued.
+ *
+ * Worth recording separately: at Playwright's DEFAULT `threshold` of 0.2 that
+ * same mutation counts **0** differing pixels (YIQ delta 69.7 against a
+ * maxDelta of 1,408.6). No budget of any size would have caught it. The 0.02
+ * threshold #1805 set is doing as much work here as the scoping is.
+ *
+ * ── What this capture does NOT cover, said plainly ───────────────────────────
+ *
+ * Focus indicators. PR #1831 added eleven of them to `Sidebar`, and a scoped
+ * capture of the resting state sees none of them — nothing is focused in a
+ * screenshot. This gate protects the sidebar's RESTING appearance; focus,
+ * hover, the open mobile drawer and the collapse transition are all out of its
+ * reach, and closing that gap needs a driven scenario rather than a wider
+ * region. Recorded here so the next reader does not infer coverage from the
+ * fact that a sidebar capture exists.
+ */
+const SIDEBAR_MAX_DIFF_PIXELS = 0 // MEASURING (#1811 method) — restored to 100 before review
+
 const PIXEL_THRESHOLD = 0.02
 
 test.describe('design-system visual regression', () => {
@@ -175,6 +292,26 @@ test.describe('design-system visual regression', () => {
         maxDiffPixels: TOP_BAR_MAX_DIFF_PIXELS,
         threshold: PIXEL_THRESHOLD,
       })
+
+      // ── The sidebar, the other half of the same chrome (#1820) ────────────
+      // Desktop only, and BEFORE `unclipScrollShell` for a reason that is much
+      // sharper here than it was for the top bar. The top bar is unaffected by
+      // un-clipping either way; the sidebar is not. Un-clipping turns the shell
+      // row's definite `100vh` into `height: auto`, and `lg:h-full` against an
+      // auto-height parent resolves to `auto` — so a capture taken afterwards
+      // would be a 240 x 663 fragment ending wherever the nav happens to end,
+      // instead of the 240 x 800 column a user actually sees. That is not a
+      // stricter capture, it is a capture of a shape that does not exist.
+      if (vp.width >= SIDEBAR_MIN_VIEWPORT_WIDTH) {
+        const sidebar = page.locator(APP_SIDEBAR)
+        await expect(sidebar).toHaveCount(1)
+        await expect(sidebar).toHaveScreenshot(`design-system-sidebar-${vp.name}.png`, {
+          animations: 'disabled',
+          caret: 'hide',
+          maxDiffPixels: SIDEBAR_MAX_DIFF_PIXELS,
+          threshold: PIXEL_THRESHOLD,
+        })
+      }
 
       // The app shell clips at h-screen/overflow-hidden, so a `fullPage`
       // capture paints only the first viewport and leaves a very long white

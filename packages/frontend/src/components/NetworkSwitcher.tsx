@@ -76,9 +76,23 @@ export default function NetworkSwitcher() {
         aria-label={`Active account ${activeSafe.name} on ${chainName(activeChainId)} — switch`}
       >
         <ChainDot chainId={activeChainId} />
-        <span className="min-w-0 max-w-[140px] truncate">{activeSafe.name}</span>
-        <span className="shrink-0 text-[var(--v2-ink-3)]">·</span>
-        <span className="min-w-0 truncate text-[var(--v2-ink-2)]">{chainName(activeChainId)}</span>
+        {/* `title`: the name truncates below ~768px, and while the trigger's
+            aria-label and the dropdown's own rows both carry it in full, a
+            resized desktop window is a hover context with neither in reach. */}
+        <span className="min-w-0 max-w-[140px] truncate" title={activeSafe.name}>
+          {activeSafe.name}
+        </span>
+        {/* The chain segment is DROPPED on a phone rather than squeezed
+            (#1767). Letting it share the squeeze measured 18px wide at 390px
+            and 0px at 320px — present, unreadable, and still taking the row's
+            gaps. Below `sm` the chain is carried by the coloured dot, which is
+            what `--v2-chain-*` identity colours are for, and by the trigger's
+            aria-label; the account name then gets the room and truncates with
+            an ellipsis instead of everything shrinking together. */}
+        <span className="hidden shrink-0 text-[var(--v2-ink-3)] sm:inline">·</span>
+        <span className="hidden shrink-0 text-[var(--v2-ink-2)] sm:inline">
+          {chainName(activeChainId)}
+        </span>
         <Icon icon={ChevronDown} className="h-3 w-3 shrink-0 text-[var(--v2-ink-3)]" />
       </DropdownMenuTrigger>
 

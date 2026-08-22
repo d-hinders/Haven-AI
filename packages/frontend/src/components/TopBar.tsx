@@ -40,8 +40,20 @@ export default function TopBar({ actionSlot }: TopBarProps) {
     // room for it), so a bar that outranks the toggle covers the control it is
     // making space for. That was #1749.
     <header className="relative z-[var(--v2-z-chrome)] h-14 flex items-center px-6 lg:px-8 border-b border-[var(--v2-border)] bg-[var(--v2-bg)]/85 backdrop-blur-md flex-shrink-0">
-      {/* Left region: hamburger spacer + optional back-link */}
-      <div className="flex items-center gap-3 min-w-0">
+      {/*
+        Left region: hamburger spacer + optional back-link.
+
+        `mr-3` is a floor, not decoration (#1767, design review). This region is
+        the compressible one and the right region carries `ml-auto`, so on a
+        phone the two meet exactly when the row runs out of space: measured at
+        390px, the account chip's right edge landed on the notification bell's
+        left edge at 210.61 — touching, with no overlap and no gap either. That
+        was a coincidence of the current strings, not a spacing decision, and it
+        sat one line away from this file rejecting a 6px gap elsewhere as too
+        tight. `mr-3` gives it the same 12px the row uses between its own items;
+        where there is free space `ml-auto` absorbs it and nothing moves.
+      */}
+      <div className="flex items-center gap-3 min-w-0 mr-3">
         {/*
           Spacer for the mobile hamburger. The toggle is `fixed` (#1749) so it
           consumes no layout at all — this box is the ONLY thing keeping the

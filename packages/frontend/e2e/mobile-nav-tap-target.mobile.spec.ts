@@ -141,6 +141,18 @@ const HEADER_BAND_PX = 56
  * again. It has been both.
  */
 const MIN_NEIGHBOUR_CLEARANCE_PX = 14
+/**
+ * The floor for the gap between two controls INSIDE the bar. 8px is the number
+ * § Buttons names for adjacent targets, and the row's own rhythm is `gap-3`
+ * (12px), so this is deliberately the weaker of the two — it is here to catch
+ * "they touch", not to police the layout's spacing choices.
+ */
+const MIN_CONTROL_GAP_PX = 8
+/**
+ * Narrowest a truncating chip segment may render before it stops carrying
+ * information. Roughly two glyphs plus an ellipsis at this 13px type.
+ */
+const LEGIBLE_SEGMENT_PX = 24
 
 type Measurement = {
   painted: { w: number; h: number }
@@ -159,8 +171,10 @@ type Measurement = {
    * the bar it floats over begins at the viewport edge. See the assertion.
    */
   headerLeft: number
-  /** Worst overlap between two consecutive controls inside the bar, in px. */
-  worstBarOverlap: number
+  /** Smallest gap between two consecutive controls inside the bar, in px. */
+  smallestBarGap: number | null
+  /** Rendered widths of the account chip's truncating text segments. */
+  chipSegments: number[]
   /** The `w-8 shrink-0 lg:hidden` spacer: the room `TopBar` claims to reserve. */
   slot: { left: number; right: number; width: number; centreX: number } | null
   /** The bar itself. Height, because the spacer's own height is 0. */
@@ -292,7 +306,12 @@ async function measureToggle(page: Page): Promise<Measurement> {
       // truncate, it does not shrink — it OVERFLOWS its parent and paints over
       // the notification bell, which is a different defect of the same shape
       // one control further along.
-      let worstBarOverlap = 0
+      // Reported as the smallest GAP rather than the worst overlap: "they do
+      // not overlap" was satisfied at 390px by two controls touching at exactly
+      // 210.61 — a coincidence of the current account name, one line away from
+      // this suite rejecting a 6px gap elsewhere as too tight (#1767, raised in
+      // design review). A floor is a decision; zero-by-luck is not.
+      let smallestBarGap = Number.POSITIVE_INFINITY
       const inBar = Array.from(
         header.querySelectorAll<HTMLElement>('button, a[href], [role="button"]'),
       )
@@ -300,7 +319,7 @@ async function measureToggle(page: Page): Promise<Measurement> {
         .filter((b) => b.width > 0 && b.height > 0 && b.bottom >= box.top && b.top <= box.bottom)
         .sort((a, b) => a.left - b.left)
       for (let i = 1; i < inBar.length; i += 1) {
-        worstBarOverlap = Math.max(worstBarOverlap, inBar[i - 1].right - inBar[i].left)
+        smallestBarGap = Math.min(smallestBarGap, inBar[i].left - inBar[i - 1].right)
       }
 
       // The room TopBar claims to reserve. `w-8` is a DECLARATION; this is the
@@ -327,7 +346,28 @@ async function measureToggle(page: Page): Promise<Measurement> {
         corners,
         neighbour,
         headerLeft: Math.round(headerBox.left),
-        worstBarOverlap: Math.round(worstBarOverlap * 100) / 100,
+        smallestBarGap: Number.isFinite(smallestBarGap)
+          ? Math.round(smallestBarGap * 100) / 100
+          : null,
+        /**
+         * Widths of the chip's RENDERED text segments, so a collapsed-to-a-
+         * sliver segment is a number rather than a judgement.
+         *
+         * `getClientRects().length` is the display filter, and it is doing real
+         * work: a `hidden sm:inline` segment is still in the DOM with its text
+         * intact and measures 0, which is indistinguishable from "squeezed to
+         * nothing" by width alone. Not hypothetical — the first version of this
+         * reported 0 for the deliberately hidden chain name and read as the
+         * very defect it was added to catch.
+         */
+        chipSegments: Array.from(
+          header.querySelectorAll<HTMLElement>('button[aria-label^="Active account"] span'),
+        )
+          .filter(
+            (el) =>
+              el.getClientRects().length > 0 && !!el.textContent && el.textContent.trim().length > 1,
+          )
+          .map((el) => Math.round(el.getBoundingClientRect().width)),
         slot: slotBox
           ? {
               left: Math.round(slotBox.left),
@@ -383,7 +423,7 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
 
         // 4. The enlarged target did not eat its neighbour. `NetworkSwitcher`
         //    starts at x=68 in this bar; the 44px target's right box edge is
-        //    x=62, so its last hitting pixel is x=61 — 6px of clearance.
+        //    x=54, so its last hitting pixel is x=53 — 14px of clearance.
         //
         //    Asserted twice on purpose, against two different edges. The border
         //    box says the two controls do not overlap; the neighbour's own hit
@@ -427,16 +467,44 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         expect(m.band.height).toBe(HEADER_BAND_PX)
         expect(m.centre.y).toBe(m.band.centreY)
 
-        // 8. No two controls IN the bar overlap either (#1767). (6) makes the
-        //    bar stop over-promising the toggle's slot; the 32px it stops
-        //    giving away has to be absorbed by something, and if nothing can
-        //    truncate, the widest item overflows its parent instead of
-        //    shrinking — measured, `NetworkSwitcher` kept its intrinsic
+        // 8. The controls IN the bar keep a real gap from each other (#1767).
+        //    (6) makes the bar stop over-promising the toggle's slot; the 32px
+        //    it stops giving away has to be absorbed by something, and if
+        //    nothing can truncate, the widest item overflows its parent instead
+        //    of shrinking — measured, `NetworkSwitcher` kept its intrinsic
         //    176.88px inside a 141px slot and ran 34px under the notification
         //    bell. Same defect as the toggle-over-chip one this issue started
         //    with, one control further along, and invisible to every
         //    toggle-relative assertion above.
-        expect(m.worstBarOverlap).toBeLessThanOrEqual(0.5)
+        //
+        //    A GAP floor rather than a no-overlap check: the first version of
+        //    this fix passed no-overlap at 390px with the chip's right edge and
+        //    the bell's left edge both at 210.61 — touching. Design review
+        //    called that what it was, a coincidence of the current account
+        //    name rather than a spacing decision, in a file that rejects a 6px
+        //    gap elsewhere. `TopBar`'s regions now hold `mr-3` apart.
+        expect(m.smallestBarGap).not.toBeNull()
+        expect(m.smallestBarGap!).toBeGreaterThanOrEqual(MIN_CONTROL_GAP_PX)
+
+        // 9. ...and what pays for that room stays legible. The chip absorbs the
+        //    squeeze by truncating, which is fine until a segment truncates to
+        //    a sliver — the failure mode review asked about, and it was real:
+        //    letting the chain name share the squeeze measured it at 18px on a
+        //    390px viewport. It is dropped below `sm` now, so the account name
+        //    gets the room.
+        //
+        //    RELAXED BELOW 390px, deliberately and temporarily (#1803). At
+        //    320px the bar does not fit at all and never did — measured on
+        //    `dev` before this change, the chip ran 57.5px underneath the
+        //    notification bell — so the account name lands at 17px here. That
+        //    is a strict improvement on overlapping tap targets, and it is not
+        //    a design: fixing it means DROPPING a control at this width, which
+        //    is a product decision #1803 owns. Asserted as "still present"
+        //    rather than dropped to nothing, so it cannot silently get worse.
+        expect(m.chipSegments.length).toBeGreaterThan(0)
+        expect(Math.min(...m.chipSegments)).toBeGreaterThanOrEqual(
+          width >= 390 ? LEGIBLE_SEGMENT_PX : 1,
+        )
       })
     })
   }

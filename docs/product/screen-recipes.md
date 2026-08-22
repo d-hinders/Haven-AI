@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-08-22" # #1844: the Receive Funds recipe gains the unresolved-network rule — a funding surface that cannot confirm the account's network names none, withholds the address and the on-ramp, and says so, rather than defaulting to Base mainnet. Only that recipe re-read. Prior: #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
+last-verified: "2026-08-22" # #1852: the Receive Funds recipe's unresolved-network rule now names the QR code and the explorer link explicitly (a receive surface withholds them together with the address, or it is still instructing), adds the required-but-non-promising next action, and pins the account name as the one thing that stays. The unconditional "keep raw address visible" bullet is now conditioned on a confirmed network — it contradicted the #1844 bullet directly above it. Only the Receive Funds recipe re-read. Prior: #1844: the Receive Funds recipe gains the unresolved-network rule — a funding surface that cannot confirm the account's network names none, withholds the address and the on-ramp, and says so, rather than defaulting to Base mainnet. Only that recipe re-read. Prior: #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
 ---
 
 # Haven Screen Recipes
@@ -210,7 +210,28 @@ Money and risk clarity:
   A funding surface with a missing network refuses to instruct rather than
   guessing one — the user cannot tell a guess from a fact on that screen, and a
   guess that lands on mainnet costs real money ([#1844](https://github.com/d-hinders/Haven-AI/issues/1844)).
-- Keep raw address visible because receiving funds requires it, but label it as the Haven wallet address.
+  On a *receive* surface this withholds the **QR code** as well, and that is the
+  half worth stating rather than leaving to inference: an address is
+  chain-agnostic, so the argument for still showing it is real — but a QR is an
+  instruction to send in its most one-click form, and a user who scans it sends
+  on whatever network their wallet is already on. Withholding an address costs a
+  refresh; a transfer to the right address on the wrong network is often
+  unrecoverable. Suppress the address, the copy action, the QR, the explorer
+  link, the supported-token list and the send checklist together — a screen that
+  keeps any one of them is still instructing
+  ([#1852](https://github.com/d-hinders/Haven-AI/issues/1852)).
+- The refusal still owes the user a next action, and the action must not
+  re-promise what the sentence above it refused. `Refresh page` is the honest
+  one — it promises only a retry — and it carries no accompanying sentence:
+  "refreshing usually resolves it" would restate the network claim the refusal
+  just withdrew. Do not offer a route to the other funding surface either; both
+  refuse identically, so the handoff reads as the product forgetting what it
+  just said (#1852).
+- Keep the account name (and its `Default` badge) visible even while refusing.
+  The refusal has to be about something, the name is true on every network, and
+  it names no network and offers no way to send (#1852).
+- With the network confirmed, keep the raw address visible because receiving
+  funds requires it, but label it as the Haven wallet address.
 - Do not imply Haven holds custody or can recover funds sent on the wrong network.
 - Use a success toast after copying, but keep the address and network visible in the modal.
 - QR loading should preserve space and use `Skeleton` rather than custom pulse divs.

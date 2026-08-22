@@ -240,6 +240,34 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(resolved.api('/agents', 'GET')).toBeUndefined()
     })
 
+    it('serves the receive-funds pair differing by chain_id and nothing else (#1852)', () => {
+      // Same contract as the #1844 pair above, asserted for the receive
+      // surface. The pair is only evidence about the CHAIN if the chain is the
+      // only thing that differs — and the unresolved capture only proves
+      // suppression if its safe genuinely lacks `chain_id` on BOTH endpoints.
+      const resolved = (SCENARIOS as Record<string, ScenarioShape>)['receive-funds']
+      const unresolved = (SCENARIOS as Record<string, ScenarioShape>)['receive-funds-unresolved-chain']
+
+      for (const endpoint of ['/auth/me', '/user/safes']) {
+        const r = resolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
+        const u = unresolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
+        expect(r.safes).toHaveLength(1)
+        expect(u.safes).toHaveLength(1)
+        expect(r.safes[0].chain_id).toBe(84532)
+        expect(u.safes[0]).not.toHaveProperty('chain_id')
+        // A MISSING chain beside a PRESENT address is the hazard; an empty safe
+        // would prove something else entirely.
+        expect(u.safes[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(u.safes[0].id).toBe(FIXTURE_SAFE_ID)
+        // The rail override is the ONLY other difference from the shared
+        // fixture, and both halves carry it, so `chain_id` is the sole variable.
+        expect(r.safes[0]).not.toHaveProperty('account_type')
+        expect(u.safes[0]).not.toHaveProperty('account_type')
+      }
+      expect(resolved.api('/agents', 'GET')).toBeUndefined()
+      expect(unresolved.api('/agents', 'GET')).toBeUndefined()
+    })
+
     it('answers the setup CREATE that the shared fixture does not key', () => {
       // Without this the modal's create step falls into the empty fallback and
       // never reaches step 4 — the capture would silently shoot the wrong screen.

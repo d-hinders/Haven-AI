@@ -254,10 +254,18 @@ export default function Sidebar() {
         <Icon icon={Menu} className="w-4 h-4" />
       </button>
 
-      {/* Overlay for mobile */}
+      {/*
+        Overlay for mobile.
+
+        bg-ink/40, not bg-[var(--v2-ink)]/40 (#1818). The arbitrary-value form is
+        an opacity modifier on a bare var(), which Tailwind v3.4 drops silently:
+        this scrim had no background at all, so the mobile drawer opened over an
+        undimmed page with only `backdrop-blur-sm` separating them. `bg-ink` reads
+        --v2-ink-rgb through <alpha-value>, so the 40% tint actually compiles.
+      */}
       {!collapsed && (
         <div
-          className="lg:hidden fixed inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm z-[var(--v2-z-nav-scrim)]"
+          className="lg:hidden fixed inset-0 bg-ink/40 backdrop-blur-sm z-[var(--v2-z-nav-scrim)]"
           onClick={() => setCollapsed(true)}
         />
       )}

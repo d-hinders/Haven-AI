@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-08-22" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1741/#1746: new "Focus rings" § under Accessibility — one treatment (focus-visible: + ring-2 + /80), the measured 3:1 rationale, and the dark-fill rule that a brand ring can never satisfy. § Buttons focus-ring line corrected to the shipped value and the § Inputs "one family … same focus ring" claim re-read against Input/Select/Textarea/Checkbox — it is now TRUE, having been false since the two families diverged. Nothing else re-verified in this pass # #1767: § Buttons' Tap targets rule — the toggle is `top-3` (centred in the 56px band); the documented 14px clearance to `NetworkSwitcher` was true only at >=768px, because TopBar's `w-8` spacer was shrinkable and collapsed to 0 on phones, and three bullets now record that, how a neighbour is damaged without moving, and why the concentric `left-6` was measured and rejected. § Buttons re-read against Button.tsx, TopBar.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass
+last-verified: "2026-08-22" # #1818: § "Opacity on a token colour" gains "The rule is about the OUTPUT, not the shape" — the bare-var() telling was the commonest instance, not the definition; currentColor and an off-scale numeric modifier (`text-white/78`, live on a design-lint-exempt marketing surface) drop identically, and the binding check is the compiled-CSS guard rather than a spelling rule. Only that § re-verified in this pass. # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1741/#1746: new "Focus rings" § under Accessibility — one treatment (focus-visible: + ring-2 + /80), the measured 3:1 rationale, and the dark-fill rule that a brand ring can never satisfy. § Buttons focus-ring line corrected to the shipped value and the § Inputs "one family … same focus ring" claim re-read against Input/Select/Textarea/Checkbox — it is now TRUE, having been false since the two families diverged. Nothing else re-verified in this pass # #1767: § Buttons' Tap targets rule — the toggle is `top-3` (centred in the 56px band); the documented 14px clearance to `NetworkSwitcher` was true only at >=768px, because TopBar's `w-8` spacer was shrinkable and collapsed to 0 on phones, and three bullets now record that, how a neighbour is damaged without moving, and why the concentric `left-6` was measured and rejected. § Buttons re-read against Button.tsx, TopBar.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass
 ---
 
 # Haven Design System
@@ -109,6 +109,36 @@ it survived 68 call-sites:
 
 A solid arbitrary value with **no** opacity modifier — `bg-[var(--v2-brand)]`,
 `text-[var(--v2-ink-2)]` — is still fine and still used widely.
+
+#### The rule is about the OUTPUT, not the shape ([#1818](https://github.com/d-hinders/Haven-AI/issues/1818))
+
+"Don't write a bare `var()`" is the commonest instance of this defect, not its
+definition. **Tailwind drops any opacity modifier it cannot re-compose**, and it
+has now done so in three shapes that have nothing in common at the source level:
+
+| shape | example | why it drops |
+|---|---|---|
+| bare `var()` colour | `bg-[var(--v2-bg)]/85` | no channels to re-compose |
+| `currentColor` | `ring-current/30` | same — `currentColor` has no channels |
+| off-scale modifier | `text-white/78` | `78` is not a step on the opacity scale |
+
+The third is the one that matters for how you read this section. It carries no
+`var()` at all — the colour is a perfectly ordinary `white` — and it shipped on a
+marketing surface that design-lint exempts. Every guard written before it matched
+a *shape*, so each new occurrence arrived wearing a shape the previous guard
+could not see. `TopBar`'s dead background was found only because a mutation
+during unrelated work went green when both renders came out byte-identical.
+
+So the check that binds is not a spelling rule. `src/__tests__/compiled-colour-utilities.test.ts`
+reads every opacity-modified colour utility out of the product source, compiles
+it through the real `tailwind.config.js`, and asserts a colour declaration came
+out — indifferent to which shape the next one wears. Its `KNOWN_DEAD` map is the
+triaged inventory still owned by [#1709](https://github.com/d-hinders/Haven-AI/issues/1709)
+and [#1710](https://github.com/d-hinders/Haven-AI/issues/1710); it is shrink-only,
+and an entry that stops being dead must be deleted or the test fails.
+
+Fixes, in preference order: the channel-token alias (`bg-bg/85`), an on-scale
+modifier (`/75`), or the arbitrary form when the exact value matters (`/[0.78]`).
 
 ### Chain identity
 

@@ -12,7 +12,7 @@ import { Checkbox } from '../ui/Checkbox'
 import { Icon } from '../ui/Icon'
 import { CopyBlock } from './CopyBlock'
 import { InlineErrorNote } from './SetupNotices'
-import { formatAbsoluteDate, isCommandPathRuntime } from './setup-copy'
+import { formatAbsoluteDate } from './setup-copy'
 
 export function WaitingForConnector({
   setup,
@@ -73,19 +73,23 @@ export function WaitingForConnector({
         <p className="mt-2 text-xs font-medium leading-relaxed text-[var(--v2-ink)]">
           Haven advances this screen automatically once the agent connects — no refresh, nothing else to click here.
         </p>
-        {/* #1672 review: on the command path the specific runtime is unknown
-            until the connector reports, so the approval heads-up must show
-            generically for the whole path — a codex-desktop-only gate would
-            render AFTER the user already faced the dialog. #1682 split that
-            one collapsed row into three named ones, so the condition asks
-            "is this the command path?" rather than naming a row. */}
-        {isCommandPathRuntime(runtime) && (
-          <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-            {runtime === 'codex-desktop'
-              ? 'Codex Desktop may ask you to approve running the setup command. That is expected.'
-              : 'Your agent app may ask you to approve running the setup command. That is expected.'}
-          </p>
-        )}
+        {/* #1672 review: the specific runtime is unknown until the connector
+            reports, so the approval heads-up must show generically — a
+            codex-desktop-only gate would render AFTER the user already faced
+            the dialog.
+
+            #1720 removed the gate entirely. It asked "is this the command
+            path?" because snippet-path users were handed a config to paste
+            rather than a command to run, and would never see an approval
+            dialog. There is one command for every environment now, so the
+            question has one answer and the heads-up is universal. The
+            sharpening below still fires once the connector names the runtime
+            — additive, and the only part that was ever runtime-specific. */}
+        <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+          {runtime === 'codex-desktop'
+            ? 'Codex Desktop may ask you to approve running the setup command. That is expected.'
+            : 'Your agent app may ask you to approve running the setup command. That is expected.'}
+        </p>
       </div>
 
       {/* #1399: this slot ALWAYS says something. Reserving it for a recovery
@@ -122,8 +126,15 @@ export function WaitingForConnector({
         {connectionStage === 'recovery' && (
           <div className="rounded-[10px] border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] p-3 text-xs text-[var(--v2-ink-2)]">
             <p className="font-semibold text-[var(--v2-ink)]">Haven has not received a connection yet</p>
+            {/* #1720: the connector can refuse LOCALLY — it stops before
+                contacting Haven when it cannot work out which agent client to
+                configure — so this screen never hears about that failure and
+                cannot name it. What it must not do is give advice that is
+                wrong for it: "run the same command again" repeats the refusal
+                verbatim. Point at the connector's own output first, which
+                does name the problem and what to pass. */}
             <p className="mt-1 leading-relaxed">
-              This setup is still waiting. Do not approve the budget yet. Run the same local command again, or cancel it and create a fresh setup prompt.
+              This setup is still waiting. Do not approve the budget yet. Check the connector&rsquo;s output first — if it stopped and asked for something, it says there what it needs. Otherwise run the same local command again, or cancel it and create a fresh setup prompt.
             </p>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
               <Button

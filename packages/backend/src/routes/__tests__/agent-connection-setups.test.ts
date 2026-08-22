@@ -415,6 +415,34 @@ describe('agent connection setup routes', () => {
     expect(response.json().connector_command).not.toContain('--local')
   })
 
+  // #1720: the dashboard sends no runtime now, so "no runtime" can no longer
+  // mean "refuse". Before this change the same payload 400'd on `!runtime`,
+  // which would have made the Advanced opt-in unusable the moment the picker
+  // went — the failure this test exists to catch if the condition is ever
+  // widened back.
+  it('accepts local_mcp when no runtime is named, leaving the check to the connector', async () => {
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        local_mcp: true,
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().connector_command).toContain('--local')
+  })
+
+  // The other half of that loosening: an EXPLICIT unsupported runtime from an
+  // older client is still refused here, where the answer is known, rather than
+  // deferred to a connector refusal the user cannot act on without starting
+  // over.
   it('rejects local_mcp for runtimes without local MCP support', async () => {
     const app = await buildApp()
     primeDb(safeLookup())
@@ -525,13 +553,21 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
-  // #1672: command-path runtimes carry NO --runtime flag — the connector
-  // detects the environment it executes inside, so an embedded wrong hint can
-  // no longer configure the wrong client. #1682's named picker rows
-  // (claude-code / codex / cowork), #1672's collapsed 'agent', and the legacy
-  // per-client ids all behave the same.
-  it.each(['claude-code', 'codex', 'cowork', 'agent', 'codex-cli', 'codex-desktop'])(
-    'omits --runtime from the setup command for the detected runtime %s',
+  // #1672 gave the command-path runtimes a flag-free command; #1720 gives it
+  // to EVERYONE. The connector resolves the runtime itself — detection, then
+  // self-report, then a prompt over installed clients (#1719) — so no id a
+  // caller supplies has any business being spelled into the command.
+  //
+  // The list below is deliberately every id the route has ever accepted,
+  // snippet rows included, PLUS undefined (the shape the dashboard now sends).
+  // The old suite asserted the flag's absence for six ids and its PRESENCE for
+  // the rest, so a narrower list here would leave the inverted half untested.
+  it.each([
+    'claude-code', 'codex', 'cowork', 'agent', 'codex-cli', 'codex-desktop',
+    'claude-desktop', 'cursor', 'vscode', 'openclaw', 'hermes', 'other',
+    undefined,
+  ])(
+    'never emits --runtime, for runtime %s',
     async (runtime) => {
       const app = await buildApp()
       primeDb(safeLookup())
@@ -561,7 +597,10 @@ describe('agent connection setup routes', () => {
     },
   )
 
-  it('keeps --runtime for snippet-based runtimes, where nothing is detectable', async () => {
+  // #1720 inverts this. It used to assert the flag SURVIVED for snippet
+  // runtimes "where nothing is detectable" — true of #1672's connector, false
+  // of #1719's, which asks the user over the clients it can actually see.
+  it('drops --runtime even for a snippet runtime an older client still sends', async () => {
     const app = await buildApp()
     primeDb(safeLookup())
 
@@ -577,17 +616,16 @@ describe('agent connection setup routes', () => {
     })
 
     expect(response.statusCode).toBe(201)
-    expect(response.json().connector_command).toContain('--runtime claude-desktop')
+    expect(response.json().connector_command).not.toContain('--runtime')
 
     await app.close()
   })
 
-  // #1682: OpenClaw is a snippet runtime, so it keeps the flag like every
-  // other snippet row. This requires the connector's `openclaw` alias to be
-  // PUBLISHED — an id the published connector does not know is refused before
-  // any side effect (#1672's no-detection-no-flag rule), so a connect release
-  // must reach npm before this row is usable in production.
-  it('keeps --runtime openclaw for the OpenClaw snippet runtime, and stores the picked id', async () => {
+  // #1720: the flag is gone for OpenClaw like everything else, but the id an
+  // older client sends is still STORED. That half is the backwards-compat
+  // contract — existing setup rows carry picked ids and the status response
+  // reads them back — so it is asserted separately from the flag.
+  it('drops --runtime for OpenClaw but still stores the id an older client sent', async () => {
     const app = await buildApp()
     primeDb(safeLookup())
 
@@ -603,7 +641,7 @@ describe('agent connection setup routes', () => {
     })
 
     expect(response.statusCode).toBe(201)
-    expect(response.json().connector_command).toContain('--runtime openclaw')
+    expect(response.json().connector_command).not.toContain('--runtime')
     const insertSetup = mockClientQuery.mock.calls.find(([sql]) =>
       String(sql).includes('INSERT INTO agent_connection_setups'),
     )
@@ -660,7 +698,19 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
-  it('gives Hermes a non-interactive config and owner-only dotenv setup prompt', async () => {
+  // #1720: the setup prompt is now UNIVERSAL — one text for every environment,
+  // because the dashboard no longer knows which environment it is talking to.
+  // The Hermes-specific block that used to ride here is asserted GONE.
+  //
+  // What it said is not lost. The connector emits the restart, `hermes mcp
+  // list` / `test`, and `pip install mcp` steps itself once it has configured
+  // Hermes (packages/connect/src/config-writers.ts), which is both later and
+  // better placed: after the config exists, from the component that knows the
+  // runtime. The one line without a connector counterpart — "do not run
+  // `hermes mcp add`" — is subsumed by the universal rule below, which forbids
+  // substituting anything for the command in every environment rather than
+  // naming one tool in one of them.
+  it('builds one universal setup prompt, with no runtime-specific block', async () => {
     const app = await buildApp()
     primeDb(safeLookup())
 
@@ -677,15 +727,58 @@ describe('agent connection setup routes', () => {
 
     expect(response.statusCode).toBe(201)
     const body = response.json()
-    expect(body.connector_command).toContain('--runtime hermes')
-    expect(body.setup_prompt).toContain('update Hermes Agent MCP config and its matching owner-only .env file')
-    expect(body.setup_prompt).toContain('MCP_HAVEN_API_KEY only as a config reference')
+    expect(body.connector_command).not.toContain('--runtime')
+
+    // The consent line is the generic one for everybody. This is the real cost
+    // of the change and it is pinned deliberately: the text a user approves
+    // BEFORE anything runs no longer names their client's config file.
+    expect(body.setup_prompt).toContain('update the local agent MCP config when supported')
+    expect(body.setup_prompt).not.toContain('update Hermes Agent MCP config')
+    expect(body.setup_prompt).not.toContain('~/.codex/config.toml')
+
+    // No Hermes block.
+    expect(body.setup_prompt).not.toContain('hermes mcp add')
+    expect(body.setup_prompt).not.toContain('hermes mcp list')
+    expect(body.setup_prompt).not.toContain('pip install mcp')
+
+    // The universal guardrails still stand.
     expect(body.setup_prompt).toContain('Do not print private keys, API keys, credential file contents, or config secrets')
-    expect(body.setup_prompt).toContain('Do not run `hermes mcp add` or a Hermes-internal Python script')
-    expect(body.setup_prompt).toContain('Gateway users: `/restart`')
-    expect(body.setup_prompt).toContain('`hermes mcp list`, `hermes mcp test haven`, and `hermes mcp test haven-signer`')
-    expect(body.setup_prompt).toContain('`pip install mcp`')
+    expect(body.setup_prompt).toContain('Only two changes to the command above are permitted')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_|hermes_cli\.mcp_config|npm install -g/)
+
+    await app.close()
+  })
+
+  // #1720: byte-identical means byte-identical. Two setups created from
+  // different callers' payloads must differ in nothing but the token — the
+  // property the picker's removal is FOR, and the one a per-runtime assertion
+  // can never quite state.
+  it('produces an identical command and prompt whatever runtime the caller names', async () => {
+    const app = await buildApp()
+
+    async function createWith(runtime: string | undefined) {
+      primeDb(safeLookup())
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agent-connection-setups',
+        payload: { name: 'Research Agent', safe_id: SAFE.id, runtime, allowances: [ALLOWANCE] },
+      })
+      expect(response.statusCode).toBe(201)
+      const body = response.json()
+      // The setup token is the one legitimate difference; normalise it out.
+      const token = body.setup_token
+      return {
+        command: String(body.connector_command).split(token).join('<token>'),
+        prompt: String(body.setup_prompt).split(token).join('<token>'),
+      }
+    }
+
+    const none = await createWith(undefined)
+    for (const runtime of ['claude-code', 'claude-desktop', 'hermes', 'openclaw', 'other']) {
+      const other = await createWith(runtime)
+      expect(other.command).toBe(none.command)
+      expect(other.prompt).toBe(none.prompt)
+    }
 
     await app.close()
   })

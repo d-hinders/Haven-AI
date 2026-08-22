@@ -24,6 +24,10 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
  *   MEASURED hit rectangle             44 x 44   (x 10-54, y 10-54)
  *   corners of the intended 44px area  all four reach the toggle
  *
+ * #1767 then moved the painted box UP to `top-3` (y 12-44, centred in the 56px
+ * bar), so the hit rectangle is y 6-50. The x is unchanged at `left-4`, on
+ * purpose — see the alignment block below.
+ *
  * Pixel conventions, because the two readings differ by one and both appear
  * below: a 44px-wide box spanning x 10-54 has its LAST HITTING PIXEL at x=53.
  * `hit.right` in the measurement is that last hitting pixel (53); "right edge
@@ -54,27 +58,129 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
  * pinned at 32x32 in the same assertion pass.
  */
 
-// The toggle is `lg:hidden`. The measured geometry is width-independent, so two
-// widths are enough to say so honestly: the narrowest phone we support, and the
-// last pixel below the `lg` breakpoint, where a regression would most plausibly
+/**
+ * Alignment — the toggle and the slot `TopBar` reserves for it (#1767).
+ *
+ * `TopBar` carries `<div className="w-8 shrink-0 lg:hidden" />` and a comment
+ * saying it reserves the room for this toggle. Two separate things were wrong
+ * with that claim, and the issue only named the first:
+ *
+ *   1. The toggle was `top-4 left-4` — x 16-48, y 16-48 — 4px low in a 56px
+ *      bar. Now `top-3`: y 12-44, centre 28, exactly the band's centre.
+ *
+ *      The issue also asked for `left-6`, making the box concentric with the
+ *      slot at x 24-56. That half was measured and NOT taken, and the numbers
+ *      are here so the decision can be argued with rather than repeated:
+ *      `left-6` moves the 44px target's right edge from x=54 to x=62, which
+ *      (a) cuts clearance to `NetworkSwitcher` (x=68) from 14px to 6px, under
+ *      the 8px § Buttons asks for between adjacent targets, and (b) reaches
+ *      PAST x=56 — the centre of the open drawer's Haven logo link — so the
+ *      last test in this file goes red. Measured, both. A spacer's job is to
+ *      keep the bar's content clear of a floating control, not to be
+ *      concentric with it, and at `left-4` it clears it by 14px at every
+ *      width. That is what (2) makes true.
+ *
+ *   2. **The slot was not there at all on a phone.** `w-8` with the default
+ *      `flex-shrink: 1` is a suggestion, and this row is over-subscribed below
+ *      about 700px: the spacer was the only compressible item in the left
+ *      region, so it collapsed to width 0 and every reserved pixel went to
+ *      `NetworkSwitcher`. Measured on `/dashboard` before the fix:
+ *
+ *        width   slot        toggle box   NetworkSwitcher box   clearance
+ *        320     24-24  (0)  16-48        36-212.88             -17px  OVERLAP
+ *        390     24-24  (0)  16-48        36-212.88             -17px  OVERLAP
+ *        393     24-24  (0)  16-48        36-212.88             -17px  OVERLAP
+ *        768     24-56  (32) 16-48        68-244.88             +15px
+ *        1023    24-56  (32) 16-48        68-244.88             +15px
+ *
+ *      The bar reserved the room at the widths where nothing needed reserving
+ *      and gave it away at every width a phone actually has. The painted 32px
+ *      toggle sat ON TOP of the chip's leading 12px, and #1766's invisible 44px
+ *      target took 18 more: `NetworkSwitcher`'s own hit rectangle started at
+ *      x=54 instead of its border-box x=36.
+ *
+ * Why the suite above did not catch (2), which is the part worth carrying
+ * forward: `neighbour` was found with `if (b.left <= box.right) continue` —
+ * "the nearest control to the toggle's RIGHT". A control the toggle is sitting
+ * on top of has `b.left` inside the toggle, so the filter skipped it and
+ * happily measured the next control along (the notification bell, 160px away).
+ * The one assertion written to catch a swallowed neighbour could not see a
+ * neighbour that had already been swallowed. It now takes the LEFTMOST control
+ * in the band, overlapping or not, and compares hit rectangle against hit
+ * rectangle rather than against a border box.
+ *
+ * `320` and `1023` alone could not have caught it either, even with the right
+ * filter, because at both of those the OLD failure and the OLD pass looked the
+ * same shape. 390 is added deliberately: it is the width `evidence-viewports`
+ * renders the mobile baseline at, and the width a Pixel/iPhone actually has.
+ */
+
+// The toggle is `lg:hidden`. Three widths: the narrowest phone we support, the
+// width the visual baseline and the design evidence render at, and the last
+// pixel below the `lg` breakpoint where a regression would most plausibly
 // reappear. (`mobile-nav-layering.mobile.spec.ts` already proves the toggle
 // vanishes AT 1024px.)
-const WIDTHS = [320, 1023]
+const WIDTHS = [320, 390, 1023]
 
 const PAINTED_PX = 32
 const COMFORTABLE_TAP_TARGET_PX = 44
+/** `w-8` — what `TopBar`'s spacer must actually measure, not merely declare. */
+const RESERVED_SLOT_PX = 32
+/** `h-14` — the bar the toggle has to be centred in. The spacer cannot say: it
+ *  is an empty box in an `items-center` row, so its own height is 0. */
+const HEADER_BAND_PX = 56
+/**
+ * The floor for dead space between the toggle's invisible target (right box
+ * edge x=54) and the nearest control's (`NetworkSwitcher`, x=68): 14px, and now
+ * 14px at EVERY width rather than 14px on a tablet and MINUS 17px on a phone.
+ *
+ * Asserted as a floor rather than left as a comment because the two ways to
+ * close it are both one-word edits someone will plausibly make: moving the
+ * toggle right (#1767 proposed `left-6`, which lands at 6px — under the 8px
+ * § Buttons asks for between adjacent targets) or letting the slot shrink
+ * again. It has been both.
+ */
+const MIN_NEIGHBOUR_CLEARANCE_PX = 14
+/**
+ * The floor for the gap between two controls INSIDE the bar. 8px is the number
+ * § Buttons names for adjacent targets, and the row's own rhythm is `gap-3`
+ * (12px), so this is deliberately the weaker of the two — it is here to catch
+ * "they touch", not to police the layout's spacing choices.
+ */
+const MIN_CONTROL_GAP_PX = 8
+/**
+ * Narrowest a truncating chip segment may render before it stops carrying
+ * information. Roughly two glyphs plus an ellipsis at this 13px type.
+ */
+const LEGIBLE_SEGMENT_PX = 24
 
 type Measurement = {
   painted: { w: number; h: number }
   hit: { left: number; right: number; top: number; bottom: number; w: number; h: number }
   corners: Record<string, string>
-  /** Nearest interactive control to the toggle's right, inside the top bar. */
-  neighbour: { label: string; left: number } | null
+  /**
+   * The LEFTMOST interactive control in the toggle's band inside the top bar —
+   * overlapping the toggle or not. `left`/`right` are its border box; `hitLeft`
+   * is its own measured hit rectangle, which is the edge that matters: a
+   * neighbour whose taps the toggle's overlay is stealing reports a `hitLeft`
+   * well right of its `left`, and nothing else in this suite would say so.
+   */
+  neighbour: { label: string; left: number; right: number; hitLeft: number } | null
   /**
    * Where the top bar starts. The toggle is `fixed`, so it consumes NO layout —
    * the bar it floats over begins at the viewport edge. See the assertion.
    */
   headerLeft: number
+  /** Smallest gap between two consecutive controls inside the bar, in px. */
+  smallestBarGap: number | null
+  /** Rendered widths of the account chip's truncating text segments. */
+  chipSegments: number[]
+  /** The `w-8 shrink-0 lg:hidden` spacer: the room `TopBar` claims to reserve. */
+  slot: { left: number; right: number; width: number; centreX: number } | null
+  /** The bar itself. Height, because the spacer's own height is 0. */
+  band: { height: number; centreY: number }
+  /** Centre of the PAINTED box — what has to line up with the slot and band. */
+  centre: { x: number; y: number }
 }
 
 /**
@@ -91,25 +197,39 @@ async function measureToggle(page: Page): Promise<Measurement> {
       const cx = Math.round(box.left + box.width / 2)
       const cy = Math.round(box.top + box.height / 2)
 
-      const reaches = (x: number, y: number) => {
-        const top = document.elementFromPoint(x, y)
-        return !!top && (top === btn || btn.contains(top))
-      }
-
-      // Walk outward until a tap stops landing on the toggle. This is the hit
-      // rectangle — the border box plus whatever the overlay adds — and it is
-      // the only measurement that can tell a working overlay from an inert one.
-      const walk = (dx: number, dy: number) => {
+      // Walk outward from an element's centre until a tap stops landing on it.
+      // This is the hit rectangle — the border box plus whatever an overlay
+      // adds, minus whatever another element has taken — and it is the only
+      // measurement that can tell a working overlay from an inert one, or a
+      // neighbour whose taps are being stolen from one that is intact.
+      const walkFrom = (
+        el: HTMLElement,
+        ox: number,
+        oy: number,
+        dx: number,
+        dy: number,
+        // Steps to try before giving up. Must exceed the element's own half
+        // extent or the walk stops on the CAP and reports a hit rectangle
+        // smaller than the border box — a false "something is covering this".
+        // It cost one red run on a 177px-wide neighbour with the cap at 80.
+        max = 80,
+      ) => {
         let n = 0
-        while (n < 80) {
-          const x = cx + dx * (n + 1)
-          const y = cy + dy * (n + 1)
+        while (n < max) {
+          const x = ox + dx * (n + 1)
+          const y = oy + dy * (n + 1)
           if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) break
-          if (!reaches(x, y)) break
+          const top = document.elementFromPoint(x, y)
+          if (!(!!top && (top === el || el.contains(top)))) break
           n += 1
         }
         return n
       }
+      const reaches = (x: number, y: number) => {
+        const top = document.elementFromPoint(x, y)
+        return !!top && (top === btn || btn.contains(top))
+      }
+      const walk = (dx: number, dy: number) => walkFrom(btn, cx, cy, dx, dy)
       const l = walk(-1, 0)
       const r = walk(1, 0)
       const u = walk(0, -1)
@@ -131,33 +251,136 @@ async function measureToggle(page: Page): Promise<Measurement> {
         bottomRight: describe(cx + half - 1, cy + half - 1),
       }
 
-      // The nearest interactive control to the toggle's right that shares its
-      // vertical band. The invisible target must not reach it: an overlay that
-      // swallows a neighbour's taps trades one mis-tap for another, and it is
-      // invisible by construction, so nothing but a measurement would notice.
+      // The LEFTMOST interactive control in the toggle's vertical band. The
+      // invisible target must not reach it: an overlay that swallows a
+      // neighbour's taps trades one mis-tap for another, and it is invisible by
+      // construction, so nothing but a measurement would notice.
+      //
+      // Deliberately NOT filtered to "controls starting right of the toggle"
+      // (#1767). That filter reads as a harmless optimisation and is the exact
+      // blind spot: a control the toggle is already sitting on top of starts
+      // INSIDE the toggle, so it was skipped, and the next control along —
+      // 160px away and in no danger from anything — was measured in its place.
+      // The failure this assertion exists for made itself invisible to it.
       const header = document.querySelector('header')!
-      let neighbour: { label: string; left: number } | null = null
+      let nEl: HTMLElement | null = null
+      let nBox: DOMRect | null = null
       for (const el of Array.from(
         header.querySelectorAll<HTMLElement>('button, a[href], [role="button"]'),
       )) {
         const b = el.getBoundingClientRect()
         if (b.width === 0 || b.height === 0) continue
-        if (b.left <= box.right) continue
         if (b.bottom < box.top || b.top > box.bottom) continue
-        if (!neighbour || b.left < neighbour.left) {
-          neighbour = {
-            label: (el.getAttribute('aria-label') || el.textContent || el.tagName).trim().slice(0, 40),
-            left: Math.round(b.left),
-          }
+        if (!nBox || b.left < nBox.left) {
+          nEl = el
+          nBox = b
         }
       }
+      const neighbour =
+        nEl && nBox
+          ? {
+              label: (nEl.getAttribute('aria-label') || nEl.textContent || nEl.tagName)
+                .trim()
+                .slice(0, 40),
+              left: Math.round(nBox.left),
+              right: Math.round(nBox.right),
+              // Its OWN hit rectangle's left edge, walked the same way. Equal to
+              // `left` when nothing is stealing from it; well right of `left`
+              // when the toggle's overlay is.
+              hitLeft:
+                Math.round(nBox.left + nBox.width / 2) -
+                walkFrom(
+                  nEl,
+                  Math.round(nBox.left + nBox.width / 2),
+                  Math.round(nBox.top + nBox.height / 2),
+                  -1,
+                  0,
+                  Math.ceil(nBox.width / 2) + 8,
+                ),
+            }
+          : null
+
+      // Every control in the bar, left to right, and the worst overlap between
+      // two consecutive ones. Reclaiming the toggle's 32px has to come out of
+      // something in an over-subscribed row: if the widest item cannot
+      // truncate, it does not shrink — it OVERFLOWS its parent and paints over
+      // the notification bell, which is a different defect of the same shape
+      // one control further along.
+      // Reported as the smallest GAP rather than the worst overlap: "they do
+      // not overlap" was satisfied at 390px by two controls touching at exactly
+      // 210.61 — a coincidence of the current account name, one line away from
+      // this suite rejecting a 6px gap elsewhere as too tight (#1767, raised in
+      // design review). A floor is a decision; zero-by-luck is not.
+      let smallestBarGap = Number.POSITIVE_INFINITY
+      const inBar = Array.from(
+        header.querySelectorAll<HTMLElement>('button, a[href], [role="button"]'),
+      )
+        .map((el) => el.getBoundingClientRect())
+        .filter((b) => b.width > 0 && b.height > 0 && b.bottom >= box.top && b.top <= box.bottom)
+        .sort((a, b) => a.left - b.left)
+      for (let i = 1; i < inBar.length; i += 1) {
+        smallestBarGap = Math.min(smallestBarGap, inBar[i].left - inBar[i - 1].right)
+      }
+
+      // The room TopBar claims to reserve. `w-8` is a DECLARATION; this is the
+      // measurement, and below ~700px they used to disagree completely.
+      //
+      // Found STRUCTURALLY — the first childless `lg:hidden` box in the bar —
+      // not by `div.w-8`. Selecting it by the width class makes the width
+      // assertion below unfalsifiable in the one direction that matters: edit
+      // `w-8` to anything else and the element simply stops being found, so the
+      // failure says "missing" instead of "36px", and a genuine change to the
+      // reserved width reads as a broken test rather than a broken promise.
+      // (Verified: the mutation that widened the slot reported `null` under the
+      // class selector and reports the number under this one.)
+      const slotEl =
+        Array.from(header.querySelectorAll<HTMLElement>('div[class*="lg:hidden"]')).find(
+          (el) => el.children.length === 0 && el.textContent === '',
+        ) ?? null
+      const slotBox = slotEl?.getBoundingClientRect()
+      const headerBox = header.getBoundingClientRect()
 
       return {
         painted: { w: Math.round(box.width), h: Math.round(box.height) },
         hit: { left: cx - l, right: cx + r, top: cy - u, bottom: cy + d, w: l + r + 1, h: u + d + 1 },
         corners,
         neighbour,
-        headerLeft: Math.round(header.getBoundingClientRect().left),
+        headerLeft: Math.round(headerBox.left),
+        smallestBarGap: Number.isFinite(smallestBarGap)
+          ? Math.round(smallestBarGap * 100) / 100
+          : null,
+        /**
+         * Widths of the chip's RENDERED text segments, so a collapsed-to-a-
+         * sliver segment is a number rather than a judgement.
+         *
+         * `getClientRects().length` is the display filter, and it is doing real
+         * work: a `hidden sm:inline` segment is still in the DOM with its text
+         * intact and measures 0, which is indistinguishable from "squeezed to
+         * nothing" by width alone. Not hypothetical — the first version of this
+         * reported 0 for the deliberately hidden chain name and read as the
+         * very defect it was added to catch.
+         */
+        chipSegments: Array.from(
+          header.querySelectorAll<HTMLElement>('button[aria-label^="Active account"] span'),
+        )
+          .filter(
+            (el) =>
+              el.getClientRects().length > 0 && !!el.textContent && el.textContent.trim().length > 1,
+          )
+          .map((el) => Math.round(el.getBoundingClientRect().width)),
+        slot: slotBox
+          ? {
+              left: Math.round(slotBox.left),
+              right: Math.round(slotBox.right),
+              width: Math.round(slotBox.width),
+              centreX: Math.round(slotBox.left + slotBox.width / 2),
+            }
+          : null,
+        band: {
+          height: Math.round(headerBox.height),
+          centreY: Math.round(headerBox.top + headerBox.height / 2),
+        },
+        centre: { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) },
       }
     },
     { half: Math.floor(COMFORTABLE_TAP_TARGET_PX / 2) },
@@ -201,8 +424,18 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         // 4. The enlarged target did not eat its neighbour. `NetworkSwitcher`
         //    starts at x=68 in this bar; the 44px target's right box edge is
         //    x=54, so its last hitting pixel is x=53 — 14px of clearance.
+        //
+        //    Asserted twice on purpose, against two different edges. The border
+        //    box says the two controls do not overlap; the neighbour's own hit
+        //    rectangle says it has not quietly lost tap area to the overlay.
+        //    Before #1767 the first was false at 320/390/393 (-17px) and the
+        //    second was false by 18px, and neither was visible from here.
         expect(m.neighbour).not.toBeNull()
         expect(m.hit.right).toBeLessThan(m.neighbour!.left)
+        expect(m.neighbour!.hitLeft).toBe(m.neighbour!.left)
+        expect(m.neighbour!.left - (m.hit.right + 1)).toBeGreaterThanOrEqual(
+          MIN_NEIGHBOUR_CLEARANCE_PX,
+        )
 
         // 5. The toggle still consumes NO layout.
         //
@@ -216,6 +449,62 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         //    32px displacement of everything, because each measures something
         //    relative to a box that moved with it. This is the absolute anchor.
         expect(m.headerLeft).toBe(0)
+
+        // 6. The slot TopBar reserves is REALLY 32px wide (#1767). `w-8` on a
+        //    flex item with the default `flex-shrink: 1` is a request, not a
+        //    reservation, and in an over-subscribed row it is the first thing
+        //    given away: measured 0px at 320/390/393. This is the mechanism
+        //    behind (4)'s clearance — without it that clearance is a fact about
+        //    tablets only, which is exactly how it was read for two issues.
+        expect(m.slot).not.toBeNull()
+        expect(m.slot!.width).toBe(RESERVED_SLOT_PX)
+
+        // 7. Vertically centred in the BAND, not in the slot. The slot is an
+        //    empty box in an `items-center` row, so its height is 0 and its own
+        //    centre is a single line at y=27.5 — measuring against it would
+        //    pass for a toggle anywhere from y 12 to y 44, which is the whole
+        //    range the fix had to choose within.
+        expect(m.band.height).toBe(HEADER_BAND_PX)
+        expect(m.centre.y).toBe(m.band.centreY)
+
+        // 8. The controls IN the bar keep a real gap from each other (#1767).
+        //    (6) makes the bar stop over-promising the toggle's slot; the 32px
+        //    it stops giving away has to be absorbed by something, and if
+        //    nothing can truncate, the widest item overflows its parent instead
+        //    of shrinking — measured, `NetworkSwitcher` kept its intrinsic
+        //    176.88px inside a 141px slot and ran 34px under the notification
+        //    bell. Same defect as the toggle-over-chip one this issue started
+        //    with, one control further along, and invisible to every
+        //    toggle-relative assertion above.
+        //
+        //    A GAP floor rather than a no-overlap check: the first version of
+        //    this fix passed no-overlap at 390px with the chip's right edge and
+        //    the bell's left edge both at 210.61 — touching. Design review
+        //    called that what it was, a coincidence of the current account
+        //    name rather than a spacing decision, in a file that rejects a 6px
+        //    gap elsewhere. `TopBar`'s regions now hold `mr-3` apart.
+        expect(m.smallestBarGap).not.toBeNull()
+        expect(m.smallestBarGap!).toBeGreaterThanOrEqual(MIN_CONTROL_GAP_PX)
+
+        // 9. ...and what pays for that room stays legible. The chip absorbs the
+        //    squeeze by truncating, which is fine until a segment truncates to
+        //    a sliver — the failure mode review asked about, and it was real:
+        //    letting the chain name share the squeeze measured it at 18px on a
+        //    390px viewport. It is dropped below `sm` now, so the account name
+        //    gets the room.
+        //
+        //    RELAXED BELOW 390px, deliberately and temporarily (#1803). At
+        //    320px the bar does not fit at all and never did — measured on
+        //    `dev` before this change, the chip ran 57.5px underneath the
+        //    notification bell — so the account name lands at 17px here. That
+        //    is a strict improvement on overlapping tap targets, and it is not
+        //    a design: fixing it means DROPPING a control at this width, which
+        //    is a product decision #1803 owns. Asserted as "still present"
+        //    rather than dropped to nothing, so it cannot silently get worse.
+        expect(m.chipSegments.length).toBeGreaterThan(0)
+        expect(Math.min(...m.chipSegments)).toBeGreaterThanOrEqual(
+          width >= 390 ? LEGIBLE_SEGMENT_PX : 1,
+        )
       })
     })
   }

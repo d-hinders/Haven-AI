@@ -63,14 +63,32 @@
  *
  * Restored between and after; the restore run is green, which is the half that
  * says the guard fired for the right reason rather than merely fired.
+ *
+ * ## Why pinning exact pixels here is not the flake the sibling helper warns of
+ *
+ * `expectNoHorizontalOverflow`'s JSDoc records that the desktop side panel's
+ * rounded `right` read 1280, 1281 and 1282 across three runs, which is why the
+ * viewport-absolute fields are reported and not asserted there. Two reasons
+ * that does not transfer to this call site, and the second is the one that
+ * matters:
+ *
+ * - **The arithmetic is all-integer.** 393 viewport, `mx-4` = 16px each side,
+ *   `max-w-lg` (512) not binding, no percentage or transform centring — so
+ *   16 and 377 fall out exactly, with no fractional input to round. The side
+ *   panel's flush-right edge had sub-pixel layout to round.
+ * - **Observed, not just derived.** These same two pins were asserted green on
+ *   three separate runs of this spec (first run, pre-mutation baseline, and
+ *   the post-mutation restore), and read identically each time. Raised by
+ *   review as "single-run evidence for a pinned pixel"; it is three, and that
+ *   is the sibling helper's own bar.
  */
 import { expect, test } from '@playwright/test'
 import {
   collectBrowserErrors,
-  dismissMobileSidebar,
   expectNoHorizontalOverflow,
   measureDialogOverflow,
   mockHavenApi,
+  openReceiveFundsModal,
   seedAuthenticatedSession,
   testSafeAddress,
   unexpectedBrowserErrors,
@@ -85,14 +103,7 @@ test.describe('receive dialog at a mobile viewport', () => {
   test('the receive panel fits inside a 393px viewport', async ({ page }) => {
     const browserErrors = collectBrowserErrors(page)
 
-    await page.goto('/dashboard')
-    await dismissMobileSidebar(page)
-    await page
-      .getByRole('button', { name: /^Receive( funds)?$/ })
-      .first()
-      .click()
-
-    const modal = page.getByRole('dialog', { name: 'Receive funds' })
+    const modal = await openReceiveFundsModal(page)
     await expect(modal).toBeVisible()
     // The content most likely to burst a 393px panel: a full 42-character
     // address. Asserted visible so the measurement below is taken with the

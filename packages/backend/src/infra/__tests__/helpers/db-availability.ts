@@ -39,8 +39,6 @@
  * acknowledgement by a human at a terminal, not an override.
  */
 
-import pg from 'pg'
-
 export const DEFAULT_TEST_DATABASE_URL = 'postgres://haven:haven@localhost:5432/haven'
 
 /** Set to `1` to accept a locally narrowed run. Ignored in CI, by design. */
@@ -121,8 +119,16 @@ const REMEDIES = [
  *
  * Moved here from `db-harness.ts` by #1763 so global setup can run the
  * identical probe once for the whole run.
+ *
+ * `pg` is imported LAZILY, inside the function (review nit). `vitest.setup.ts`
+ * imports this module for `DEFAULT_TEST_DATABASE_URL`, and a top-level `import
+ * pg` would therefore load the driver into all 177 test files — including the
+ * ~155 that never touch a database — where previously only the real-DB suites
+ * paid for it. Nothing else in this module has a module-scope side effect, and
+ * this keeps it that way.
  */
 export async function probeDatabase(connectionString: string): Promise<boolean> {
+  const { default: pg } = await import('pg')
   for (let attempt = 1; attempt <= 3; attempt++) {
     const client = new pg.Client({ connectionString, connectionTimeoutMillis: 3_000 })
     try {

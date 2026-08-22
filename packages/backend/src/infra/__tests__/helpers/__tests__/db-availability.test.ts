@@ -109,7 +109,15 @@ describe('resolveTestDatabaseUrl', () => {
       'utf8',
     )
     expect(setup).toContain('DEFAULT_TEST_DATABASE_URL')
-    expect(setup).not.toMatch(/DATABASE_URL \?\?= ['"]postgres:/)
+    // The negative tripwire matches the LITERAL, not an assignment shape
+    // (review nit). A pattern like /DATABASE_URL \?\?= ['"]postgres:/ pins one
+    // syntax and is walked around by bracket access, `||`, a template literal,
+    // or staging the value through a third variable — a guard against a
+    // literal drifting back that a reformat can dodge is a guard that cannot
+    // fail in most of the cases it was written for. Compared against the
+    // constant rather than a second copy of the string, so this assertion
+    // cannot become the duplication it forbids.
+    expect(setup).not.toContain(DEFAULT_TEST_DATABASE_URL)
   })
 })
 

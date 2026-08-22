@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-08-22" # #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
+last-verified: "2026-08-22" # #1844: the Receive Funds recipe gains the unresolved-network rule — a funding surface that cannot confirm the account's network names none, withholds the address and the on-ramp, and says so, rather than defaulting to Base mainnet. Only that recipe re-read. Prior: #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
 ---
 
 # Haven Screen Recipes
@@ -205,6 +205,11 @@ Money and risk clarity:
   licensed provider flow with the selected Haven wallet as destination; the
   provider handles KYC and funds. When unavailable, route to `Receive` without
   implying Haven operates an on-ramp.
+- If the account's network cannot be confirmed, name no network, withhold the
+  deposit address and the on-ramp, and say plainly that the network is unknown.
+  A funding surface with a missing network refuses to instruct rather than
+  guessing one — the user cannot tell a guess from a fact on that screen, and a
+  guess that lands on mainnet costs real money ([#1844](https://github.com/d-hinders/Haven-AI/issues/1844)).
 - Keep raw address visible because receiving funds requires it, but label it as the Haven wallet address.
 - Do not imply Haven holds custody or can recover funds sent on the wrong network.
 - Use a success toast after copying, but keep the address and network visible in the modal.

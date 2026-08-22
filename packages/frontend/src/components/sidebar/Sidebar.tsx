@@ -209,11 +209,36 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Mobile toggle */}
+      {/*
+        Mobile toggle.
+
+        Tap target (#1766). The control paints 32x32 — deliberately, because it
+        shares a 56px bar with `NetworkSwitcher` and a larger visible box would
+        crowd it — which left it 12px under the 44px comfort target
+        `docs/product/design-system.md` § Buttons documents. It is not a
+        `Button`, so it inherited none of #1726's mechanism; it borrows it here
+        instead: a transparent `::after` extends the HIT area to 44x44 while the
+        painted pixels stay exactly where they were.
+
+        Two deliberate deviations from `Button`'s version of the same trick:
+
+        1. **The target grows in BOTH axes**, where `Button` grows vertically
+           only. That rule exists because an `sm` Button's width already clears
+           44px once it carries a label, so widening it would only let it steal
+           a neighbour's taps in a tight toolbar. Neither half holds for an
+           icon-only 32px square: its width is the short axis too, and the
+           nearest interactive control in this bar starts at x=68, which leaves
+           14px of clearance beyond the 44px target's right edge (x=54). The
+           mobile spec asserts that clearance so a future move of either control
+           cannot quietly close it.
+        2. **No `relative`.** `Button` adds it to create a positioning context;
+           `fixed` already is one, and adding `relative` here would un-fix the
+           button and drop it back under `TopBar` — the #1749 defect, restored.
+      */}
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed top-4 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+        className="lg:hidden fixed top-4 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
       >
         <Icon icon={Menu} className="w-4 h-4" />
       </button>

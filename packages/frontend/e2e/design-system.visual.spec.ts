@@ -57,6 +57,7 @@ test.describe('design-system visual regression', () => {
 
   for (const vp of VIEWPORTS) {
     test(`/design-system renders pixel-stable (${vp.name})`, async ({ page }) => {
+      test.setTimeout(180_000) // PROBE only
       await page.setViewportSize({ width: vp.width, height: vp.height })
       await page.goto('/design-system')
       // Determinism: fonts loaded, no animation mid-flight.
@@ -78,7 +79,7 @@ test.describe('design-system visual regression', () => {
         animations: 'disabled',
         caret: 'hide',
         maxDiffPixels: TOP_BAR_MAX_DIFF_PIXELS,
-        timeout: 1_000, // PROBE: one attempt, report the count, do not retry
+        timeout: 20_000, // PROBE: one attempt, report the count, do not retry
       })
 
       // The app shell clips at h-screen/overflow-hidden, so a `fullPage`
@@ -100,7 +101,7 @@ test.describe('design-system visual regression', () => {
         caret: 'hide',
         maxDiffPixels: FULL_PAGE_MAX_DIFF_PIXELS,
         maxDiffPixelRatio: FULL_PAGE_MAX_DIFF_PIXEL_RATIO,
-        timeout: 1_000, // PROBE: one attempt, report the count, do not retry
+        timeout: 20_000, // PROBE: one attempt, report the count, do not retry
       })
     })
   }

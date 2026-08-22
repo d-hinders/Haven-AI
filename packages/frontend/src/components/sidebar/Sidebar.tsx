@@ -254,10 +254,26 @@ export default function Sidebar() {
         <Icon icon={Menu} className="w-4 h-4" />
       </button>
 
-      {/* Overlay for mobile */}
+      {/*
+        Overlay for mobile — the same `v2-modal-backdrop` Modal and SidePanel use.
+
+        It was `bg-[var(--v2-ink)]/40 backdrop-blur-sm`, an opacity modifier on a
+        bare var(), which Tailwind v3.4 drops silently (#1818): the scrim had no
+        background at all, so the drawer opened over an undimmed page.
+
+        Fixing it onto `bg-ink/40` would have worked, but it would have shipped a
+        SECOND overlay convention — and worse, it would have made the blur real.
+        `backdrop-blur-sm` was never free by intent, only by accident: with no
+        background painted there was nothing to composite. Painting one activates
+        a full-viewport `backdrop-filter` on a `fixed inset-0` element, which is
+        exactly what globals.css's `.v2-modal-backdrop` documents avoiding — the
+        compositor keeps a GPU snapshot of the whole page and re-blurs it every
+        paint. So this reuses the existing dim token instead, blur included in
+        what it deliberately omits.
+      */}
       {!collapsed && (
         <div
-          className="lg:hidden fixed inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm z-[var(--v2-z-nav-scrim)]"
+          className="lg:hidden fixed inset-0 v2-modal-backdrop z-[var(--v2-z-nav-scrim)]"
           onClick={() => setCollapsed(true)}
         />
       )}

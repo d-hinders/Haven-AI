@@ -22,7 +22,7 @@ export function DiagramBox({
     <div
       className={`rounded-lg border px-3 py-2 text-center ${
         accent
-          ? 'border-[var(--v2-brand)]/30 bg-[var(--v2-brand-soft)]'
+          ? 'border-brand/30 bg-[var(--v2-brand-soft)]'
           : 'border-[var(--v2-border)] bg-[var(--v2-surface)]'
       } ${className}`}
     >

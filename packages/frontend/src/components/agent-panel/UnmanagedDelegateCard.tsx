@@ -31,7 +31,7 @@ export function UnmanagedDelegateCard({
   const accentText = pendingHavenSetup ? 'text-[var(--v2-ink-2)]' : 'text-[var(--v2-warning)]'
   const containerCls = pendingHavenSetup
     ? 'border-[var(--v2-border)] bg-[var(--v2-surface)]'
-    : 'border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)]'
+    : 'border-warning/25 bg-[var(--v2-warning-soft)]'
   return (
     <div className={`rounded-[10px] border border-dashed p-5 ${containerCls}`}>
       <div className="flex items-start justify-between mb-4">

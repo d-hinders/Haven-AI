@@ -13,7 +13,7 @@ const CHAIN_STYLES: Record<number, { dot: string; text: string; border: string; 
   100: {
     dot: 'bg-[var(--v2-success)]',
     text: 'text-[var(--v2-success)]',
-    border: 'border-[var(--v2-success)]/20',
+    border: 'border-success/20',
     bg: 'bg-[var(--v2-success-soft)]',
   },
   // Base — sky-tinted pill (chain-identity tokens, see globals.css)

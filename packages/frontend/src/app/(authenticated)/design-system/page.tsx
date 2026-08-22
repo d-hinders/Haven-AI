@@ -203,31 +203,31 @@ export default function DesignSystemPage() {
                 name: '--v2-brand',
                 soft: '--v2-brand-soft',
                 use: 'Primary actions, links, brand identity.',
-                swatch: 'border-[var(--v2-brand)]/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]',
+                swatch: 'border-brand/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]',
               },
               {
                 name: '--v2-success',
                 soft: '--v2-success-soft',
                 use: 'Incoming payments, completed states, positive money movement.',
-                swatch: 'border-[var(--v2-success)]/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]',
+                swatch: 'border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]',
               },
               {
                 name: '--v2-debit',
                 soft: '--v2-debit-soft',
                 use: 'Outgoing payments, sent money. Sibling to success — never use for warnings.',
-                swatch: 'border-[var(--v2-debit)]/30 bg-[var(--v2-debit-soft)] text-[var(--v2-debit)]',
+                swatch: 'border-debit/30 bg-[var(--v2-debit-soft)] text-[var(--v2-debit)]',
               },
               {
                 name: '--v2-warning',
                 soft: '--v2-warning-soft',
                 use: 'Needs attention, paused states, soft caution. Not for irreversible actions.',
-                swatch: 'border-[var(--v2-warning)]/30 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]',
+                swatch: 'border-warning/30 bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]',
               },
               {
                 name: '--v2-danger',
                 soft: '--v2-danger-soft',
                 use: 'Errors, failures, destructive confirmations (revoke / delete).',
-                swatch: 'border-[var(--v2-danger)]/30 bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]',
+                swatch: 'border-danger/30 bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]',
               },
               {
                 name: '--v2-ink / -2 / -3',
@@ -1111,7 +1111,7 @@ export default function DesignSystemPage() {
         description="Approval requests lead with the money, show who asked, and make the wallet-to-recipient path readable before the user approves or rejects."
       >
         <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-          <Card hover={false} className="overflow-hidden border-[var(--v2-warning)]/25">
+          <Card hover={false} className="overflow-hidden border-warning/25">
             <Card.Header>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -1233,7 +1233,7 @@ export default function DesignSystemPage() {
             ['Research API', '0x31bc...8d04'],
           ].map(([name, address]) => (
             <div key={name} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-5 py-3 last:border-b-0">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--v2-brand)]/20 bg-[var(--v2-brand-soft)]">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-brand/20 bg-[var(--v2-brand-soft)]">
                 <span className="text-xs font-semibold text-[var(--v2-brand)]">{name.slice(0, 2).toUpperCase()}</span>
               </div>
               <div className="min-w-0 flex-1">

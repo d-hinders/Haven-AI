@@ -33,7 +33,7 @@ export default class ErrorBoundary extends Component<Props, State> {
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="max-w-md text-center">
             {/* Alert icon */}
-            <div className="w-12 h-12 rounded-xl bg-[var(--v2-danger-soft)] border border-[var(--v2-danger)]/20 flex items-center justify-center mx-auto mb-5">
+            <div className="w-12 h-12 rounded-xl bg-[var(--v2-danger-soft)] border border-danger/20 flex items-center justify-center mx-auto mb-5">
               <Icon icon={CircleAlert} className="h-[22px] w-[22px] text-[var(--v2-danger)]" />
             </div>
 
@@ -50,7 +50,7 @@ export default class ErrorBoundary extends Component<Props, State> {
                   <Icon icon={ChevronRight} className="h-2.5 w-2.5 transition-transform group-open:rotate-90" />
                   Show technical details
                 </summary>
-                <pre className="mt-2 text-xs text-[var(--v2-danger)] bg-[var(--v2-danger-soft)] border border-[var(--v2-danger)]/20 rounded-lg p-3 overflow-auto max-h-32 font-mono">
+                <pre className="mt-2 text-xs text-[var(--v2-danger)] bg-[var(--v2-danger-soft)] border border-danger/20 rounded-lg p-3 overflow-auto max-h-32 font-mono">
                   {this.state.error.message}
                 </pre>
               </details>

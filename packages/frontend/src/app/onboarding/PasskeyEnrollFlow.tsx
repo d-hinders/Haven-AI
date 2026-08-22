@@ -357,9 +357,9 @@ export default function PasskeyEnrollFlow({
                 key={item.id}
                 className={`flex items-center gap-3 px-3 py-3 rounded-md border transition-colors duration-300 ${
                   isActive
-                    ? 'border-[var(--v2-brand)]/35 bg-[var(--v2-brand-soft)]'
+                    ? 'border-brand/35 bg-[var(--v2-brand-soft)]'
                     : isDone
-                      ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)]'
+                      ? 'border-success/20 bg-[var(--v2-success-soft)]'
                       : 'border-[var(--v2-border)] bg-white'
                 }`}
               >
@@ -391,7 +391,7 @@ export default function PasskeyEnrollFlow({
                   )}
                 </div>
                 {isActive && (
-                  <div className="w-3 h-3 border-2 border-[var(--v2-brand)]/30 border-t-[var(--v2-brand)] rounded-full animate-spin shrink-0" />
+                  <div className="w-3 h-3 border-2 border-brand/30 border-t-[var(--v2-brand)] rounded-full animate-spin shrink-0" />
                 )}
               </div>
             )

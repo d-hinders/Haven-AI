@@ -505,7 +505,7 @@ export default function WalletButton() {
             <button
               type="button"
               onClick={openChainModal}
-              className="px-3 py-2 rounded-md text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-[var(--v2-danger)]/25 hover:border-[var(--v2-danger)]/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
+              className="px-3 py-2 rounded-md text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-danger/25 hover:border-danger/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
             >
               Wrong network
             </button>

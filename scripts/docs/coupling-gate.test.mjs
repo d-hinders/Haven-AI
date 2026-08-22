@@ -56,16 +56,45 @@ test('ageDays computes whole-day differences', () => {
   assert.equal(ageDays('not-a-date', now), null)
 })
 
-test('suppresses a doc whose last-verified is today (same-day)', () => {
-  // Inject '2026-06-01' as today → matches every doc's lastVerified → all suppressed.
-  const f = implicatedDocs(['packages/backend/src/routes/x402.ts'], DOCS, '2026-06-01')
-  assert.equal(f.length, 0)
+test('#1824: a freshly stamped last-verified no longer suppresses anything', () => {
+  // These docs are stamped 2026-06-01. Before #1824, running the gate ON that
+  // date suppressed both. The date is no longer an input at all, so the only
+  // question left is whether a covered file changed.
+  const f = implicatedDocs(['packages/backend/src/routes/x402.ts'], DOCS)
+  assert.deepEqual(f.map((x) => x.doc).sort(), ['docs/architecture/04-x402.md', 'docs/regulatory/casp.md'])
 })
 
-test('still flags a doc verified before today', () => {
-  // today is later than the docs' 2026-06-01 verification → not suppressed.
-  const f = implicatedDocs(['packages/backend/src/routes/x402.ts'], DOCS, '2026-06-02')
-  assert.deepEqual(f.map((x) => x.doc).sort(), ['docs/architecture/04-x402.md', 'docs/regulatory/casp.md'])
+test('#1824: the real scenario — another PR stamped the doc today', () => {
+  // The case that motivated the issue, reproduced concretely rather than
+  // described. docs/product/design-system.md `covers:` TransactionMovement.tsx
+  // by EXACT path (not a wide glob), and on 2026-08-22 its last-verified was
+  // stamped by unrelated button/focus-ring work whose eight chained notes each
+  // said "nothing else re-verified in this pass". A PR touching that component
+  // must still be told the doc describes it.
+  const docs = [
+    {
+      doc: 'docs/product/design-system.md',
+      covers: ['packages/frontend/src/components/haven/TransactionMovement.tsx'],
+      lastVerified: '2026-08-22',
+    },
+  ]
+  const f = implicatedDocs(
+    ['packages/frontend/src/components/haven/TransactionMovement.tsx'],
+    docs,
+  )
+  assert.deepEqual(f.map((x) => x.doc), ['docs/product/design-system.md'])
+})
+
+test('#1824: a doc THIS change edited is still skipped — that path is untouched', () => {
+  // The half of the old heuristic that was actually load-bearing was never the
+  // date: it is `changedSet.has(doc)`. Verifying a doc means editing it, so the
+  // author who re-read it is not nagged. Asserted explicitly, because removing
+  // the date check would look identical to breaking this one if it regressed.
+  const docs = [
+    { doc: 'docs/a.md', covers: ['packages/x/**'], lastVerified: '2026-06-01' },
+  ]
+  const f = implicatedDocs(['packages/x/y.ts', 'docs/a.md'], docs)
+  assert.equal(f.length, 0)
 })
 
 test('carries the contract flag through to findings (#646 strict mode)', () => {
@@ -73,36 +102,50 @@ test('carries the contract flag through to findings (#646 strict mode)', () => {
     { doc: 'docs/a.md', covers: ['packages/x/**'], lastVerified: '2026-06-01', contract: true },
     { doc: 'docs/b.md', covers: ['packages/x/**'], lastVerified: '2026-06-01' },
   ]
-  const f = implicatedDocs(['packages/x/y.ts'], docs, '2026-06-02')
+  const f = implicatedDocs(['packages/x/y.ts'], docs)
   assert.deepEqual(
     f.map((x) => [x.doc, x.contract]).sort(),
     [['docs/a.md', true], ['docs/b.md', false]],
   )
 })
 
-// --- #1077: same-day suppression must not weaken the BLOCKING half ---
+// --- #1077, as extended by #1824 ---
+//
+// #1077's finding was that a wall-clock heuristic must not weaken the BLOCKING
+// half: it would make a required check green at 23:59 and red at 00:01 with no
+// code change. It fixed that by carving contract-docs-under-strict out of the
+// suppression. #1824 found the carve-out was the wrong shape — the same
+// argument applies to the advisory half, so the suppression is gone entirely
+// and these tests now assert its absence in both postures.
 
 const CONTRACT_DOCS = [
   { doc: 'docs/regulatory/casp.md', covers: ['packages/x/**'], lastVerified: '2026-06-01', contract: true },
   { doc: 'docs/advisory.md', covers: ['packages/x/**'], lastVerified: '2026-06-01' },
 ]
 
-test('strict mode does not same-day-suppress a contract doc', () => {
-  // A contract doc verified today by some OTHER PR says nothing about whether
-  // THIS PR made it stale. Suppressing it would make a required check depend on
-  // wall-clock time: green at 23:59, red at 00:01 with no code change.
-  const f = implicatedDocs(['packages/x/y.ts'], CONTRACT_DOCS, '2026-06-01', { strict: true })
-  assert.deepEqual(f.map((x) => x.doc), ['docs/regulatory/casp.md'])
+test('strict mode flags a contract doc regardless of its stamp (#1077)', () => {
+  // #1077's own assertion was `deepEqual([casp.md])` — which held only because
+  // the advisory doc was suppressed alongside. That made the test's exact list
+  // depend on a behaviour it was not testing. It now asserts what #1077 was
+  // actually about: the contract doc is present, and it carries the flag the
+  // strict gate blocks on.
+  const f = implicatedDocs(['packages/x/y.ts'], CONTRACT_DOCS, { strict: true })
+  const casp = f.find((x) => x.doc === 'docs/regulatory/casp.md')
+  assert.ok(casp, 'a contract doc covering a changed file must be implicated under strict')
+  assert.equal(casp.contract, true)
 })
 
-test('strict mode still same-day-suppresses an advisory doc', () => {
-  const f = implicatedDocs(['packages/x/y.ts'], CONTRACT_DOCS, '2026-06-01', { strict: true })
-  assert.equal(f.some((x) => x.doc === 'docs/advisory.md'), false)
+test('#1824: strict mode now flags the ADVISORY doc too', () => {
+  // Was `strict mode still same-day-suppresses an advisory doc`. Under strict,
+  // the advisory doc is still reported — it simply does not FAIL the build.
+  // Reporting and blocking are separate axes, and the old code conflated them.
+  const f = implicatedDocs(['packages/x/y.ts'], CONTRACT_DOCS, { strict: true })
+  assert.equal(f.some((x) => x.doc === 'docs/advisory.md'), true)
 })
 
-test('advisory mode same-day-suppresses a contract doc as before', () => {
-  const f = implicatedDocs(['packages/x/y.ts'], CONTRACT_DOCS, '2026-06-01')
-  assert.equal(f.length, 0)
+test('#1824: advisory mode flags both, where it used to flag neither', () => {
+  const f = implicatedDocs(['packages/x/y.ts'], CONTRACT_DOCS)
+  assert.deepEqual(f.map((x) => x.doc).sort(), ['docs/advisory.md', 'docs/regulatory/casp.md'])
 })
 
 // --- #1077: tests and generated files are incidental to prose ---
@@ -129,8 +172,7 @@ test('a wildcard glob does not implicate via a test file alone', () => {
   const docs = [{ doc: 'docs/product/design-review.md', covers: ['packages/frontend/src/components/**'], lastVerified: '2026-06-01' }]
   const f = implicatedDocs(
     ['packages/frontend/src/components/__tests__/BudgetGrantAction.test.tsx'],
-    docs,
-    '2026-06-02',
+    docs
   )
   assert.equal(f.length, 0)
 })
@@ -142,8 +184,7 @@ test('a non-test sibling under the same glob still implicates', () => {
       'packages/frontend/src/components/BudgetGrantAction.tsx',
       'packages/frontend/src/components/__tests__/BudgetGrantAction.test.tsx',
     ],
-    docs,
-    '2026-06-02',
+    docs
   )
   // Implicated by the source file, and the incidental test is not listed as evidence.
   assert.deepEqual(f.map((x) => x.matched), [['packages/frontend/src/components/BudgetGrantAction.tsx']])
@@ -160,9 +201,9 @@ test('strict mode does not filter incidental paths for a contract doc (review fi
     contract: true,
   }]
   const changed = ['packages/sdk/src/client.test.ts']
-  assert.equal(implicatedDocs(changed, docs, '2026-06-02', { strict: true }).length, 1)
+  assert.equal(implicatedDocs(changed, docs, { strict: true }).length, 1)
   // Advisory posture keeps the noise reduction.
-  assert.equal(implicatedDocs(changed, docs, '2026-06-02').length, 0)
+  assert.equal(implicatedDocs(changed, docs).length, 0)
 })
 
 test('packages whose content IS tests are never incidental', () => {
@@ -173,7 +214,7 @@ test('packages whose content IS tests are never incidental', () => {
   assert.equal(isIncidentalPath('packages/qa-agent/src/scenarios/x402.test.ts'), false)
 
   const docs = [{ doc: 'docs/operations/agent-qa.md', covers: ['packages/qa-agent/**'], lastVerified: '2026-06-01' }]
-  const f = implicatedDocs(['packages/qa-agent/src/scenarios/x402.test.ts'], docs, '2026-06-02')
+  const f = implicatedDocs(['packages/qa-agent/src/scenarios/x402.test.ts'], docs)
   assert.deepEqual(f.map((x) => x.doc), ['docs/operations/agent-qa.md'])
 })
 
@@ -184,7 +225,7 @@ test('an EXACT covers entry still implicates via a test file', () => {
     covers: ['packages/mcp-server/src/hosted-signer-integration.test.ts'],
     lastVerified: '2026-06-01',
   }]
-  const f = implicatedDocs(['packages/mcp-server/src/hosted-signer-integration.test.ts'], docs, '2026-06-02')
+  const f = implicatedDocs(['packages/mcp-server/src/hosted-signer-integration.test.ts'], docs)
   assert.deepEqual(f.map((x) => x.doc), ['docs/architecture/07-edge-signer.md'])
 })
 
@@ -238,17 +279,46 @@ test1366('a changed shard satisfies the contract doc in strict mode (#1366)', ()
   const f = implicatedDocs(
     ['packages/signer/src/core.ts', 'docs/regulatory/casp-changelog/2026-08-12-1399.md'],
     [SHARDED_DOC],
-    undefined,
     { strict: true },
   )
   assert1366.deepStrictEqual(f, [])
+})
+
+/**
+ * #1824 review: the three tests in this block used to be called as
+ * `implicatedDocs(changed, docs, undefined, { strict: true })` — the pre-#1824
+ * four-argument form. After the signature lost its `today` parameter, that
+ * `undefined` landed in the options slot and `{ strict: true }` was dropped
+ * silently by JS, so every test here ran in ADVISORY mode while its name said
+ * strict. They still passed, because their fixtures produce the same answer in
+ * both postures.
+ *
+ * Fixing the call form alone would have been cosmetic. `filterIncidental` is
+ * the ONLY strict-dependent branch in `implicatedDocs`, and none of these
+ * fixtures reach it — their changed file is ordinary source. So this test is
+ * added to make the distinction real: the changed file is a TEST file, which
+ * advisory mode filters as incidental and strict mode deliberately does not
+ * (the #1076 carve-out — a contract doc whose covered paths are all incidental
+ * would otherwise pass `--strict` silently).
+ *
+ * With this fixture the two postures disagree, so passing the wrong one is no
+ * longer invisible. Verified by re-breaking the call to the four-argument form:
+ * this test goes red, and only this one.
+ */
+test1366('#1824: strict vs advisory actually diverge on a sharded contract doc', () => {
+  const changed = ['packages/signer/src/core.test.ts']
+  const strictFindings = implicatedDocs(changed, [SHARDED_DOC], { strict: true })
+  assert1366.strictEqual(strictFindings.length, 1, 'strict must not filter incidental paths for a contract doc')
+  assert1366.strictEqual(strictFindings[0].contract, true)
+
+  const advisoryFindings = implicatedDocs(changed, [SHARDED_DOC])
+  assert1366.strictEqual(advisoryFindings.length, 0, 'advisory mode filters a test file as incidental')
 })
 
 test1366('MUTATION PROOF: the same change WITHOUT a shard still blocks (#1366)', () => {
   const f = implicatedDocs(
     ['packages/signer/src/core.ts'],
     [SHARDED_DOC],
-    undefined,
     { strict: true },
   )
   assert1366.strictEqual(f.length, 1)
@@ -266,7 +336,6 @@ test1366('a shard satisfies ONLY docs that declare it — not every contract doc
   const f = implicatedDocs(
     ['packages/signer/src/core.ts', 'docs/regulatory/casp-changelog/2026-08-12-1399.md'],
     [SHARDED_DOC, other],
-    undefined,
     { strict: true },
   )
   assert1366.strictEqual(f.length, 1)
@@ -287,12 +356,12 @@ test('a satisfied-by shard suppresses the strict contract finding (#1496)', () =
   }]
   const withShard = implicatedDocs(
     ['packages/backend/src/modules/x402/helpers.ts', 'docs/regulatory/casp-changelog/2026-08-16-1.md'],
-    docs, '2000-01-01', { strict: true },
+    docs, { strict: true },
   )
   assert.deepEqual(withShard, [])
   const withoutShard = implicatedDocs(
     ['packages/backend/src/modules/x402/helpers.ts'],
-    docs, '2000-01-01', { strict: true },
+    docs, { strict: true },
   )
   assert.equal(withoutShard.length, 1)
 })

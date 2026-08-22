@@ -24,9 +24,9 @@ export function DirectionMark({
 }) {
   const classes =
     direction === 'in'
-      ? 'border-[var(--v2-success)]/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+      ? 'border-success/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
       : direction === 'out'
-        ? 'border-[var(--v2-debit)]/20 bg-[var(--v2-debit-soft)] text-[var(--v2-debit)]'
+        ? 'border-debit/20 bg-[var(--v2-debit-soft)] text-[var(--v2-debit)]'
         : 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
 
   const sizeClass = density === 'compact' ? 'h-8 w-8' : 'h-9 w-9'

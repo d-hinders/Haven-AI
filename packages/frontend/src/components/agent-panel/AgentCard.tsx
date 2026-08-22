@@ -177,7 +177,7 @@ export function AgentCard({
       </div>
 
       {isPaused && (
-        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg">
+        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg">
           <Icon icon={CirclePause} className="h-[13px] w-[13px] text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-xs font-medium text-[var(--v2-warning)]">Paused in Haven</p>
@@ -189,7 +189,7 @@ export function AgentCard({
       )}
 
       {agent.has_stranded_funds && (
-        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg">
+        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg">
           <Icon icon={TriangleAlert} className="h-[13px] w-[13px] text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-[var(--v2-warning)]">Stranded funds on delegate</p>
@@ -240,7 +240,7 @@ export function AgentCard({
                 onClick={() => onEdit(agent)}
                 disabled={isBusy}
                 aria-label={`Edit ${agent.name}`}
-                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 Edit
               </button>
@@ -249,7 +249,7 @@ export function AgentCard({
                 onClick={openDetails}
                 disabled={isBusy}
                 aria-label={`Open details for ${agent.name}`}
-                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 Details
               </button>
@@ -260,7 +260,7 @@ export function AgentCard({
                 onClick={() => setPauseModalOpen(true)}
                 disabled={isBusy}
                 aria-label={`Pause ${agent.name}`}
-                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 {busyAction === 'pause' ? 'Pausing...' : 'Pause'}
               </button>
@@ -269,7 +269,7 @@ export function AgentCard({
                 onClick={() => onResume(agent)}
                 disabled={isBusy}
                 aria-label={`Resume ${agent.name}`}
-                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
               </button>
@@ -284,7 +284,7 @@ export function AgentCard({
                   onClick={() => setRevokeModalOpen(true)}
                   disabled={isBusy}
                   aria-label={`Revoke ${agent.name}`}
-                  className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
+                  className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
                 >
                   Revoke
                 </button>
@@ -301,7 +301,7 @@ export function AgentCard({
                   onClick={() => setRemoveModalOpen(true)}
                   disabled={isBusy}
                   aria-label={`Remove ${agent.name}`}
-                  className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
+                  className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
                 >
                   Remove
                 </button>
@@ -319,7 +319,7 @@ export function AgentCard({
               onClick={() => setRemoveModalOpen(true)}
               disabled={isBusy}
               aria-label={`Remove ${agent.name}`}
-              className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
+              className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
             >
               {busyAction === 'archive' ? 'Removing...' : 'Remove'}
             </button>
@@ -331,7 +331,7 @@ export function AgentCard({
               onClick={() => onRestore(agent)}
               disabled={isBusy}
               aria-label={`Restore ${agent.name} to the list`}
-              className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+              className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
             >
               {busyAction === 'restore' ? 'Restoring...' : 'Restore to list'}
             </button>
@@ -353,7 +353,7 @@ export function AgentCard({
           <p>
             Pausing stops this agent from creating new payments through Haven right away, without changing its network permissions.
           </p>
-          <div className="rounded-lg border border-[var(--v2-brand)]/15 bg-[var(--v2-brand-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
+          <div className="rounded-lg border border-brand/15 bg-[var(--v2-brand-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
             <p className="text-xs font-medium text-[var(--v2-brand)] mb-1">What stays the same</p>
             <p className="text-xs leading-relaxed">
               The agent&apos;s network permissions remain in place. You can resume this agent later without reconnecting or reconfiguring it.
@@ -379,7 +379,7 @@ export function AgentCard({
           <p>
             This removes the agent&apos;s Haven access immediately and also revokes its network spending authority.
           </p>
-          <div className="rounded-lg border border-[var(--v2-danger)]/15 bg-[var(--v2-danger-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
+          <div className="rounded-lg border border-danger/15 bg-[var(--v2-danger-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
             <p className="text-xs font-medium text-[var(--v2-danger)] mb-1">What happens next</p>
             <p className="text-xs leading-relaxed">
               Haven will stop accepting new requests from this agent, and you&apos;ll be asked to approve the update that removes its spending access.

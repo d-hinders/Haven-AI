@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import postcss from 'postcss'
 import tailwindcss from 'tailwindcss'
 import { describe, expect, it } from 'vitest'
@@ -202,92 +202,25 @@ describe('compiled CSS: the focus ring is brand-derived (#1708)', () => {
 })
 
 /**
- * Test files legitimately contain dead-class literals as FIXTURES — this file's
- * own regression cases, and #1818's `compiled-colour-utilities.test.ts`
- * inventory. These guards scan raw source text, so they cannot tell a fixture
- * from a call-site.
+ * The two source-scanning guards that lived here are GONE (#1710).
  *
- * This started as a single hardcoded filename (#1708) and broke the moment a
- * second test file about this defect class appeared. Excluding the class of
- * file rather than one name is the fix; a dead class inside a test ships to
- * nobody.
+ * `no dead ring-* or border-* call-sites remain` (#1708, widened by #1709) and
+ * `no bracketed-alpha-on-var() call-sites remain` (#1709) both matched raw
+ * source text for the dead shape. `compiled-colour-utilities.test.ts` (#1818)
+ * replaced them with something strictly stronger on every axis:
+ *
+ *   - it scans ALL of src/, not just the two dirs design-lint walks;
+ *   - it covers every colour-bearing utility, not ring/border;
+ *   - it accepts a bracketed alpha as well as a numeric one;
+ *   - it strips comments, which a raw-text scan cannot — and that is not
+ *     hypothetical: in #1709 an explanatory comment quoting the dead form
+ *     tripped the very guard it was explaining, and a sweep script later
+ *     rewrote a different comment into a false claim;
+ *   - it decides by COMPILING the class, so it catches a token that exists but
+ *     has no channel form — a shape no regex over call-sites can see.
+ *
+ * Keeping both would have meant two mechanisms for one defect, with the weaker
+ * one producing the false positives. The COMPILE PROBES above stay: they assert
+ * an alias resolves to the right token at the right alpha, which is a different
+ * claim from "this compiles to something".
  */
-const IS_TEST_FILE = /\.test\.tsx?$|[\\/]__tests__[\\/]/
-
-/** Shared by both dead-call-site guards below. */
-function sourceFiles(dir: string, acc: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules' || entry === '.next') continue
-    const full = join(dir, entry)
-    if (statSync(full).isDirectory()) sourceFiles(full, acc)
-    else if (/\.tsx?$/.test(full)) acc.push(full)
-  }
-  return acc
-}
-
-describe('no dead ring-* or border-* call-sites remain (#1708, #1709)', () => {
-  /**
-   * Widened from ring-only by #1709, which converted the 91 `border-*`
-   * occurrences. Still deliberately NOT widened to `bg-`/`text-`: those are
-   * #1710's 12 remaining call-sites, and failing the tree for work another
-   * slice owns is what this scoping exists to avoid. #1710 widens it last,
-   * when the count is already zero.
-   *
-   * The alternation accepts a BRACKETED alpha (`/[0.03]`) as well as `/30`,
-   * but only for these two utilities. The bracketed form on ANY utility is
-   * guarded separately below, because the one real instance was a `bg-`.
-   *
-   * NOTE (#1818, landed after this): `compiled-colour-utilities.test.ts` now
-   * scans EVERY colour utility and decides by compiling it rather than by
-   * matching source text — strictly stronger than these two regex guards, and
-   * it strips comments, which these cannot. They are kept because deleting
-   * #1708's shipped guard is not this slice's call; #1710 is the natural place
-   * to consolidate, and that is flagged on it.
-   */
-  const DEAD_ALPHA_ON_VAR = /(?:ring|border)-\[var\(--v2-[a-z0-9-]+\)\]\/(?:[0-9]+|\[)/
-
-  it('finds none in packages/frontend/src', () => {
-    const offenders = sourceFiles(join(FRONTEND, 'src'))
-      .filter((f) => !IS_TEST_FILE.test(f))
-      .filter((f) => DEAD_ALPHA_ON_VAR.test(readFileSync(f, 'utf8')))
-      .map((f) => relative(FRONTEND, f))
-    expect(
-      offenders,
-      'use the theme alias (ring-brand/30, border-danger/20) — the bare var() form with an ' +
-        'opacity modifier compiles to NOTHING on Tailwind v3.4, so the class is silently dropped',
-    ).toEqual([])
-  })
-})
-
-describe('no bracketed-alpha-on-var() call-sites remain, on ANY utility (#1709)', () => {
-  /**
-   * A separate guard, and the reason is worth stating: every grep in epic
-   * #1685 — the original 175-occurrence census, #1710's enumeration command,
-   * and #1710's own acceptance criterion — matches `/[0-9]+`. None of them can
-   * match `/[`, so `entityCardStyles.ts`'s `bg-[var(--v2-brand)]/[0.03]` was
-   * invisible to all three and would have outlived the epic that exists to
-   * remove it.
-   *
-   * This one is NOT restricted to ring/border. The bracketed count is already
-   * zero across every utility, so guarding it globally costs nothing and
-   * needs no baseline — unlike the `/[0-9]+` form on `bg-`/`text-`, where
-   * #1710's 12 call-sites are still live and a global guard would fail the
-   * tree for another slice's work.
-   *
-   * Found by mutation: the ring/border guard above stayed GREEN when the
-   * bracketed fix was reverted, because that instance is a `bg-`.
-   */
-  const DEAD_BRACKETED = /[a-z-]+-\[var\(--v2-[a-z0-9-]+\)\]\/\[/
-
-  it('finds none in packages/frontend/src', () => {
-    const offenders = sourceFiles(join(FRONTEND, 'src'))
-      .filter((f) => !IS_TEST_FILE.test(f))
-      .filter((f) => DEAD_BRACKETED.test(readFileSync(f, 'utf8')))
-      .map((f) => relative(FRONTEND, f))
-    expect(
-      offenders,
-      'use the theme alias (bg-brand/[0.03]) — a bracketed opacity on a bare var() ' +
-        'compiles to nothing, and no grep in epic #1685 can see this form',
-    ).toEqual([])
-  })
-})

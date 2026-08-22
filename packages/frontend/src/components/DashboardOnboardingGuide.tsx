@@ -151,7 +151,7 @@ function ChecklistRow({ status, number, title, body, completedBody, cta }: StepP
   const isLocked = status === 'locked'
 
   const rowClass = isActive
-    ? 'rounded-[10px] border border-brand/15 bg-[var(--v2-brand-soft)]/40'
+    ? 'rounded-[10px] border border-brand/15 bg-brand-soft/40'
     : isComplete
       ? 'rounded-[10px]'
       : 'rounded-[10px] opacity-60'

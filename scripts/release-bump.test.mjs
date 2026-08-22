@@ -226,3 +226,108 @@ test('the sign-off still tells the operator publishing is not theirs to do (#178
   assert.match(block, /Never run `npm publish` by hand/)
   assert.match(block, /promotion/)
 })
+
+/**
+ * #1791: the documented manual fallback in scripts/README.md claims to publish
+ * "the same versions the workflow would have published" and published four of
+ * five — @haven_ai/cli was missing from the dist-wipe, the builds and the
+ * publish. It is the break-glass path, taken mid-incident under time pressure,
+ * with no per-package summary to reveal the gap.
+ *
+ * The irony this guard exists to prevent recurring: the paragraph immediately
+ * above that block narrates @haven_ai/cli being missed in the 2026-08-07
+ * release (#1159) and staying invisible for six weeks.
+ *
+ * The set is DERIVED from each workspace's `private` flag — the same test
+ * release-bump.mjs and workspace-pin-lint.mjs already apply — because a fifth
+ * hand-maintained copy is the defect, not the fix.
+ *
+ * Note LOCKSTEP_LOCKFILE_PATHS is deliberately NOT reused here: it carries six
+ * entries including mcp-server, whose version moves in lockstep but which is
+ * private and must never be published.
+ */
+async function publishedPackageDirs() {
+  const { readdir } = await import('node:fs/promises')
+  const entries = await readdir(join(ROOT, 'packages'))
+  const published = []
+  for (const dir of entries) {
+    let manifest
+    try {
+      manifest = JSON.parse(await readFile(join(ROOT, 'packages', dir, 'package.json'), 'utf8'))
+    } catch {
+      continue
+    }
+    if (manifest.private !== true) published.push(dir)
+  }
+  return published.sort()
+}
+
+async function manualFallbackBlock() {
+  const readme = await readFile(join(ROOT, 'scripts', 'README.md'), 'utf8')
+  const start = readme.indexOf('#### Manual fallback')
+  assert.notEqual(start, -1, 'scripts/README.md no longer has a "Manual fallback" section')
+  const end = readme.indexOf('\n### ', start)
+  assert.notEqual(end, -1, 'could not find the end of the Manual fallback section')
+  return readme.slice(start, end)
+}
+
+test('the manual fallback publishes every published package, and only those (#1791)', async () => {
+  const block = await manualFallbackBlock()
+  const expected = await publishedPackageDirs()
+  // The publish loop is the authoritative list in that block.
+  const loop = block.match(/for pkg in ([^;]+); do\s*\n\s*npm publish/)
+  assert.ok(loop, 'the manual fallback no longer publishes via a "for pkg in ..." loop')
+  const listed = loop[1].trim().split(/\s+/).sort()
+  assert.deepEqual(
+    listed,
+    expected,
+    'the manual fallback publish list has drifted from the packages whose package.json is not private',
+  )
+})
+
+test('the manual fallback builds and wipes every package it publishes (#1791)', async () => {
+  const block = await manualFallbackBlock()
+  const expected = await publishedPackageDirs()
+  const wipe = block.match(/rm -rf packages\/\{([^}]+)\}\/dist/)
+  assert.ok(wipe, 'the manual fallback no longer wipes dist with a brace-expanded list')
+  assert.deepEqual(
+    wipe[1].split(',').map((s) => s.trim()).sort(),
+    expected,
+    'the dist-wipe list has drifted from the published set — a stale dist ships in the tarball',
+  )
+  for (const pkg of expected) {
+    assert.match(
+      block,
+      new RegExp(`npm run build -w packages/${pkg}\\b`),
+      `the manual fallback publishes ${pkg} but never builds it`,
+    )
+  }
+})
+
+test('the manual fallback builds in the order publish.yml builds in (#1791)', async () => {
+  // Membership is not enough, and the block's own prose says why: connect's
+  // tsup INLINES MCP_VERSION, so building connect before a fresh mcp bundles a
+  // stale one. Review on #1791 proved the point — swapping the mcp and connect
+  // build lines left every other guard here passing.
+  const block = await manualFallbackBlock()
+  const workflow = await readFile(join(ROOT, '.github', 'workflows', 'publish.yml'), 'utf8')
+  const order = (text) =>
+    [...text.matchAll(/npm run build -w packages\/(\S+)/g)].map((m) => m[1])
+
+  const documented = order(block)
+  const actual = order(workflow)
+  assert.ok(actual.length > 0, 'publish.yml no longer builds packages with `npm run build -w`')
+  assert.deepEqual(
+    documented,
+    actual,
+    'the manual fallback build ORDER has drifted from publish.yml — a stale dist gets bundled',
+  )
+})
+
+test('the manual fallback tells the operator to verify on the registry (#1791)', async () => {
+  const block = await manualFallbackBlock()
+  // This path has no per-package summary and does not stop on a partial
+  // failure, so "it printed no error" is not evidence anything published.
+  assert.match(block, /npm view/)
+  assert.match(block, /dist-tags/)
+})

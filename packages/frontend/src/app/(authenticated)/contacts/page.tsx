@@ -241,7 +241,7 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
           onClick={copyAddress}
           aria-label={copied ? 'Address copied' : 'Copy address'}
           title={copied ? 'Address copied' : 'Copy address'}
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 sm:h-9 sm:w-9"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:h-9 sm:w-9"
         >
           {copied ? (
             <Icon icon={Check} className="h-4 w-4 text-[var(--v2-success)]" />
@@ -255,7 +255,7 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
           onClick={() => onEdit(contact)}
           aria-label={`Edit ${contact.name}`}
           title="Edit contact"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 sm:h-9 sm:w-9"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:h-9 sm:w-9"
         >
           <Icon icon={Pencil} className="h-4 w-4" />
         </button>
@@ -265,7 +265,7 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
           onClick={() => onDelete(contact)}
           aria-label={`Delete ${contact.name}`}
           title="Delete contact"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 sm:h-9 sm:w-9"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:h-9 sm:w-9"
         >
           <Icon icon={Trash2} className="h-4 w-4" />
         </button>

@@ -743,6 +743,156 @@ describe('mergeX402Transactions', () => {
     })
   })
 
+  it('carries settlement_scheme from machine_metadata on a confirmed x402 payment intent (eip3009)', async () => {
+    vi.spyOn(pool, 'query')
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'payment-id',
+            tx_hash: TX_HASH,
+            agent_id: 'agent-id',
+            agent_name: 'Research assistant',
+            safe_id: 'safe-id',
+            safe_address: SAFE_ADDRESS,
+            safe_name: 'Main wallet',
+            chain_id: 8453,
+            token_symbol: 'USDC',
+            token_address: USDC_ADDRESS,
+            to_address: '0x1111111111111111111111111111111111111111',
+            amount_raw: '20000',
+            amount_human: '0.02',
+            x402_merchant_address: '0x2222222222222222222222222222222222222222',
+            x402_resource_url: 'https://api.example.com/data',
+            payment_proof_status: 'payment_confirmed',
+            payment_reconciliation_event_type: null,
+            settlement_scheme: 'eip3009',
+            confirmed_at: '2026-05-08T11:50:10Z',
+            created_at: '2026-05-08T11:49:55Z',
+          },
+        ],
+      } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+
+    const result = await mergeX402Transactions(
+      'user-id',
+      [{ id: 'safe-id', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [],
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].settlementScheme).toBe('eip3009')
+  })
+
+  it('carries settlement_scheme from machine_metadata on an executed x402 approval request (erc7710)', async () => {
+    vi.spyOn(pool, 'query')
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'approval-id',
+            tx_hash: TX_HASH,
+            agent_id: 'agent-id',
+            agent_name: 'Research assistant',
+            safe_id: 'safe-id',
+            safe_address: SAFE_ADDRESS,
+            safe_name: 'Main wallet',
+            chain_id: 8453,
+            token_symbol: 'USDC',
+            token_address: USDC_ADDRESS,
+            to_address: '0x1111111111111111111111111111111111111111',
+            amount_raw: '10000',
+            amount_human: '0.01',
+            merchant_address: '0x2222222222222222222222222222222222222222',
+            payment_resource_url: 'https://mcp.soundside.ai/mcp',
+            payment_proof_status: 'payment_confirmed',
+            payment_reconciliation_event_type: null,
+            settlement_scheme: 'erc7710',
+            executed_at: '2026-05-22T07:50:10Z',
+            created_at: '2026-05-22T07:49:55Z',
+          },
+        ],
+      } as never)
+
+    const result = await mergeX402Transactions(
+      'user-id',
+      [{ id: 'safe-id', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [],
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].settlementScheme).toBe('erc7710')
+  })
+
+  it('leaves settlementScheme null-in-null-out when the metadata key is absent', async () => {
+    vi.spyOn(pool, 'query')
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'payment-id',
+            tx_hash: TX_HASH,
+            agent_id: 'agent-id',
+            agent_name: 'Research assistant',
+            safe_id: 'safe-id',
+            safe_address: SAFE_ADDRESS,
+            safe_name: 'Main wallet',
+            chain_id: 8453,
+            token_symbol: 'USDC',
+            token_address: USDC_ADDRESS,
+            to_address: '0x1111111111111111111111111111111111111111',
+            amount_raw: '20000',
+            amount_human: '0.02',
+            x402_merchant_address: '0x2222222222222222222222222222222222222222',
+            x402_resource_url: 'https://api.example.com/data',
+            payment_proof_status: 'payment_confirmed',
+            payment_reconciliation_event_type: null,
+            confirmed_at: '2026-05-08T11:50:10Z',
+            created_at: '2026-05-08T11:49:55Z',
+          },
+        ],
+      } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+
+    const result = await mergeX402Transactions(
+      'user-id',
+      [{ id: 'safe-id', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [],
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0].settlementScheme).toBeUndefined()
+  })
+
+  it('keeps settlementScheme on a feed row when agent enrichment does not overwrite it', async () => {
+    vi.spyOn(pool, 'query').mockResolvedValue({ rows: [] } as never)
+
+    const [result] = await enrichTransactionsWithAgents('user-id', [
+      {
+        hash: TX_HASH,
+        type: 'erc20',
+        from: SAFE_ADDRESS,
+        to: '0x1111111111111111111111111111111111111111',
+        value: '20000',
+        valueFormatted: '0.02',
+        asset: 'USDC',
+        decimals: 6,
+        direction: 'out',
+        timestamp: 1778240999,
+        blockNumber: 45725826,
+        isError: false,
+        tokenAddress: USDC_ADDRESS,
+        tokenSymbol: 'USDC',
+        chainId: 8453,
+        safeId: 'safe-id',
+        safeAddress: SAFE_ADDRESS,
+        safeName: 'Main wallet',
+        source: 'x402',
+        settlementScheme: 'eip3009',
+      } as EnrichedTransaction,
+    ])
+
+    expect(result.settlementScheme).toBe('eip3009')
+  })
+
   it('marks x402 transactions with open merchant reconciliation as needing attention', async () => {
     vi.spyOn(pool, 'query')
       .mockResolvedValueOnce({

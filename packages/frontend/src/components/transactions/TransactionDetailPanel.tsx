@@ -9,6 +9,7 @@ import { truncate } from '@/lib/format'
 import { parseX402Hostname } from '@/lib/transaction-labels'
 import {
   isDelegateSweep,
+  settlementSchemeLabel,
   transactionStatus,
   transactionTitle,
 } from '@/lib/transaction-presentation'
@@ -166,6 +167,9 @@ export default function TransactionDetailPanel({
           <DetailRow label="Amount" value={`${tx.valueFormatted} ${tx.asset}`} />
           {tx.paymentId ? <DetailRow label="Payment ID" value={<span className="v2-tabular">{truncate(tx.paymentId)}</span>} /> : null}
           {tx.paymentProofStatus ? <DetailRow label="Proof" value={tx.paymentProofStatus} /> : null}
+          {tx.settlementScheme ? (
+            <DetailRow label="Settlement" value={settlementSchemeLabel(tx.settlementScheme)} />
+          ) : null}
         </Section>
       ) : null}
 

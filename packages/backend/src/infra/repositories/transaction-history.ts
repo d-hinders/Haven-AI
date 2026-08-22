@@ -119,6 +119,7 @@ export interface X402PaymentIntentRow {
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
   amount_sek: string | null
+  settlement_scheme: string | null
   confirmed_at: string | null
   created_at: string
 }
@@ -142,6 +143,7 @@ export interface X402ApprovalRequestRow {
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
   amount_sek: string | null
+  settlement_scheme: string | null
   executed_at: string | null
   created_at: string
 }
@@ -395,6 +397,7 @@ export const FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL = `SELECT pi.id,
             pi.x402_resource_url,
             mpe.proof_status AS payment_proof_status,
             mpe.amount_sek AS amount_sek,
+            pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
             mpre.event_type AS payment_reconciliation_event_type,
             pi.confirmed_at,
             pi.created_at
@@ -447,6 +450,7 @@ export const FIND_CONFIRMED_X402_APPROVAL_REQUESTS_SQL = `SELECT ar.id,
             COALESCE(ar.payment_resource_url, ar.x402_resource_url) AS payment_resource_url,
             mpe.proof_status AS payment_proof_status,
             mpe.amount_sek AS amount_sek,
+            ar.machine_metadata->>'settlement_scheme' AS settlement_scheme,
             mpre.event_type AS payment_reconciliation_event_type,
             ar.executed_at,
             ar.created_at

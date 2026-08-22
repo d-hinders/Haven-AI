@@ -559,6 +559,37 @@ export async function dismissMobileSidebar(page: Page) {
  * page BEHIND the dialog — still a real assertion, but not a check on the
  * dialog's own layout. Filed as #1773 rather than widened here: it wants its
  * own selector, its own call-site changes and its own mutation proof.
+ *
+ * ## The viewport-absolute fields, and why they are REPORTED and not asserted
+ *
+ * `viewportWidth` / `contentLeft` / `contentRight` measure the content region
+ * against the VIEWPORT rather than against itself (#1779). Both overflow
+ * metrics above compare a box to another box — `scrollWidth` to `clientWidth`,
+ * of the same element — so they are invariant under any transformation that
+ * moves the whole shell. Measured: swapping the mobile toggle's `fixed` for
+ * `relative` puts it in flow as a 32px flex item, `<main>` goes from
+ * `left 0, width 393` to `left 32, width 361`, and BOTH ratios are unchanged
+ * (`361 - 361 = 0`, exactly as `393 - 393 = 0` was). The whole app shell
+ * displaced 32px and every relative reading held. That is a property of the
+ * reference frame, not of how the assertion was phrased — no rewording of a
+ * "A relative to B" check can see A and B move together.
+ *
+ * These three are deliberately NOT asserted here, and that is the design rather
+ * than an omission. This helper has three classes of caller with three
+ * different CORRECT answers: below `lg` the drawer is `fixed`, so `<main>`
+ * spans the full viewport (`0 → innerWidth`); on desktop the drawer is
+ * `lg:static` and legitimately occupies the first 240px, so `contentLeft` is
+ * 240; and `/login` is outside the shell entirely and has no content region at
+ * all. A single anchor baked in here would have to be loose enough to hold for
+ * all three, which is another way of saying it would hold for the defect too.
+ *
+ * So the numbers come from here and the CONTRACT is asserted where it is known:
+ * `navigation.mobile.spec.ts` pins the mobile shell to `0 → innerWidth`. That
+ * split is also why `mobile-nav-layering.mobile.spec.ts` computes its own
+ * anchor instead of calling this helper — one shared anchor that every mobile
+ * suite trusts would be a single reference frame again, and a single reference
+ * frame is the thing #1779 is about. Two independent measurements can disagree;
+ * one cannot.
  */
 export async function expectNoHorizontalOverflow(page: Page) {
   return page.evaluate(() => {
@@ -571,6 +602,14 @@ export async function expectNoHorizontalOverflow(page: Page) {
     const main = document.getElementById('main-content')
     const contentScrollWidth = main ? main.scrollWidth : null
     const contentClientWidth = main ? main.clientWidth : null
+
+    // Where the content region sits IN THE VIEWPORT. Nothing above this line
+    // can see the shell move, because everything above compares a box to
+    // itself. `getBoundingClientRect` is viewport-relative by definition, so
+    // these are the anchored readings — see the JSDoc for why they are reported
+    // rather than asserted here (#1779).
+    const contentBox = main ? main.getBoundingClientRect() : null
+    const viewportWidth = window.innerWidth
     // Presence is NOT enough: an attached but unlaid-out `<main>` measures
     // `0 - 0 = 0`, which reads as "fits". Require a real box, so the no-op
     // path fails the `contentRegionFound` assertion instead of passing.
@@ -598,6 +637,11 @@ export async function expectNoHorizontalOverflow(page: Page) {
       contentOverflowBy,
       contentOverflows,
       hasOverflow: documentOverflows || contentOverflows,
+      // Viewport-absolute (#1779). Rounded: sub-pixel layout makes a raw
+      // `left` read `0.00001` and an `=== 0` assertion flake on it.
+      viewportWidth,
+      contentLeft: contentBox ? Math.round(contentBox.left) : null,
+      contentRight: contentBox ? Math.round(contentBox.right) : null,
     }
   })
 }

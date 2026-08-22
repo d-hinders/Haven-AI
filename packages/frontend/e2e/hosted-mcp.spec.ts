@@ -63,7 +63,10 @@ test.describe('Hosted MCP — in-budget path', () => {
     // Primary CTA is present — clicking it opens the ConnectAgentModal
     await expect(page.getByRole('button', { name: 'Connect agent', exact: true })).toBeVisible()
 
-    expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
+    expect(await expectNoHorizontalOverflow(page)).toMatchObject({
+      hasOverflow: false,
+      contentRegionFound: true,
+    })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 
@@ -105,7 +108,10 @@ test.describe('Hosted MCP — in-budget path', () => {
     // Multiple elements may show "12.50" (stat + activity row) — pin to first.
     await expect(page.getByText(/12\.50/).first()).toBeVisible()
 
-    expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
+    expect(await expectNoHorizontalOverflow(page)).toMatchObject({
+      hasOverflow: false,
+      contentRegionFound: true,
+    })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 })
@@ -140,7 +146,10 @@ test.describe('Hosted MCP — over-budget path', () => {
     // The URL can appear multiple times (row + detail) — pin to first.
     await expect(page.getByText(/research\.example/i).first()).toBeVisible()
 
-    expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
+    expect(await expectNoHorizontalOverflow(page)).toMatchObject({
+      hasOverflow: false,
+      contentRegionFound: true,
+    })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 
@@ -163,13 +172,22 @@ test.describe('Hosted MCP — over-budget path', () => {
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 
-  test('approval page renders without horizontal overflow on mobile', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 }) // iPhone 14
-    await page.goto('/approvals')
-    await dismissMobileSidebar(page)
-
-    expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
-  })
+  // REMOVED (#1771): 'approval page renders without horizontal overflow on
+  // mobile'. It narrowed the viewport to 390px with `setViewportSize` inside
+  // the DESKTOP project and asserted the old document-level overflow metric —
+  // and that assertion was its entire body. Inside the authenticated shell
+  // that metric could not fail, so the test proved nothing whatsoever, which
+  // is why nobody noticed it was also not testing mobile: `setViewportSize`
+  // leaves `maxTouchPoints` at 0, the pointer fine and the UA desktop (the
+  // #1768/#1770 finding).
+  //
+  // Not a coverage loss. `/approvals` is in `navigation.mobile.spec.ts`'
+  // ROUTES, which checks it at 393px under real Pixel 5 emulation using the
+  // content-region metric, and gates every PR since #1770 — strictly stronger
+  // on every axis. Repairing this one would have left two places asserting the
+  // same thing with the weaker one lying about being mobile.
+  //
+  // If you want a new mobile assertion, add it to a `*.mobile.spec.ts`.
 })
 
 // ── Connected-state path (mcp_last_seen_at) ───────────────────────────────────

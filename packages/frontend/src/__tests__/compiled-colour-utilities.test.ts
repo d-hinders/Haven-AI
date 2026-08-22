@@ -212,8 +212,24 @@ function uses(): Use[] {
 
 // ── compiling ──────────────────────────────────────────────────────────────
 
+/**
+ * The properties that COUNT as "a colour was emitted".
+ *
+ * The `border` branch allows hyphens inside the middle segment on purpose.
+ * `border-s-*`/`border-e-*` compile to the LOGICAL properties
+ * `border-inline-start-color` / `border-inline-end-color`, and an inner `[a-z]+`
+ * cannot consume `-inline-start-` — so a live, correctly-compiling
+ * `border-s-brand/20` was reported as dead.
+ *
+ * Worth naming the direction, because it is the opposite of the defect this
+ * file exists for and reads as harmless by comparison: everything else here
+ * fails to fire on broken code, whereas this fired on CORRECT code. That is not
+ * the safer failure. It would have forced a working class into a `KNOWN_DEAD`
+ * map whose whole value is that its entries are really dead — a false entry
+ * there discredits the other thirty-one.
+ */
 const COLOUR_DECL =
-  /^(?:background-color|color|border(?:-[a-z]+)?-color|fill|stroke|outline-color|accent-color|caret-color|text-decoration-color|--tw-(?:ring|ring-offset|shadow|gradient-from|gradient-to|gradient-via)-color)$/
+  /^(?:background-color|color|border(?:-[a-z-]+)?-color|fill|stroke|outline-color|accent-color|caret-color|text-decoration-color|--tw-(?:ring|ring-offset|shadow|gradient-from|gradient-to|gradient-via)-color)$/
 
 /**
  * Compile every utility in ONE Tailwind pass and return the set that emitted a
@@ -331,8 +347,22 @@ describe('REGRESSION: the three shapes that have actually shipped (#1818)', () =
     ).toEqual([])
   }, COMPILE_TIMEOUT)
 
-  it('the fix TopBar and Sidebar actually shipped is the compiling one', async () => {
-    const live = await compileLive(['bg-bg/85', 'bg-ink/40'])
-    expect([...live].sort()).toEqual(['bg-bg/85', 'bg-ink/40'])
+  it('the fix TopBar actually shipped is the compiling one', async () => {
+    // Sidebar's scrim is deliberately NOT here: it moved to the shared
+    // `v2-modal-backdrop` class rather than to `bg-ink/40`, so it carries no
+    // opacity modifier at all and this guard has nothing to say about it.
+    const live = await compileLive(['bg-bg/85'])
+    expect([...live]).toEqual(['bg-bg/85'])
+  }, COMPILE_TIMEOUT)
+
+  it('recognises the LOGICAL border properties as a colour', async () => {
+    // `border-s-*`/`border-e-*` emit `border-inline-start-color` /
+    // `border-inline-end-color`. COLOUR_DECL's border branch must allow the
+    // hyphens inside that middle segment, or these correctly-compiling classes
+    // are reported dead — a false entry in an inventory that claims accuracy.
+    // No call-site uses them today, which is exactly why this is pinned: the
+    // scan would have been wrong the first time someone reached for one.
+    const live = await compileLive(['border-s-brand/20', 'border-e-brand/20'])
+    expect([...live].sort()).toEqual(['border-e-brand/20', 'border-s-brand/20'])
   }, COMPILE_TIMEOUT)
 })

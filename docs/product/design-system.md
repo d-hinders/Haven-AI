@@ -474,10 +474,17 @@ focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-<tone>/80
 
 Three parts, each decided rather than inherited:
 
-- **`focus-visible:`, never `focus:`.** Form fields used to fire on mouse click as
-  well. This costs nothing for text inputs — the Selectors-4 heuristic makes a
-  focused `<input>`/`<textarea>` match `:focus-visible` however it was focused —
-  and for `<select>` and buttons a click no longer leaves a ring behind.
+- **`focus-visible:`, never `focus:`.** Form fields used to fire on mouse click
+  as well. Switching them costs nothing, and that was **measured in a real
+  browser rather than reasoned from the selector name**: in Chromium a
+  mouse-clicked `<input>`, `<textarea>` *and* `<select>` all match
+  `:focus-visible` and keep their ring, because the heuristic covers any control
+  that accepts keyboard input once focused — not only text entry. A
+  mouse-clicked `<button>`, measured the same way on the same page, does **not**
+  match and shows no ring, which is both the desired behaviour and the control
+  that proves the others were not a stuck keyboard modality. The heuristic is
+  UA-defined, so a browser that declined to match on a clicked select would only
+  drop a ring on mouse click — never a keyboard regression.
 - **`ring-2`, and `/80` opacity.** `/80` is the lowest 10%-step alpha at which
   every ring/background pair in the product clears WCAG's **3:1** non-text
   contrast bar ([1.4.11](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast),

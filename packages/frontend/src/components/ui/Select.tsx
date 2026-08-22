@@ -1,12 +1,23 @@
 import type { SelectHTMLAttributes } from 'react'
 
 /**
- * Unlike `Input` and `Textarea`, moving this to `focus-visible:` (#1746) is a
- * real behavioural change: `<select>` is not a text-entry field, so the
- * Selectors-4 heuristic does NOT force a match on mouse focus, and a clicked
- * select no longer keeps a ring after its dropdown closes. That is the intended
- * outcome — it now behaves like every other clicked control in the product, and
- * a native select's open list is its own affordance.
+ * Moved from `focus:` to `focus-visible:` with the rest of the form family
+ * (#1746). This was expected to be the one place the switch changed behaviour —
+ * `<select>` is not a text-entry field, so the Selectors-4 heuristic looked
+ * like it should decline to match on a mouse click.
+ *
+ * Measured in Chromium, that is **wrong**: a mouse-clicked `<select>` matches
+ * `:focus-visible` and keeps its ring, exactly like `<input>` and `<textarea>`.
+ * The heuristic covers controls that accept keyboard input once focused, and a
+ * select does (arrow keys, typeahead) — it is not restricted to text entry. A
+ * mouse-clicked `<button>` in the same page, same click mechanism, measured
+ * `:focus-visible = false` with no ring, which is what rules out the result
+ * being a stuck keyboard modality.
+ *
+ * So the variant switch is behaviour-preserving here too. The heuristic is
+ * UA-defined rather than spec-pinned, so a browser that declined to match would
+ * simply drop the ring on mouse click — cosmetic, and never a keyboard
+ * accessibility regression, since keyboard focus always matches.
  */
 export function Select({
   className = '',

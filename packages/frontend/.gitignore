@@ -1,3 +1,7 @@
 
 # Rendered-screen evidence (#896) — attach to PRs, never commit
 .screenshots/
+
+# Capture-server identity marker (#1800) — written per run into public/ so the
+# app itself can prove which worktree it is, removed when the run ends
+public/capture-identity.json

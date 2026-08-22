@@ -2,10 +2,17 @@
 #
 # Baselines MUST be Linux-rendered (CI is the judge; macOS fonts differ), so
 # intended visual changes are accepted by dispatching this workflow on the PR
-# branch: it rebuilds, reruns the visual spec with --update-snapshots, and
+# branch: it rebuilds, reruns the visual spec with --update-snapshots=ALL, and
 # commits the new baselines back to the branch — where they show up as a
 # reviewable image diff in the PR. This is also how the very first baseline
 # set was bootstrapped.
+#
+# `=all` is load-bearing and not a stylistic choice — see the note on the
+# Regenerate step below (#1760). Because `all` blesses whatever renders without
+# comparing anything, DIAGNOSE A FAILING DIFF BEFORE DISPATCHING THIS: scan the
+# diff PNG by row (a clean horizontal cut or a size-mismatch line is a height
+# change; a continuous colour difference at unchanged dimensions is drift).
+# Regenerating first is how a broken render becomes the expected state.
 name: Update visual baselines
 
 on:

@@ -3,6 +3,7 @@ import {
   collectBrowserErrors,
   dismissMobileSidebar,
   expectNoHorizontalOverflow,
+  measureDialogOverflow,
   mockHavenApi,
   seedAuthenticatedSession,
   testSafeAddress,
@@ -37,10 +38,28 @@ test.describe('dashboard browser UX', () => {
     // Measures the dashboard BEHIND the modal, not the modal. A fixed-position
     // overlay contributes to neither scroll box — see the blind spot noted on
     // `expectNoHorizontalOverflow` (#1771), measured rather than assumed.
-    // Checking the modal's own box is #1773.
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,
       contentRegionFound: true,
+    })
+    // ...and now the modal's OWN layout (#1773), which the assertion above is
+    // structurally unable to see. `dialogFound` is asserted because an overlay
+    // that is attached but not laid out measures `0 - 0 = 0` and reads as
+    // "fits" — the same silent no-op `contentRegionFound` guards against.
+    //
+    // This is the one dialog of the three whose `role="dialog"` node is the
+    // scrolling panel itself, so here `dialogOverflowBy` and
+    // `overlayOverflowBy` agree. On the other two the dialog node is blind and
+    // only the subtree figure moves; see the helper's JSDoc for the table.
+    const receiveOverlay = await measureDialogOverflow(page)
+    expect(receiveOverlay, `receive modal overflows: ${JSON.stringify(receiveOverlay)}`).toMatchObject({
+      dialogFound: true,
+      // Exactly one overlay, so "the dialog measured" is unambiguous. Without
+      // this the helper silently measures whichever `[role="dialog"]` comes
+      // first in DOM order, and a second one (a nested confirm, a portalled
+      // prompt) would go unchecked with nothing going red to say so.
+      dialogCount: 1,
+      overlayOverflows: false,
     })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })

@@ -143,7 +143,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 rounded-md p-1.5 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+            className="-mr-1 rounded-md p-1.5 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
           >
             <Icon icon={X} className="h-4 w-4" />
           </button>
@@ -242,7 +242,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
                 <button
                   type="button"
                   onClick={() => void copyAgentId()}
-                  className="flex-shrink-0 rounded text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+                  className="flex-shrink-0 rounded text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
                   aria-label="Copy agent ID"
                 >
                   {idCopied ? 'Copied' : 'Copy'}

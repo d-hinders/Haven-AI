@@ -404,7 +404,7 @@ export function HostedConnectCard({
                   type="button"
                   onClick={() => setShowManualSetup((v) => !v)}
                   aria-expanded={showManualSetup}
-                  className="flex w-full items-start justify-between gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:ring-offset-2"
+                  className="flex w-full items-start justify-between gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2"
                 >
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -440,7 +440,7 @@ export function HostedConnectCard({
                           <button
                             type="button"
                             onClick={() => setShowConfigFallback((v) => !v)}
-                            className="rounded-sm text-[12px] text-[var(--v2-ink-3)] underline-offset-2 hover:text-[var(--v2-ink)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+                            className="rounded-sm text-[12px] text-[var(--v2-ink-3)] underline-offset-2 hover:text-[var(--v2-ink)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
                           >
                             {showConfigFallback ? 'Hide config' : "Didn't work? Show config"}
                           </button>

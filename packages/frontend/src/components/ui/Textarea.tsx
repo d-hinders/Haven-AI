@@ -24,12 +24,13 @@ export function Textarea({
   ...props
 }: TextareaProps) {
   const borderClass = invalid
-    ? 'border-[var(--v2-danger)] focus:border-[var(--v2-danger)] focus:ring-danger/20'
-    : 'border-[var(--v2-border)] focus:border-[var(--v2-brand)] focus:ring-brand/20'
+    // `focus-visible:` rather than `focus:` — see the note in Input.tsx (#1746).
+    ? 'border-[var(--v2-danger)] focus-visible:border-[var(--v2-danger)] focus-visible:ring-danger/80'
+    : 'border-[var(--v2-border)] focus-visible:border-[var(--v2-brand)] focus-visible:ring-brand/80'
 
   const textareaEl = (
     <textarea
-      className={`w-full resize-none rounded-md border bg-[var(--v2-bg)] px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] transition-colors focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-[var(--v2-surface)] disabled:text-[var(--v2-ink-3)] ${borderClass} ${className}`}
+      className={`w-full resize-none rounded-md border bg-[var(--v2-bg)] px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-[var(--v2-surface)] disabled:text-[var(--v2-ink-3)] ${borderClass} ${className}`}
       {...props}
     />
   )

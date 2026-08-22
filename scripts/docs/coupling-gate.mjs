@@ -128,28 +128,47 @@ export function isIncidentalPath(file) {
  * return the docs implicated by the change. A doc is implicated when a changed
  * file matches one of its globs AND the doc itself was not changed.
  *
- * Same-day suppression: a doc whose `last-verified` is `today` is skipped — it
- * was already confirmed accurate in this day's work, so re-flagging it on every
- * subsequent edit to a covered file is just noise. This is a heuristic: it
- * trades a small same-day-staleness risk for far less noise. `today` is
- * injectable for testing.
+ * SAME-DAY SUPPRESSION IS GONE (#1824). It used to skip any doc whose
+ * `last-verified` was today. #1077 had already ruled that reasoning out for the
+ * blocking half — "a doc that some OTHER PR verified today says nothing about
+ * whether THIS PR made it stale" — and carved contract docs out of it under
+ * `strict`. #1824 is that same argument finished: it applies just as well to
+ * the advisory half, and the carve-out was the wrong shape.
  *
- * It does NOT apply to a contract doc under `strict`. The advisory comment can
- * afford a wall-clock heuristic; a blocking gate cannot — it would be green at
- * 23:59 and red at 00:01 with no code change, and a doc that some *other* PR
+ * The mechanical reason it could never be right: a doc THIS change verified is
+ * a doc THIS change edited, and `changedSet.has(doc)` skips it four lines down.
+ * So the only situation in which same-day suppression could ever fire was a
+ * stamp written by somebody else's work — precisely the situation #1077 named
+ * as unacceptable. The heuristic was not mostly-right with an edge case; its
+ * entire domain was the edge case.
+ *
+ * `last-verified` notes say so themselves. `docs/product/design-system.md`
+ * carried EIGHT chained notes stamped 2026-08-22, each ending "nothing else
+ * re-verified in this pass" — the document stating, in prose, that one section
+ * was re-read — while the gate read the date and concluded the whole file was
+ * current against every diff that day.
+ *
+ * Measured before removing rather than argued: over the last 40 merges into
+ * `dev`, the heuristic hid 13 advisories across 8 merges (~0.33 per merge),
+ * including `design-system.md` on a change to `TransactionMovement.tsx`, a file
+ * it `covers:` by exact path. So removal buys back 13 real coupling checks at a
+ * cost of one extra advisory line every third PR. That is not a noise problem.
+ *
+ * The `today` parameter is REMOVED rather than left accepted-and-ignored. It
+ * had no other reader in this function, and an unused knob that used to change
+ * behaviour is how a future caller reintroduces the bug believing it still
+ * works. Staleness AGE reporting is `ageDays`, which owns its own `now`.
+ *
+ * Historical note on the carve-out this replaces: a blocking gate could not
+ * afford a wall-clock heuristic — it would be green at 23:59 and red at 00:01
+ * with no code change, and a doc that some *other* PR
  * verified today says nothing about whether this PR made it stale.
  *
- * Note: the default `today` is the UTC calendar date, while `last-verified` is a
- * human-written local date — so for non-UTC contributors the match can be off by
- * at most ±1 calendar day. Harmless for the advisory half (worst case: one extra
- * comment), and the strict half no longer depends on it at all.
+ * The UTC-vs-local ±1-day skew that note used to carry no longer affects any
+ * suppression decision, because there is none. It still applies to `ageDays`
+ * staleness reporting, where being a day out never changes an outcome.
  */
-export function implicatedDocs(
-  changed,
-  docs,
-  today = new Date().toISOString().slice(0, 10),
-  { strict = false } = {},
-) {
+export function implicatedDocs(changed, docs, { strict = false } = {}) {
   const changedSet = new Set(changed)
   const findings = []
   for (const { doc, covers, lastVerified, contract, satisfiedBy } of docs) {
@@ -170,7 +189,10 @@ export function implicatedDocs(
       continue
     }
     if (!covers || covers.length === 0) continue
-    if (lastVerified && lastVerified === today && !(strict && contract)) continue
+    // (#1824) No same-day suppression. See the header: a doc this change
+    // verified is a doc this change edited, and that was already handled by
+    // `changedSet.has(doc)` above — so every suppression this line could still
+    // perform was on somebody else's stamp.
     // Noise-reduction never weakens the BLOCKING half. Under strict, a contract
     // doc sees every changed file its globs match — the same carve-out the
     // same-day heuristic gets above, for the same reason: a green --strict run
@@ -250,7 +272,7 @@ async function main() {
   }
 
   const docsByPath = new Map(docs.map((d) => [d.doc, d]))
-  const findings = implicatedDocs(changed, docs, undefined, { strict })
+  const findings = implicatedDocs(changed, docs, { strict })
   const hasFindings = findings.length > 0
   const contractFindings = findings.filter((f) => f.contract)
 

@@ -331,3 +331,99 @@ test('the manual fallback tells the operator to verify on the registry (#1791)',
   assert.match(block, /npm view/)
   assert.match(block, /dist-tags/)
 })
+
+/**
+ * #1795: scripts/README.md stated the published-package count twice, in the
+ * same file, differently — "the four published packages" at the top and "all
+ * five" further down. Both stale lines predated @haven_ai/cli becoming
+ * published (`3f6e9959c`), and neither was wrong in a way any check could see.
+ *
+ * Third instance of one root cause in three days (#1159, #1526, #1791): the
+ * published set is hand-written in several places and each copy drifts on its
+ * own. So this guard, like #1791's above, DERIVES the set from each workspace's
+ * `private` flag rather than adding a fifth hand-maintained copy.
+ *
+ * Scoped deliberately to the two enumerations that claim to BE the set. Prose
+ * elsewhere in the file names packages for other reasons — the build order
+ * (`sdk → signer → mcp → connect`, correct WITHOUT cli), the `private`-rule
+ * table, the #1159 story about cli — and a file-wide "every package name must
+ * appear" rule would fail on all of them and push the next author to weaken it.
+ */
+function namedPackages(text) {
+  return [...text.matchAll(/`@haven_ai\/([a-z-]+)`/g)].map((m) => m[1]).sort()
+}
+
+async function readmeText() {
+  return readFile(join(ROOT, 'scripts', 'README.md'), 'utf8')
+}
+
+test('the README\'s "problem it solves" names exactly the published set (#1795)', async () => {
+  const readme = await readmeText()
+  const sentence = readme.match(/^A version bump for the .*$/m)
+  assert.ok(sentence, 'scripts/README.md no longer opens release-bump.mjs with "A version bump for the ..."')
+  assert.deepEqual(
+    namedPackages(sentence[0]),
+    await publishedPackageDirs(),
+    'the opening sentence enumerates a published set that has drifted from the non-private workspaces',
+  )
+})
+
+test('the README\'s version-bump step names exactly the LOCKSTEP set (#1795)', async () => {
+  // Not the same set as above, and the difference is the whole point: the
+  // script bumps mcp-server's version too (VERSIONED_PACKAGES), for coherence
+  // with HOSTED_SERVER_VERSION, while mcp-server stays private and unpublished.
+  // Conflating the two is how ":105" came to say "four".
+  const readme = await readmeText()
+  const step = readme.match(/^4\. \*\*Update\*\* the `version` field.*$/m)
+  assert.ok(step, 'scripts/README.md step 4 is no longer the version-field update step')
+  const expected = [...(await publishedPackageDirs()), 'mcp-server'].sort()
+  const named = [...step[0].matchAll(/`([a-z-]+)`/g)]
+    .map((m) => m[1])
+    .filter((n) => expected.includes(n))
+    .sort()
+  assert.deepEqual(
+    [...new Set(named)],
+    expected,
+    'step 4 enumerates a lockstep set that has drifted from (non-private workspaces + mcp-server)',
+  )
+})
+
+test('the sign-off names release shards by version, never by PR number (#1789)', async () => {
+  // The reviewer pass on this change found this line still teaching the retired
+  // convention after all three DOCS had been corrected — and it is the copy a
+  // release-cutter actually reads, at the moment they are about to write the
+  // shard. A PR-numbered name is unsatisfiable by construction: the coupling
+  // gate blocks the PR until the shard exists, so the number does not exist
+  // yet. Nothing validates a shard filename, so a wrong name never fails
+  // anything; it just persists as a mislabelled compliance record.
+  const printed = emitted(await doneBlock())
+  const shardLine = printed.match(/^.*casp-changelog.*$/m)
+  assert.ok(shardLine, 'the sign-off no longer tells the operator to write a CASP shard')
+  assert.doesNotMatch(
+    shardLine[0],
+    /<pr>|<PR>/,
+    'the sign-off names the shard after the PR number, which cannot be known when the shard must be written (#1789)',
+  )
+  // It interpolates the real version rather than a placeholder, so the operator
+  // has nothing left to guess.
+  assert.match(
+    shardLine[0],
+    /newVersion\}-release\.md/,
+    'the sign-off should print the actual release version in the shard filename',
+  )
+})
+
+test('no surviving prose calls the published set "four" (#1795)', async () => {
+  const readme = await readmeText()
+  // Whitespace-collapsed so a hand-rewrap that puts "four" and "packages" on
+  // adjacent LINES cannot slip past (review nit). Still sentence-bounded: the
+  // file legitimately says things like "four more source constants appeared".
+  const stale = readme
+    .replace(/\s+/g, ' ')
+    .match(/\bfour\b[^.]*\bpackages?\b|\bpackages?\b[^.]*\bfour\b/gi)
+  assert.equal(
+    stale,
+    null,
+    `scripts/README.md still describes a package set as "four": ${JSON.stringify(stale)}`,
+  )
+})

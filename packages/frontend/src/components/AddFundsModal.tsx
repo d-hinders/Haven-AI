@@ -182,7 +182,33 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
               <Button variant="ghost" className="mt-3 w-full" onClick={handleReceiveInstead}>
                 Show receive address →
               </Button>
-            ) : null}
+            ) : (
+              /*
+                A refusal still owes the user a next action — `design-review.md`
+                ("Error copy explains the next useful action") does not exempt
+                the states where we are the ones who cannot proceed. Retrying is
+                the honest one, and the only one: the unresolved chain reaches
+                this component as a safe that arrived without `chain_id`, which
+                is a load-shaped condition, so re-fetching is a real step rather
+                than a gesture.
+
+                The label is `ErrorBoundary`'s, deliberately reused rather than
+                reinvented (`ErrorBoundary.tsx:64`) — "Refresh page" promises
+                only a retry. It must NOT grow a sentence like "refreshing
+                usually resolves it": that would re-promise the network the copy
+                above just refused, which is the exact shape of the earlier
+                finding on this PR. `ui/Button` rather than ErrorBoundary's raw
+                element, because that one is styled for a page outside the app
+                shell; inside a modal the primitive is the design-system answer.
+              */
+              <Button
+                variant="ghost"
+                className="mt-3 w-full"
+                onClick={() => window.location.reload()}
+              >
+                Refresh page
+              </Button>
+            )}
             {/*
               The receive handoff is offered ONLY when there is no address at
               all — its original condition, restored after the rendered review

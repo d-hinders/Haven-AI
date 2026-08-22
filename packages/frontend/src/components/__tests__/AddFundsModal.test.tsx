@@ -90,6 +90,16 @@ describe('AddFundsModal', () => {
       screen.getByText(/we can't tell you where to send USDC/i),
     ).toBeInTheDocument()
 
+    // A refusal still owes a next action, and Refresh is the honest one — it
+    // promises a retry and nothing else. Asserted by ROLE, not by scanning for
+    // the word, so a stray mention elsewhere in the dialog cannot satisfy it.
+    const refresh = screen.getByRole('button', { name: 'Refresh page' })
+    expect(refresh).toBeInTheDocument()
+    // And it must not re-promise the network the sentence above refused. The
+    // whole dialog is checked, because the over-promise would most naturally
+    // appear as a line NEXT TO the button rather than inside its label.
+    expect(screen.getByRole('dialog').textContent).not.toMatch(/usually resolves|will show|try again to see/i)
+
     // And no handoff to the receive screen. That screen calls
     // `getChainConfig(safe.chain_id)` unconditionally and throws on a missing
     // chain, so offering it here would make the refusal's own way out a crash
@@ -125,5 +135,9 @@ describe('AddFundsModal', () => {
 
     expect(screen.getByRole('button', { name: /Show receive address/ })).toBeInTheDocument()
     expect(screen.getByRole('dialog').textContent).not.toMatch(/\bBase\b/)
+    // Refresh belongs to the OTHER unresolved state — the one where an address
+    // exists and only the chain is missing. Here there is a better next action
+    // than retrying, so the two must not both appear.
+    expect(screen.queryByRole('button', { name: 'Refresh page' })).toBeNull()
   })
 })

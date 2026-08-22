@@ -133,6 +133,23 @@ test.describe('mobile viewport', () => {
       // must never be silent.
       await page.locator('#main-content').waitFor({ state: 'attached' })
 
+      // ...and wait for the SIDEBAR too, not just the content region (#1779).
+      //
+      // `Sidebar` is `dynamic(..., { ssr: false })`, so it renders a chunk
+      // later than `<main>` does. Until it does, the shell has no leading
+      // element at all and `<main>` sits at x=0 — which is the same reading a
+      // correctly-anchored shell gives. The viewport anchor below therefore
+      // passed under the very mutation it exists to catch, on 3 of 4 routes,
+      // in the run that was supposed to prove it: the measurement had simply
+      // happened first. The one route that went red was the slow one.
+      //
+      // Caught by running the mutation rather than by reading, and it is the
+      // same silent-no-op shape `contentRegionFound` was added for one issue
+      // ago — a guard that passes because the thing it measures had not
+      // rendered yet. The toggle is the sidebar's own `lg:hidden` control, so
+      // waiting for it is exactly "the mobile shell is now laid out".
+      await page.getByRole('button', { name: 'Open sidebar' }).waitFor()
+
       const overflow = await expectNoHorizontalOverflow(page)
       expect(overflow, 'content region was never found — measurement was a no-op').toMatchObject({
         contentRegionFound: true,
@@ -144,6 +161,33 @@ test.describe('mobile viewport', () => {
       expect(overflow, `document overflows: ${JSON.stringify(overflow)}`).toMatchObject({
         documentOverflows: false,
       })
+
+      // The VIEWPORT-ABSOLUTE anchor (#1779). Everything asserted above this
+      // point compares a box to itself — `scrollWidth` against `clientWidth`,
+      // of the same element — so all of it is invariant under a change that
+      // moves the entire shell. Found by mutation, not by reading: swapping the
+      // mobile toggle's `fixed` for `relative` puts it in flow as a 32px flex
+      // item ahead of the content column, and `<main>` goes
+      //
+      //     left   0 → 32
+      //     width  393 → 361      (the column is `flex-1 min-w-0`, so it
+      //     right  393 → 393       SHRINKS rather than overflowing)
+      //
+      // — the whole app shell displaced 32px, a dead gutter of page background
+      // down the left of every authenticated route, and `contentOverflowBy`
+      // still reads `361 - 361 = 0`. Three mobile specs passed it.
+      //
+      // Note which half does the work, because the plausible-looking version of
+      // this assertion is the useless one: `contentRight === viewportWidth`
+      // holds under the mutation (393 either way) and catches nothing on its
+      // own. `contentLeft === 0` is what goes red. Both are asserted because
+      // together they say the real invariant — below `lg` the drawer is
+      // `fixed`, so it consumes no layout and the content region owns the FULL
+      // width of the screen — which also catches a gutter opening on the right.
+      expect(
+        { left: overflow.contentLeft, right: overflow.contentRight },
+        `content region is not anchored to the viewport: ${JSON.stringify(overflow)}`,
+      ).toEqual({ left: 0, right: overflow.viewportWidth })
 
       const known = KNOWN_CONTENT_OVERFLOW[route]
       if (known) {

@@ -3,6 +3,7 @@ import {
   collectBrowserErrors,
   dismissMobileSidebar,
   expectNoHorizontalOverflow,
+  measureDialogOverflow,
   mockHavenApi,
   seedAuthenticatedSession,
   unexpectedBrowserErrors,
@@ -50,8 +51,8 @@ test.describe('transaction history — x402 display + detail panel', () => {
     // never checked the panel: a fixed-position overlay contributes to neither
     // scroll box, so this measures `/transactions` BEHIND the panel (#1771).
     // Kept — the page behind is real content and this is a real assertion at
-    // desktop width — but described accurately now. Checking the panel's own
-    // box is #1773.
+    // desktop width — but described accurately now. The panel's own box is
+    // asserted separately below (#1773).
     //
     // #1772 is the mobile-width clipping of this same table. It does not fire
     // here: at 1280px the table fits, and the mobile project asserts the route
@@ -59,6 +60,24 @@ test.describe('transaction history — x402 display + detail panel', () => {
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,
       contentRegionFound: true,
+    })
+    // ...and now the assertion the comment above used to be mistaken for: the
+    // PANEL's own layout (#1773).
+    //
+    // This is the call site that proves the subtree scan was necessary. The
+    // panel is a `ui/SidePanel`, whose `role="dialog"` node wraps a
+    // `flex-1 overflow-y-auto` body; per CSS Overflow §3 that body's
+    // `overflow-x` computes to `auto`, so it is itself a horizontal scroll box
+    // and swallows the overflow. Under a 120vw mutation the dialog node's own
+    // `scrollWidth - clientWidth` stayed at 0 while the body's read 1129.
+    // Measuring only the dialog node — the shape #1773 proposed — would have
+    // left this spec green.
+    const detailOverlay = await measureDialogOverflow(page)
+    expect(detailOverlay, `detail panel overflows: ${JSON.stringify(detailOverlay)}`).toMatchObject({
+      dialogFound: true,
+      // See dashboard.spec.ts — pins WHICH overlay was measured.
+      dialogCount: 1,
+      overlayOverflows: false,
     })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })

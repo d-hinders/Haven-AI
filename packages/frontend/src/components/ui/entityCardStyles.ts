@@ -10,7 +10,7 @@ export function entityCardClassName({
 
   return [
     'group relative rounded-lg border p-5 shadow-[var(--v2-shadow-card)] transition-all duration-200',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80',
     muted ? 'opacity-80' : '',
     selected
       ? `border-[var(--v2-brand)]/30 bg-[var(--v2-brand)]/[0.03] ${hoverEffect}`

@@ -49,7 +49,7 @@ vi.mock('../../../infra/repositories/outbound-txs.js', async () => {
   return { ...actual, findOutboundTxByHash: (...a: unknown[]) => findOutboundTxByHash(...a) }
 })
 
-const { classifyAnchorTxLiveness, ANCHOR_NONCE_READ_DEPTH_BLOCKS } = await import(
+const { classifyAnchorTxLiveness, SETTLED_CHAIN_READ_DEPTH_BLOCKS } = await import(
   '../attestation.js'
 )
 
@@ -142,7 +142,7 @@ describe('the nonce is read from settled state, not the head', () => {
 
   it('an unsupported `finalized` tag falls back to a buried block, never the head', async () => {
     getBlock.mockRejectedValue(new Error('unknown block tag "finalized"'))
-    const buried = HEAD - ANCHOR_NONCE_READ_DEPTH_BLOCKS
+    const buried = HEAD - SETTLED_CHAIN_READ_DEPTH_BLOCKS
     getTransactionCount.mockImplementation(nonceByBlock({ [buried]: 8 }))
 
     expect(await classifyAnchorTxLiveness(84532, TX)).toBe('dead')
@@ -154,7 +154,7 @@ describe('the nonce is read from settled state, not the head', () => {
     // Some nodes accept the tag and return the head anyway. Believing that
     // would silently reinstate the reorg exposure this function removes.
     getBlock.mockResolvedValue({ number: HEAD })
-    const buried = HEAD - ANCHOR_NONCE_READ_DEPTH_BLOCKS
+    const buried = HEAD - SETTLED_CHAIN_READ_DEPTH_BLOCKS
     getTransactionCount.mockImplementation(nonceByBlock({ [buried]: 8, [HEAD]: 8 }))
 
     expect(await classifyAnchorTxLiveness(84532, TX)).toBe('dead')

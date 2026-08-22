@@ -27,7 +27,13 @@ async function seedUserSafe(): Promise<string> {
   return safe.rows[0].id
 }
 
-await initDbHarness()
+// #1763: the module-scope `await initDbHarness()` that used to sit here ran
+// unconditionally — including on a machine with no database, where it threw
+// past `describeDb` and failed the file. That accidental loudness was the
+// only thing making a no-database full run exit non-zero, and it did so by
+// violating the harness's own convention (init belongs in `beforeAll`). The
+// run-level guard in vitest.global-setup.ts now owns that job deliberately,
+// so this file follows the convention.
 
 describeDb('hybrid_account_passkeys reads (#1679)', () => {
   beforeAll(async () => {

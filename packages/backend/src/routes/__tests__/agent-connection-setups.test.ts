@@ -319,7 +319,11 @@ describe('agent connection setup routes', () => {
     // #1545: the backend is the source of truth for the prompt — pin the
     // --json discoverability sentence and the gate's one name here, not only
     // in the frontend/e2e mirrors.
-    expect(body.setup_prompt).toContain('Appending --json is the ONLY permitted change to the command above.')
+    // #1719: the permitted-changes sentence now names the --runtime retry the
+    // connector asks an agent for by name, and still forbids everything else.
+    expect(body.setup_prompt).toContain('Only two changes to the command above are permitted, and no others: appending --json')
+    expect(body.setup_prompt).toContain('could not determine the agent runtime')
+    expect(body.setup_prompt).toContain('Never invent a runtime name')
     expect(body.setup_prompt).toContain('return to Haven to approve the budget')
     expect(body.setup_prompt).not.toContain('agent rules')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)

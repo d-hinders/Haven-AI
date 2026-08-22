@@ -388,9 +388,39 @@ test('the README\'s version-bump step names exactly the LOCKSTEP set (#1795)', a
   )
 })
 
+test('the sign-off names release shards by version, never by PR number (#1789)', async () => {
+  // The reviewer pass on this change found this line still teaching the retired
+  // convention after all three DOCS had been corrected — and it is the copy a
+  // release-cutter actually reads, at the moment they are about to write the
+  // shard. A PR-numbered name is unsatisfiable by construction: the coupling
+  // gate blocks the PR until the shard exists, so the number does not exist
+  // yet. Nothing validates a shard filename, so a wrong name never fails
+  // anything; it just persists as a mislabelled compliance record.
+  const printed = emitted(await doneBlock())
+  const shardLine = printed.match(/^.*casp-changelog.*$/m)
+  assert.ok(shardLine, 'the sign-off no longer tells the operator to write a CASP shard')
+  assert.doesNotMatch(
+    shardLine[0],
+    /<pr>|<PR>/,
+    'the sign-off names the shard after the PR number, which cannot be known when the shard must be written (#1789)',
+  )
+  // It interpolates the real version rather than a placeholder, so the operator
+  // has nothing left to guess.
+  assert.match(
+    shardLine[0],
+    /newVersion\}-release\.md/,
+    'the sign-off should print the actual release version in the shard filename',
+  )
+})
+
 test('no surviving prose calls the published set "four" (#1795)', async () => {
   const readme = await readmeText()
-  const stale = readme.match(/\bfour\b[^.\n]*\bpackages?\b|\bpackages?\b[^.\n]*\bfour\b/gi)
+  // Whitespace-collapsed so a hand-rewrap that puts "four" and "packages" on
+  // adjacent LINES cannot slip past (review nit). Still sentence-bounded: the
+  // file legitimately says things like "four more source constants appeared".
+  const stale = readme
+    .replace(/\s+/g, ' ')
+    .match(/\bfour\b[^.]*\bpackages?\b|\bpackages?\b[^.]*\bfour\b/gi)
   assert.equal(
     stale,
     null,

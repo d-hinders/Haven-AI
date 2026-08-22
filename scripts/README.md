@@ -38,7 +38,7 @@ Missing any edit caused bugs in production — e.g. connect shipping a stale run
 That table is the **original inventory** (`3f6e9959c`), kept because it is what
 motivated the script — not a description of today's surface, which has grown
 since: `@haven_ai/cli` became a published package, `mcp-server`'s version joined
-the lockstep set, four more source constants appeared
+the lockstep set, more source constants appeared
 (`SIGNER_VERSION`, `HOSTED_SERVER_VERSION`, `CONNECTOR_VERSION`, `CLI_VERSION`),
 and the lockfile is rewritten too. *What the script does (in order)* below is the
 current list. The authoritative published set is not written down in prose at

@@ -96,30 +96,18 @@ const COMPILE_TIMEOUT = 60_000
  * list of excuses.
  */
 const KNOWN_DEAD: Record<string, string> = {
-  // #1709's 22 border entries are GONE — that slice converted every one, so
-  // they have no call-site left and the 'still in use' assertion below would
-  // fail if they lingered here. #1710's bg-/text- entries are what remain.
-
-  // #1710 — the remaining `bg-*`/`text-*` call-sites plus the design-lint rule.
-  // #1818 took three of these out of the queue (TopBar's background, Sidebar's
-  // mobile scrim, investor-briefing's off-scale white) because the issue named
-  // them; the rest are still #1710's, including the two on marketing surfaces
-  // where a repaint is a design call rather than a mechanical one.
-  'bg-[var(--v2-brand)]/15': '#1710',
-  'bg-[var(--v2-brand)]/25': '#1710',
-  // NOTE: `bg-[var(--v2-brand)]/[0.03]` was here, tagged #1710. #1709 took it:
-  // it shares a class string with a border that slice owned, on the invisible
-  // selected-account indicator, and its BRACKETED alpha is unmatchable by
-  // #1710's enumeration grep and acceptance criterion (both `/[0-9]+`), so it
-  // would have outlived the epic. This scanner is the only thing in the repo
-  // that could see it — its opacity alternation accepts `\[...\]`.
-  'bg-[var(--v2-brand-soft)]/40': '#1710',
-  'bg-[var(--v2-brand-soft)]/55': '#1710',
-  'bg-[var(--v2-danger)]/90': '#1710',
-  'text-[var(--v2-brand)]/60': '#1710',
-  'text-[var(--v2-danger)]/50': '#1710',
-  'text-[var(--v2-success)]/50': '#1710',
-  'text-[var(--v2-warning)]/80': '#1710',
+  // EMPTY, and that is the point (#1710 closed epic #1685).
+  //
+  // Every one of the 175 dead call-sites is converted: #1708 the 68 rings,
+  // #1709 the 91 borders plus one bracketed `bg-`, #1818 the TopBar background
+  // and the mobile scrim, #1710 the last 9. With nothing triaged, the
+  // `no dead class outside the triaged inventory` assertion below stops being a
+  // ratchet and becomes an ABSOLUTE gate: any opacity-modified colour utility
+  // that compiles to nothing now fails, with no escape hatch to add one to.
+  //
+  // Do not reintroduce an entry. There is no longer a slice that owes debt
+  // here, so a new key would be a tolerance rather than a queue — which is what
+  // the ceiling below refuses.
 }
 
 // ── reading the call-sites ─────────────────────────────────────────────────
@@ -299,18 +287,17 @@ describe('every opacity-modified colour utility compiles to a colour (#1818)', (
     expect(orphaned, 'no call-site left for these — delete them from KNOWN_DEAD').toEqual([])
   }, COMPILE_TIMEOUT)
 
-  it('the inventory shrinks — it is #1709/#1710 debt, not a tolerance', () => {
-    // A ceiling at today's measured count, so the map cannot quietly absorb new
-    // debt between sweeps. Lower it as #1709/#1710 land; never raise it.
+  it('the inventory is EMPTY — a dead class has nowhere to hide (#1710)', () => {
+    // This started as a shrink-only ratchet: 31 entries, "lower it as
+    // #1709/#1710 land; never raise it". Both landed, so it is now zero and the
+    // assertion changes character — from "do not grow" to "there is no such
+    // thing as an accepted dead class".
     //
-    // Unique utilities, not call-sites: variants are stripped and duplicates
-    // collapse, so `border-[var(--v2-danger)]/20` was one entry covering 15
-    // files. The epic's headline 175 is the call-site count.
-    //
-    // Lowered 31 -> 9 by #1709: every `border-*` entry, plus the one
-    // bracketed `bg-` it had to take (see the note in the map).
-    // What is left is #1710's bg-/text- population.
-    expect(Object.keys(KNOWN_DEAD).length).toBeLessThanOrEqual(9)
+    // Kept as its own assertion rather than deleted with the map. The scan
+    // above only reports classes it finds dead; if someone re-adds a key here
+    // to quiet a failure, THIS is what refuses. A gate with an escape hatch
+    // nobody guards is the shape epic #1685 spent three slices removing.
+    expect(Object.keys(KNOWN_DEAD).length).toBe(0)
   })
 })
 

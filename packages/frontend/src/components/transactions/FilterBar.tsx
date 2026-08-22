@@ -305,7 +305,7 @@ export default function FilterBar({
             <button
               key={chip.key}
               onClick={() => clearFilter(chip.key)}
-              className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-brand-soft)] px-2 py-1 text-xs text-[var(--v2-brand)] transition-colors hover:bg-[var(--v2-brand)]/15"
+              className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-brand-soft)] px-2 py-1 text-xs text-[var(--v2-brand)] transition-colors hover:bg-brand/15"
             >
               <span>{chip.label}</span>
               <span aria-hidden="true">×</span>

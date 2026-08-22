@@ -622,7 +622,7 @@ export default function SendModal({
                       <button
                         type="button"
                         onClick={() => { setSelectedContactName(null); setRecipient('') }}
-                        className="text-[var(--v2-brand)]/60 hover:text-[var(--v2-brand-strong)] ml-0.5"
+                        className="text-brand/60 hover:text-[var(--v2-brand-strong)] ml-0.5"
                       >
                         <Icon icon={X} className="w-3 h-3" />
                       </button>

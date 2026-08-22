@@ -27,6 +27,21 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
   height: number
 }>
 
+/**
+ * The app shell's top bar, located by its POSITION IN THE SHELL rather than by
+ * tag or class. `<header>` alone is ambiguous — `ui/PageHeader` renders one too,
+ * and `/design-system` shows it — and a class string is the thing this gate is
+ * supposed to be checking, not the thing it should trust to find its subject.
+ * The top bar is the header immediately preceding the shell's scroll root
+ * (`(authenticated)/layout.tsx`), and nothing else on any route is.
+ */
+const APP_TOP_BAR = 'xpath=//*[@id="main-content"]/preceding-sibling::header[1]'
+
+// PROVISIONAL (#1805) — replaced with measured numbers later in this PR.
+const FULL_PAGE_MAX_DIFF_PIXELS = 100_000
+const FULL_PAGE_MAX_DIFF_PIXEL_RATIO = 0.005
+const TOP_BAR_MAX_DIFF_PIXELS = 100_000
+
 test.describe('design-system visual regression', () => {
   test.skip(
     process.env.VISUAL_REGRESSION !== '1',
@@ -46,6 +61,23 @@ test.describe('design-system visual regression', () => {
       await page.evaluate(() => document.fonts.ready)
       await page.waitForLoadState('networkidle')
 
+      // ── The app shell, on its own, BEFORE un-clipping ──────────────────────
+      // Captured first on purpose: `unclipScrollShell` rewrites height/overflow
+      // on the shell's ancestors, so anything captured after it is a shape the
+      // user never sees. The top bar is unaffected either way, but "capture the
+      // pristine state first" is the rule that keeps that true if the shell
+      // changes.
+      const topBar = page.locator(APP_TOP_BAR)
+      // A locator that matched nothing would make the screenshot below error,
+      // but one that matched TWO would silently capture the first — the failure
+      // shape this gate exists to close. Assert the count, don't assume it.
+      await expect(topBar).toHaveCount(1)
+      await expect(topBar).toHaveScreenshot(`design-system-topbar-${vp.name}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: TOP_BAR_MAX_DIFF_PIXELS,
+      })
+
       // The app shell clips at h-screen/overflow-hidden, so a `fullPage`
       // capture paints only the first viewport and leaves a very long white
       // tail. Until #1738 these baselines were 95%+ blank, which made this
@@ -63,8 +95,8 @@ test.describe('design-system visual regression', () => {
         fullPage: true,
         animations: 'disabled',
         caret: 'hide',
-        // Tiny tolerance for AA jitter; real drift is orders of magnitude larger.
-        maxDiffPixelRatio: 0.005,
+        maxDiffPixels: FULL_PAGE_MAX_DIFF_PIXELS,
+        maxDiffPixelRatio: FULL_PAGE_MAX_DIFF_PIXEL_RATIO,
       })
     })
   }

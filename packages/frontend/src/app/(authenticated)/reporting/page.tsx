@@ -146,7 +146,7 @@ export default function ReportingPage() {
           {!status.liveSyncReady && (
             <div
               role="status"
-              className="rounded-[12px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3"
+              className="rounded-[12px] border border-warning/20 bg-[var(--v2-warning-soft)] px-4 py-3"
             >
               <p className="text-sm font-medium text-[var(--v2-warning)]">Preview — not yet delivering to Fortnox</p>
               <p className="mt-1 text-sm text-[var(--v2-ink-2)]">

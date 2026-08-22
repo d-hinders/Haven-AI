@@ -681,7 +681,7 @@ export default function EditAgentModal({
               )}
 
               {budgetChanged && (safeDetails?.threshold ?? 1) > 1 && (
-                <div className="text-xs text-[var(--v2-warning)] bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg px-3 py-2">
+                <div className="text-xs text-[var(--v2-warning)] bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg px-3 py-2">
                   This account requires {safeDetails?.threshold} of {safeDetails?.owners?.length} approvals. Haven will submit it for approval.
                 </div>
               )}

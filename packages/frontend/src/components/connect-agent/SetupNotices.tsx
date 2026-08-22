@@ -12,7 +12,7 @@ import { Icon } from '../ui/Icon'
 /** Single-paragraph danger note (create/approval/manual errors). */
 export function InlineErrorNote({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
+    <div className="rounded-[10px] border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-xs text-[var(--v2-danger)]">
       {children}
     </div>
   )
@@ -29,7 +29,7 @@ export function WarningCallout({
   children?: ReactNode
 }) {
   return (
-    <div className="rounded-[10px] border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] p-3">
+    <div className="rounded-[10px] border border-warning/20 bg-[var(--v2-warning-soft)] p-3">
       <p className="text-sm font-semibold text-[var(--v2-ink)]">{title}</p>
       <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">{body}</p>
       {children}

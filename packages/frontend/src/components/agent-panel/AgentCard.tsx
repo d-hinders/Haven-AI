@@ -177,7 +177,7 @@ export function AgentCard({
       </div>
 
       {isPaused && (
-        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg">
+        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg">
           <Icon icon={CirclePause} className="h-[13px] w-[13px] text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-xs font-medium text-[var(--v2-warning)]">Paused in Haven</p>
@@ -189,7 +189,7 @@ export function AgentCard({
       )}
 
       {agent.has_stranded_funds && (
-        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg">
+        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg">
           <Icon icon={TriangleAlert} className="h-[13px] w-[13px] text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-[var(--v2-warning)]">Stranded funds on delegate</p>
@@ -353,7 +353,7 @@ export function AgentCard({
           <p>
             Pausing stops this agent from creating new payments through Haven right away, without changing its network permissions.
           </p>
-          <div className="rounded-lg border border-[var(--v2-brand)]/15 bg-[var(--v2-brand-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
+          <div className="rounded-lg border border-brand/15 bg-[var(--v2-brand-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
             <p className="text-xs font-medium text-[var(--v2-brand)] mb-1">What stays the same</p>
             <p className="text-xs leading-relaxed">
               The agent&apos;s network permissions remain in place. You can resume this agent later without reconnecting or reconfiguring it.
@@ -379,7 +379,7 @@ export function AgentCard({
           <p>
             This removes the agent&apos;s Haven access immediately and also revokes its network spending authority.
           </p>
-          <div className="rounded-lg border border-[var(--v2-danger)]/15 bg-[var(--v2-danger-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
+          <div className="rounded-lg border border-danger/15 bg-[var(--v2-danger-soft)] px-3 py-3 text-[var(--v2-ink-2)]">
             <p className="text-xs font-medium text-[var(--v2-danger)] mb-1">What happens next</p>
             <p className="text-xs leading-relaxed">
               Haven will stop accepting new requests from this agent, and you&apos;ll be asked to approve the update that removes its spending access.

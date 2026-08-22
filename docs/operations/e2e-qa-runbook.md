@@ -13,8 +13,6 @@ covers:
   - packages/frontend/e2e/hosted-mcp.spec.ts
   - packages/frontend/e2e/transactions-detail.spec.ts
   - packages/connect/src/**
-  - packages/frontend/src/components/haven/__tests__/HostedConnectCard.test.tsx
-  - packages/frontend/src/lib/__tests__/hosted-connect.test.ts
   - packages/frontend/src/components/settings/ManageApprovers.tsx
   - packages/frontend/src/components/settings/__tests__/ManageApprovers.test.tsx
   - packages/backend/src/modules/accounts/safe-owner-tx.ts
@@ -23,7 +21,7 @@ covers:
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-08-22" # #1720: the per-environment run list is no longer a picker-row list — there is no picker, so per-environment coverage now checks that the CONNECTOR resolves each environment from an identical command, and a deliberately-undetectable environment becomes a case worth running rather than an unreachable one. Step 1 rewritten (nothing to pick; commands must match across environments) and a new step 2 added for confirming which resolution rung fired, renumbering the rest. Other steps and the "Already automated" table NOT re-run. Prior: #1771: corrected the "Already automated" row that credited `hosted-mcp.spec.ts` with mobile-overflow coverage — that test asserted a helper which could not fail inside the app shell and was removed; mobile overflow is covered by `navigation.mobile.spec.ts` under Pixel 5 emulation. Scope of this re-verification: the "Already automated" table only; the hand-test steps were NOT re-run. Prior: #1682: the per-environment run list notes the name-first picker (a row per environment again); steps themselves unchanged. Prior: #1672: noted the collapsed AI-agent picker entry in the per-environment run list; steps themselves unchanged. Prior: #1346 runtime-specific activation + read-only Connect verification re-checked; #1330 Hermes .env credential-reference verification
+last-verified: "2026-08-22" # #1813: removed the "Hosted connect copy, commands, and deep-link behavior" row from "Already automated" and the two `covers:` entries feeding it. Both named tests were deleted with the component they covered — HostedConnectCard lost its only call site when #345 retired CreateAgentModal and has been unreachable since. The row is DELETED rather than repointed because the behaviour it claimed coverage of no longer exists in the product; repointing would have re-created exactly the #1771 defect in the same table — a row crediting coverage that is not there. Scope: this row and the covers list only; the hand-test steps were NOT re-run. Prior: #1720: the per-environment run list is no longer a picker-row list — there is no picker, so per-environment coverage now checks that the CONNECTOR resolves each environment from an identical command, and a deliberately-undetectable environment becomes a case worth running rather than an unreachable one. Step 1 rewritten (nothing to pick; commands must match across environments) and a new step 2 added for confirming which resolution rung fired, renumbering the rest. Other steps and the "Already automated" table NOT re-run. Prior: #1771: corrected the "Already automated" row that credited `hosted-mcp.spec.ts` with mobile-overflow coverage — that test asserted a helper which could not fail inside the app shell and was removed; mobile overflow is covered by `navigation.mobile.spec.ts` under Pixel 5 emulation. Scope of this re-verification: the "Already automated" table only; the hand-test steps were NOT re-run. Prior: #1682: the per-environment run list notes the name-first picker (a row per environment again); steps themselves unchanged. Prior: #1672: noted the collapsed AI-agent picker entry in the per-environment run list; steps themselves unchanged. Prior: #1346 runtime-specific activation + read-only Connect verification re-checked; #1330 Hermes .env credential-reference verification
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
@@ -52,7 +50,6 @@ document for the remaining exploratory checklist.
 | Connect-agent modal: create setup → prompt → connected-local → approval screen, no secrets leaked | `e2e/connect-agent.spec.ts` |
 | Hosted-MCP agent/allowance/CTA states | `e2e/hosted-mcp.spec.ts` |
 | Mobile-viewport layout overflow on the primary authenticated routes | `e2e/navigation.mobile.spec.ts` (Pixel 5 emulation, gates every PR since #1770) |
-| Hosted connect copy, commands, and deep-link behavior | `HostedConnectCard.test.tsx`; `hosted-connect.test.ts` |
 | **x402 tx displays in history + opens the per-type detail panel** (#420 UI half) | `e2e/transactions-detail.spec.ts` |
 | Approver add/remove/reuse/passkey logic, last-owner guard | unit tests (`ManageApprovers`, `safe-owner-tx`, route tests) |
 | CSV export shape + injection guard | unit tests (`transaction-csv`) |

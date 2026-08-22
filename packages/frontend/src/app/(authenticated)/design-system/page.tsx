@@ -1410,7 +1410,13 @@ export default function DesignSystemPage() {
                         above word-wraps instead of ellipsising, so the
                         showcase would teach a shape the real component does
                         not have. */}
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {/* `md:flex-nowrap` for the same reason as `md:max-w-none`
+                        above: this showcase's desktop titles WRAP to two
+                        lines, so a wrapping flex row pushed the Failed badge
+                        onto a third and grew the page by 12px. The visual
+                        gate measured it — 17746 -> 17758 — after the first
+                        attempt at this fix. Desktop must not move at all. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
                       {/* Ellipsise below md, wrap normally at md and up — the
                           `md:` half restores this showcase's original desktop
                           rendering byte for byte, so only the mobile baseline

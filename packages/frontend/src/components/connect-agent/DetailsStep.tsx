@@ -47,34 +47,36 @@ export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           rows={2}
         />
       </div>
-      <div>
-        {/* #1720: the Advanced opt-in is no longer gated on a picked runtime —
-            there is no pick. It is offered to everyone and the CONNECTOR
-            decides, which is the only component that knows the runtime.
+      {/* #1720: the Advanced opt-in is no longer gated on a picked runtime —
+          there is no pick. It is offered to everyone and the CONNECTOR
+          decides, which is the only component that knows the runtime.
 
-            That gate did real work, though: it kept the box away from users
-            whose runtime cannot take it. The connector's refusal is clear but
-            FATAL (`runtime.ts` throws before /resolve), and `--local` is baked
-            into a server-generated command the setup prompt forbids editing —
-            so an uninformed tick is a trip back here to start over. The
-            constraint therefore moves into the label, where it is read BEFORE
-            the choice instead of enforced after it. */}
-        <details className="group">
-          <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)]">
-            <Icon
-              icon={ChevronRight}
-              className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
-            />
-            Advanced
-          </summary>
-          <Checkbox
-            checked={flow.localMcp}
-            onChange={(event) => flow.setLocalMcp(event.target.checked)}
-            className="mt-2 text-xs text-[var(--v2-ink-3)]"
-            label="Run everything on this machine instead of Haven's hosted tools — for users who manage their own runtime. Works with Claude Code, Codex, and Cowork only; on anything else the connector stops and asks you to set this up again without it."
+          That gate did real work, though: it kept the box away from users
+          whose runtime cannot take it. The connector's refusal is clear but
+          FATAL (`runtime.ts` throws before /resolve), and `--local` is baked
+          into a server-generated command the setup prompt forbids editing —
+          so an uninformed tick is a trip back here to start over. The
+          constraint therefore moves into the label, where it is read BEFORE
+          the choice instead of enforced after it.
+
+          No wrapper div: this used to share one with the runtime Select and
+          its helper text. Alone it needs none — the modal's shared
+          `flex flex-col gap-5` gives a bare sibling the identical rhythm. */}
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)]">
+          <Icon
+            icon={ChevronRight}
+            className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
           />
-        </details>
-      </div>
+          Advanced
+        </summary>
+        <Checkbox
+          checked={flow.localMcp}
+          onChange={(event) => flow.setLocalMcp(event.target.checked)}
+          className="mt-2 text-xs text-[var(--v2-ink-3)]"
+          label="Run everything on this machine instead of Haven's hosted tools. Only Claude Code, Codex, and Cowork support it — elsewhere, setup stops and you restart without it."
+        />
+      </details>
       <div className="flex gap-3">
         {/* handleClose is safe here without a confirm: its only guard
             (manualCredentialNeedsSave) is a step-4 concern unreachable from

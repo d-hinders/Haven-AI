@@ -571,7 +571,7 @@ describe('ConnectAgentModal', () => {
     expect(screen.getByText('Advanced')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Advanced'))
     expect(
-      screen.getByText(/Works with Claude Code, Codex, and Cowork only/i),
+      screen.getByText(/Only Claude Code, Codex, and Cowork support it/i),
     ).toBeInTheDocument()
   })
 

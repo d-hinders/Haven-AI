@@ -84,7 +84,19 @@ export function TransactionActivityRow({
     : 'gap-3 px-4 py-4 sm:px-5'
   return (
     <div className={`grid transition-colors hover:bg-[var(--v2-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${containerPadding}`}>
-      <div className="flex min-w-0 items-center gap-3">
+      {/* `items-start` below `sm`, centred at `sm` and up (#1833 review).
+          Centring the mark against the WHOLE text block reads correctly while
+          that block is one or two lines, and wrongly once it wraps to three or
+          four: the mark drifts down beside the status badge or the "From …"
+          line, away from the title it marks. Below `sm` that wrap is now the
+          common case rather than the exception, because the row sizes to its
+          content instead of clipping at 72px — so this fix and the height fix
+          are the same change seen from two sides.
+
+          Same shape as the height pin above: an alignment chosen for the
+          arrangement at one breakpoint, applied where that arrangement does
+          not exist. `sm:items-center` keeps `sm`+ byte-identical. */}
+      <div className="flex min-w-0 items-start gap-3 sm:items-center">
         <DirectionMark direction={direction} density={density} />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

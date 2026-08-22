@@ -73,3 +73,20 @@ function counterpartyLabel(
 
   return safeName ?? contactName ?? truncate(address)
 }
+
+/**
+ * Display label for the on-chain settlement scheme (epic #1704, #1707).
+ * EIP-3009 is the delegate-signed transferWithAuthorization fallback;
+ * ERC-7710 is smart-account redemption. Technical-but-calm per
+ * `docs/product/copy-guidelines.md`. Null-in, null-out: an x402 row without
+ * a recorded scheme renders nothing — never a guessed value. Kept separate
+ * from `source` (protocol) and `execution_rail` (account architecture), which
+ * are different axes; do not merge them in copy or naming.
+ */
+export function settlementSchemeLabel(
+  scheme: AggregatedTransaction['settlementScheme'],
+): 'EIP-3009' | 'ERC-7710' | null {
+  if (scheme === 'eip3009') return 'EIP-3009'
+  if (scheme === 'erc7710') return 'ERC-7710'
+  return null
+}

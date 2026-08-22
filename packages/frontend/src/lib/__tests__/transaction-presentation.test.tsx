@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import {
+  settlementSchemeLabel,
   transactionInitiator,
   transactionMovement,
   transactionStatus,
@@ -57,5 +58,12 @@ describe('transaction presentation', () => {
     expect(transactionTitle(incoming)).toBe('Received payment')
     expect(transactionInitiator(incoming)).toBe('')
     expect(transactionStatus(incoming)).toBeNull()
+  })
+
+  it('maps the settlement scheme to its display label, null-in null-out', () => {
+    expect(settlementSchemeLabel('eip3009')).toBe('EIP-3009')
+    expect(settlementSchemeLabel('erc7710')).toBe('ERC-7710')
+    expect(settlementSchemeLabel(null)).toBeNull()
+    expect(settlementSchemeLabel(undefined)).toBeNull()
   })
 })

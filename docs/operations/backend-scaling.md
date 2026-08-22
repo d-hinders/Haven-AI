@@ -279,6 +279,11 @@ they queue behind the same key. Two consequences worth planning around:
    the attest so a fresh anchor is correct — a new mechanism, deliberately not
    built under #1735.
 
+   The lane's other passport tenant, `passport_revoke`, **is** rebroadcast-safe
+   and so is fee-replaced normally; when one of those stalls anyway, the
+   operator procedure is
+   [`stuck-revoke-alarm.md`](stuck-revoke-alarm.md).
+
 ### Multi-replica CORRECTNESS: closed for the queue lane (#1559)
 
 The correctness half of the old constraint — two replicas reading the same

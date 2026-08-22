@@ -62,16 +62,38 @@ export default function NetworkSwitcher() {
   if (!activeSafe) return null
 
   return (
-    <DropdownMenu>
+    // `min-w-0` on the ROOT, plus truncating segments below (#1767). This chip
+    // is the widest thing in TopBar's left region and the only compressible
+    // one: once the hamburger's slot stopped collapsing, the 32px it had been
+    // giving away had to come from somewhere, and without this the chip renders
+    // at its intrinsic 176.88px inside a 141px slot and paints over the
+    // notification bell. `min-w-0` on the TRIGGER alone is inert — the root
+    // wrapper is what TopBar's flex row measures. Where there is room (≥768px)
+    // nothing truncates and the render is byte-identical to before.
+    <DropdownMenu className="min-w-0">
       <DropdownMenuTrigger
-        className="inline-flex items-center gap-2 rounded-full border border-[var(--v2-border)] bg-[var(--v2-bg)] px-2.5 py-1 text-[13px] font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface)]"
+        className="inline-flex min-w-0 items-center gap-2 rounded-full border border-[var(--v2-border)] bg-[var(--v2-bg)] px-2.5 py-1 text-[13px] font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface)]"
         aria-label={`Active account ${activeSafe.name} on ${chainName(activeChainId)} — switch`}
       >
         <ChainDot chainId={activeChainId} />
-        <span className="max-w-[140px] truncate">{activeSafe.name}</span>
-        <span className="text-[var(--v2-ink-3)]">·</span>
-        <span className="text-[var(--v2-ink-2)]">{chainName(activeChainId)}</span>
-        <Icon icon={ChevronDown} className="h-3 w-3 text-[var(--v2-ink-3)]" />
+        {/* `title`: the name truncates below ~768px, and while the trigger's
+            aria-label and the dropdown's own rows both carry it in full, a
+            resized desktop window is a hover context with neither in reach. */}
+        <span className="min-w-0 max-w-[140px] truncate" title={activeSafe.name}>
+          {activeSafe.name}
+        </span>
+        {/* The chain segment is DROPPED on a phone rather than squeezed
+            (#1767). Letting it share the squeeze measured 18px wide at 390px
+            and 0px at 320px — present, unreadable, and still taking the row's
+            gaps. Below `sm` the chain is carried by the coloured dot, which is
+            what `--v2-chain-*` identity colours are for, and by the trigger's
+            aria-label; the account name then gets the room and truncates with
+            an ellipsis instead of everything shrinking together. */}
+        <span className="hidden shrink-0 text-[var(--v2-ink-3)] sm:inline">·</span>
+        <span className="hidden shrink-0 text-[var(--v2-ink-2)] sm:inline">
+          {chainName(activeChainId)}
+        </span>
+        <Icon icon={ChevronDown} className="h-3 w-3 shrink-0 text-[var(--v2-ink-3)]" />
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="left">

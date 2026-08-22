@@ -6,6 +6,7 @@ import { ConnectRequestError } from './api.js'
 import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
 import { completionHandoffLines, failedConnectOutcome, runConnect, waitForBudgetApproval } from './runtime.js'
+import { ConnectError } from './connect-error.js'
 import type { RuntimeInstallResult } from './runtime-install.js'
 
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
@@ -532,6 +533,152 @@ describe('runConnect', () => {
       }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} }))
 
       expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-desktop' }))
+    })
+
+    // #1719: every rung added below the detection rungs is a new way for the
+    // connection step to fail. Each of these asserts the SAME #1161 property
+    // the original refusal had — the failure happens before the setup token is
+    // resolved, before a key is minted, and before a credential is written, so
+    // there is no half-connected agent to recover from.
+    describe('self-resolving ladder (#1719)', () => {
+      function expectNothingWritten(spies: ReturnType<typeof resolutionSpies>): void {
+        expect(spies.api.resolveSetup).not.toHaveBeenCalled()
+        expect(spies.api.registerSetup).not.toHaveBeenCalled()
+        expect(spies.generateKey).not.toHaveBeenCalled()
+        expect(spies.writeCredentials).not.toHaveBeenCalled()
+        expect(spies.installRuntime).not.toHaveBeenCalled()
+      }
+
+      it('asks an interactive terminal which installed client to configure', async () => {
+        const spies = resolutionSpies()
+        const promptRuntime = vi.fn(async () => 'claude-desktop' as const)
+        await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          interactive: true,
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {}, isTty: true, promptRuntime }))
+
+        expect(promptRuntime).toHaveBeenCalledTimes(1)
+        expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-desktop' }))
+      })
+
+      it('skips the prompt entirely when stdin is not a TTY', async () => {
+        const spies = resolutionSpies()
+        const promptRuntime = vi.fn(async () => 'claude-desktop' as const)
+        const error = await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          interactive: true,
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {}, isTty: false, promptRuntime }))
+
+        expect(promptRuntime).not.toHaveBeenCalled()
+        expect((error as ConnectError).code).toBe('runtime_undetermined')
+        expectNothingWritten(spies)
+      })
+
+      it('skips the prompt entirely for a non-interactive run', async () => {
+        const spies = resolutionSpies()
+        const promptRuntime = vi.fn(async () => 'claude-desktop' as const)
+        const error = await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {}, isTty: true, promptRuntime }))
+
+        expect(promptRuntime).not.toHaveBeenCalled()
+        expect((error as ConnectError).code).toBe('runtime_undetermined')
+        expectNothingWritten(spies)
+      })
+
+      it('makes the no-runtime refusal actionable for the agent running it', async () => {
+        const spies = resolutionSpies()
+        const error = await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} }))
+
+        expect(error.message).toContain('If you are an AI agent running this command')
+        expect(error.message).toContain('--runtime <name>')
+        expect(error.message).toContain('Do not guess')
+        expect(error.message).toContain('--runtime other')
+        expect(error.message).toContain('setup token is still unused')
+      })
+
+      it('accepts an agent self-report at hint precedence', async () => {
+        const spies = resolutionSpies()
+        await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          runtimeSelfReport: 'openclaw',
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} }))
+
+        expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'other' }))
+      })
+
+      it('MUTATION PROOF: an aborted prompt writes nothing at all', async () => {
+        const spies = resolutionSpies()
+        const error = await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          interactive: true,
+        }, {
+          ...spies,
+          nodeVersion: SUPPORTED_NODE,
+          env: {},
+          isTty: true,
+          promptRuntime: async () => {
+            throw new ConnectError('runtime_prompt_aborted', 'cancelled', 'rerun_connect_and_choose_a_runtime')
+          },
+        }))
+
+        expect((error as ConnectError).code).toBe('runtime_prompt_aborted')
+        expectNothingWritten(spies)
+      })
+
+      it('MUTATION PROOF: an unrecognised runtime writes nothing at all', async () => {
+        const spies = resolutionSpies()
+        const error = await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          runtime: 'clawed-code',
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} }))
+
+        expect((error as ConnectError).code).toBe('runtime_unrecognized')
+        expectNothingWritten(spies)
+      })
+
+      it('says so out loud when detection carried an unrecognised hint', async () => {
+        const logs: string[] = []
+        const spies = resolutionSpies()
+        await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          runtime: 'clawed-code',
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: { CLAUDECODE: '1' }, log: (m) => logs.push(m) }))
+
+        expect(logs.some((m) => m.includes('"clawed-code" is not a runtime Haven knows'))).toBe(true)
+        expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-code' }))
+      })
+    })
+  })
+
+  describe('failure vocabulary (#1719)', () => {
+    it('reads a ConnectError code and next action instead of guessing from prose', () => {
+      const outcome = failedConnectOutcome(
+        undefined,
+        new ConnectError('runtime_no_installed_clients', 'nothing installed', 'rerun_connect_with_explicit_runtime'),
+      )
+
+      expect(outcome.outcome).toBe('failed')
+      expect(outcome.error).toEqual({
+        code: 'runtime_no_installed_clients',
+        next_action: 'rerun_connect_with_explicit_runtime',
+      })
+      expect(outcome.next_action).toBe('rerun_connect_with_explicit_runtime')
+    })
+
+    it('still classifies the older plain-Error refusals it always did', () => {
+      const outcome = failedConnectOutcome(undefined, new Error('Haven Connect requires Node.js >= 22.0.0'))
+      expect(outcome.error?.code).toBe('unsupported_node_version')
     })
   })
 

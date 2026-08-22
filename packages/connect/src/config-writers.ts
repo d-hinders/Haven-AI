@@ -79,6 +79,31 @@ export class InvalidCodexTomlError extends Error {
   }
 }
 
+/**
+ * #1719: the chosen client's config file EXISTS but Haven cannot read it.
+ *
+ * Distinct from a write failure on purpose. A write failure is a permissions
+ * or disk problem and "try again" is reasonable advice; an unreadable config
+ * is a file the user has to fix by hand, and re-running the connector will
+ * fail identically forever until they do. Collapsing the two under
+ * `runtime_config_write_failed` told the user to retry a thing that cannot
+ * succeed.
+ */
+/**
+ * Mirrors `RERUN` in doctor.ts — the moving alpha tag, so the advice resolves
+ * to a connector that has `--repair` regardless of what is cached locally.
+ */
+const REPAIR_COMMAND_PREFIX = 'npx @haven_ai/connect@alpha --doctor --repair --runtime'
+
+export class UnreadableRuntimeConfigError extends Error {
+  readonly configPath: string
+  constructor(configPath: string, detail: string) {
+    super(`${configPath} is not a config Haven can merge into (${detail})`)
+    this.name = 'UnreadableRuntimeConfigError'
+    this.configPath = configPath
+  }
+}
+
 export async function writeRuntimeConfig(
   input: RuntimeConfigInput,
   deps: RuntimeConfigWriteDeps = {},
@@ -163,8 +188,9 @@ export function mergeJsonMcpConfig(
   hostedServer: Record<string, unknown>,
   signerServer: Record<string, unknown>,
   names: ServerNames = serverNamesFor(),
+  configPath?: string,
 ): string {
-  const config = existingJson?.trim() ? parseJsonObject(existingJson) : {}
+  const config = existingJson?.trim() ? parseJsonObject(existingJson, configPath) : {}
   const existingRoot = config[serverRoot]
   const servers = existingRoot && typeof existingRoot === 'object' && !Array.isArray(existingRoot)
     ? existingRoot as Record<string, unknown>
@@ -183,6 +209,7 @@ export function mergeHermesYaml(
   hostedServer: Record<string, unknown>,
   signerServer: Record<string, unknown>,
   names: ServerNames = serverNamesFor(),
+  configPath?: string,
 ): string {
   if (!existingYaml?.trim()) {
     return renderHermesYaml({ [names.hosted]: hostedServer, [names.signer]: signerServer })
@@ -190,7 +217,12 @@ export function mergeHermesYaml(
 
   const doc = parseDocument(existingYaml, { keepSourceTokens: true })
   if (doc.errors.length > 0 || !isMap(doc.contents)) {
-    throw new Error('Hermes config must be a YAML object')
+    // #1719: the same class as an unparseable JSON config — the file has to be
+    // fixed by hand, so it must not be reported as a retryable write failure.
+    // The YAML parser's own message is deliberately NOT included: it quotes the
+    // offending source, which is a file that may hold another server's bearer
+    // token (the #1719 sibling of the redaction rule this writer already keeps).
+    throw new UnreadableRuntimeConfigError(configPath ?? 'the Hermes config', 'it is not a YAML object')
   }
 
   const mcpPair = doc.contents.items.find((item) => item.key?.toString() === 'mcp_servers')
@@ -391,6 +423,7 @@ async function writeJsonRuntimeConfig(
       buildHostedServer(input.hostedMcpUrl, input.apiKey, input.runtime),
       buildSignerServer(resolveSignerLaunchSpec(input), input.runtime),
       serverNamesFor(input.serverName),
+      target,
     )
     await writeOwnerOnlyText(target, merged)
     return {
@@ -404,6 +437,16 @@ async function writeJsonRuntimeConfig(
       messages: [`Updated Haven MCP entries in ${configTargetLabel(input.runtime)}.`],
     }
   } catch (err) {
+    // #1719: the parse runs BEFORE the write, so an unreadable config leaves
+    // the file untouched — no half-merged config, nothing to roll back. The
+    // separate code exists so the message can say "fix this file" instead of
+    // "run setup again", which would never succeed — this fires AFTER
+    // registerSetup consumed the one-shot setup token, so the pasted command
+    // now 409s at /resolve. `--repair` is the recovery that actually works:
+    // it rewrites this exact config from the credentials already on disk,
+    // needs no token, and mints no second agent (the #1688 orphaning a fresh
+    // connection would cause).
+    const unreadable = err instanceof UnreadableRuntimeConfigError
     return {
       hostedConfigured: false,
       signerConfigured: false,
@@ -412,8 +455,13 @@ async function writeJsonRuntimeConfig(
       target: configTargetLabel(input.runtime),
       changed: false,
       restartRequired: true,
-      messages: [`Could not update ${configTargetLabel(input.runtime)}: ${err instanceof Error ? err.message : String(err)}`],
-      errorCode: 'runtime_config_write_failed',
+      messages: unreadable
+        ? [
+            `Could not update ${configTargetLabel(input.runtime)}: ${err.message}.`,
+            `Nothing was written to ${err.configPath}. Fix the JSON there (or move the file aside), then run \`${REPAIR_COMMAND_PREFIX} ${input.runtime}\` to write the Haven entries from the credentials already stored on this machine. Do not re-run the setup command: its token is already used.`,
+          ]
+        : [`Could not update ${configTargetLabel(input.runtime)}: ${err instanceof Error ? err.message : String(err)}`],
+      errorCode: unreadable ? 'runtime_config_unreadable' : 'runtime_config_write_failed',
     }
   }
 }
@@ -437,6 +485,7 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
       hostedServer,
       signerServer,
       names,
+      target,
     )
     const mergedEnv = mergeHermesEnv(existingEnv, input.apiKey, names.hermesEnvKey)
     const writeText = deps.writeOwnerOnlyText ?? writeOwnerOnlyText
@@ -465,6 +514,7 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
     }
   } catch (err) {
     const recoveryIncomplete = err instanceof HermesConfigRecoveryError
+    const unreadable = err instanceof UnreadableRuntimeConfigError
     return {
       hostedConfigured: false,
       signerConfigured: false,
@@ -473,10 +523,15 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
       target: 'Hermes Agent config',
       changed: false,
       restartRequired: true,
-      messages: [recoveryIncomplete
-        ? 'Could not update Hermes Agent config. Recovery did not complete; inspect the Hermes configuration before retrying.'
-        : 'Could not update Hermes Agent config. Existing configuration was left unchanged.'],
-      errorCode: 'runtime_config_write_failed',
+      messages: unreadable
+        ? [
+            `Could not update Hermes Agent config: ${err.message}.`,
+            `Nothing was written to ${err.configPath}. Fix the YAML there (or move the file aside), then run \`${REPAIR_COMMAND_PREFIX} hermes\` to write the Haven entries from the credentials already stored on this machine. Do not re-run the setup command: its token is already used.`,
+          ]
+        : [recoveryIncomplete
+          ? 'Could not update Hermes Agent config. Recovery did not complete; inspect the Hermes configuration before retrying.'
+          : 'Could not update Hermes Agent config. Existing configuration was left unchanged.'],
+      errorCode: unreadable ? 'runtime_config_unreadable' : 'runtime_config_write_failed',
     }
   }
 }
@@ -587,10 +642,19 @@ async function writeOwnerOnlyText(path: string, value: string): Promise<void> {
   await chmod(path, 0o600).catch(() => undefined)
 }
 
-function parseJsonObject(value: string): Record<string, unknown> {
-  const parsed = JSON.parse(value) as unknown
+function parseJsonObject(value: string, configPath?: string): Record<string, unknown> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value) as unknown
+  } catch {
+    // The parser's own message is deliberately dropped: V8's SyntaxError text
+    // quotes the offending source, and this file may hold ANOTHER MCP server's
+    // bearer token. The path plus "not valid JSON" is everything the user
+    // needs, and nothing they must not see in a log.
+    throw new UnreadableRuntimeConfigError(configPath ?? 'the runtime config', 'it is not valid JSON')
+  }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('runtime config must be a JSON object')
+    throw new UnreadableRuntimeConfigError(configPath ?? 'the runtime config', 'the top level is not a JSON object')
   }
   return parsed as Record<string, unknown>
 }

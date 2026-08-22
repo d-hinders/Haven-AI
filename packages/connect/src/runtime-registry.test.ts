@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { ConnectError } from './connect-error.js'
 import {
   normalizeRuntime,
+  resolveRuntimeSelection,
   restartRequiredForRuntime,
   runtimeProfile,
   runtimeVerificationInstruction,
+  RUNTIME_FLAG_VALUES,
 } from './runtime-registry.js'
 
 describe('Hermes runtime registry', () => {
@@ -63,6 +66,107 @@ describe('Hermes runtime registry', () => {
     expect(runtimeProfile('openclaw', {})).toMatchObject({
       id: 'other',
       canWriteRuntimeConfig: false,
+    })
+  })
+})
+
+describe('the runtime resolution ladder (#1719)', () => {
+  const AGENT_SHELL = { CLAUDECODE: '1' }
+
+  it('takes an agent self-report when detection found nothing', async () => {
+    const selection = await resolveRuntimeSelection(undefined, undefined, {
+      env: {},
+      selfReported: 'claude-desktop',
+    })
+
+    expect(selection).toEqual({ runtime: 'claude-desktop', source: 'explicit' })
+  })
+
+  it('DISCARDS a self-reported runtime when detection fires', async () => {
+    // The #1672 property that makes rung 3b safe: the self-report enters at
+    // hint precedence, so it can only fill a vacuum. An agent that mis-reports
+    // itself inside a detectable shell cannot redirect the write.
+    const selection = await resolveRuntimeSelection(undefined, undefined, {
+      env: AGENT_SHELL,
+      selfReported: 'claude-desktop',
+    })
+
+    expect(selection.runtime).toBe('claude-code')
+    expect(selection.source).toBe('detected')
+    expect(selection.overrodeHint).toBe('claude-desktop')
+  })
+
+  it('lets an explicit --runtime outrank a self-report', async () => {
+    const selection = await resolveRuntimeSelection('cursor', undefined, {
+      env: {},
+      selfReported: 'claude-desktop',
+    })
+
+    expect(selection).toEqual({ runtime: 'cursor', source: 'explicit' })
+  })
+
+  it('refuses an unrecognised self-report instead of guessing a config location', async () => {
+    const error = await resolveRuntimeSelection(undefined, undefined, {
+      env: {},
+      selfReported: 'not-a-harness',
+    }).catch((err: unknown) => err)
+
+    expect(error).toBeInstanceOf(ConnectError)
+    expect((error as ConnectError).code).toBe('runtime_unrecognized')
+    expect((error as ConnectError).message).toContain('not-a-harness')
+    expect((error as ConnectError).message).toContain(RUNTIME_FLAG_VALUES)
+    expect((error as ConnectError).message).toContain('--runtime other')
+  })
+
+  it('never prompts after refusing an unrecognised hint', async () => {
+    const promptForRuntime = vi.fn()
+    await resolveRuntimeSelection('not-a-harness', undefined, { env: {}, promptForRuntime }).catch(() => undefined)
+
+    expect(promptForRuntime).not.toHaveBeenCalled()
+  })
+
+  it('lets detection carry an unrecognised hint rather than failing a rollout window', async () => {
+    // The dashboard can learn a picker id before the PUBLISHED connector does.
+    // With a confident detection there is no guess to make, so the run
+    // proceeds — loudly, via discardedHint, never silently.
+    const selection = await resolveRuntimeSelection('a-harness-shipped-after-this-connector', undefined, {
+      env: AGENT_SHELL,
+    })
+
+    expect(selection.runtime).toBe('claude-code')
+    expect(selection.discardedHint).toBe('a-harness-shipped-after-this-connector')
+  })
+
+  it('refuses an unknown --runtime-force with a code and the valid values', async () => {
+    const error = await resolveRuntimeSelection(undefined, 'nope', { env: AGENT_SHELL }).catch((err: unknown) => err)
+
+    expect(error).toBeInstanceOf(ConnectError)
+    expect((error as ConnectError).code).toBe('runtime_force_unrecognized')
+    expect((error as ConnectError).message).toContain(RUNTIME_FLAG_VALUES)
+  })
+
+  it('reaches the prompt rung only when nothing else answered', async () => {
+    const promptForRuntime = vi.fn(async () => 'claude-desktop' as const)
+    const selection = await resolveRuntimeSelection(undefined, undefined, { env: {}, promptForRuntime })
+
+    expect(promptForRuntime).toHaveBeenCalledTimes(1)
+    expect(selection).toEqual({ runtime: 'claude-desktop', source: 'prompted' })
+  })
+
+  it('does not prompt when detection already answered', async () => {
+    const promptForRuntime = vi.fn(async () => 'claude-desktop' as const)
+    const selection = await resolveRuntimeSelection(undefined, undefined, { env: AGENT_SHELL, promptForRuntime })
+
+    expect(promptForRuntime).not.toHaveBeenCalled()
+    expect(selection.runtime).toBe('claude-code')
+  })
+
+  it('falls through to the caller refusal when the prompt rung is omitted', async () => {
+    // Omitting the rung is how --json, CI, and library callers are SKIPPED
+    // rather than blocked on stdin.
+    expect(await resolveRuntimeSelection(undefined, undefined, { env: {} })).toEqual({
+      runtime: null,
+      source: 'none',
     })
   })
 })

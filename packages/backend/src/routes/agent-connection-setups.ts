@@ -1233,7 +1233,14 @@ function buildSetupPrompt(command: string, runtime: string | null, apiUrl: strin
     // #1545: one sentence of discoverability for agent operators — the flag is
     // opt-in and the pasted command stays the prose-mode default, so the
     // relay-to-human narration keeps working when the operator ignores this.
-    'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr. Appending --json is the ONLY permitted change to the command above.',
+    'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr.',
+    // #1719: the old sentence said appending --json was the ONLY permitted
+    // change, which forbade the one retry the connector now asks an agent for
+    // by name. Exactly two changes are permitted, and the second is bounded to
+    // a value the refusal itself listed — an agent must never invent a runtime
+    // name, because the name selects which app gets an API key and a signing
+    // key written into it.
+    'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.',
     '',
     // #1545: "budget" is the connect flow's one name for the approval gate —
     // the same word the connector's own wait loop and celebration use (#1542).

@@ -1085,6 +1085,90 @@ export const SCENARIOS = {
       await shoot(comingSoonDialog, 'coming-soon-modal')
     },
   },
+  'add-funds': {
+    description: 'Add funds modal with a RESOLVED chain — the normal path (#1844)',
+    // Route capture cannot see this: it is a dialog behind the dashboard hero's
+    // "Add funds" button. The chain data is the shared fixture's, untouched —
+    // its safe carries chain_id 84532, which is the whole point of the
+    // "resolved" capture.
+    //
+    // The ONE override is the rail marker, and it is about reachability rather
+    // than about this issue: the shared fixture's safe is a `delegator_hybrid`
+    // whose hydrated signer set holds a passkey that is not on this device, so
+    // the hero renders `PasskeyOtherDeviceNotice` INSTEAD of the action buttons
+    // and "Add funds" is unclickable. Measured, not assumed — the first run of
+    // this scenario timed out waiting for the button while the unresolved
+    // counterpart found it, because a missing chain_id happens to route the
+    // gate down a different branch. Dropping `account_type` puts the account on
+    // the Safe rail with no stored passkey, i.e. `no_signer`, which is a hero
+    // that offers its actions. Nothing about the modal under capture changes.
+    api(apiPath) {
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE }] }
+      // Same both-endpoints reasoning as the unresolved twin below.
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE }] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Add funds', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      // Confirmed by the RESOLVED sentence, not by a bare timeout. A run that
+      // somehow lands on the unknown-network state fails here rather than
+      // shooting it under the resolved filename — which is the whole point of
+      // having two scenarios.
+      await dialog
+        .getByText('Send USDC to your account address on Base Sepolia.')
+        .waitFor({ timeout: 20_000 })
+      await shoot(dialog, 'resolved')
+    },
+  },
+  'add-funds-unresolved-chain': {
+    description:
+      'Add funds modal with an UNRESOLVED chain — names no network, offers no onramp (#1844)',
+    // A separate scenario rather than a second state of `add-funds`: the two
+    // need opposite pins on the SAME endpoints for their whole run, and one run
+    // cannot hold both (same reason `connect-agent-approved` is split out).
+    //
+    // The state is not reachable through the UI today — the hero only renders
+    // "Add funds" when the user has at least one account, and `defaultSafe`
+    // falls through to `safes[0]`, so `selectedActionSafe` is never absent
+    // while the button exists. What IS reachable is the wire condition #1844
+    // names as the thing that makes the hazard live: a safe that arrives
+    // WITHOUT `chain_id`. That is what this scenario serves — a partially
+    // loaded safe, at the API boundary, with no component code mutated. The
+    // capture is therefore evidence of the real fallback path, not of a
+    // hand-edited render.
+    //
+    // It carries the same rail override as `add-funds` for the same
+    // reachability reason, so the two captures differ by EXACTLY one field —
+    // `chain_id` — and the pair is therefore evidence about the chain and
+    // nothing else.
+    // Both safe-serving endpoints are overridden even though the dashboard reads
+    // only `/auth/me` (`DashboardClient.tsx:633` → `user?.safes`). Deliberate,
+    // not over-mocking: a fixture whose two safe endpoints disagree about
+    // whether an account HAS a chain is a trap for the next scenario that
+    // reaches for the other one, and the disagreement would be invisible.
+    api(apiPath) {
+      const safeWithoutChain = { ...FIXTURE_SAFE }
+      delete safeWithoutChain.chain_id
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
+      if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Add funds', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      await dialog
+        .getByText(/We can't confirm which network this account uses/)
+        .waitFor({ timeout: 20_000 })
+      await shoot(dialog, 'unresolved')
+    },
+  },
 }
 
 function resolveScenarios(names) {

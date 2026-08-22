@@ -575,9 +575,18 @@ export default function DesignSystemPage() {
         title="Layering — the z-index scale"
         description="Every stacking layer has a named token in globals.css. Reach for a token, never a fresh number: two independently chosen values (a z-[100] top bar over a z-[60] navigation toggle) left the mobile sidebar toggle painted and hit-tested under the top bar on every authenticated route, and a third ad-hoc number is how that recurs. Tiers are spaced by 10 so a genuinely new layer lands between two without renumbering."
       >
+        {/* `collapseBelowMd={false}` + `overflow-x-auto`: Table.Head hides the
+            header below md on the assumption that mobile rows carry their own
+            labels. These rows are a bare token, a bare integer and a
+            description — nothing self-labelling — so at 390px the table would
+            otherwise open on "--v2-z-content / 10 / …" with no way to tell
+            which column is which. This is exactly the case the primitive's own
+            docstring names, and it is paired with the horizontal scroll that
+            docstring asks for. */}
         <Card hover={false} className="overflow-hidden">
-          <Table>
-            <Table.Head>
+          <div className="overflow-x-auto">
+          <Table className="min-w-[560px]">
+            <Table.Head collapseBelowMd={false}>
               <tr>
                 <Table.HeaderCell align="left">Token</Table.HeaderCell>
                 <Table.HeaderCell align="left">Value</Table.HeaderCell>
@@ -608,6 +617,7 @@ export default function DesignSystemPage() {
               ))}
             </Table.Body>
           </Table>
+          </div>
         </Card>
         <Card hover={false} className="p-5">
           <h3 className="text-sm font-semibold text-[var(--v2-ink)]">

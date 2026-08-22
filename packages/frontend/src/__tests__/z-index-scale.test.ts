@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { globSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -100,6 +100,40 @@ describe('z-index scale (#1749)', () => {
       expect(bare, `${file} must reference --v2-z-* tokens, found: ${bare.join(', ')}`).toEqual([])
       expect(source, `${file} should reference the layering scale`).toMatch(/z-\[var\(--v2-z-/)
     }
+  })
+
+  it('every full-screen modal overlay sits on the modal tier', () => {
+    // The finding that made this test exist in its current form: raising the
+    // navigation above the chrome silently DEMOTED ten `fixed inset-0`
+    // overlays below it, because they carried hand-picked z-indexes (five at
+    // 100/110, three at 50, two at 200) that nobody had reconciled. Three of
+    // them were already rendering under TopBar before this change.
+    //
+    // "Modals outrank the navigation" is a claim the design-system page makes
+    // in prose; this is the assertion that keeps it TRUE. A full-screen
+    // overlay is unambiguous — `fixed inset-0` is the shape — so a new one on
+    // a fresh number fails here rather than being discovered by a user who
+    // cannot dismiss a dialog.
+    // The mobile drawer's scrim is the one legitimate full-screen overlay that
+    // is NOT a modal — it belongs to the navigation tier by construction, and
+    // is allowed here by its token rather than by filename, so renaming the
+    // file cannot smuggle a modal through.
+    const ALLOWED = new Set(['[var(--v2-z-modal)]', '[var(--v2-z-nav-scrim)]'])
+
+    const files = globSync('**/*.tsx', { cwd: root }).filter(
+      (f) => !String(f).includes('__tests__'),
+    ) as string[]
+    const offenders: string[] = []
+    for (const file of files) {
+      const source = readFileSync(resolve(root, file), 'utf8')
+      for (const line of source.split('\n')) {
+        if (!/fixed inset-0/.test(line)) continue
+        const z = line.match(/\bz-(\[[^\]]+\]|\d+)/)
+        if (!z) continue
+        if (!ALLOWED.has(z[1])) offenders.push(`${file}: ${z[0]}`)
+      }
+    }
+    expect(offenders, 'full-screen overlays must use --v2-z-modal').toEqual([])
   })
 
   it('every --v2-z-* token in the scale is documented on /design-system', () => {

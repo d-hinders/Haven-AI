@@ -89,11 +89,22 @@ describe('lost-result recovery (#1043)', () => {
     expect(anchor).not.toHaveBeenCalled() // the whole point: no second mint
   })
 
-  it('falls through to a fresh anchor when recovery finds nothing, passing the broadcast hook', async () => {
-    const anchor = vi.fn(async (_c: number, _claim: unknown, onBroadcast?: (h: string) => Promise<void>) => {
-      await onBroadcast?.('0x' + 'd'.repeat(64))
-      return { attestationUid: '0x' + 'e'.repeat(64), txHash: '0x' + 'd'.repeat(64) }
-    })
+  /**
+   * AMENDED BY #1745. This test used to assert the opposite — that a null
+   * from recovery FALLS THROUGH to a fresh anchor. That fall-through was the
+   * defect: `getTransactionReceipt` returns null for a pending transaction
+   * and a dropped one alike, so the fall-through minted a second live
+   * credential behind a merely fee-stuck attest. A re-mint now needs positive
+   * evidence of death from the liveness probe, and there is none wired here.
+   *
+   * The broadcast-hook half this test used to carry moved to
+   * `presumed-dropped-attest.test.ts`, where the anchor path is exercised
+   * from the state in which anchoring IS correct (no prior hash) — and
+   * against real Postgres, so "the hash was persisted" is read back from the
+   * row rather than pattern-matched against a mocked UPDATE.
+   */
+  it('does NOT fall through to a fresh anchor when recovery finds nothing (#1745)', async () => {
+    const anchor = vi.fn()
     setAnchor(anchor)
     setAnchorRecovery(vi.fn(async () => null))
 
@@ -108,10 +119,7 @@ describe('lost-result recovery (#1043)', () => {
       .mockResolvedValue({ rows: [], rowCount: 1 })
 
     await issuePassport('agent-1', 'user-1')
-    expect(anchor).toHaveBeenCalled()
-    // The broadcast hook persisted the hash (recordBroadcast UPDATE ran).
-    const sqls = mockQuery.mock.calls.map(([sql]) => String(sql))
-    expect(sqls.some((sql) => sql.includes('SET tx_hash = $2'))).toBe(true)
+    expect(anchor).not.toHaveBeenCalled()
   })
 
   it('refuses a revoked agent before claiming', async () => {

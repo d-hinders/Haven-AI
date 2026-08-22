@@ -1415,7 +1415,7 @@ export default function DesignSystemPage() {
                       From/To column's min-content: the middle row measured
                       85px -> 73px at 1280px. Attributing that to these classes
                       would send the next reader to the wrong file.) */}
-                  <td className="w-10 px-2 py-4 align-middle md:w-auto md:px-4">
+                  <td className="w-9 px-2 py-4 align-middle md:w-auto md:px-4">
                     <DirectionMark direction={row.direction} />
                   </td>
                   {/* `max-w-0` BELOW md ONLY. Unconditional, it squashed the

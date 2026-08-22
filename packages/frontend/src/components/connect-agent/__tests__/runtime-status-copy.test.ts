@@ -39,8 +39,24 @@ describe('runtimeStatusHelper for config failures (#1719)', () => {
     const helper = runtimeStatusHelper(installWith('runtime_config_unreadable'))
 
     expect(helper).toContain('--doctor --repair')
-    expect(helper).toContain('already connected')
+    expect(helper).toContain('not the setup command')
     expect(helper).not.toMatch(/run the setup command again/i)
+  })
+
+  it('spells the repair command WITH --runtime, because the parser requires it', () => {
+    // #1719 design review (blocking): the connector's arg parser refuses
+    // --doctor/--repair without --runtime and has no detection fallback on
+    // that path. A command missing it reproduces the failure with a second,
+    // less legible error — advice worse than none.
+    expect(runtimeStatusHelper(installWith('runtime_config_unreadable'))).toContain(
+      '--doctor --repair --runtime cursor',
+    )
+  })
+
+  it('keeps the command shape correct when the connector reported no runtime', () => {
+    const noRuntime = { ...installWith('runtime_config_unreadable'), runtime: undefined } as Install
+
+    expect(runtimeStatusHelper(noRuntime)).toContain('--doctor --repair --runtime <your agent client>')
   })
 
   it('keeps the retry wording for a genuine write failure', () => {

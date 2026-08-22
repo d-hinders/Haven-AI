@@ -5,6 +5,11 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
+    // #1763: owns the RUN-level database verdict — one probe before
+    // collection (which refuses a run that would silently narrow itself), and
+    // the closing line after vitest's own summary. Per-file state in
+    // db-harness.ts cannot do either; see vitest.global-setup.ts.
+    globalSetup: ['./vitest.global-setup.ts'],
     // #1372: the real-DB harness (`initDbHarness`, db-harness.ts) brings a
     // per-worker schema to the migration head inside a `beforeAll` — or, since
     // resetDb() awaits init as a guarantee, inside a `beforeEach` for a file

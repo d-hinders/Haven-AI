@@ -10,11 +10,15 @@
  * this input, the handler's mapping is dead code and THIS test is what says so.
  */
 import { expect, it } from 'vitest'
-import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
+import { describeDb, resetDb } from '../../__tests__/helpers/db-harness.js'
 import db from '../../../db.js'
 import { renameContactForUser, deleteContactForUser } from '../contacts.js'
 
-await initDbHarness()
+// #1763: the module-scope `await initDbHarness()` that used to sit here ran
+// even with no database, throwing past `describeDb`. `resetDb()` awaits init
+// as a documented guarantee, so dropping it changes nothing when a database
+// IS present — and stops this file being the accidental reason a
+// no-database run failed. That job belongs to vitest.global-setup.ts now.
 
 // A REAL uuid, because user_id is also a UUID column — the mocked route tests
 // pass 'user-1' everywhere and never learn that real Postgres rejects it.

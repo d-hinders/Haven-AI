@@ -67,6 +67,52 @@ async function expectNavigationReachable(page: Page) {
   const open = page.getByRole('button', { name: 'Open sidebar' })
   await expect(open).toBeVisible()
 
+  // 0. The VIEWPORT-ABSOLUTE anchor (#1779), asserted BEFORE the hit-tests
+  //    because it is the frame they are all read in.
+  //
+  //    Every other assertion in this function measures one element against
+  //    another: the toggle against whatever `elementFromPoint` returns at the
+  //    toggle's own centre, the drawer against the header's own height. Those
+  //    are all preserved by a transformation that moves the whole shell, so
+  //    this spec passed the mutation that exposed the gap — the toggle's
+  //    `fixed` swapped for `relative`, which drops it into flow as a 32px flex
+  //    item and shifts `<header>` from x=0 to x=32 while every relative
+  //    reading holds. Measured, not predicted.
+  //
+  //    The top bar spanning the viewport edge to edge is the right anchor for
+  //    THIS spec specifically: the 56px band is its whole subject — the band
+  //    where the toggle and `TopBar` contest the stacking order — so pinning
+  //    that band to the screen says the geometry the layering claims are made
+  //    against has not moved under them.
+  //
+  //    Computed here rather than through `expectNoHorizontalOverflow`, on
+  //    purpose. `navigation.mobile.spec.ts` gets its anchor from that shared
+  //    helper; if this one did too, a single weakened helper would blind every
+  //    mobile suite at once and nothing would go red — one shared reference
+  //    frame that everything trusts is precisely the defect #1779 is about, and
+  //    re-introducing it one layer up would be the same mistake wearing the
+  //    fix's clothes. Two independently-computed anchors can disagree.
+  //
+  //    Expressed as two GAPS rather than as `right === innerWidth`, so a
+  //    failure prints how far the bar is off each edge instead of two absolute
+  //    numbers the reader then has to subtract.
+  const shell = await page.evaluate(() => {
+    const header = document.querySelector('header')
+    if (!header) return null
+    const b = header.getBoundingClientRect()
+    return {
+      leftGap: Math.round(b.left),
+      rightGap: Math.round(window.innerWidth - b.right),
+      viewportWidth: window.innerWidth,
+      headerWidth: Math.round(b.width),
+    }
+  })
+  expect(shell, 'no <header> — the shell never rendered').not.toBeNull()
+  expect(
+    { leftGap: shell!.leftGap, rightGap: shell!.rightGap },
+    `top bar is not anchored to the viewport: ${JSON.stringify(shell)}`,
+  ).toEqual({ leftGap: 0, rightGap: 0 })
+
   // 1. The hit-test from the original report. `elementFromPoint` answers "what
   //    would a tap here actually reach", which is the only question that
   //    matters — the button's own computed style was always correct.

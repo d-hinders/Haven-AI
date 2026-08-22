@@ -173,6 +173,12 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
 
     rerender(<WaitingForConnector {...props} connectionStage="recovery" />)
     expect(container.textContent).toContain('Haven has not received a connection yet')
+    // #1720: the connector can refuse locally (it cannot work out which agent
+    // client to configure) and never contact Haven at all, so this is the only
+    // screen that failure ever reaches. It must send the user to the connector
+    // output that names the problem BEFORE telling them to re-run — a re-run
+    // reproduces that refusal exactly.
+    expect(container.textContent).toContain("Check the connector’s output first")
     fireEvent.click(getByRole('button', { name: 'Copy local command' }))
     expect(onCopy).toHaveBeenCalledWith('command', SETUP.connector_command)
     fireEvent.click(getByRole('button', { name: 'Cancel this setup' }))

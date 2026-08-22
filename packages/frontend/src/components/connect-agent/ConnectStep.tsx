@@ -36,13 +36,15 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   if (!setup) return null
 
   // #1672: once the connector has run, the setup status carries the runtime it
-  // DETECTED in the executing environment — more truthful than the picker's
-  // choice, which on the command path names a product (#1682: claude-code /
-  // codex / cowork) without settling which client the command actually ran
-  // inside. Runtime-specific copy (restart guidance, the Codex Desktop note)
-  // keys off this; before the connector reports, it falls back to the picked
-  // value.
-  const effectiveRuntime = setupStatus?.runtime ?? flow.runtime
+  // DETECTED in the executing environment. Runtime-specific copy (restart
+  // guidance, the Codex Desktop note) keys off this.
+  //
+  // #1720 removed the picker, so there is no longer a pre-run value to fall
+  // back to — before the connector reports, the runtime is genuinely unknown
+  // and the empty string says so. Every consumer already had to handle "the
+  // connector has not reported yet"; that state is now simply reached by
+  // everyone rather than by the command path alone.
+  const effectiveRuntime = setupStatus?.runtime ?? ''
 
   return (
     <ConnectStepShell phase={shellPhase(connectView?.kind)} stateKey={connectView?.kind ?? 'none'}>

@@ -34,6 +34,24 @@ export {
   type PreparedSignerRuntime,
   type PrepareSignerRuntimeInput,
 } from './signer-runtime.js'
-export { normalizeRuntime, runtimeProfile, type RuntimeId, type RuntimeProfile } from './runtime-registry.js'
+export {
+  normalizeRuntime,
+  resolveRuntimeSelection,
+  runtimeProfile,
+  RUNTIME_FLAG_VALUES,
+  type RuntimeId,
+  type RuntimeProfile,
+  type RuntimeResolutionOptions,
+  type RuntimeSelection,
+} from './runtime-registry.js'
+export { ConnectError, isConnectError } from './connect-error.js'
+export {
+  promptForInstalledClient,
+  resolveRuntimeByInstalledClientPrompt,
+  scanInstalledClients,
+  type InstalledClientCandidate,
+  type PromptIo,
+  type ScanInstalledClientsOptions,
+} from './installed-clients.js'
 export { defaultAgentDirectory, writeCredentialFiles, type StoredCredentialPaths, type WriteCredentialInput } from './storage.js'
 export { MCP_RUNTIME_MANIFEST, mcpPackageSpec, sdkPackageSpec, signerPackageSpec } from './runtime-manifest.js'

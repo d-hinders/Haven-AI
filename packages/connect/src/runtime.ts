@@ -24,7 +24,9 @@ import {
   supportsLocalMcp,
   type RuntimeInstallResult,
 } from './runtime-install.js'
-import { normalizeRuntime, resolveRuntimeSelection, runtimeProfile, runtimeVerificationInstruction, RUNTIME_FLAG_VALUES, type RuntimeProfile } from './runtime-registry.js'
+import { normalizeRuntime, resolveRuntimeSelection, runtimeProfile, runtimeVerificationInstruction, RUNTIME_FLAG_VALUES, type RuntimeId, type RuntimeProfile } from './runtime-registry.js'
+import { ConnectError } from './connect-error.js'
+import { resolveRuntimeByInstalledClientPrompt } from './installed-clients.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
@@ -36,6 +38,19 @@ export interface ConnectOptions {
   runtime?: string
   /** #1672 escape hatch: use exactly this runtime, ignoring environment detection. */
   runtimeForce?: string
+  /**
+   * #1719: the harness an AGENT running this command reported for itself. Enters
+   * at the same precedence as `runtime`, so it can only fill a vacuum — never
+   * override a detected environment.
+   */
+  runtimeSelfReport?: string
+  /**
+   * #1719: this run may ask a human which installed client to configure. The
+   * CLI sets it for a non-`--json` run; a library caller must opt in. Combined
+   * with `deps.isTty`, it is what makes the prompt rung SKIPPED rather than
+   * answered in CI, in `--json` automation, and in library embeddings.
+   */
+  interactive?: boolean
   credentialsDir?: string
   environmentLabel?: string
   /** #1696: wiring slug for a named MCP pair + slug-keyed credential dir. */
@@ -99,6 +114,10 @@ export interface ConnectDeps {
   nodeVersion?: string
   /** Overridable so runtime detection (#1672) is testable without faking process.env. */
   env?: NodeJS.ProcessEnv
+  /** Overridable so the #1719 TTY gate is testable without faking process.stdin. */
+  isTty?: boolean
+  /** Overridable so the #1719 installed-client prompt is testable without readline. */
+  promptRuntime?: () => Promise<RuntimeId>
 }
 
 export interface ConnectResult {
@@ -145,11 +164,29 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   // setup command no longer carries --runtime, and a hint that contradicts a
   // confident detection must not write another client's config. Refusing here
   // keeps the #1161 discipline: no half-created agent, no burned setup token.
-  const selection = resolveRuntimeSelection(options.runtime, options.runtimeForce, deps.env ?? process.env)
+  //
+  // #1719 extends the ladder past detection: an agent that knows its own
+  // harness may say so (as a re-run carrying --runtime, which is why the
+  // backend's setup prompt now permits exactly that one change), and a human
+  // at a TTY is offered the clients actually installed here. The prompt rung
+  // is OMITTED — not answered — whenever this is not an interactive terminal
+  // run, so CI and --json automation still reach the refusal below instead of
+  // blocking on stdin.
+  const selection = await resolveRuntimeSelection(options.runtime, options.runtimeForce, {
+    env: deps.env ?? process.env,
+    selfReported: options.runtimeSelfReport,
+    promptForRuntime: runtimeSelectionPrompt(options, deps),
+  })
   if (!selection.runtime) {
-    throw new Error(
-      'Could not determine the agent runtime: no runtime detected in this environment and no --runtime given. ' +
-      `Re-run with --runtime <name> (one of: ${RUNTIME_FLAG_VALUES}).`,
+    throw new ConnectError(
+      'runtime_undetermined',
+      'Could not determine the agent runtime: nothing was detected in this environment and no --runtime was given. ' +
+        'If you are an AI agent running this command: re-run it once, unchanged except for adding ' +
+        `--runtime <name>, naming the harness you are running in — one of: ${RUNTIME_FLAG_VALUES} ` +
+        '(the aliases cowork, codex and openclaw are accepted too). Do not guess: if your harness is ' +
+        'not one of those, use --runtime other, which stores the credentials and prints the manual MCP steps. ' +
+        'Nothing was written and the Haven setup token is still unused.',
+      'rerun_connect_with_explicit_runtime',
     )
   }
   const runtime = selection.runtime
@@ -167,6 +204,15 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
 
   if (selection.overrodeHint) {
     log(`runtime: ${runtime} (detected; ignoring the ${selection.overrodeHint} hint — pass --runtime-force ${selection.overrodeHint} to override)`)
+  }
+  if (selection.discardedHint) {
+    // #1719: never silent. The caller asked for something this connector has
+    // no name for; detection is what saved the run, and the user has to be
+    // able to see that their value did nothing.
+    log(`runtime: ${runtime} (detected; "${selection.discardedHint}" is not a runtime Haven knows — valid values: ${RUNTIME_FLAG_VALUES})`)
+  }
+  if (selection.source === 'prompted') {
+    log(`runtime: ${runtime} (chosen at the prompt — nothing was detected in this environment)`)
   }
 
   log('Warming up your connection to Haven…')
@@ -452,26 +498,54 @@ export function completionOutcome(input: {
 }
 
 /**
+ * The prompt rung's gate (#1719), in one place so the two conditions that
+ * SKIP it cannot drift apart: a run that is not interactive (`--json`, a
+ * library embedding) and a run whose stdin is not a terminal (CI, a pipe).
+ * Returning `undefined` omits the rung from the ladder entirely, so those runs
+ * reach the `runtime_undetermined` refusal instead of blocking on stdin.
+ */
+function runtimeSelectionPrompt(
+  options: ConnectOptions,
+  deps: ConnectDeps,
+): (() => Promise<RuntimeId>) | undefined {
+  if (options.interactive !== true) return undefined
+  // The TTY gate is checked BEFORE the injected prompt, not after: an override
+  // that could skip it would make the gate untestable through the seam that
+  // exists to test it.
+  if (!(deps.isTty ?? Boolean(process.stdin.isTTY))) return undefined
+  return deps.promptRuntime ?? (() => resolveRuntimeByInstalledClientPrompt())
+}
+
+/**
  * A deliberately terse failure record: error messages can contain server or
  * filesystem detail, while this public contract must remain safe to serialize.
+ *
+ * #1719: a `ConnectError` carries its own code and next action, so it is read
+ * rather than guessed. The regex ladder below survives only for the refusals
+ * that are still plain `Error`s — every new failure mode joins the vocabulary
+ * instead of joining that ladder.
  */
 export function failedConnectOutcome(runtimeHint: string | undefined, error: unknown): ConnectOutcome {
   const message = error instanceof Error ? error.message : ''
-  const code = /Node\.js >=/i.test(message)
-    ? 'unsupported_node_version'
-    : /setup challenge.*expired|expired or invalid/i.test(message)
-      ? 'setup_challenge_expired_or_invalid'
-      : /only available for Claude Code and Codex/i.test(message)
-        ? 'local_mcp_unsupported_runtime'
-        : 'connect_failed'
+  const code = error instanceof ConnectError
+    ? error.code
+    : /Node\.js >=/i.test(message)
+      ? 'unsupported_node_version'
+      : /setup challenge.*expired|expired or invalid/i.test(message)
+        ? 'setup_challenge_expired_or_invalid'
+        : /only available for Claude Code and Codex/i.test(message)
+          ? 'local_mcp_unsupported_runtime'
+          : 'connect_failed'
   const runtime = normalizeRuntime(runtimeHint)
-  const nextAction = code === 'setup_challenge_expired_or_invalid'
-    ? 'return_to_haven_for_fresh_setup'
-    : code === 'unsupported_node_version'
-      ? 'install_supported_node_and_rerun_connect'
-      : code === 'local_mcp_unsupported_runtime'
-        ? 'rerun_without_local_mcp'
-        : 'review_the_safe_error_output_and_start_a_fresh_haven_setup_if_needed'
+  const nextAction = error instanceof ConnectError
+    ? error.nextAction
+    : code === 'setup_challenge_expired_or_invalid'
+      ? 'return_to_haven_for_fresh_setup'
+      : code === 'unsupported_node_version'
+        ? 'install_supported_node_and_rerun_connect'
+        : code === 'local_mcp_unsupported_runtime'
+          ? 'rerun_without_local_mcp'
+          : 'review_the_safe_error_output_and_start_a_fresh_haven_setup_if_needed'
   return {
     schema_version: CONNECT_OUTCOME_SCHEMA_VERSION,
     outcome: 'failed',

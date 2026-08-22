@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { isCliEntrypoint, runCli } from './cli.js'
 import * as runtime from './runtime.js'
+import { ConnectError } from './connect-error.js'
 
 let tempDir = ''
 
@@ -60,6 +61,68 @@ describe('--json wiring for the approval wait (#1377 D)', () => {
       spy.mockRestore()
     }
     expect(seen).toEqual([false, true])
+  })
+})
+
+describe('--json never prompts for a runtime (#1719)', () => {
+  // The interactive rung is the one thing that could make the automation
+  // contract block on stdin. --json must reach a machine-readable refusal
+  // instead, which is what `interactive: false` buys.
+  it('passes interactive:false under --json and true otherwise', async () => {
+    const seen: Array<boolean | undefined> = []
+    const spy = vi.spyOn(runtime, 'runConnect').mockImplementation(async (options) => {
+      seen.push(options.interactive)
+      return { outcome: { schema_version: 1, outcome: 'complete' } } as never
+    })
+    try {
+      const io = { stdout: () => undefined, stderr: () => undefined }
+      await runCli(['--setup', 'hv_setup_x', '--api', 'https://api.haven.example', '--json'], io)
+      await runCli(['--setup', 'hv_setup_x', '--api', 'https://api.haven.example'], io)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(seen).toEqual([false, true])
+  })
+
+  it('reports an undetermined runtime as a code on stdout, and exits non-zero', async () => {
+    const stdout: string[] = []
+    const spy = vi.spyOn(runtime, 'runConnect').mockRejectedValue(
+      new ConnectError('runtime_undetermined', 'could not determine the agent runtime', 'rerun_connect_with_explicit_runtime'),
+    )
+    try {
+      const exitCode = await runCli(
+        ['--setup', 'hv_setup_x', '--api', 'https://api.haven.example', '--json'],
+        { stdout: (message) => stdout.push(message), stderr: () => undefined },
+      )
+      expect(exitCode).toBe(1)
+      expect(JSON.parse(stdout[0])).toMatchObject({
+        outcome: 'failed',
+        error: { code: 'runtime_undetermined', next_action: 'rerun_connect_with_explicit_runtime' },
+      })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('exits non-zero on an aborted prompt in prose mode, saying nothing was written', async () => {
+    const stderr: string[] = []
+    const spy = vi.spyOn(runtime, 'runConnect').mockRejectedValue(
+      new ConnectError(
+        'runtime_prompt_aborted',
+        'Runtime not chosen (the prompt was cancelled). Nothing was written.',
+        'rerun_connect_and_choose_a_runtime',
+      ),
+    )
+    try {
+      const exitCode = await runCli(
+        ['--setup', 'hv_setup_x', '--api', 'https://api.haven.example'],
+        { stdout: () => undefined, stderr: (message) => stderr.push(message) },
+      )
+      expect(exitCode).toBe(1)
+      expect(stderr.join('')).toContain('Nothing was written')
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

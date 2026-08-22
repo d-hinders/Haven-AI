@@ -94,8 +94,10 @@ const BACKGROUNDS: Record<string, string[]> = {
   // different semantic tone from the ring:
   //   - ApprovalNotifications.tsx — the bell is `bg-[var(--v2-warning-soft)]`
   //     whenever `actionableCount > 0`, a static state rather than a hover.
-  //   - AgentBudgetCard.tsx — "Remove budget" tints `hover:bg-danger-soft`
-  //     while its ring stays brand.
+  //   - contacts/page.tsx — "Delete contact" tints `hover:bg-danger-soft`
+  //     while its ring stays brand. That mismatch is #1809; until it
+  //     lands the pair is real and stays registered. (AgentBudgetCard.tsx was
+  //     the other one and moved to a danger ring in #1792.)
   // Both clear the bar today (3.93:1 and 3.95:1). They are registered anyway:
   // an unregistered pair is not "passing", it is UNMEASURED, and would regress
   // silently under any future palette or alpha change.
@@ -272,6 +274,104 @@ describe('brand-filled controls carry a ring offset (#1741)', () => {
     expect(button, 'Button primary is brand-filled; its ring must stay offset').toMatch(
       /focus-visible:ring-brand\/\d+ focus-visible:ring-offset-2/,
     )
+  })
+})
+
+/**
+ * A destructive control signals destructive in EVERY state it has (#1792).
+ *
+ * This guard is about tone, not contrast, and the difference matters for how it
+ * is read. `ring-brand/80` on `--v2-danger-soft` measures 3.95:1 — comfortably
+ * over the bar, registered in BACKGROUNDS, and #1798's measured assertions were
+ * therefore never going to say a word about it. Two identical destructive icon
+ * buttons answered "what colour is focus?" two different ways for months
+ * precisely because every *measurable* property of both was fine.
+ *
+ * What makes a control destructive here is its own hover treatment: it tints
+ * `--v2-danger-soft` or reddens its glyph to `--v2-danger`. If it says danger on
+ * hover it says danger on focus.
+ *
+ * Scope note, so this does not read as more than it is: it matches within a
+ * single class STRING, the same granularity as the brand-fill rule above and for
+ * the same reason — a file with several buttons must not be excused because one
+ * of its others is correct. Three known limits follow from that, named here so
+ * the list is honest rather than ending at the cheapest one:
+ *
+ *   1. `Button`'s `variant="danger"` — a SOLID `--v2-danger` fill in
+ *      `VARIANT_CLASS` against `ring-brand/80` in the base string. The same
+ *      co-location split #1798 had to work around for its offset rule, plus a
+ *      hover shape (`hover:bg-[var(--v2-danger)]/90`) this regex does not match.
+ *      It is the loudest destructive control in the product and it focuses
+ *      brand. Not a contrast defect — the base string's `ring-offset-2` puts a
+ *      white moat (6.57:1 against the fill) between ring and fill, so the ring
+ *      lands on the page at 4.19:1; un-offset it would be 1.08:1. Tracked as
+ *      #1817, which is where the `Button`-specific assertion belongs, since a
+ *      co-location rule structurally cannot cover it.
+ *   2. `DropdownMenu`'s `tone="danger"` item, whose focus indicator is a
+ *      background swap rather than a ring — outside a ring rule's domain
+ *      entirely.
+ *   3. Controls with NO focus ring at all (`Sidebar` logout, `AgentCard`'s
+ *      revoke/remove links, #1819). This rule only fires on a class string that
+ *      already contains a `focus-visible:ring-*` utility, which is right for a
+ *      TONE rule — a missing indicator is a different defect needing its own
+ *      guard, not a widened version of this one.
+ */
+const DESTRUCTIVE_HOVER = /hover:(?:bg-\[var\(--v2-danger-soft\)\]|text-\[var\(--v2-danger\)\])/
+
+/**
+ * File-scoped, and it is meant to be deleted rather than grown.
+ *
+ * `contacts/page.tsx`'s "Delete contact" button has exactly the mismatch this
+ * guard exists for. #1792 fixed ONE call-site on purpose — which tone a control
+ * should wear is a per-call-site design judgement, and sweeping it would have put
+ * "the rule now exists" and "this other button is now red too" in one diff.
+ * Filed as #1809; closing that issue means removing this entry, not adding a
+ * second one.
+ */
+const TONE_EXEMPT = ['src/app/(authenticated)/contacts/page.tsx']
+
+describe('destructive controls focus in their own tone (#1792)', () => {
+  it('a control that hovers danger does not focus brand', () => {
+    const offenders: string[] = []
+    for (const file of sourceFiles(join(FRONTEND, 'src'))) {
+      const rel = relative(FRONTEND, file)
+      if (TONE_EXEMPT.includes(rel)) continue
+      const text = readFileSync(file, 'utf8')
+      for (const cls of text.match(/[^"'`]*focus-visible:ring-[a-z]+\/\d+[^"'`]*/g) ?? []) {
+        if (!DESTRUCTIVE_HOVER.test(cls)) continue
+        const tone = cls.match(/focus-visible:ring-([a-z]+)\/\d+/)?.[1]
+        if (tone !== undefined && tone !== 'danger') {
+          offenders.push(`${rel}: hovers danger, focuses ${tone}`)
+        }
+      }
+    }
+    expect(
+      offenders,
+      'a destructive control must focus in its own tone — use focus-visible:ring-danger/80',
+    ).toEqual([])
+  })
+
+  it('the exemption names a file that really is still mismatched', () => {
+    // An exemption list that outlives its reason silently licenses the next
+    // regression in that file. This asserts the entry is still EARNING its
+    // place, so #1809's fix makes this test red until the entry is removed.
+    for (const rel of TONE_EXEMPT) {
+      const text = readFileSync(join(FRONTEND, rel), 'utf8')
+      const mismatched = (text.match(/[^"'`]*focus-visible:ring-[a-z]+\/\d+[^"'`]*/g) ?? []).some(
+        (cls) =>
+          DESTRUCTIVE_HOVER.test(cls) && cls.match(/focus-visible:ring-([a-z]+)\/\d+/)?.[1] !== 'danger',
+      )
+      expect(mismatched, `${rel} is exempt but no longer mismatched — drop it from TONE_EXEMPT`).toBe(
+        true,
+      )
+    }
+  })
+
+  it('the sibling that was already right stays right', () => {
+    // EditAgentModal's "Remove budget" is the reference call-site #1792 was
+    // measured against. Named so a future sweep cannot quietly flip it back.
+    const modal = readFileSync(join(FRONTEND, 'src/components/EditAgentModal.tsx'), 'utf8')
+    expect(modal).toMatch(/hover:bg-\[var\(--v2-danger-soft\)\][^"'`]*focus-visible:ring-danger\/\d+/)
   })
 })
 

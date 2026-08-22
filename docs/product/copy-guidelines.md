@@ -10,14 +10,12 @@ covers:
   - packages/frontend/src/app/onboarding/**
   - packages/frontend/src/components/ConnectAgentModal.tsx
   - packages/frontend/src/components/UsingYourAgentInfo.tsx
-  - packages/frontend/src/components/haven/HostedConnectCard.tsx
   - packages/frontend/src/lib/agent-credential.ts
   - packages/frontend/src/lib/agent-handoff.ts
   - packages/frontend/src/lib/chains.ts
-  - packages/frontend/src/lib/hosted-connect.ts
   - packages/frontend/src/lib/passkey.ts
   - packages/frontend/src/lib/signer.ts
-last-verified: "2026-08-10" # re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-22" # #1813: dropped two `covers:` entries pointing at files this change deleted (`haven/HostedConnectCard.tsx`, `lib/hosted-connect.ts`) — both unreachable since #345 retired their call site. A covers entry naming a path that no longer exists silently stops mapping anything, so the doc looks better-covered than it is. No copy RULE here changes; the deleted component's user-facing strings simply no longer exist. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven UX Copy Guidelines

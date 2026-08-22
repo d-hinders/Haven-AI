@@ -174,8 +174,7 @@ export function WaitingForConnector({
           hand-rolled form (design-lint's structural rules only catch the
           `Card` primitive, so nothing flagged it). This flow already has a
           lighter convention for exactly this — chevron summary, left rule for
-          the body, no box at all (ConnectionVerificationFooter,
-          HostedConnectCard) — so use it. Depth now reads from indentation
+          the body, no box at all (ConnectionVerificationFooter) — so use it. Depth now reads from indentation
           instead of from stacked surfaces, and the only card left inside is
           the CopyBlock, which is genuinely one. */}
       <details className="group text-xs">

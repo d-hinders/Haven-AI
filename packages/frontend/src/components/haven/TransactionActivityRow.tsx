@@ -42,9 +42,17 @@ export function TransactionActivityRow({
   action?: ReactNode
   /**
    * `comfortable` (default) is for the dedicated transactions screen.
-   * `compact` matches the height of the shared `<Row>` primitive (~56px) so
-   * the dashboard's agents + transactions columns sit on the same rhythm.
-   * Compact also hides the description line on the desktop layout.
+   * `compact` is the dashboard preview, tightened so the agents and
+   * transactions columns sit on the same rhythm. Compact also hides the
+   * description line on the desktop layout.
+   *
+   * This used to say compact "matches the height of the shared `<Row>`
+   * primitive (~56px)", which was wrong twice over and about the one property
+   * #1833 turned out to hinge on: compact is pinned to **72px** (at `sm` and
+   * up — see `containerPadding`), and 56px is `Row`'s *comfortable* density,
+   * its compact being ~44px (`ui/Row.tsx`). Corrected rather than left, since
+   * a stale number about row height is exactly what sends the next reader to
+   * the wrong conclusion here.
    */
   density?: Density
 }) {

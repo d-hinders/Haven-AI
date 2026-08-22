@@ -21,10 +21,13 @@
 import { AbiCoder, Contract, Interface } from 'ethers'
 import { getRelayer } from '../../infra/relayer.js'
 import { openOutboundRecord, submitRecorded } from '../../infra/outbound-queue.js'
-import { findOutboundTxByHash } from '../../infra/repositories/outbound-txs.js'
+import {
+  findOutboundEvidenceTxHash,
+  findOutboundTxByHash,
+} from '../../infra/repositories/outbound-txs.js'
 import { getEasDeployment, getPassportSchemaUid } from './schema.js'
 import type { Anchor, AnchorResult, PassportClaim } from './issuance.js'
-import type { Revoker } from './revocation.js'
+import type { RevocationAnchorProbe, RevocationAnchorReading, Revoker } from './revocation.js'
 
 /** Field order MUST match PASSPORT_SCHEMA — the encoding is positional. */
 const SCHEMA_TYPES = [
@@ -43,6 +46,12 @@ const EAS_ABI = [
   // For receipt recovery (#1043): the UID of an attestation whose result was
   // lost after broadcast is re-read from this event, never re-minted.
   'event Attested(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schemaUID)',
+  // For revocation convergence (#1758): `revocationTime` is the chain's own
+  // answer to "is this attestation revoked", independent of which transaction
+  // did it and of whether Haven ever saw that transaction's receipt.
+  'function getAttestation(bytes32 uid) external view returns ' +
+    '((bytes32 uid,bytes32 schema,uint64 time,uint64 expirationTime,uint64 revocationTime,' +
+    'bytes32 refUID,address recipient,address attester,bool revocable,bytes data))',
 ]
 
 const ZERO_BYTES32 = '0x' + '00'.repeat(32)
@@ -299,7 +308,7 @@ export async function recoverAnchorFromReceipt(
  * still live in the mempool — after which the reorg restores the slot, the
  * original mines, and BOTH mine. That is the exact duplicate this probe
  * exists to prevent, so the nonce is read as of a finalized (or failing that,
- * a deeply buried) block rather than the head. See `nonceReadBlock`.
+ * a deeply buried) block rather than the head. See `settledReadBlock`.
  *
  * What this deliberately does NOT decide is the time question: how long an
  * unmined attest whose nonce is still open may sit before Haven declares it
@@ -350,29 +359,40 @@ export async function recoverAnchorFromReceipt(
  * contradicts itself, and we believe the receipt.
  */
 /**
- * How far back the nonce is read when the node cannot name a finalized block.
+ * How far back chain state is read when the node cannot name a finalized
+ * block.
  *
  * A fallback, not the preferred path. Base and Base Sepolia are OP-stack and
  * expose `finalized`, which is the honest answer; this exists so a provider
  * that does not understand the tag degrades to something conservative rather
  * than to reading the head. At 2 s blocks this is ~10 minutes of burial,
- * comfortably past any ordinary reorg, and the latency costs nothing here —
- * the caller is a passport anchor that has already been stuck for minutes.
+ * comfortably past any ordinary reorg, and the latency costs nothing for
+ * either caller — both are passport anchors that have already been stuck for
+ * minutes.
+ *
+ * Two probes share it, and deliberately so: #1745's nonce read (is the attest
+ * still mineable) and #1758's revocation read (is the attestation revoked).
+ * They ask different questions of the chain but need the identical property
+ * from the vantage point — that what it shows will not be un-shown — so a
+ * second constant would be the same number argued twice.
  */
-export const ANCHOR_NONCE_READ_DEPTH_BLOCKS = 300
+export const SETTLED_CHAIN_READ_DEPTH_BLOCKS = 300
 
 /**
- * A block old enough that a nonce consumed as of it will stay consumed.
+ * A block old enough that what it shows will not be un-shown — a nonce
+ * consumed as of it stays consumed, an attestation revoked as of it stays
+ * revoked.
  *
  * Returns null when no such vantage point exists (a chain shorter than the
- * fallback depth), which the caller reads as "no evidence" — never as death.
+ * fallback depth), which every caller reads as "no evidence" — never as a
+ * conclusion.
  *
  * The `finalized` result is sanity-checked against the head rather than
  * trusted: a node that does not implement the tag may echo the latest block
  * back, and silently reading the head is precisely the reorg exposure this
  * function exists to remove.
  */
-async function nonceReadBlock(provider: {
+async function settledReadBlock(provider: {
   getBlockNumber: () => Promise<number>
   getBlock: (tag: string) => Promise<{ number: number } | null>
 }): Promise<number | null> {
@@ -383,7 +403,7 @@ async function nonceReadBlock(provider: {
   } catch {
     // Tag unsupported — fall through to the depth fallback.
   }
-  const buried = head - ANCHOR_NONCE_READ_DEPTH_BLOCKS
+  const buried = head - SETTLED_CHAIN_READ_DEPTH_BLOCKS
   return buried > 0 ? buried : null
 }
 
@@ -416,10 +436,10 @@ export async function classifyAnchorTxLiveness(
   if (record.status === 'replaced' || record.status === 'mined') return 'live'
 
   // 3. Has the slot been consumed by something else, durably? Read as of a
-  //    finalized/buried block, never the head — see `nonceReadBlock`. The
+  //    finalized/buried block, never the head — see `settledReadBlock`. The
   //    count is of MINED transactions only; `pending` would include the stuck
   //    transaction itself and could never answer this.
-  const readBlock = await nonceReadBlock(provider)
+  const readBlock = await settledReadBlock(provider)
   if (readBlock === null) return 'live' // no settled vantage point = no evidence
   const minedNonce = await provider.getTransactionCount(relayer.address, readBlock)
   if (BigInt(minedNonce) <= BigInt(record.nonce)) return 'live'
@@ -499,6 +519,16 @@ export class PassportRevokeUnconfirmedError extends Error {
 // hoisting it out of this module entirely — it exists a third time, unexported,
 // in `rails/hybrid-provisioning.ts`.
 
+/**
+ * The `outbound_txs.submitter` every passport revoke is recorded under.
+ *
+ * A constant rather than a literal because #1758's convergence path looks the
+ * transaction back UP by this value: writer and reader drifting apart would
+ * not fail — it would silently return no evidence, and the row that could have
+ * converged would go back to alarming forever.
+ */
+export const PASSPORT_REVOKE_SUBMITTER = 'passport_revoke'
+
 /** The one revoke request object — record and broadcast share it (#1556). */
 export function buildRevokeRequest(chainId: number, attestationUid: string) {
   return { schema: getPassportSchemaUid(chainId), data: { uid: attestationUid, value: 0n } }
@@ -529,7 +559,7 @@ export const revokeOnChain: Revoker = async (chainId: number, attestationUid: st
   // #1556: same durable-record shape as `anchorOnChain`, opened pre-broadcast.
   const record = await openOutboundRecord({
     chainId,
-    submitter: 'passport_revoke',
+    submitter: PASSPORT_REVOKE_SUBMITTER,
     to: eas,
     data: buildRevokeCall(chainId, attestationUid).data,
   })
@@ -595,4 +625,104 @@ export const revokeOnChain: Revoker = async (chainId: number, attestationUid: st
   }
   await record.mined()
   return { txHash: tx.hash }
+}
+
+/**
+ * Is this attestation already revoked on-chain? (#1758)
+ *
+ * ## The question, and why it is this one
+ *
+ * #1742 bounded the revoke's wait, which means the transaction can now mine
+ * AFTER the caller stopped watching — ordinary Base congestion is enough. When
+ * it does, nothing re-observes it: the bump worker closes the `outbound_txs`
+ * row and has no business reaching into `agent_passports`, and the only path
+ * that can set `revocation_status = 'confirmed'` is a FRESH `revokeOnChain`
+ * seeing `receipt.status === 1` — which can never happen again, because EAS
+ * reverts every later revoke of a revoked UID with `AlreadyRevoked`. So the
+ * row stayed `pending` permanently, the stuck-revoke alarm fired forever for
+ * an agent whose credential was already dead, and the relayer burned gas on a
+ * doomed transaction roughly hourly.
+ *
+ * The obvious fix is to decode that `AlreadyRevoked` revert and treat it as
+ * success. This deliberately does NOT do that, for #1745's reason: a revert is
+ * a claim about one transaction, and reading a failure as a success is the
+ * kind of inference that goes wrong quietly. The revoked BIT is the fact
+ * itself — it does not care which transaction set it, whether Haven ever saw
+ * that transaction's receipt, or whether an operator revoked the attestation
+ * by hand. And reading it costs no gas at all, so the doomed broadcast stops
+ * happening rather than being reinterpreted after the fact.
+ *
+ * ## Read as of a SETTLED block, never the head
+ *
+ * `revocationTime` at the chain head can be undone by a reorg. Acting on that
+ * would write `confirmed` — which is terminal, `listStuckRevocations` never
+ * looks at those rows again — for an attestation that is still live and
+ * merchant-readable after the reorg. That is the one direction that actually
+ * hurts: it silences the alarm for a live credential. So the read takes the
+ * same vantage point as #1745's nonce read, `settledReadBlock`, with the same
+ * sanity check that a node claiming `finalized` is not just echoing the head.
+ *
+ * ## Three answers, and only one of them concludes anything
+ *
+ * - `revoked` — positive evidence, as of a settled block. The caller may
+ *   converge.
+ * - `live` — the attestation exists and its `revocationTime` is 0. The revoke
+ *   has not landed; submit one, exactly as before.
+ * - `unknown` — no provider, no settled vantage point, or the UID is not
+ *   visible as of that block (a young attestation legitimately is not).
+ *   ABSENCE OF EVIDENCE. It reads identically to `live` at the call site: the
+ *   caller submits a revoke, which is what it would have done anyway. Nothing
+ *   is ever concluded from a failed read.
+ *
+ * ## The evidence pointer
+ *
+ * Migration 049 refuses `revocation_status = 'confirmed'` without a
+ * `revocation_tx_hash`, so "the chain says revoked" is not on its own a
+ * representable conclusion — the row also needs the transaction that did it.
+ * That comes from the durable outbound record (#1556) carrying this revoke's
+ * exact calldata, preferring a `mined` row (proven status-1) over a
+ * `broadcast` one. It is read HERE rather than in `revocation.ts` so that
+ * module stays chain-free and relayer-free, which is what makes its state
+ * machine testable without ethers.
+ *
+ * A `revoked` reading with no pointer is possible — an attestation revoked by
+ * something Haven has no record of — and is returned honestly as
+ * `txHash: null`. The caller must not invent one; see `reconcileRevocation`.
+ */
+export const readRevocationAnchor: RevocationAnchorProbe = async (
+  chainId: number,
+  attestationUid: string,
+): Promise<RevocationAnchorReading> => {
+  const unknown: RevocationAnchorReading = { state: 'unknown', txHash: null }
+  const { eas } = getEasDeployment(chainId)
+  const provider = getRelayer(chainId).provider
+  // No provider means no evidence, and no evidence concludes nothing.
+  if (!provider) return unknown
+
+  const readBlock = await settledReadBlock(provider)
+  if (readBlock === null) return unknown
+
+  const attestation = await new Contract(eas, EAS_ABI, provider).getAttestation(attestationUid, {
+    blockTag: readBlock,
+  })
+  // The struct must be the one we ASKED about. EAS returns a zeroed struct for
+  // a UID it does not know, and as of a settled block that is the ordinary
+  // state of an attestation minted minutes ago — "not visible yet", never "not
+  // revoked". Comparing the echoed UID rather than testing for zero bytes also
+  // refuses anything else a provider or shim might hand back, which is the
+  // cheaper guard to hold: `revocationTime` from the wrong attestation is
+  // indistinguishable from the right one's (review nit, #1758).
+  const uid = String(attestation?.uid ?? '').toLowerCase()
+  if (uid !== attestationUid.toLowerCase()) return unknown
+
+  if (BigInt(attestation.revocationTime ?? 0) === 0n) return { state: 'live', txHash: null }
+
+  return {
+    state: 'revoked',
+    txHash: await findOutboundEvidenceTxHash(
+      chainId,
+      PASSPORT_REVOKE_SUBMITTER,
+      buildRevokeCall(chainId, attestationUid).data,
+    ),
+  }
 }

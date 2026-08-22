@@ -526,7 +526,8 @@ export async function dismissMobileSidebar(page: Page) {
  * `overflow-hidden` does not clip it either. Measured, not assumed (#1771).
  * Call sites that open a dialog before asserting are therefore measuring the
  * page BEHIND the dialog, which is still a real assertion but not a check on
- * the dialog's own layout. Tracked separately rather than widened here.
+ * the dialog's own layout. Filed as #1773 rather than widened here — it wants
+ * its own selector, its own call-site changes and its own mutation proof.
  */
 export async function expectNoHorizontalOverflow(page: Page) {
   return page.evaluate(() => {

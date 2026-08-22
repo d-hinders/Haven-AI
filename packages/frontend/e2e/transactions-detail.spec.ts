@@ -50,7 +50,8 @@ test.describe('transaction history — x402 display + detail panel', () => {
     // never checked the panel: a fixed-position overlay contributes to neither
     // scroll box, so this measures `/transactions` BEHIND the panel (#1771).
     // Kept — the page behind is real content and this is a real assertion at
-    // desktop width — but described accurately now.
+    // desktop width — but described accurately now. Checking the panel's own
+    // box is #1773.
     //
     // #1772 is the mobile-width clipping of this same table. It does not fire
     // here: at 1280px the table fits, and the mobile project asserts the route

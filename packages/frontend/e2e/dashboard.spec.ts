@@ -36,8 +36,8 @@ test.describe('dashboard browser UX', () => {
     await expect(modal.getByText(testSafeAddress)).toBeVisible()
     // Measures the dashboard BEHIND the modal, not the modal. A fixed-position
     // overlay contributes to neither scroll box — see the blind spot noted on
-    // `expectNoHorizontalOverflow` (#1771), which was measured rather than
-    // assumed.
+    // `expectNoHorizontalOverflow` (#1771), measured rather than assumed.
+    // Checking the modal's own box is #1773.
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,
       contentRegionFound: true,

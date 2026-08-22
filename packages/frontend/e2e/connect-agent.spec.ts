@@ -61,7 +61,8 @@ test.describe('Connect agent setup acceptance', () => {
 
     // Measures `/agents` BEHIND the dialog, not the dialog. A fixed-position
     // overlay contributes to neither scroll box — see the blind spot noted on
-    // `expectNoHorizontalOverflow` (#1771).
+    // `expectNoHorizontalOverflow` (#1771). Checking the dialog's own box is
+    // #1773.
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,
       contentRegionFound: true,

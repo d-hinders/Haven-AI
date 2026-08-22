@@ -448,7 +448,7 @@ this entry is now labelled:
 - **`Button`'s own guarantees do not travel with the class string.** Copying the classes
   copies the paint and nothing else.
 
-`InvestorButton` — **pattern**, `investor-briefing/page.tsx:531-556`, used 3×. A local
+`InvestorButton` — **pattern**, `investor-briefing/page.tsx:531-557`, used 3×. A local
 mini-`Button`: it re-implements the base string, a two-value `variant` (`primary`/`ghost`)
 and a two-value `size` (`sm`/`lg`) by hand. It diverges from `Button` in four ways worth
 knowing before copying it — no `md` size, **no `disabled` handling at all**, a bare `<a>`

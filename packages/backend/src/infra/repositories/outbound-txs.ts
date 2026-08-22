@@ -188,14 +188,28 @@ export async function findOutboundTxByHash(
  * chain has one EAS deployment, and adding it would only let a lowercase
  * mismatch silently drop the row.
  *
- * `status = 'mined'` sorts FIRST and that ordering is the whole point.
+ * **Only `mined` counts, and that is the whole point.**
  * `markOutboundTxMined` is called only after a status-1 receipt read (see
  * `outbound-bump-worker.ts`), so a mined row is a transaction PROVEN to have
- * succeeded. A `broadcast` row is weaker — it says only "we sent this" — and
- * is accepted second, for the window between the transaction mining and the
- * bump worker's next scan closing the row. `failed` and `replaced` rows are
- * excluded outright: a reverted or superseded transaction is precisely the
- * hash we must not record as the one that did the work.
+ * succeeded. Nothing weaker is accepted:
+ *
+ * - a `broadcast` row says only "we sent this". It is tempting to accept one
+ *   for the window between a transaction mining and the bump worker's next
+ *   scan closing the row — but several `broadcast` rows for the SAME calldata
+ *   is a NORMAL state here, not an exotic one: every revoke retry opens a
+ *   fresh record, and migration 061's partial unique key only stops two of
+ *   them sharing a nonce. When the chain then says the UID is revoked, exactly
+ *   one of those rows is the transaction that did it and the rest are reverts
+ *   the worker has not closed yet — and this query cannot tell which. Picking
+ *   the newest would write a plausible-looking wrong hash into an audit
+ *   column, which is worse than waiting one more backoff tick for the worker
+ *   to close the real one (review finding, #1758);
+ * - `failed` and `replaced` rows are excluded for the blunter version of the
+ *   same reason: a reverted or superseded transaction is precisely the hash we
+ *   must not record as the one that did the work.
+ *
+ * The cost of the strictness is a delay, never a wrong answer: until a mined
+ * row exists the caller keeps the row pending and keeps alarming.
  *
  * No index backs this, for the same reason `FIND_OUTBOUND_TX_BY_HASH_SQL` has
  * none: the only caller is a cold recovery path that runs at most once per
@@ -205,8 +219,8 @@ export async function findOutboundTxByHash(
 export const FIND_OUTBOUND_EVIDENCE_TX_HASH_SQL = `SELECT tx_hash FROM outbound_txs
    WHERE chain_id = $1 AND submitter = $2 AND data = $3
      AND tx_hash IS NOT NULL
-     AND status IN ('mined', 'broadcast')
-   ORDER BY (status = 'mined') DESC, created_at DESC, id
+     AND status = 'mined'
+   ORDER BY created_at DESC, id
    LIMIT 1`
 
 export async function findOutboundEvidenceTxHash(

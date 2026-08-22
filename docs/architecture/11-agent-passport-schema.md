@@ -402,10 +402,16 @@ each is deliberate:
 Migration 049 refuses `revocation_status = 'confirmed'` without a
 `revocation_tx_hash`, so the convergence also needs the transaction that did it.
 That comes from the durable outbound record (#1556) carrying this revoke's exact
-calldata — `mined` (proven status-1) preferred over `broadcast`, never `failed`
-or `replaced`. Where the chain agrees but no such record exists, the row stays
-`pending` with a reason naming the missing pointer and still refuses to
-broadcast: a fabricated hash in an audit column is worse than an honest alarm.
+calldata, and **only a `mined` row counts** — the one status the bump worker
+writes solely after reading a status-1 receipt. A `broadcast` row is refused
+even when it is the only candidate: several of them for one calldata is the
+normal state here, since every retry opens a fresh record, so once the chain
+says the UID is revoked exactly one of those rows did it and the rest are
+reverts nothing has closed yet. Nothing in the row distinguishes them. Where
+the chain agrees but no mined record exists, the row stays `pending` with a
+reason naming the missing pointer and still refuses to broadcast: the cost is a
+backoff tick, and a plausible-looking wrong hash in an audit column is worse
+than an honest alarm.
 
 **Still open.** How long a revoke whose attestation is genuinely still live may
 go unlanded before Haven declares it dead is *not* decided here. It is the

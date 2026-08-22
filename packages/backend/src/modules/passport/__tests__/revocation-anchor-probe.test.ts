@@ -117,6 +117,15 @@ describe('readRevocationAnchor (#1758)', () => {
     expect(findOutboundEvidenceTxHash).not.toHaveBeenCalled()
   })
 
+  it('a struct for a DIFFERENT uid is UNKNOWN — revocationTime is only meaningful in context', async () => {
+    // Review nit (#1758): the check compares the echoed UID rather than
+    // testing for zero bytes, so anything a provider or shim hands back for
+    // the wrong attestation is refused too.
+    attestationByBlock.mockResolvedValue(attestation(0, '0x' + 'ee'.repeat(32)))
+
+    expect(await readRevocationAnchor(84532, UID)).toEqual({ state: 'unknown', txHash: null })
+  })
+
   it('a UID not visible as of the settled block is UNKNOWN, never "not revoked"', async () => {
     // An attestation minted minutes ago legitimately does not exist at a
     // finalized block. Reading the zeroed struct's `revocationTime = 0` as

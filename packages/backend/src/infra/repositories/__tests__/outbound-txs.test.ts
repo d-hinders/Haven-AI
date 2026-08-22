@@ -429,10 +429,10 @@ describeDb('findOutboundTxByHash (#1745)', () => {
 
   const OTHER_TX = '0x' + 'ef'.repeat(32)
 
-  it('prefers a MINED row over a broadcast one — proven beats merely sent', async () => {
+  it('takes the MINED row and ignores an unresolved broadcast sibling', async () => {
     // A `mined` row is only ever written after a status-1 receipt read
     // (`outbound-bump-worker.ts`), so it is a transaction proven to have
-    // succeeded. `broadcast` says only "we sent this".
+    // succeeded. The still-open sibling is a retry that has not been closed.
     const sent = await enqueue('passport_revoke')
     await markOutboundTxBroadcast(sent.id, { txHash: OTHER_TX, nonce: 1n })
     const mined = await enqueue('passport_revoke')
@@ -447,14 +447,21 @@ describeDb('findOutboundTxByHash (#1745)', () => {
     expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', DATA)).toBe(TX)
   })
 
-  it('accepts a BROADCAST row when nothing is mined yet', async () => {
-    // The window between the transaction mining and the bump worker's next
-    // scan closing the row. Without this the convergence would have to wait
-    // for a worker tick it does not control.
-    const sent = await enqueue('passport_revoke')
-    await markOutboundTxBroadcast(sent.id, { txHash: TX, nonce: 1n })
+  it('refuses a BROADCAST row — "we sent this" is not "this is what did it"', async () => {
+    // Review finding (#1758). SEVERAL broadcast rows for one calldata is the
+    // normal state, not an exotic one: every revoke retry opens a fresh record
+    // and migration 061's partial unique key only stops two sharing a nonce.
+    // Once the chain says the UID is revoked, exactly ONE of these did it and
+    // the rest are reverts nothing has closed yet — and this query cannot tell
+    // which. Returning the newest would put a plausible-looking wrong hash in
+    // an audit column; waiting for the bump worker to close the real one costs
+    // a backoff tick.
+    const first = await enqueue('passport_revoke')
+    await markOutboundTxBroadcast(first.id, { txHash: TX, nonce: 1n })
+    const retry = await enqueue('passport_revoke')
+    await markOutboundTxBroadcast(retry.id, { txHash: OTHER_TX, nonce: 2n })
 
-    expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', DATA)).toBe(TX)
+    expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', DATA)).toBeNull()
   })
 
   it('never returns a FAILED or REPLACED transaction', async () => {
@@ -477,6 +484,7 @@ describeDb('findOutboundTxByHash (#1745)', () => {
     // match on chain+submitter alone would hand back another agent's revoke.
     const ours = await enqueue('passport_revoke')
     await markOutboundTxBroadcast(ours.id, { txHash: TX, nonce: 1n })
+    await markOutboundTxMined(ours.id)
 
     const otherPayload = await enqueueOutboundTx({
       chainId: CHAIN,
@@ -485,6 +493,7 @@ describeDb('findOutboundTxByHash (#1745)', () => {
       data: '0x' + 'ba'.repeat(200),
     })
     await markOutboundTxBroadcast(otherPayload.id, { txHash: OTHER_TX, nonce: 2n })
+    await markOutboundTxMined(otherPayload.id)
 
     expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', DATA)).toBe(TX)
     expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_attest', DATA)).toBeNull()
@@ -494,6 +503,7 @@ describeDb('findOutboundTxByHash (#1745)', () => {
   it('matches calldata case-insensitively — the writer lower-cases, a caller may not', async () => {
     const row = await enqueue('passport_revoke')
     await markOutboundTxBroadcast(row.id, { txHash: TX, nonce: 1n })
+    await markOutboundTxMined(row.id)
 
     const upper = '0x' + DATA.slice(2).toUpperCase()
     expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', upper)).toBe(TX)

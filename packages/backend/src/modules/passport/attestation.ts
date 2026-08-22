@@ -705,11 +705,15 @@ export const readRevocationAnchor: RevocationAnchorProbe = async (
   const attestation = await new Contract(eas, EAS_ABI, provider).getAttestation(attestationUid, {
     blockTag: readBlock,
   })
-  // EAS returns a ZEROED struct for a UID it does not know. As of a settled
-  // block that is the ordinary state of an attestation minted minutes ago —
-  // "not visible yet", never "not revoked".
-  const uid = String(attestation?.uid ?? '')
-  if (!/^0x[0-9a-f]*[1-9a-f]/i.test(uid)) return unknown
+  // The struct must be the one we ASKED about. EAS returns a zeroed struct for
+  // a UID it does not know, and as of a settled block that is the ordinary
+  // state of an attestation minted minutes ago — "not visible yet", never "not
+  // revoked". Comparing the echoed UID rather than testing for zero bytes also
+  // refuses anything else a provider or shim might hand back, which is the
+  // cheaper guard to hold: `revocationTime` from the wrong attestation is
+  // indistinguishable from the right one's (review nit, #1758).
+  const uid = String(attestation?.uid ?? '').toLowerCase()
+  if (uid !== attestationUid.toLowerCase()) return unknown
 
   if (BigInt(attestation.revocationTime ?? 0) === 0n) return { state: 'live', txHash: null }
 

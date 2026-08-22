@@ -88,7 +88,18 @@ function composite(fg: RGB, alpha: number, bg: RGB): RGB {
 const BACKGROUNDS: Record<string, string[]> = {
   // Light product chrome. `brand-soft` is reached via `hover:bg-…-soft` on the
   // several icon buttons that tint on hover while focused.
-  brand: ['bg', 'surface', 'surface-2', 'surface-hover', 'brand-soft'],
+  //
+  // `warning-soft` and `danger-soft` are here because a BRAND ring lands on
+  // them — the two cases that are easy to miss, since the surface is a
+  // different semantic tone from the ring:
+  //   - ApprovalNotifications.tsx — the bell is `bg-[var(--v2-warning-soft)]`
+  //     whenever `actionableCount > 0`, a static state rather than a hover.
+  //   - AgentBudgetCard.tsx — "Remove budget" tints `hover:bg-danger-soft`
+  //     while its ring stays brand.
+  // Both clear the bar today (3.93:1 and 3.95:1). They are registered anyway:
+  // an unregistered pair is not "passing", it is UNMEASURED, and would regress
+  // silently under any future palette or alpha change.
+  brand: ['bg', 'surface', 'surface-2', 'surface-hover', 'brand-soft', 'warning-soft', 'danger-soft'],
   // Destructive controls: page surfaces plus the danger toast / disconnect row.
   danger: ['bg', 'surface', 'surface-2', 'danger-soft'],
   // Success toast only.

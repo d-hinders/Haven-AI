@@ -269,20 +269,40 @@ Only if the workflow is unavailable mid-incident and a release is urgent,
 publish by hand from a clean checkout of the merged commit — the same versions
 the workflow would have published. This path uses your own npm credentials
 (`npm login`) and **does not produce provenance** (provenance requires the CI
-OIDC flow), so prefer re-running the workflow whenever possible:
+OIDC flow), so prefer re-running the workflow whenever possible.
+
+It mirrors `publish.yml`'s build-and-publish step deliberately: the same five
+packages, the same dist-wipe, the same build order — connect's tsup inlines
+`MCP_VERSION`, so a leftover dist bundles a stale one. The publish loop is the
+workflow's, minus the per-package summary table you no longer get here.
 
 ```sh
 npm ci
-rm -rf packages/{sdk,signer,mcp,connect}/dist
+rm -rf packages/{sdk,signer,mcp,connect,cli}/dist
 npm run build -w packages/sdk
 npm run build -w packages/signer
 npm run build -w packages/mcp
 npm run build -w packages/connect   # runs verify-connect-bundle.mjs
-npm publish -w packages/sdk     --tag alpha
-npm publish -w packages/signer  --tag alpha
-npm publish -w packages/mcp     --tag alpha
-npm publish -w packages/connect --tag alpha
+npm run build -w packages/cli
+for pkg in sdk signer mcp connect cli; do
+  npm publish -w "packages/$pkg" --tag alpha
+done
 ```
+
+**Then verify on the registry, package by package.** This path prints no
+summary and does not stop on a partial failure, so a package that did not go
+out is silent:
+
+```sh
+for pkg in sdk signer mcp connect cli; do
+  npm view "@haven_ai/$pkg" dist-tags --json
+done
+```
+
+All five must show the new version on `alpha`, and `latest` must be unchanged
+for a prerelease. Anything missing is a partial publish — the state
+[#1159](https://github.com/d-hinders/Haven-AI/issues/1159) exists to surface,
+which this path cannot do for you.
 
 ### If verification fails
 

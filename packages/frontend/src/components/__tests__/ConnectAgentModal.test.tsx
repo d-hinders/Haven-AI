@@ -671,6 +671,10 @@ describe('ConnectAgentModal', () => {
   it('asks no runtime question anywhere in the flow', () => {
     renderModal()
 
+    // The step's own subtitle counts. It said "choose where it runs" long after
+    // there was anything to choose — an instruction for a control that is not
+    // on the screen, which is worse than no instruction at all.
+    expect(screen.queryByText(/choose where it runs/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Where will this agent run?')).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: /where will this agent run/i })).not.toBeInTheDocument()
     for (const label of [

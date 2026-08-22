@@ -194,7 +194,10 @@ export function headerSubtitle(step: SetupStep, status: string | undefined, runt
     if (status === 'cancelled') return 'This setup was cancelled'
     return 'Paste the setup prompt into your agent environment'
   }
-  if (step === 'details') return 'Name the agent and choose where it runs'
+  // #1720: no longer "choose where it runs" — there is nothing to choose.
+  // A subtitle that names an action the step does not offer is worse than a
+  // vague one, and this was the last place the removed picker still spoke.
+  if (step === 'details') return 'Name the agent and describe what it does'
   if (step === 'policy') return 'Set agent budget and approval boundaries'
   return 'Review before creating the local setup prompt'
 }

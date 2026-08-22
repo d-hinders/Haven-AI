@@ -578,7 +578,13 @@ async function main() {
   log('    2. Write the two contract docs, or the blocking coupling gate fails:')
   log('         docs/operations/mcp-runtime-compatibility.md')
   log('           re-pin the Supported Runtime Manifest table + prepend a last-verified note')
-  log('         docs/regulatory/casp-changelog/<date>-<pr>-release.md')
+  // #1789: named for the VERSION, never the PR number. The shard must exist
+  // before the PR is opened — the coupling gate blocks the PR without it — so a
+  // PR-numbered name cannot be written at the moment it is needed. This line is
+  // where a release-cutter actually reads the convention, which is why it is
+  // guarded: the docs were corrected once while this string kept teaching the
+  // retired rule to the next person who ran the bump.
+  log(`         docs/regulatory/casp-changelog/<date>-${newVersion}-release.md`)
   log('           a new shard, ending in a perimeter verdict')
   log('    3. npm run docs:coupling      must exit 0')
   log('    4. Commit on a release branch and open a PR into `dev`.')

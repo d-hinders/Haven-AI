@@ -96,30 +96,9 @@ const COMPILE_TIMEOUT = 60_000
  * list of excuses.
  */
 const KNOWN_DEAD: Record<string, string> = {
-  // #1709 — the 94 `border-*` tinted-border call-sites. Pure call-site rewrite
-  // onto the channel-token aliases (`border-brand/20`, …) the mechanism from
-  // #1708 already provides.
-  'border-[var(--v2-brand)]/15': '#1709',
-  'border-[var(--v2-brand)]/20': '#1709',
-  'border-[var(--v2-brand)]/25': '#1709',
-  'border-[var(--v2-brand)]/30': '#1709',
-  'border-[var(--v2-brand)]/35': '#1709',
-  'border-[var(--v2-brand)]/40': '#1709',
-  'border-[var(--v2-brand)]/45': '#1709',
-  'border-[var(--v2-brand)]/50': '#1709',
-  'border-[var(--v2-danger)]/15': '#1709',
-  'border-[var(--v2-danger)]/20': '#1709',
-  'border-[var(--v2-danger)]/25': '#1709',
-  'border-[var(--v2-danger)]/30': '#1709',
-  'border-[var(--v2-danger)]/40': '#1709',
-  'border-[var(--v2-debit)]/20': '#1709',
-  'border-[var(--v2-debit)]/30': '#1709',
-  'border-[var(--v2-success)]/20': '#1709',
-  'border-[var(--v2-success)]/30': '#1709',
-  'border-[var(--v2-warning)]/20': '#1709',
-  'border-[var(--v2-warning)]/25': '#1709',
-  'border-[var(--v2-warning)]/30': '#1709',
-  'border-[var(--v2-warning)]/40': '#1709',
+  // #1709's 22 border entries are GONE — that slice converted every one, so
+  // they have no call-site left and the 'still in use' assertion below would
+  // fail if they lingered here. #1710's bg-/text- entries are what remain.
 
   // #1710 — the remaining `bg-*`/`text-*` call-sites plus the design-lint rule.
   // #1818 took three of these out of the queue (TopBar's background, Sidebar's
@@ -128,7 +107,12 @@ const KNOWN_DEAD: Record<string, string> = {
   // where a repaint is a design call rather than a mechanical one.
   'bg-[var(--v2-brand)]/15': '#1710',
   'bg-[var(--v2-brand)]/25': '#1710',
-  'bg-[var(--v2-brand)]/[0.03]': '#1710',
+  // NOTE: `bg-[var(--v2-brand)]/[0.03]` was here, tagged #1710. #1709 took it:
+  // it shares a class string with a border that slice owned, on the invisible
+  // selected-account indicator, and its BRACKETED alpha is unmatchable by
+  // #1710's enumeration grep and acceptance criterion (both `/[0-9]+`), so it
+  // would have outlived the epic. This scanner is the only thing in the repo
+  // that could see it — its opacity alternation accepts `\[...\]`.
   'bg-[var(--v2-brand-soft)]/40': '#1710',
   'bg-[var(--v2-brand-soft)]/55': '#1710',
   'bg-[var(--v2-danger)]/90': '#1710',
@@ -319,10 +303,14 @@ describe('every opacity-modified colour utility compiles to a colour (#1818)', (
     // A ceiling at today's measured count, so the map cannot quietly absorb new
     // debt between sweeps. Lower it as #1709/#1710 land; never raise it.
     //
-    // 31 unique utilities, not 31 call-sites: variants are stripped and
-    // duplicates collapse, so `border-[var(--v2-danger)]/20` is one entry
-    // covering 15 files. The epic's headline 175 is the call-site count.
-    expect(Object.keys(KNOWN_DEAD).length).toBeLessThanOrEqual(31)
+    // Unique utilities, not call-sites: variants are stripped and duplicates
+    // collapse, so `border-[var(--v2-danger)]/20` was one entry covering 15
+    // files. The epic's headline 175 is the call-site count.
+    //
+    // Lowered 31 -> 9 by #1709: every `border-*` entry, plus the one
+    // bracketed `bg-` it had to take (see the note in the map).
+    // What is left is #1710's bg-/text- population.
+    expect(Object.keys(KNOWN_DEAD).length).toBeLessThanOrEqual(9)
   })
 })
 

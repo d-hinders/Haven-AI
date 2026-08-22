@@ -195,7 +195,7 @@ export default function TransactionsClient() {
       />
 
       {partialFailure && (
-        <div className="mb-4 rounded-lg border border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">
+        <div className="mb-4 rounded-lg border border-warning/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">
           <div className="font-medium mb-1">Some accounts failed to load completely.</div>
           <div className="text-xs text-[var(--v2-warning)]">
             {failedSafeNames.length > 0

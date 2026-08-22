@@ -52,7 +52,7 @@ function Initials({ name }: { name: string }) {
       : (parts[0] ?? '?').slice(0, 2)
 
   return (
-    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-brand)]/20 bg-[var(--v2-brand-soft)]">
+    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-brand/20 bg-[var(--v2-brand-soft)]">
       <span className="text-xs font-semibold text-[var(--v2-brand)]">{initials.toUpperCase()}</span>
     </div>
   )
@@ -174,7 +174,7 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
         )}
 
         {error && (
-          <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
+          <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
             {error}
           </div>
         )}
@@ -316,7 +316,7 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
           </p>
         </div>
         {error && (
-          <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
+          <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
             {error}
           </div>
         )}

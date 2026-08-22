@@ -105,7 +105,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
       ) : signers ? (
         <>
           {onlyOneWay ? (
-            <div className="mt-4 rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink)]">
+            <div className="mt-4 rounded-lg border border-warning/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink)]">
               This account has only one way to approve. Add a backup now — without it, losing this device
               means losing the account.
             </div>

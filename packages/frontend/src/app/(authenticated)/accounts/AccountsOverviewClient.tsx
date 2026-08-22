@@ -1,7 +1,7 @@
 'use client'
 
 import { isAddress } from '@haven_ai/core'
-import { Check, ChevronLeft, ChevronRight, CircleAlert, CreditCard, FlaskConical, Link as LinkIcon, Plus, Star, X } from 'lucide-react'
+import { ArrowRight, Check, ChevronLeft, ChevronRight, CircleAlert, CreditCard, FlaskConical, Link as LinkIcon, Plus, Star, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
@@ -585,8 +585,9 @@ function SafeCard({
           <Icon icon={FlaskConical} className="h-3.5 w-3.5" />
           {agentCount} agent{agentCount !== 1 ? 's' : ''}
         </span>
-        <span className="font-medium text-[var(--v2-brand)] opacity-70 transition-opacity group-hover:opacity-100">
-          Open &rarr;
+        <span className="inline-flex items-center gap-1 font-medium text-[var(--v2-brand)] opacity-70 transition-opacity group-hover:opacity-100">
+          Open
+          <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
         </span>
       </div>
     </Link>

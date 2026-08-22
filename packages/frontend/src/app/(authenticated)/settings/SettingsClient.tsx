@@ -1,6 +1,8 @@
 'use client'
 
+import { ArrowRight } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
+import { Icon } from '@/components/ui/Icon'
 import { type ReactNode } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
@@ -265,9 +267,10 @@ export default function SettingsClient() {
                 href="/exit/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm font-medium text-[var(--v2-brand)] hover:underline"
+                className="inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
               >
-                {t.settings.recovery.exitPathLabel} →
+                {t.settings.recovery.exitPathLabel}
+                <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
               </a>
             }
           />

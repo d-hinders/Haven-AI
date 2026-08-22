@@ -323,7 +323,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Spacing & radius"
-        description="The implicit scale, made explicit. Radius: cards and inner tiles are 10px (rounded-[10px]); marketing heroes 24px; buttons, inputs and selects rounded-md; badges/pills rounded-full. Card padding: p-5 default, p-6 for page-level section cards (Card.Header uses px-5 py-4 / spacious px-6 py-5). Vertical rhythm: space-y-10 between page sections, gap-4/gap-5 inside grids, mt-2 title→body, mt-4/mt-5 body→action."
+        description="The implicit scale, made explicit. Radius: cards and inner tiles are 10px (rounded-[10px]); marketing heroes 24px; buttons, inputs and selects rounded-md; badges/pills rounded-full. Card padding: p-5 default, p-6 for page-level section cards (Card.Header uses px-5 py-4 / spacious px-6 py-5). Vertical rhythm: space-y-10 between page sections, gap-4/gap-5 inside grids, mt-2 title to body, mt-4/mt-5 body to action."
       >
         <Card hover={false} className="p-5">
           <div className="grid gap-4 sm:grid-cols-3">
@@ -679,7 +679,7 @@ export default function DesignSystemPage() {
             <div className="mt-3 space-y-2 text-sm text-[var(--v2-ink-2)]">
               <p><Address value={sampleAddress} /> <span className="text-xs text-[var(--v2-ink-3)]">— hover for the full address</span></p>
               <p><Address value={sampleAddress} copy /> <span className="text-xs text-[var(--v2-ink-3)]">— with check-pop copy</span></p>
-              <p><Address value={sampleAddress} href="https://basescan.org" /> <span className="text-xs text-[var(--v2-ink-3)]">— explorer link with ↗</span></p>
+              <p><Address value={sampleAddress} href="https://basescan.org" /> <span className="text-xs text-[var(--v2-ink-3)]">— explorer link, opens in a new tab</span></p>
               <p className="break-all text-xs"><Address value={sampleAddress} truncate={false} /> <span className="text-[var(--v2-ink-3)]">— full form for receive surfaces</span></p>
             </div>
           </Card>

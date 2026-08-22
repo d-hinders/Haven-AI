@@ -34,7 +34,7 @@
  * singular** — one element at a time — so "one composite capture with several
  * controls focused" cannot be built at all. N indicators need N drives no
  * matter what. The real lever is how wide each capture is, and this file takes
- * the tight one, following #1811/#1820's scoped-region precedent: the 176x117
+ * the tight one, following #1811/#1820's scoped-region precedent: the 176x118
  * popover, and the 438x37 card action row. A ring recoloured on Revoke reddens
  * `…-revoke-…` and nothing else.
  *
@@ -141,22 +141,54 @@ const DESKTOP = VIEWPORTS.find((vp) => vp.width >= DESKTOP_MIN_VIEWPORT_WIDTH)
  * `toHaveCount(1)` closes "matches nothing" and "matches several". Read what it
  * does NOT close, the way #1820 had to: it cannot tell a plausible-but-wrong
  * element from the right one. The backstop is the baseline — a different
- * element will not match a 176x117 render of this popover — but it would fail
+ * element will not match a 176x118 render of this popover — but it would fail
  * as "the popover drifted" rather than as "the locator moved".
  */
 const USER_MENU_POPOVER = '[role="menu"][aria-label="User menu"]'
 const USER_MENU_TRIGGER = 'button[aria-label="User menu"]'
 
 /**
- * ── The budget ───────────────────────────────────────────────────────────────
+ * ── The budget, measured rather than chosen ──────────────────────────────────
  *
- * PLACEHOLDER — measured, not chosen, using #1811's and #1820's method:
- * committed at `0`, pushed, and the real count read off what CI does with it,
- * against baselines generated in a DIFFERENT run. Replaced with the measured
- * number before this PR is ready; if you are reading `0` on a merged commit,
- * that is the bug #1820's design pass caught in itself.
+ * #1811's and #1820's method, repeated: commit it at `0`, push, and read the
+ * real count off what CI does with it — against baselines generated in a
+ * DIFFERENT run (baselines from run 32603576515, compared in run 32603824968,
+ * both ubuntu-latest with the same cached Chromium).
+ *
+ *   run-to-run jitter, all six driven captures, at threshold 0.02:   0 pixels
+ *
+ * At a budget of 0 the job went GREEN, which is the strongest form this
+ * measurement takes: not "under budget" but literally zero differing pixels.
+ * Consistent with the five resting-state captures, and for the same reason one
+ * layer down — pixelmatch runs with `includeAA: false`, so antialiased pixels
+ * are excluded before any budget is consulted. The budget never absorbed AA.
+ *
+ * ── Why 50 and not the 100 the other captures carry ──────────────────────────
+ *
+ * Because the absolute number is the wrong thing to copy. These regions are an
+ * order of magnitude smaller than the sidebar's, so the SAME slack is a much
+ * looser gate:
+ *
+ *   capture                 area        budget 100 would be   50 is
+ *   sidebar (#1820)         192,000 px        0.052%            —
+ *   top bar, desktop        58,240 px         0.17%             —
+ *   this popover            20,768 px         0.48%           0.24%
+ *   this action row         16,206 px         0.62%           0.31%
+ *
+ * Carrying 100 here would have been the loosest gate in the family while
+ * looking like consistency. 50 keeps these in the same proportional band as
+ * the chrome captures.
+ *
+ * It is not 0, for the reason none of the others are: a runner-image or
+ * Chromium bump may legitimately nudge a few pixels, and a gate that goes flat
+ * red every week is a gate someone turns off. 50 is an order of magnitude above
+ * "a few pixels" and still **16x below the smallest real defect measured here**
+ * — stripping this file's own Log out ring moves 814 px, and dropping its
+ * `ring-inset` moves 1,576 px (both macOS; CI runs ~30% higher). There is no
+ * plausible focus-ring regression that fits under 50, because a ring's whole
+ * perimeter on one of these items is roughly 800 px to begin with.
  */
-const FOCUS_MAX_DIFF_PIXELS = 0
+const FOCUS_MAX_DIFF_PIXELS = 50
 
 /**
  * Inherited from #1805, and it is doing more work here than the budget is.
@@ -241,6 +273,59 @@ function paintsSomething(css: string) {
 }
 
 /**
+ * Split a computed `box-shadow` into its layers and ask whether ANY layer
+ * actually paints — non-transparent colour AND non-zero geometry.
+ *
+ * This is the SECOND hole found in this assertion, in the same place, by the
+ * same method. The first version of the ring check ran `paintsSomething` over
+ * the whole `box-shadow` string and accepted it if any colour anywhere in it
+ * was opaque. `haven-reviewer` predicted that is a tautology for any Tailwind
+ * `ring-*` utility, and the mutation confirmed it. Setting Log out's ring to
+ * `ring-transparent` — a control with NO visible focus indicator at all —
+ * measured:
+ *
+ *   rgb(255, 255, 255) 0px 0px 0px 0px inset,     <- ring-offset layer
+ *   rgba(0, 0, 0, 0)   0px 0px 0px 2px inset,     <- the ring itself, invisible
+ *   rgba(0, 0, 0, 0)   0px 0px 0px 0px
+ *
+ * `ring-2` ALWAYS emits that first `--tw-ring-offset-shadow` layer, opaque
+ * white by default, even with no `ring-offset-*` utility in the class string.
+ * It is zero-sized, so it paints nothing — but it is opaque, so the old check
+ * saw it and passed. The assertion went green on a control with no ring, and
+ * only the pixel capture (1,356 px) caught it.
+ *
+ * Colour alone is therefore not enough, and neither is geometry alone: the
+ * offending layer has colour without size, and the real ring had size without
+ * colour. A layer has to have both.
+ */
+function shadowPaints(boxShadow: string) {
+  if (boxShadow === 'none') return false
+  // Paren-aware split: `rgba(0, 0, 0, 0)` contains the very delimiter layers
+  // are separated by, so a bare `.split(',')` shreds every colour token.
+  const layers: string[] = []
+  let depth = 0
+  let current = ''
+  for (const ch of boxShadow) {
+    if (ch === '(') depth++
+    else if (ch === ')') depth--
+    if (ch === ',' && depth === 0) {
+      layers.push(current)
+      current = ''
+    } else current += ch
+  }
+  layers.push(current)
+
+  return layers.some((layer) => {
+    if (!paintsSomething(layer)) return false
+    // Lengths OUTSIDE the colour function — the colour's own numbers are not
+    // geometry, and `rgb(255, 255, 255)` would otherwise read as non-zero.
+    const geometry = layer.replace(/rgba?\([^)]*\)/gi, ' ')
+    const lengths = geometry.match(/-?[\d.]+px/g) ?? []
+    return lengths.some((l) => parseFloat(l) !== 0)
+  })
+}
+
+/**
  * The capture is only worth anything if the control is genuinely in the state
  * the baseline claims, so assert that structurally BEFORE the pixels.
  *
@@ -280,7 +365,7 @@ async function expectFocusedAndIndicated(page: Page, target: Locator, label: str
   expect(state.isActive, `${label}: expected it to hold focus`).toBe(true)
   expect(state.focusVisible, `${label}: focus landed but :focus-visible did not match`).toBe(true)
 
-  const ring = state.boxShadow !== 'none' && paintsSomething(state.boxShadow)
+  const ring = shadowPaints(state.boxShadow)
   const outline =
     state.outlineStyle !== 'none' &&
     parseFloat(state.outlineWidth) > 0 &&

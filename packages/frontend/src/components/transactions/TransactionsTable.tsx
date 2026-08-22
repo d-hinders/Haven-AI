@@ -367,8 +367,20 @@ export default function TransactionsTable({
                   // Measured — thead pinned at y=56 while scrolling before,
                   // scrolled off to y=-303 after.
                   <td className={`max-w-0 px-4 ${padY}`}>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-[var(--v2-ink)] truncate">
+                    {/* `flex-wrap` so a status badge drops BELOW the title
+                        instead of competing with it for a ~141px line — a
+                        failed row used to ellipsise all the way down to
+                        "Age…" next to its Failed badge. `title` carries the
+                        untruncated string for the two `variant="card"` call
+                        sites (agent detail, account detail) that render
+                        non-selectable rows: on `/transactions` the row is a
+                        button whose `aria-label` already holds it, but there
+                        the truncation would otherwise be unrecoverable. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <p
+                        className="truncate text-sm font-medium text-[var(--v2-ink)]"
+                        title={transactionTitle(tx)}
+                      >
                         {transactionTitle(tx)}
                       </p>
                       {statusBadge ? (

@@ -1397,8 +1397,15 @@ export default function DesignSystemPage() {
                     <DirectionMark direction={row.direction} />
                   </td>
                   <td className="max-w-0 px-4 py-4 align-middle">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-[var(--v2-ink)]">{row.title}</p>
+                    {/* `truncate` + `flex-wrap` mirror TransactionsTable
+                        exactly (#1772). Without `truncate` the `max-w-0`
+                        above word-wraps instead of ellipsising, so the
+                        showcase would teach a shape the real component does
+                        not have. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <p className="truncate text-sm font-semibold text-[var(--v2-ink)]" title={row.title}>
+                        {row.title}
+                      </p>
                       {row.failed ? <StatusBadge tone="danger">Failed</StatusBadge> : null}
                     </div>
                     <div className="mt-1 md:hidden">

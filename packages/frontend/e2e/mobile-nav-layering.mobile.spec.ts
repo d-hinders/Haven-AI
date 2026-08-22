@@ -28,13 +28,27 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
  * actionable" do not exist there in any meaningful form. The defect is purely
  * a rendered-layout property. Only a real engine can see it.
  *
- * ── Why it declares its own viewport ────────────────────────────────────────
- * The gating CI job runs `test:e2e:desktop` (`--project=chromium-desktop`);
- * the `chromium-mobile` project runs only on a manual `ui_suite=full`
- * dispatch. A mobile-project spec therefore would NOT gate a pull request —
- * which is a large part of why this survived. `test.use({ viewport })`
- * overrides the project's viewport, so these run inside the desktop project
- * and are genuinely blocking.
+ * ── Which project this runs in, and why it still declares viewports ─────────
+ * This was `mobile-nav-layering.spec.ts` in `chromium-desktop`, using
+ * `test.use({ viewport })` — for the reason its original header stated
+ * plainly: the gating CI job ran `test:e2e:desktop`, `chromium-mobile` ran
+ * only on a manual `ui_suite=full` dispatch, and so a mobile-project spec
+ * would not have gated a pull request at all. #1768 removed that constraint.
+ * Both projects now gate every PR, `*.mobile.spec.ts` selects into the Pixel 5
+ * one, and the workaround is retired: the spec lives in the project it always
+ * belonged to.
+ *
+ * The gain is not cosmetic. A viewport override inside `chromium-desktop`
+ * leaves `maxTouchPoints` at 0, `pointer: coarse` false and the UA desktop —
+ * so every hit-test below was being answered for a MOUSE in a narrow window.
+ * They now run under real device emulation, which is the pointer a phone
+ * actually uses, on the one defect class where that distinction is the whole
+ * point.
+ *
+ * `test.use({ viewport })` stays, and is no longer a lie about the project: a
+ * project pins ONE viewport, and the point of this spec is the sweep across
+ * the band the toggle is `lg:hidden` for. The override sets the width; the
+ * touch/UA emulation the project provides is unaffected by it.
  */
 
 // The toggle is `lg:hidden`, so everything from the narrowest phone up to one

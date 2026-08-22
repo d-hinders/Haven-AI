@@ -41,8 +41,12 @@ Verify the change in the **browser**, or — when the browser path is unavailabl
 
 | Project | Emulation | Runs | Gates a PR |
 |---|---|---|---|
-| `chromium-desktop` | Desktop Chrome, 1280×720, mouse pointer | every `e2e/*.spec.ts` **except** `*.mobile.spec.ts` | yes |
-| `chromium-mobile` | **Pixel 5** — 393×851, touch pointer, mobile UA, DSF 3 | `e2e/*.mobile.spec.ts` only | yes |
+| `chromium-desktop` | Desktop Chrome — 1280×720 viewport, fine pointer, no touch, DSF 1 | every `e2e/*.spec.ts` **except** `*.mobile.spec.ts` | yes |
+| `chromium-mobile` | **Pixel 5** — 393×727 viewport, coarse pointer, touch, Android UA, DSF 2.75 | `e2e/*.mobile.spec.ts` only | yes |
+
+(Numbers read off Playwright's own `devices` table at the pinned version, not from memory. Pixel 5's `screen` is 393×851; the **viewport** — what the page actually gets — is 393×727.)
+
+Both projects also inherit `SUITE_IGNORE` (`e2e/live/**`, and `*.visual.spec.ts` unless `VISUAL_REGRESSION=1`). That constant exists because a project-level `testIgnore` **replaces** the config-level one instead of extending it — a project that declares its own must spread `SUITE_IGNORE` back in, or the unmocked live smoke silently rejoins the fast suite.
 
 Plus the separate *Design visual regression* job, which pixel-compares `/design-system` at **1280** and **390** (`scripts/evidence-viewports.mjs`) — but under `chromium-desktop` at DSF 1, by setting the viewport inside the spec. That is a pixel gate, not a device gate: it sees layout, never touch or hit-testing.
 

@@ -11,16 +11,28 @@ const webServerCommand = process.env.CI
     ].join(' && ')
   : `npm run dev -- --hostname 127.0.0.1 --port ${PORT}`
 
-export default defineConfig({
-  testDir: './e2e',
+// Specs no project in THIS config may ever run.
+//
+// A project-level `testIgnore` REPLACES this list rather than extending it, so
+// every project that declares one must spread `SUITE_IGNORE` back in. Getting
+// that wrong is not a quiet mistake: the first draft of #1768 set
+// `testIgnore: ['**/*.mobile.spec.ts']` on `chromium-desktop` alone, which
+// silently re-admitted `e2e/live/**` and turned `browser_smoke` red with four
+// "Live QA session needs QA_HAVEN_API_URL…" failures — the unmocked live smoke,
+// running inside the fast mocked suite. Hoisted into a named constant so the
+// next person adding a project inherits the answer instead of rediscovering it.
+const SUITE_IGNORE = [
   // The unmocked live smoke (e2e/live) runs only via playwright.live.config.ts
   // against a real deployment — keep it out of the fast, fully-mocked suite.
-  testIgnore: [
-    '**/live/**',
-    // Visual-regression specs run only under the dedicated CI job (Linux
-    // baselines) — VISUAL_REGRESSION=1 opts in. See #897.
-    ...(process.env.VISUAL_REGRESSION === '1' ? [] : ['**/*.visual.spec.ts']),
-  ],
+  '**/live/**',
+  // Visual-regression specs run only under the dedicated CI job (Linux
+  // baselines) — VISUAL_REGRESSION=1 opts in. See #897.
+  ...(process.env.VISUAL_REGRESSION === '1' ? [] : ['**/*.visual.spec.ts']),
+]
+
+export default defineConfig({
+  testDir: './e2e',
+  testIgnore: SUITE_IGNORE,
   // Stable baseline paths (no {platform} suffix): baselines are ALWAYS
   // Linux-rendered via the CI job / update workflow, never local macOS.
   snapshotPathTemplate: '{testDir}/__screenshots__/{testFileName}/{arg}{ext}',
@@ -87,14 +99,19 @@ export default defineConfig({
     {
       name: 'chromium-desktop',
       use: { ...devices['Desktop Chrome'] },
-      testIgnore: ['**/*.mobile.spec.ts'],
+      // SUITE_IGNORE must be spread back in — see its definition above.
+      testIgnore: [...SUITE_IGNORE, '**/*.mobile.spec.ts'],
     },
     {
       name: 'chromium-mobile',
-      // Real device emulation — touch points, mobile UA, DSF 3 — not a bare
-      // viewport override. Anything touch-dependent is only provable here.
+      // Real device emulation — 393×727 viewport, touch points, coarse
+      // pointer, Android UA, deviceScaleFactor 2.75 — not a bare viewport
+      // override. Anything touch- or hit-test-dependent is only provable here.
       use: { ...devices['Pixel 5'] },
+      // `testMatch` narrows; `testIgnore` still has to exclude, and a
+      // project-level one replaces the config-level list.
       testMatch: ['**/*.mobile.spec.ts'],
+      testIgnore: SUITE_IGNORE,
     },
   ],
 })

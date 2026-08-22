@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-08-21" # #1738: full-page captures un-clip the shell and fail on a blank PNG — §4 re-read against the capture scripts
+last-verified: "2026-08-22" # #1768: §4 gains the viewport-coverage table — both Playwright projects gate on every PR now, and `*.mobile.spec.ts` is how you write a mobile test. Prior: #1738: full-page captures un-clip the shell and fail on a blank PNG — §4 re-read against the capture scripts
 ---
 
 # Frontend playbook

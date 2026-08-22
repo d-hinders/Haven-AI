@@ -21,7 +21,7 @@ covers:
   - .github/workflows/qa-live.yml
   - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
-last-verified: "2026-08-09" # re-verified for #1227 (db-mock ratchet joins the gates) — no claim here affected
+last-verified: "2026-08-22" # #1768: canonical commands re-read against `packages/frontend/package.json` — `test:e2e:gate` replaces the desktop/full pair, `test:e2e:mobile` added. Prior: re-verified for #1227 (db-mock ratchet joins the gates) — no claim here affected
 ---
 
 <!--
@@ -95,8 +95,11 @@ remove the affected files first.
 Canonical commands:
 
 ```sh
+# Both gating Playwright projects — desktop + mobile (#1768). This is what CI runs.
+npm run test:e2e:gate -w packages/frontend
+# One project at a time, while iterating:
 npm run test:e2e:desktop -w packages/frontend
-npm run test:e2e:full -w packages/frontend
+npm run test:e2e:mobile -w packages/frontend
 npm run test:e2e:live -w packages/frontend
 npm run qa:dev -w packages/qa-agent
 ```

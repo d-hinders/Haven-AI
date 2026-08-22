@@ -178,7 +178,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
                     variant="ghost"
                     onClick={() => void rotateKey()}
                     disabled={rotating}
-                    className="text-[var(--v2-warning)] hover:text-[var(--v2-warning)]/80"
+                    className="text-[var(--v2-warning)] hover:text-warning/80"
                   >
                     {rotating ? (
                       <span className="flex items-center gap-1.5">

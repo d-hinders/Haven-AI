@@ -201,6 +201,19 @@ describe('compiled CSS: the focus ring is brand-derived (#1708)', () => {
   }, COMPILE_TIMEOUT)
 })
 
+/**
+ * Test files legitimately contain dead-class literals as FIXTURES — this file's
+ * own regression cases, and #1818's `compiled-colour-utilities.test.ts`
+ * inventory. These guards scan raw source text, so they cannot tell a fixture
+ * from a call-site.
+ *
+ * This started as a single hardcoded filename (#1708) and broke the moment a
+ * second test file about this defect class appeared. Excluding the class of
+ * file rather than one name is the fix; a dead class inside a test ships to
+ * nobody.
+ */
+const IS_TEST_FILE = /\.test\.tsx?$|[\\/]__tests__[\\/]/
+
 /** Shared by both dead-call-site guards below. */
 function sourceFiles(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -223,12 +236,19 @@ describe('no dead ring-* or border-* call-sites remain (#1708, #1709)', () => {
    * The alternation accepts a BRACKETED alpha (`/[0.03]`) as well as `/30`,
    * but only for these two utilities. The bracketed form on ANY utility is
    * guarded separately below, because the one real instance was a `bg-`.
+   *
+   * NOTE (#1818, landed after this): `compiled-colour-utilities.test.ts` now
+   * scans EVERY colour utility and decides by compiling it rather than by
+   * matching source text — strictly stronger than these two regex guards, and
+   * it strips comments, which these cannot. They are kept because deleting
+   * #1708's shipped guard is not this slice's call; #1710 is the natural place
+   * to consolidate, and that is flagged on it.
    */
   const DEAD_ALPHA_ON_VAR = /(?:ring|border)-\[var\(--v2-[a-z0-9-]+\)\]\/(?:[0-9]+|\[)/
 
   it('finds none in packages/frontend/src', () => {
     const offenders = sourceFiles(join(FRONTEND, 'src'))
-      .filter((f) => !f.endsWith('design-token-alpha.test.ts'))
+      .filter((f) => !IS_TEST_FILE.test(f))
       .filter((f) => DEAD_ALPHA_ON_VAR.test(readFileSync(f, 'utf8')))
       .map((f) => relative(FRONTEND, f))
     expect(
@@ -261,7 +281,7 @@ describe('no bracketed-alpha-on-var() call-sites remain, on ANY utility (#1709)'
 
   it('finds none in packages/frontend/src', () => {
     const offenders = sourceFiles(join(FRONTEND, 'src'))
-      .filter((f) => !f.endsWith('design-token-alpha.test.ts'))
+      .filter((f) => !IS_TEST_FILE.test(f))
       .filter((f) => DEAD_BRACKETED.test(readFileSync(f, 'utf8')))
       .map((f) => relative(FRONTEND, f))
     expect(

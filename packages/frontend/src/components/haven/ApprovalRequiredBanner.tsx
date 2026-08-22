@@ -21,7 +21,7 @@ export function ApprovalRequiredBanner({
       className={`${compact ? 'p-3' : 'p-4'} rounded-[10px] border ${
         neutral
           ? 'border-[var(--v2-border)] bg-[var(--v2-surface)]'
-          : 'border-[var(--v2-warning)]/20 bg-[var(--v2-warning-soft)]'
+          : 'border-warning/20 bg-[var(--v2-warning-soft)]'
       }`}
     >
       <div className="flex gap-3">

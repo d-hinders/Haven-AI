@@ -150,6 +150,35 @@ describe('compiled CSS: the focus ring is brand-derived (#1708)', () => {
     }
   }, COMPILE_TIMEOUT)
 
+  it('covers every border token this slice converted (#1709)', async () => {
+    // The 91 border-* call-sites reduce to five base tokens. One case per
+    // token, at an alpha actually used in the tree, so a token silently losing
+    // its channel form fails here rather than rendering no border in the app.
+    const cases: Array<[string, string, string]> = [
+      ['border-brand/30', '--v2-brand-rgb', '0.3'],
+      ['border-danger/20', '--v2-danger-rgb', '0.2'],
+      ['border-warning/25', '--v2-warning-rgb', '0.25'],
+      ['border-success/20', '--v2-success-rgb', '0.2'],
+      ['border-debit/30', '--v2-debit-rgb', '0.3'],
+    ]
+    for (const [cls, token, alpha] of cases) {
+      const out = await compile([cls])
+      expect(out, `${cls} did not compile a border colour`).toContain(
+        `border-color: rgb(var(${token}) / ${alpha})`,
+      )
+    }
+  }, COMPILE_TIMEOUT)
+
+  it('a BRACKETED opacity compiles too — the form every grep in #1685 missed (#1709)', async () => {
+    // entityCardStyles.ts carried `bg-[var(--v2-brand)]/[0.03]`. The epic's
+    // census, #1710's enumeration and #1710's acceptance criterion all match
+    // `/[0-9]+`, which cannot match `/[` — so this one instance was invisible
+    // to the count and would have outlived the epic. Pinned here so the
+    // bracketed form is known to work, not merely assumed to.
+    const out = await compile(['bg-brand/[0.03]'])
+    expect(out).toContain('background-color: rgb(var(--v2-brand-rgb) / 0.03)')
+  }, COMPILE_TIMEOUT)
+
   it('solid usages are unchanged — bg/text/border render the token at full opacity', async () => {
     const out = await compile(['bg-brand', 'text-brand', 'border-border', 'bg-surface'])
     expect(out).toContain('background-color: rgb(var(--v2-brand-rgb) / var(--tw-bg-opacity, 1))')
@@ -172,32 +201,73 @@ describe('compiled CSS: the focus ring is brand-derived (#1708)', () => {
   }, COMPILE_TIMEOUT)
 })
 
-describe('no dead ring-* call-sites remain (#1708)', () => {
-  /**
-   * Scoped to `ring-` on purpose. The same bare-var()-with-opacity shape still
-   * exists on `border-*` and `bg-*`/`text-*` call-sites; those are #1709 and
-   * #1710, which rewrite them against the mechanism this slice lands. Widening
-   * this guard here would fail the tree for work another slice owns.
-   */
-  const DEAD_RING = /ring-\[var\(--v2-[a-z0-9-]+\)\]\/[0-9]+/
-
-  function sourceFiles(dir: string, acc: string[] = []): string[] {
-    for (const entry of readdirSync(dir)) {
-      if (entry === 'node_modules' || entry === '.next') continue
-      const full = join(dir, entry)
-      if (statSync(full).isDirectory()) sourceFiles(full, acc)
-      else if (/\.tsx?$/.test(full)) acc.push(full)
-    }
-    return acc
+/** Shared by both dead-call-site guards below. */
+function sourceFiles(dir: string, acc: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    if (entry === 'node_modules' || entry === '.next') continue
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) sourceFiles(full, acc)
+    else if (/\.tsx?$/.test(full)) acc.push(full)
   }
+  return acc
+}
+
+describe('no dead ring-* or border-* call-sites remain (#1708, #1709)', () => {
+  /**
+   * Widened from ring-only by #1709, which converted the 91 `border-*`
+   * occurrences. Still deliberately NOT widened to `bg-`/`text-`: those are
+   * #1710's 12 remaining call-sites, and failing the tree for work another
+   * slice owns is what this scoping exists to avoid. #1710 widens it last,
+   * when the count is already zero.
+   *
+   * The alternation accepts a BRACKETED alpha (`/[0.03]`) as well as `/30`,
+   * but only for these two utilities. The bracketed form on ANY utility is
+   * guarded separately below, because the one real instance was a `bg-`.
+   */
+  const DEAD_ALPHA_ON_VAR = /(?:ring|border)-\[var\(--v2-[a-z0-9-]+\)\]\/(?:[0-9]+|\[)/
 
   it('finds none in packages/frontend/src', () => {
     const offenders = sourceFiles(join(FRONTEND, 'src'))
       .filter((f) => !f.endsWith('design-token-alpha.test.ts'))
-      .filter((f) => DEAD_RING.test(readFileSync(f, 'utf8')))
+      .filter((f) => DEAD_ALPHA_ON_VAR.test(readFileSync(f, 'utf8')))
       .map((f) => relative(FRONTEND, f))
-    expect(offenders, 'use the theme alias (ring-brand/30), not ring-[var(--v2-brand)]/30').toEqual(
-      [],
-    )
+    expect(
+      offenders,
+      'use the theme alias (ring-brand/30, border-danger/20) — the bare var() form with an ' +
+        'opacity modifier compiles to NOTHING on Tailwind v3.4, so the class is silently dropped',
+    ).toEqual([])
+  })
+})
+
+describe('no bracketed-alpha-on-var() call-sites remain, on ANY utility (#1709)', () => {
+  /**
+   * A separate guard, and the reason is worth stating: every grep in epic
+   * #1685 — the original 175-occurrence census, #1710's enumeration command,
+   * and #1710's own acceptance criterion — matches `/[0-9]+`. None of them can
+   * match `/[`, so `entityCardStyles.ts`'s `bg-[var(--v2-brand)]/[0.03]` was
+   * invisible to all three and would have outlived the epic that exists to
+   * remove it.
+   *
+   * This one is NOT restricted to ring/border. The bracketed count is already
+   * zero across every utility, so guarding it globally costs nothing and
+   * needs no baseline — unlike the `/[0-9]+` form on `bg-`/`text-`, where
+   * #1710's 12 call-sites are still live and a global guard would fail the
+   * tree for another slice's work.
+   *
+   * Found by mutation: the ring/border guard above stayed GREEN when the
+   * bracketed fix was reverted, because that instance is a `bg-`.
+   */
+  const DEAD_BRACKETED = /[a-z-]+-\[var\(--v2-[a-z0-9-]+\)\]\/\[/
+
+  it('finds none in packages/frontend/src', () => {
+    const offenders = sourceFiles(join(FRONTEND, 'src'))
+      .filter((f) => !f.endsWith('design-token-alpha.test.ts'))
+      .filter((f) => DEAD_BRACKETED.test(readFileSync(f, 'utf8')))
+      .map((f) => relative(FRONTEND, f))
+    expect(
+      offenders,
+      'use the theme alias (bg-brand/[0.03]) — a bracketed opacity on a bare var() ' +
+        'compiles to nothing, and no grep in epic #1685 can see this form',
+    ).toEqual([])
   })
 })

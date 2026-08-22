@@ -186,13 +186,13 @@ function SafeApproversCard({ safe, multiple }: { safe: UserSafe; multiple: boole
       </div>
 
       {message ? (
-        <div className="mb-3 rounded-lg border border-[var(--v2-warning)]/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]">
+        <div className="mb-3 rounded-lg border border-warning/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]">
           {message}
         </div>
       ) : null}
 
       {error ? (
-        <div className="mb-3 rounded-lg border border-[var(--v2-danger)]/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+        <div className="mb-3 rounded-lg border border-danger/25 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
           {error}
         </div>
       ) : null}

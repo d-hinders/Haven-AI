@@ -56,7 +56,7 @@ function triggerClasses(active: boolean, disabled = false): string {
   return [
     'flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors',
     active
-      ? 'border-[var(--v2-brand)]/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+      ? 'border-brand/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
       : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]',
     disabled ? 'cursor-not-allowed opacity-60 hover:bg-white' : '',
   ].join(' ')

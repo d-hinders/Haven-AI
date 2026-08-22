@@ -273,6 +273,11 @@ import {
   LIST_BASIC_SAFES_FOR_USER_SQL,
 } from '../src/infra/repositories/transaction-history.js'
 import {
+  COUNT_PENDING_CATALOG_SUBMISSIONS_SQL,
+  FIND_PENDING_CATALOG_SUBMISSION_BY_HOST_SQL,
+  INSERT_CATALOG_SUBMISSION_SQL,
+} from '../src/infra/repositories/catalog-submissions.js'
+import {
   FIND_CURRENCY_PREFERENCE_SQL,
   FIND_USER_CREDENTIALS_BY_EMAIL_SQL,
   FIND_USER_ID_BY_EMAIL_SQL,
@@ -746,6 +751,9 @@ const QUERIES: SmokeQuery[] = [
   { name: 'tx-history: confirmed x402 payment_intents funding', sql: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL },
   { name: 'tx-history: confirmed x402 approval_requests funding', sql: FIND_CONFIRMED_X402_APPROVAL_REQUESTS_SQL },
   { name: 'tx-history: machine-payment evidence detail', sql: FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL },
+  { name: 'catalog-submissions: insert with pending-host dedupe', sql: INSERT_CATALOG_SUBMISSION_SQL },
+  { name: 'catalog-submissions: pending row by host (no-op path)', sql: FIND_PENDING_CATALOG_SUBMISSION_BY_HOST_SQL },
+  { name: 'catalog-submissions: pending queue count (429 cap)', sql: COUNT_PENDING_CATALOG_SUBMISSIONS_SQL },
 ]
 
 async function main(): Promise<void> {

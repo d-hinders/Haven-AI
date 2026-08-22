@@ -2515,6 +2515,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/catalog/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a payable (x402/MCP) endpoint for verification and listing.
+         * @description Public, unauthenticated self-service submission (epic #1717). Writes a queue row only and returns a `verify_token`; the request path makes **no outbound request of any kind** — nothing here probes, signs, or pays. The seller proves domain control (well-known token / DNS TXT) and a leader-locked, SSRF-hardened, read-only probe watches a real 402 challenge before anything is listed; listed means domain-controlled AND verified-payable, and verification exercises the 402 challenge only, never settlement. Submitting a host that already has a pending/active submission is a no-op returning the same id. A flood is bound by a per-IP rate limit and a capped pending queue (429). Money-path: none; no payment, signature, or authority change.
+         */
+        post: operations["submitCatalogEntry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/catalog/{id}": {
         parameters: {
             query?: never;
@@ -2611,6 +2631,20 @@ export type components = {
             /** @enum {string} */
             status: "active" | "degraded" | "delisted";
             verified_at: string | null;
+        };
+        CatalogSubmitRequest: {
+            /** @description https URL of the payable x402/MCP endpoint the seller wants verified and listed. This endpoint makes no request to it: the submission is queue-only, and ownership proof plus the verification probe run later, asynchronously under the leader-locked catalog monitor. */
+            resource_url: string;
+            /** @description Honeypot. Bots that fill this plausible-looking field are dropped with a fake success and nothing is written; human submitters leave it empty. */
+            website?: string;
+        };
+        CatalogSubmissionAccepted: {
+            /** Format: uuid */
+            id: string;
+            /** @description Domain-ownership proof token. The seller proves control of the endpoint domain by serving the expected value at https://<host>/.well-known/haven-verify-<token>.txt (DNS TXT supported as fallback). Verification, and any public listing, waits for that proof; `submitted` alone guarantees nothing. */
+            verify_token: string;
+            /** @enum {string} */
+            status: "submitted";
         };
         /**
          * @description Stable Haven agent payment state phase.
@@ -15694,6 +15728,60 @@ export interface operations {
                     "application/json": {
                         error: string;
                         detail?: string;
+                    };
+                };
+            };
+        };
+    };
+    submitCatalogEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogSubmitRequest"];
+            };
+        };
+        responses: {
+            /** @description Submission accepted (or an existing pending submission for the same host). */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogSubmissionAccepted"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };

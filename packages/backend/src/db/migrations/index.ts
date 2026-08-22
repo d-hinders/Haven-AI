@@ -64,6 +64,7 @@ import * as normalizePriceDisplay from './062_normalize_price_display.js'
 import * as rateLimitCounters from './063_rate_limit_counters.js'
 import * as labelStrandingFixture from './064_label_stranding_fixture.js'
 import * as agentRekeys from './065_agent_rekeys.js'
+import * as catalogSubmissions from './066_catalog_submissions.js'
 
 export interface Migration {
   version: string
@@ -141,4 +142,5 @@ export const migrations: Migration[] = [
   rateLimitCounters,
   labelStrandingFixture,
   agentRekeys,
+  catalogSubmissions,
 ]

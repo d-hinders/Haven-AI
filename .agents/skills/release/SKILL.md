@@ -79,10 +79,15 @@ rather than greps. If the guard fires, read what it names.
 check fails without them, and forgetting is the single most common way a
 release PR goes red:
 
-1. `docs/operations/mcp-runtime-compatibility.md` — re-pin the *Supported
-   Runtime Manifest* table and prepend a `last-verified` note.
-2. `docs/regulatory/casp-changelog/YYYY-MM-DD-<pr>-release.md` — a new shard
-   ending in a perimeter verdict.
+1. `docs/operations/mcp-runtime-compatibility.md` — the *Supported Runtime
+   Manifest* table is re-pinned by the bump (#1790); prepend the `last-verified`
+   note yourself. That note is not ceremony — it is the release's argument for
+   what moved and what did not, and it is the reason a generated table still
+   leaves a human reading this doc.
+2. `docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md` — a new
+   shard ending in a perimeter verdict. The **version**, not the PR number
+   (#1789): the shard must exist before the PR is opened, because the gate blocks
+   the PR without it, so a PR-numbered name cannot be written when it is needed.
 
 `scripts/README.md` § *The contract-doc gate* has the required content of each.
 

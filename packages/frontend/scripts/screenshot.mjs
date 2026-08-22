@@ -11,6 +11,16 @@
  *   npm run screenshot -w packages/frontend -- /dashboard,/agents
  *   npm run screenshot -w packages/frontend -- --scenario=connect-agent
  *
+ * ── One server per worktree, and it has to prove it (#1800) ──────────────────
+ * The port is DERIVED FROM THE WORKTREE PATH and proven free before the dev
+ * server is spawned, and the run then fetches `/capture-identity.json` from
+ * whatever it is about to capture and refuses unless the marker matches this
+ * run's random token. Both halves matter: the fixed 3111 this replaces meant a
+ * second concurrent session captured the OTHER worktree's app, and a 200 OK is
+ * not proof of identity. See `scripts/capture-identity.mjs`. Provenance
+ * (branch, commit, worktree, port) is printed and stamped into
+ * `.screenshots/capture-manifest.json`, so a PNG can be traced afterwards.
+ *
  * ── Route captures are un-clipped, and checked (#1738) ───────────────────────
  * The app shell is `h-screen` + `overflow-hidden` with `<main>` as the only
  * scroller, so a plain `fullPage: true` capture paints ONE viewport and leaves
@@ -67,18 +77,35 @@
  */
 import { chromium } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { mkdir, rm } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { VIEWPORTS } from './evidence-viewports.mjs'
 import { captureFullPage } from './full-page-capture.mjs'
+import {
+  buildRunIdentity,
+  derivePort,
+  removeIdentityMarkerSync,
+  reserveFreePort,
+  verifyServerIdentity,
+  worktreeIdentity,
+  writeIdentityMarker,
+} from './capture-identity.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = path.join(ROOT, '.screenshots')
-const PORT = Number(process.env.SCREENSHOT_PORT ?? 3111)
-const BASE_URL = process.env.SCREENSHOT_BASE_URL ?? `http://127.0.0.1:${PORT}`
+const PUBLIC_DIR = path.join(ROOT, 'public')
+const MANIFEST = path.join(OUT_DIR, 'capture-manifest.json')
+
+// The server this run captures. Both are resolved in `main()`, because the
+// port is now derived from the WORKTREE rather than fixed (#1800): a fixed
+// 3111 in every worktree meant a second concurrent session captured the other
+// worktree's app and the PNGs looked plausible. `SCREENSHOT_BASE_URL` still
+// points the run at an already-running server — and is identity-checked like
+// every other server, so pointing it at the wrong one fails loudly.
 const OWN_SERVER = !process.env.SCREENSHOT_BASE_URL
+let BASE_URL = process.env.SCREENSHOT_BASE_URL ?? ''
 
 // Retina captures, so a reviewer can zoom into type and hairlines. Named
 // because the blank-capture guard needs it: it measures the fold in DEVICE
@@ -706,10 +733,11 @@ export const SCENARIOS = {
       // capture reaches. Disclosures are opened first — a control nobody can
       // see is a control nobody reviewed (#1410).
       // Not guarded: the same principle as the manual-credential reveal below.
-      // This scenario pins runtime=claude-code, for which the Advanced
-      // disclosure always renders, so a missing one means the flow changed and
-      // the capture should fail rather than quietly omit the control it exists
-      // to show.
+      // #1720: this used to pin runtime=claude-code, the one row for which the
+      // Advanced disclosure rendered. There is no runtime to pin now and the
+      // disclosure renders for everyone, so a missing one means the flow
+      // changed and the capture should fail rather than quietly omit the
+      // control it exists to show.
       await dialog.getByText('Advanced', { exact: true }).click()
       await shoot(dialog, 'step1-details')
 
@@ -1081,23 +1109,106 @@ async function main() {
   await rm(OUT_DIR, { recursive: true, force: true })
   await mkdir(OUT_DIR, { recursive: true })
 
+  // Provenance, printed before anything is captured and stamped into the
+  // manifest afterwards: a PNG on its own cannot say which branch it shows.
+  const identity = buildRunIdentity(worktreeIdentity(ROOT))
+  console.log(`screenshot: worktree ${identity.worktree}`)
+  console.log(
+    `screenshot: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty working tree)' : ''}`,
+  )
+
+  // The marker the server serves back at /capture-identity.json. Written
+  // BEFORE the server starts so it is on disk for the first probe, and torn
+  // down again on EVERY exit — success, throw, or signal.
+  await writeIdentityMarker(PUBLIC_DIR, identity)
+
+  // Declared before the teardown that has to reach it. `server` is assigned
+  // further down; a signal handler registered above it would close over a
+  // binding it can never see, which is how an interrupted run orphans a Next
+  // process holding this worktree's port.
   let server
-  if (OWN_SERVER) {
-    console.log(`screenshot: starting dev server on :${PORT}…`)
-    server = spawn('npm', ['run', 'dev', '--', '--hostname', '127.0.0.1', '--port', String(PORT)], {
-      cwd: ROOT,
-      stdio: 'ignore',
-      env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' },
-    })
-    server.on('exit', (code) => {
-      if (code && code !== 0 && code !== null) console.error(`dev server exited ${code}`)
-    })
-    await waitForServer(BASE_URL)
+  let port = null
+
+  // Sync on purpose: an awaited promise does not settle before the process
+  // leaves on a throw or a signal, and the first refusal this guard ever
+  // produced left the marker sitting in `public/` for exactly that reason.
+  // `public/` is copied verbatim into a production build, so a marker that
+  // outlives its run is a worktree path and commit hash shipped at the site
+  // root — the `exit` hook is what keeps that to a hard kill only.
+  const teardown = () => {
+    if (server) {
+      server.kill('SIGTERM')
+      server = null
+    }
+    try {
+      removeIdentityMarkerSync(PUBLIC_DIR)
+    } catch {
+      /* nothing to clean up */
+    }
+  }
+  process.on('exit', teardown)
+  process.once('SIGINT', () => {
+    teardown()
+    process.exit(130)
+  })
+  process.once('SIGTERM', () => {
+    teardown()
+    process.exit(143)
+  })
+
+  try {
+    if (OWN_SERVER) {
+      // Per-worktree, and PROVEN free by binding it — never inherited from
+      // whatever happens to answer on a fixed port. `SCREENSHOT_PORT` still
+      // overrides the derived value, and gets the same free-port and identity
+      // treatment, so it cannot reintroduce the collision either.
+      const preferred = process.env.SCREENSHOT_PORT ? Number(process.env.SCREENSHOT_PORT) : derivePort(identity.worktree)
+      port = await reserveFreePort(preferred)
+      BASE_URL = `http://127.0.0.1:${port}`
+      console.log(`screenshot: starting dev server on :${port} (derived from this worktree)…`)
+      server = spawn('npm', ['run', 'dev', '--', '--hostname', '127.0.0.1', '--port', String(port)], {
+        cwd: ROOT,
+        stdio: 'ignore',
+        env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' },
+      })
+      server.on('exit', (code) => {
+        if (code && code !== 0 && code !== null) console.error(`dev server exited ${code}`)
+      })
+      await waitForServer(BASE_URL)
+    } else {
+      console.log(`screenshot: capturing an already-running server at ${BASE_URL}`)
+    }
+
+    // A 200 is not proof of identity (#1800). Refuse anything that cannot
+    // prove it is THIS worktree's app, before a single PNG exists.
+    if (process.env.SCREENSHOT_ALLOW_UNVERIFIED_SERVER === '1') {
+      identity.identity_verified = false
+      console.warn(
+        `\n⚠ SCREENSHOT_ALLOW_UNVERIFIED_SERVER=1 — capturing ${BASE_URL} WITHOUT proving it is this worktree's app.\n` +
+          '  The PNGs may show a different branch. Say so wherever you attach them.\n',
+      )
+    } else {
+      await verifyServerIdentity(BASE_URL, identity)
+      identity.identity_verified = true
+      console.log(`screenshot: server identity verified — ${BASE_URL} is this worktree's app`)
+    }
+  } catch (err) {
+    teardown()
+    throw err
   }
 
-  const browser = await chromium.launch({
-    executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
-  })
+  // Inside its own guard: a launch failure here is not hypothetical (the
+  // docblock names the recurring Chromium-version cause), and it happens with
+  // the dev server already spawned and the marker already on disk.
+  let browser
+  try {
+    browser = await chromium.launch({
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
+    })
+  } catch (err) {
+    teardown()
+    throw err
+  }
   const captured = []
   const consoleErrors = []
   const gotoFailures = []
@@ -1217,8 +1328,34 @@ async function main() {
     }
   } finally {
     await browser.close()
-    if (server) server.kill('SIGTERM')
+    teardown()
   }
+
+  // Provenance an artifact can be traced by after the fact — which branch and
+  // commit these PNGs actually show, and that the server was proven to be this
+  // worktree's before they were taken.
+  await writeFile(
+    MANIFEST,
+    `${JSON.stringify(
+      {
+        generated_at: new Date().toISOString(),
+        worktree: identity.worktree,
+        branch: identity.branch,
+        commit: identity.commit,
+        dirty: identity.dirty,
+        base_url: BASE_URL,
+        port,
+        own_server: OWN_SERVER,
+        identity_verified: identity.identity_verified === true,
+        routes: ROUTES,
+        scenarios: scenarios.map((s) => s.name),
+        files: captured,
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
 
   console.log(`\nscreenshot: wrote ${captured.length} PNGs to .screenshots/`)
   for (const f of captured) console.log(`  ${f}`)
@@ -1244,6 +1381,11 @@ async function main() {
     for (const e of consoleErrors) console.log(`  [${e.route} · ${e.viewport}] ${e.text}`)
     console.log('  (a fixture-shape gap or a real client bug — fix before trusting these screenshots)')
   }
+  console.log(
+    `\nProvenance: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty)' : ''}, ` +
+      `captured from ${BASE_URL}${identity.identity_verified === true ? ' (identity verified)' : ' (identity NOT verified)'}.`,
+  )
+  console.log(`  Full record: ${path.relative(ROOT, MANIFEST)}`)
   console.log('\nAttach these to the PR (or reference them in the Browser Verification section).')
   // Broken evidence must not exit 0 — a failed navigation means missing PNGs,
   // and a blank capture means the run produced something that LOOKS like

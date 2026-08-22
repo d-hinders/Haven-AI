@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/docs-drift/docs-drift.test.ts
   - packages/backend/src/docs-drift/env-example-drift.test.ts
   - .env.example
-last-verified: "2026-08-22" # #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
+last-verified: "2026-08-23" # #1854: Phase 2 §"Scoping covers" re-read against `scripts/docs/coupling-gate.mjs` — documents the test-content carve-out (`packages/qa-agent/**`, `packages/frontend/e2e/**`) and the `__screenshots__/` carve-out from it, which is checked first; the same-day-suppression paragraph in this section is STALE since #1824 and is NOT fixed here (#1869) — nothing else re-verified in this pass. Prior: #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
 ---
 
 # Documentation-quality system
@@ -267,10 +267,26 @@ screen it is applied to. Narrowing to zero is the opposite failure: a doc that
 matches nothing never gets the doc-reviewer nudge, so keep a real net.
 Two related rules the gate applies for you:
 test files and generated files (`__tests__/`, `*.test.*`, `*.spec.*`,
-`packages/core/src/api-types.ts`) implicate a doc only when `covers` names the
-path **exactly** — a wildcard does not sweep them up, since prose is not made
-stale by a test being added; and a `#` comment may only trail a `covers` item,
-never occupy its own line, which would silently truncate the list.
+`__screenshots__/`, `packages/core/src/api-types.ts`) implicate a doc only when
+`covers` names the path **exactly** — a wildcard does not sweep them up, since
+prose is not made stale by a test being added; and a `#` comment may only trail
+a `covers` item, never occupy its own line, which would silently truncate the
+list.
+
+That list has one deliberate carve-out and one carve-out *from* the carve-out,
+and the order between them is load-bearing. Packages whose **content is tests**
+— `packages/qa-agent/**` and `packages/frontend/e2e/**` — are never incidental:
+those scenarios and specs are what their runbooks (`agent-qa.md`,
+`e2e-qa-runbook.md`) document, not a test of some other source, so treating them
+as incidental would silently un-cover the docs that describe them. But
+`__screenshots__/` is checked **first**
+([#1854](https://github.com/d-hinders/Haven-AI/issues/1854)), because Playwright
+writes the committed visual-regression baselines *inside* the e2e tree
+(`snapshotPathTemplate` in `packages/frontend/playwright.config.ts`) and the
+*Update visual baselines* workflow commits them. Those PNGs are generated and
+described by no runbook, so before #1854 every baseline regeneration implicated
+`docs/bug-reports/_run-report-template.md` — noise on a whole class of PR. An
+e2e **spec** change still implicates the runbooks, unchanged.
 
 **Drift tests** (`packages/backend/src/docs-drift/`): vitest tests, modeled on
 the OpenAPI drift test, that pin hand-maintained doc/config claims to the code

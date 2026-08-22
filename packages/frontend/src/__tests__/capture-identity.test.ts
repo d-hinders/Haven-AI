@@ -315,6 +315,15 @@ describe('the capture script wires the guard in', () => {
     expect(source).toMatch(/verifyServerIdentity\(BASE_URL, identity\)/)
     expect(source).toMatch(/reserveFreePort\(preferred\)/)
     expect(source).toMatch(/derivePort\(identity\.worktree\)/)
+    // Teardown reaches BOTH things a half-finished run leaves behind: the
+    // marker in `public/` (which a later `next build` would ship) and the dev
+    // server holding this worktree's port. Review found the browser-launch
+    // throw and the signal path escaping the first version of this.
+    expect(source).toMatch(/process\.on\('exit', teardown\)/)
+    expect(source).toMatch(/process\.once\('SIGINT'/)
+    expect(source).toMatch(/process\.once\('SIGTERM'/)
+    expect(source).toMatch(/const teardown = \(\) => \{[\s\S]*?server\.kill\('SIGTERM'\)[\s\S]*?removeIdentityMarkerSync/)
+
     // The old fixed default. It must not come back — in any form. Comments
     // may still NAME it (the docblock explains the defect), so they are
     // stripped before the check rather than the check being softened.

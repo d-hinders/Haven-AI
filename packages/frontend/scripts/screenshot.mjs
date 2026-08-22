@@ -1117,30 +1117,44 @@ async function main() {
   )
 
   // The marker the server serves back at /capture-identity.json. Written
-  // BEFORE the server starts so it is on disk for the first probe, and removed
-  // in the finally below (and on a signal) so it never outlives the run.
+  // BEFORE the server starts so it is on disk for the first probe, and torn
+  // down again on EVERY exit — success, throw, or signal.
   await writeIdentityMarker(PUBLIC_DIR, identity)
-  // Sync removal on purpose: an `await`ed promise does not settle before the
-  // process leaves on a throw or a signal, and the first refusal this guard
-  // ever produced left the marker sitting in `public/`.
-  const cleanupMarker = () => {
+
+  // Declared before the teardown that has to reach it. `server` is assigned
+  // further down; a signal handler registered above it would close over a
+  // binding it can never see, which is how an interrupted run orphans a Next
+  // process holding this worktree's port.
+  let server
+  let port = null
+
+  // Sync on purpose: an awaited promise does not settle before the process
+  // leaves on a throw or a signal, and the first refusal this guard ever
+  // produced left the marker sitting in `public/` for exactly that reason.
+  // `public/` is copied verbatim into a production build, so a marker that
+  // outlives its run is a worktree path and commit hash shipped at the site
+  // root — the `exit` hook is what keeps that to a hard kill only.
+  const teardown = () => {
+    if (server) {
+      server.kill('SIGTERM')
+      server = null
+    }
     try {
       removeIdentityMarkerSync(PUBLIC_DIR)
     } catch {
       /* nothing to clean up */
     }
   }
+  process.on('exit', teardown)
   process.once('SIGINT', () => {
-    cleanupMarker()
+    teardown()
     process.exit(130)
   })
   process.once('SIGTERM', () => {
-    cleanupMarker()
+    teardown()
     process.exit(143)
   })
 
-  let server
-  let port = null
   try {
     if (OWN_SERVER) {
       // Per-worktree, and PROVEN free by binding it — never inherited from
@@ -1178,14 +1192,22 @@ async function main() {
       console.log(`screenshot: server identity verified — ${BASE_URL} is this worktree's app`)
     }
   } catch (err) {
-    if (server) server.kill('SIGTERM')
-    cleanupMarker()
+    teardown()
     throw err
   }
 
-  const browser = await chromium.launch({
-    executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
-  })
+  // Inside its own guard: a launch failure here is not hypothetical (the
+  // docblock names the recurring Chromium-version cause), and it happens with
+  // the dev server already spawned and the marker already on disk.
+  let browser
+  try {
+    browser = await chromium.launch({
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
+    })
+  } catch (err) {
+    teardown()
+    throw err
+  }
   const captured = []
   const consoleErrors = []
   const gotoFailures = []
@@ -1305,8 +1327,7 @@ async function main() {
     }
   } finally {
     await browser.close()
-    if (server) server.kill('SIGTERM')
-    cleanupMarker()
+    teardown()
   }
 
   // Provenance an artifact can be traced by after the fact — which branch and

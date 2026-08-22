@@ -147,6 +147,11 @@ export function identityMismatch(expected, served) {
       .join(', ')
     return `the server belongs to a DIFFERENT capture run${where ? ` (${where})` : ''} — expected worktree ${expected.worktree}, branch ${expected.branch}, commit ${String(expected.commit).slice(0, 12)}`
   }
+  // Belt and suspenders, and deliberately unreachable through
+  // `verifyServerIdentity` today: a token match already implies the same run,
+  // because the token is a per-run `randomUUID()`. It is here for any future
+  // caller that compares against a token it did not generate itself (a shared
+  // or persisted one), where a replay from a different worktree becomes real.
   if (served.worktree !== expected.worktree) {
     return `the served marker's token matches but its worktree does not (served ${served.worktree}, expected ${expected.worktree})`
   }

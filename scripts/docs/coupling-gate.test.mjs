@@ -319,6 +319,24 @@ test('a satisfied-by shard suppresses the strict contract finding (#1496)', () =
  * So: assert it directly, against the repo's REAL front-matter. If someone ever
  * narrows CASP's coverage (entirely plausible — "connect isn't money-path"),
  * this fails instead of the human-read requirement disappearing silently.
+ *
+ * #1739 — be exact about WHICH entries carry this, because the loose phrasing
+ * ("CASP's five published-package `covers:` entries") is wrong in both
+ * directions and would mislead whoever narrows the list next. The entries a
+ * bump-only diff actually lands on are `packages/mcp/src/**`,
+ * `packages/signer/src/**`, `packages/connect/src/**` and
+ * `packages/mcp-server/src/**` — and `mcp-server` is a PRIVATE package, never
+ * published. `packages/sdk/src/**` is covered but contributes nothing here: the
+ * bump rewrites no source constant under it, only `packages/sdk/package.json`.
+ *
+ * #1826 — `packages/cli/src/**` now carries it too. It is a published package
+ * the bump DOES write (`CLI_VERSION` in `commands.ts`), and it was the one such
+ * entry CASP did not cover; #1826 added it (with
+ * `packages/backend/src/routes/agents.ts`) after finding the agent-authority
+ * surface gated by no contract doc. So FIVE entries carry this guarantee:
+ * `packages/mcp/src/**`, `packages/signer/src/**`, `packages/connect/src/**`,
+ * `packages/mcp-server/src/**` and `packages/cli/src/**`. Narrowing any one of
+ * them weakens it; narrowing all five removes it.
  */
 test('a bump-only release diff still FAILS the strict gate — no shard, no green (#1790)', async () => {
   const { execFile } = await import('node:child_process')
@@ -339,6 +357,7 @@ test('a bump-only release diff still FAILS the strict gate — no shard, no gree
     'packages/mcp/src/server.ts',
     'packages/signer/src/server.ts',
     'packages/mcp-server/src/server.ts',
+    'packages/cli/src/commands.ts',
     'docs/operations/mcp-runtime-compatibility.md',
   ].join(',')
 

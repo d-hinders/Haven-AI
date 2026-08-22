@@ -239,21 +239,28 @@ const TOP_BAR_MAX_DIFF_PIXELS = 100
  * Recolouring the three nav GROUP HEADINGS one token sideways — `--v2-ink-3`
  * #5d6c85 to `--v2-ink-2` #525f7f, both solid tokens, deliberately not the
  * `/85`-on-a-bare-`var()` shape that compiles to nothing on Tailwind v3.4 and
- * made #1811's first mutation inert (#1818) — moves **282 pixels**.
+ * made #1811's first mutation inert (#1818). On CI, both halves RUN rather than
+ * being argued from one number (the scoped assertion precedes the full-page one
+ * and short-circuits it, so the counterfactual needed its own run with the
+ * scoped block disabled):
  *
- *   this scoped capture, budget 100:   282 px  ->  RED   (2.8x over)
- *   the whole-page capture, budget 500: 282 px ->  GREEN (absorbed)
+ *   this scoped capture, budget 100:    366 px  ->  RED   (3.66x over)
+ *   the whole-page capture, budget 500: same mutation ->  GREEN
+ *   the mobile test:                    same mutation ->  GREEN
  *
- * Both captures report the SAME 282, which is the check that the scoped region
- * is really the region: every changed pixel on the page is inside it. And the
- * second line is the counterfactual — this is a real, sidebar-confined design
- * regression that the pre-existing gate passes, which is the coverage hole
- * #1820 is about, demonstrated rather than argued.
+ * The second line is the point of #1820: a real, sidebar-confined design
+ * regression that the pre-existing gate passes. The third is the desktop-only
+ * decision paying off in the same run — the mutated headings are not painted on
+ * mobile at all, because the drawer is off-canvas there.
  *
- * Worth recording separately: at Playwright's DEFAULT `threshold` of 0.2 that
- * same mutation counts **0** differing pixels (YIQ delta 69.7 against a
- * maxDelta of 1,408.6). No budget of any size would have caught it. The 0.02
- * threshold #1805 set is doing as much work here as the scoping is.
+ * Two things this measurement teaches that a single number would have hidden.
+ * **Local counts are not the gate's counts:** the same mutation is 282 px
+ * rendered on macOS and 366 px on Linux, ~30% apart on glyph antialiasing
+ * alone. Mutation-prove locally by all means, but quote the Linux figure, since
+ * the baselines are Linux. And **at Playwright's DEFAULT `threshold` of 0.2
+ * this mutation counts 0 differing pixels** (YIQ delta 69.7 against a maxDelta
+ * of 1,408.6) — no budget of any size would have caught it. The 0.02 threshold
+ * #1805 set is doing as much work here as the scoping is.
  *
  * ── What this capture does NOT cover, said plainly ───────────────────────────
  *

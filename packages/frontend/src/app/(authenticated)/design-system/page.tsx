@@ -679,7 +679,7 @@ export default function DesignSystemPage() {
             <div className="mt-3 space-y-2 text-sm text-[var(--v2-ink-2)]">
               <p><Address value={sampleAddress} /> <span className="text-xs text-[var(--v2-ink-3)]">— hover for the full address</span></p>
               <p><Address value={sampleAddress} copy /> <span className="text-xs text-[var(--v2-ink-3)]">— with check-pop copy</span></p>
-              <p><Address value={sampleAddress} href="https://basescan.org" /> <span className="text-xs text-[var(--v2-ink-3)]">— explorer link with a trailing lucide ExternalLink</span></p>
+              <p><Address value={sampleAddress} href="https://basescan.org" /> <span className="text-xs text-[var(--v2-ink-3)]">— explorer link, opens in a new tab</span></p>
               <p className="break-all text-xs"><Address value={sampleAddress} truncate={false} /> <span className="text-[var(--v2-ink-3)]">— full form for receive surfaces</span></p>
             </div>
           </Card>

@@ -108,7 +108,7 @@ export default function TransactionsClient() {
     .filter((name): name is string => Boolean(name))
 
   // Plain-English page subtitle that reflects the active filter scope. When
-  // the user lands here from the "View all →" link on an account or agent
+  // the user lands here from the "View all" link on an account or agent
   // detail page, this turns the static "All activity across your accounts."
   // line into "Transactions for {accountName}" so the view feels intentional.
   const subtitle = useMemo(

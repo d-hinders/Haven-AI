@@ -465,7 +465,15 @@ export async function dismissMobileSidebar(page: Page) {
 
   const closeButton = page.getByRole('button', { name: 'Close sidebar' })
   if (await closeButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await closeButton.click({ force: true })
+    // No `{ force: true }` (#1749). It used to be required, and that was the
+    // undiagnosed symptom: `force` skips the actionability check, and the
+    // check this helper was failing is the hit-test — TopBar's `z-[100]`
+    // covered the toggle's `z-[60]`, so the real user gesture was impossible
+    // on every authenticated route below `lg`. Keeping the plain click makes
+    // this helper the regression canary: if the layering breaks again, every
+    // mobile e2e test fails here with "intercepts pointer events" instead of
+    // quietly forcing its way through.
+    await closeButton.click()
     await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible' })
   }
 }

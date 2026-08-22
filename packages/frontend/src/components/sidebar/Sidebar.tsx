@@ -213,7 +213,7 @@ export default function Sidebar() {
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed top-4 left-4 z-[60] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+        className="lg:hidden fixed top-4 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
       >
         <Icon icon={Menu} className="w-4 h-4" />
       </button>
@@ -221,13 +221,13 @@ export default function Sidebar() {
       {/* Overlay for mobile */}
       {!collapsed && (
         <div
-          className="lg:hidden fixed inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm z-40"
+          className="lg:hidden fixed inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm z-[var(--v2-z-nav-scrim)]"
           onClick={() => setCollapsed(true)}
         />
       )}
 
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-[240px] h-screen lg:h-full bg-[var(--v2-surface)] border-r border-[var(--v2-border)] flex flex-col flex-shrink-0 transition-transform duration-200 ${
+        className={`fixed lg:static inset-y-0 left-0 z-[var(--v2-z-nav-drawer)] w-[240px] h-screen lg:h-full bg-[var(--v2-surface)] border-r border-[var(--v2-border)] flex flex-col flex-shrink-0 transition-transform duration-200 ${
           collapsed ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'
         }`}
       >
@@ -339,7 +339,7 @@ export default function Sidebar() {
                     ref={popoverRef}
                     role="menu"
                     aria-label="User menu"
-                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-[var(--v2-shadow-popover)] py-1 z-[60]"
+                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-[var(--v2-shadow-popover)] py-1 z-[var(--v2-z-chrome-popover)]"
                   >
                     <Link
                       href="/profile"

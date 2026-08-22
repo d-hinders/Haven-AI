@@ -216,7 +216,7 @@ export function Toaster() {
         role="status"
         aria-live="polite"
         aria-atomic="false"
-        className="pointer-events-none fixed bottom-4 inset-x-4 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:left-auto z-[9999] flex flex-col items-end gap-2"
+        className="pointer-events-none fixed bottom-4 inset-x-4 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:left-auto z-[var(--v2-z-toast)] flex flex-col items-end gap-2"
       >
         {politeToasts.map((item) => (
           <div key={item.id} className="pointer-events-auto w-full sm:w-auto">
@@ -230,7 +230,7 @@ export function Toaster() {
         role="alert"
         aria-live="assertive"
         aria-atomic="true"
-        className="pointer-events-none fixed bottom-4 inset-x-4 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:left-auto z-[9999] flex flex-col items-end gap-2"
+        className="pointer-events-none fixed bottom-4 inset-x-4 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:left-auto z-[var(--v2-z-toast)] flex flex-col items-end gap-2"
         style={{ marginBottom: politeToasts.length > 0 ? `${politeToasts.length * 60}px` : undefined }}
       >
         {assertiveToasts.map((item) => (

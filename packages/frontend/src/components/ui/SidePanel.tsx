@@ -34,7 +34,7 @@ export function SidePanel({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-[200] flex justify-end">
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex justify-end">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
       <div
         ref={panelRef}

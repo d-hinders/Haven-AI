@@ -578,7 +578,7 @@ async function main() {
   log('    2. Write the two contract docs, or the blocking coupling gate fails:')
   log('         docs/operations/mcp-runtime-compatibility.md')
   log('           re-pin the Supported Runtime Manifest table + prepend a last-verified note')
-  log('         docs/regulatory/casp-changelog/<date>-<n>-release.md')
+  log('         docs/regulatory/casp-changelog/<date>-<pr>-release.md')
   log('           a new shard, ending in a perimeter verdict')
   log('    3. npm run docs:coupling      must exit 0')
   log('    4. Commit on a release branch and open a PR into `dev`.')

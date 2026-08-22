@@ -176,27 +176,46 @@ async function doneBlock() {
   return source.slice(start, end)
 }
 
-test('MUTATION PROOF: the sign-off never emits a runnable npm publish command (#1788)', async () => {
-  const block = await doneBlock()
-  // A runnable command, not the word: `npm publish` carrying a flag or a
-  // workspace selector. This is the exact shape that shipped and was followed.
-  const runnable = block.match(/npm publish\s+(?:-|--)\S+/g)
+/**
+ * What the script PRINTS, not what its source says. The block carries a
+ * comment explaining the #1788 defect — which necessarily names @haven_ai/cli
+ * and the words "npm publish" — and a guard that read the raw source would
+ * trip on the very explanation of why it exists.
+ */
+function emitted(block) {
+  return block
+    .split('\n')
+    .filter((line) => line.trim().startsWith('log('))
+    .join('\n')
+}
+
+test('MUTATION PROOF: the sign-off never emits an npm publish instruction (#1788)', async () => {
+  const printed = emitted(await doneBlock())
+  // Every legitimate mention is the backtick-quoted one inside the
+  // prohibition sentence. Strip those, and NOTHING may remain — this catches
+  // a bare `npm publish` with no flags, which an earlier flag-shaped regex
+  // let through (review finding on #1788).
+  const leftover = printed.replace(/`npm publish`/g, '').match(/npm publish/g)
   assert.equal(
-    runnable,
+    leftover,
     null,
-    `release-bump.mjs must not instruct a manual publish; found: ${JSON.stringify(runnable)}`,
+    `release-bump.mjs must not instruct a manual publish; found ${leftover?.length} unquoted mention(s)`,
   )
 })
 
-test('the sign-off enumerates no packages, so it cannot drift from the published set (#1788)', async () => {
-  const block = await doneBlock()
-  // The original listed four of five (@haven_ai/cli was missing) — a second
-  // hand-maintained copy of the published set. publish.yml derives it.
-  const enumerated = block.match(/-w\s+packages\/\S+/g)
+test('the sign-off enumerates no packages, in flags or in prose (#1788)', async () => {
+  const printed = emitted(await doneBlock())
+  // Doc paths legitimately contain package-ish substrings
+  // (mcp-runtime-compatibility.md), and they are not enumerations.
+  const prose = printed.replace(/\S*\/\S*/g, '').replace(/publish\.yml/g, '')
+  // The original defect listed four of the five published packages. Catch that
+  // shape however it is written — `-w packages/sdk` or "sdk, signer, mcp,
+  // connect and cli" — because the second form slipped past a flag-only regex.
+  const named = prose.match(/\b(sdk|signer|mcp|connect|cli)\b/gi)
   assert.equal(
-    enumerated,
+    named,
     null,
-    `the Done block must not name individual packages; found: ${JSON.stringify(enumerated)}`,
+    `the sign-off must not name packages — the published set is derived, not restated; found: ${JSON.stringify(named)}`,
   )
 })
 

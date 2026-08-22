@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-08-22" # #1745: the SECOND limit on "recovered, never re-minted" is closed — a null receipt no longer presumes dropped; a re-mint needs positive evidence the prior tx can never mine (its nonce consumed by something else). The bounded-stall argument and the still-open time question (#1743) are recorded rather than implied. The first limit (hash-keyed recovery) stands. Prior: #1742: the sweep's phase isolation protects against a THROW, not a hang — `revokeOnChain`'s bare `tx.wait()` could park the revocation phase and the stuck-revoke alarm downstream of it indefinitely. The wait is now bounded; the retry/backoff model, the no-terminal-failed-state rule and the verifier precedence are unchanged. Prior: #1735: the "recovered, never re-minted" claim is qualified — recovery is keyed off the persisted tx hash (hence the bump-worker exclusion) and presumes a null receipt means dropped, so a fee-stuck anchor can still re-mint (#1745). Anchor wait disposition on expiry recorded. Rest of the anchoring/revocation prose re-read against the code and unchanged.
+last-verified: "2026-08-22" # #1758: "no terminal failed revocation state" needed something able to observe agreement, and the only observer was unreachable — a revoke that mines after its bounded wait leaves `revocation_status` permanently `pending`. A new section records what CLOSES a revocation: the attestation's revoked bit read at a settled block, its evidence pointer from the durable outbound record, and the #1743 time question left open. Prior: #1745: the SECOND limit on "recovered, never re-minted" is closed — a null receipt no longer presumes dropped; a re-mint needs positive evidence the prior tx can never mine (its nonce consumed by something else). The bounded-stall argument and the still-open time question (#1743) are recorded rather than implied. The first limit (hash-keyed recovery) stands. Prior: #1742: the sweep's phase isolation protects against a THROW, not a hang — `revokeOnChain`'s bare `tx.wait()` could park the revocation phase and the stuck-revoke alarm downstream of it indefinitely. The wait is now bounded; the retry/backoff model, the no-terminal-failed-state rule and the verifier precedence are unchanged. Prior: #1735: the "recovered, never re-minted" claim is qualified — recovery is keyed off the persisted tx hash (hence the bump-worker exclusion) and presumes a null receipt means dropped, so a fee-stuck anchor can still re-mint (#1745). Anchor wait disposition on expiry recorded. Rest of the anchoring/revocation prose re-read against the code and unchanged.
 ---
 
 # L0 Agent Passport — EAS schema
@@ -359,6 +359,59 @@ not which plan.
   lease matters because EAS reverts a second revoke with `AlreadyRevoked`: two
   concurrent attempts would burn gas and then fail on every backoff cycle
   forever instead of converging.
+
+### What CLOSES a revocation
+
+"Retries until they agree" needs something able to observe agreement, and until
+[#1758](https://github.com/d-hinders/Haven-AI/issues/1758) only one thing could:
+a fresh `revokeOnChain` returning a status-1 receipt. That is unreachable in the
+case bounding the wait made ordinary. Once a revoke crosses its 120s deadline
+and its transaction **later mines**, the attestation is revoked on-chain, so
+every fresh attempt reverts `AlreadyRevoked` — recorded as a genuine revert,
+rescheduled, forever at the 1h cap — while the bump worker that adopted the
+transaction closes only the `outbound_txs` row and never reaches
+`agent_passports`. The row stayed `pending` **permanently**: a false stuck-revoke
+alarm that never cleared, and hourly relayer gas on a transaction that could
+never succeed. Note the shape — this is the same non-convergence the
+`claimRevocation` lease prevents between *concurrent* attempts, reappearing
+**sequentially**, across the lease boundary.
+
+`reconcileRevocation` now asks the chain before it spends anything: **is this
+attestation already revoked?** — `revocationTime != 0`, read as of a *finalized*
+block (falling back to ~300 blocks of burial, with the same
+[#1745](https://github.com/d-hinders/Haven-AI/issues/1745) check that a node
+claiming `finalized` is not just echoing the head). Three things follow, and
+each is deliberate:
+
+- **The evidence is positive and transaction-independent.** The revoked bit does
+  not care which transaction set it, whether Haven ever saw a receipt, or
+  whether an operator revoked by hand — so it converges cases no hand-off from
+  the bump worker ever could. Decoding the `AlreadyRevoked` revert as success
+  would have been the smaller change and is deliberately not what happens: a
+  revert is a claim about one transaction, and it would still burn the gas
+  before reinterpreting it.
+- **It is read at a SETTLED block because `confirmed` is terminal.**
+  `listStuckRevocations` never revisits a confirmed row, so writing it from a
+  head read that a reorg then undid would silence the alarm for a still-live,
+  merchant-readable credential — the exact inversion of the alarm's purpose.
+- **Everything that is not `revoked` behaves as before.** No probe wired, a
+  throwing probe, an unreadable UID, a `live` attestation: all fall through to
+  submitting the revoke, which is what this code did before the probe existed.
+  The probe can only ever remove a stuck row, never create a wrong one.
+
+Migration 049 refuses `revocation_status = 'confirmed'` without a
+`revocation_tx_hash`, so the convergence also needs the transaction that did it.
+That comes from the durable outbound record (#1556) carrying this revoke's exact
+calldata — `mined` (proven status-1) preferred over `broadcast`, never `failed`
+or `replaced`. Where the chain agrees but no such record exists, the row stays
+`pending` with a reason naming the missing pointer and still refuses to
+broadcast: a fabricated hash in an audit column is worse than an honest alarm.
+
+**Still open.** How long a revoke whose attestation is genuinely still live may
+go unlanded before Haven declares it dead is *not* decided here. It is the
+revoke-side face of [#1743](https://github.com/d-hinders/Haven-AI/issues/1743)'s
+owner call, it is not derivable from the code, and such a row keeps retrying and
+keeps alarming — correctly, because in that case the credential really is live.
 
 ## Verifying a passport (merchant-facing)
 

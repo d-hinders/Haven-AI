@@ -622,7 +622,16 @@ function ControlSurfaceMock() {
               <span className="text-[12px] font-medium text-white/80">Payment intent</span>
               <span className="text-[11px] font-mono text-white/45">POST /payments</span>
             </div>
-            <div className="space-y-2 font-mono text-[12px] leading-relaxed text-white/78">
+            {/*
+              text-white/75, not text-white/78 (#1818). `/78` is not a step on
+              Tailwind's opacity scale, so v3.4 dropped the utility entirely and
+              this block inherited the parent's full-strength `text-white` — the
+              same silent-drop failure as the bare-var() shape, on a colour that
+              has nothing to do with var(). `/75` is the nearest scale step and
+              sits below the `/80` label above it, which is the hierarchy the
+              off-scale value was reaching for.
+            */}
+            <div className="space-y-2 font-mono text-[12px] leading-relaxed text-white/75">
               <div>{'{ token: "USDC", amount: "23.40",'}</div>
               <div>{'  protocol: "x402", agent: "research" }'}</div>
             </div>

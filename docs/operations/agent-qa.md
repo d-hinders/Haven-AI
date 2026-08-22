@@ -601,9 +601,10 @@ green run → the gate fails with instructions to dispatch one. Only the
 deterministic money-flow harness gates; the LLM-agent layer (2b, #577) and browser
 exploration (Layer 3, #579) stay **non-gating**.
 
-Like the branch-source gate, `qa-freshness` is **advisory until added to `main`'s
-required status checks** in branch protection. It needs the `QA_*` secrets
-configured (so the scheduled run can go green) before it's enforced.
+Both `qa-freshness` and the branch-source `gate` have been **required status
+checks on `main` since 2026-07-27** (`dev-environment.md`). They need the `QA_*`
+secrets configured so the scheduled run can go green; a gate that is required
+but can never pass blocks every promotion rather than none.
 
 ### Flake budget & quarantine policy
 

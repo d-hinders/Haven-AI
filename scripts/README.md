@@ -20,7 +20,7 @@ If it fails, the error message points at the fix: `npm run release:bump -- <type
 
 ### Problem it solves
 
-A version bump for the four published packages (`@haven_ai/sdk`, `@haven_ai/signer`, `@haven_ai/mcp`, `@haven_ai/connect`) previously required 8+ surgical edits across 5 files:
+A version bump for the five published packages (`@haven_ai/sdk`, `@haven_ai/signer`, `@haven_ai/mcp`, `@haven_ai/connect`, `@haven_ai/cli`) previously required 8+ surgical edits across 5 files:
 
 | File | What to change |
 |---|---|
@@ -34,6 +34,17 @@ A version bump for the four published packages (`@haven_ai/sdk`, `@haven_ai/sign
 Missing any edit caused bugs in production — e.g. connect shipping a stale runtime manifest or mcp loading the wrong SDK version via npm's nested-resolution rules.
 
 `release-bump.mjs` atomically applies all of these in one command.
+
+That table is the **original inventory** (`3f6e9959c`), kept because it is what
+motivated the script — not a description of today's surface, which has grown
+since: `@haven_ai/cli` became a published package, `mcp-server`'s version joined
+the lockstep set, four more source constants appeared
+(`SIGNER_VERSION`, `HOSTED_SERVER_VERSION`, `CONNECTOR_VERSION`, `CLI_VERSION`),
+and the lockfile is rewritten too. *What the script does (in order)* below is the
+current list. The authoritative published set is not written down in prose at
+all: it is **derived from each workspace's `private` flag** — the same test
+`release-bump.mjs` and `scripts/workspace-pin-lint.mjs` apply — and
+`npm run release:bump:test` fails if an enumeration in this file drifts from it.
 
 **Private workspace consumers are intentionally NOT in this table.** `backend`,
 `qa-agent`, `frontend` and `mcp-server` depend on `@haven_ai/*` with `"*"` so
@@ -102,7 +113,7 @@ npm run release:bump -- prerelease --yes
 1. **Read** current version from `packages/sdk/package.json`.
 2. **Compute** the new version from the bump type.
 3. **Show** a preview of all changes; prompt for confirmation (unless `--yes`).
-4. **Update** all four `package.json` `version` fields.
+4. **Update** the `version` field of every lockstep package — the five published ones (`sdk`, `signer`, `mcp`, `connect`, `cli`) **plus `mcp-server`**, which is `private: true` and never published but version-locksteps for coherence with its `HOSTED_SERVER_VERSION` constant. Six in total (`VERSIONED_PACKAGES` = `PUBLISHED_PACKAGES` + `mcp-server`); only the five published ones are pin-managed.
 5. **Update** cross-package dep pins: `mcp → @haven_ai/sdk`, `connect → @haven_ai/sdk / @haven_ai/mcp / @haven_ai/signer`.
 6. **Update** `packages/mcp/src/server.ts` — the `MCP_VERSION` constant.
 7. **Update** `packages/connect/src/runtime-manifest.ts` — `sdkVersion` and `signerVersion` string literals.
@@ -110,6 +121,7 @@ npm run release:bump -- prerelease --yes
 9. **`npm install` + deterministic lockfile rewrite** ([#1663](https://github.com/d-hinders/Haven-AI/issues/1663)) — the install keeps `node_modules` consistent for the builds below, but its lockfile output is **not taken**: on three consecutive cuts (0.1.26 → 0.1.28) the local npm also inserted `"dev"`/`"peer"` metadata on unrelated entries, and each release hand-repaired the diff back to its 11 version lines. Instead the version substitution is replayed **structurally** onto the pre-install lockfile (`scripts/release-lockfile.mjs` — structural rather than textual so a third-party dep coincidentally at the old version is never touched), and the bump then **fails loudly** if the final `package-lock.json` diff contains any line that is not a workspace `version` field or an `@haven_ai/*` pin. The guard reads the file on disk, so removing the rewrite makes the guard see npm's polluted output and fail. Self-tested: `npm run release:bump:test`.
 10. **Build** in dependency order: `sdk → signer → mcp → connect`.
     - Connect is built directly with tsup (skipping its internal pre-build of mcp/signer) so the already-built dist from the previous step is used — the exact scenario that surfaces the build-order bug.
+    - **`cli` is deliberately absent here, and this is not the count drift fixed above — do not "correct" it.** These builds exist to *verify the connect bundle*, which is the one artifact that inlines version literals at build time; `cli` inlines nothing connect depends on and nothing this step checks. Publishing does not rely on it either: `publish.yml` rebuilds every published package from a clean checkout at publish time, so a `cli` dist produced here would be discarded. Whether the bump should build `cli` anyway — as a cheap "does it still compile at the new version" signal — is a real question, but it is a **behaviour change** and belongs in its own issue rather than in a doc edit.
 11. **Verify** the built `packages/connect/dist/cli.cjs` contains the new version literal, and that `server.ts` has the correct `MCP_VERSION`.
 
 ### Why the dist-wipe is mandatory
@@ -121,7 +133,7 @@ The dist-wipe ensures tsup starts from a clean slate and picks up the freshly-bu
 ### What the script does NOT do
 
 - **Publish** — publishing is decoupled from the bump. Bumping only produces a reviewable version diff; the actual `npm publish` happens automatically when that diff lands on `main` (see *After the bump*, below).
-- Bump `mcp-server`, `backend`, or `frontend` — those are not published to npm.
+- Bump `backend` or `frontend` — those are not published to npm and are not in the lockstep set. (`mcp-server` **is** bumped, per step 4: not published, but version-locked to its `HOSTED_SERVER_VERSION` constant. This line used to say otherwise, contradicting both the script and the paragraph above about `mcp-server`'s version moving in lockstep.)
 - Update the dashboard's `npx` install command — that's handled by the `@alpha` dist-tag (#311).
 
 ### After the bump
@@ -193,8 +205,13 @@ both** — this is not optional and not conditional:
    `packages/connect/src/runtime-manifest.ts`), and prepend a note to
    `last-verified` saying what the release carries and that no tool, capability,
    or version-skew surface moved.
-2. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<pr>-release.md`** — a new
-   shard. `casp-risk-guardrails.md` declares
+2. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md`** — a new
+   shard, named for the **version** and not the PR number (#1789): the gate
+   blocks the PR until the shard exists, so the shard has to be written *before*
+   there is a PR number to name it after. The version is known from the moment
+   you choose it. Convention and an example:
+   [`casp-changelog/README.md`](../docs/regulatory/casp-changelog/README.md).
+   `casp-risk-guardrails.md` declares
    `satisfied-by: docs/regulatory/casp-changelog/**`, so a shard satisfies the
    gate without touching the shared parent (which is what stops concurrent PRs
    conflicting — #1366). State what changed, the authority/custody argument for

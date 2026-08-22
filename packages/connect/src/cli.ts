@@ -131,7 +131,15 @@ export async function runCli(
     // --json is the automation contract: emit the outcome promptly instead of
     // blocking up to the approval-wait bound (#1377 D).
     const result = await runConnect(
-      { ...parsed.options, waitForApproval: !parsed.json },
+      {
+        ...parsed.options,
+        waitForApproval: !parsed.json,
+        // #1719: only a human-facing run may be asked which installed client to
+        // configure. --json is the automation contract — it must fail with a
+        // machine-readable code, never block on stdin. runConnect additionally
+        // requires a real TTY before it prompts.
+        interactive: !parsed.json,
+      },
       {
         log: (message) => (parsed.json ? io.stderr : io.stdout)(`${message}\n`),
         redactPaths: parsed.json,

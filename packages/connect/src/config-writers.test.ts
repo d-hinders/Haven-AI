@@ -372,6 +372,60 @@ describe('runtime config writers', () => {
     }
   })
 
+  // #1719: an unparseable client config is its own failure mode. The parse
+  // runs BEFORE any write, so the file is left exactly as it was — the "no
+  // partial state" property the new rungs are held to, on the one new failure
+  // path that can happen AFTER credentials exist.
+  it('leaves an unparseable JSON client config untouched and names it as unreadable', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-json-invalid-'))
+    const target = join(dir, '.cursor', 'mcp.json')
+    // A real-world shape: another MCP server's bearer token sitting in a file
+    // whose JSON got broken. V8's own SyntaxError text would quote it.
+    const malformed = '{"mcpServers": {"other": {"headers": {"Authorization": "Bearer sk_other_do_not_echo"'
+    await mkdir(join(dir, '.cursor'), { recursive: true })
+    await writeFile(target, malformed)
+
+    const result = await writeRuntimeConfig({
+      runtime: 'cursor',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      identityPath: join(dir, 'identity.json'),
+      signerPath: SIGNER_PATH,
+      credentialDirectory: dir,
+      homeDir: dir,
+    })
+
+    expect(result.errorCode).toBe('runtime_config_unreadable')
+    expect(result.changed).toBe(false)
+    expect(result.hostedConfigured).toBe(false)
+    expect(await readFile(target, 'utf8')).toBe(malformed)
+    const messages = result.messages.join('\n')
+    expect(messages).toContain(target)
+    expect(messages).toContain('Fix the JSON there')
+    expect(messages).not.toContain('sk_other_do_not_echo')
+    expect(messages).not.toContain(API_KEY)
+  })
+
+  it('treats a JSON config whose top level is not an object as unreadable too', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-json-array-'))
+    const target = join(dir, '.cursor', 'mcp.json')
+    await mkdir(join(dir, '.cursor'), { recursive: true })
+    await writeFile(target, '["not", "an", "object"]')
+
+    const result = await writeRuntimeConfig({
+      runtime: 'cursor',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      identityPath: join(dir, 'identity.json'),
+      signerPath: SIGNER_PATH,
+      credentialDirectory: dir,
+      homeDir: dir,
+    })
+
+    expect(result.errorCode).toBe('runtime_config_unreadable')
+    expect(await readFile(target, 'utf8')).toBe('["not", "an", "object"]')
+  })
+
   it('does not overwrite a Hermes config when its YAML is malformed', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'haven-connect-hermes-invalid-'))
     const target = join(dir, '.hermes', 'config.yaml')
@@ -391,10 +445,15 @@ describe('runtime config writers', () => {
       homeDir: dir,
     })
 
-    expect(result.errorCode).toBe('runtime_config_write_failed')
+    // #1719: an unparseable config is its OWN code — "fix this file" advice,
+    // not the "try again" advice a write failure earns. Still redacted: the
+    // YAML parser's message quotes the source, which may hold another
+    // server's bearer token.
+    expect(result.errorCode).toBe('runtime_config_unreadable')
     expect(result.changed).toBe(false)
     expect(result.messages.join('\n')).not.toContain('sk_agent_do_not_echo')
     expect(result.messages.join('\n')).not.toContain(malformed)
+    expect(result.messages.join('\n')).toContain('Fix the YAML there')
     expect(await readFile(target, 'utf8')).toBe(malformed)
     expect(await readFile(envTarget, 'utf8')).toBe('OTHER_MCP_TOKEN=unchanged\n')
   })

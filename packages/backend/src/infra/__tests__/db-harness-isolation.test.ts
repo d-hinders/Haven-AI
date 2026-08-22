@@ -19,9 +19,14 @@ import { WORKER_SCHEMA, describeDb, initDbHarness } from './helpers/db-harness.j
 const CANARY = `harness_isolation_canary_1562_${WORKER_SCHEMA}`
 
 describeDb('db-harness isolation (#1562)', () => {
-  initDbHarness()
-
   beforeAll(async () => {
+    // #1763: this was a bare `initDbHarness()` at describe-REGISTRATION time —
+    // the un-awaited shape the harness docs warn about (#1555/#1559). A
+    // `describe.skip` body still executes to collect its skipped tests, so on
+    // a machine with no database the un-awaited promise rejected into an
+    // unhandled error and the "skipped" file failed anyway. Awaited in
+    // `beforeAll`, per the documented convention.
+    await initDbHarness()
     await db.query(`CREATE TABLE IF NOT EXISTS public.${CANARY} (id INT)`)
     await db.query(`INSERT INTO public.${CANARY} VALUES (1)`)
   })

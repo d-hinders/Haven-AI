@@ -328,9 +328,15 @@ test('a satisfied-by shard suppresses the strict contract finding (#1496)', () =
  * `packages/mcp-server/src/**` — and `mcp-server` is a PRIVATE package, never
  * published. `packages/sdk/src/**` is covered but contributes nothing here: the
  * bump rewrites no source constant under it, only `packages/sdk/package.json`.
- * `packages/cli/src/**` is a published package that the bump DOES write
- * (`CLI_VERSION` in `commands.ts`) and CASP does not cover at all, so it cannot
- * hold this guarantee up either. Four entries carry it, not five.
+ *
+ * #1826 — `packages/cli/src/**` now carries it too. It is a published package
+ * the bump DOES write (`CLI_VERSION` in `commands.ts`), and it was the one such
+ * entry CASP did not cover; #1826 added it (with
+ * `packages/backend/src/routes/agents.ts`) after finding the agent-authority
+ * surface gated by no contract doc. So FIVE entries carry this guarantee:
+ * `packages/mcp/src/**`, `packages/signer/src/**`, `packages/connect/src/**`,
+ * `packages/mcp-server/src/**` and `packages/cli/src/**`. Narrowing any one of
+ * them weakens it; narrowing all five removes it.
  */
 test('a bump-only release diff still FAILS the strict gate — no shard, no green (#1790)', async () => {
   const { execFile } = await import('node:child_process')

@@ -305,7 +305,19 @@ async function measureToggle(page: Page): Promise<Measurement> {
 
       // The room TopBar claims to reserve. `w-8` is a DECLARATION; this is the
       // measurement, and below ~700px they used to disagree completely.
-      const slotEl = header.querySelector<HTMLElement>('div.w-8.lg\\:hidden')
+      //
+      // Found STRUCTURALLY — the first childless `lg:hidden` box in the bar —
+      // not by `div.w-8`. Selecting it by the width class makes the width
+      // assertion below unfalsifiable in the one direction that matters: edit
+      // `w-8` to anything else and the element simply stops being found, so the
+      // failure says "missing" instead of "36px", and a genuine change to the
+      // reserved width reads as a broken test rather than a broken promise.
+      // (Verified: the mutation that widened the slot reported `null` under the
+      // class selector and reports the number under this one.)
+      const slotEl =
+        Array.from(header.querySelectorAll<HTMLElement>('div[class*="lg:hidden"]')).find(
+          (el) => el.children.length === 0 && el.textContent === '',
+        ) ?? null
       const slotBox = slotEl?.getBoundingClientRect()
       const headerBox = header.getBoundingClientRect()
 

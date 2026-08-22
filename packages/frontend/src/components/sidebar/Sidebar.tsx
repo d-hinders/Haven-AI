@@ -234,11 +234,22 @@ export default function Sidebar() {
         2. **No `relative`.** `Button` adds it to create a positioning context;
            `fixed` already is one, and adding `relative` here would un-fix the
            button and drop it back under `TopBar` — the #1749 defect, restored.
+        3. **`top-3 left-4`, and the `left` is deliberate (#1767).** `top-3`
+           centres the 32px box in the 56px bar (y 12-44, centre 28 — it was
+           `top-4` and 4px low). The obvious matching change, `left-6`, would
+           make the box concentric with `TopBar`'s `w-8` spacer (x 24-56), and
+           it was measured and REJECTED: it costs 8px of the 44px target's
+           right-hand clearance (14px -> 6px, under the 8px § Buttons asks
+           between adjacent targets) AND it pushes the target's right edge from
+           x=54 to x=62, past the centre of the open drawer's own Haven logo
+           link at x=56 — turning the last assertion in the mobile spec red.
+           The spacer's job is to keep the bar's content CLEAR of this control,
+           not to be concentric with it; `left-4` is what clears it best.
       */}
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed top-4 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
+        className="lg:hidden fixed top-3 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
       >
         <Icon icon={Menu} className="w-4 h-4" />
       </button>

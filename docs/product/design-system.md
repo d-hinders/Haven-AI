@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-08-21" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass
+last-verified: "2026-08-22" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1767: § Buttons' Tap targets rule — the toggle is `top-3` (centred in the 56px band); the documented 14px clearance to `NetworkSwitcher` was true only at >=768px, because TopBar's `w-8` spacer was shrinkable and collapsed to 0 on phones, and three bullets now record that, how a neighbour is damaged without moving, and why the concentric `left-6` was measured and rejected. § Buttons re-read against Button.tsx, TopBar.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass
 ---
 
 # Haven Design System
@@ -279,6 +279,23 @@ on the entry point to primary navigation. It borrows the same mechanism (transpa
   Open: the target floats over the drawer's own logo band, which it already did at 32px
   — what is asserted there is that the logo link is still reachable at its centre, not
   that nothing overlaps. Both are pinned in `e2e/mobile-nav-tap-target.mobile.spec.ts`.
+- **The clearance is only as real as the space the neighbour is standing in
+  ([#1767](https://github.com/d-hinders/Haven-AI/issues/1767)).** The 14px above was
+  measured at 768px and assumed to hold on a phone. It did not. `TopBar` reserves the
+  toggle's room with a `w-8` spacer, and `w-8` on a flex item still carries
+  `flex-shrink: 1` — in a row that does not fit, it is the first thing given away. The
+  spacer collapsed to **width 0** below about 700px, `NetworkSwitcher` slid left to
+  x=36, and the painted toggle sat on top of it with 18px of the chip's own tap area
+  inside the invisible overlay. **Reserve space with `shrink-0`, and assert the
+  reserved box's measured width** — not just the gap it was supposed to produce.
+- **A neighbour can be damaged without moving.** The chip's border box never changed;
+  only a walked `elementFromPoint` showed its hit rectangle starting 18px right of it.
+  Measure the neighbour the same way you measure the control.
+- **Moving the control into the slot is not automatically the fix.** `left-6` would
+  make the toggle concentric with the spacer and was rejected on measurement: it cuts
+  the clearance above to 6px and pushes the target past the centre of the open
+  drawer's own logo link (x=56). A spacer's job is to keep content clear of a floating
+  control, not to be concentric with it.
 - **Do not add `relative` to an already-positioned element.** `Button` needs it because
   it is static. A `fixed` or `absolute` control is already a positioning context, and
   adding `relative` un-fixes it — on the toggle that shifts the whole app shell 32px

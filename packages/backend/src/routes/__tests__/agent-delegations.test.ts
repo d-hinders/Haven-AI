@@ -93,7 +93,7 @@ function mockDb(opts: {
   version?: number
   stored?: Record<string, unknown> | null
   owner?: string | null
-  passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string }>
+  passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string; created_at?: Date | string | null }>
   waiverAt?: string | null
   list?: Array<Record<string, unknown>>
 } = {}) {
@@ -362,6 +362,8 @@ describe('delegation lifecycle API (#828)', () => {
     })
 
     it('returns the signer set for a passkey account — public key material only', async () => {
+      // The fixture row has no created_at → the response serves null, never a
+      // fabricated date and never a 500 (#1679 defensive mapping).
       mockDb({ owner: null, passkeys: [{ key_id: '0x' + '11'.repeat(32), public_key_x: '0xaa', public_key_y: '0xbb' }] })
       const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/account-signers` })
       expect(res.statusCode).toBe(200)
@@ -369,8 +371,24 @@ describe('delegation lifecycle API (#828)', () => {
         account_address: TREASURY,
         chain_id: 84532,
         owner_address: null,
-        passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0xaa', y: '0xbb' }],
+        passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0xaa', y: '0xbb', created_at: null }],
       })
+    })
+
+    it('serves per-credential created_at when stored — the UI labels "Passkey · added {date}" from it (#1679)', async () => {
+      mockDb({
+        owner: null,
+        passkeys: [{
+          key_id: '0x' + '11'.repeat(32), public_key_x: '0xaa', public_key_y: '0xbb',
+          created_at: new Date('2026-03-03T12:00:00.000Z'),
+        }],
+      })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/account-signers` })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().passkeys).toEqual([
+        { key_id: '0x' + '11'.repeat(32), x: '0xaa', y: '0xbb', created_at: '2026-03-03T12:00:00.000Z' },
+      ])
+      expectMatchesSpec('GET', '/agents/{id}/account-signers', res.json())
     })
 
     it('returns the EOA owner with an empty passkey list', async () => {
@@ -859,7 +877,7 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
     agent?: Record<string, unknown> | null
     targets?: Array<Record<string, unknown>>
     owner?: string | null
-    passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string }>
+    passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string; created_at?: Date | string | null }>
   } = {}) {
     mockQuery.mockImplementation((sql: string) => {
       const s = String(sql)

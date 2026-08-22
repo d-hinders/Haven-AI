@@ -18,6 +18,8 @@
     "test:visual": "VISUAL_REGRESSION=1 playwright test e2e/design-system.visual.spec.ts --project=chromium-desktop",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",
     "test:e2e:desktop": "playwright test --project=chromium-desktop",
+    "test:e2e:mobile": "playwright test --project=chromium-mobile",
+    "test:e2e:gate": "playwright test --project=chromium-desktop --project=chromium-mobile",
     "test:e2e:full": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:report": "playwright show-report ../../output/playwright/html-report"

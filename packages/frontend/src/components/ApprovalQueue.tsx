@@ -222,7 +222,7 @@ function ApprovalCard({
           <Card.Section className="pt-3 pb-3">
             <button
               type="button"
-              className="flex w-full items-center gap-1.5 text-left text-xs font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-1 rounded-sm"
+              className="flex w-full items-center gap-1.5 text-left text-xs font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:ring-offset-1 rounded-sm"
               aria-expanded={disclosureOpen}
               onClick={toggleDisclosure}
             >
@@ -315,7 +315,13 @@ function ApprovalCard({
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              // gap-3 on the stacked (mobile) axis, not gap-2: Reject and Approve are
+              // the one pair where a mis-tap rejects or approves a real payment, and at
+              // 8px their 44px tap targets (#1726) would meet with exactly zero slack.
+              // The extra 4px buys margin against subpixel rounding rather than relying
+              // on two targets tessellating perfectly. Desktop keeps sm:gap-2 — the row
+              // is horizontal there and the targets never grow sideways.
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end sm:gap-2">
                 <Button
                   variant="ghost"
                   size="sm"

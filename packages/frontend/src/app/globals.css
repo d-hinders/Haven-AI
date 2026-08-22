@@ -35,6 +35,45 @@
   --v2-danger-soft: #fef2f2;
   --v2-modal-backdrop: rgba(26, 31, 54, 0.66);
 
+  /* ── Channel form of the palette above (#1708) ──────────────────────────
+     Tailwind cannot apply an opacity modifier to a colour whose value is a
+     bare `var()`: the old arbitrary-value form — a `ring-` utility given
+     `[var(--v2-brand)]` plus an opacity modifier — compiled to NOTHING,
+     silently. The class set a ring width with no ring colour, so
+     every focus ring fell back to Tailwind's preflight default,
+     `rgb(59 130 246 / 0.5)` (blue-500/50). The theme in
+     `tailwind.config.js` therefore reads these space-separated R G B channels
+     through an `<alpha-value>` placeholder — `rgb(var(--v2-brand-rgb) /
+     <alpha-value>)` — which makes `ring-brand/30`, `bg-brand`, `text-brand`
+     all compile from one entry.
+
+     These are ADDITIVE. Every `--v2-<name>` above stays a `#RRGGBB` hex,
+     because `token-contrast.test.ts` parses those hex values out of this file
+     to check WCAG contrast, and a channel-only palette would be invisible to
+     it. The cost of two forms is drift, so the two forms are pinned to each
+     other by `design-token-alpha.test.ts` — change a hex and the paired
+     triplet must change with it, or the suite fails. */
+  --v2-bg-rgb: 255 255 255;
+  --v2-surface-rgb: 246 249 252;
+  --v2-surface-2-rgb: 238 242 247;
+  --v2-surface-code-rgb: 11 17 32;
+  --v2-ink-rgb: 26 31 54;
+  --v2-ink-2-rgb: 82 95 127;
+  --v2-ink-3-rgb: 93 108 133;
+  --v2-border-rgb: 230 235 241;
+  --v2-border-strong-rgb: 214 219 227;
+  --v2-brand-rgb: 79 70 229;
+  --v2-brand-strong-rgb: 67 56 202;
+  --v2-brand-soft-rgb: 238 242 255;
+  --v2-success-rgb: 4 120 87;
+  --v2-success-soft-rgb: 236 253 245;
+  --v2-debit-rgb: 3 105 161;
+  --v2-debit-soft-rgb: 240 249 255;
+  --v2-warning-rgb: 181 71 8;
+  --v2-warning-soft-rgb: 254 243 199;
+  --v2-danger-rgb: 180 35 24;
+  --v2-danger-soft-rgb: 254 242 242;
+
   /* ── Chain identity ─────────────────────────────────────────────────
      Brand/identity colours that tell networks apart in NetworkPill and
      NetworkSwitcher. Deliberately OUTSIDE the semantic-colour rule — they
@@ -91,6 +130,37 @@
   --v2-table-header-ink: #5d6c85;
   --v2-table-row-border: #e6ebf1;
   --v2-table-row-hover: #f0f4f9;
+
+  /* ── Layering scale (#1749) ────────────────────────────────────────────────
+     Named tiers for everything that stacks. Reach for a token, never a fresh
+     number: #1749 was a `z-[100]` header and a `z-[60]` sidebar toggle picked
+     independently, in different files, months apart — which left the mobile
+     navigation toggle painted AND hit-tested under the top bar on every
+     authenticated route.
+
+     The rule the numbers encode, in one sentence: the mobile navigation
+     overlay outranks the app chrome it slides over. That direction is not
+     arbitrary. The drawer is `inset-y-0`, so its own logo band occupies the
+     same 56px as TopBar; its scrim exists to dim everything behind it, and
+     "everything" includes the bar. Let the bar win and the drawer is
+     decapitated, the scrim dims all but the top strip, and the toggle — which
+     is positioned INSIDE that strip by design, in the gap TopBar reserves for
+     it — is unreachable. Modals and toasts in turn outrank the navigation,
+     because a dialog opened from a nav link must cover the drawer.
+
+     Tiers are spaced by 10 so a genuinely new layer has room to land between
+     two without renumbering the scale. */
+  --v2-z-content: 10; /* in-flow overlaps: badges, gradient washes */
+  --v2-z-sticky: 20; /* sticky table headers */
+  --v2-z-chrome: 100; /* TopBar — the app shell's own bar */
+  --v2-z-chrome-popover: 110; /* popovers anchored in the chrome (notifications, wallet) */
+  --v2-z-nav-scrim: 130; /* mobile drawer scrim — dims the chrome, hence > chrome */
+  --v2-z-nav-drawer: 140; /* mobile drawer itself */
+  --v2-z-nav-toggle: 150; /* the Open/Close toggle — above its own drawer, so one control does both */
+  --v2-z-modal: 200; /* Modal, SidePanel */
+  --v2-z-tooltip: 210;
+  --v2-z-panel: 250; /* AgentPanel */
+  --v2-z-toast: 9999; /* Toast, and the skip-to-content link */
 
   --v2-font-weight-medium: 500;
   --v2-font-weight-semibold: 600;

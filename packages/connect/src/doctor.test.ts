@@ -12,6 +12,7 @@ import { acknowledgeLocalSignerConsent } from './signer-consent.js'
 import { runDoctor, runRepair, type DoctorDeps } from './doctor.js'
 
 const API_KEY = 'sk_agent_1234567890abcdef1234567890abcdef'
+const DELEGATE_ADDRESS = '0x' + 'cd'.repeat(20)
 const HOSTED = 'https://mcp.haven.example/mcp'
 
 async function seedCredentials(homeDir: string, agentId = 'agent-1') {
@@ -26,6 +27,7 @@ async function seedCredentials(homeDir: string, agentId = 'agent-1') {
   await writeFile(join(dir, 'signer.json'), JSON.stringify({
     version: 1,
     delegate_key: '0x' + '11'.repeat(32),
+    delegate_address: DELEGATE_ADDRESS,
     agent_id: agentId,
     safe_address: '0x' + 'ab'.repeat(20),
     chain_id: 84532,
@@ -74,9 +76,19 @@ async function seedCodexConfig(homeDir: string, wrapperPath: string) {
   ].join('\n'))
 }
 
-function healthyDeps(): DoctorDeps & { probeSignerTools: ReturnType<typeof vi.fn>; probeHosted: ReturnType<typeof vi.fn> } {
+function healthyDeps(): DoctorDeps & {
+  probeSignerTools: ReturnType<typeof vi.fn>
+  probeHosted: ReturnType<typeof vi.fn>
+  probeHostedIdentity: ReturnType<typeof vi.fn>
+} {
   return {
     probeHosted: vi.fn(async () => ({ status: 'ok' as const })),
+    // Stubbed deliberately: an unstubbed identity probe reaches the network,
+    // fails, and reports "comparison skipped" — a green check that proves
+    // nothing. The mismatch cases below are the real coverage.
+    probeHostedIdentity: vi.fn(async () => ({
+      status: 'ok' as const, agentId: 'agent-1', delegateAddress: DELEGATE_ADDRESS,
+    })),
     probeSignerTools: vi.fn(async () => ({
       status: 'ok' as const,
       toolNames: [...MCP_RUNTIME_MANIFEST.requiredSignerTools],
@@ -104,8 +116,11 @@ describe('runDoctor (#1589)', () => {
 
     expect(report.ok).toBe(true)
     expect(report.checks.filter((c) => !c.ok)).toEqual([])
+    // #1697 adds identity_match to the single-agent list, deliberately and
+    // visibly: proving the stored API key and the stored signing key belong
+    // to the same agent is the half of the #1681 hazard a local tool CAN know.
     expect(report.checks.map((c) => c.id)).toEqual([
-      'credentials', 'signer_runtime', 'runtime_config', 'hosted_mcp', 'signer_process', 'restart',
+      'credentials', 'signer_runtime', 'runtime_config', 'hosted_mcp', 'identity_match', 'signer_process', 'restart',
     ])
     // Compat surface rides from the SAME handshake — the #1587-review design —
     // extracted from the REAL experimental nesting, and the human detail names
@@ -261,5 +276,498 @@ describe('runRepair (#1589)', () => {
     const repair = await runRepair({ runtime: 'codex-cli' }, { homeDir })
     expect(repair.ok).toBe(false)
     expect(repair.messages.join('\n')).toContain('--setup <token>')
+  })
+})
+
+/**
+ * #1688 — the superseded_agents check. A re-run mints a new agent and retires
+ * nothing; these pin that a directory the doctor did NOT select is probed with
+ * ITS OWN key, and that the three probe outcomes map to exactly the right
+ * severities: live ⇒ failure with the revoke repair, revoked ⇒ informational
+ * pass, unreachable ⇒ note that is neither a false alarm nor a clean bill.
+ */
+describe('superseded agent credentials (#1688)', () => {
+  const OLD_KEY = 'sk_agent_oldsecret'
+
+  async function homeWithSuperseded() {
+    const { homeDir } = await healthyHome()
+    // The OLD directory: seeded after the selected one, so force ordering by
+    // touching the selected dir's identity.json to be newest.
+    const oldDir = join(homeDir, '.haven', 'agents', 'agent-old')
+    await mkdir(oldDir, { recursive: true })
+    await writeFile(join(oldDir, 'identity.json'), JSON.stringify({
+      api_key: OLD_KEY,
+      agent_id: 'agent-old',
+      api_url: 'https://api.haven.example',
+      hosted_mcp_url: HOSTED,
+    }))
+    // Make the ORIGINAL dir newest so discovery still selects agent-1.
+    const selected = join(homeDir, '.haven', 'agents', 'agent-1', 'identity.json')
+    const current = JSON.parse(await readFile(selected, 'utf8')) as Record<string, unknown>
+    await writeFile(selected, JSON.stringify(current))
+    return { homeDir, oldDir }
+  }
+
+  function depsWithOldKeyProbing(oldStatus: 'ok' | 'unauthorized' | 'network_error') {
+    const deps = healthyDeps()
+    deps.probeHosted.mockImplementation(async (apiKey: string) =>
+      apiKey === OLD_KEY ? { status: oldStatus } : { status: 'ok' },
+    )
+    return deps
+  }
+
+  it('MUTATION PROOF: a superseded dir whose key still authenticates FAILS the doctor, naming the agent', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('ok') })
+
+    expect(report.ok).toBe(false)
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toContain('agent-old')
+    expect(check?.detail).toMatch(/SPEND-CAPABLE/)
+    expect(check?.repair).toMatch(/[Rr]evoke/)
+    expect(check?.repair).toContain('agent-old')
+    // Connect reports; the user acts. The repair must never claim otherwise.
+    expect(check?.repair).toMatch(/never revokes or deletes/)
+  })
+
+  it('an already-revoked superseded dir is an informational pass, not a failure', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('unauthorized') })
+
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain('already revoked')
+    expect(report.ok).toBe(true)
+  })
+
+  it('a network error probing the OLD key is a note — never a false "still live", never a clean bill', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('network_error') })
+
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain('could not verify')
+    expect(check?.detail).not.toMatch(/SPEND-CAPABLE/)
+  })
+
+  it('the old cosmetic "N dirs found; examining the newest" note is gone — subsumed by the check', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('ok') })
+
+    const credentials = report.checks.find((c) => c.id === 'credentials')
+    expect(credentials?.detail).not.toContain('examining the newest')
+  })
+
+  it('no secret material reaches the report, in either state', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    for (const status of ['ok', 'unauthorized'] as const) {
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing(status) })
+      const serialized = JSON.stringify(report)
+      expect(serialized).not.toContain(OLD_KEY)
+      expect(serialized).not.toContain(API_KEY)
+      expect(serialized).not.toContain('11'.repeat(32))
+    }
+  })
+
+  it('REGRESSION (B2): an explicit --credentials-dir scans ITS OWN parent, never the default root', async () => {
+    // Pointing doctor at an explicit directory must not live-probe real keys
+    // under ~/.haven/agents — the location the caller explicitly moved away
+    // from. Siblings of the explicit dir are the only legitimate "others".
+    const { homeDir } = await homeWithSuperseded() // default root holds agent-1 + agent-old
+    const customRoot = await mkdtemp(join(tmpdir(), 'haven-custom-'))
+    const explicitDir = join(customRoot, 'agent-x')
+    await mkdir(explicitDir, { recursive: true })
+    await writeFile(join(explicitDir, 'identity.json'), JSON.stringify({
+      api_key: API_KEY, agent_id: 'agent-x', api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+    const sibling = join(customRoot, 'agent-sibling')
+    await mkdir(sibling, { recursive: true })
+    await writeFile(join(sibling, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_sibsecret', agent_id: 'agent-sibling', api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+
+    const deps = healthyDeps()
+    const probedKeys: string[] = []
+    deps.probeHosted.mockImplementation(async (apiKey: string) => {
+      probedKeys.push(apiKey)
+      return { status: 'ok' as const }
+    })
+
+    const report = await runDoctor(
+      { runtime: 'codex-cli', credentialsDir: explicitDir },
+      { homeDir, ...deps },
+    )
+
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.detail).toContain('agent-sibling')
+    // The default root's OLD key must never have been probed.
+    expect(probedKeys).not.toContain(OLD_KEY)
+    expect(check?.detail).not.toContain('agent-old')
+  })
+
+  it('a single credential directory adds NO superseded check — the id list stays the #1589 shape', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    expect(report.checks.map((c) => c.id)).toEqual([
+      'credentials', 'signer_runtime', 'runtime_config', 'hosted_mcp', 'identity_match', 'signer_process', 'restart',
+    ])
+  })
+
+  /**
+   * #1681 — a tombstone changes how a directory READS, never whether a
+   * still-present key gets probed. Retired-with-keys-removed is an
+   * informational pass; tombstoned-with-live-key still fails the doctor.
+   */
+  it('a tombstoned dir with keys REMOVED reads as retired — informational pass, not "no stored key"', async () => {
+    const { homeDir, oldDir } = await homeWithSuperseded()
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    const { rm } = await import('node:fs/promises')
+    await writeAgentTombstone({
+      directory: oldDir, agentId: 'agent-old', reason: 'reset', retiredAt: '2026-08-21T10:00:00.000Z',
+    })
+    await rm(join(oldDir, 'identity.json'))
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain('tombstoned (keys removed)')
+    expect(check?.detail).toContain('agent-old')
+    expect(check?.detail).toContain('2026-08-21')
+    expect(check?.detail).not.toContain('no stored key/URL to probe')
+  })
+
+  it('MUTATION PROOF: a tombstone does NOT excuse a live key — still spend-capable, still a failure', async () => {
+    // A tombstone is a marker, not a revocation. If it silenced the probe, a
+    // retirement flow that forgot the revoke step would green-wash a key that
+    // still spends.
+    const { homeDir, oldDir } = await homeWithSuperseded()
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    await writeAgentTombstone({ directory: oldDir, agentId: 'agent-old', reason: 'reset' })
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('ok') })
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toMatch(/SPEND-CAPABLE/)
+    expect(check?.detail).toContain('tombstoned — key material still present')
+  })
+})
+
+
+/**
+ * #1697 — the hosted-vs-local identity compare. On 2026-08-21 the only way to
+ * prove a running session was unsafe to pay from was cross-checking the
+ * delegate address by hand, mid-purchase. This makes the knowable half
+ * mechanical: the stored API key and the stored signing key must belong to
+ * the same agent.
+ */
+describe('hosted identity vs local signing key (#1697)', () => {
+  it('MUTATION PROOF: a MISMATCH is a hard failure naming both sides and the remedy', async () => {
+    const { homeDir } = await healthyHome()
+    const deps = healthyDeps()
+    const otherDelegate = '0x' + 'ef'.repeat(20)
+    deps.probeHostedIdentity.mockResolvedValue({
+      status: 'ok', agentId: 'agent-other', delegateAddress: otherDelegate,
+    })
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+    const check = report.checks.find((c) => c.id === 'identity_match')
+
+    expect(report.ok).toBe(false)
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toContain('MISMATCH')
+    expect(check?.detail).toContain('agent-other')
+    // Both addresses named — abbreviated, never in full, and never the key.
+    expect(check?.detail).toContain(otherDelegate.slice(0, 6))
+    expect(check?.detail).toContain(DELEGATE_ADDRESS.slice(0, 6))
+    expect(check?.detail).toMatch(/quote as one agent and sign as another/)
+    expect(check?.repair).toMatch(/Re-run setup/)
+  })
+
+  it('a matching pair passes and says so in the agent inventory too', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+
+    expect(report.checks.find((c) => c.id === 'identity_match')?.ok).toBe(true)
+    expect(report.agents).toHaveLength(1)
+    expect(report.agents[0].classification).toBe('wired')
+    expect(report.agents[0].checks.map((c) => c.id)).toContain('identity_match')
+  })
+
+  it('MUTATION PROOF: an unreachable hosted API does NOT pass — a comparison that did not happen is not a match', async () => {
+    // #1697 review, finding 1: the old code said "skipped, not passed" in the
+    // text while setting ok:true, so a real key mismatch coinciding with a
+    // network blip sailed through every consumer that reads the boolean —
+    // exit code, --json, CI. The earlier version of this test asserted only on
+    // detail text, so it did not back its own title.
+    const { homeDir } = await healthyHome()
+    for (const status of ['network_error', 'bad_response'] as const) {
+      const deps = healthyDeps()
+      deps.probeHostedIdentity.mockResolvedValue({ status })
+
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+      const check = report.checks.find((c) => c.id === 'identity_match')
+      expect(check?.ok, status).toBe(false)
+      expect(report.ok, status).toBe(false)
+      expect(check?.detail).toMatch(/cannot be reported as a match/)
+      expect(check?.repair).toBeTruthy()
+    }
+  })
+
+  it('a rejected API key fails the compare — it cannot be called a match', async () => {
+    const { homeDir } = await healthyHome()
+    const deps = healthyDeps()
+    deps.probeHostedIdentity.mockResolvedValue({ status: 'unauthorized' })
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+    expect(report.checks.find((c) => c.id === 'identity_match')?.ok).toBe(false)
+  })
+
+  it('NO SECRETS: neither the api key nor the delegate private key reaches the report', async () => {
+    const { homeDir } = await healthyHome()
+    const deps = healthyDeps()
+    deps.probeHostedIdentity.mockResolvedValue({
+      status: 'ok', agentId: 'agent-other', delegateAddress: '0x' + 'ef'.repeat(20),
+    })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+    const serialized = JSON.stringify(report)
+    expect(serialized).not.toContain(API_KEY)
+    expect(serialized).not.toContain('11'.repeat(32))
+  })
+})
+
+/**
+ * #1697 — the inventory itself. "Newest wins" said one directory was real and
+ * the rest were notes; multi-agent (#1696) makes several agents legitimately
+ * live at once, so the doctor must enumerate and classify instead of choosing.
+ */
+describe('per-agent inventory (#1697)', () => {
+  async function homeWithTwoWiredAgents() {
+    const { homeDir, dir } = await healthyHome()
+    // A NAMED second agent, wired under its own entry names (#1695/#1696).
+    const namedDir = join(homeDir, '.haven', 'agents', 'ops')
+    await mkdir(join(namedDir, 'bin'), { recursive: true })
+    await writeFile(join(namedDir, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_opssecret', agent_id: 'agent-ops',
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+    await writeFile(join(namedDir, 'signer.json'), JSON.stringify({
+      version: 1, delegate_key: '0x' + '22'.repeat(32), delegate_address: '0x' + 'ba'.repeat(20),
+      agent_id: 'agent-ops', chain_id: 84532,
+    }), { mode: 0o600 })
+    await acknowledgeLocalSignerConsent(join(namedDir, 'signer.json'))
+    const namedWrapper = join(namedDir, 'bin', 'haven-signer.mjs')
+    await writeFile(namedWrapper, '// wrapper')
+    const runtimeDirectory = join(homeDir, '.haven', 'signer-runtime', MCP_RUNTIME_MANIFEST.signerVersion)
+    await writeFile(join(namedDir, 'signer-runtime.json'), JSON.stringify({
+      server_name: 'ops',
+      signer_package: MCP_RUNTIME_MANIFEST.signerPackage,
+      signer_version: MCP_RUNTIME_MANIFEST.signerVersion,
+      sdk_package: MCP_RUNTIME_MANIFEST.sdkPackage,
+      sdk_version: MCP_RUNTIME_MANIFEST.sdkVersion,
+      wrapper_path: namedWrapper,
+      runtime_directory: runtimeDirectory,
+      npm_cache_directory: join(homeDir, '.haven', 'npm-cache'),
+      cli_path: join(runtimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist', 'cli.js'),
+    }))
+    // Wire BOTH pairs into the Codex config.
+    await writeFile(join(homeDir, '.codex', 'config.toml'), [
+      '[mcp_servers.haven]', `url = "${HOSTED}"`,
+      '[mcp_servers.haven_signer]', `command = "${join(dir, 'bin', 'haven-signer.mjs')}"`,
+      '[mcp_servers.haven-ops]', `url = "${HOSTED}"`,
+      '[mcp_servers.haven-signer-ops]', `command = "${namedWrapper}"`,
+    ].join('\n'))
+    return { homeDir, dir, namedDir }
+  }
+
+  function depsForTwo(namedOverrides: Record<string, unknown> = {}) {
+    const deps = healthyDeps()
+    deps.probeHostedIdentity.mockImplementation(async (apiKey: string) =>
+      apiKey === 'sk_agent_opssecret'
+        ? { status: 'ok' as const, agentId: 'agent-ops', delegateAddress: '0x' + 'ba'.repeat(20), ...namedOverrides }
+        : { status: 'ok' as const, agentId: 'agent-1', delegateAddress: DELEGATE_ADDRESS },
+    )
+    return deps
+  }
+
+  it('MUTATION PROOF: BOTH wired agents are reported — a live sibling is not "superseded"', async () => {
+    const { homeDir } = await homeWithTwoWiredAgents()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsForTwo() })
+
+    const wired = report.agents.filter((a) => a.classification === 'wired')
+    expect(wired).toHaveLength(2)
+    expect(wired.map((a) => a.agentId).sort()).toEqual(['agent-1', 'agent-ops'])
+    expect(wired.find((a) => a.slug === 'ops')).toBeDefined()
+    // Each carries the full per-agent check set, not a summary line.
+    for (const agent of wired) {
+      expect(agent.checks.map((c) => c.id)).toEqual(
+        expect.arrayContaining(['credentials', 'signer_runtime', 'hosted_mcp', 'identity_match', 'signer_process']),
+      )
+    }
+    // A legitimately live second agent must NOT be reported as spend-capable
+    // leftover — that was the old heuristic's failure mode.
+    const superseded = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(superseded?.ok).toBe(true)
+    expect(report.ok).toBe(true)
+  })
+
+  it('MUTATION PROOF: a failure on a NON-primary wired agent still fails the doctor', async () => {
+    // The old shape only ever checked one directory, so a broken second agent
+    // was invisible — exactly what multi-agent makes common. The failing agent
+    // here is deliberately NOT the one the flat `checks` array describes, so
+    // the only thing that can catch it is the inventory.
+    const { homeDir } = await homeWithTwoWiredAgents()
+    const deps = healthyDeps()
+    deps.probeHostedIdentity.mockImplementation(async (apiKey: string) =>
+      apiKey === 'sk_agent_opssecret'
+        ? { status: 'ok' as const, agentId: 'agent-ops', delegateAddress: '0x' + 'ba'.repeat(20) }
+        // agent-1 is the older, non-primary agent: its hosted identity no
+        // longer matches the signing key sitting in its directory.
+        : { status: 'ok' as const, agentId: 'agent-someone-else', delegateAddress: '0x' + 'ee'.repeat(20) },
+    )
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+
+    // The flat list describes the PRIMARY agent and is entirely green...
+    expect(report.credentialDirectory).toContain('ops')
+    expect(report.checks.filter((c) => !c.ok)).toEqual([])
+    // ...yet the report as a whole must fail, because a wired agent is broken.
+    expect(report.ok).toBe(false)
+    const broken = report.agents.find((a) => a.agentId === 'agent-1')
+    expect(broken?.classification).toBe('wired')
+    expect(broken?.checks.find((c) => c.id === 'identity_match')?.ok).toBe(false)
+  })
+
+  it('a credential dir with NO config entry is classified superseded, never silently skipped', async () => {
+    const { homeDir } = await homeWithTwoWiredAgents()
+    const strayDir = join(homeDir, '.haven', 'agents', 'stray')
+    await mkdir(strayDir, { recursive: true })
+    await writeFile(join(strayDir, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_straysecret', agent_id: 'agent-stray',
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsForTwo() })
+    const stray = report.agents.find((a) => a.agentId === 'agent-stray')
+    expect(stray?.classification).toBe('superseded')
+    // And it is the one that makes the superseded check fail: its key is live.
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.ok).toBe(false)
+  })
+
+  it('a tombstoned dir is classified retired, not orphaned', async () => {
+    const { homeDir } = await homeWithTwoWiredAgents()
+    const deadDir = join(homeDir, '.haven', 'agents', 'dead')
+    await mkdir(deadDir, { recursive: true })
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    await writeAgentTombstone({ directory: deadDir, agentId: 'agent-dead', reason: 'reset' })
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsForTwo() })
+    const dead = report.agents.find((a) => a.agentId === 'agent-dead')
+    expect(dead?.classification).toBe('retired')
+    expect(dead?.checks).toEqual([])
+  })
+})
+
+/**
+ * #1697 review — the three classification/attribution defects the independent
+ * pass found. Each test below exists because none of the tests written with
+ * the feature caught it.
+ */
+describe('classification correctness (#1697 review)', () => {
+  it('MUTATION PROOF: a live agent whose config still uses the retired npx launch is NOT called superseded', async () => {
+    // Finding 2. The directory has a prepared sidecar, but the config names no
+    // wrapper at all (the pre-#1586 npx shape, which runtime_config flags
+    // separately). Condemning it as superseded would tell the user to revoke
+    // the one agent that actually works.
+    const { homeDir } = await healthyHome()
+    await writeFile(join(homeDir, '.codex', 'config.toml'), [
+      '[mcp_servers.haven]',
+      `url = "${HOSTED}"`,
+      '[mcp_servers.haven_signer]',
+      'command = "npx"',
+      `args = ["-y", "@haven_ai/signer@${MCP_RUNTIME_MANIFEST.signerVersion}"]`,
+    ].join('\n'))
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+
+    const agent = report.agents.find((a) => a.agentId === 'agent-1')
+    expect(agent?.classification).toBe('wired')
+    // The stale config is reported as what it is — a config problem, not a
+    // reason to revoke a credential.
+    expect(report.checks.find((c) => c.id === 'runtime_config')?.ok).toBe(false)
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.repair ?? '').not.toMatch(/[Rr]evoke/)
+  })
+
+  it("MUTATION PROOF: a prefix-sharing agent id cannot borrow another agent's classification", async () => {
+    // Finding 3. Resolving a label back to its entry by string PREFIX picks
+    // the first sibling whose id is a prefix of the label — so with a
+    // superseded `agent-1` listed before a wired `agent-10`, the wired
+    // agent inherits the superseded one's verdict and the user is told to
+    // revoke the agent they are actively using.
+    //
+    // Both prefix-sharing agents must be NON-primary for this to bite: the
+    // primary is excluded from the scan, so a two-directory fixture leaves
+    // exactly one candidate and the wrong lookup cannot pick wrongly. An
+    // earlier version of this test made that mistake and passed against the
+    // reintroduced bug.
+    const { homeDir } = await healthyHome()
+
+    // Oldest first, so the newest (agent-main) is the primary.
+    const opsDir = join(homeDir, '.haven', 'agents', 'ops')
+    await mkdir(join(opsDir, 'bin'), { recursive: true })
+    const opsWrapper = join(opsDir, 'bin', 'haven-signer.mjs')
+    await writeFile(opsWrapper, '// wrapper')
+    await writeFile(join(opsDir, 'signer-runtime.json'), JSON.stringify({
+      server_name: 'ops', wrapper_path: opsWrapper,
+      signer_package: MCP_RUNTIME_MANIFEST.signerPackage,
+      signer_version: MCP_RUNTIME_MANIFEST.signerVersion,
+      sdk_package: MCP_RUNTIME_MANIFEST.sdkPackage,
+      sdk_version: MCP_RUNTIME_MANIFEST.sdkVersion,
+      runtime_directory: join(homeDir, '.haven', 'signer-runtime', MCP_RUNTIME_MANIFEST.signerVersion),
+      npm_cache_directory: join(homeDir, '.haven', 'npm-cache'),
+      cli_path: join(homeDir, 'cli.js'),
+    }))
+    await writeFile(join(opsDir, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_tensecret', agent_id: 'agent-10',
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+
+    const strayDir = join(homeDir, '.haven', 'agents', 'stray')
+    await mkdir(strayDir, { recursive: true })
+    await writeFile(join(strayDir, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_straysecret', agent_id: 'agent-1',
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+
+    const mainDir = join(homeDir, '.haven', 'agents', 'agent-main')
+    await mkdir(join(mainDir, 'bin'), { recursive: true })
+    const mainWrapper = join(mainDir, 'bin', 'haven-signer.mjs')
+    await writeFile(mainWrapper, '// wrapper')
+    await writeFile(join(mainDir, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_mainsecret', agent_id: 'agent-main',
+      api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+
+    // agent-main owns the bare pair; ops is wired under its named entries;
+    // stray (agent-1) appears nowhere and is genuinely superseded.
+    await writeFile(join(homeDir, '.codex', 'config.toml'), [
+      '[mcp_servers.haven]', `url = "${HOSTED}"`,
+      '[mcp_servers.haven_signer]', `command = "${mainWrapper}"`,
+      '[mcp_servers.haven-ops]', `url = "${HOSTED}"`,
+      '[mcp_servers.haven-signer-ops]', `command = "${opsWrapper}"`,
+    ].join('\n'))
+
+    const deps = healthyDeps()
+    deps.probeHosted.mockImplementation(async () => ({ status: 'ok' as const }))
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+
+    expect(report.agents.find((a) => a.agentId === 'agent-10')?.classification).toBe('wired')
+    expect(report.agents.find((a) => a.agentId === 'agent-1')?.classification).toBe('superseded')
+    // The genuinely superseded agent is named...
+    expect(check?.repair).toContain('agent-1')
+    // ...and the WIRED agent whose id merely starts with it is not.
+    expect(check?.repair).not.toContain('agent-10')
   })
 })

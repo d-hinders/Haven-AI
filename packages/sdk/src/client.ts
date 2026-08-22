@@ -56,6 +56,7 @@ import {
   X402AlreadySettledError,
   HavenSigningError,
   HavenTimeoutError,
+  DEFAULT_CONFIRMATION_TIMEOUT_MS,
 } from './types.js'
 import {
   buildX402IdempotencyKey,
@@ -103,7 +104,6 @@ import { X402Erc7710 } from './x402-erc7710.js'
 import { toolError, toolX402PaymentRequired, x402ToolReceipt } from './tool-adapter.js'
 import { MerchantCompletion, parseMerchantSettlement } from './merchant-completion.js'
 
-const DEFAULT_CONFIRMATION_TIMEOUT = 90_000
 const DEFAULT_POLLING_INTERVAL = 3_000
 
 /** Cap the merchant body persisted to the reconciliation event (the full body is kept on the thrown error). */
@@ -200,7 +200,9 @@ export class HavenClient {
     })
     this.x402Wallet = config.x402Wallet
     this.merchantTransport = new McpMerchantTransport({ merchantTimeout: config.merchantTimeout })
-    this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT
+    // #1756 moved the 90 s literal to `types.ts` so the delegate sweep shares
+    // this number rather than choosing a fourth one. Same value, same default.
+    this.confirmationTimeout = config.confirmationTimeout ?? DEFAULT_CONFIRMATION_TIMEOUT_MS
     this.pollingInterval = config.pollingInterval ?? DEFAULT_POLLING_INTERVAL
     this.chainRpcs = config.chainRpcs ?? {}
     if (this.delegateKey) {
@@ -421,6 +423,8 @@ export class HavenClient {
       asset: option.asset,
       network: option.network,
       expectedAuth: raw.x402_expected_auth,
+      payerDelegate: (raw as { payer_delegate?: string }).payer_delegate,
+      payerAgentId: (raw as { payer_agent_id?: string }).payer_agent_id,
       // #1138: the digest the delegation-rail expected context commits to.
       // Re-derived locally, exactly like every other context field the edge
       // signer is handed (amount, merchantTo, …) — none of them are trusted

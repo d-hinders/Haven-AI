@@ -896,6 +896,45 @@ describe('installRuntime hosted default topology', () => {
     expect(JSON.stringify(commands)).not.toContain(PRIVATE_KEY)
   })
 
+  it('#1695: a NAMED Claude Code setup removes/adds only its own pair — the bare pair is never touched', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-connect-claude-named-'))
+    const credentialDirectory = join(dir, 'agent-1')
+    const identityPath = await writeIdentityCredential(credentialDirectory)
+    const signerPath = await writeSignerCredential(credentialDirectory)
+    const commands: Array<{ command: string; args: string[] }> = []
+    const runCommand = vi.fn(async (command: string, args: string[]) => {
+      commands.push({ command, args })
+    })
+
+    const result = await installRuntime({
+      runtime: 'claude-code',
+      hostedMcpUrl: HOSTED_URL,
+      apiKey: API_KEY,
+      signerPath,
+      identityPath,
+      credentialDirectory,
+      ackLocalTools: true,
+      serverName: 'ops',
+    }, {
+      homeDir: dir,
+      runCommand,
+      fetch: okToolsFetch(),
+      probeSignerTools: okSignerProbe(),
+      prepareSignerRuntime: fakePrepareSignerRuntime(),
+    })
+
+    expect(result.hostedMcpConfigured).toBe(true)
+    const mcpCalls = commands.filter((c) => c.args[0] === 'mcp')
+    const touchedNames = mcpCalls.map((c) => c.args[2])
+    // Every remove/add/get names the ops pair; the bare names never appear —
+    // a named setup that removed 'haven' would disconnect the bare agent,
+    // exactly the #1569 clobbering class this slice removes.
+    expect(touchedNames).toContain('haven-ops')
+    expect(touchedNames).toContain('haven-signer-ops')
+    expect(touchedNames).not.toContain('haven')
+    expect(touchedNames).not.toContain('haven-signer')
+  })
+
   it('never produces local_stdio or manual for any known runtime by default', async () => {
     const runtimes = [
       'claude-code', 'codex-cli', 'codex-desktop', 'cursor', 'vscode', 'vscode-insiders', 'claude-desktop', 'hermes',

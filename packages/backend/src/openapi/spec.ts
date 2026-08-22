@@ -1392,34 +1392,10 @@ export const openapiSpec = {
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
           '200': {
-            description: 'The signer set.',
+            description: 'The signer set. Same shape as the account-scoped read (#1679).',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['account_address', 'chain_id', 'owner_address', 'passkeys'],
-                  properties: {
-                    account_address: address,
-                    chain_id: { type: 'integer' },
-                    owner_address: {
-                      type: ['string', 'null'],
-                      pattern: '^0x[0-9a-fA-F]{40}$',
-                      description: 'Null for a pure-passkey account.',
-                    },
-                    passkeys: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: ['key_id', 'x', 'y'],
-                        properties: {
-                          key_id: { type: 'string' },
-                          x: { type: 'string', description: '0x-hex P256 public-key x coordinate.' },
-                          y: { type: 'string', description: '0x-hex P256 public-key y coordinate.' },
-                        },
-                      },
-                    },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/HybridAccountSigners' },
               },
             },
           },
@@ -3175,23 +3151,7 @@ export const openapiSpec = {
             description: 'The signer set.',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['account_address', 'chain_id', 'owner_address', 'passkeys'],
-                  properties: {
-                    account_address: address,
-                    chain_id: { type: 'integer' },
-                    owner_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', description: 'Null for a pure-passkey account.' },
-                    passkeys: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: ['key_id', 'x', 'y'],
-                        properties: { key_id: { type: 'string' }, x: { type: 'string' }, y: { type: 'string' } },
-                      },
-                    },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/HybridAccountSigners' },
               },
             },
           },
@@ -3671,7 +3631,7 @@ export const openapiSpec = {
         operationId: 'signup',
         summary: 'Create an account and return a session token.',
         description:
-          "The email is NORMALISED before the uniqueness check, deliberately: an exact match on the raw input would let `ADA@Example.com` register alongside a stored `ada@example.com`, giving one person two accounts and two treasuries. Password bounds are 8-128 characters. The returned user is a fixed new-account shape — no wallet, no Safe, USD, an empty safes list — because none of those exist yet.",
+          "The email is NORMALISED before the uniqueness check, deliberately: an exact match on the raw input would let `ADA@Example.com` register alongside a stored `ada@example.com`, giving one person two accounts and two treasuries. Password bounds are 8-128 characters. The returned user is a fixed new-account shape — no wallet, no Safe, USD, an empty safes list — because none of those exist yet. **The 409 for a taken address is a deliberate, ACCEPTED disclosure (#1654):** one unauthenticated request tells the caller whether an email has a Haven account, which is stronger than the oracle #1646 closed on login. It stands because telling a returning user \"you already have an account — sign in instead\" is real product value, and because the standard mitigation is structurally unavailable here: a 201 carries the SESSION TOKEN, so answering 201 for a taken address would either mint a token for someone else's account or return a token-less 201 that is an equally strong oracle — genuine hardening needs an email-verification channel this API does not have. Bulk probing is additionally rate limited (#1670) — 10 requests/minute per client address, in deployments where TRUST_PROXY_HOPS is set so per-IP means the CLIENT rather than one shared proxy bucket; the tier deliberately disarms itself otherwise, since a shared-bucket limit on the front door is a denial-of-service, not a protection. Throttled is not closed: one request against one address still answers definitively, which is what the acceptance above is about. If an email channel is ever added, revisit this tradeoff in the same change. Timing is not equalised on this route because the status already discloses account existence — the clock has nothing to add beyond what the 409 already says.",
         security: [],
         requestBody: {
           required: true,
@@ -3703,7 +3663,8 @@ export const openapiSpec = {
             },
           },
           '400': errorResponse,
-          '409': { ...errorResponse, description: 'An account with this email already exists.' },
+          '409': { ...errorResponse, description: 'An account with this email already exists. A deliberate, documented enumeration disclosure — see this operation\'s description (#1654).' },
+          '429': { ...errorResponse, description: 'Rate limited (10/min per client address, #1670) — only in deployments with a trusted proxy.' },
         },
       },
     },
@@ -3742,6 +3703,7 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': { ...errorResponse, description: 'Invalid email or password — one answer for both, on purpose.' },
+          '429': { ...errorResponse, description: 'Rate limited (30/min per client address, #1670) — only in deployments with a trusted proxy.' },
         },
       },
     },
@@ -5648,7 +5610,7 @@ export const openapiSpec = {
         summary: 'List curated payable services agents can discover and pay.',
         description:
           'Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. ' +
-          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures.',
+          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: \'test-fixture\'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly, and clients that pre-filter should treat the category as the structural signal.',
         security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
         parameters: [
           { name: 'category', in: 'query', schema: { type: 'string' } },
@@ -5754,6 +5716,35 @@ export const openapiSpec = {
       },
     },
     schemas: {
+      HybridAccountSigners: {
+        type: 'object',
+        description:
+          "A hybrid account's signer set — the exact configuration the account address was derived from. Public key material plus per-credential enrollment time (#1679); nothing secret.",
+        required: ['account_address', 'chain_id', 'owner_address', 'passkeys'],
+        properties: {
+          account_address: { type: 'string', pattern: '^0x[0-9a-fA-F]{40}$' },
+          chain_id: { type: 'integer' },
+          owner_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', description: 'Null for a pure-passkey account.' },
+          passkeys: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['key_id', 'x', 'y', 'created_at'],
+              properties: {
+                key_id: { type: 'string' },
+                x: { type: 'string' },
+                y: { type: 'string' },
+                created_at: {
+                  type: ['string', 'null'],
+                  format: 'date-time',
+                  description:
+                    'When this credential was enrolled (#1679) — the UI labels the row "Passkey · added {date}". Null only if the stored row is missing; clients fall back to ordinal "Passkey N" labels, never a platform name.',
+                },
+              },
+            },
+          },
+        },
+      },
       Delegation: {
         type: 'object',
         description:
@@ -5925,6 +5916,21 @@ export const openapiSpec = {
                 },
               },
               unverifiableChainIds: { type: 'array', items: { type: 'integer' } },
+            },
+            additionalProperties: false,
+          },
+          trustProxy: {
+            type: 'object',
+            description:
+              'Trust-proxy state (#1670): the hop count the process actually read, and ' +
+              'whether the per-IP auth rate-limit tier is therefore armed. Exists because ' +
+              'the armed/disarmed split is otherwise invisible from outside — the tier ' +
+              'deliberately returns NO limit when the proxy is untrusted, which a probe ' +
+              'cannot tell apart from a variable the process never saw.',
+            required: ['hops', 'authRateLimitArmed'],
+            properties: {
+              hops: { type: 'integer' },
+              authRateLimitArmed: { type: 'boolean' },
             },
             additionalProperties: false,
           },
@@ -6628,7 +6634,12 @@ export const openapiSpec = {
                 type: 'object',
                 required: ['version', 'message', 'signature', 'signer'],
                 properties: {
-                  version: { type: 'integer', enum: [1] },
+                  version: {
+                    type: 'integer',
+                    enum: [1, 2, 3],
+                    description:
+                      'Contents-derived, never chosen: 1 = hash-only (legacy rail); 2 = commits to the EIP-712 typedDataHash (delegation rail, #1138); 3 = additionally binds the payer identity (#1690). The enum previously claimed [1] while v2 had shipped — corrected here.',
+                  },
                   message: {
                     type: 'string',
                     description: 'Haven-signed expected x402 context. Includes expiresAt when the funding window is time-bound.',
@@ -6637,6 +6648,15 @@ export const openapiSpec = {
                   signer: address,
                 },
                 additionalProperties: false,
+              },
+              payer_delegate: {
+                ...address,
+                description:
+                  "#1690: the delegate this quote was created FOR, bound inside the Haven-signed expected context (version 3). The edge signer refuses to sign when it is not its own delegate — the guard that turns a stale-host quote-as-A-sign-as-B into a named refusal instead of an on-chain revert. Emitted only when the deployment has flipped X402_EMIT_PAYER_CONTEXT (signer-first rollout).",
+              },
+              payer_agent_id: {
+                type: 'string',
+                description: "#1690: the paying agent's id, carried so the signer's refusal can name both sides. Same gate as payer_delegate.",
               },
               payment_required: {
                 type: 'object',
@@ -7092,6 +7112,23 @@ export const openapiSpec = {
           },
           activityType: { type: 'string', enum: ['delegate_sweep'] },
           agentName: { type: 'string' },
+          // #1705 (epic #1704). Read from the intent's `machine_metadata`
+          // JSONB, which both delegation-rail branches already stamp
+          // (`modules/x402/delegation-authorize.ts`).
+          settlementScheme: {
+            type: ['string', 'null'],
+            enum: ['eip3009', 'erc7710', null],
+            description:
+              'Which settlement branch actually moved the money: `erc7710` (direct settlement, ' +
+              'account → merchant, no funding leg) or `eip3009` (funded transfer — the budget ' +
+              'delegation funds the delegate EOA, which then signs the standard EIP-3009 header). ' +
+              'This is the settlement SCHEME and is three-way distinct from its neighbours: ' +
+              '`source` is the payment PROTOCOL (x402, mpp_crypto, …), and the account\'s ' +
+              '`execution_rail` is the ACCOUNT ARCHITECTURE (delegation vs the legacy ' +
+              'AllowanceModule). Do not collapse them. Null when no scheme was recorded — ' +
+              'non-machine transfers, and legacy-rail rows, which are structurally EIP-3009 but ' +
+              'never stamp the key. Null-in-null-out: nothing is inferred or backfilled.',
+          },
           // #984 spec correction: emitted on every enriched row (string | null),
           // was missing while additionalProperties:false claimed completeness.
           amountSek: { type: ['string', 'null'] },

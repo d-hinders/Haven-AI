@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { writeRuntimeConfig, type RuntimeMcpMode } from './config-writers.js'
+import { serverNamesFor } from './server-names.js'
 import {
   acknowledgeLocalMcpConsent,
   getLocalMcpConsentStatus,
@@ -50,6 +51,11 @@ export interface RuntimeInstallInput {
    * used when this is true and the runtime supports it.
    */
   localMcp?: boolean
+  /**
+   * #1695: wiring slug for a NAMED MCP pair (haven-<slug> /
+   * haven-signer-<slug>). Absent = the bare pair, unchanged from today.
+   */
+  serverName?: string
 }
 
 export interface RuntimeInstallResult {
@@ -275,7 +281,7 @@ export async function installRuntime(
   progress('Setting up your Haven tools…')
   const configResult = runtime === 'claude-code'
     ? localRuntime
-      ? await configureClaudeCode(deps, localRuntimeInstall?.command ?? '')
+      ? await configureClaudeCode(deps, localRuntimeInstall?.command ?? '', input.serverName)
       : await configureClaudeCodeHosted(deps, input, signerCommand)
     : await writeRuntimeConfig({
         runtime,
@@ -283,6 +289,7 @@ export async function installRuntime(
         apiKey: input.apiKey,
         identityPath: input.identityPath,
         signerPath: input.signerPath,
+        serverName: input.serverName,
         credentialDirectory: input.credentialDirectory,
         localMcpCommand: localRuntimeInstall?.command,
         signerCommand,
@@ -433,6 +440,7 @@ export function runtimeInstallCapabilities(runtime: string | undefined, env: Nod
 async function configureClaudeCode(
   deps: RuntimeInstallDeps,
   localMcpCommand: string,
+  serverName?: string,
 ): Promise<{
   hostedConfigured: boolean
   signerConfigured: boolean
@@ -463,13 +471,14 @@ async function configureClaudeCode(
     // with NO haven entry instead of a stale wrong-agent one — fail-closed,
     // and the claude_code_config_failed recovery (rerun setup) works cleanly
     // from that state because this sequence is idempotent from any start.
-    await runCommand('claude', ['mcp', 'remove', 'haven']).catch(() => undefined)
-    await runCommand('claude', ['mcp', 'remove', 'haven-signer']).catch(() => undefined)
-    await runCommand('claude', ['mcp', 'add-json', 'haven', serverJson, '--scope', 'user'])
+    const names = serverNamesFor(serverName)
+    await runCommand('claude', ['mcp', 'remove', names.hosted]).catch(() => undefined)
+    await runCommand('claude', ['mcp', 'remove', names.signer]).catch(() => undefined)
+    await runCommand('claude', ['mcp', 'add-json', names.hosted, serverJson, '--scope', 'user'])
       .catch(async () => {
-        await runCommand('claude', ['mcp', 'add', 'haven', '--scope', 'user', '--', localMcpCommand])
+        await runCommand('claude', ['mcp', 'add', names.hosted, '--scope', 'user', '--', localMcpCommand])
       })
-    const verified = await runCommand('claude', ['mcp', 'get', 'haven'])
+    const verified = await runCommand('claude', ['mcp', 'get', names.hosted])
       .then(() => true)
       .catch(() => false)
     return {
@@ -534,11 +543,14 @@ async function configureClaudeCodeHosted(
   try {
     // Remove stale entries first so re-runs and local→hosted switches are
     // idempotent — `claude mcp add-json` fails when the name already exists.
-    await runCommand('claude', ['mcp', 'remove', 'haven']).catch(() => undefined)
-    await runCommand('claude', ['mcp', 'remove', 'haven-signer']).catch(() => undefined)
-    await runCommand('claude', ['mcp', 'add-json', 'haven', hostedJson, '--scope', 'user'])
-    await runCommand('claude', ['mcp', 'add-json', 'haven-signer', signerJson, '--scope', 'user'])
-    const verified = await runCommand('claude', ['mcp', 'get', 'haven'])
+    // #1695: only the entries THIS pair owns, by name — a named setup can
+    // never clobber the bare pair or a sibling named pair.
+    const names = serverNamesFor(input.serverName)
+    await runCommand('claude', ['mcp', 'remove', names.hosted]).catch(() => undefined)
+    await runCommand('claude', ['mcp', 'remove', names.signer]).catch(() => undefined)
+    await runCommand('claude', ['mcp', 'add-json', names.hosted, hostedJson, '--scope', 'user'])
+    await runCommand('claude', ['mcp', 'add-json', names.signer, signerJson, '--scope', 'user'])
+    const verified = await runCommand('claude', ['mcp', 'get', names.hosted])
       .then(() => true)
       .catch(() => false)
     return {
@@ -694,6 +706,7 @@ async function prepareRuntimeForLocalMcp(
     identityPath: input.identityPath,
     signerPath: input.signerPath,
     homeDir: deps.homeDir,
+    serverName: input.serverName,
   })
 }
 
@@ -711,6 +724,7 @@ async function prepareSignerForRuntime(
     credentialDirectory: input.credentialDirectory,
     signerPath: input.signerPath,
     homeDir: deps.homeDir,
+    serverName: input.serverName,
   })
 }
 

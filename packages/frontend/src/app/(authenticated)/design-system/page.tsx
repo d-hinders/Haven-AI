@@ -406,6 +406,19 @@ export default function DesignSystemPage() {
               <Button variant="tertiary">Tertiary</Button>
               <Button variant="danger">Danger</Button>
             </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Button size="sm" variant="ghost">Small</Button>
+              <Button size="md" variant="ghost">Medium</Button>
+              <Button size="lg" variant="ghost">Large</Button>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              Sizes paint at 36 / 40 / 44px. Small and medium carry an invisible
+              44px-tall tap target that reaches past their painted edge, so a compact
+              button in a row list stays comfortable to hit on a phone without
+              loosening the layout around it. The target grows vertically only —
+              widening it would let a button steal taps from its neighbour in a tight
+              toolbar.
+            </p>
             <div className="mt-5 flex flex-wrap items-center gap-2">
               <StatusBadge tone="success">Received</StatusBadge>
               <StatusBadge tone="warning">Needs approval</StatusBadge>
@@ -445,7 +458,7 @@ export default function DesignSystemPage() {
               <Tooltip label={sampleAddress} mono>
                 <button
                   type="button"
-                  className="rounded font-mono text-xs text-[var(--v2-ink-2)] underline decoration-[var(--v2-border-strong)] underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                  className="rounded font-mono text-xs text-[var(--v2-ink-2)] underline decoration-[var(--v2-border-strong)] underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
                 >
                   0x8f4F...a6f4
                 </button>
@@ -556,6 +569,77 @@ export default function DesignSystemPage() {
             </p>
           </div>
         </div>
+      </Section>
+
+      <Section
+        title="Layering — the z-index scale"
+        description="Every stacking layer has a named token in globals.css. Reach for a token, never a fresh number: two independently chosen values (a z-[100] top bar over a z-[60] navigation toggle) left the mobile sidebar toggle painted and hit-tested under the top bar on every authenticated route, and a third ad-hoc number is how that recurs. Tiers are spaced by 10 so a genuinely new layer lands between two without renumbering."
+      >
+        {/* `collapseBelowMd={false}` + `overflow-x-auto`: Table.Head hides the
+            header below md on the assumption that mobile rows carry their own
+            labels. These rows are a bare token, a bare integer and a
+            description — nothing self-labelling — so at 390px the table would
+            otherwise open on "--v2-z-content / 10 / …" with no way to tell
+            which column is which. This is exactly the case the primitive's own
+            docstring names, and it is paired with the horizontal scroll that
+            docstring asks for. */}
+        <Card hover={false} className="overflow-hidden">
+          <div className="overflow-x-auto">
+          <Table className="min-w-[560px]">
+            <Table.Head collapseBelowMd={false}>
+              <tr>
+                <Table.HeaderCell align="left">Token</Table.HeaderCell>
+                <Table.HeaderCell align="left">Value</Table.HeaderCell>
+                <Table.HeaderCell align="left">What lives here</Table.HeaderCell>
+              </tr>
+            </Table.Head>
+            <Table.Body>
+              {[
+                ['--v2-z-content', '10', 'In-flow overlaps: badges, gradient washes'],
+                ['--v2-z-sticky', '20', 'Sticky table headers'],
+                ['--v2-z-chrome', '100', 'TopBar — the app shell’s own bar'],
+                ['--v2-z-chrome-popover', '110', 'Popovers anchored in the chrome (notifications, wallet, user menu)'],
+                ['--v2-z-nav-scrim', '130', 'Mobile drawer scrim'],
+                ['--v2-z-nav-drawer', '140', 'Mobile drawer itself'],
+                ['--v2-z-nav-toggle', '150', 'The Open / Close sidebar toggle'],
+                ['--v2-z-modal', '200', 'Modal, SidePanel'],
+                ['--v2-z-tooltip', '210', 'Tooltip'],
+                ['--v2-z-panel', '250', 'AgentPanel'],
+                ['--v2-z-toast', '9999', 'Toast, and the skip-to-content link'],
+              ].map(([token, value, what]) => (
+                <tr key={token}>
+                  <td className="px-4 py-2.5 align-top">
+                    <code className="rounded bg-[var(--v2-surface)] px-1 text-xs text-[var(--v2-ink)]">{token}</code>
+                  </td>
+                  <td className="px-4 py-2.5 align-top text-sm text-[var(--v2-ink-2)] v2-tabular">{value}</td>
+                  <td className="px-4 py-2.5 align-top text-sm text-[var(--v2-ink-2)]">{what}</td>
+                </tr>
+              ))}
+            </Table.Body>
+          </Table>
+          </div>
+        </Card>
+        <Card hover={false} className="p-5">
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
+            The rule the numbers encode
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            The mobile navigation overlay outranks the app chrome it slides over, and modals
+            outrank the navigation. That direction is not arbitrary. The drawer is{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">inset-y-0</code>, so its
+            own logo band shares the top 56px with the bar; its scrim exists to dim everything
+            behind it, and “everything” includes the bar. Let the bar win and the drawer is
+            decapitated, the scrim dims all but the top strip, and the toggle — which sits inside
+            that strip by design, in the gap the bar reserves for it — cannot be tapped at all.
+            Modals sit above both, because a dialog opened from a nav link has to cover the drawer.
+          </p>
+          <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            Adding a layer means picking the tier it belongs to, not picking a number. If none of
+            the tiers fits, add one to the scale here first — a raw{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">z-[…]</code> in a shell
+            component is the failure this table exists to prevent.
+          </p>
+        </Card>
       </Section>
 
       <Section
@@ -687,7 +771,7 @@ export default function DesignSystemPage() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Account options"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
               >
                 <Icon icon={EllipsisVertical} className="h-4 w-4" />
               </DropdownMenuTrigger>
@@ -1304,12 +1388,45 @@ export default function DesignSystemPage() {
                 },
               ].map((row) => (
                 <tr key={row.title}>
-                  <td className="px-4 py-4 align-middle">
+                  {/* Narrow gutters below md mirror TransactionsTable (#1772).
+                      Without them this showcase rendered 375px wide inside a
+                      343px Card at 393px — clipped by the Card's
+                      `overflow-hidden`, i.e. the very defect the table below
+                      is meant to document the correct shape of. */}
+                  <td className="px-2 py-4 align-middle md:px-4">
                     <DirectionMark direction={row.direction} />
                   </td>
-                  <td className="px-4 py-4 align-middle">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-[var(--v2-ink)]">{row.title}</p>
+                  {/* `max-w-0` BELOW md ONLY. Unconditional, it squashed the
+                      Activity column on DESKTOP too — the visual-regression
+                      gate caught "Recei…" / "x402 …" / "Faile…" at 1280px.
+                      TransactionsTable survives it unconditionally because
+                      every other column there carries an explicit `w-[…]`, so
+                      the leftover flows to Activity; this showcase sizes its
+                      columns purely from content, so capping one collapses it.
+                      Do not drop the `md:` here. */}
+                  <td className="max-w-0 px-4 py-4 align-middle md:max-w-none">
+                    {/* `truncate` + `flex-wrap` mirror TransactionsTable
+                        exactly (#1772). Without `truncate` the `max-w-0`
+                        above word-wraps instead of ellipsising, so the
+                        showcase would teach a shape the real component does
+                        not have. */}
+                    {/* `md:flex-nowrap` for the same reason as `md:max-w-none`
+                        above: this showcase's desktop titles WRAP to two
+                        lines, so a wrapping flex row pushed the Failed badge
+                        onto a third and grew the page by 12px. The visual
+                        gate measured it — 17746 -> 17758 — after the first
+                        attempt at this fix. Desktop must not move at all. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
+                      {/* Ellipsise below md, wrap normally at md and up — the
+                          `md:` half restores this showcase's original desktop
+                          rendering byte for byte, so only the mobile baseline
+                          moves. */}
+                      <p
+                        className="truncate text-sm font-semibold text-[var(--v2-ink)] md:overflow-visible md:whitespace-normal md:text-clip"
+                        title={row.title}
+                      >
+                        {row.title}
+                      </p>
                       {row.failed ? <StatusBadge tone="danger">Failed</StatusBadge> : null}
                     </div>
                     <div className="mt-1 md:hidden">
@@ -1325,13 +1442,13 @@ export default function DesignSystemPage() {
                   <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] md:table-cell">
                     {row.date}
                   </td>
-                  <td className="px-4 py-4 align-middle text-right">
+                  <td className="px-2 py-4 align-middle text-right md:px-4">
                     <p>
                       <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
                     </p>
                     <p className="mt-1 text-xs text-[var(--v2-ink-3)] md:hidden">{row.date}</p>
                   </td>
-                  <td className="px-4 py-4 align-middle text-right">
+                  <td className="px-2 py-4 align-middle text-right md:px-4">
                     <ExternalDetailsLink href="#" />
                   </td>
                 </tr>

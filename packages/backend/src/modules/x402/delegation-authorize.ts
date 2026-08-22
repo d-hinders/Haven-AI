@@ -6,12 +6,13 @@
  * settlement-child construction. Behavior and ordering are unchanged from the
  * pre-#996 route.
  */
-import { signX402ExpectedContext } from '../../infra/chain/x402-binding-signer.js'
+import { signX402ExpectedContext, x402PayerContextFields, x402PayerWireFields } from '../../infra/chain/x402-binding-signer.js'
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { redactVendorSecrets } from '../../rails/execution-rail.js'
 import { selectDelegation, prepareDelegationPayment } from '../../rails/delegation-authorization.js'
-import { computeHybridAccountAddress } from '../../rails/hybrid-provisioning.js'
+import { computeHybridAccountAddress, ensureHybridDeployed } from '../../rails/hybrid-provisioning.js'
+import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
 import {
   buildSettlementDelegation,
   typedDataDigest,
@@ -212,6 +213,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // #1138: commit to the typed data, not just the 4337 hash — the
       // signer signs the former and can only verify what is bound.
       typedDataHash: typedDataDigest(fundingAuth.prepared.signingTypedData),
+      // #1690: gated payer identity — {} until X402_EMIT_PAYER_CONTEXT=1.
+      ...x402PayerContextFields(agent),
     })
     return {
       code: 201,
@@ -228,6 +231,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         merchant_to: merchantPayTo.toLowerCase(),
         resource_url: url,
         x402_expected_auth: fundingExpectedAuth,
+        // #1690: gated payer identity on the wire, paired with the context above.
+        ...x402PayerWireFields(agent),
         sign_data: {
           hash: fundingAuth.prepared.userOpHash,
           signature_scheme: 'eip712_userop',
@@ -281,6 +286,40 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       code: 502,
       body: {
         error: 'Could not build the settlement delegation',
+        details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+      },
+    }
+  }
+
+  // ── #1667: deploy the child's delegator if still counterfactual ──────────
+  // The settlement child's delegator is the delegate HYBRID ACCOUNT, and
+  // nothing else on this path deploys it: the DelegationManager verifies the
+  // child's signature via EIP-1271 when the delegator has code and ecrecover
+  // when it does not, so against a counterfactual account the delegate EOA's
+  // signature recovers to the EOA ≠ delegator and redemption reverts
+  // InvalidEOASignature. The 3009 funding leg deploys the account as a side
+  // effect of its first UserOp (initCode) — a fresh agent whose FIRST payment
+  // is erc7710 never ran one, and a recipient-pinned agent never can (they
+  // are erc7710-only). The factory deploy is permissionless and relayer-paid
+  // (#860's treasury pattern at grant activation); once deployed,
+  // ensureHybridDeployed short-circuits on a single getBytecode. Fail-closed
+  // BEFORE the intent row exists, so a failed deploy leaves nothing half
+  // created and authorize can simply be retried.
+  try {
+    await ensureHybridDeployed(
+      agent.chain_id,
+      { ownerAddress: agent.delegate_address as `0x${string}` },
+      delegateAccountAddress as `0x${string}`,
+      { agentId: agent.id, userId: agent.user_id },
+    )
+  } catch (err) {
+    if (err instanceof RelayerBudgetExceededError) {
+      return { code: 429, body: { error: err.message } }
+    }
+    return {
+      code: 502,
+      body: {
+        error: 'Could not deploy the delegate account for erc7710 settlement — retry the authorize',
         details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
       },
     }
@@ -367,6 +406,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     network,
     expiresAt: intent.expires_at,
     typedDataHash: typedDataDigest(built.signingPayload),
+    // #1690: gated payer identity — {} until X402_EMIT_PAYER_CONTEXT=1.
+    ...x402PayerContextFields(agent),
   })
 
   return {
@@ -376,6 +417,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       status: intent.status,
       expires_at: intent.expires_at,
       x402_expected_auth: settlementExpectedAuth,
+      // #1690: gated payer identity on the wire, paired with the context above.
+      ...x402PayerWireFields(agent),
       sign_data: {
         hash: built.childHash,
         signature_scheme: 'eip712_delegation',

@@ -20,7 +20,7 @@ import {
 import { loadHavenIdentity } from './sign-context.js'
 
 export const SIGNER_NAME = '@haven_ai/signer'
-export const SIGNER_VERSION = '0.1.28-alpha.0'
+export const SIGNER_VERSION = '0.1.29-alpha.0'
 
 export interface SignerOptions {
   /** Path to a Haven credential JSON file (delegate_key is read from it). */
@@ -87,6 +87,10 @@ export async function resolveSignerRuntime(
     signer: createEdgeSigner(creds.delegateKey, {
       x402BindingSigner:
         options.x402BindingSigner ?? creds.x402BindingSigner ?? process.env.HAVEN_X402_BINDING_SIGNER,
+      // #1690: the signer's own agent id, so a payer-mismatch refusal can name
+      // both sides. The bare-delegateKey path above has no credential file and
+      // therefore no agent id — the guard still works there, on addresses.
+      agentId: creds.agentId,
     }),
     credentials: creds,
   }

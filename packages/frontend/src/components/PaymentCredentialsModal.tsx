@@ -120,7 +120,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 v2-modal-backdrop">
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center p-4 v2-modal-backdrop">
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
@@ -143,7 +143,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 rounded-md p-1.5 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            className="-mr-1 rounded-md p-1.5 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
           >
             <Icon icon={X} className="h-4 w-4" />
           </button>
@@ -242,7 +242,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
                 <button
                   type="button"
                   onClick={() => void copyAgentId()}
-                  className="flex-shrink-0 rounded text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+                  className="flex-shrink-0 rounded text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
                   aria-label="Copy agent ID"
                 >
                   {idCopied ? 'Copied' : 'Copy'}

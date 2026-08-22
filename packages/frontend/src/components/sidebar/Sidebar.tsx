@@ -209,11 +209,36 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Mobile toggle */}
+      {/*
+        Mobile toggle.
+
+        Tap target (#1766). The control paints 32x32 — deliberately, because it
+        shares a 56px bar with `NetworkSwitcher` and a larger visible box would
+        crowd it — which left it 12px under the 44px comfort target
+        `docs/product/design-system.md` § Buttons documents. It is not a
+        `Button`, so it inherited none of #1726's mechanism; it borrows it here
+        instead: a transparent `::after` extends the HIT area to 44x44 while the
+        painted pixels stay exactly where they were.
+
+        Two deliberate deviations from `Button`'s version of the same trick:
+
+        1. **The target grows in BOTH axes**, where `Button` grows vertically
+           only. That rule exists because an `sm` Button's width already clears
+           44px once it carries a label, so widening it would only let it steal
+           a neighbour's taps in a tight toolbar. Neither half holds for an
+           icon-only 32px square: its width is the short axis too, and the
+           nearest interactive control in this bar starts at x=68, which leaves
+           14px of clearance beyond the 44px target's right edge (x=54). The
+           mobile spec asserts that clearance so a future move of either control
+           cannot quietly close it.
+        2. **No `relative`.** `Button` adds it to create a positioning context;
+           `fixed` already is one, and adding `relative` here would un-fix the
+           button and drop it back under `TopBar` — the #1749 defect, restored.
+      */}
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed top-4 left-4 z-[60] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+        className="lg:hidden fixed top-4 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
       >
         <Icon icon={Menu} className="w-4 h-4" />
       </button>
@@ -221,13 +246,13 @@ export default function Sidebar() {
       {/* Overlay for mobile */}
       {!collapsed && (
         <div
-          className="lg:hidden fixed inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm z-40"
+          className="lg:hidden fixed inset-0 bg-[var(--v2-ink)]/40 backdrop-blur-sm z-[var(--v2-z-nav-scrim)]"
           onClick={() => setCollapsed(true)}
         />
       )}
 
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-[240px] h-screen lg:h-full bg-[var(--v2-surface)] border-r border-[var(--v2-border)] flex flex-col flex-shrink-0 transition-transform duration-200 ${
+        className={`fixed lg:static inset-y-0 left-0 z-[var(--v2-z-nav-drawer)] w-[240px] h-screen lg:h-full bg-[var(--v2-surface)] border-r border-[var(--v2-border)] flex flex-col flex-shrink-0 transition-transform duration-200 ${
           collapsed ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'
         }`}
       >
@@ -295,7 +320,7 @@ export default function Sidebar() {
                 onClick={() => setCollapsed(true)}
                 aria-label={`Open profile for ${name}`}
                 aria-current={profileActive ? 'page' : undefined}
-                className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:ring-offset-1"
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:ring-offset-1"
               >
                 {/* Avatar */}
                 <div className="w-8 h-8 rounded-full bg-[var(--v2-brand)] flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
@@ -325,7 +350,7 @@ export default function Sidebar() {
                     aria-haspopup="menu"
                     aria-expanded={menuOpen}
                     aria-label="User menu"
-                    className="w-7 h-7 flex items-center justify-center rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 focus-visible:outline-none transition-colors"
+                    className="w-7 h-7 flex items-center justify-center rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:outline-none transition-colors"
                   >
                     <span className="inline-flex w-4 h-4 items-center justify-center">
                       {icons.dotsVertical}
@@ -339,7 +364,7 @@ export default function Sidebar() {
                     ref={popoverRef}
                     role="menu"
                     aria-label="User menu"
-                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-[var(--v2-shadow-popover)] py-1 z-[60]"
+                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-[var(--v2-shadow-popover)] py-1 z-[var(--v2-z-chrome-popover)]"
                   >
                     <Link
                       href="/profile"

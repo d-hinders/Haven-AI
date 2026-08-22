@@ -67,7 +67,7 @@ describe('HybridEnrollFlow (#886)', () => {
     mockPost.mockResolvedValue({ account_address: ACCOUNT })
     const { onComplete } = renderFlow()
 
-    fireEvent.click(screen.getByRole('button', { name: /Face ID/ }))
+    fireEvent.click(screen.getByRole('button', { name: /passkey/i }))
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith({ accountAddress: ACCOUNT }))
 
     expect(mockPost).toHaveBeenCalledWith('/accounts/hybrid', {
@@ -81,34 +81,34 @@ describe('HybridEnrollFlow (#886)', () => {
     mockPost.mockResolvedValue({ account_address: ACCOUNT })
     renderFlow()
 
-    fireEvent.click(screen.getByRole('button', { name: /Face ID/ }))
+    fireEvent.click(screen.getByRole('button', { name: /passkey/i }))
     await waitFor(() => expect(mockPost).toHaveBeenCalled())
     // Exactly ONE api call: the account registration.
     expect(mockPost).toHaveBeenCalledTimes(1)
     expect(mockCreatePasskey).toHaveBeenCalledTimes(1)
   })
 
-  it('maps a cancelled Face ID prompt to friendly copy and resets', async () => {
+  it('maps a cancelled passkey prompt to friendly copy and resets', async () => {
     mockCreatePasskey.mockRejectedValue(new PasskeyCancelledError('cancelled'))
     const { onComplete, onError } = renderFlow()
 
-    fireEvent.click(screen.getByRole('button', { name: /Face ID/ }))
-    await waitFor(() => expect(onError).toHaveBeenCalledWith('Face ID prompt was cancelled.'))
+    fireEvent.click(screen.getByRole('button', { name: /passkey/i }))
+    await waitFor(() => expect(onError).toHaveBeenCalledWith('The passkey prompt was cancelled.'))
     expect(onComplete).not.toHaveBeenCalled()
     // Back to idle — the button is clickable again:
-    expect(screen.getByRole('button', { name: /Face ID/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /passkey/i })).toBeTruthy()
   })
 
   it('offers no action when the browser cannot create a passkey (#1162)', async () => {
     mockCreatePasskey.mockRejectedValue(new PasskeyUnsupportedError())
     const { onError } = renderFlow()
 
-    fireEvent.click(screen.getByRole('button', { name: /Face ID/ }))
+    fireEvent.click(screen.getByRole('button', { name: /passkey/i }))
 
     await waitFor(() => expect(onError).toHaveBeenCalledWith(PASSKEY_REQUIRED_MESSAGE))
     // An honest dead end — the host screen shows the message, and there is no
     // button here that could only fail the same way.
-    expect(screen.queryByRole('button', { name: /Face ID/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /passkey/i })).toBeNull()
   })
 
   it('never shows crypto jargon', () => {

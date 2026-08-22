@@ -109,7 +109,7 @@ export function Modal({
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center p-4"
     >
       <div
         className="absolute inset-0 v2-modal-backdrop"
@@ -137,7 +137,7 @@ export function Modal({
               onClick={onClose}
               disabled={closeButtonDisabled}
               aria-label="Close"
-              className="-m-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 disabled:cursor-not-allowed disabled:opacity-20"
+              className="-m-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 disabled:cursor-not-allowed disabled:opacity-20"
             >
               <Icon icon={X} className="h-4 w-4" />
             </button>

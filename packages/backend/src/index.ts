@@ -7,6 +7,8 @@ import cors from '@fastify/cors'
 import fastifyJwt from '@fastify/jwt'
 import rateLimit from '@fastify/rate-limit'
 import { rateLimitKeyFor } from './middleware/rate-limit.js'
+import { SharedRateLimitStore, setRateLimitDegradedReporter } from './middleware/shared-rate-limit-store.js'
+import { deleteExpiredRateLimits } from './infra/repositories/rate-limit-counters.js'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
 import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
@@ -26,8 +28,10 @@ import agentPassportRoutes from './routes/agent-passports.js'
 import {
   setAnchor,
   setAnchorRecovery,
+  setAnchorLiveness,
   anchorOnChain,
   recoverAnchorFromReceipt,
+  classifyAnchorTxLiveness,
   setRevoker,
   revokeOnChain,
   setReceiptSigningKey,
@@ -70,6 +74,10 @@ const app = Fastify({
   logger: {
     level: config.logLevel,
   },
+  // #1670: a hop COUNT, not `true` — see the note on trustProxyHops in
+  // config.ts. 0 → false → request.ip stays the socket peer, exactly as
+  // before this option existed.
+  trustProxy: config.trustProxyHops > 0 ? config.trustProxyHops : false,
 })
 
 // --- Global error handler (extracted for testability, #1464) ---
@@ -111,12 +119,25 @@ await app.register(fastifyJwt, {
 // limited; dashboard reads stay unthrottled. Keyed per presented credential
 // (Authorization or X-API-Key — see rateLimitKeyFor) so each agent gets its
 // own bucket regardless of network path; unauthenticated requests fall back
-// to per-IP (behind Railway's proxy that can collapse to the proxy IP —
-// acceptable for the public demo routes, where a shared throttle still beats
-// an open faucet).
+// to per-IP. With TRUST_PROXY_HOPS unset that per-IP fallback collapses to
+// the proxy address behind Railway — acceptable for the public demo routes,
+// where a shared throttle still beats an open faucet, and the reason the
+// auth tier (#1670) refuses to arm itself until the proxy is trusted.
+// #1680: the shared Postgres-backed store replaces the plugin's in-process
+// LRU. With the default store each replica counted only its own share of the
+// traffic, so the real ceiling was `max × replicas` and it ROSE with load —
+// live probing of dev read x-ratelimit-remaining back as two interleaved
+// descending series. The store is fail-open and deadline-bounded: a database
+// problem degrades to the old per-replica counting rather than locking anyone
+// out of signup or login.
 await app.register(rateLimit, {
   global: false,
   keyGenerator: (request: FastifyRequest) => rateLimitKeyFor(request),
+  store: SharedRateLimitStore,
+})
+
+setRateLimitDegradedReporter((reason) => {
+  app.log.warn({ reason }, 'Rate-limit store fell back to per-replica counting (#1680)')
 })
 
 await app.register(openapiRoutes)
@@ -145,6 +166,14 @@ app.get('/health', async (_request, reply) => {
   // when they curl /health, and losing it because Postgres is slow would repeat
   // the failure this field exists to end.
   const passport = passportReadiness()
+  // Trust-proxy state (#1670). The auth rate-limit tier arms only when the
+  // process actually READS a hop count > 0 — and whether it does is invisible
+  // from outside: on the first dev rollout the operator set the variable, the
+  // service kept answering, and 32 probe logins still went unthrottled because
+  // the running process predated the env change. This field ends that class of
+  // guessing. Not secret: the setting is documented in .env.example, and the
+  // hop count reveals topology no more than any traceroute would.
+  const trustProxy = { hops: config.trustProxyHops, authRateLimitArmed: config.trustProxyHops > 0 }
   try {
     await pool.query('SELECT 1')
     const dbLatencyMs = Date.now() - start
@@ -154,6 +183,7 @@ app.get('/health', async (_request, reply) => {
       db: { status: 'ok', latencyMs: dbLatencyMs },
       relayer,
       passport,
+      trustProxy,
     }
   } catch (err) {
     reply.status(503)
@@ -163,6 +193,7 @@ app.get('/health', async (_request, reply) => {
       db: { status: 'error', error: err instanceof Error ? err.message : String(err) },
       relayer,
       passport,
+      trustProxy,
     }
   }
 })
@@ -178,6 +209,11 @@ app.get('/chains', async () => {
 // (#972 / #973). Both are governance metadata: EAS-only targets, zero value.
 setAnchor(anchorOnChain)
 setAnchorRecovery(recoverAnchorFromReceipt)
+// A null receipt is not evidence the attest was dropped (#1745). The re-mint
+// is unlocked only by this probe finding the transaction's nonce burned by
+// something else; anything less leaves the passport retryable rather than
+// minting a second live credential.
+setAnchorLiveness(classifyAnchorTxLiveness)
 setRevoker(revokeOnChain)
 // Receipts the merchant-facing verifier hands out (#974) are signed with a
 // DEDICATED key, never the relayer's: the relayer pays gas for user-authorised
@@ -239,6 +275,13 @@ if (fortnoxConfigured()) {
 
 // --- Start ---
 const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly
+
+/**
+ * #1680: the sweep only reclaims space — every read already filters on expiry,
+ * so a late run costs dead rows, never a wrong count. Five minutes keeps the
+ * table small without adding a chatty query to a busy database.
+ */
+const RATE_LIMIT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
 const DELEGATE_MONITOR_INTERVAL_MS = 60 * 60 * 1000 // hourly (#714)
 // Every 5 minutes, not hourly: this sweep carries revocation reconciliation,
 // and the backoff schedule it drives starts at 30s. An hourly tick would flatten
@@ -289,6 +332,25 @@ const start = async () => {
     }
     void runCatalogRefresh()
     setInterval(runCatalogRefresh, CATALOG_REFRESH_INTERVAL_MS).unref()
+
+    // Expired rate-limit counters (#1680): nothing else removes them, and the
+    // table is written by UNAUTHENTICATED traffic — so without a sweep,
+    // unbounded growth is reachable by anyone with a script and a supply of
+    // source addresses. Leader-gated like every tick here; a missed run only
+    // leaves dead rows, never a wrong count, because every read filters on
+    // expiry.
+    const runRateLimitSweep = async () => {
+      try {
+        await runIfLeader(LEADER_LOCK_KEYS.rateLimitSweep, async () => {
+          const deleted = await deleteExpiredRateLimits()
+          if (deleted > 0) app.log.debug({ deleted }, 'Swept expired rate-limit counters')
+        })
+      } catch (err) {
+        app.log.warn({ err }, 'Rate-limit counter sweep failed')
+      }
+    }
+    void runRateLimitSweep()
+    setInterval(runRateLimitSweep, RATE_LIMIT_SWEEP_INTERVAL_MS).unref()
 
     // Delegate balance monitor (#714): hourly read-only scan of every active
     // agent's delegate USDC balance — WARNs on lingering (sweepable) balances

@@ -148,3 +148,32 @@ describe('prepareSignerRuntime', () => {
     expect(result.command).toBe(join(credentialDirectory, 'bin', 'haven-signer.mjs'))
   })
 })
+
+describe('sidecar slug recording (#1696)', () => {
+  it('records server_name for a NAMED pair and omits it for the bare pair — byte-compat', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-signer-runtime-slug-'))
+    const credentialDirectory = join(homeDir, '.haven', 'agents', 'work')
+    await mkdir(credentialDirectory, { recursive: true })
+    const signerPath = join(credentialDirectory, 'signer.json')
+    await writeFile(signerPath, '{}')
+    const runCommand = vi.fn(async () => {
+      const cliPath = signerNodeModule(homeDir, 'signer', 'dist', 'cli.js')
+      await mkdir(join(cliPath, '..'), { recursive: true })
+      await writeFile(cliPath, 'console.log("signer")\n', 'utf8')
+      await writePackage(signerNodeModule(homeDir, 'signer', 'package.json'), PINNED_SIGNER_VERSION)
+      await writePackage(signerNodeModule(homeDir, 'sdk', 'package.json'), PINNED_SDK_VERSION)
+    })
+
+    await prepareSignerRuntime({ credentialDirectory, signerPath, homeDir, serverName: 'work' }, { runCommand })
+    const named = JSON.parse(await readFile(join(credentialDirectory, 'signer-runtime.json'), 'utf8'))
+    expect(named.server_name).toBe('work')
+
+    const bareDir = join(homeDir, '.haven', 'agents', 'agt-bare')
+    await mkdir(bareDir, { recursive: true })
+    const bareSigner = join(bareDir, 'signer.json')
+    await writeFile(bareSigner, '{}')
+    await prepareSignerRuntime({ credentialDirectory: bareDir, signerPath: bareSigner, homeDir }, { runCommand })
+    const bare = JSON.parse(await readFile(join(bareDir, 'signer-runtime.json'), 'utf8'))
+    expect('server_name' in bare).toBe(false)
+  })
+})

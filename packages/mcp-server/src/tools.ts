@@ -2119,6 +2119,12 @@ function buildX402SigningContext(
         ...(intent.expectedTypedDataHash
           ? { typed_data_hash: intent.expectedTypedDataHash }
           : {}),
+        // #1690: relay the payer identity VERBATIM when Haven bound one (v3).
+        // Same rule as the #1189 lesson above — the signature is the
+        // authority, this surface only relays; omitting a bound field would
+        // make every signer rebuild a message that no longer matches.
+        ...(intent.payerDelegate ? { payer_delegate: intent.payerDelegate } : {}),
+        ...(intent.payerAgentId ? { payer_agent_id: intent.payerAgentId } : {}),
         auth: intent.expectedAuth,
       },
     },

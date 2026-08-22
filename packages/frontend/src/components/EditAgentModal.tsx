@@ -341,7 +341,7 @@ export default function EditAgentModal({
       if (message.includes('User rejected') || message.includes('user rejected') || message.includes('User denied')) {
         setExecError(
           signer?.type === 'passkey'
-            ? 'Face ID or Touch ID was cancelled'
+            ? 'The passkey prompt was cancelled'
             : 'Transaction rejected in wallet',
         )
       } else if (
@@ -444,7 +444,7 @@ export default function EditAgentModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 v2-modal-backdrop">
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center p-4 v2-modal-backdrop">
       <div
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
@@ -535,7 +535,7 @@ export default function EditAgentModal({
                               }
                               disabled={isRemoving}
                               aria-label={`Remove ${sym} budget`}
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-danger)]/30 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/30 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <Icon icon={X} className="h-3 w-3" />
                             </button>

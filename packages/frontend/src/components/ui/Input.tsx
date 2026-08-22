@@ -15,7 +15,7 @@ export function MaxButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="text-xs font-semibold uppercase tracking-wide text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] px-1.5 py-0.5 rounded-md hover:bg-[var(--v2-brand-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+      className="text-xs font-semibold uppercase tracking-wide text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] px-1.5 py-0.5 rounded-md hover:bg-[var(--v2-brand-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 disabled:opacity-40 disabled:pointer-events-none transition-colors"
     >
       Max
     </button>
@@ -48,7 +48,7 @@ export function PasteButton({
       type="button"
       onClick={() => { void handleClick() }}
       disabled={disabled}
-      className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] px-1.5 py-0.5 rounded-md hover:bg-[var(--v2-brand-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+      className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] px-1.5 py-0.5 rounded-md hover:bg-[var(--v2-brand-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 disabled:opacity-40 disabled:pointer-events-none transition-colors"
     >
       <Icon icon={Copy} className="w-3.5 h-3.5" />
       Paste
@@ -73,8 +73,8 @@ export function Input({
   ...props
 }: InputProps) {
   const borderClass = invalid
-    ? 'border-[var(--v2-danger)] focus:border-[var(--v2-danger)] focus:ring-[var(--v2-danger)]/20'
-    : 'border-[var(--v2-border)] focus:border-[var(--v2-brand)] focus:ring-[var(--v2-brand)]/20'
+    ? 'border-[var(--v2-danger)] focus:border-[var(--v2-danger)] focus:ring-danger/20'
+    : 'border-[var(--v2-border)] focus:border-[var(--v2-brand)] focus:ring-brand/20'
 
   const inputEl = (
     <div className="relative">

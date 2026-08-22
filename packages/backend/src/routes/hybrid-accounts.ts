@@ -33,6 +33,7 @@ import {
 import { prepareTransfer, submitTransfer, type TransferBody } from '../rails/hybrid-transfers.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
+import { listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
 
 interface CreateHybridBody {
   chain_id?: number
@@ -333,7 +334,13 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       const resolved = await resolveOwnedHybridAccount(sub, request.params.address, request.query.chain_id)
       if (!resolved.ok) return reply.code(resolved.status).send({ error: resolved.error })
 
-      const { accountAddress, chainId, config } = resolved.account
+      const { accountAddress, chainId, config, userSafeId } = resolved.account
+      // #1679: enrollment dates let the UI label rows "Passkey · added {date}"
+      // instead of a positional platform name. Joined by key_id rather than
+      // threaded through the owner config — that config is the deploy/signing
+      // shape and stays key material only. Null (never a guessed date) when a
+      // row is somehow absent; the UI falls back to ordinal "Passkey N".
+      const createdByKey = passkeyEnrollmentDates(await listAccountPasskeys(userSafeId))
       return {
         account_address: accountAddress,
         chain_id: chainId,
@@ -342,6 +349,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
           key_id: p.keyId,
           x: `0x${p.x.toString(16)}`,
           y: `0x${p.y.toString(16)}`,
+          created_at: createdByKey.get(p.keyId.toLowerCase()) ?? null,
         })),
       }
     },

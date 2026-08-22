@@ -17,6 +17,11 @@
  * - publicVerifyRateLimit / publicIssuerRateLimit — public passport
  *   verification (#974). These override the shared key generator entirely,
  *   because per-IP is meaningless behind an untrusted proxy; see below.
+ * - authRateLimit(trustProxyHops) — signup/login (#1670). SELF-DISARMING:
+ *   returns no limit at all unless the deployment trusts its proxy
+ *   (TRUST_PROXY_HOPS > 0), because these are the product's front door and a
+ *   per-IP limit whose "IP" is one shared proxy address is a cheap global
+ *   login denial-of-service, not a protection.
  *
  * Constants, not env: tuning is a code change with review, and the values are
  * deliberately generous — the goal is a ceiling, not throttling real use.
@@ -86,13 +91,23 @@ export const demoRateLimit = {
  * an untrusted proxy we cannot know anyway.
  *
  * "Mostly", precisely: the key generator runs as an `onRequest` hook, BEFORE the
- * handler validates the address, so it buckets raw query text. @fastify/rate-limit's
- * default store is an LRU capped at 5000 entries, so this is not unbounded
- * memory growth — but a caller flooding >5000 distinct junk subjects inside a
- * window can EVICT a specific legitimate subject's counter and reset its
- * ceiling. So the isolation is a large improvement on one global bucket, not an
- * absolute guarantee. Making it absolute means a shared store with real keys,
- * which needs `trustProxy` first.
+ * handler validates the address, so it buckets raw query text.
+ *
+ * #1680 changed what that costs, and in the right direction. This used to sit
+ * on the plugin's in-process LRU capped at 5000 entries, where a caller
+ * flooding >5000 distinct junk subjects inside a window could EVICT a
+ * legitimate subject's counter and reset its ceiling — the isolation was a
+ * large improvement on one global bucket, but not a guarantee. Counters now
+ * live in `rate_limit_counters`, so no eviction resets anyone: a subject's
+ * count survives any amount of junk beside it, and the count is shared across
+ * replicas rather than per-process.
+ *
+ * The residual risk MOVED rather than vanished. Junk subjects now become real
+ * rows until the leader-gated sweep clears them, so a flood costs table growth
+ * instead of a lost counter — bounded, because a row is keyed by subject and
+ * updated in place, so the table tracks DISTINCT subjects seen recently rather
+ * than requests. Trading an eviction that breaks the guarantee for rows that
+ * cost space is the trade worth making.
  *
  * 120/min per subject is generous on purpose: receipts carry a 5-minute signed
  * TTL and are explicitly cacheable, so a correctly integrated merchant needs
@@ -129,3 +144,46 @@ export const publicIssuerRateLimit = {
     keyGenerator: () => 'passport:issuer',
   },
 } as const
+
+/**
+ * Signup + login (#1670). Unauthenticated, so the shared key generator falls
+ * back to `ip:` — which is only meaningful when `request.ip` is the CLIENT.
+ * Behind an untrusted proxy it is the proxy, one bucket for every external
+ * caller, and a limit tight enough to slow bulk account-enumeration (#1654)
+ * or credential stuffing would be a cheap global denial-of-service on the
+ * front door: ~one attacker request per two seconds locks everyone out.
+ *
+ * So the tier arms itself ONLY when the operator has set TRUST_PROXY_HOPS
+ * (config.ts) — never partially, never with a fallback key. Returning `{}`
+ * rather than a looser limit is deliberate: a limit that exists but cannot
+ * bind to a caller is worse than none, because it reads as protection.
+ *
+ * Signup is tighter than login: a person signs up once, and signup is where
+ * the #1654 enumeration disclosure lives; login absorbs NAT'd offices and
+ * password managers retrying. Both are ceilings on automation, not throttles
+ * on people. Per-EMAIL keying on login was considered for single-account
+ * credential stuffing and deliberately NOT used here: it hands an attacker a
+ * one-request-per-window lockout of any victim's login (worse behind the
+ * LRU-eviction caveat documented on publicVerifyRateLimit), and it cannot
+ * touch enumeration anyway — every probed address is its own fresh bucket.
+ *
+ * ACCEPTED residual risk, named rather than implied: a shared IP means a
+ * shared fate. A workshop, an office NAT, or carrier-grade NAT putting many
+ * people behind one address will 429 the 11th signup in a minute — and
+ * anyone behind that NAT can be locked out deliberately by one abuser next
+ * to them. That is inherent to any per-IP limit; the ceilings are set where
+ * automation is throttled and a room of humans usually is not, and raising
+ * them is a reviewed constant change, not an env knob.
+ */
+export function authRateLimit(
+  trustProxyHops: number,
+  route: 'signup' | 'login',
+): { rateLimit?: { max: number; timeWindow: string } } {
+  if (trustProxyHops <= 0) return {}
+  return {
+    rateLimit: {
+      max: route === 'signup' ? 10 : 30,
+      timeWindow: '1 minute',
+    },
+  }
+}

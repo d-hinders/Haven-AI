@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { createConnectApiClient, ConnectRequestError, type ConnectApiClient, type ResolvedSetup } from './api.js'
 import { resolveTokenFromAddress } from '@haven_ai/sdk'
 import {
@@ -8,7 +10,10 @@ import {
   type LocalDelegateKey,
 } from './key.js'
 import { redactSecrets, shortAddress } from './redact.js'
+import { assertValidServerSlug } from './server-names.js'
 import {
+  assertServerSlugAvailable,
+  defaultCredentialRoot,
   preflightCredentialStorage,
   writeCredentialFiles,
   type StoredCredentialPaths,
@@ -19,18 +24,37 @@ import {
   supportsLocalMcp,
   type RuntimeInstallResult,
 } from './runtime-install.js'
-import { normalizeRuntime, runtimeProfile, runtimeVerificationInstruction, type RuntimeProfile } from './runtime-registry.js'
+import { normalizeRuntime, resolveRuntimeSelection, runtimeProfile, runtimeVerificationInstruction, RUNTIME_FLAG_VALUES, type RuntimeId, type RuntimeProfile } from './runtime-registry.js'
+import { ConnectError } from './connect-error.js'
+import { resolveRuntimeByInstalledClientPrompt } from './installed-clients.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.1.28-alpha.0'
+export const CONNECTOR_VERSION = '0.1.29-alpha.0'
 
 export interface ConnectOptions {
   setupToken: string
   apiBaseUrl: string
   runtime?: string
+  /** #1672 escape hatch: use exactly this runtime, ignoring environment detection. */
+  runtimeForce?: string
+  /**
+   * #1719: the harness an AGENT running this command reported for itself. Enters
+   * at the same precedence as `runtime`, so it can only fill a vacuum — never
+   * override a detected environment.
+   */
+  runtimeSelfReport?: string
+  /**
+   * #1719: this run may ask a human which installed client to configure. The
+   * CLI sets it for a non-`--json` run; a library caller must opt in. Combined
+   * with `deps.isTty`, it is what makes the prompt rung SKIPPED rather than
+   * answered in CI, in `--json` automation, and in library embeddings.
+   */
+  interactive?: boolean
   credentialsDir?: string
   environmentLabel?: string
+  /** #1696: wiring slug for a named MCP pair + slug-keyed credential dir. */
+  serverName?: string
   connectorVersion?: string
   ackSigner?: boolean
   ackLocalTools?: boolean
@@ -88,6 +112,12 @@ export interface ConnectDeps {
   redactPaths?: boolean
   /** Overridable so the Node-floor refusal is testable without spawning a Node. */
   nodeVersion?: string
+  /** Overridable so runtime detection (#1672) is testable without faking process.env. */
+  env?: NodeJS.ProcessEnv
+  /** Overridable so the #1719 TTY gate is testable without faking process.stdin. */
+  isTty?: boolean
+  /** Overridable so the #1719 installed-client prompt is testable without readline. */
+  promptRuntime?: () => Promise<RuntimeId>
 }
 
 export interface ConnectResult {
@@ -130,29 +160,84 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   const runRuntimeInstall = deps.installRuntime ?? installRuntime
   const generateKey = deps.generateKey ?? generateDelegateKey
   const generateLocalApiKey = deps.generateApiKey ?? generateAgentApiKey
-  const installCapabilities = runtimeInstallCapabilities(options.runtime)
+  // #1672: detection-first runtime resolution, BEFORE any side effect — the
+  // setup command no longer carries --runtime, and a hint that contradicts a
+  // confident detection must not write another client's config. Refusing here
+  // keeps the #1161 discipline: no half-created agent, no burned setup token.
+  //
+  // #1719 extends the ladder past detection: an agent that knows its own
+  // harness may say so (as a re-run carrying --runtime, which is why the
+  // backend's setup prompt now permits exactly that one change), and a human
+  // at a TTY is offered the clients actually installed here. The prompt rung
+  // is OMITTED — not answered — whenever this is not an interactive terminal
+  // run, so CI and --json automation still reach the refusal below instead of
+  // blocking on stdin.
+  const selection = await resolveRuntimeSelection(options.runtime, options.runtimeForce, {
+    env: deps.env ?? process.env,
+    selfReported: options.runtimeSelfReport,
+    promptForRuntime: runtimeSelectionPrompt(options, deps),
+  })
+  if (!selection.runtime) {
+    throw new ConnectError(
+      'runtime_undetermined',
+      'Could not determine the agent runtime: nothing was detected in this environment and no --runtime was given. ' +
+        'If you are an AI agent running this command: re-run it once, unchanged except for adding ' +
+        `--runtime <name>, naming the harness you are running in — one of: ${RUNTIME_FLAG_VALUES} ` +
+        '(the aliases cowork, codex and openclaw are accepted too). Do not guess: if your harness is ' +
+        'not one of those, use --runtime other, which stores the credentials and prints the manual MCP steps. ' +
+        'Nothing was written and the Haven setup token is still unused.',
+      'rerun_connect_with_explicit_runtime',
+    )
+  }
+  const runtime = selection.runtime
+  const installCapabilities = runtimeInstallCapabilities(runtime)
 
   if (options.localMcp) {
-    const resolvedRuntime = normalizeRuntime(options.runtime)
-    if (!supportsLocalMcp(resolvedRuntime)) {
+    if (!supportsLocalMcp(runtime)) {
       throw new Error(
         `--local (fully-local Haven MCP) is only available for Claude Code and Codex. ` +
-        `The detected runtime is ${runtimeProfile(resolvedRuntime).label}. ` +
+        `The detected runtime is ${runtimeProfile(runtime).label}. ` +
         'Re-run without --local to use the default hosted MCP + local signer setup.',
       )
     }
+  }
+
+  if (selection.overrodeHint) {
+    log(`runtime: ${runtime} (detected; ignoring the ${selection.overrodeHint} hint — pass --runtime-force ${selection.overrodeHint} to override)`)
+  }
+  if (selection.discardedHint) {
+    // #1719: never silent. The caller asked for something this connector has
+    // no name for; detection is what saved the run, and the user has to be
+    // able to see that their value did nothing.
+    log(`runtime: ${runtime} (detected; "${selection.discardedHint}" is not a runtime Haven knows — valid values: ${RUNTIME_FLAG_VALUES})`)
+  }
+  if (selection.source === 'prompted') {
+    log(`runtime: ${runtime} (chosen at the prompt — nothing was detected in this environment)`)
   }
 
   log('Warming up your connection to Haven…')
   const setup = await api.resolveSetup({
     setupToken: options.setupToken,
     connectorVersion,
-    runtime: options.runtime,
+    runtime,
   })
   assertSetupChallengeIsUsable(setup.challenge.expires_at)
   printSetupSummary(setup, log)
 
   await preflightStorage({ baseDir: options.credentialsDir, warn: log })
+  if (options.serverName) {
+    // Validated HERE too, not only in the CLI parser (#1696 review): runConnect
+    // is exported, and a library caller passing a reserved or malformed slug
+    // would otherwise register a live agent and write real key material to
+    // disk before failing deep inside the config writer — the exact orphaned
+    // -agent outcome this ordering exists to prevent.
+    assertValidServerSlug(options.serverName)
+    // #1696: the slug keys the credential directory, and connect never
+    // overwrites credential files — so a taken slug must refuse HERE, before
+    // a key is minted or an agent registered, not fail on the write and
+    // leave an orphaned registration behind.
+    await assertServerSlugAvailable(options.serverName, options.credentialsDir)
+  }
   log('Checked local credential storage — all clear.')
 
   const localKey = generateKey()
@@ -166,7 +251,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     registration = await api.registerSetup({
       setupToken: options.setupToken,
       connectorVersion,
-      runtime: options.runtime,
+      runtime,
       challengeId: setup.challenge.id,
       delegateAddress: localKey.address,
       proofSignature,
@@ -195,6 +280,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   const credentialPaths = await writeCredentials({
     baseDir: options.credentialsDir,
     agentId: registration.agent_id,
+    serverName: options.serverName,
     apiKey: localApiKey,
     delegateKey: localKey.privateKey,
     delegateAddress: localKey.address,
@@ -226,7 +312,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
   }
 
   const runtimeInstall = await runRuntimeInstall({
-    runtime: options.runtime,
+    runtime,
     hostedMcpUrl: registration.hosted_mcp_url,
     apiKey: localApiKey,
     signerPath: credentialPaths.signerPath,
@@ -236,6 +322,7 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     ackSigner: options.ackSigner,
     ackLocalTools: options.ackLocalTools,
     localMcp: options.localMcp,
+    serverName: options.serverName,
   }, {
     onProgress: log,
     // #1543: report "runtime configured" the moment the config write settles,
@@ -278,6 +365,31 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
     log('Haven setup needs a couple more steps on this machine — see the notes above.')
   } else {
     log('Haven setup on this machine is complete.')
+  }
+
+  // #1688: a re-run minted a NEW agent, and nothing retires the old one — the
+  // previous directory keeps an API key and a signing key, and any host that
+  // started before this run keeps spending as that agent. Name the superseded
+  // agents here, at the moment the user is watching, with the one action only
+  // they can take. Connect never revokes or deletes credentials itself.
+  try {
+    const supersededIds = await listOtherAgentIds(options.credentialsDir, credentialPaths.directory)
+    if (supersededIds.length > 0) {
+      log('')
+      log(
+        `Heads-up: this setup created a NEW agent. Your previous agent(s) — ${supersededIds.join(', ')} — ` +
+          'still exist with their own keys, and any host that was already running keeps acting as them.',
+      )
+      log(
+        'If you meant to replace them: revoke them on the Haven agent page, then restart EVERY ' +
+          'long-lived host (gateways, TUI workers, editors) — each holds the MCP wiring snapshot from ' +
+          'its own start time, so after repeated setups each can be stuck on a DIFFERENT old agent. ' +
+          `Then remove their directories under ~/.haven/agents (or ${RERUN_HINT} --tombstone <dir> to ` +
+          `leave a diagnostic in their place). Run ${RERUN_HINT} --doctor to check whether their keys are still live.`,
+      )
+    }
+  } catch {
+    // Best-effort — never let the heads-up break a completed setup.
   }
 
   // Report the completed runtime state before polling for budget approval.
@@ -386,26 +498,54 @@ export function completionOutcome(input: {
 }
 
 /**
+ * The prompt rung's gate (#1719), in one place so the two conditions that
+ * SKIP it cannot drift apart: a run that is not interactive (`--json`, a
+ * library embedding) and a run whose stdin is not a terminal (CI, a pipe).
+ * Returning `undefined` omits the rung from the ladder entirely, so those runs
+ * reach the `runtime_undetermined` refusal instead of blocking on stdin.
+ */
+function runtimeSelectionPrompt(
+  options: ConnectOptions,
+  deps: ConnectDeps,
+): (() => Promise<RuntimeId>) | undefined {
+  if (options.interactive !== true) return undefined
+  // The TTY gate is checked BEFORE the injected prompt, not after: an override
+  // that could skip it would make the gate untestable through the seam that
+  // exists to test it.
+  if (!(deps.isTty ?? Boolean(process.stdin.isTTY))) return undefined
+  return deps.promptRuntime ?? (() => resolveRuntimeByInstalledClientPrompt())
+}
+
+/**
  * A deliberately terse failure record: error messages can contain server or
  * filesystem detail, while this public contract must remain safe to serialize.
+ *
+ * #1719: a `ConnectError` carries its own code and next action, so it is read
+ * rather than guessed. The regex ladder below survives only for the refusals
+ * that are still plain `Error`s — every new failure mode joins the vocabulary
+ * instead of joining that ladder.
  */
 export function failedConnectOutcome(runtimeHint: string | undefined, error: unknown): ConnectOutcome {
   const message = error instanceof Error ? error.message : ''
-  const code = /Node\.js >=/i.test(message)
-    ? 'unsupported_node_version'
-    : /setup challenge.*expired|expired or invalid/i.test(message)
-      ? 'setup_challenge_expired_or_invalid'
-      : /only available for Claude Code and Codex/i.test(message)
-        ? 'local_mcp_unsupported_runtime'
-        : 'connect_failed'
+  const code = error instanceof ConnectError
+    ? error.code
+    : /Node\.js >=/i.test(message)
+      ? 'unsupported_node_version'
+      : /setup challenge.*expired|expired or invalid/i.test(message)
+        ? 'setup_challenge_expired_or_invalid'
+        : /only available for Claude Code and Codex/i.test(message)
+          ? 'local_mcp_unsupported_runtime'
+          : 'connect_failed'
   const runtime = normalizeRuntime(runtimeHint)
-  const nextAction = code === 'setup_challenge_expired_or_invalid'
-    ? 'return_to_haven_for_fresh_setup'
-    : code === 'unsupported_node_version'
-      ? 'install_supported_node_and_rerun_connect'
-      : code === 'local_mcp_unsupported_runtime'
-        ? 'rerun_without_local_mcp'
-        : 'review_the_safe_error_output_and_start_a_fresh_haven_setup_if_needed'
+  const nextAction = error instanceof ConnectError
+    ? error.nextAction
+    : code === 'setup_challenge_expired_or_invalid'
+      ? 'return_to_haven_for_fresh_setup'
+      : code === 'unsupported_node_version'
+        ? 'install_supported_node_and_rerun_connect'
+        : code === 'local_mcp_unsupported_runtime'
+          ? 'rerun_without_local_mcp'
+          : 'review_the_safe_error_output_and_start_a_fresh_haven_setup_if_needed'
   return {
     schema_version: CONNECT_OUTCOME_SCHEMA_VERSION,
     outcome: 'failed',
@@ -690,6 +830,51 @@ function activationInstructionWithWhy(profile: RuntimeProfile): string {
     return `${profile.activationInstruction} (The entries are already written and verified — ${profile.label} only reads MCP config at app launch, which is why this step is still needed.)`
   }
   return profile.activationInstruction
+}
+
+const RERUN_HINT = 'npx @haven_ai/connect@alpha'
+
+/**
+ * Agent ids of every OTHER credential directory (#1688) — the agents this
+ * run just superseded. Reads identity.json for the id; a directory that does
+ * not parse is named by its directory name, because "I could not read it" is
+ * still a directory the user should know exists.
+ */
+async function listOtherAgentIds(baseDir: string | undefined, currentDirectory: string): Promise<string[]> {
+  const root = defaultCredentialRoot(baseDir)
+  let entries: string[] = []
+  try {
+    entries = await readdir(root)
+  } catch {
+    return []
+  }
+  const ids: string[] = []
+  for (const entry of entries) {
+    // Exclude by the DIRECTORY this run wrote, never by agent id (#1696
+    // review): a named agent's directory is its slug, which never equals the
+    // agent uuid, so an id comparison would name the agent just created as a
+    // superseded one and tell the user to revoke it on a clean first run.
+    if (join(root, entry) === currentDirectory) continue
+    const identityPath = join(root, entry, 'identity.json')
+    // Gate on the FILE EXISTING before treating the entry as an agent at all
+    // (#1688 review, B1): readdir returns every filesystem entry, and a
+    // .DS_Store or sync-relic that merely fails to read must be skipped —
+    // naming it would tell the user to "revoke" a file. A directory whose
+    // identity.json EXISTS but does not parse is the case worth surfacing,
+    // by directory name, because a corrupt agent dir is still an agent dir.
+    try {
+      await stat(identityPath)
+    } catch {
+      continue
+    }
+    try {
+      const identity = JSON.parse(await readFile(identityPath, 'utf8')) as { agent_id?: string }
+      ids.push(identity.agent_id ?? entry)
+    } catch {
+      ids.push(entry)
+    }
+  }
+  return ids
 }
 
 function printNextSteps(

@@ -11,6 +11,16 @@
  *   npm run screenshot -w packages/frontend -- /dashboard,/agents
  *   npm run screenshot -w packages/frontend -- --scenario=connect-agent
  *
+ * ── Route captures are un-clipped, and checked (#1738) ───────────────────────
+ * The app shell is `h-screen` + `overflow-hidden` with `<main>` as the only
+ * scroller, so a plain `fullPage: true` capture paints ONE viewport and leaves
+ * a very long white tail — the PNG is the right size and looks fine. Route
+ * captures therefore go through `captureFullPage` (`full-page-capture.mjs`),
+ * which un-clips the shell first and then reads the PNG back to prove it is not
+ * blank below the fold. A blank capture is DELETED and fails the run, on the
+ * same reasoning as the mislabeled-PNG case below: evidence that cannot show a
+ * defect is worse than no evidence, because it gets reviewed anyway.
+ *
  * ── Scenarios (#1409) ────────────────────────────────────────────────────────
  * Some surfaces no URL can reach: the connect-agent modal lives behind a
  * four-step dialog AND a connection state machine that only advances on a
@@ -62,12 +72,18 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { VIEWPORTS } from './evidence-viewports.mjs'
+import { captureFullPage } from './full-page-capture.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = path.join(ROOT, '.screenshots')
 const PORT = Number(process.env.SCREENSHOT_PORT ?? 3111)
 const BASE_URL = process.env.SCREENSHOT_BASE_URL ?? `http://127.0.0.1:${PORT}`
 const OWN_SERVER = !process.env.SCREENSHOT_BASE_URL
+
+// Retina captures, so a reviewer can zoom into type and hairlines. Named
+// because the blank-capture guard needs it: it measures the fold in DEVICE
+// pixels, and a drift between the two would silently move the fold.
+const DEVICE_SCALE_FACTOR = 2
 
 
 // Exported for the parity test against src/lib/auth-storage.ts — a key rename
@@ -357,7 +373,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
       account_address: FIXTURE_SAFE.safe_address,
       chain_id: FIXTURE_SAFE.chain_id,
       owner_address: null,
-      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+      passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
   }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/passport')) {
@@ -427,7 +443,7 @@ async function waitForServer(url, timeoutMs = 90_000) {
 async function newFixtureContext(browser, vp, scenario) {
   const context = await browser.newContext({
     viewport: { width: vp.width, height: vp.height },
-    deviceScaleFactor: 2,
+    deviceScaleFactor: DEVICE_SCALE_FACTOR,
     reducedMotion: 'reduce',
   })
 
@@ -486,7 +502,11 @@ async function dismissMobileSidebar(page, vp) {
   if (vp.width >= 1024) return
   const close = page.getByRole('button', { name: 'Close sidebar' })
   if (await close.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await close.click({ force: true })
+    // No `{ force: true }` (#1749) — see the note on the e2e twin in
+    // `e2e/fixtures/haven-api.ts`. The forced click was this bug's only
+    // footprint in the repo: the capture tooling had been routing around an
+    // unreachable navigation toggle for months without anyone naming it.
+    await close.click()
     await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible' })
   }
 }
@@ -498,6 +518,106 @@ const CONNECT_SETUP_TOKEN = 'hv_setup_screenshot'
 const CONNECT_COMMAND = `npx -y @haven_ai/connect@alpha --setup ${CONNECT_SETUP_TOKEN} --api https://api.haven.example --ack-local-tools --runtime claude-code`
 
 export const SCENARIOS = {
+  'design-system-buttons': {
+    description:
+      'The Buttons and badges card on /design-system — variants, the size scale, and the tap-target note',
+    // Route capture cannot evidence this card. `/design-system` is ~32000px
+    // tall at 1280 and ~52000px at 390, and a fullPage screenshot past
+    // Chromium's surface cap (~16384px) comes back BLANK below the fold — not
+    // truncated, blank, which is far worse because the PNG still looks like a
+    // real capture and its file size looks plausible. #1726's design review
+    // caught exactly that: the whole Primitives section was white canvas.
+    // An element capture sidesteps the cap entirely.
+    //
+    // No fixture overrides: `/design-system` renders static showcase markup, so
+    // the shared fixture is exactly right and this scenario has nothing special
+    // to say about the data. Stated explicitly rather than omitted, because
+    // `ScenarioShape` requires it — an absent `api` is indistinguishable from a
+    // forgotten one.
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/design-system`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      const heading = page.getByRole('heading', { name: 'Buttons and badges' })
+      await heading.waitFor({ timeout: 20_000 })
+
+      // The Card root owning the heading — same coupling to Card's radius class
+      // as account-backup-recovery, and the same intent: if Card's shape
+      // changes, this FAILS rather than quietly shooting the wrong box.
+      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+
+      // Wait for both button rows, not just the heading. The size row is the
+      // thing under review, so a capture that raced it would be evidence of
+      // nothing. `Small`/`Large` bracket the scale; `Primary` proves the
+      // variants row above it painted too.
+      await card.getByRole('button', { name: 'Primary' }).waitFor({ timeout: 20_000 })
+      await card.getByRole('button', { name: 'Small' }).waitFor({ timeout: 20_000 })
+      await card.getByRole('button', { name: 'Large' }).waitFor({ timeout: 20_000 })
+
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'card')
+    },
+  },
+  'account-backup-recovery': {
+    description:
+      'Backup & recovery card unobstructed at both viewports — wallet + two dated passkeys',
+    // The SHARED fixture serves one passkey and no wallet, which renders the
+    // "only one way to approve" state — the right default for route capture,
+    // but it shows neither the Wallet row nor a second passkey. This scenario
+    // serves the healthy multi-signer set instead, so one PNG carries every
+    // element the row layout has to get right: the Wallet row, the dated
+    // passkey labels that WRAP at 390px (#1679), and the enrolment button with
+    // its anchor subtext.
+    api(apiPath) {
+      if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: '0x' + 'ee'.repeat(20),
+          // Both dates are noon UTC so the rendered day cannot slide either
+          // way with the runner's timezone — the label IS the evidence here.
+          // March 3 is the exact case #1679's review saw wrap to two lines at
+          // 390px; September 12 is longer still, so a regression that unwraps
+          // one would have to unwrap both to go unnoticed.
+          passkeys: [
+            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: '2026-09-12T12:00:00.000Z' },
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      const heading = page.getByRole('heading', { name: 'Backup & recovery' })
+      await heading.waitFor({ timeout: 15_000 })
+
+      // The Card root that owns the heading. Card does not forward props, so
+      // there is no testid to target without changing a shared primitive;
+      // this couples to Card's own radius class instead. If that changes the
+      // locator finds nothing and the run FAILS — which is the behaviour you
+      // want from a capture whose entire purpose is trustworthy evidence.
+      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+
+      // Wait for the ROWS, not just the heading. The card short-circuits to
+      // null until the signer fetch settles, so there is no empty-shell phase
+      // to race — but the heading renders in the loadError branch too, where
+      // the rows and the button do not. Waiting on the heading alone would
+      // therefore accept "Haven could not load how this account is approved"
+      // as the capture. These two waits are what make the error state time
+      // out instead of quietly becoming the evidence.
+      await card.getByText('Wallet', { exact: true }).waitFor({ timeout: 15_000 })
+      await card.getByRole('button', { name: 'Add a backup passkey' }).waitFor({ timeout: 15_000 })
+
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'card')
+    },
+  },
   'account-signer-removal': {
     description: 'Account backup-removal consequence dialog with exactly two approval ways',
     api(apiPath) {
@@ -506,7 +626,7 @@ export const SCENARIOS = {
           account_address: FIXTURE_SAFE.safe_address,
           chain_id: FIXTURE_SAFE.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
-          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' }],
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         }
       }
       return undefined
@@ -645,6 +765,192 @@ export const SCENARIOS = {
       await revealManual.click()
       await dialog.getByText(/one-time private signing key/i).first().waitFor({ timeout: 10_000 })
       await shoot(dialog, 'manual-credential-warning')
+    },
+  },
+  'connect-agent-approve': {
+    description: 'Connect agent modal, step 4, the APPROVE screen on the delegation rail (#1684)',
+    // The third pin the other two connect scenarios cannot hold: `connect-agent`
+    // pins awaiting_connection for its whole run and `connect-agent-approved`
+    // pins active, so the screen BETWEEN them — where the user actually grants
+    // spend authority — had no rendered evidence at all.
+    api(apiPath, method) {
+      if (apiPath === '/agent-connection-setups' && method === 'POST') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          status: 'connected_local',
+          setup_token: CONNECT_SETUP_TOKEN,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: CONNECT_COMMAND,
+          setup_prompt: 'Please connect this workspace to Haven.',
+        }
+      }
+      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: 'agent-fixture-1',
+          status: 'connected_local',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          agent: { name: 'Research agent', description: 'Pays for research APIs' },
+          haven_wallet: {
+            id: FIXTURE_SAFE.id,
+            name: FIXTURE_SAFE.name,
+            address: FIXTURE_SAFE.safe_address,
+            chain_id: FIXTURE_SAFE.chain_id,
+            network: 'Base Sepolia',
+          },
+          // 25.00 USDC per day, atomic — the Budget row is the whole reason
+          // the description no longer restates the per-period amount (#1684).
+          agent_budget: [
+            {
+              id: 'budget-1',
+              token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+              token_symbol: 'USDC',
+              allowance_amount: '25000000',
+              reset_period_min: 1440,
+            },
+          ],
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          install_status: {
+            runtime_mcp_mode: 'local_stdio',
+            local_mcp_configured: true,
+            local_mcp_acknowledged: true,
+            credential_files_written: true,
+            skill_installed: true,
+            restart_required: true,
+          },
+          approval: { status: 'pending', safe_tx_hash: null, tx_hash: null },
+        }
+      }
+      // A reachable signer, or `ready` is false and the screen shows the
+      // connect-wallet fallback instead of the Approve button this issue is about.
+      if (apiPath === '/agents/agent-fixture-1/account-signers') {
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: null,
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      await dialog.getByLabel('Agent name').fill('Research agent')
+      await dialog.getByRole('button', { name: 'Set agent budget' }).click()
+      await dialog.getByPlaceholder('Amount').fill('25')
+      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
+      await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
+
+      // Confirmed by the money-authority action itself, not a bare timeout — a
+      // run that lands on any other sub-state fails here rather than shooting
+      // it under the approve screen's filename.
+      await dialog.getByRole('button', { name: 'Approve budget' }).waitFor({ timeout: 30_000 })
+      await shoot(dialog, 'approve')
+
+      // ...and again with the verification disclosure open, since #1684 made
+      // that one row the collapsed state: both halves need evidence.
+      await dialog.getByText(/Local connection verified/).click()
+      await dialog.getByText('Public address').waitFor({ timeout: 10_000 })
+      await shoot(dialog, 'approve-verification-open')
+    },
+  },
+  'connect-agent-approve-legacy': {
+    description: 'Connect agent modal, step 4, the APPROVE screen on the LEGACY rail (#1684)',
+    // The delegation twin of this (`connect-agent-approve`) cannot reach this
+    // screen: the rail branch reads `account_type` off `/auth/me`, and the
+    // shared fixture's account is `delegator_hybrid`. #1684 changes BOTH
+    // approve screens — the card heading, the one-row verification footer and
+    // the `Cancel` label are shared — so the legacy one needs its own capture
+    // rather than an argument by symmetry.
+    //
+    // A fixture has no wallet to connect, so the reachable state is the
+    // approval-blocked one (`approvalBlockReason` → `no_signer`). That is
+    // honest rather than convenient: every element this issue changed renders
+    // in it, and the blocked branch is itself a state worth having evidence
+    // for.
+    api(apiPath, method) {
+      if (apiPath === '/auth/me') {
+        // Same account, LEGACY rail. Spread rather than rebuilt so this
+        // scenario states only the one field that puts it on the other rail.
+        return {
+          ...FIXTURE_USER,
+          safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }],
+        }
+      }
+      if (apiPath === '/user/safes') {
+        return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      }
+      if (apiPath === '/agent-connection-setups' && method === 'POST') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          status: 'connected_local',
+          setup_token: CONNECT_SETUP_TOKEN,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: CONNECT_COMMAND,
+          setup_prompt: 'Please connect this workspace to Haven.',
+        }
+      }
+      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: 'agent-fixture-1',
+          status: 'connected_local',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          agent: { name: 'Research agent', description: 'Pays for research APIs' },
+          haven_wallet: {
+            id: FIXTURE_SAFE.id,
+            name: FIXTURE_SAFE.name,
+            address: FIXTURE_SAFE.safe_address,
+            chain_id: FIXTURE_SAFE.chain_id,
+            network: 'Base Sepolia',
+          },
+          agent_budget: [
+            {
+              id: 'budget-1',
+              token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+              token_symbol: 'USDC',
+              allowance_amount: '25000000',
+              reset_period_min: 1440,
+            },
+          ],
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          install_status: {
+            runtime_mcp_mode: 'local_stdio',
+            local_mcp_configured: true,
+            local_mcp_acknowledged: true,
+            credential_files_written: true,
+            skill_installed: true,
+            restart_required: true,
+          },
+          approval: { status: 'pending', safe_tx_hash: null, tx_hash: null },
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      await dialog.getByLabel('Agent name').fill('Research agent')
+      await dialog.getByRole('button', { name: 'Set agent budget' }).click()
+      await dialog.getByPlaceholder('Amount').fill('25')
+      await dialog.getByRole('button', { name: 'Review agent budget' }).click()
+      await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
+
+      // Confirmed by the LEGACY rail's own description copy — "You sign to
+      // give…" against the delegation rail's "You sign once to give…". A run
+      // that lands on the delegation screen fails here rather than shooting it
+      // under the legacy filename, which is the whole point of the scenario.
+      await dialog
+        .getByText(/You sign to give Research agent authority to spend/)
+        .waitFor({ timeout: 30_000 })
+      await shoot(dialog, 'approve')
     },
   },
   'connect-agent-approved': {
@@ -796,6 +1102,7 @@ async function main() {
   const consoleErrors = []
   const gotoFailures = []
   const clipped = []
+  const blankCaptures = []
   try {
     for (const vp of VIEWPORTS) {
       const context = await newFixtureContext(browser, vp, null)
@@ -824,8 +1131,27 @@ async function main() {
         }
         await page.waitForTimeout(400) // settle late paints
         const file = path.join(OUT_DIR, `${slug(routePath)}-${vp.name}.png`)
-        await page.screenshot({ path: file, fullPage: true })
-        captured.push(path.relative(ROOT, file))
+        // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
+        // whole route, then reads the PNG back and refuses a blank one (#1738).
+        try {
+          await captureFullPage(page, {
+            path: file,
+            label: `${routePath} · ${vp.name}`,
+            viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
+          })
+          captured.push(path.relative(ROOT, file))
+        } catch (err) {
+          // Same stance as the navigation failure above: a PNG that looks like
+          // evidence and is not is worse than no PNG, so remove it rather than
+          // leave it for someone to attach to a PR.
+          await rm(file, { force: true })
+          blankCaptures.push({
+            route: routePath,
+            viewport: vp.name,
+            text: String(err?.message ?? err).slice(0, 400),
+          })
+          continue
+        }
       }
       await context.close()
 
@@ -900,6 +1226,12 @@ async function main() {
     console.error(`\n✗ ${gotoFailures.length} capture(s) FAILED — their PNGs were NOT written:`)
     for (const e of gotoFailures) console.error(`  [${e.route} · ${e.viewport}] ${e.text}`)
   }
+  if (blankCaptures.length > 0) {
+    console.error(
+      `\n✗ ${blankCaptures.length} capture(s) came back BLANK below the fold — their PNGs were DELETED:`,
+    )
+    for (const e of blankCaptures) console.error(`  [${e.route} · ${e.viewport}] ${e.text}`)
+  }
   if (clipped.length > 0) {
     console.log(
       `\n⚠ ${clipped.length} capture(s) had content BELOW THE FOLD — the plain PNG shows only what a user sees without scrolling:`,
@@ -913,8 +1245,10 @@ async function main() {
     console.log('  (a fixture-shape gap or a real client bug — fix before trusting these screenshots)')
   }
   console.log('\nAttach these to the PR (or reference them in the Browser Verification section).')
-  // Broken evidence must not exit 0 — a failed navigation means missing PNGs.
-  if (gotoFailures.length > 0) process.exit(1)
+  // Broken evidence must not exit 0 — a failed navigation means missing PNGs,
+  // and a blank capture means the run produced something that LOOKS like
+  // evidence (#1738).
+  if (gotoFailures.length > 0 || blankCaptures.length > 0) process.exit(1)
 }
 
 // Run only as a CLI (fixtureFor is imported by tests).

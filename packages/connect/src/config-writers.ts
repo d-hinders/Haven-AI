@@ -3,6 +3,7 @@ import { homedir, platform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { isMap, parseDocument, stringify } from 'yaml'
 import { signerPackageSpec } from './runtime-manifest.js'
+import { serverNamesFor, type ServerNames } from './server-names.js'
 import { type RuntimeId } from './runtime-registry.js'
 
 export type RuntimeMcpMode = 'local_stdio' | 'hosted_plus_signer' | 'manual'
@@ -37,6 +38,13 @@ export interface RuntimeConfigInput {
    * runtimes that support it (explicit opt-in only).
    */
   mode?: 'hosted' | 'local'
+  /**
+   * #1695: wiring slug for a NAMED server pair (haven-<slug> /
+   * haven-signer-<slug>). Absent = the bare haven / haven-signer pair,
+   * byte-identical to the pre-#1695 output. A writer only ever touches the
+   * pair it owns, so named and unnamed pairs coexist in one config.
+   */
+  serverName?: string
 }
 
 export interface RuntimeConfigWriteResult {
@@ -68,6 +76,31 @@ export class InvalidCodexTomlError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'InvalidCodexTomlError'
+  }
+}
+
+/**
+ * #1719: the chosen client's config file EXISTS but Haven cannot read it.
+ *
+ * Distinct from a write failure on purpose. A write failure is a permissions
+ * or disk problem and "try again" is reasonable advice; an unreadable config
+ * is a file the user has to fix by hand, and re-running the connector will
+ * fail identically forever until they do. Collapsing the two under
+ * `runtime_config_write_failed` told the user to retry a thing that cannot
+ * succeed.
+ */
+/**
+ * Mirrors `RERUN` in doctor.ts — the moving alpha tag, so the advice resolves
+ * to a connector that has `--repair` regardless of what is cached locally.
+ */
+const REPAIR_COMMAND_PREFIX = 'npx @haven_ai/connect@alpha --doctor --repair --runtime'
+
+export class UnreadableRuntimeConfigError extends Error {
+  readonly configPath: string
+  constructor(configPath: string, detail: string) {
+    super(`${configPath} is not a config Haven can merge into (${detail})`)
+    this.name = 'UnreadableRuntimeConfigError'
+    this.configPath = configPath
   }
 }
 
@@ -154,16 +187,18 @@ export function mergeJsonMcpConfig(
   serverRoot: 'mcpServers' | 'servers',
   hostedServer: Record<string, unknown>,
   signerServer: Record<string, unknown>,
+  names: ServerNames = serverNamesFor(),
+  configPath?: string,
 ): string {
-  const config = existingJson?.trim() ? parseJsonObject(existingJson) : {}
+  const config = existingJson?.trim() ? parseJsonObject(existingJson, configPath) : {}
   const existingRoot = config[serverRoot]
   const servers = existingRoot && typeof existingRoot === 'object' && !Array.isArray(existingRoot)
     ? existingRoot as Record<string, unknown>
     : {}
   config[serverRoot] = {
     ...servers,
-    haven: hostedServer,
-    'haven-signer': signerServer,
+    [names.hosted]: hostedServer,
+    [names.signer]: signerServer,
   }
   return `${JSON.stringify(config, null, 2)}\n`
 }
@@ -173,12 +208,21 @@ export function mergeHermesYaml(
   existingYaml: string | null,
   hostedServer: Record<string, unknown>,
   signerServer: Record<string, unknown>,
+  names: ServerNames = serverNamesFor(),
+  configPath?: string,
 ): string {
-  if (!existingYaml?.trim()) return renderHermesYaml({ haven: hostedServer, 'haven-signer': signerServer })
+  if (!existingYaml?.trim()) {
+    return renderHermesYaml({ [names.hosted]: hostedServer, [names.signer]: signerServer })
+  }
 
   const doc = parseDocument(existingYaml, { keepSourceTokens: true })
   if (doc.errors.length > 0 || !isMap(doc.contents)) {
-    throw new Error('Hermes config must be a YAML object')
+    // #1719: the same class as an unparseable JSON config — the file has to be
+    // fixed by hand, so it must not be reported as a retryable write failure.
+    // The YAML parser's own message is deliberately NOT included: it quotes the
+    // offending source, which is a file that may hold another server's bearer
+    // token (the #1719 sibling of the redaction rule this writer already keeps).
+    throw new UnreadableRuntimeConfigError(configPath ?? 'the Hermes config', 'it is not a YAML object')
   }
 
   const mcpPair = doc.contents.items.find((item) => item.key?.toString() === 'mcp_servers')
@@ -186,8 +230,8 @@ export function mergeHermesYaml(
   const servers = isRecord(existingServers) ? existingServers : {}
   const mergedServers = {
     ...servers,
-    haven: hostedServer,
-    'haven-signer': signerServer,
+    [names.hosted]: hostedServer,
+    [names.signer]: signerServer,
   }
 
   if (!mcpPair) {
@@ -201,10 +245,14 @@ export function mergeHermesYaml(
  * Upsert the hosted MCP identity in Hermes's dotenv file without evaluating
  * arbitrary dotenv syntax or rewriting unrelated lines.
  */
-export function mergeHermesEnv(existingEnv: string | null, apiKey: string): string {
+export function mergeHermesEnv(
+  existingEnv: string | null,
+  apiKey: string,
+  envKey: string = HERMES_API_KEY_ENV,
+): string {
   if (/[\r\n]/.test(apiKey)) throw new Error('Hermes API key must be a single line')
 
-  const assignment = `${HERMES_API_KEY_ENV}=${apiKey}`
+  const assignment = `${envKey}=${apiKey}`
   if (!existingEnv) return `${assignment}\n`
 
   const lineEnding = existingEnv.includes('\r\n') ? '\r\n' : '\n'
@@ -214,12 +262,12 @@ export function mergeHermesEnv(existingEnv: string | null, apiKey: string): stri
 
   let found = false
   const merged = lines.flatMap((line) => {
-    if (isHermesEnvAssignment(line)) {
+    if (isHermesEnvAssignment(line, envKey)) {
       if (found) return []
       found = true
       return [assignment]
     }
-    if (isAmbiguousHermesEnvLine(line)) {
+    if (isAmbiguousHermesEnvLine(line, envKey)) {
       throw new Error('Hermes environment contains an ambiguous managed key')
     }
     return [line]
@@ -231,12 +279,14 @@ export function mergeHermesEnv(existingEnv: string | null, apiKey: string): stri
   return `${merged.join(lineEnding)}${hasTrailingNewline ? lineEnding : ''}`
 }
 
-function isHermesEnvAssignment(line: string): boolean {
-  return /^\s*(?:export[ \t]+)?MCP_HAVEN_API_KEY[ \t]*=/.test(line)
+function isHermesEnvAssignment(line: string, envKey: string): boolean {
+  return new RegExp(`^\\s*(?:export[ \\t]+)?${envKey}[ \\t]*=`).test(line)
 }
 
-function isAmbiguousHermesEnvLine(line: string): boolean {
-  return /^\s*(?:export[ \t]+)?MCP_HAVEN_API_KEY\b/.test(line)
+function isAmbiguousHermesEnvLine(line: string, envKey: string): boolean {
+  // The env keys are our own generated identifiers (no regex metacharacters),
+  // so embedding them in a pattern is safe by construction.
+  return new RegExp(`^\\s*(?:export[ \\t]+)?${envKey}\\b`).test(line)
 }
 
 function appendHermesMcpServers(source: string, servers: Record<string, unknown>): string {
@@ -312,11 +362,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-export function mergeCodexToml(existingToml: string, localMcpCommand: string): string {
-  let next = removeTomlTableTree(removeTomlTableTree(existingToml, 'mcp_servers.haven'), 'mcp_servers.haven_signer')
+export function mergeCodexToml(
+  existingToml: string,
+  localMcpCommand: string,
+  names: ServerNames = serverNamesFor(),
+): string {
+  let next = removeTomlTableTree(
+    removeTomlTableTree(existingToml, `mcp_servers.${names.codexHosted}`),
+    `mcp_servers.${names.codexSigner}`,
+  )
   next = next.trimEnd()
   const block = [
-    '[mcp_servers.haven]',
+    `[mcp_servers.${names.codexHosted}]`,
     `command = ${tomlString(localMcpCommand)}`,
     'args = []',
     'startup_timeout_sec = 120',
@@ -331,15 +388,19 @@ export function mergeCodexTomlHosted(
   hostedMcpUrl: string,
   apiKey: string,
   signerSpec: SignerLaunchSpec,
+  names: ServerNames = serverNamesFor(),
 ): string {
-  let next = removeTomlTableTree(removeTomlTableTree(existingToml, 'mcp_servers.haven'), 'mcp_servers.haven_signer')
+  let next = removeTomlTableTree(
+    removeTomlTableTree(existingToml, `mcp_servers.${names.codexHosted}`),
+    `mcp_servers.${names.codexSigner}`,
+  )
   next = next.trimEnd()
   const block = [
-    '[mcp_servers.haven]',
+    `[mcp_servers.${names.codexHosted}]`,
     `url = ${tomlString(hostedMcpUrl)}`,
     `http_headers = { "Authorization" = ${tomlString(`Bearer ${apiKey}`)} }`,
     '',
-    '[mcp_servers.haven_signer]',
+    `[mcp_servers.${names.codexSigner}]`,
     `command = ${tomlString(signerSpec.command)}`,
     `args = [${signerSpec.args.map((arg) => tomlString(arg)).join(', ')}]`,
     'startup_timeout_sec = 120',
@@ -361,6 +422,8 @@ async function writeJsonRuntimeConfig(
       serverRoot,
       buildHostedServer(input.hostedMcpUrl, input.apiKey, input.runtime),
       buildSignerServer(resolveSignerLaunchSpec(input), input.runtime),
+      serverNamesFor(input.serverName),
+      target,
     )
     await writeOwnerOnlyText(target, merged)
     return {
@@ -374,6 +437,16 @@ async function writeJsonRuntimeConfig(
       messages: [`Updated Haven MCP entries in ${configTargetLabel(input.runtime)}.`],
     }
   } catch (err) {
+    // #1719: the parse runs BEFORE the write, so an unreadable config leaves
+    // the file untouched — no half-merged config, nothing to roll back. The
+    // separate code exists so the message can say "fix this file" instead of
+    // "run setup again", which would never succeed — this fires AFTER
+    // registerSetup consumed the one-shot setup token, so the pasted command
+    // now 409s at /resolve. `--repair` is the recovery that actually works:
+    // it rewrites this exact config from the credentials already on disk,
+    // needs no token, and mints no second agent (the #1688 orphaning a fresh
+    // connection would cause).
+    const unreadable = err instanceof UnreadableRuntimeConfigError
     return {
       hostedConfigured: false,
       signerConfigured: false,
@@ -382,8 +455,13 @@ async function writeJsonRuntimeConfig(
       target: configTargetLabel(input.runtime),
       changed: false,
       restartRequired: true,
-      messages: [`Could not update ${configTargetLabel(input.runtime)}: ${err instanceof Error ? err.message : String(err)}`],
-      errorCode: 'runtime_config_write_failed',
+      messages: unreadable
+        ? [
+            `Could not update ${configTargetLabel(input.runtime)}: ${err.message}.`,
+            `Nothing was written to ${err.configPath}. Fix the JSON there (or move the file aside), then run \`${REPAIR_COMMAND_PREFIX} ${input.runtime}\` to write the Haven entries from the credentials already stored on this machine. Do not re-run the setup command: its token is already used.`,
+          ]
+        : [`Could not update ${configTargetLabel(input.runtime)}: ${err instanceof Error ? err.message : String(err)}`],
+      errorCode: unreadable ? 'runtime_config_unreadable' : 'runtime_config_write_failed',
     }
   }
 }
@@ -393,8 +471,9 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
   const envTarget = hermesEnvPath(input.homeDir)
   try {
     const [existing, existingEnv] = await Promise.all([readOptional(target), readOptional(envTarget)])
+    const names = serverNamesFor(input.serverName)
     const hostedServer = {
-      ...buildHostedServer(input.hostedMcpUrl, `\${${HERMES_API_KEY_ENV}}`, input.runtime),
+      ...buildHostedServer(input.hostedMcpUrl, `\${${names.hermesEnvKey}}`, input.runtime),
       enabled: true,
     }
     const signerServer = {
@@ -405,8 +484,10 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
       existing,
       hostedServer,
       signerServer,
+      names,
+      target,
     )
-    const mergedEnv = mergeHermesEnv(existingEnv, input.apiKey)
+    const mergedEnv = mergeHermesEnv(existingEnv, input.apiKey, names.hermesEnvKey)
     const writeText = deps.writeOwnerOnlyText ?? writeOwnerOnlyText
     await writeText(envTarget, mergedEnv)
     try {
@@ -427,11 +508,13 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
       messages: [
         `Updated Haven MCP entries in ${target}; stored the hosted MCP identity in ${envTarget}.`,
         'Restart Hermes (start a new session; gateway users: /restart), then verify with `hermes mcp list`, `hermes mcp test haven`, and `hermes mcp test haven-signer`.',
+        'If several long-lived Hermes processes are running (a gateway plus TUI workers), restart EVERY one: each loads its MCP wiring at startup, so a process started before this setup keeps using its old snapshot.',
         'If no mcp_* tools appear after restart, ensure the MCP SDK is installed in Hermes: pip install mcp',
       ],
     }
   } catch (err) {
     const recoveryIncomplete = err instanceof HermesConfigRecoveryError
+    const unreadable = err instanceof UnreadableRuntimeConfigError
     return {
       hostedConfigured: false,
       signerConfigured: false,
@@ -440,10 +523,15 @@ async function writeHermesConfig(input: RuntimeConfigInput, deps: RuntimeConfigW
       target: 'Hermes Agent config',
       changed: false,
       restartRequired: true,
-      messages: [recoveryIncomplete
-        ? 'Could not update Hermes Agent config. Recovery did not complete; inspect the Hermes configuration before retrying.'
-        : 'Could not update Hermes Agent config. Existing configuration was left unchanged.'],
-      errorCode: 'runtime_config_write_failed',
+      messages: unreadable
+        ? [
+            `Could not update Hermes Agent config: ${err.message}.`,
+            `Nothing was written to ${err.configPath}. Fix the YAML there (or move the file aside), then run \`${REPAIR_COMMAND_PREFIX} hermes\` to write the Haven entries from the credentials already stored on this machine. Do not re-run the setup command: its token is already used.`,
+          ]
+        : [recoveryIncomplete
+          ? 'Could not update Hermes Agent config. Recovery did not complete; inspect the Hermes configuration before retrying.'
+          : 'Could not update Hermes Agent config. Existing configuration was left unchanged.'],
+      errorCode: unreadable ? 'runtime_config_unreadable' : 'runtime_config_write_failed',
     }
   }
 }
@@ -488,7 +576,7 @@ async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfi
       if (!input.localMcpCommand) {
         throw new Error('local MCP wrapper command is required')
       }
-      const merged = mergeCodexToml(existing ?? '', input.localMcpCommand)
+      const merged = mergeCodexToml(existing ?? '', input.localMcpCommand, serverNamesFor(input.serverName))
       await writeOwnerOnlyText(target, merged)
       return {
         hostedConfigured: false,
@@ -503,7 +591,13 @@ async function writeCodexConfig(input: RuntimeConfigInput): Promise<RuntimeConfi
         ],
       }
     }
-    const merged = mergeCodexTomlHosted(existing ?? '', input.hostedMcpUrl, input.apiKey, resolveSignerLaunchSpec(input))
+    const merged = mergeCodexTomlHosted(
+      existing ?? '',
+      input.hostedMcpUrl,
+      input.apiKey,
+      resolveSignerLaunchSpec(input),
+      serverNamesFor(input.serverName),
+    )
     await writeOwnerOnlyText(target, merged)
     return {
       hostedConfigured: true,
@@ -548,10 +642,19 @@ async function writeOwnerOnlyText(path: string, value: string): Promise<void> {
   await chmod(path, 0o600).catch(() => undefined)
 }
 
-function parseJsonObject(value: string): Record<string, unknown> {
-  const parsed = JSON.parse(value) as unknown
+function parseJsonObject(value: string, configPath?: string): Record<string, unknown> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value) as unknown
+  } catch {
+    // The parser's own message is deliberately dropped: V8's SyntaxError text
+    // quotes the offending source, and this file may hold ANOTHER MCP server's
+    // bearer token. The path plus "not valid JSON" is everything the user
+    // needs, and nothing they must not see in a log.
+    throw new UnreadableRuntimeConfigError(configPath ?? 'the runtime config', 'it is not valid JSON')
+  }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('runtime config must be a JSON object')
+    throw new UnreadableRuntimeConfigError(configPath ?? 'the runtime config', 'the top level is not a JSON object')
   }
   return parsed as Record<string, unknown>
 }

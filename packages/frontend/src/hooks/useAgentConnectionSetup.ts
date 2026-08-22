@@ -59,17 +59,47 @@ export interface ManualCredential {
   delegateAddress: string
 }
 
+/**
+ * The rows whose setup is a COMMAND pasted into the agent itself, rather than
+ * a config snippet pasted into an app's settings (#1682).
+ *
+ * All three produce the identical flag-free command — #1672's detection
+ * decides what actually gets configured — so they differ only in label and in
+ * what they record. Kept as distinct ids on purpose: the collapsed `agent`
+ * entry threw away which harnesses people actually connect from.
+ */
+export const COMMAND_PATH_RUNTIMES = new Set(['claude-code', 'codex', 'cowork'])
+
+/**
+ * #1682: name-first. The user picks their product BY NAME, and whether that
+ * row yields a command or a snippet is a property of the row — never a
+ * question put to the user.
+ *
+ * #1672's collapsed "AI agent (Claude Code, Codex, Cowork)" row asked exactly
+ * that question, and it read wrong from both sides: a Hermes or OpenClaw user
+ * would rightly call theirs an AI agent too, and nobody can recognise a row
+ * whose label never names their harness. Alphabetical by product name, with
+ * the catch-all last because it is the only row that isn't a name.
+ */
 export const RUNTIME_OPTIONS = [
   { id: 'claude-code', label: 'Claude Code' },
-  { id: 'codex-cli', label: 'Codex CLI' },
-  { id: 'codex-desktop', label: 'Codex Desktop' },
-  { id: 'cursor', label: 'Cursor' },
-  { id: 'vscode', label: 'VS Code' },
-  { id: 'vscode-insiders', label: 'VS Code Insiders' },
   { id: 'claude-desktop', label: 'Claude Desktop' },
+  { id: 'codex', label: 'Codex (CLI or Desktop)' },
+  { id: 'cowork', label: 'Cowork' },
+  { id: 'cursor', label: 'Cursor' },
   { id: 'hermes', label: 'Hermes Agent' },
-  { id: 'other', label: 'Other agent' },
+  { id: 'openclaw', label: 'OpenClaw' },
+  { id: 'vscode', label: 'VS Code (incl. Insiders)' },
+  { id: 'other', label: 'Not listed / other' },
 ]
+
+/**
+ * The row the picker opens on. Declared ONCE and used by both the initial
+ * state and `resetForm`: when those two held separate literals, renaming the
+ * default left `resetForm` pointing at an id with no matching `<option>`, so
+ * reopening the modal showed an EMPTY picker and posted the stale id.
+ */
+export const DEFAULT_RUNTIME = RUNTIME_OPTIONS[0].id
 
 export interface UseAgentConnectionSetupOptions {
   open: boolean
@@ -249,7 +279,7 @@ export function approvalErrorMessage(err: unknown, signerType?: string): string 
   const message = errorMessage(err)
   if (/user rejected|user denied/i.test(message)) {
     return signerType === 'passkey'
-      ? 'Face ID or Touch ID was cancelled.'
+      ? 'The passkey prompt was cancelled.'
       : 'Wallet approval was cancelled.'
   }
   if (message.includes('would revert on-chain')) {
@@ -416,7 +446,7 @@ export function useAgentConnectionSetup({
   const [step, setStep] = useState<SetupStep>('details')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [runtime, setRuntime] = useState('claude-code')
+  const [runtime, setRuntime] = useState(DEFAULT_RUNTIME)
   const [localMcp, setLocalMcp] = useState(false)
   const [issuePassport, setIssuePassport] = useState(false)
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
@@ -565,7 +595,7 @@ export function useAgentConnectionSetup({
     setStep('details')
     setName('')
     setDescription('')
-    setRuntime('claude-code')
+    setRuntime(DEFAULT_RUNTIME)
     setLocalMcp(false)
     setIssuePassport(false)
     setAllowances([])
@@ -614,7 +644,7 @@ export function useAgentConnectionSetup({
       ? addAmountValidation.message
       : '')
   const walletUnavailable = !safeId
-  const localMcpSupported = runtime === 'claude-code' || runtime === 'codex-cli' || runtime === 'codex-desktop'
+  const localMcpSupported = COMMAND_PATH_RUNTIMES.has(runtime)
 
   async function handleCreateSetup() {
     if (!safeId) {

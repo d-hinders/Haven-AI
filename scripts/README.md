@@ -107,9 +107,9 @@ npm run release:bump -- prerelease --yes
 6. **Update** `packages/mcp/src/server.ts` — the `MCP_VERSION` constant.
 7. **Update** `packages/connect/src/runtime-manifest.ts` — `sdkVersion` and `signerVersion` string literals.
 8. **Wipe** all `packages/*/dist` directories — required to prevent tsup from bundling a stale constant from the previous build's output.
-9. **`npm install`** — regenerates `package-lock.json` with the new versions.
+9. **`npm install` + deterministic lockfile rewrite** ([#1663](https://github.com/d-hinders/Haven-AI/issues/1663)) — the install keeps `node_modules` consistent for the builds below, but its lockfile output is **not taken**: on three consecutive cuts (0.1.26 → 0.1.28) the local npm also inserted `"dev"`/`"peer"` metadata on unrelated entries, and each release hand-repaired the diff back to its 11 version lines. Instead the version substitution is replayed **structurally** onto the pre-install lockfile (`scripts/release-lockfile.mjs` — structural rather than textual so a third-party dep coincidentally at the old version is never touched), and the bump then **fails loudly** if the final `package-lock.json` diff contains any line that is not a workspace `version` field or an `@haven_ai/*` pin. The guard reads the file on disk, so removing the rewrite makes the guard see npm's polluted output and fail. Self-tested: `npm run release:bump:test`.
 10. **Build** in dependency order: `sdk → signer → mcp → connect`.
-    - Connect is built directly with tsup (skipping its internal pre-build of mcp/signer) so the already-built dist from step 10 is used — the exact scenario that surfaces the build-order bug.
+    - Connect is built directly with tsup (skipping its internal pre-build of mcp/signer) so the already-built dist from the previous step is used — the exact scenario that surfaces the build-order bug.
 11. **Verify** the built `packages/connect/dist/cli.cjs` contains the new version literal, and that `server.ts` has the correct `MCP_VERSION`.
 
 ### Why the dist-wipe is mandatory
@@ -130,25 +130,106 @@ Publishing is automated by the **Publish packages** workflow
 (`.github/workflows/publish.yml`). You do not run `npm publish` by hand.
 
 ```sh
-# 1. Review the diff.
+# 1. Review the diff. The lockfile must be ONLY version-string lines (11 at
+#    time of writing: 6 workspace versions + 5 @haven_ai/* pins). If npm also
+#    inserted "dev"/"peer" metadata, repair it — see *Lockfile hygiene* below.
 git diff --stat
 
-# 2. Commit on a branch and open a PR.
+# 2. Touch the two CONTRACT DOCS. The release PR does not go green without
+#    them — see *The contract-doc gate* below.
+
+# 3. Commit on a branch and open a PR **against `dev`**.
 git checkout -b release/<new-version>
 git add packages/sdk/package.json packages/signer/package.json \
         packages/mcp/package.json packages/mcp/src/server.ts \
         packages/connect/package.json packages/connect/src/runtime-manifest.ts \
+        packages/cli/package.json packages/cli/src/commands.ts \
+        packages/signer/src/server.ts packages/mcp-server/package.json \
+        packages/mcp-server/src/server.ts packages/connect/src/runtime.ts \
+        docs/operations/mcp-runtime-compatibility.md \
+        docs/regulatory/casp-changelog/ \
         package-lock.json
 git commit -m "chore(release): bump all published packages to <new-version>"
 git push -u origin release/<new-version>
-gh pr create --base main --fill
+gh pr create --base dev --fill
 
-# 3. Merge the PR. On push to main, the Publish packages workflow rebuilds
-#    dist in dependency order and publishes only the packages whose
+# 4. Merge to `dev`. NOTHING PUBLISHES HERE. Publishing happens on the later
+#    `dev → main` promotion (a separate, human step).
+
+# 5. Promote `dev → main`. On push to main, the Publish packages workflow
+#    rebuilds dist in dependency order and publishes only the packages whose
 #    package.json version is not yet on npm. The dist-tag is derived from the
 #    version: a prerelease (x.y.z-alpha.N) -> --tag alpha, a stable x.y.z ->
 #    --tag latest. A commit that does not change a version is a no-op.
 ```
+
+> **Target `dev`, never `main`.** This block said `--base main` for as long as
+> the dev-gate model has been in force. Under the branch
+> model ([`docs/contributing/branch-and-release-flow.md`](../docs/contributing/branch-and-release-flow.md))
+> only `dev` or `hotfix/*` may merge into `main` — the `dev-gate` workflow fails
+> a `release/*` PR aimed at `main`. Following this doc literally used to produce
+> a PR that could not merge.
+
+### Which version string
+
+The bump-type table above is a description of the script's arithmetic, not a
+recommendation. **The convention for an alpha release is an explicit
+`0.1.<N+1>-alpha.0`** — pass the version string, not `prerelease`.
+
+`prerelease` against `0.1.27-alpha.0` produces `0.1.27-alpha.1`, which is
+valid but is not what the last several releases did (`…25-alpha.0` →
+`…26-alpha.0` → `…27-alpha.0` → `…28-alpha.0`). Reserve the `-alpha.N`
+form for a second attempt at a version that failed to publish.
+
+### The contract-doc gate
+
+Two **contract docs** are coupled to the published packages, and the blocking
+`Contract-doc coupling` check fails until a PR that touches those packages also
+touches them. A version bump touches all five, so **every release PR needs
+both** — this is not optional and not conditional:
+
+1. **`docs/operations/mcp-runtime-compatibility.md`** — re-pin the *Supported
+   Runtime Manifest* table to the new version (it must match
+   `packages/connect/src/runtime-manifest.ts`), and prepend a note to
+   `last-verified` saying what the release carries and that no tool, capability,
+   or version-skew surface moved.
+2. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<pr>-release.md`** — a new
+   shard. `casp-risk-guardrails.md` declares
+   `satisfied-by: docs/regulatory/casp-changelog/**`, so a shard satisfies the
+   gate without touching the shared parent (which is what stops concurrent PRs
+   conflicting — #1366). State what changed, the authority/custody argument for
+   why the CASP perimeter is unaffected, and end with `Perimeter unchanged.`
+
+Check locally before pushing: `npm run docs:coupling` must exit 0. It will still
+list ~14 **advisory** docs; those are architecture prose a version bump does not
+invalidate, and prior releases have left them untouched. Only the ⚠️ contract
+entries block.
+
+### Lockfile hygiene
+
+**Handled by the bump since [#1663](https://github.com/d-hinders/Haven-AI/issues/1663) — do not hand-repair.**
+
+`npm install` does not promise that a version bump moves only the version lines:
+on three consecutive cuts (`0.1.26` → `0.1.28`) the local npm also inserted
+`"dev"`/`"peer"` metadata on unrelated entries, and each release repaired the
+diff by hand at exactly the moment the repo is least able to absorb a hand-edit.
+
+Step 9 above now replays the version substitution **structurally** onto the
+pre-install lockfile (`scripts/release-lockfile.mjs`) and fails the release
+loudly if the final diff holds any line that is not a workspace `version` field
+or an `@haven_ai/*` pin. Self-tested by `npm run release:bump:test`.
+
+So: if the bump completes, the lockfile is already correct — and if it doesn't,
+the guard names what is wrong. **Do not "fix" the lockfile by hand**, and in
+particular do not reach for a text-wide substitution of the old version string:
+a third-party dependency can legitimately sit at the version the workspace is
+leaving, and a textual replace would silently rewrite it. That hazard is why the
+shipped rewrite parses rather than greps.
+
+Why any of this is worth a guard: a noisy lockfile installs fine and fails
+nothing, which is exactly the problem. The release diff's whole safety argument
+is *"nothing here is anything but a version string"*, and the CASP shard asserts
+that in writing — so churn in it is where a real change would hide.
 
 The workflow authenticates with **npm Trusted Publishing (OIDC)** — there is no
 `NPM_TOKEN` secret to manage. It grants the job `id-token: write` and upgrades

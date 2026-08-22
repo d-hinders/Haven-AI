@@ -44,13 +44,13 @@ export function RecoveryNudge({ rail = 'delegation' }: { rail?: RecoveryNudgeRai
   return (
     <div className="mt-6 rounded-lg border border-[var(--v2-brand)]/25 bg-[var(--v2-brand-soft)] p-4 text-left">
       <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-white text-[var(--v2-brand)] ring-1 ring-[var(--v2-brand)]/20">
+        <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-white text-[var(--v2-brand)] ring-1 ring-brand/20">
           <Icon icon={ShieldCheck} className="h-4 w-4" />
         </span>
         <div className="min-w-0">
           <p className="text-sm font-semibold text-[var(--v2-ink)]">Add a backup soon</p>
           <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Right now this account has one way to approve it. Add a backup — a second Face ID or a
+            Right now this account has one way to approve it. Add a backup — a backup passkey or a
             wallet — so a lost device never means a lost account.{' '}
             {rail === 'safe' ? (
               <>

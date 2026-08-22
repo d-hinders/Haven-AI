@@ -36,12 +36,49 @@ describe('buildRuntimeSnippets — inline mode', () => {
       'claude-desktop',
       'cursor',
       'generic-mcp',
+      'openclaw',
       'python',
       'sdk-cli',
       'vscode',
-      'vscode-insiders',
       'windsurf',
     ])
+  })
+
+  // #1682: OpenClaw is an mcpServers entry in ~/.openclaw/openclaw.json —
+  // the same shape as the Cursor/Windsurf snippets, restarted at the gateway.
+  it('OpenClaw snippet is an mcpServers entry with the gateway config path', () => {
+    const snippet = buildRuntimeSnippet({ credential: credential() }, 'openclaw', 'inline')
+    expect(snippet.language).toBe('json')
+    expect(snippet.destination).toBe('~/.openclaw/openclaw.json')
+    expect(snippet.guidance).toMatch(/restart the gateway/i)
+    expect(snippet.consentNote).toBeTruthy()
+    const config = JSON.parse(snippet.code)
+    expect(config.mcpServers.haven.command).toBe('npx')
+    expect(config.mcpServers.haven.args).toEqual(['-y', '@haven_ai/mcp'])
+    expect(config.mcpServers.haven.env.HAVEN_API_KEY).toBe('sk_agent_TESTKEY_NEVERREAL')
+    expect(snippet.code).not.toContain('--credentials')
+  })
+
+  it('OpenClaw file-mode snippet references the credential path via --credentials', () => {
+    const snippet = buildRuntimeSnippet(
+      { credential: credential(), credentialFilePath: '/tmp/haven.json' },
+      'openclaw',
+      'file',
+    )
+    const config = JSON.parse(snippet.code)
+    expect(config.mcpServers.haven.args).toEqual(['-y', '@haven_ai/mcp', '--credentials', '/tmp/haven.json'])
+    expect(config.mcpServers.haven.env).toBeUndefined()
+  })
+
+  // #1682: Insiders folded into the VS Code snippet — identical config shape
+  // AND instructions, so it stopped being a surface of its own. The id stays
+  // ACCEPTED, because stored setup rows and `--runtime vscode-insiders` still
+  // carry it; it resolves to VS Code instead of throwing.
+  it('resolves the vscode-insiders id to the VS Code snippet', () => {
+    const insiders = buildRuntimeSnippet({ credential: credential() }, 'vscode-insiders', 'inline')
+    const vscode = buildRuntimeSnippet({ credential: credential() }, 'vscode', 'inline')
+    expect(insiders).toEqual(vscode)
+    expect(insiders.guidance).toMatch(/Insiders/)
   })
 
   it('Claude Desktop snippet inlines the secret via env vars', () => {
@@ -121,7 +158,7 @@ describe('buildRuntimeSnippets — inline mode', () => {
   })
 
   it('MCP-based snippets include a consentNote; non-MCP do not', () => {
-    const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'generic-mcp'] as const
+    const mcpIds = ['claude-desktop', 'cursor', 'windsurf', 'vscode', 'openclaw', 'generic-mcp'] as const
     for (const id of mcpIds) {
       const snippet = buildRuntimeSnippet({ credential: credential() }, id, 'inline')
       expect(snippet.consentNote, `${id} should have a consentNote`).toBeTruthy()

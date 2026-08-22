@@ -234,7 +234,8 @@ export async function mockHavenApi(page: Page) {
           '',
           'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
           '',
-          'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr. Appending --json is the ONLY permitted change to the command above.',
+          'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr.',
+          'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.',
           '',
           'When the connector finishes, tell me to return to Haven to approve the budget.',
         ].join('\n'),
@@ -465,22 +466,183 @@ export async function dismissMobileSidebar(page: Page) {
 
   const closeButton = page.getByRole('button', { name: 'Close sidebar' })
   if (await closeButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await closeButton.click({ force: true })
+    // No `{ force: true }` (#1749). It used to be required, and that was the
+    // undiagnosed symptom: `force` skips the actionability check, and the
+    // check this helper was failing is the hit-test — TopBar's `z-[100]`
+    // covered the toggle's `z-[60]`, so the real user gesture was impossible
+    // on every authenticated route below `lg`. Keeping the plain click makes
+    // this helper the regression canary: if the layering breaks again, every
+    // mobile e2e test fails here with "intercepts pointer events" instead of
+    // quietly forcing its way through.
+    await closeButton.click()
     await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible' })
   }
 }
 
+/**
+ * Horizontal overflow, measured on BOTH scroll boxes that can hold it.
+ *
+ * ## Why there are two metrics (#1771)
+ *
+ * This helper used to compare the document alone —
+ * `documentElement.scrollWidth` / `body.scrollWidth` against
+ * `documentElement.clientWidth`. Inside the authenticated shell that
+ * comparison **cannot fail**. `(authenticated)/layout.tsx` wraps everything in
+ * `overflow-hidden` twice (the `flex h-screen … overflow-hidden` root and the
+ * `flex-1 flex flex-col min-w-0 overflow-hidden` column), so overflowing
+ * content never grows the document and the old metric reported a clean fit.
+ *
+ * That is worse than no check, because it gets cited as evidence. It was found
+ * only by mutation — #1768 shipped a deliberate `w-[120vw]` on `/dashboard`
+ * and CI run 32542736317 went green, with the overflow assertion explicitly
+ * passing.
+ *
+ * So the document metric is kept — it is the ONLY one that works on
+ * unauthenticated pages like `/login`, which have no shell and no
+ * `#main-content` — and the content-region metric is added beside it.
+ *
+ * ## What each metric actually means — they are DIFFERENT defects
+ *
+ * Do not collapse these two into "content is off-screen"; the next person
+ * debugging a failure needs to know which one fired.
+ *
+ * - `documentOverflows` — something escaped the page box itself. Where the
+ *   ancestors are `overflow-hidden` (the authenticated shell) this means the
+ *   content really is CLIPPED and unreachable, with no scrollbar anywhere.
+ *
+ * - `contentOverflows` — `<main id="main-content">` is wider than its own box.
+ *   `<main>` is `overflow-y-auto`, and per CSS Overflow §3 setting one axis to
+ *   a non-`visible` value computes the OTHER axis to `auto`, so its
+ *   `overflow-x` is `auto` and it is a genuine horizontal scroll box.
+ *   Measured directly rather than reasoned about: with a 120vw child at 393px,
+ *   `getComputedStyle(main).overflowX === 'auto'` and `main.scrollLeft` moves
+ *   to 79 — so the content is REACHABLE by scrolling the pane.
+ *
+ *   That is still a real defect, and it is the #1772 shape: one wide element
+ *   drags the WHOLE content pane into horizontal scroll — headings, cards and
+ *   all — instead of scrolling only itself inside an `overflow-x-auto`
+ *   wrapper. Read a `contentOverflows` failure as "the entire content pane is
+ *   forced into horizontal scroll", NOT as "the content cannot be reached".
+ *
+ * `hasOverflow` is the UNION, so every existing
+ * `toMatchObject({ hasOverflow: false })` call site starts gating for real
+ * without changing shape. The two booleans are also returned separately for a
+ * caller that needs to say which one it means.
+ *
+ * ## Assert `contentRegionFound` on authenticated routes
+ *
+ * When the content region is absent — or attached but not laid out — the
+ * content metric degrades to `0`, which reads as "fits": the silent no-op that
+ * this whole helper exists to prevent. So `contentRegionFound` requires a
+ * NON-ZERO `clientWidth`, not merely a node in the DOM; a hydration flash, a
+ * `display:none` mid-transition or a failed stylesheet all produce an attached
+ * `<main>` measuring `0 - 0 = 0`. The helper cannot tell on its own whether a
+ * page SHOULD have a content region, so authenticated call sites pass
+ * `{ hasOverflow: false, contentRegionFound: true }` and make the no-op path
+ * loud. `/login` legitimately has no content region and asserts only
+ * `hasOverflow`.
+ *
+ * ## Known blind spot, and it is structural
+ *
+ * This compares TWO scroll boxes; it does not walk the ancestor chain. So any
+ * `overflow-hidden` BETWEEN the two measured boxes swallows the evidence
+ * before either one sees it — a card inside `<main>` that clips a decorative
+ * element, and one day clips real content, recreates the exact #1768 failure
+ * one level further down. Fixing the document-level case did not close the
+ * failure class; it closed the instance of it that the shell created.
+ *
+ * The concrete case measured so far is `position: fixed` overlays. A fixed
+ * element is laid out against the viewport, so it contributes to neither the
+ * document's scrollable overflow nor `<main>`'s — and an ancestor's
+ * `overflow-hidden` does not clip it either. Verified, not assumed: a 120vw
+ * block inside `ReceiveFundsModal` left `dashboard.spec.ts`' assertion green.
+ * Call sites that open a dialog before asserting are therefore measuring the
+ * page BEHIND the dialog — still a real assertion, but not a check on the
+ * dialog's own layout. Filed as #1773 rather than widened here: it wants its
+ * own selector, its own call-site changes and its own mutation proof.
+ *
+ * ## The viewport-absolute fields, and why they are REPORTED and not asserted
+ *
+ * `viewportWidth` / `contentLeft` / `contentRight` measure the content region
+ * against the VIEWPORT rather than against itself (#1779). Both overflow
+ * metrics above compare a box to another box — `scrollWidth` to `clientWidth`,
+ * of the same element — so they are invariant under any transformation that
+ * moves the whole shell. Measured: swapping the mobile toggle's `fixed` for
+ * `relative` puts it in flow as a 32px flex item, `<main>` goes from
+ * `left 0, width 393` to `left 32, width 361`, and BOTH ratios are unchanged
+ * (`361 - 361 = 0`, exactly as `393 - 393 = 0` was). The whole app shell
+ * displaced 32px and every relative reading held. That is a property of the
+ * reference frame, not of how the assertion was phrased — no rewording of a
+ * "A relative to B" check can see A and B move together.
+ *
+ * These three are deliberately NOT asserted here, and that is the design rather
+ * than an omission. This helper has three classes of caller with three
+ * different CORRECT answers: below `lg` the drawer is `fixed`, so `<main>`
+ * spans the full viewport (`0 → innerWidth`); on desktop the drawer is
+ * `lg:static` and legitimately occupies the first 240px, so `contentLeft` is
+ * 240; and `/login` is outside the shell entirely and has no content region at
+ * all. A single anchor baked in here would have to be loose enough to hold for
+ * all three, which is another way of saying it would hold for the defect too.
+ *
+ * So the numbers come from here and the CONTRACT is asserted where it is known:
+ * `navigation.mobile.spec.ts` pins the mobile shell to `0 → innerWidth`. That
+ * split is also why `mobile-nav-layering.mobile.spec.ts` computes its own
+ * anchor instead of calling this helper — one shared anchor that every mobile
+ * suite trusts would be a single reference frame again, and a single reference
+ * frame is the thing #1779 is about. Two independent measurements can disagree;
+ * one cannot.
+ */
 export async function expectNoHorizontalOverflow(page: Page) {
   return page.evaluate(() => {
     const documentWidth = document.documentElement.clientWidth
     const scrollWidth = document.documentElement.scrollWidth
     const bodyScrollWidth = document.body.scrollWidth
+    const documentOverflows =
+      scrollWidth > documentWidth + 1 || bodyScrollWidth > documentWidth + 1
+
+    const main = document.getElementById('main-content')
+    const contentScrollWidth = main ? main.scrollWidth : null
+    const contentClientWidth = main ? main.clientWidth : null
+
+    // Where the content region sits IN THE VIEWPORT. Nothing above this line
+    // can see the shell move, because everything above compares a box to
+    // itself. `getBoundingClientRect` is viewport-relative by definition, so
+    // these are the anchored readings — see the JSDoc for why they are reported
+    // rather than asserted here (#1779).
+    const contentBox = main ? main.getBoundingClientRect() : null
+    const viewportWidth = window.innerWidth
+    // Presence is NOT enough: an attached but unlaid-out `<main>` measures
+    // `0 - 0 = 0`, which reads as "fits". Require a real box, so the no-op
+    // path fails the `contentRegionFound` assertion instead of passing.
+    const contentRegionFound = contentClientWidth !== null && contentClientWidth > 0
+    // 1px of tolerance for sub-pixel layout rounding. A real overflow is far
+    // larger — the three measured so far were the #1768 mutation, #1772's
+    // transactions table, and this helper's own mutation proof, all ~100px+.
+    const contentOverflowBy =
+      contentRegionFound && contentScrollWidth !== null && contentClientWidth !== null
+        ? contentScrollWidth - contentClientWidth
+        : 0
+    const contentOverflows = contentOverflowBy > 1
 
     return {
       documentWidth,
       scrollWidth,
       bodyScrollWidth,
-      hasOverflow: scrollWidth > documentWidth + 1 || bodyScrollWidth > documentWidth + 1,
+      documentOverflows,
+      contentRegionFound,
+      // Distinguishes "no such element" from "element present but not laid
+      // out" when a `contentRegionFound` assertion fails.
+      contentAttached: Boolean(main),
+      contentScrollWidth,
+      contentClientWidth,
+      contentOverflowBy,
+      contentOverflows,
+      hasOverflow: documentOverflows || contentOverflows,
+      // Viewport-absolute (#1779). Rounded: sub-pixel layout makes a raw
+      // `left` read `0.00001` and an `=== 0` assertion flake on it.
+      viewportWidth,
+      contentLeft: contentBox ? Math.round(contentBox.left) : null,
+      contentRight: contentBox ? Math.round(contentBox.right) : null,
     }
   })
 }

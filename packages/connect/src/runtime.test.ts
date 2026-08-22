@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { ConnectRequestError } from './api.js'
 import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
 import { completionHandoffLines, failedConnectOutcome, runConnect, waitForBudgetApproval } from './runtime.js'
+import { ConnectError } from './connect-error.js'
 import type { RuntimeInstallResult } from './runtime-install.js'
 
 const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
@@ -136,6 +140,7 @@ describe('runConnect', () => {
     const writeCredentials = vi.fn()
     const error = await expectRejection(runConnect({
       setupToken: 'hv_setup_test_expired',
+      runtime: 'claude-code',
       apiBaseUrl: 'https://api.haven.example',
     }, {
       nodeVersion: SUPPORTED_NODE,
@@ -164,6 +169,7 @@ describe('runConnect', () => {
     const registerSetup = vi.fn()
     await expect(runConnect({
       setupToken: 'hv_setup_test_invalid_expiry',
+      runtime: 'claude-code',
       apiBaseUrl: 'https://api.haven.example',
     }, {
       nodeVersion: SUPPORTED_NODE,
@@ -443,12 +449,237 @@ describe('runConnect', () => {
   })
 
   it('rejects --local on runtimes that do not support local MCP', async () => {
+    // env: {} — the test host may itself be an agent shell (CLAUDECODE=1),
+    // where #1672's detection would override the explicit cursor hint.
     await expect(runConnect({
       setupToken: 'hv_setup_test',
       apiBaseUrl: 'https://api.haven.example',
       runtime: 'cursor',
       localMcp: true,
-    }, { nodeVersion: SUPPORTED_NODE })).rejects.toThrow(/only available for Claude Code and Codex/)
+    }, { nodeVersion: SUPPORTED_NODE, env: {} })).rejects.toThrow(/only available for Claude Code and Codex/)
+  })
+
+  describe('detection-first runtime resolution (#1672)', () => {
+    function resolutionSpies() {
+      return {
+        api: {
+          resolveSetup: vi.fn(),
+          registerSetup: vi.fn(),
+          updateInstallStatus: vi.fn(),
+          getConnectorStatus: vi.fn(),
+        } as unknown as ConnectApiClient,
+        preflightStorage: vi.fn(),
+        writeCredentials: vi.fn(),
+        installRuntime: vi.fn(),
+        generateKey: vi.fn(),
+      }
+    }
+
+    it('detection overrides a contradicting --runtime hint, with a printed notice', async () => {
+      const logs: string[] = []
+      const spies = resolutionSpies()
+      // The run still fails later (stub API returns nothing) — the assertions
+      // are about what happened BEFORE that: the notice and the resolved value.
+      await expectRejection(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'claude-desktop',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: { CLAUDECODE: '1' }, log: (m) => logs.push(m) }))
+
+      expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-code' }))
+      expect(logs.some((m) => m.includes('detected; ignoring the claude-desktop hint'))).toBe(true)
+    })
+
+    it('--runtime-force wins over detection', async () => {
+      const spies = resolutionSpies()
+      await expectRejection(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtimeForce: 'claude-desktop',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: { CLAUDECODE: '1' } }))
+
+      expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-desktop' }))
+    })
+
+    it('refuses before any side effect when nothing is detected and no --runtime is given', async () => {
+      const spies = resolutionSpies()
+      await expect(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} })).rejects.toThrow(/Could not determine the agent runtime/)
+
+      // The #1161 discipline: refusal must not burn the setup token.
+      expect(spies.api.resolveSetup).not.toHaveBeenCalled()
+      expect(spies.writeCredentials).not.toHaveBeenCalled()
+      expect(spies.generateKey).not.toHaveBeenCalled()
+    })
+
+    it('refuses an unknown --runtime-force value, naming the valid ones', async () => {
+      const spies = resolutionSpies()
+      await expect(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtimeForce: 'not-a-runtime',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} })).rejects.toThrow(/Unknown --runtime-force value "not-a-runtime"/)
+      expect(spies.api.resolveSetup).not.toHaveBeenCalled()
+    })
+
+    it('an explicit --runtime in a plain terminal (no detection) still applies as given', async () => {
+      const spies = resolutionSpies()
+      await expectRejection(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'claude-desktop',
+      }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} }))
+
+      expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-desktop' }))
+    })
+
+    // #1719: every rung added below the detection rungs is a new way for the
+    // connection step to fail. Each of these asserts the SAME #1161 property
+    // the original refusal had — the failure happens before the setup token is
+    // resolved, before a key is minted, and before a credential is written, so
+    // there is no half-connected agent to recover from.
+    describe('self-resolving ladder (#1719)', () => {
+      function expectNothingWritten(spies: ReturnType<typeof resolutionSpies>): void {
+        expect(spies.api.resolveSetup).not.toHaveBeenCalled()
+        expect(spies.api.registerSetup).not.toHaveBeenCalled()
+        expect(spies.generateKey).not.toHaveBeenCalled()
+        expect(spies.writeCredentials).not.toHaveBeenCalled()
+        expect(spies.installRuntime).not.toHaveBeenCalled()
+      }
+
+      it('asks an interactive terminal which installed client to configure', async () => {
+        const spies = resolutionSpies()
+        const promptRuntime = vi.fn(async () => 'claude-desktop' as const)
+        await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          interactive: true,
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {}, isTty: true, promptRuntime }))
+
+        expect(promptRuntime).toHaveBeenCalledTimes(1)
+        expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-desktop' }))
+      })
+
+      it('skips the prompt entirely when stdin is not a TTY', async () => {
+        const spies = resolutionSpies()
+        const promptRuntime = vi.fn(async () => 'claude-desktop' as const)
+        const error = await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          interactive: true,
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {}, isTty: false, promptRuntime }))
+
+        expect(promptRuntime).not.toHaveBeenCalled()
+        expect((error as ConnectError).code).toBe('runtime_undetermined')
+        expectNothingWritten(spies)
+      })
+
+      it('skips the prompt entirely for a non-interactive run', async () => {
+        const spies = resolutionSpies()
+        const promptRuntime = vi.fn(async () => 'claude-desktop' as const)
+        const error = await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {}, isTty: true, promptRuntime }))
+
+        expect(promptRuntime).not.toHaveBeenCalled()
+        expect((error as ConnectError).code).toBe('runtime_undetermined')
+        expectNothingWritten(spies)
+      })
+
+      it('makes the no-runtime refusal actionable for the agent running it', async () => {
+        const spies = resolutionSpies()
+        const error = await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} }))
+
+        expect(error.message).toContain('If you are an AI agent running this command')
+        expect(error.message).toContain('--runtime <name>')
+        expect(error.message).toContain('Do not guess')
+        expect(error.message).toContain('--runtime other')
+        expect(error.message).toContain('setup token is still unused')
+      })
+
+      it('accepts an agent self-report at hint precedence', async () => {
+        const spies = resolutionSpies()
+        await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          runtimeSelfReport: 'openclaw',
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} }))
+
+        expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'other' }))
+      })
+
+      it('MUTATION PROOF: an aborted prompt writes nothing at all', async () => {
+        const spies = resolutionSpies()
+        const error = await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          interactive: true,
+        }, {
+          ...spies,
+          nodeVersion: SUPPORTED_NODE,
+          env: {},
+          isTty: true,
+          promptRuntime: async () => {
+            throw new ConnectError('runtime_prompt_aborted', 'cancelled', 'rerun_connect_and_choose_a_runtime')
+          },
+        }))
+
+        expect((error as ConnectError).code).toBe('runtime_prompt_aborted')
+        expectNothingWritten(spies)
+      })
+
+      it('MUTATION PROOF: an unrecognised runtime writes nothing at all', async () => {
+        const spies = resolutionSpies()
+        const error = await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          runtime: 'clawed-code',
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: {} }))
+
+        expect((error as ConnectError).code).toBe('runtime_unrecognized')
+        expectNothingWritten(spies)
+      })
+
+      it('says so out loud when detection carried an unrecognised hint', async () => {
+        const logs: string[] = []
+        const spies = resolutionSpies()
+        await expectRejection(runConnect({
+          setupToken: 'hv_setup_test',
+          apiBaseUrl: 'https://api.haven.example',
+          runtime: 'clawed-code',
+        }, { ...spies, nodeVersion: SUPPORTED_NODE, env: { CLAUDECODE: '1' }, log: (m) => logs.push(m) }))
+
+        expect(logs.some((m) => m.includes('"clawed-code" is not a runtime Haven knows'))).toBe(true)
+        expect(spies.api.resolveSetup).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-code' }))
+      })
+    })
+  })
+
+  describe('failure vocabulary (#1719)', () => {
+    it('reads a ConnectError code and next action instead of guessing from prose', () => {
+      const outcome = failedConnectOutcome(
+        undefined,
+        new ConnectError('runtime_no_installed_clients', 'nothing installed', 'rerun_connect_with_explicit_runtime'),
+      )
+
+      expect(outcome.outcome).toBe('failed')
+      expect(outcome.error).toEqual({
+        code: 'runtime_no_installed_clients',
+        next_action: 'rerun_connect_with_explicit_runtime',
+      })
+      expect(outcome.next_action).toBe('rerun_connect_with_explicit_runtime')
+    })
+
+    it('still classifies the older plain-Error refusals it always did', () => {
+      const outcome = failedConnectOutcome(undefined, new Error('Haven Connect requires Node.js >= 22.0.0'))
+      expect(outcome.error?.code).toBe('unsupported_node_version')
+    })
   })
 
   it('uses the hard-restart copy on desktop GUI runtimes', async () => {
@@ -1124,3 +1355,389 @@ describe('waitForBudgetApproval (#1377 D)', () => {
     expect(output).toContain('the budget is already approved')
   })
 })
+
+/**
+ * #1696 — --name threading end to end through runConnect: the slug reaches
+ * the credential write and the runtime install (which #1695's writers key
+ * their entries on), and a TAKEN slug refuses BEFORE any key is minted or
+ * agent registered — connect never overwrites credentials, and failing after
+ * registration would orphan a live agent.
+ */
+describe('--name wiring slug through runConnect (#1696)', () => {
+  const SETUP = {
+    setup_id: 'setup-3',
+    status: 'awaiting_connection',
+    agent: { name: 'Named Agent' },
+    haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 84532, network: 'Base Sepolia' },
+    agent_budget: [],
+    hosted_mcp_url: 'https://mcp.haven.example/v1',
+    challenge: { id: 'challenge-3', message: 'sign me', expires_at: '2099-01-01T00:00:00.000Z' },
+  }
+
+  function namedApi() {
+    return {
+      resolveSetup: vi.fn(async () => SETUP),
+      registerSetup: vi.fn(async (input: { apiKeyPrefix: string; delegateAddress: string }) => ({
+        setup_id: 'setup-3',
+        agent_id: 'agent-named',
+        status: 'connected_local',
+        agent_status: 'pending_approval',
+        api_key_prefix: input.apiKeyPrefix,
+        api_key_scope: 'setup_pending',
+        delegate_address: input.delegateAddress.toLowerCase(),
+        hosted_mcp_url: 'https://mcp.haven.example/v1',
+        next_action: 'return_to_haven_for_wallet_approval',
+      })),
+      updateInstallStatus: vi.fn(async () => {}),
+      getConnectorStatus: vi.fn(),
+    }
+  }
+
+  const namedInstallMock = () => vi.fn(async () => ({
+    runtime: 'claude-code' as const,
+    runtimeMcpMode: 'hosted_plus_signer' as const,
+    hostedMcpConfigured: true,
+    localSignerConfigured: true,
+    localMcpConfigured: false,
+    probeResult: 'hosted_ok_local_signer_ready',
+    restartRequired: true,
+    nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
+    configTarget: 'Claude Code MCP config',
+    messages: [],
+  }))
+
+  it('MUTATION PROOF: the slug reaches the credential write AND the runtime install', async () => {
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1696-'))
+    const writeCredentials = vi.fn(async () => ({
+      directory: join(credentialsDir, 'work'),
+      identityPath: join(credentialsDir, 'work', 'identity.json'),
+      signerPath: join(credentialsDir, 'work', 'signer.json'),
+      agentPath: join(credentialsDir, 'work', 'agent.json'),
+    }))
+    const installRuntime = namedInstallMock()
+
+    await runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      serverName: 'work',
+      waitForApproval: false,
+    }, {
+      api: namedApi() as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      writeCredentials: writeCredentials as never,
+      installRuntime: installRuntime as never,
+      log: () => undefined,
+      redactPaths: true,
+    })
+
+    expect(writeCredentials).toHaveBeenCalledWith(expect.objectContaining({ serverName: 'work' }))
+    expect(installRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({ serverName: 'work' }),
+      expect.anything(),
+    )
+  })
+
+  it('MUTATION PROOF: runConnect validates the slug ITSELF — a library caller cannot register an agent under a reserved name', async () => {
+    // runConnect is exported (index.ts), so CLI-side validation is not the
+    // boundary. Before this guard a reserved slug passed the availability
+    // check, registered a LIVE agent, wrote the delegate private key to disk,
+    // and only then failed inside the config writer — an orphaned agent with
+    // real key material under a name --doctor does not scan.
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1696-reserved-'))
+    const api = namedApi()
+    const writeCredentials = vi.fn()
+
+    for (const slug of ['signer', 'haven', 'Bad Slug']) {
+      await expect(runConnect({
+        setupToken: 'hv_setup_test',
+        apiBaseUrl: 'https://api.haven.example',
+        runtime: 'claude-code',
+        credentialsDir,
+        serverName: slug,
+        waitForApproval: false,
+      }, {
+        api: api as never,
+        nodeVersion: SUPPORTED_NODE,
+        generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+        generateApiKey: () => 'sk_agent_supersecret',
+        preflightStorage: vi.fn(async () => credentialsDir),
+        writeCredentials: writeCredentials as never,
+        installRuntime: namedInstallMock() as never,
+        log: () => undefined,
+        redactPaths: true,
+      })).rejects.toThrow(/Invalid server name/)
+    }
+
+    expect(api.registerSetup).not.toHaveBeenCalled()
+    expect(writeCredentials).not.toHaveBeenCalled()
+  })
+
+  it('MUTATION PROOF: a named FIRST run does not name its own directory as a superseded agent', async () => {
+    // The superseded scan excluded by AGENT ID, but a named agent's directory
+    // is its SLUG — never equal to the uuid — so a clean first run told the
+    // user to revoke the agent they had just created.
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1696-selfscan-'))
+    const directory = join(credentialsDir, 'work')
+    const logs: string[] = []
+
+    await runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      serverName: 'work',
+      waitForApproval: false,
+    }, {
+      api: namedApi() as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      // Writes for real, the way the production writer does — the superseded
+      // scan runs AFTER the write and must not find this directory.
+      writeCredentials: vi.fn(async () => {
+        await mkdir(directory, { recursive: true })
+        await writeFile(join(directory, 'identity.json'), JSON.stringify({
+          api_key: 'sk_agent_supersecret', agent_id: 'agent-named',
+        }))
+        return {
+          directory,
+          identityPath: join(directory, 'identity.json'),
+          signerPath: join(directory, 'signer.json'),
+          agentPath: join(directory, 'agent.json'),
+        }
+      }) as never,
+      installRuntime: namedInstallMock() as never,
+      log: (message: string) => logs.push(message),
+      redactPaths: true,
+    })
+
+    const output = logs.join('\n')
+    expect(output).not.toContain('Heads-up: this setup created a NEW agent')
+    expect(output).not.toContain('agent-named')
+  })
+
+  it('a SECOND named run names the FIRST named agent, and only it', async () => {
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1696-second-'))
+    const first = join(credentialsDir, 'work')
+    await mkdir(first, { recursive: true })
+    await writeFile(join(first, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_first', agent_id: 'agent-work',
+    }))
+    const second = join(credentialsDir, 'personal')
+    const logs: string[] = []
+
+    await runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      serverName: 'personal',
+      waitForApproval: false,
+    }, {
+      api: namedApi() as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      writeCredentials: vi.fn(async () => {
+        await mkdir(second, { recursive: true })
+        await writeFile(join(second, 'identity.json'), JSON.stringify({
+          api_key: 'sk_agent_second', agent_id: 'agent-personal',
+        }))
+        return {
+          directory: second,
+          identityPath: join(second, 'identity.json'),
+          signerPath: join(second, 'signer.json'),
+          agentPath: join(second, 'agent.json'),
+        }
+      }) as never,
+      installRuntime: namedInstallMock() as never,
+      log: (message: string) => logs.push(message),
+      redactPaths: true,
+    })
+
+    const output = logs.join('\n')
+    expect(output).toContain('agent-work')
+    expect(output).not.toContain('agent-personal')
+  })
+
+  it('MUTATION PROOF: a TAKEN slug refuses before registration — no key minted, no agent orphaned', async () => {
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1696-taken-'))
+    await mkdir(join(credentialsDir, 'work'), { recursive: true })
+    await writeFile(join(credentialsDir, 'work', 'identity.json'), JSON.stringify({ api_key: 'sk_agent_x' }))
+    const api = namedApi()
+    const writeCredentials = vi.fn()
+
+    await expect(runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      serverName: 'work',
+      waitForApproval: false,
+    }, {
+      api: api as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      writeCredentials: writeCredentials as never,
+      installRuntime: namedInstallMock() as never,
+      log: () => undefined,
+      redactPaths: true,
+    })).rejects.toThrow(/already wired/)
+
+    expect(api.registerSetup).not.toHaveBeenCalled()
+    expect(writeCredentials).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * #1688 — the completion heads-up. A re-run mints a NEW agent; the moment the
+ * user is watching is the completion output, so that is where the superseded
+ * agents are named, with the one action only the user can take.
+ */
+describe('superseded-agent heads-up at completion (#1688)', () => {
+  const FRESH_SETUP = {
+    setup_id: 'setup-2',
+    status: 'awaiting_connection',
+    agent: { name: 'Rerun Agent' },
+    haven_wallet: { id: 'safe-1', name: 'Main Haven wallet', address: '0x2222222222222222222222222222222222222222', chain_id: 84532, network: 'Base Sepolia' },
+    agent_budget: [],
+    hosted_mcp_url: 'https://mcp.haven.example/v1',
+    challenge: { id: 'challenge-2', message: 'sign me', expires_at: '2099-01-01T00:00:00.000Z' },
+  }
+
+  function apiFor(agentId: string) {
+    return {
+      resolveSetup: vi.fn(async () => FRESH_SETUP),
+      registerSetup: vi.fn(async (input: { apiKeyPrefix: string; delegateAddress: string }) => ({
+        setup_id: 'setup-2',
+        agent_id: agentId,
+        status: 'connected_local',
+        agent_status: 'pending_approval',
+        api_key_prefix: input.apiKeyPrefix,
+        api_key_scope: 'setup_pending',
+        delegate_address: input.delegateAddress.toLowerCase(),
+        hosted_mcp_url: 'https://mcp.haven.example/v1',
+        next_action: 'return_to_haven_for_wallet_approval',
+      })),
+      updateInstallStatus: vi.fn(async () => {}),
+      getConnectorStatus: vi.fn(),
+    }
+  }
+
+  const installRuntimeMock = () => vi.fn(async () => ({
+    runtime: 'claude-code' as const,
+    runtimeMcpMode: 'local_stdio' as const,
+    hostedMcpConfigured: false,
+    localSignerConfigured: true,
+    localMcpConfigured: true,
+    localMcpAcknowledged: true,
+    probeResult: 'local_stdio_mcp_ready',
+    restartRequired: true,
+    nextUserAction: 'return_to_haven_for_wallet_approval_then_restart_agent_session',
+    configTarget: 'Claude Code MCP config',
+    messages: [],
+  }))
+
+  async function runWithPriorDir(seedPrior: boolean) {
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1688-'))
+    if (seedPrior) {
+      const oldDir = join(credentialsDir, 'agent-old-uuid')
+      await mkdir(oldDir, { recursive: true })
+      await writeFile(join(oldDir, 'identity.json'), JSON.stringify({
+        api_key: 'sk_agent_oldsecret', agent_id: 'agent-old',
+      }))
+    }
+    const logs: string[] = []
+    await runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      waitForApproval: false,
+    }, {
+      api: apiFor('agent-new') as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      writeCredentials: vi.fn(async () => ({
+        directory: join(credentialsDir, 'agent-new'),
+        identityPath: join(credentialsDir, 'agent-new', 'identity.json'),
+        signerPath: join(credentialsDir, 'agent-new', 'signer.json'),
+        agentPath: join(credentialsDir, 'agent-new', 'agent.json'),
+      })),
+      installRuntime: installRuntimeMock() as never,
+      log: (message: string) => logs.push(message),
+      redactPaths: true,
+    })
+    return logs.join('\n')
+  }
+
+  it('MUTATION PROOF: names the superseded agent and the revoke step when a prior dir exists', async () => {
+    const output = await runWithPriorDir(true)
+
+    expect(output).toContain('agent-old')
+    expect(output).toMatch(/[Rr]evoke/)
+    expect(output).toMatch(/keeps acting as them/)
+    // Never the secret, never an auto-action claim.
+    expect(output).not.toContain('sk_agent_oldsecret')
+    expect(output).not.toMatch(/revoked (it|them) for you/)
+  })
+
+  it('REGRESSION (B1): filesystem junk under the credentials root is never named as an agent', async () => {
+    // readdir returns EVERYTHING — a .DS_Store or a sync-relic must be
+    // skipped, not surfaced as "revoke .DS_Store on the agent page".
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1688-junk-'))
+    await writeFile(join(credentialsDir, '.DS_Store'), 'junk')
+    await mkdir(join(credentialsDir, 'not-an-agent'), { recursive: true })
+    // A REAL agent dir with corrupt identity.json IS worth naming, by dirname.
+    const corrupt = join(credentialsDir, 'agent-corrupt')
+    await mkdir(corrupt, { recursive: true })
+    await writeFile(join(corrupt, 'identity.json'), '{not json')
+
+    const logs: string[] = []
+    await runConnect({
+      setupToken: 'hv_setup_test',
+      apiBaseUrl: 'https://api.haven.example',
+      runtime: 'claude-code',
+      credentialsDir,
+      waitForApproval: false,
+    }, {
+      api: apiFor('agent-new') as never,
+      nodeVersion: SUPPORTED_NODE,
+      generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY),
+      generateApiKey: () => 'sk_agent_supersecret',
+      preflightStorage: vi.fn(async () => credentialsDir),
+      writeCredentials: vi.fn(async () => ({
+        directory: join(credentialsDir, 'agent-new'),
+        identityPath: join(credentialsDir, 'agent-new', 'identity.json'),
+        signerPath: join(credentialsDir, 'agent-new', 'signer.json'),
+        agentPath: join(credentialsDir, 'agent-new', 'agent.json'),
+      })),
+      installRuntime: installRuntimeMock() as never,
+      log: (message: string) => logs.push(message),
+      redactPaths: true,
+    })
+    const output = logs.join('\n')
+
+    expect(output).not.toContain('.DS_Store')
+    expect(output).not.toContain('not-an-agent')
+    expect(output).toContain('agent-corrupt')
+  })
+
+  it('says nothing extra on a first-ever setup — no prior dirs, no heads-up', async () => {
+    const output = await runWithPriorDir(false)
+    expect(output).not.toContain('agent-old')
+    expect(output).not.toMatch(/previous agent/)
+  })
+})
+

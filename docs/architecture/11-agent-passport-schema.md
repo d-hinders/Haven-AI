@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-08-08"
+last-verified: "2026-08-22" # #1745: the SECOND limit on "recovered, never re-minted" is closed — a null receipt no longer presumes dropped; a re-mint needs positive evidence the prior tx can never mine (its nonce consumed by something else). The bounded-stall argument and the still-open time question (#1743) are recorded rather than implied. The first limit (hash-keyed recovery) stands. Prior: #1742: the sweep's phase isolation protects against a THROW, not a hang — `revokeOnChain`'s bare `tx.wait()` could park the revocation phase and the stuck-revoke alarm downstream of it indefinitely. The wait is now bounded; the retry/backoff model, the no-terminal-failed-state rule and the verifier precedence are unchanged. Prior: #1735: the "recovered, never re-minted" claim is qualified — recovery is keyed off the persisted tx hash (hence the bump-worker exclusion) and presumes a null receipt means dropped, so a fee-stuck anchor can still re-mint (#1745). Anchor wait disposition on expiry recorded. Rest of the anchoring/revocation prose re-read against the code and unchanged.
 ---
 
 # L0 Agent Passport — EAS schema
@@ -185,12 +185,61 @@ row simply stops being due. Rows past the attention threshold (10 attempts —
 hours of failing) are counted and logged by the sweep as an operational
 alarm rather than churning silently.
 
-A broadcast whose result was lost is **recovered, never re-minted**: the tx
-hash is persisted the moment the transaction is broadcast (before the wait),
-and a retry reads the attestation UID back from that receipt. Re-minting
-would create a second live attestation with the first permanently invisible
-to Haven. The on-chain wait is bounded (120s) so it cannot outlive the
-anchoring claim's 600s stale window.
+A broadcast whose result was lost is **recovered rather than re-minted** where
+recovery is possible: the tx hash is persisted the moment the transaction is
+broadcast (before the wait), and a retry reads the attestation UID back from
+that receipt. Re-minting would create a second live attestation with the first
+permanently invisible to Haven. The on-chain wait is bounded (120s) so it
+cannot outlive the anchoring claim's 600s stale window.
+
+Two limits on "never re-minted", stated because the unqualified version is not
+true today:
+
+- The recovery is **keyed off the persisted tx hash**, so anything that
+  replaces the transaction breaks it. That is why
+  [#1735](https://github.com/d-hinders/Haven-AI/issues/1735) excludes
+  `passport_attest` from the bump worker's fee-replacement path, and why an
+  expiry of the 120 s wait leaves the outbound record `broadcast` (for
+  chain-first reconciliation) instead of closing it `failed` as a revert.
+- `getTransactionReceipt` returns `null` for a **pending** transaction exactly
+  as for a dropped one, so the absence of a receipt is not evidence the
+  transaction died. Until
+  [#1745](https://github.com/d-hinders/Haven-AI/issues/1745) the retry presumed
+  dropped and re-minted at the next nonce ≈180 s after broadcast; it no longer
+  does. A re-mint now requires **positive evidence that the prior transaction
+  can never mine** — its nonce consumed by something else, read as the
+  relayer's mined `getTransactionCount` past the nonce the outbound record
+  (#1556) stamped at broadcast. A transaction only ever mines into its own
+  nonce and a nonce is spent once, so that is arithmetic rather than a
+  deadline. Anything weaker — a transaction any node still knows, a missing or
+  un-stamped record, a `replaced`/`mined` record, an unreadable provider, or a
+  receipt that appears on the confirming re-read — withholds the re-mint and
+  leaves the passport retryable.
+
+  Two consequences worth stating, because they are the shape of the trade.
+  **The stall ends when the nonce is burned, and in practice that is the
+  operator's cancel — not Haven's own traffic.** It is tempting to argue that a
+  dropped transaction stops reserving its nonce, so the relayer's next
+  broadcast takes the slot and issuance recovers by itself. It does not, and
+  the reason is worth knowing: `submitRecorded` allocates from
+  `getNonce('pending')`, but the stuck attest still holds a `broadcast` row at
+  that nonce, and migration 061's partial UNIQUE index on
+  `(chain_id, nonce) WHERE status = 'broadcast'` refuses the stamp — the queue
+  retries, re-reads the same nonce, and throws `could not win a nonce lane`.
+  So the lane #1735 already documents as blocked stays blocked, and what burns
+  the nonce is the same-nonce cancel in the
+  [vendor-ops runbook](../operations/delegation-rail-vendor-ops.md) §3. The
+  gain is that the cancel is now **sufficient on its own**: once it mines, the
+  burned nonce is exactly the evidence the sweep needs, so issuance completes
+  on its next tick with no further operator action and no duplicate to hunt
+  for first. While it waits, the row keeps failing retryably and alarms
+  through `ISSUANCE_ATTENTION_ATTEMPTS`. **The time question is deliberately
+  open:** how
+  long an attest whose nonce is *still open* may sit before Haven declares it
+  dead on its own is an owner decision with duplicate-credential consequences,
+  tracked as [#1743](https://github.com/d-hinders/Haven-AI/issues/1743) and not
+  taken in code. Until it is, such an attest is live for as long as it holds
+  its nonce.
 
 ## Revocation — what merchants must check
 
@@ -269,6 +318,21 @@ each of the three phases runs in its own try/catch so a failure in the issuance
 retry cannot silence the revocation reconciliation or the alarm. The alarm
 especially must run when everything above it is failing: that is when it
 matters.
+
+**A try/catch isolates a throw, not a hang** — and until [#1742](https://github.com/d-hinders/Haven-AI/issues/1742)
+that distinction was a real hole rather than a pedantic one. The sweep's phases
+and rows are sequential and `await`ed, so anything that never settles parks
+every row behind it, every later phase, and the pooled Postgres connection the
+leader lock holds for the whole tick. `revokeOnChain` awaited a bare
+`tx.wait()`, which in ethers v6 has no deadline at all, so **one revoke whose
+transaction never mined silenced the very alarm quoted above** — the one signal
+that reports "agents revoked in Haven still hold a live attestation on-chain"
+sat downstream of the stall that caused it. The wait is now bounded
+(`PASSPORT_REVOKE_CONFIRM_TIMEOUT_MS`, 120s, under both the bump worker's 180s
+adoption age and the 300s revocation lease), so a stuck revoke becomes a
+scheduled retry — which the isolation above then handles as designed — instead
+of a stalled sweep. Anything else added to this tick inherits no such ceiling
+and must bound its own chain waits.
 
 Two properties make that safe to run repeatedly and from more than one place:
 

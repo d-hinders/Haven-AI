@@ -69,4 +69,66 @@ describe('parseArgs', () => {
     expect(helpText()).toContain('hermes')
     expect(helpText()).toMatch(/never sends it to Haven/)
   })
+
+  it('parses --runtime-force into options.runtimeForce (#1672)', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_test', '--runtime-force', 'claude-desktop'], {})
+
+    expect(parsed.options.runtimeForce).toBe('claude-desktop')
+    expect(parsed.options.runtime).toBeUndefined()
+    expect(() => parseArgs(['--setup', 'hv_setup_test', '--runtime-force'], {})).toThrow('Missing value for --runtime-force')
+    expect(helpText()).toContain('--runtime-force')
+  })
+})
+
+describe('parseArgs --tombstone (#1681)', () => {
+  it('parses the retirement shape without a setup token or runtime', () => {
+    const parsed = parseArgs(
+      ['--tombstone', '/tmp/agents/agent-old', '--reason', 'superseded', '--replaced-by', 'agent-new'],
+      {},
+    )
+    expect(parsed.tombstone).toEqual({
+      directory: '/tmp/agents/agent-old',
+      reason: 'superseded',
+      replacedBy: 'agent-new',
+    })
+  })
+
+  it('takes precedence over --doctor: no --runtime requirement kicks in', () => {
+    // cli.ts dispatches on tombstone FIRST; parseArgs must not throw doctor's
+    // runtime-required error when both are passed.
+    const parsed = parseArgs(['--tombstone', '/tmp/agents/agent-old', '--doctor'], {})
+    expect(parsed.tombstone?.directory).toBe('/tmp/agents/agent-old')
+    expect(parsed.doctor).toBe(true)
+  })
+
+  it('REFUSES --reason / --replaced-by without --tombstone — never a silent no-op', () => {
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--reason', 'oops'], {})).toThrow(/require --tombstone/)
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--replaced-by', 'a'], {})).toThrow(/require --tombstone/)
+  })
+
+  it('--help still wins over a stray --reason', () => {
+    const parsed = parseArgs(['--help', '--reason', 'oops'], {})
+    expect(parsed.help).toBe(true)
+  })
+})
+
+describe('parseArgs --name (#1696)', () => {
+  it('parses the wiring slug into options.serverName', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_x', '--name', 'work'], {})
+    expect(parsed.options.serverName).toBe('work')
+  })
+
+  it('omitting --name leaves serverName undefined — the bare pair', () => {
+    const parsed = parseArgs(['--setup', 'hv_setup_x'], {})
+    expect(parsed.options.serverName).toBeUndefined()
+  })
+
+  it('MUTATION PROOF: an invalid slug dies AT THE ARGUMENT, before anything else runs', () => {
+    // parseArgs touches no filesystem, so a throw here proves validation
+    // precedes every write — the slug is immutable once wired (#1694).
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--name', 'Bad Slug'], {})).toThrow(/Invalid server name/)
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--name', 'haven'], {})).toThrow(/unnamed pair/)
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--name', 'haven-signer'], {})).toThrow(/unnamed pair/)
+    expect(() => parseArgs(['--setup', 'hv_setup_x', '--name', 'signer-ops'], {})).toThrow(/reserved/)
+  })
 })

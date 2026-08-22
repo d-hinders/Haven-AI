@@ -319,7 +319,11 @@ describe('agent connection setup routes', () => {
     // #1545: the backend is the source of truth for the prompt — pin the
     // --json discoverability sentence and the gate's one name here, not only
     // in the frontend/e2e mirrors.
-    expect(body.setup_prompt).toContain('Appending --json is the ONLY permitted change to the command above.')
+    // #1719: the permitted-changes sentence now names the --runtime retry the
+    // connector asks an agent for by name, and still forbids everything else.
+    expect(body.setup_prompt).toContain('Only two changes to the command above are permitted, and no others: appending --json')
+    expect(body.setup_prompt).toContain('could not determine the agent runtime')
+    expect(body.setup_prompt).toContain('Never invent a runtime name')
     expect(body.setup_prompt).toContain('return to Haven to approve the budget')
     expect(body.setup_prompt).not.toContain('agent rules')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
@@ -521,7 +525,43 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
-  it('includes Codex Desktop runtime in the generated setup command', async () => {
+  // #1672: command-path runtimes carry NO --runtime flag — the connector
+  // detects the environment it executes inside, so an embedded wrong hint can
+  // no longer configure the wrong client. #1682's named picker rows
+  // (claude-code / codex / cowork), #1672's collapsed 'agent', and the legacy
+  // per-client ids all behave the same.
+  it.each(['claude-code', 'codex', 'cowork', 'agent', 'codex-cli', 'codex-desktop'])(
+    'omits --runtime from the setup command for the detected runtime %s',
+    async (runtime) => {
+      const app = await buildApp()
+      primeDb(safeLookup())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agent-connection-setups',
+        payload: {
+          name: 'Research Agent',
+          safe_id: SAFE.id,
+          runtime,
+          allowances: [ALLOWANCE],
+        },
+      })
+
+      expect(response.statusCode).toBe(201)
+      const body = response.json()
+      expect(body.connector_command).toContain(`npx -y ${CONNECTOR_PACKAGE}`)
+      expect(body.connector_command).toContain('--ack-local-tools')
+      expect(body.connector_command).not.toContain('--runtime')
+      expect(body.setup_prompt).toContain('I approve running this exact Haven setup command')
+      expect(body.setup_prompt).toContain(`download and execute the published npm package ${CONNECTOR_PACKAGE}`)
+      expect(body.setup_prompt).toContain('Do not print private keys, API keys, credential file contents, or config secrets')
+      expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
+
+      await app.close()
+    },
+  )
+
+  it('keeps --runtime for snippet-based runtimes, where nothing is detectable', async () => {
     const app = await buildApp()
     primeDb(safeLookup())
 
@@ -531,21 +571,91 @@ describe('agent connection setup routes', () => {
       payload: {
         name: 'Research Agent',
         safe_id: SAFE.id,
-        runtime: 'codex-desktop',
+        runtime: 'claude-desktop',
         allowances: [ALLOWANCE],
       },
     })
 
     expect(response.statusCode).toBe(201)
-    const body = response.json()
-    expect(body.connector_command).toContain(`npx -y ${CONNECTOR_PACKAGE}`)
-    expect(body.connector_command).toContain('--ack-local-tools')
-    expect(body.connector_command).toContain('--runtime codex-desktop')
-    expect(body.setup_prompt).toContain('I approve running this exact Haven setup command')
-    expect(body.setup_prompt).toContain(`download and execute the published npm package ${CONNECTOR_PACKAGE}`)
-    expect(body.setup_prompt).toContain('update Codex MCP config under ~/.codex/config.toml')
-    expect(body.setup_prompt).toContain('Do not print private keys, API keys, credential file contents, or config secrets')
-    expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
+    expect(response.json().connector_command).toContain('--runtime claude-desktop')
+
+    await app.close()
+  })
+
+  // #1682: OpenClaw is a snippet runtime, so it keeps the flag like every
+  // other snippet row. This requires the connector's `openclaw` alias to be
+  // PUBLISHED — an id the published connector does not know is refused before
+  // any side effect (#1672's no-detection-no-flag rule), so a connect release
+  // must reach npm before this row is usable in production.
+  it('keeps --runtime openclaw for the OpenClaw snippet runtime, and stores the picked id', async () => {
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        runtime: 'openclaw',
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().connector_command).toContain('--runtime openclaw')
+    const insertSetup = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO agent_connection_setups'),
+    )
+    expect(insertSetup?.[1] as unknown[]).toContain('openclaw')
+
+    await app.close()
+  })
+
+  // Local MCP follows the command path, so the two new named rows get it and
+  // a snippet row still does not.
+  it.each(['codex', 'cowork'])(
+    'accepts local_mcp for the %s runtime',
+    async (runtime) => {
+      const app = await buildApp()
+      primeDb(safeLookup())
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agent-connection-setups',
+        payload: {
+          name: 'Research Agent',
+          safe_id: SAFE.id,
+          runtime,
+          local_mcp: true,
+          allowances: [ALLOWANCE],
+        },
+      })
+
+      expect(response.statusCode).toBe(201)
+      expect(response.json().connector_command).toContain('--local')
+
+      await app.close()
+    },
+  )
+
+  it('still rejects local_mcp for the OpenClaw snippet runtime', async () => {
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: {
+        name: 'Research Agent',
+        safe_id: SAFE.id,
+        runtime: 'openclaw',
+        local_mcp: true,
+        allowances: [ALLOWANCE],
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
 
     await app.close()
   })

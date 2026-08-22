@@ -734,7 +734,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     ? body.runtime.trim().slice(0, 80)
     : null
   if (body.local_mcp === true && (!runtime || !LOCAL_MCP_RUNTIMES.has(runtime))) {
-    reply.code(400).send({ error: 'Local MCP is only available for Claude Code and Codex runtimes' })
+    reply.code(400).send({ error: 'Local MCP is only available for the Claude Code, Codex, and Cowork runtimes' })
     return null
   }
   return {
@@ -749,7 +749,19 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
   }
 }
 
-const LOCAL_MCP_RUNTIMES = new Set(['claude-code', 'codex-cli', 'codex-desktop'])
+// The command-path runtimes: Claude Code, Codex, and Cowork (which runs
+// Claude Code's config). #1682 replaced #1672's collapsed 'agent' entry with
+// named rows, and 'agent' stays accepted for the rollout window in which a
+// deployed frontend still sends it. The legacy per-client ids stay too, for
+// setups created before either change.
+const LOCAL_MCP_RUNTIMES = new Set([
+  'claude-code',
+  'codex',
+  'cowork',
+  'agent',
+  'codex-cli',
+  'codex-desktop',
+])
 
 async function resolveUserSafe(userId: string, safeId?: string): Promise<UserSafeRow | null> {
   return setups.findUserSafe(userId, safeId)
@@ -1168,6 +1180,22 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
   }
 }
 
+// #1672: command-path runtimes get NO --runtime flag — the connector detects
+// the environment it executes inside (CLAUDECODE/CODEX_*/… markers), and an
+// embedded wrong hint used to silently configure the wrong client. #1682's
+// named rows (claude-code / codex / cowork) are that same path; 'agent' and
+// the legacy per-client ids keep older clients and older setup rows flag-free
+// too. Snippet-only runtimes (claude-desktop, cursor, …) keep the flag: their
+// command is run from a plain terminal where nothing is detectable.
+const DETECTED_RUNTIMES = new Set([
+  'claude-code',
+  'codex',
+  'cowork',
+  'agent',
+  'codex-cli',
+  'codex-desktop',
+])
+
 function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: string | null, localMcp = false): string {
   const args = [
     `npx -y ${CONNECTOR_PACKAGE}`,
@@ -1175,7 +1203,7 @@ function buildConnectorCommand(setupToken: string, apiUrl: string, runtime: stri
     `--api ${shellQuote(apiUrl)}`,
     '--ack-local-tools',
   ]
-  if (runtime) args.push(`--runtime ${shellQuote(runtime)}`)
+  if (runtime && !DETECTED_RUNTIMES.has(runtime)) args.push(`--runtime ${shellQuote(runtime)}`)
   if (localMcp) args.push('--local')
   return args.join(' ')
 }
@@ -1205,7 +1233,14 @@ function buildSetupPrompt(command: string, runtime: string | null, apiUrl: strin
     // #1545: one sentence of discoverability for agent operators — the flag is
     // opt-in and the pasted command stays the prose-mode default, so the
     // relay-to-human narration keeps working when the operator ignores this.
-    'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr. Appending --json is the ONLY permitted change to the command above.',
+    'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr.',
+    // #1719: the old sentence said appending --json was the ONLY permitted
+    // change, which forbade the one retry the connector now asks an agent for
+    // by name. Exactly two changes are permitted, and the second is bounded to
+    // a value the refusal itself listed — an agent must never invent a runtime
+    // name, because the name selects which app gets an API key and a signing
+    // key written into it.
+    'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.',
     '',
     // #1545: "budget" is the connect flow's one name for the approval gate —
     // the same word the connector's own wait loop and celebration use (#1542).

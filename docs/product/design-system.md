@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-07-13"
+last-verified: "2026-08-21" # #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass
 ---
 
 # Haven Design System
@@ -82,6 +82,34 @@ Same rule as v1: **never repurpose a semantic color**.
 
 **Contrast guarantee:** every ink and semantic text token meets WCAG AA (≥4.5:1) against white, its own `-soft` background, and the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover). Guarded by `packages/frontend/src/__tests__/token-contrast.test.ts` — if you change a token, that test tells you whether it still clears the bar.
 
+### Opacity on a token colour ([#1708](https://github.com/d-hinders/Haven-AI/issues/1708))
+
+**Want a token at partial opacity? Use the Tailwind alias, never the arbitrary
+value.** `ring-brand/30`, `border-danger/40`, `bg-warning/10` — not
+`ring-[var(--v2-brand)]/30`.
+
+The arbitrary-value form does not merely look worse; it **compiles to nothing**.
+Tailwind cannot re-compose a colour whose value is a bare `var()`, so it drops
+the utility from the output with no error, no warning and no class. That is how
+68 focus rings across 39 files spent months setting a ring *width* with no ring
+*colour*, leaving `--tw-ring-color` at Tailwind's preflight default and
+rendering blue-500/50 instead of brand indigo.
+
+The mechanism: every `--v2-<name>: #RRGGBB` above is paired with a channel form
+`--v2-<name>-rgb: R G B`, and `tailwind.config.js` reads the channels through an
+`<alpha-value>` placeholder. One theme entry then serves both the solid
+(`bg-brand`) and the translucent (`ring-brand/30`) use. Two rules follow, and
+`src/__tests__/design-token-alpha.test.ts` enforces both against the **compiled
+CSS** — source-level checking cannot see this defect, which is the whole reason
+it survived 68 call-sites:
+
+- adding a colour means adding **both** forms — the hex stays, because the
+  contrast guarantee above is checked by parsing those hex values;
+- a theme colour is never a bare `var()`.
+
+A solid arbitrary value with **no** opacity modifier — `bg-[var(--v2-brand)]`,
+`text-[var(--v2-ink-2)]` — is still fine and still used widely.
+
 ### Chain identity
 
 `--v2-chain-*` (Base, Gnosis, testnet, plus `NetworkPill`'s sky/amber soft-pill scale) tells networks apart in `NetworkPill` and `NetworkSwitcher`. These are **identity** colours — deliberately outside the semantic rule above. Never reuse a chain colour to carry success/warning meaning, and never route money tone through them. Live swatches on `/design-system` → "Colour tokens".
@@ -109,6 +137,30 @@ Cards on hover get a brand‑tinted lift only when interactive:
 Raised card elevation is reserved for the few surfaces that anchor a page, such as the dashboard hero and account balance card. Popover shadow is for floating menus, tooltips, and toasts.
 
 **No glow shadows on text**, no colored shadows on buttons.
+
+### Layering (z-index) ([#1749](https://github.com/d-hinders/Haven-AI/issues/1749))
+
+Every stacking layer has a named token. **Reach for a token, never a fresh number.**
+
+```css
+--v2-z-content:        10;   /* in-flow overlaps: badges, gradient washes */
+--v2-z-sticky:         20;   /* sticky table headers */
+--v2-z-chrome:        100;   /* TopBar */
+--v2-z-chrome-popover: 110;  /* popovers anchored in the chrome */
+--v2-z-nav-scrim:     130;   /* mobile drawer scrim */
+--v2-z-nav-drawer:    140;   /* mobile drawer */
+--v2-z-nav-toggle:    150;   /* the Open / Close sidebar toggle */
+--v2-z-modal:         200;   /* Modal, SidePanel */
+--v2-z-tooltip:       210;
+--v2-z-panel:         250;   /* AgentPanel */
+--v2-z-toast:        9999;   /* Toast, skip-to-content link */
+```
+
+The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it slides over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top 56px with the bar, and its scrim exists to dim everything behind it — the bar included. Let the bar win and the drawer is decapitated, the scrim dims all but the top strip, and the toggle (which sits *inside* that strip by design, in the gap the bar reserves for it) cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
+
+Tiers are spaced by 10 so a new layer lands between two without renumbering. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
+
+That test reads source, so it cannot see stacking contexts or hit-testing. `e2e/mobile-nav-layering.spec.ts` is the half that can: it drives a real engine at four widths below `lg` and asserts `document.elementFromPoint` at the toggle's centre returns the toggle.
 
 ---
 
@@ -175,7 +227,7 @@ Do not use marketing hero typography for normal authenticated pages.
 Primary (`Button` `variant="primary"`):
 - `bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)]`
 - `shadow-[var(--v2-shadow-button)]`
-- focus ring: `ring-2 ring-[var(--v2-brand)]/30 ring-offset-2`
+- focus ring: `ring-2 ring-brand/30 ring-offset-2` (theme alias — see *Opacity on a token colour* below; the arbitrary-value form compiles to no ring colour at all)
 - Three sizes: `sm` (h‑9), `md` (h‑10), `lg` (h‑11)
 - Trailing arrow icon optional, slides 2px on hover via wrapper `group-hover:gap-2`
 
@@ -188,6 +240,61 @@ White‑on‑brand (used inside dark CTA band):
 - `bg-white/10 text-white border border-white/20 backdrop-blur` for secondary
 
 **No gradient buttons. No glow shadows.**
+
+**Tap targets ([#1726](https://github.com/d-hinders/Haven-AI/issues/1726)).** `sm` paints
+36px tall and `md` 40px — both under the ~44px usually cited as comfortable for touch.
+(Not an accessibility failure: WCAG 2.2 AA *Target Size (Minimum)* floors at 24px. It is
+mis-tap rate, and it bites hardest in row lists of destructive actions.) `Button` closes
+the gap without moving any pixels: `sm` and `md` carry a transparent pseudo-element that
+extends the **hit area** to 44px while the button still renders at its declared height.
+`lg` is already 44px and carries nothing.
+
+Consequences worth knowing:
+
+- **Do not "fix" this by raising `h-9`/`h-10`.** The compact sizes are compact on purpose
+  — tables, toolbars and row lists chose them for density — and changing them moves the
+  rhythm of every one of those surfaces and invalidates the `/design-system` baselines.
+- **The target grows vertically only.** An `sm` button's width already clears 44px at real
+  call sites; growing it sideways would let a button in a `gap-2` toolbar swallow taps
+  meant for its neighbour.
+- **Keep at least 8px between stacked controls.** The overhang is 4px per edge on `sm` and
+  2px on `md`, so at the 8px (`gap-2`) spacing this system typically uses between stacked
+  controls, adjacent targets meet but never overlap. Tighter than that and two buttons
+  fight over the same pixels — this is the one new constraint the mechanism introduces.
+- Choosing `size` therefore stays a **density** decision, not an ergonomics one.
+
+**The rule outlives the primitive ([#1766](https://github.com/d-hinders/Haven-AI/issues/1766)).**
+A control that is not a `Button` inherits none of the above automatically, and the
+first one to need it was the mobile sidebar toggle — a hand-rolled 32px square that
+#1749 had just made reachable, so an undersized target went from moot to load-bearing
+on the entry point to primary navigation. It borrows the same mechanism (transparent
+`::after`, paint unchanged) with two deviations worth knowing before you copy it:
+
+- **An icon-only square grows in BOTH axes.** "Vertical only" is not the rule; it is a
+  consequence of a labelled `sm` Button's width already clearing 44px. A 32px square
+  has no long axis, so the overlay is `h-11 w-11` and centred on both. What still
+  applies is the *reason* behind the original rule — check what the widened target now
+  reaches, in **both** states the control has. For the toggle, closed: right box edge
+  x=54, nearest interactive control (`NetworkSwitcher`) at x=68, 14px of clearance.
+  Open: the target floats over the drawer's own logo band, which it already did at 32px
+  — what is asserted there is that the logo link is still reachable at its centre, not
+  that nothing overlaps. Both are pinned in `e2e/mobile-nav-tap-target.mobile.spec.ts`.
+- **Do not add `relative` to an already-positioned element.** `Button` needs it because
+  it is static. A `fixed` or `absolute` control is already a positioning context, and
+  adding `relative` un-fixes it — on the toggle that shifts the whole app shell 32px
+  and drops the control back under `TopBar`, which was #1749. Do not take this on the
+  prose's word: it is a claim about which of two same-property utilities the cascade
+  keeps, so it is pinned by a test rather than by this paragraph —
+  `e2e/mobile-nav-tap-target.mobile.spec.ts` asserts `header.left === 0` as an absolute
+  anchor, and that assertion exists **because** the mutation passed three other mobile
+  specs first.
+
+**Prove it rendered, not in the class string.** A pseudo-element overlay has several
+silent no-op failure modes (a clipping ancestor, a positioning context resolving
+elsewhere, another element winning the band), and none of them exist in jsdom — which
+has no layout, no stacking contexts and no hit-testing. Measure the hit rectangle by
+walking `elementFromPoint` outward from the centre in a real engine; `getBoundingClientRect`
+returns the border box and reports 32×32 even when the overlay works perfectly.
 
 ### Cards (`Card`)
 
@@ -250,6 +357,8 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 - Empty state renders inside the table with the correct column span.
 
 Use `TransactionActivityRow` for compact dashboard, account detail, or agent detail previews.
+
+A collapsing table like this one has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
 
 ### Sections (`Section`)
 

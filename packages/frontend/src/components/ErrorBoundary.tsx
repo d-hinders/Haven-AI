@@ -46,7 +46,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
             {this.state.error && (
               <details className="text-left mb-5 group">
-                <summary className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] cursor-pointer select-none inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30 rounded">
+                <summary className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] cursor-pointer select-none inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 rounded">
                   <Icon icon={ChevronRight} className="h-2.5 w-2.5 transition-transform group-open:rotate-90" />
                   Show technical details
                 </summary>
@@ -58,7 +58,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
             <button
               onClick={() => window.location.reload()}
-              className="px-4 py-2 rounded-md bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+              className="px-4 py-2 rounded-md bg-[var(--v2-brand)] text-white text-sm font-medium hover:bg-[var(--v2-brand-strong)] transition-colors shadow-[var(--v2-shadow-button)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             >
               Refresh page
             </button>

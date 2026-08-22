@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DelegateSweepApi } from './delegate-sweep.js'
 import { createErc20Contract, createJsonRpcProvider, createWallet } from './provider.js'
 import { sweepUsdcAddress } from './sweep.js'
-import { HavenSigningError, type HavenAgent } from './types.js'
+import { DEFAULT_CONFIRMATION_TIMEOUT_MS, HavenSigningError, type HavenAgent } from './types.js'
 
 vi.mock('./provider.js', () => ({
   createErc20Contract: vi.fn(),
@@ -64,14 +64,16 @@ describe('DelegateSweepApi', () => {
       to: AGENT.safeAddress,
       value: 1_000_000_000_000_000_000n - reserved,
     })
-    expect(usdcTx.wait).toHaveBeenCalledWith(1)
-    expect(ethTx.wait).toHaveBeenCalledWith(1)
+    // Confirmations AND a deadline (#1756) — `wait(1)` alone was unbounded.
+    expect(usdcTx.wait).toHaveBeenCalledWith(1, DEFAULT_CONFIRMATION_TIMEOUT_MS)
+    expect(ethTx.wait).toHaveBeenCalledWith(1, DEFAULT_CONFIRMATION_TIMEOUT_MS)
     expect(result).toMatchObject({
       fromAddress: AGENT.delegateAddress,
       toAddress: AGENT.safeAddress,
+      unconfirmed: false,
       transfers: [
-        { asset: 'USDC', amountAtomic: '1500000', txHash: '0xusdc-receipt' },
-        { asset: 'ETH', amountAtomic: String(1_000_000_000_000_000_000n - reserved), txHash: '0xeth-receipt' },
+        { asset: 'USDC', amountAtomic: '1500000', txHash: '0xusdc-receipt', confirmation: 'confirmed' },
+        { asset: 'ETH', amountAtomic: String(1_000_000_000_000_000_000n - reserved), txHash: '0xeth-receipt', confirmation: 'confirmed' },
       ],
     })
   })
@@ -92,7 +94,13 @@ describe('DelegateSweepApi', () => {
 
     expect(createErc20Contract).not.toHaveBeenCalled()
     expect(wallet.sendTransaction).toHaveBeenCalledWith({ to: AGENT.safeAddress, value: 958_000n })
-    expect(result.transfers).toEqual([expect.objectContaining({ asset: 'ETH', amountAtomic: '958000' })])
+    // This leg's `wait` resolves null, which is `unconfirmed` since #1756 —
+    // stated here so the case is asserted rather than absorbed by a loose
+    // `objectContaining`.
+    expect(result.transfers).toEqual([
+      expect.objectContaining({ asset: 'ETH', amountAtomic: '958000', txHash: '0xeth', confirmation: 'unconfirmed' }),
+    ])
+    expect(result.unconfirmed).toBe(true)
   })
 
   it('preserves missing-key, delegate, and RPC errors before any transfer', async () => {

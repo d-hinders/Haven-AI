@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import crypto from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -14,6 +14,12 @@ export interface StoredCredentialPaths {
 export interface WriteCredentialInput {
   baseDir?: string
   agentId: string
+  /**
+   * #1696: wiring slug. Named agents live at ~/.haven/agents/<slug>/ (stable
+   * across a re-key by construction — the slug never rotates); unnamed keep
+   * the historical ~/.haven/agents/<agent-uuid>/. Both schemes coexist.
+   */
+  serverName?: string
   apiKey: string
   delegateKey: string
   delegateAddress: string
@@ -54,7 +60,7 @@ export async function preflightCredentialStorage(
 }
 
 export async function writeCredentialFiles(input: WriteCredentialInput): Promise<StoredCredentialPaths> {
-  const directory = defaultAgentDirectory(input.agentId, input.baseDir)
+  const directory = defaultAgentDirectory(input.serverName ?? input.agentId, input.baseDir)
   await mkdir(directory, { recursive: true, mode: 0o700 })
   await restrictPermissions(directory, 0o700, input.warn)
 
@@ -132,6 +138,26 @@ export async function writeCredentialFiles(input: WriteCredentialInput): Promise
   }
 
   return { directory, identityPath, signerPath, agentPath }
+}
+
+/**
+ * #1696: a wiring slug keys a credential directory, and connect never
+ * overwrites credential files — a taken slug is refused before any side
+ * effect. A leftover EMPTY slug directory (no identity.json) does not count
+ * as taken. Replacing a named agent's credentials in place is #1700's
+ * explicit re-key path, never a re-run.
+ */
+export async function assertServerSlugAvailable(serverName: string, baseDir?: string): Promise<void> {
+  const directory = defaultAgentDirectory(serverName, baseDir)
+  try {
+    await stat(join(directory, 'identity.json'))
+  } catch {
+    return
+  }
+  throw new Error(
+    `The name "${serverName}" is already wired on this machine (${directory} holds credentials). ` +
+      'Pick a different --name, or revoke and remove that agent first — connect never overwrites credentials.',
+  )
 }
 
 export function defaultAgentDirectory(agentId: string, baseDir = join(homedir(), '.haven', 'agents')): string {

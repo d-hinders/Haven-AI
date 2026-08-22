@@ -3,8 +3,8 @@
 /**
  * Onboarding — one screen (#1162).
  *
- * Signup is passkey-only and single-screen: welcome + network + "create with
- * Face ID / Touch ID", then a success state IN PLACE that hands off to the
+ * Signup is passkey-only and single-screen: welcome + network + "Create
+ * account with a passkey", then a success state IN PLACE that hands off to the
  * dashboard, where `DashboardOnboardingGuide` takes over. There is no signer
  * fork here — the delegation rail (epic #821/#836) is passkey-first, and an
  * EOA is a later addition to an account's signer set, not a starting choice.
@@ -286,7 +286,7 @@ export default function OnboardingClient() {
                     }}
                   />
                 </div>
-                <div className="animate-check-pop relative flex h-14 w-14 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] ring-1 ring-inset ring-[var(--v2-brand)]/25 shadow-[var(--v2-shadow-button)]">
+                <div className="animate-check-pop relative flex h-14 w-14 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] ring-1 ring-inset ring-brand/25 shadow-[var(--v2-shadow-button)]">
                   {/* Heavier stroke: the 56px success bloom check reads too light at 1.5. */}
                   <Icon icon={Check} className="h-7 w-7 text-[var(--v2-brand)]" strokeWidth={2.4} />
                 </div>

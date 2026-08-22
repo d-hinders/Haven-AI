@@ -35,12 +35,21 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   const { setup, setupStatus, connectView } = flow
   if (!setup) return null
 
+  // #1672: once the connector has run, the setup status carries the runtime it
+  // DETECTED in the executing environment — more truthful than the picker's
+  // choice, which on the command path names a product (#1682: claude-code /
+  // codex / cowork) without settling which client the command actually ran
+  // inside. Runtime-specific copy (restart guidance, the Codex Desktop note)
+  // keys off this; before the connector reports, it falls back to the picked
+  // value.
+  const effectiveRuntime = setupStatus?.runtime ?? flow.runtime
+
   return (
     <ConnectStepShell phase={shellPhase(connectView?.kind)} stateKey={connectView?.kind ?? 'none'}>
       {connectView?.kind === 'waiting_for_connector' && (
         <WaitingForConnector
           setup={setup}
-          runtime={flow.runtime}
+          runtime={effectiveRuntime}
           copied={flow.copied}
           onCopy={flow.copyText}
           manualPathRevealed={flow.manualPathRevealed}
@@ -128,7 +137,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
 
       {connectView?.kind === 'active' && (
         <SetupDoneState
-          runtime={flow.runtime}
+          runtime={effectiveRuntime}
           skillInstalled={Boolean(setupStatus?.install_status?.skill_installed)}
           agentName={setupStatus?.agent.name}
           budgets={setupStatus?.agent_budget}

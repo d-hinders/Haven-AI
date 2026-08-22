@@ -162,6 +162,35 @@ describe('Auth routes', () => {
       expect(response.statusCode).toBe(409)
       expect(response.json().error).toBe('An account with this email already exists')
     })
+
+    it('#1654: the 409 enumeration disclosure is ACCEPTED — and the reason is that 201 carries the token', async () => {
+      // Signup answers 409 vs 201, so one unauthenticated request reveals
+      // whether an address has an account. That is a documented, deliberate
+      // tradeoff, not an oversight (#1654) — and this test pins the
+      // structural fact the acceptance rests on: a successful signup returns
+      // the SESSION TOKEN in the 201 body. Answering 201 for a taken address
+      // would therefore either mint a token for someone else's account or
+      // return a token-less 201 that is an equally strong oracle. If signup
+      // ever stops returning the token (an email-verification flow), this
+      // fails, which is the signal to revisit the acceptance in the same
+      // change — the spec description says so too.
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (/SELECT id FROM users/i.test(String(sql))) return { rows: [] }
+        return {
+          rows: [{ id: USER_UUID, name: 'Ada Lovelace', email: 'fresh@example.com' }],
+        }
+      })
+
+      const created = await app.inject({
+        method: 'POST',
+        url: '/auth/signup',
+        payload: { name: 'Ada Lovelace', email: 'fresh@example.com', password: 'password123' },
+      })
+
+      expect(created.statusCode).toBe(201)
+      expect(typeof created.json().token).toBe('string')
+      expect(created.json().token.length).toBeGreaterThan(0)
+    })
   })
 
   // --- POST /auth/login ---
@@ -400,5 +429,91 @@ describe('safes payload carries the rail (#1069)', () => {
     const src = readFileSync(new URL('../auth.ts', import.meta.url), 'utf8')
     const mapped = src.match(/\.map\(sessionSafePayload\)/g) ?? []
     expect(mapped.length, 'both /auth/login and /auth/me must map through sessionSafePayload').toBe(2)
+  })
+})
+
+/**
+ * #1670: the auth rate-limit tier, in both of its states. Separate app
+ * instances because the tier is decided at ROUTE REGISTRATION from the
+ * trust-proxy setting — the property under test is precisely that the two
+ * configurations register different routes.
+ */
+describe('auth rate limiting (#1670)', () => {
+  async function buildRateLimitedApp(trustProxyHops: number): Promise<FastifyInstance> {
+    const { default: Fastify } = await import('fastify')
+    const { default: fastifyJwt } = await import('@fastify/jwt')
+    const { default: rateLimitPlugin } = await import('@fastify/rate-limit')
+    const { rateLimitKeyFor } = await import('../../middleware/rate-limit.js')
+    const { default: routes } = await import('../auth.js')
+
+    const app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    // Mirrors index.ts: non-global, shared key generator.
+    await app.register(rateLimitPlugin, {
+      global: false,
+      keyGenerator: (request: { headers: Record<string, string | string[] | undefined>; ip: string }) => rateLimitKeyFor(request),
+    })
+    await app.register(routes, { prefix: '/auth', trustProxyHops })
+    return app
+  }
+
+  it('MUTATION PROOF: with a trusted proxy, the 11th signup from one address is 429', { timeout: 30_000 }, async () => {
+    const app = await buildRateLimitedApp(1)
+    // Free email on every probe — the enumeration shape the limit throttles.
+    mockQuery.mockImplementation(async () => ({ rows: [] }))
+
+    let limited = 0
+    for (let i = 0; i < 12; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/auth/signup',
+        payload: { name: 'Ada', email: `probe-${i}@example.com`, password: 'password123' },
+      })
+      if (res.statusCode === 429) limited++
+    }
+    // 10/min for signup: requests 11 and 12 must be refused. Against a build
+    // where the route never spreads the tier, this is 0 — that IS the bug.
+    expect(limited).toBe(2)
+    await app.close()
+  })
+
+  it('login has its own, looser ceiling (30/min)', { timeout: 30_000 }, async () => {
+    // 31 probes × a REAL bcrypt compare each (#1646 makes the comparison run
+    // on the unknown-email path too, deliberately) is ~2s of hashing alone —
+    // under a loaded parallel suite the default 5s cap flakes.
+    const app = await buildRateLimitedApp(1)
+    mockQuery.mockImplementation(async () => ({ rows: [] }))
+
+    let limited = 0
+    for (let i = 0; i < 31; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: `probe-${i}@example.com`, password: 'x'.repeat(12) },
+      })
+      if (res.statusCode === 429) limited++
+    }
+    expect(limited).toBe(1)
+    await app.close()
+  })
+
+  it('SELF-DISARMING: with no trusted proxy there is NO limit — a shared bucket would be a DoS, not a protection', { timeout: 30_000 }, async () => {
+    // The property that makes shipping this safe before the operator flips
+    // TRUST_PROXY_HOPS: ungated, every external caller behind the proxy is
+    // one "IP", and a 10/min ceiling on that bucket lets a single attacker
+    // lock every real user out of signup. So untrusted → unlimited, exactly
+    // as before this tier existed.
+    const app = await buildRateLimitedApp(0)
+    mockQuery.mockImplementation(async () => ({ rows: [] }))
+
+    for (let i = 0; i < 15; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/auth/signup',
+        payload: { name: 'Ada', email: `probe-${i}@example.com`, password: 'password123' },
+      })
+      expect(res.statusCode).not.toBe(429)
+    }
+    await app.close()
   })
 })

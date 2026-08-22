@@ -26,6 +26,7 @@ import ConfirmDialog from './ConfirmDialog'
 import { Icon } from './ui/Icon'
 import { useToast } from './ui/Toast'
 import { truncateAddress } from '@/components/haven'
+import { passkeyRowLabel } from '@/lib/passkeyLabels'
 
 interface Props {
   safeAddress: string
@@ -114,7 +115,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
             {signers.owner_address ? (
               <div className="flex items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--v2-ink)]">A connected wallet</p>
+                  <p className="text-sm font-medium text-[var(--v2-ink)]">Wallet</p>
                   <p className="truncate text-xs text-[var(--v2-ink-muted)]">
                     {truncateAddress(signers.owner_address)}
                   </p>
@@ -141,7 +142,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
               <div key={pk.key_id} className="flex items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--v2-ink)]">
-                    {i === 0 ? 'Face ID / Touch ID' : `Backup ${i}`}
+                    {passkeyRowLabel(pk.created_at, i)}
                   </p>
                   <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
                     {truncateAddress(pk.key_id)}
@@ -163,15 +164,20 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
             ))}
           </Card.Section>
 
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Button disabled={busy || !ready} onClick={() => void handle(enrollBackupPasskey(), 'Backup added.')}>
-              {busy ? 'Working…' : 'Add a backup with Face ID / Touch ID'}
-            </Button>
-            {!signers.owner_address ? (
-              <Button variant="ghost" disabled={busy || !ready} onClick={() => setShowWallet((v) => !v)}>
-                Or add a wallet
+          <div className="mt-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <Button disabled={busy || !ready} onClick={() => void handle(enrollBackupPasskey(), 'Backup added.')}>
+                {busy ? 'Working…' : 'Add a backup passkey'}
               </Button>
-            ) : null}
+              {!signers.owner_address ? (
+                <Button variant="ghost" disabled={busy || !ready} onClick={() => setShowWallet((v) => !v)}>
+                  Or add a wallet
+                </Button>
+              ) : null}
+            </div>
+            <p className="mt-1.5 text-xs text-[var(--v2-ink-muted)]">
+              Approve with Face ID, Touch ID, Windows Hello, or your device PIN.
+            </p>
           </div>
 
           {showWallet && !signers.owner_address ? (
@@ -210,7 +216,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
             // device that holds the passkey — say so BEFORE the browser's
             // QR dialog surprises them.
             <p className="mt-3 text-xs text-[var(--v2-ink-muted)]">
-              This account&apos;s Face ID / Touch ID may be on another device — your browser will
+              This account&apos;s passkey may be on another device — your browser will
               guide you there when you approve.
             </p>
           ) : null}
@@ -240,7 +246,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
       >
         <div className="space-y-3">
           <p>
-            Open Haven on a device that still has a working approval — a backup Face ID, or the
+            Open Haven on a device that still has a working approval — a backup passkey, or the
             wallet you added. Add a replacement for the device you lost so you&apos;re back to two
             ways to approve, then remove the lost one above.
           </p>
@@ -273,7 +279,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
         body={
           <div className="space-y-3">
           <p>
-            This is the last backup on this account. Removing it leaves a single Face ID / Touch ID
+            This is the last backup on this account. Removing it leaves a single passkey
             as the only way to approve anything — this account will have no recovery.
           </p>
           <p>
@@ -299,7 +305,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
         body={
           <div className="space-y-3">
           <p>
-            Removing this Face ID / Touch ID leaves this account with one way to approve. If that
+            Removing this passkey leaves this account with one way to approve. If that
             remaining way is lost, this account will have no recovery.
           </p>
           <p>

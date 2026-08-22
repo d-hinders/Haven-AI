@@ -60,7 +60,7 @@ export function DetailsStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           ))}
         </Select>
         <p className="mt-1.5 text-xs text-[var(--v2-ink-3)]">
-          Haven tailors the setup prompt and restart steps to this environment. "Other" always works.
+          Pick where your agent runs — Haven tailors the setup steps. “Not listed” works for any MCP-aware agent.
         </p>
         {flow.localMcpSupported && (
           /* #1411: footnote weight, not a technical essay. A power-user

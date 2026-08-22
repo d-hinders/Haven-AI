@@ -29,7 +29,15 @@ export type RuntimeSnippetId =
   | 'cursor'
   | 'windsurf'
   | 'vscode'
+  /**
+   * #1682: Insiders folded into the VS Code snippet — the two were identical
+   * in config shape AND instructions, so they rendered as two tabs saying the
+   * same thing. The id stays ACCEPTED (it resolves to the VS Code snippet) so
+   * stored setup rows and `--runtime vscode-insiders` keep working; it just
+   * no longer has a surface of its own.
+   */
   | 'vscode-insiders'
+  | 'openclaw'
   | 'generic-mcp'
   | 'sdk-cli'
   | 'python'
@@ -306,7 +314,7 @@ function vsCodeInline(cred: AgentCredentialJson): RuntimeSnippet {
     label: 'VS Code',
     language: 'json',
     guidance:
-      'Add this to your VS Code MCP settings and reload the window. ' +
+      'Add this to your VS Code MCP settings and reload the window. VS Code Insiders uses the same config. ' +
       '(Open the Command Palette → "MCP: Open User Configuration" or edit .vscode/mcp.json in your workspace.)',
     destination: '.vscode/mcp.json',
     code: jsonBlock(config),
@@ -329,20 +337,19 @@ function vsCodeFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
     ...vsCodeInline(cred),
     guidance:
       'First download the credentials below and save them somewhere private. Then add this to ' +
-      'your VS Code MCP settings and reload the window.',
+      'your VS Code MCP settings (Insiders included) and reload the window.',
     code: jsonBlock(config),
     mode: 'file',
     consentNote: CONSENT_NOTE,
   }
 }
 
-// ── VS Code Insiders ─────────────────────────────────────────────
+// ── OpenClaw ──────────────────────────────────────────────────────
 
-function vsCodeInsidersInline(cred: AgentCredentialJson): RuntimeSnippet {
+function openClawInline(cred: AgentCredentialJson): RuntimeSnippet {
   const config = {
-    servers: {
+    mcpServers: {
       haven: {
-        type: 'stdio',
         command: 'npx',
         args: ['-y', MCP_PACKAGE],
         env: stripUndefined({
@@ -356,34 +363,33 @@ function vsCodeInsidersInline(cred: AgentCredentialJson): RuntimeSnippet {
     },
   }
   return {
-    id: 'vscode-insiders',
-    label: 'VS Code Insiders',
+    id: 'openclaw',
+    label: 'OpenClaw',
     language: 'json',
     guidance:
-      'Add this to your VS Code Insiders MCP settings and reload the window. ' +
-      '(Open the Command Palette → "MCP: Open User Configuration" or edit .vscode/mcp.json in your workspace.)',
-    destination: '.vscode/mcp.json',
+      'Add this to OpenClaw’s MCP config, then restart the gateway. ' +
+      '(The config lives at ~/.openclaw/openclaw.json — create the file if it’s not there yet.)',
+    destination: '~/.openclaw/openclaw.json',
     code: jsonBlock(config),
     mode: 'inline',
     consentNote: CONSENT_NOTE,
   }
 }
 
-function vsCodeInsidersFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
+function openClawFile(cred: AgentCredentialJson, path: string): RuntimeSnippet {
   const config = {
-    servers: {
+    mcpServers: {
       haven: {
-        type: 'stdio',
         command: 'npx',
         args: ['-y', MCP_PACKAGE, '--credentials', path],
       },
     },
   }
   return {
-    ...vsCodeInsidersInline(cred),
+    ...openClawInline(cred),
     guidance:
       'First download the credentials below and save them somewhere private. Then add this to ' +
-      'your VS Code Insiders MCP settings and reload the window.',
+      'OpenClaw’s MCP config and restart the gateway.',
     code: jsonBlock(config),
     mode: 'file',
     consentNote: CONSENT_NOTE,
@@ -508,7 +514,7 @@ export function buildRuntimeSnippets(input: RuntimeSnippetInput, mode: RuntimeSn
       cursorFile(input.credential, path),
       windsurfFile(input.credential, path),
       vsCodeFile(input.credential, path),
-      vsCodeInsidersFile(input.credential, path),
+      openClawFile(input.credential, path),
       genericFile(input.credential, path),
       sdkFile(input.credential, path),
       pythonFile(input.credential, path),
@@ -519,7 +525,7 @@ export function buildRuntimeSnippets(input: RuntimeSnippetInput, mode: RuntimeSn
     cursorInline(input.credential),
     windsurfInline(input.credential),
     vsCodeInline(input.credential),
-    vsCodeInsidersInline(input.credential),
+    openClawInline(input.credential),
     genericInline(input.credential),
     sdkInline(input.credential),
     pythonInline(input.credential),
@@ -533,7 +539,10 @@ export function buildRuntimeSnippet(
   mode: RuntimeSnippetMode,
 ): RuntimeSnippet {
   const all = buildRuntimeSnippets(input, mode)
-  const found = all.find((s) => s.id === id)
+  // #1682: Insiders is an accepted ALIAS of the VS Code snippet, not a
+  // surface of its own — same config shape, same instructions.
+  const resolved = id === 'vscode-insiders' ? 'vscode' : id
+  const found = all.find((s) => s.id === resolved)
   if (!found) throw new Error(`Unknown runtime snippet id: ${id}`)
   return found
 }

@@ -5,8 +5,9 @@ covers:
   - packages/backend/src/rails/allowance-nonce-coordinator.ts
   - packages/backend/src/infra/repositories/allowance-nonce-watermarks.ts
   - packages/backend/src/platform/leader-lock.ts
+  - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/infra/relayer.ts
-last-verified: "2026-08-18" # #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
+last-verified: "2026-08-22" # #1745: the "single point of stall" entry drops the ordering constraint it carried — no duplicate attest is queued while the stuck one is live — and records that the operator's same-nonce cancel now completes issuance by itself. The blocked-lane trade itself is unchanged. Prior: #1735: the "self-healing on the queue lane" claim gains its exception — a stuck `passport_attest` is deliberately NOT fee-replaced (a replacement orphans the hash #1043 recovery is keyed off), so that lane blocks until an operator acts; cross-ref to the #1745 ordering constraint. Prior: #1722: the deploy lock's connection hold now has a real ceiling — the confirmation wait is `tx.wait(1, 120_000)`, bracketed under the bump worker's 180 s adoption age, and expiry hands the tx to that worker instead of marking the record failed. The rest of the accept (burst threshold, fail-open scoping, the 502 shape) re-read and unchanged. Prior: #1680: rate-limit counters join the list of things multiple replicas now handle — the plugin's in-process store made the real ceiling max × replicas, fixed with a shared Postgres tier (fail-open, 250 ms deadline, leader-gated sweep) on the same pattern as the #718 nonce watermark. Prior: #1559: queue-lane nonce correctness is DB-arbitrated (submitRecorded stamp-before-broadcast); multi-replica correctness now gated only on the Safe-bound legacy sites (#1440); #1558 bump worker noted on the stall point
 ---
 
 # Backend Scaling
@@ -21,6 +22,20 @@ may now run more than one, and the relayer is what still caps throughput.**
   advisory lock elects one executor per tick; the losers skip rather than queue.
   Without it, an N-replica deployment runs every scan N times and sends up to N
   copies of each alert.
+- **First-deploy races on one counterfactual account**
+  ([#1673](https://github.com/d-hinders/Haven-AI/issues/1673)). `runIfLeader`'s
+  blocking sibling, `withKeyedAdvisoryLock`, serialises the callers that must
+  WAIT and then observe what the winner did — a monitor tick that loses the
+  race should be skipped, but an account deploy that loses still owes its
+  caller an answer. `ensureHybridDeployed` holds it per `(chain, address)` from
+  the bytecode check through to the mined receipt, so two concurrent first
+  payments from a brand-new agent cannot both pass the check and both broadcast
+  a deploy to the same CREATE2 address. Fail-open by construction: an
+  unavailable lock degrades to the pre-#1673 duplicate deploy, which costs a
+  second relayer gas spend rather than correctness. Read that as scoped to the
+  lock — the *request* can still fail, because whatever made the lock
+  unavailable can hit the guarded work too. What the hold costs, and why it is
+  accepted anyway, is worked through in *Accepted cost* below.
 - **Allowance-nonce coordination on every legacy-rail sign-hash builder**
   ([#718](https://github.com/d-hinders/Haven-AI/issues/718),
   [#1196](https://github.com/d-hinders/Haven-AI/issues/1196)). #692 wired the
@@ -58,6 +73,167 @@ may now run more than one, and the relayer is what still caps throughput.**
   thing that keeps the money safe under every failure mode; nothing here is
   load-bearing for correctness.
 
+- **Rate-limit counters** ([#1680](https://github.com/d-hinders/Haven-AI/issues/1680)).
+  `@fastify/rate-limit` ships an in-process LRU store, so every replica counted
+  only the requests routed to it: the effective ceiling was `max × replicas`,
+  and it ROSE with load, because more traffic means more replicas. That is the
+  worst direction for a control whose job is to bound automation, and it was
+  invisible from inside — live probing of dev read `x-ratelimit-remaining` back
+  as two interleaved descending series, which is what the defect looks like
+  from outside.
+
+  The store is now `rate_limit_counters`, one row per bucket key, incremented
+  by a single `ON CONFLICT DO UPDATE` so concurrent replicas serialise on the
+  row rather than racing. Same two obligations as the nonce watermark above,
+  and for sharper reasons: it is **fail-open** — a database error or a query
+  past the 250 ms deadline degrades to per-replica counting, because this
+  guards SIGNUP AND LOGIN and failing closed would lock every user out of the
+  product's front door over a hiccup. Every degradation is logged, since
+  falling back silently is the failure it was built to end.
+
+  It also does **not** consult the database for a client already over its
+  limit: the answer cannot change until the window ends, so it is cached in
+  memory. The table is written by unauthenticated traffic, so without that a
+  flood would cost one row-locked upsert per request — cheap HTTP amplified
+  into contention on a single hot row. Expired rows are swept on a
+  leader-gated tick; a missed sweep leaves dead rows, never a wrong count,
+  because every read filters on expiry.
+
+### Accepted cost: the deploy lock holds a pooled connection ([#1686](https://github.com/d-hinders/Haven-AI/issues/1686))
+
+`withKeyedAdvisoryLock` holds one connection from the **shared application
+pool** (`DB_POOL_MAX`, default 20) for as long as the work it serialises runs.
+For its only caller today that work spans `submitRecorded` and `tx.wait()`, so
+the hold is a chain round-trip — normally seconds.
+
+**The tail is bounded at 120 s** ([#1722](https://github.com/d-hinders/Haven-AI/issues/1722)).
+The wait is `tx.wait(1, HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS)` — 120 000 ms — so the
+worst-case hold is that deadline plus the surrounding round-trips, not "however
+long the transaction takes". Until #1722 the call was bare, and ethers v6's
+`wait(confirms?, timeout?)` waits indefinitely that way: a transaction that
+never mined (an RPC hiccup, or a base-fee spike past the doubled headroom
+`getRelayerFeeOverrides` applies) held its connection for as long as it took.
+The accept below rests on the hold being short; this is what makes it so.
+
+The value is bracketed rather than round: one confirmation of a single factory
+call on 2 s Base blocks is a handful of blocks, so 120 s never fires on a
+healthy deploy; and it sits under `STALE_BROADCAST_SECONDS` (180 s), the age at
+which the bump worker adopts a `broadcast` row — so the request has released
+the lock, and its connection, before another owner can take the transaction.
+
+**Expiry hands off, it does not fail.** A wait timeout cancels nothing: the
+transaction stays in the mempool and may still mine, so the durable outbound
+record (#1556) is deliberately left `broadcast` for the bump worker (#1558) to
+adopt and, if needed, replace with bumped fees — never marked failed, which
+would strand it between two owners. The caller sees the same retryable **502**
+it already gets for any other deploy failure, and a retry is safe because the
+factory deploy is permissionless, relayer-paid and idempotent on-chain: a
+duplicate costs gas and nothing else.
+
+Two residual costs, named because they are accepted rather than absent. Each
+retry after an expiry opens its OWN `outbound_txs` row at its own nonce, so a
+persistently stuck RPC can leave several `broadcast` rows for one account, each
+bumped independently once it ages past 180 s — relayer gas amplification,
+bounded by `MAX_BUMPS_PER_NONCE` per lane and by the relayer budget guard
+(#717), never a fund risk. And only a `TIMEOUT` takes the hand-off branch: any
+other wait error (a transient RPC exception mid-wait) still closes the record
+failed, exactly as before #1722 — unchanged behaviour, not a new gap, but the
+same ambiguity in a narrower window.
+
+**The burst that would hurt** is brand-new accounts deploying at once. Each
+holds a lock connection while, inside that same critical section, the relayer
+budget check, the spend row, the outbound record and the `submitRecorded` stamp
+compete for the *remaining* pool headroom. Near the ceiling, unrelated requests
+app-wide pay up to `DB_POOL_CONNECTION_TIMEOUT` (default 5 s) before their own
+`connect()` resolves or rejects.
+
+State the threshold carefully, because the crisp version flatters it. It is not
+"20 distinct new accounts": every entrant checks out a connection *before* the
+lock is attempted, so callers that merely block count too. And the pool is
+shared with all other traffic rather than reserved for this path — so the real
+threshold is 20 minus whatever else the backend is doing.
+
+Worse, the retries are not independent of the burst. A deploy that fails leaves
+no bytecode, so the fast path does not engage and the retry re-enters the lock
+for the same account — and both call sites invite that retry by design
+(`delegation-authorize.ts` says so in as many words: "a failed deploy leaves
+nothing half created and authorize can simply be retried"). The failures that
+produce those retries — RPC trouble, a gas spike past the fee headroom, a
+relayer budget cap — are exactly the conditions a burst creates. So the same
+few accounts can re-enter concurrently, and the number of *distinct* accounts
+needed to threaten the pool is lower than the headline figure suggests. Treat
+"on the order of 20" as the optimistic end of the range, not the bar.
+
+**Why this is accepted rather than fixed.** Both call sites
+(`modules/x402/delegation-authorize.ts`, `routes/agent-delegations.ts`) pass
+`expectedAddress`, so the pre-lock `getBytecode` fast path short-circuits
+permanently once an account exists. The lock is therefore reached about **once
+per account** — never on the payment hot path. ("Ever" would overstate it: a
+deploy that reverts leaves bytecode absent, so a legitimate retry re-enters the
+critical section for that account again.) At dev-pilot volume the burst above
+is not reachable.
+
+**Be precise about what failing open does and does not promise**, because the
+distinction is most of the reason to write this down: it protects the LOCK, not
+the work the lock guards. As it happens, almost all of that work protects
+itself. `assertRelayerBudget` and `recordRelayerSpend` are fail-open against a
+database error — "Fail OPEN — availability guard" and "Never throws" in their
+own doc comments (`infra/relayer-spend-guard.ts`) — and `openOutboundRecord`
+catches, warns, and continues with a null id, which `infra/outbound-queue.ts`'s
+header states as deliberate policy. (`assertRelayerBudget` does throw when the
+gas cap is genuinely exceeded; that is the guard working, not a pool symptom,
+and it surfaces as a 429.)
+
+The **one** write in that section that is not fail-open is `submitRecorded`'s
+stamp, `markOutboundTxBroadcast`: it catches a unique violation to retry the
+nonce lane and rethrows everything else, because `infra/repositories/outbound-txs.ts`
+is fail-closed on purpose — post-#1559 the stamp IS the nonce fence, not an
+optimisation, so degrading it would trade a latency problem for a correctness
+one. That is the write a pool timeout can actually break, and it is the right
+one to have chosen. It surfaces as a retryable **502** at both call sites
+(`POST /x402/authorize` and grant activation; a 429 there means the relayer
+budget cap, not the pool).
+
+So the honest worst case is a failed payment *attempt*, not merely added
+latency. What stays safe is the part that matters: authorize fails closed
+BEFORE the intent row exists so nothing is left half-created, the factory
+deploy is permissionless and grants its deployer nothing, and no funds move.
+Wasted gas and a retry — never a loss.
+
+Stated plainly, because it is the uncomfortable part: **the mitigation for pool
+exhaustion is losing the mitigation.** That equilibrium is defensible while the
+only caller is once-per-account-rare. It is not one to leave undocumented,
+which is why it is written here rather than merely assumed.
+
+**Three triggers, any of which reopens this as real work:**
+
+1. A second, more frequent caller of `withKeyedAdvisoryLock`. Its doc comment
+   names once-per-subject-rare as a constraint on new callers for exactly this
+   reason.
+2. Onboarding volume where tens of first-ever payments land within seconds.
+3. An existing call site quietly ceasing to pass `expectedAddress`. This one
+   deserves naming separately because trigger 1 would not catch it: no caller
+   is added, `expectedAddress` is optional and unenforced beyond its `?`, and
+   the "once per account" guarantee erodes with nothing mechanical to flag it.
+
+**The shape to build when triggered** is shrinking the critical section: hold
+across the bytecode check and the *broadcast*, release before `tx.wait()`, and
+have queued callers poll instead of waiting on the lock. Note the trap before
+reaching for it — releasing after broadcast does **not** close the
+duplicate-broadcast window on its own, because bytecode stays `0x` until the tx
+is *mined*, so a queued caller re-checking inside the lock would still see
+nothing and broadcast a duplicate. A correct shrink needs in-flight detection
+via the durable `outbound_txs` record
+([#1556](https://github.com/d-hinders/Haven-AI/issues/1556)), a polling path
+for the loser, and a degraded path past the poll deadline. The state machine
+for that exists (queued/broadcast/mined/failed) — but not a lookup scoped to
+"is there an in-flight row for this account", so the work includes writing and
+indexing that query, not just wiring a poll onto something ready-made.
+
+The alternative, if isolation is preferred over shrinking, is a **dedicated
+small pool for advisory locks** — lock holds then cannot starve request-serving
+queries, at the cost of a second pool to configure and monitor.
+
 ## What still serialises: the relayer
 
 One relayer EOA per chain signs every sponsored transaction (Safe deploys,
@@ -68,11 +244,40 @@ they queue behind the same key. Two consequences worth planning around:
 1. **Throughput ceiling.** Adding replicas raises how many requests you can
    accept, not how many transactions you can land. The bottleneck moves to the
    relayer, and past that point new replicas buy latency, not capacity.
-2. **Single point of stall — now self-healing on the queue lane.** One stuck
-   transaction blocks every later submission on that chain. Since #1558 the
-   leader-locked bump worker replaces a stuck queue-lane tx with bumped fees
-   (and alerts after 3 attempts); the Safe-bound legacy sites have no bump
-   path until they retire (#1440).
+2. **Single point of stall — self-healing on the queue lane, with one named
+   exception.** One stuck transaction blocks every later submission on that
+   chain. Since #1558 the leader-locked bump worker replaces a stuck
+   queue-lane tx with bumped fees (and alerts after 3 attempts); the
+   Safe-bound legacy sites have no bump path until they retire (#1440).
+
+   The exception, deliberate since [#1735](https://github.com/d-hinders/Haven-AI/issues/1735):
+   a stuck **`passport_attest`** is NOT replaced. A same-nonce replacement is
+   safe on-chain — at most one transaction per nonce mines — but it mints a
+   new tx hash, and the anchor's #1043 receipt recovery is keyed off the hash
+   it recorded; a replaced attest becomes unfindable and issuance re-mints,
+   producing a second live, revocable credential. So the worker alerts
+   (`outbound-bump: stuck broadcast from a non-idempotent submitter`) and the
+   **lane stays blocked until an operator intervenes**. That is the accepted
+   trade: a blocked lane is loud, bounded and human-recoverable; a duplicate
+   attestation is silent and permanent. See
+   [`delegation-rail-vendor-ops.md`](delegation-rail-vendor-ops.md) §3 for the
+   operator response. The ordering constraint that procedure used to carry —
+   check for a duplicate attest the sweep already queued at the next nonce,
+   because cancelling would release it — is **gone since
+   [#1745](https://github.com/d-hinders/Haven-AI/issues/1745)**: the passport
+   retry now re-mints only on positive evidence that the stuck transaction can
+   never mine (its nonce consumed by something else), so no duplicate is queued
+   while it is live. That also makes the cancel below self-completing — once it
+   mines, the burned nonce is exactly the evidence the sweep needs, and
+   issuance recovers on its next tick without further operator action. The
+   cancel remains **necessary**, though: a dropped attest does not free its own
+   nonce here, because its row is still `broadcast` and 061's partial UNIQUE
+   `(chain_id, nonce) WHERE status = 'broadcast'` refuses the stamp, so the
+   queue cannot take the slot back by itself.
+   Unblocking the lane automatically still wants that same-nonce **cancel**
+   (a 0-value self-send), which would clear the lane *and* definitively kill
+   the attest so a fresh anchor is correct — a new mechanism, deliberately not
+   built under #1735.
 
 ### Multi-replica CORRECTNESS: closed for the queue lane (#1559)
 

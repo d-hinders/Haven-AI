@@ -26,6 +26,7 @@ import { readFile, writeFile, rm, readdir } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { bumpLockfileText, lockfileDiffViolations } from './release-lockfile.mjs'
 
 const execAsync = promisify(execFile)
 
@@ -497,9 +498,39 @@ async function main() {
   header('Wiping dist directories')
   await wipeAllDists()
 
-  // ── 7. npm install ────────────────────────────────────────────────────────
-  header('Running npm install (updates package-lock.json)')
+  // ── 7. npm install + deterministic lockfile (#1663) ──────────────────────
+  // The install keeps node_modules consistent for the builds below, but its
+  // lockfile output is NOT taken: on three consecutive cuts (0.1.26 → 0.1.28)
+  // the local npm also inserted "dev"/"peer" metadata on unrelated entries,
+  // and each release hand-repaired the diff back to its 11 version lines.
+  // Instead the version substitution is replayed structurally onto the
+  // pre-install lockfile, and a guard below fails the release if the final
+  // diff carries anything but version lines — the release commit's whole
+  // safety argument is that nothing in it is anything but a version string.
+  header('Running npm install (node_modules only — lockfile is rewritten deterministically)')
+  const lockfilePath = join(ROOT, 'package-lock.json')
+  const lockfileBefore = await readFile(lockfilePath, 'utf8')
   await run('npm', ['install', '--no-audit', '--no-fund'])
+  await writeFile(
+    lockfilePath,
+    bumpLockfileText(lockfileBefore, { currentVersion, newVersion }),
+    'utf8',
+  )
+  // Assert on what is ON DISK, not on what was just computed — so if the
+  // rewrite above is ever removed, this reads npm's polluted output and fails.
+  const lockfileViolations = lockfileDiffViolations(
+    lockfileBefore,
+    await readFile(lockfilePath, 'utf8'),
+    { currentVersion, newVersion },
+  )
+  if (lockfileViolations.length > 0) {
+    die(
+      'package-lock.json changed beyond version lines (#1663):\n  ' +
+      lockfileViolations.slice(0, 20).join('\n  ') +
+      (lockfileViolations.length > 20 ? `\n  … and ${lockfileViolations.length - 20} more` : ''),
+    )
+  }
+  log(`  ✓ lockfile diff is version lines only (${newVersion})`)
 
   // ── 8. Build in dependency order ─────────────────────────────────────────
   // sdk first (no Haven deps), then signer (depends on sdk), then mcp

@@ -46,8 +46,13 @@ export function ConnectStepShell({
           return (
             <div key={p.id} className="flex items-center gap-2">
               {index > 0 && (
+                // #1684: solid tokens only. `bg-[var(--v2-brand)]/40` compiles
+                // to NOTHING on Tailwind v3.4 — an opacity modifier on a
+                // var()-backed colour is dropped silently, so every done/current
+                // connector rendered with no background at all. The brand line
+                // reads the walked path; pending stays border grey.
                 <div
-                  className={`h-px w-8 ${done || current ? 'bg-[var(--v2-brand)]/40' : 'bg-[var(--v2-border)]'}`}
+                  className={`h-px w-8 ${done || current ? 'bg-[var(--v2-brand)]' : 'bg-[var(--v2-border)]'}`}
                 />
               )}
               <div className="flex items-center gap-1.5">

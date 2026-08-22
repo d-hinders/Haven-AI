@@ -141,7 +141,7 @@ function AddSafeModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={handleClose} />
       <div className="relative bg-white border border-[var(--v2-border)] rounded-xl w-full max-w-md shadow-[var(--v2-shadow-modal)] overflow-hidden">
         {/* Header */}
@@ -166,7 +166,7 @@ function AddSafeModal({
           <button
             onClick={handleClose}
             aria-label="Close"
-            className="p-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            className="p-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
           >
             <Icon icon={X} className="w-4 h-4" />
           </button>
@@ -486,7 +486,7 @@ function SafeCard({
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetActive() }}
-            className="rounded-md px-2 py-1 text-xs font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            className="rounded-md px-2 py-1 text-xs font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             aria-label={`Set ${safe.name} as active`}
           >
             Set active
@@ -496,7 +496,7 @@ function SafeCard({
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetDefault() }}
-            className="p-1.5 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            className="p-1.5 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             aria-label={`Set ${safe.name} as default`}
           >
             <Icon icon={Star} className="w-3.5 h-3.5" />

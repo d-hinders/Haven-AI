@@ -11,6 +11,8 @@ export interface PrepareSignerRuntimeInput {
   credentialDirectory: string
   signerPath: string
   homeDir?: string
+  /** #1696: wiring slug, recorded in the sidecar for per-agent inventory (#1697). */
+  serverName?: string
 }
 
 export interface PreparedSignerRuntime {
@@ -93,6 +95,7 @@ export async function prepareSignerRuntime(
     runtimeDirectory,
     npmCacheDirectory,
     cliPath,
+    serverName: input.serverName,
   })
 
   messages.push(`Prepared stable local Haven signer wrapper: ${wrapperPath}`)
@@ -213,6 +216,8 @@ async function writeWrapper(input: {
 
 /** The sidecar `prepareSignerRuntime` writes next to the credentials (#1589). */
 export interface SignerRuntimeSidecar {
+  /** #1696: present when this credential dir belongs to a NAMED pair. */
+  server_name?: string
   signer_package: string
   signer_version: string
   sdk_package: string
@@ -239,8 +244,10 @@ async function writeRuntimeSidecar(input: {
   runtimeDirectory: string
   npmCacheDirectory: string
   cliPath: string
+  serverName?: string
 }): Promise<void> {
   const value = {
+    ...(input.serverName ? { server_name: input.serverName } : {}),
     signer_package: MCP_RUNTIME_MANIFEST.signerPackage,
     signer_version: MCP_RUNTIME_MANIFEST.signerVersion,
     sdk_package: MCP_RUNTIME_MANIFEST.sdkPackage,

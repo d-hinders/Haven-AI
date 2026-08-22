@@ -74,7 +74,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center">
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
       <div
         ref={panelRef}
@@ -93,7 +93,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
           <button
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--v2-brand)]/30"
+            className="-mr-1 rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
           >
             <Icon icon={X} className="h-5 w-5" />
           </button>

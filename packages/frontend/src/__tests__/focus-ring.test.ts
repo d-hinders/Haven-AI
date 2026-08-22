@@ -226,6 +226,55 @@ describe('one focus-ring treatment (#1746)', () => {
   })
 })
 
+/**
+ * Controls whose OWN fill is opaque brand, and therefore cannot wear an
+ * un-offset brand ring: it would composite brand-over-brand and measure ~1.0:1
+ * (or ~1.5:1 where the fill is `accent-color`), invisible at any alpha.
+ *
+ * This is a hand-maintained list because it CANNOT be derived. `BACKGROUNDS`
+ * above resolves `--v2-*` background tokens; a fill that arrives via
+ * `accent-color`, or only in a checked/active state, is not a background token
+ * and never appears as a `bg-` class in the markup. `Checkbox` was exactly
+ * that case — it looked like an ordinary sweep line in the diff, passed every
+ * registered pair, and was only caught by LOOKING at the rendered crop.
+ *
+ * So read the guarantee precisely: `BACKGROUNDS` is complete for the pairs it
+ * registers, not for the render. This list is the second net for the gap.
+ */
+/** An opaque brand fill, however it is painted — `bg-`, or `accent-color`. */
+const BRAND_FILL = /(?:\bbg-brand\b|bg-\[var\(--v2-brand\)\]|\baccent-brand\b|accent-\[var\(--v2-brand\)\])/
+
+describe('brand-filled controls carry a ring offset (#1741)', () => {
+  it('no class string pairs a brand fill with an un-offset brand ring', () => {
+    const offenders: string[] = []
+    for (const file of sourceFiles(join(FRONTEND, 'src'))) {
+      const text = readFileSync(file, 'utf8')
+      // Per class STRING, not per file: a file with several controls must not
+      // be excused because one of its other buttons happens to be correct.
+      for (const cls of text.match(/[^"'`]*focus-visible:ring-brand\/\d+[^"'`]*/g) ?? []) {
+        if (BRAND_FILL.test(cls) && !/focus-visible:ring-offset-2/.test(cls)) {
+          offenders.push(`${relative(FRONTEND, file)}: ${cls.trim().slice(0, 80)}…`)
+        }
+      }
+    }
+    expect(
+      offenders,
+      'a brand ring on a brand-FILLED control composites brand-over-brand (~1.0:1) — add ' +
+        'focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]',
+    ).toEqual([])
+  })
+
+  it('Button keeps its offset even though its fill is defined apart from its ring', () => {
+    // The rule above is co-location-based, so it cannot see `Button`, whose
+    // `bg-brand` lives in VARIANT_CLASS while the ring lives in the base
+    // string. Asserted separately rather than left as a silent blind spot.
+    const button = readFileSync(join(FRONTEND, 'src/components/ui/Button.tsx'), 'utf8')
+    expect(button, 'Button primary is brand-filled; its ring must stay offset').toMatch(
+      /focus-visible:ring-brand\/\d+ focus-visible:ring-offset-2/,
+    )
+  })
+})
+
 describe('every focus ring actually compiles to a colour (#1741)', () => {
   // `ring-inset` is structural, not a colour — it sets --tw-ring-inset.
   const STRUCTURAL = new Set(['ring-inset'])

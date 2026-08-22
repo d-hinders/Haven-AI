@@ -79,6 +79,7 @@ test.describe('design-system visual regression', () => {
         animations: 'disabled',
         caret: 'hide',
         maxDiffPixels: TOP_BAR_MAX_DIFF_PIXELS,
+        threshold: 0.02, // PROBE 3: measure jitter at a tight per-pixel threshold
         timeout: 20_000, // PROBE: one attempt, report the count, do not retry
       })
 
@@ -101,6 +102,7 @@ test.describe('design-system visual regression', () => {
         caret: 'hide',
         maxDiffPixels: FULL_PAGE_MAX_DIFF_PIXELS,
         maxDiffPixelRatio: FULL_PAGE_MAX_DIFF_PIXEL_RATIO,
+        threshold: 0.02, // PROBE 3: measure jitter at a tight per-pixel threshold
         timeout: 20_000, // PROBE: one attempt, report the count, do not retry
       })
     })

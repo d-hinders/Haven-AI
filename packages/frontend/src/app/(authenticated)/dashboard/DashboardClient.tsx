@@ -550,7 +550,14 @@ function TransactionsSection({
       {loading ? (
         <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading recent transactions">
           {[0, 1, 2].map((item) => (
-            <div key={item} className="grid gap-3 px-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 h-[72px]">
+            // Same breakpoint-scoped height as the loaded row it stands in for
+            // (#1833). It does not currently overflow — the stacked skeleton is
+            // ~64px against the 72px clamp — but it is the identical shape:
+            // an `sm:`-gated two-column grid pinned unconditionally. Left
+            // clamped it would ALSO make the list jump on load, since the
+            // loaded row now grows to 116-164px below `sm` while this stayed
+            // at 72px.
+            <div key={item} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-0 sm:h-[72px]">
               <div className="flex items-center gap-3">
                 <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
                 <div>

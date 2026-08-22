@@ -1396,14 +1396,29 @@ export default function DesignSystemPage() {
                   <td className="px-2 py-4 align-middle md:px-4">
                     <DirectionMark direction={row.direction} />
                   </td>
-                  <td className="max-w-0 px-4 py-4 align-middle">
+                  {/* `max-w-0` BELOW md ONLY. Unconditional, it squashed the
+                      Activity column on DESKTOP too — the visual-regression
+                      gate caught "Recei…" / "x402 …" / "Faile…" at 1280px.
+                      TransactionsTable survives it unconditionally because
+                      every other column there carries an explicit `w-[…]`, so
+                      the leftover flows to Activity; this showcase sizes its
+                      columns purely from content, so capping one collapses it.
+                      Do not drop the `md:` here. */}
+                  <td className="max-w-0 px-4 py-4 align-middle md:max-w-none">
                     {/* `truncate` + `flex-wrap` mirror TransactionsTable
                         exactly (#1772). Without `truncate` the `max-w-0`
                         above word-wraps instead of ellipsising, so the
                         showcase would teach a shape the real component does
                         not have. */}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <p className="truncate text-sm font-semibold text-[var(--v2-ink)]" title={row.title}>
+                      {/* Ellipsise below md, wrap normally at md and up — the
+                          `md:` half restores this showcase's original desktop
+                          rendering byte for byte, so only the mobile baseline
+                          moves. */}
+                      <p
+                        className="truncate text-sm font-semibold text-[var(--v2-ink)] md:overflow-visible md:whitespace-normal md:text-clip"
+                        title={row.title}
+                      >
                         {row.title}
                       </p>
                       {row.failed ? <StatusBadge tone="danger">Failed</StatusBadge> : null}

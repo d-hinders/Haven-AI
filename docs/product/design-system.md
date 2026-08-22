@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-08-22" # #1710: § "Opacity on a token colour" — KNOWN_DEAD is now EMPTY and documented as the enforcement rather than an inventory, with the guarded escape hatch; plus a paragraph on why this is NOT also a design-lint rule (that gate scans two dirs and exempts marketing, where two of the dead call-sites lived). Only that § re-verified in this pass. Prior: #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1741/#1746: new "Focus rings" § under Accessibility — one treatment (focus-visible: + ring-2 + /80), the measured 3:1 rationale, and the dark-fill rule that a brand ring can never satisfy. § Buttons focus-ring line corrected to the shipped value and the § Inputs "one family … same focus ring" claim re-read against Input/Select/Textarea/Checkbox — it is now TRUE, having been false since the two families diverged. Nothing else re-verified in this pass # #1767: § Buttons' Tap targets rule — the toggle is `top-3` (centred in the 56px band); the documented 14px clearance to `NetworkSwitcher` was true only at >=768px, because TopBar's `w-8` spacer was shrinkable and collapsed to 0 on phones, and three bullets now record that, how a neighbour is damaged without moving, and why the concentric `left-6` was measured and rejected. § Buttons re-read against Button.tsx, TopBar.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1817/#1809: § Buttons gains the previously undocumented Danger variant and the rule that ring TONE lives per-variant in VARIANT_CLASS while ring GEOMETRY stays in the base string — the co-location is what makes the fill/ring pair checkable at all. § Focus rings' offset paragraph gains the inversion it did not record: fixing a solid control's tone makes its offset MORE load-bearing, not less (danger-on-danger un-offset is 1.00:1, against 1.08:1 when it wrongly wore brand). § Buttons and § Focus rings re-read against Button.tsx and globals.css; the token tables and everything else NOT re-verified in this pass # #1818: § "Opacity on a token colour" gains "The rule is about the OUTPUT, not the shape" — the bare-var() telling was the commonest instance, not the definition; currentColor and an off-scale numeric modifier (`text-white/78`, live on a design-lint-exempt marketing surface) drop identically, and the binding check is the compiled-CSS guard rather than a spelling rule. § Layering gains the nav scrim reusing `v2-modal-backdrop`. Only those two §§ re-verified in this pass. # #1840: § 5 Iconography's arrow rule — the bullet claiming arrows "come from lucide, not unicode" was false against `TransactionMovement.tsx`, which this doc `covers:` by exact path. Replaced by an "### Arrows" sub-section: the marketing/`protocols` exemption now stated as covering the WHOLE section (it sat on bullet 1 only and the arrow rule silently inherited it — 15 arrows live on those surfaces legitimately), a ONE-FILE allowlist, and a check written over the Unicode arrow RANGES rather than a list of spellings. Three review iterations are recorded in the § itself because each fix hid the same hole one level down: false claim -> a punctuation/affordance taxonomy that forbade nothing -> an allowlist whose grep searched only `->`/`&rarr;` and so reported clean on files rendering an up-right arrow. The check's blind spots (numeric character references, string escapes, runtime/i18n data) are stated in the doc, and it was verified from a CLEAN shell after the first version turned out to invoke a tool that was only a shell function locally. All six § 5 bullets re-read against `components/ui/Icon.tsx`, `scripts/design-lint.mjs` (`MARKETING_SURFACES`) and every arrow call site in `app/**` + `components/**`. Two findings recorded rather than fixed, so this § is NOT stamped clean: ten raw arrows across seven gated files remain (#1857, enumerated in the doc, including the shared `Address` primitive), and the "14 / 16 / 20 px exactly" bullet was re-read, MEASURED, and is VERIFIED FALSE — roughly a third of sized call sites are off-scale, with the exact counts and the census script in #1858 rather than here. The bullet now carries that caveat and the issue link INLINE in the body; an earlier draft of this note recorded the finding only here, which is nowhere anyone reads. Nothing outside § 5 re-verified in this pass. # #1857: § 5's Arrows sub-section re-verified by RUNNING its own check, not by reading it — extracted byte-for-byte from this Markdown and run under `env -i` before and after the diff: **15 lines before, 5 after**, which is the acceptance criterion. The ten defects the table used to enumerate are converted (lucide `ExternalLink` in the shared `Address` primitive and on `custody`'s Safe{Wallet} link, `Button`'s existing `trailingIcon` in `AddFundsModal` ×2, lucide `ArrowRight` on the `AccountDetailClient` ×2 / `AccountsOverviewClient` / `SettingsClient` link affordances, and two copy edits on `/design-system` — one of which was the caption advertising `Address`'s `↗` as the pattern). The table is replaced by what the check returns in its CLEAN state (5 lines: the one allowlist entry plus four JSX-comment continuation lines, each named with why it is a false positive) — a documented clean number, so more than 5 is a new defect and fewer than 5 means an expected line moved. Also ANSWERS #1857's open question, which #1840 left open: **the allowlist stays at one file and does not go to zero**, because emptying it would change what `TransactionMovement` renders (a 14px stroked glyph mid-sentence, with no separable icon slot since #1774) rather than clean up a call site — recorded in the body with the reasoning, not just here. `Icon.tsx`, `Button.tsx`'s `trailingIcon`, and the `TransactionActivityRow` / `SendModal` `ExternalLink` precedents re-read. The `14 / 16 / 20 px` bullet's #1858 caveat re-read and still accurate — every icon this pass added is `h-3.5 w-3.5`, on-scale, so it does not grow the 12px cluster. Nothing outside § 5 re-verified in this pass.
+last-verified: "2026-08-22" # #1710: § "Opacity on a token colour" — KNOWN_DEAD is now EMPTY and documented as the enforcement rather than an inventory, with the guarded escape hatch; plus a paragraph on why this is NOT also a design-lint rule (that gate scans two dirs and exempts marketing, where two of the dead call-sites lived). Only that § re-verified in this pass. Prior: #1708: the documented primary/ghost focus ring was the dead arbitrary-value form; re-read against globals.css + tailwind.config.js and corrected, plus a new "Opacity on a token colour" rule. Token tables and the rest of the body NOT re-verified in this pass. # #1726: Buttons § gains the Tap targets rule — sm/md extend an invisible 44px hit area rather than raising h-9/h-10; the rest of § Buttons re-read and still accurate # #1749: new "Layering (z-index)" § under Tokens — the shell's stacking order is now a named scale in globals.css, and the mobile nav overlay deliberately outranks the chrome. Only § Tokens re-verified in this pass # #1766: § Buttons' Tap targets rule gains "the rule outlives the primitive" — the mobile sidebar toggle borrows the ::after mechanism as a non-Button, growing in both axes because an icon-only square has no long axis, and must not take `relative`. § Buttons re-read against Button.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1741/#1746: new "Focus rings" § under Accessibility — one treatment (focus-visible: + ring-2 + /80), the measured 3:1 rationale, and the dark-fill rule that a brand ring can never satisfy. § Buttons focus-ring line corrected to the shipped value and the § Inputs "one family … same focus ring" claim re-read against Input/Select/Textarea/Checkbox — it is now TRUE, having been false since the two families diverged. Nothing else re-verified in this pass # #1767: § Buttons' Tap targets rule — the toggle is `top-3` (centred in the 56px band); the documented 14px clearance to `NetworkSwitcher` was true only at >=768px, because TopBar's `w-8` spacer was shrinkable and collapsed to 0 on phones, and three bullets now record that, how a neighbour is damaged without moving, and why the concentric `left-6` was measured and rejected. § Buttons re-read against Button.tsx, TopBar.tsx and sidebar/Sidebar.tsx; nothing else re-verified in this pass # #1817/#1809: § Buttons gains the previously undocumented Danger variant and the rule that ring TONE lives per-variant in VARIANT_CLASS while ring GEOMETRY stays in the base string — the co-location is what makes the fill/ring pair checkable at all. § Focus rings' offset paragraph gains the inversion it did not record: fixing a solid control's tone makes its offset MORE load-bearing, not less (danger-on-danger un-offset is 1.00:1, against 1.08:1 when it wrongly wore brand). § Buttons and § Focus rings re-read against Button.tsx and globals.css; the token tables and everything else NOT re-verified in this pass # #1818: § "Opacity on a token colour" gains "The rule is about the OUTPUT, not the shape" — the bare-var() telling was the commonest instance, not the definition; currentColor and an off-scale numeric modifier (`text-white/78`, live on a design-lint-exempt marketing surface) drop identically, and the binding check is the compiled-CSS guard rather than a spelling rule. § Layering gains the nav scrim reusing `v2-modal-backdrop`. Only those two §§ re-verified in this pass. # #1840: § 5 Iconography's arrow rule — the bullet claiming arrows "come from lucide, not unicode" was false against `TransactionMovement.tsx`, which this doc `covers:` by exact path. Replaced by an "### Arrows" sub-section: the marketing/`protocols` exemption now stated as covering the WHOLE section (it sat on bullet 1 only and the arrow rule silently inherited it — 15 arrows live on those surfaces legitimately), a ONE-FILE allowlist, and a check written over the Unicode arrow RANGES rather than a list of spellings. Three review iterations are recorded in the § itself because each fix hid the same hole one level down: false claim -> a punctuation/affordance taxonomy that forbade nothing -> an allowlist whose grep searched only `->`/`&rarr;` and so reported clean on files rendering an up-right arrow. The check's blind spots (numeric character references, string escapes, runtime/i18n data) are stated in the doc, and it was verified from a CLEAN shell after the first version turned out to invoke a tool that was only a shell function locally. All six § 5 bullets re-read against `components/ui/Icon.tsx`, `scripts/design-lint.mjs` (`MARKETING_SURFACES`) and every arrow call site in `app/**` + `components/**`. Two findings recorded rather than fixed, so this § is NOT stamped clean: ten raw arrows across seven gated files remain (#1857, enumerated in the doc, including the shared `Address` primitive), and the "14 / 16 / 20 px exactly" bullet was re-read, MEASURED, and is VERIFIED FALSE — roughly a third of sized call sites are off-scale, with the exact counts and the census script in #1858 rather than here. The bullet now carries that caveat and the issue link INLINE in the body; an earlier draft of this note recorded the finding only here, which is nowhere anyone reads. Nothing outside § 5 re-verified in this pass. # #1857: § 5's Arrows sub-section re-verified by RUNNING its own check, not by reading it — extracted byte-for-byte from this Markdown and run under `env -i` before and after the diff: **15 lines before, 5 after**, which is the acceptance criterion. The ten defects the table used to enumerate are converted (lucide `ExternalLink` in the shared `Address` primitive and on `custody`'s Safe{Wallet} link, `Button`'s existing `trailingIcon` in `AddFundsModal` ×2, lucide `ArrowRight` on the `AccountDetailClient` ×2 / `AccountsOverviewClient` / `SettingsClient` link affordances, and two copy edits on `/design-system` — one of which was the caption advertising `Address`'s `↗` as the pattern). The table is replaced by what the check returns in its CLEAN state (5 lines: the one allowlist entry plus four JSX-comment continuation lines, each named with why it is a false positive) — a documented clean number, so more than 5 is a new defect and fewer than 5 means an expected line moved. Also ANSWERS #1857's open question, which #1840 left open: **the allowlist stays at one file and does not go to zero**, because emptying it would change what `TransactionMovement` renders (a 14px stroked glyph mid-sentence, with no separable icon slot since #1774) rather than clean up a call site — recorded in the body with the reasoning, not just here. `Icon.tsx`, `Button.tsx`'s `trailingIcon`, and the `TransactionActivityRow` / `SendModal` `ExternalLink` precedents re-read. The `14 / 16 / 20 px` bullet's #1858 caveat re-read and still accurate — every icon this pass added is `h-3.5 w-3.5`, on-scale, so it does not grow the 12px cluster. Nothing outside § 5 re-verified in this pass. # #1830: § Buttons — `variant="tertiary"` was the last undocumented variant and is now recorded, with what actually separates it from `ghost` (a box vs. no box; tertiary is the only variant that shifts its TEXT colour on hover, having no border to do that work) and the shipped case where it mattered (`connect-agent/SetupStates.tsx:219` swapped tertiary→ghost because transparent-on-white read as stray bold text mid-checklist). Completeness is anchored to the SOURCE and says so: enumerated from `Button.tsx`'s `Variant` union + `VARIANT_CLASS`, kept in agreement by `Record<Variant, string>` — not from the list being edited. Also corrects two FALSE claims the § had carried for months: `trailingIcon` does NOT "slide 2px on hover via wrapper `group-hover:gap-2`" (`Button` sets no `group`; that class lives on three hand-rolled marketing link affordances), and the danger hover was quoted as `hover:bg-[var(--v2-danger)]/90` — an opacity modifier on a bare `var()`, i.e. the dead form § "Opacity on a token colour" exists to forbid — against the shipped `hover:bg-danger/90`. New "Shared by every variant" block records the base-string axes the § omitted entirely (disabled, transition, `href`→`next/link`, `trailingIcon`'s variant- AND element-independence: 6 anchor + 2 `AddFundsModal` button call sites). White-on-brand relabelled a PATTERN with its off-scale `h-12` and its focus treatment differing across its own three instances (2 of 3 carry no `focus-visible:` at all — filed separately, NOT fixed here); `InvestorButton` and `MaxButton`/`PasteButton` added as patterns. **On the strength of this pass, honestly:** the first draft asserted a line-by-line re-read and still shipped the dead danger class and an "all six `trailingIcon` call sites" claim contradicted by #1857's entry directly above this one — review caught both. So what this entry buys is narrower than a re-read: § Buttons' variant table, shared-state block and pattern catalog are now each backed by a **published command** (variant distribution; hand-copied-base-class catalog, clean output 4) with its blind spots stated, and the pattern catalog is labelled known-partial rather than complete. § Focus rings was read only for consistency with the new pattern entry, NOT re-verified. The Tap-targets and "rule outlives the primitive" bullets inside § Buttons were NOT re-verified. Token tables, § 5 and everything else: untouched and uninspected.
 ---
 
 # Haven Design System
@@ -277,22 +277,116 @@ Do not use marketing hero typography for normal authenticated pages.
 
 ### Buttons
 
-Primary (`Button` `variant="primary"`):
+**`Button` has four variants, and that is the whole set — but read the next sentence before
+trusting it.** The four below were enumerated *from the source*, not from this list: the
+`Variant` union at the top of `packages/frontend/src/components/ui/Button.tsx` and the
+`VARIANT_CLASS` record beneath it, which cannot disagree with each other because
+`Record<Variant, string>` makes TypeScript reject a missing or extra key. **That pair is the
+authority; this section is a copy of it.** Enumerate from there whenever you need to know
+what exists — `danger` went undocumented until
+[#1817](https://github.com/d-hinders/Haven-AI/issues/1817) and `tertiary` until
+[#1830](https://github.com/d-hinders/Haven-AI/issues/1830), and in both cases the mechanism
+was the same: a reader found a plausible-looking list of three, and a list of three is
+indistinguishable from a complete one. The compiler will force a new variant into
+`VARIANT_CLASS`. Nothing forces it into this document.
+
+**Variant vs. pattern.** Each entry below is labelled. A *variant* is a `variant=` value on
+the `Button` primitive. A *pattern* is hand-rolled markup that looks like a button and shares
+none of `Button`'s guarantees — sizes, tap target, disabled treatment, or focus ring.
+
+#### Shared by every variant
+
+These live in `Button`'s base class string, so they are variant-independent and stated once
+rather than repeated per entry:
+
+- **Three sizes**, `sm` (h‑9 / 36px), `md` (h‑10 / 40px, the default), `lg` (h‑11 / 44px) —
+  plus the invisible 44px tap target on `sm` and `md`, see *Tap targets* below.
+- **Focus-ring geometry:** `focus-visible:outline-none focus-visible:ring-2
+  focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]` — the one treatment,
+  see *Focus rings* below. Ring **tone** is per-variant; see *Ring tone lives with the fill*.
+- **Disabled:** `disabled:cursor-not-allowed disabled:opacity-60`. There is no per-variant
+  disabled fill — every variant dims to 60% of itself. (Note this is *not* the same
+  treatment the field micro-actions use; see *Button-shaped controls that are not `Button`*.)
+- **Transition:** `transition-colors duration-150`. Colour only — nothing about a `Button`
+  animates its size, position or spacing.
+- **`href` turns it into a link.** With `href`, `Button` renders a `next/link` `<a>` (and
+  accepts `target` / `rel`) with an identical class string; without it, a `<button>` (with
+  `type`, defaulting to `"button"`). Same paint, different element — which matters for focus,
+  because a `<button>` does not match `:focus-visible` on mouse click while an `<a>` behaves
+  differently again.
+- **`trailingIcon`** renders a 14px lucide `ArrowRight` after the label, at the base
+  `gap-1.5`. It is available on **every** variant and on **both** elements — six of its eight
+  call sites are the marketing `href`/`<a>` form, and two (`AddFundsModal.tsx:123` and
+  `:166`) are `onClick` `<button>`s. **It does not animate.**
+  (Through #1829 this section claimed the icon "slides 2px on hover via wrapper
+  `group-hover:gap-2`". It never did: `Button` sets no `group` class and no call site wraps
+  one. `group-hover:gap-2` is real, but it belongs to three hand-rolled marketing link
+  affordances — `app/page.tsx:299`, `:320`, `app/protocols/page.tsx:80` — none of which are
+  `Button`s. Corrected in #1830.)
+
+#### The four variants
+
+Primary — **variant**, `variant="primary"`, and the default when `variant` is omitted:
 - `bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)]`
 - `shadow-[var(--v2-shadow-button)]`
-- focus ring: `focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2` — the one treatment, see *Focus rings* below
-- Three sizes: `sm` (h‑9), `md` (h‑10), `lg` (h‑11)
-- Trailing arrow icon optional, slides 2px on hover via wrapper `group-hover:gap-2`
+- focus ring `focus-visible:ring-brand/80`
 
-Ghost (`variant="ghost"`):
+Ghost — **variant**, `variant="ghost"`. By a wide margin the most-used variant (see the
+distribution note below):
 - `bg-white text-[var(--v2-ink)] border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]`
-- Same sizes, same focus ring
+- focus ring `focus-visible:ring-brand/80`
 
-Danger (`variant="danger"`, used for destructive confirmations — the approval
+Tertiary — **variant**, `variant="tertiary"`
+([#1830](https://github.com/d-hinders/Haven-AI/issues/1830)). The *quiet* action: dismiss,
+cancel, "not now" — the escape hatch beside a committing action, never the committing action
+itself. Live at eight product call sites plus the `/design-system` showcase — among them
+`ConfirmDialog`'s cancel, `ProfileClient`'s cancel edit, `DashboardOnboardingGuide`'s dismiss,
+and three in `settings/ManageApprovers`:
+- `bg-transparent text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]`
+- focus ring `focus-visible:ring-brand/80`
+
+**Tertiary is not a quieter ghost — it is a different shape.** The two are worth
+distinguishing explicitly, because "subtle neutral button" describes both and the choice
+between them is made wrongly by default. Ghost paints a **box**: a white fill and a
+`--v2-border-strong` outline, so at rest it reads as a control. Tertiary paints **no box at
+all**: transparent fill, no border, and dimmed `--v2-ink-2` label, so at rest it reads as
+text and only resolves into a control on hover — which is also the only variant that shifts
+its *text* colour on hover (`ink-2` → `ink`), because it has no border to do that work.
+
+That difference has a shipped consequence, and it is the rule to take from it: **tertiary
+needs surrounding structure to be legible as pressable.** It works inside a dialog's action
+row or at the end of a card, where position tells you it is a control. It fails in running
+content — `connect-agent/SetupStates.tsx:219` records the case where a tertiary button
+"rendered as stray bold text in the middle of a checklist rather than a control", and was
+changed to ghost for the border alone while keeping secondary weight. Reach for ghost when
+the control has to announce itself; tertiary when its context already has.
+
+Danger — **variant**, `variant="danger"`, used for destructive confirmations (the approval
 queue's reject, agent revoke/remove, delete contact):
-- `bg-[var(--v2-danger)] text-white hover:bg-[var(--v2-danger)]/90 shadow-[var(--v2-shadow-button)]`
+- `bg-[var(--v2-danger)] text-white hover:bg-danger/90 shadow-[var(--v2-shadow-button)]`
 - focus ring `focus-visible:ring-danger/80` — its own tone, per *Focus rings* below
-- Same sizes
+- Note the hover is the **semantic token** `bg-danger/90`, not `bg-[var(--v2-danger)]/90`.
+  The two look interchangeable and are not: an opacity modifier on a bare `var()` compiles to
+  nothing, which is the whole subject of *Opacity on a token colour* above. This section
+  quoted the dead form until #1830. The resting fill is safe in arbitrary-value form only
+  because it carries **no** alpha modifier; `bg-danger` is defined in `tailwind.config.js`
+  and would work there too. The mixed spelling in one class string is the tell — where the
+  two forms sit side by side, the one with a modifier is the one that has to be semantic.
+
+**Distribution, with the command that produced it.** Ghost dominates: 111 ghost, 9 tertiary,
+6 danger, 2 primary — 128 literal occurrences, from `packages/frontend`:
+
+```bash
+grep -rhoE 'variant="(primary|ghost|tertiary|danger)"' src --include='*.tsx' | sort | uniq -c
+```
+
+The command is published because it has to be: during review of #1830 two reasonable
+counting methods disagreed by roughly a factor of two, and a call-site number without its
+command is not reproducible. It misses two things by construction. **`variant` is optional**,
+so every unadorned `<Button>` is an uncounted `primary` — which is why primary shows 2 and is
+nonetheless the most common button in the product. And it cannot see the three dynamic call
+sites (`DashboardClient.tsx:336`, `ConfirmDialog.tsx:52`, `CopyBlock.tsx:39`). The shape of
+the distribution is the point, not the integer.
 
 **Ring tone lives with the fill ([#1817](https://github.com/d-hinders/Haven-AI/issues/1817)).**
 The ring's *geometry* (`ring-2`, `ring-offset-2`, the offset colour) is uniform and lives in
@@ -303,9 +397,72 @@ across four destructive confirmations, and no guard could see it: a per-class-st
 cannot pair a fill in one declaration with a ring in another. Do not consolidate the three
 repeated `ring-brand/80` values back into the base string to deduplicate them.
 
-White‑on‑brand (used inside dark CTA band):
-- `bg-white text-[var(--v2-ink)] hover:bg-white/95` for primary
-- `bg-white/10 text-white border border-white/20 backdrop-blur` for secondary
+#### Button-shaped controls that are not `Button`
+
+**This list is derived from a check, and the check is the artifact — not the list.** The
+first draft of this section was itself a plausible-looking incomplete catalog, which is the
+exact failure the opening paragraph warns about, so the enumeration is a command you can run
+rather than a number you have to trust. From `packages/frontend`:
+
+```bash
+# Controls that hand-copy Button's base class string.
+grep -rn "rounded-md font-medium tracking-tight" src --include='*.tsx' \
+  | grep -v 'src/components/ui/Button.tsx'
+```
+
+**Clean output today is 4 lines** — `app/page.tsx:372`, `:381`,
+`investor-briefing/page.tsx:438`, and the `InvestorButton` helper at
+`investor-briefing/page.tsx:551`. More than 4 is a new hand-copy; fewer means one was
+converted to `Button` or its class string drifted out of the signature.
+
+**What this check cannot see, stated because a check without its blind spots is just a
+number.** It matches only controls that copied the *full* base signature. Button-shaped
+controls built from scratch do not appear, and there are at least a dozen: the `MaxButton` /
+`PasteButton` micro-actions below, `CodeBlock`'s copy button, `ApprovalNotifications.tsx:133`
+(a `next/link` styled as a button, with no `focus-visible:` of its own). **Treat the list
+below as known-partial for that class.** Making it complete would need a real lint rule —
+something that classifies by rendered role rather than by class-string spelling — and that is
+a code change nobody has scoped yet, not a longer paragraph here.
+
+White‑on‑brand — **pattern, not a variant** (used inside the dark CTA band; there is no
+`variant="white"`). It is hand-rolled `next/link` / `<a>` markup that copies `Button`'s base
+class string by hand:
+- `bg-white text-[var(--v2-ink)] hover:bg-white/95` for the leading action
+- `bg-white/10 text-white border border-white/20 backdrop-blur` for the trailing one
+
+Three things follow from it being a copy rather than the primitive, and they are the reason
+this entry is now labelled:
+
+- **It is off the size scale.** All three instances are `h-12 px-6 text-[15px]` — a fourth
+  size that `SIZE_CLASS` does not have. Nothing carries the `sm`/`md` tap-target overlay
+  either, though at 48px it does not need one.
+- **Its focus treatment is inconsistent between instances.** `investor-briefing/page.tsx:438`
+  carries the correct dark-fill ring — `focus-visible:ring-white/80` with
+  `focus-visible:ring-offset-[var(--v2-brand)]`, exactly what *Focus rings* prescribes on a
+  brand band. The two on the home page (`app/page.tsx:372`, `:381`) carry **no
+  `focus-visible:` classes at all** and fall back to the browser's default outline. That is
+  an indicator, so it is not a 2.4.7 failure — but it is not this system's ring, and no guard
+  catches it: `focus-ring.test.ts` checks that declared rings compile and measure, not that
+  every button-shaped control declares one. Tracked separately; do not treat the home-page
+  form as the reference.
+- **`Button`'s own guarantees do not travel with the class string.** Copying the classes
+  copies the paint and nothing else.
+
+`InvestorButton` — **pattern**, `investor-briefing/page.tsx:531-557`, used 3×. A local
+mini-`Button`: it re-implements the base string, a two-value `variant` (`primary`/`ghost`)
+and a two-value `size` (`sm`/`lg`) by hand. It diverges from `Button` in four ways worth
+knowing before copying it — no `md` size, **no `disabled` handling at all**, a bare `<a>`
+rather than `next/link`, and a hardcoded `focus-visible:ring-brand/80` that does not follow
+the variant. That last one is only correct today because both of its variants are
+light-surface; it would be wrong the moment someone added a solid or dark one, which is the
+same defect *Ring tone lives with the fill* describes.
+
+Field micro-actions — **pattern**. `MaxButton` and `PasteButton`
+(`components/ui/Input.tsx`) are exported `<button>`s that are deliberately not `Button`s:
+brand-coloured uppercase text at `px-1.5 py-0.5`, sized to sit inside a field's trailing
+slot. They carry the system focus ring (`focus-visible:ring-brand/80`) but a **different
+disabled treatment** — `disabled:opacity-40 disabled:pointer-events-none` against `Button`'s
+`disabled:opacity-60 disabled:cursor-not-allowed`. Recorded as observed, not endorsed.
 
 **No gradient buttons. No glow shadows.**
 

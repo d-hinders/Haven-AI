@@ -34,7 +34,14 @@ test.describe('dashboard browser UX', () => {
     await expect(modal.getByText('Operations')).toBeVisible()
     await expect(modal.getByText('Base', { exact: true })).toBeVisible()
     await expect(modal.getByText(testSafeAddress)).toBeVisible()
-    expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
+    // Measures the dashboard BEHIND the modal, not the modal. A fixed-position
+    // overlay contributes to neither scroll box — see the blind spot noted on
+    // `expectNoHorizontalOverflow` (#1771), which was measured rather than
+    // assumed.
+    expect(await expectNoHorizontalOverflow(page)).toMatchObject({
+      hasOverflow: false,
+      contentRegionFound: true,
+    })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 
@@ -49,7 +56,10 @@ test.describe('dashboard browser UX', () => {
     await expect(page.getByRole('heading', { name: 'Approvals' })).toBeVisible()
     await expect(page.getByText('Research agent', { exact: true })).toBeVisible()
     await expect(page.getByText('12.50 USDC')).toBeVisible()
-    expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
+    expect(await expectNoHorizontalOverflow(page)).toMatchObject({
+      hasOverflow: false,
+      contentRegionFound: true,
+    })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 })

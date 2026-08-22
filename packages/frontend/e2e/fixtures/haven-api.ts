@@ -478,17 +478,82 @@ export async function dismissMobileSidebar(page: Page) {
   }
 }
 
+/**
+ * Horizontal overflow, measured on BOTH scroll boxes that can hold it.
+ *
+ * ## Why there are two metrics (#1771)
+ *
+ * This helper used to compare the document alone —
+ * `documentElement.scrollWidth` / `body.scrollWidth` against
+ * `documentElement.clientWidth`. Inside the authenticated shell that
+ * comparison **cannot fail**. `(authenticated)/layout.tsx` wraps everything in
+ * `overflow-hidden` twice (the `flex h-screen … overflow-hidden` root and the
+ * `flex-1 flex flex-col min-w-0 overflow-hidden` column), so overflowing
+ * content is CLIPPED: it never grows the document, and the old metric reported
+ * a clean fit while content sat unreachable past the bezel.
+ *
+ * That is worse than no check, because it gets cited as evidence. It was found
+ * only by mutation — #1768 shipped a deliberate `w-[120vw]` on `/dashboard`
+ * and CI run 32542736317 went green, with the overflow assertion explicitly
+ * passing.
+ *
+ * So the document metric is kept — it is the ONLY one that works on
+ * unauthenticated pages like `/login`, which have no shell and no
+ * `#main-content` — and the content-region metric is added beside it.
+ * `<main id="main-content">` is `overflow-y-auto`, which computes `overflow-x`
+ * to `auto`, so it is a real scroll box: comparing its own `scrollWidth`
+ * against its own `clientWidth` sees exactly what the shell was hiding.
+ *
+ * `hasOverflow` is the UNION, so every existing
+ * `toMatchObject({ hasOverflow: false })` call site starts gating for real
+ * without changing shape. The two booleans are also returned separately for a
+ * caller that needs to say which one it means.
+ *
+ * ## Assert `contentRegionFound` on authenticated routes
+ *
+ * When `#main-content` is absent the content metric degrades to `false` — the
+ * silent no-op that this whole helper exists to prevent. It cannot tell on its
+ * own whether a page SHOULD have a content region, so authenticated call sites
+ * pass `{ hasOverflow: false, contentRegionFound: true }` and make the no-op
+ * path loud. `/login` legitimately has no content region and asserts only
+ * `hasOverflow`.
+ *
+ * ## Known blind spot: `position: fixed` overlays
+ *
+ * Neither metric sees overflow INSIDE a fixed-position modal. A fixed element
+ * is laid out against the viewport, so it contributes to neither the
+ * document's scrollable overflow nor `<main>`'s — and an ancestor's
+ * `overflow-hidden` does not clip it either. Measured, not assumed (#1771).
+ * Call sites that open a dialog before asserting are therefore measuring the
+ * page BEHIND the dialog, which is still a real assertion but not a check on
+ * the dialog's own layout. Tracked separately rather than widened here.
+ */
 export async function expectNoHorizontalOverflow(page: Page) {
   return page.evaluate(() => {
     const documentWidth = document.documentElement.clientWidth
     const scrollWidth = document.documentElement.scrollWidth
     const bodyScrollWidth = document.body.scrollWidth
+    const documentOverflows =
+      scrollWidth > documentWidth + 1 || bodyScrollWidth > documentWidth + 1
+
+    const main = document.getElementById('main-content')
+    // 1px of tolerance for sub-pixel layout rounding. A real overflow is far
+    // larger — the three measured so far were the #1768 mutation, #1772's
+    // transactions table, and this helper's own mutation proof, all ~100px+.
+    const contentOverflowBy = main ? main.scrollWidth - main.clientWidth : 0
+    const contentOverflows = contentOverflowBy > 1
 
     return {
       documentWidth,
       scrollWidth,
       bodyScrollWidth,
-      hasOverflow: scrollWidth > documentWidth + 1 || bodyScrollWidth > documentWidth + 1,
+      documentOverflows,
+      contentRegionFound: Boolean(main),
+      contentScrollWidth: main ? main.scrollWidth : null,
+      contentClientWidth: main ? main.clientWidth : null,
+      contentOverflowBy,
+      contentOverflows,
+      hasOverflow: documentOverflows || contentOverflows,
     }
   })
 }

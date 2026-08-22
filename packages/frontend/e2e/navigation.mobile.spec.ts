@@ -21,7 +21,7 @@
  * `mobile-nav-layering.mobile.spec.ts` sweeps five widths in this project quite
  * happily, because it compares geometry rather than pixels.
  */
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 import {
   collectBrowserErrors,
   expectNoHorizontalOverflow,
@@ -63,48 +63,21 @@ const KNOWN_CONTENT_OVERFLOW: Partial<Record<(typeof ROUTES)[number], string>> =
 }
 
 /**
- * Horizontal overflow of the CONTENT REGION, measured on its own scroll box.
+ * The local `measureContentOverflow` that used to live here was folded into the
+ * shared `expectNoHorizontalOverflow` by #1771.
  *
- * Why the shared `expectNoHorizontalOverflow` is not enough — found the hard
- * way, by the #1768 mutation, which this spec's first version passed:
+ * It existed because the shared helper compared the DOCUMENT alone, which
+ * inside the authenticated shell cannot fail — the shell is `overflow-hidden`
+ * twice over, so overflowing content is clipped rather than growing
+ * `documentElement.scrollWidth`. #1768 proved it: a deliberate `w-[120vw]` on
+ * `/dashboard` sailed through, green, on a real CI run. That blind spot was
+ * repo-wide rather than local to this file, so widening the shared helper was
+ * the actual fix; keeping a second copy here is how the two drift apart.
  *
- *   The authenticated shell wraps everything in `overflow-hidden` twice
- *   (`layout.tsx`: the `flex h-screen … overflow-hidden` root and the
- *   `flex-1 flex flex-col min-w-0 overflow-hidden` column). Content that
- *   overflows is therefore CLIPPED — it never grows
- *   `documentElement.scrollWidth`, which is all the shared helper compares.
- *   A deliberate `w-[120vw]` on `/dashboard` sailed through it, green, on a
- *   real CI run.
- *
- * That is worse than no check: the content is genuinely unreachable — cut off
- * at the bezel with no way to scroll to it — and the page-level metric reports
- * a clean fit. `<main id="main-content">` is the element that actually holds
- * the route's content, so compare ITS scroll width against ITS client width.
- *
- * The shared helper's blind spot is repo-wide, not local to this file — every
- * authenticated desktop spec calls it too. Widening it there would change what
- * those specs assert, so it is left alone here and filed separately.
+ * The shared helper now returns both metrics — `documentOverflows` and
+ * `contentOverflows` / `contentOverflowBy`, plus `contentRegionFound` so the
+ * no-op path stays loud — and `hasOverflow` is their union.
  */
-async function measureContentOverflow(page: Page) {
-  return page.evaluate(() => {
-    const main = document.getElementById('main-content')
-    if (!main) return { found: false, overflowBy: 0, contentOverflows: false }
-
-    const overflowBy = main.scrollWidth - main.clientWidth
-
-    return {
-      found: true,
-      viewportWidth: document.documentElement.clientWidth,
-      scrollWidth: main.scrollWidth,
-      clientWidth: main.clientWidth,
-      overflowBy,
-      // 1px of tolerance for sub-pixel layout rounding. A real overflow is far
-      // larger — the two measured so far were the #1768 mutation and #1772's
-      // transactions table, both around 100px on a 393px screen.
-      contentOverflows: overflowBy > 1,
-    }
-  })
-}
 
 test.describe('mobile viewport', () => {
   test.beforeEach(async ({ page }) => {
@@ -148,23 +121,24 @@ test.describe('mobile viewport', () => {
       await page.goto(route)
       await page.waitForLoadState('networkidle')
 
-      // Page level. Kept, but see `measureContentOverflow` — inside the
-      // authenticated shell this one cannot fail, so it is the weaker half.
-      // (#1771: on `/transactions` it passed while the content region
-      // overflowed by a visible margin. Both were true at once.)
-      expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
-
       // Wait for the shell's content region before measuring it. Without this
-      // the helper returned `{ found: false, overflowBy: 0 }` on a slow render
-      // — which the overflow assertion would have read as "fits". A check that
-      // passes because the page was not there yet is the failure mode this
-      // whole spec exists to prevent, so `found` is asserted too: the no-op
-      // path must never be silent.
+      // the helper returns `contentOverflowBy: 0` on a slow render — which the
+      // overflow assertion would read as "fits". A check that passes because
+      // the page was not there yet is the failure mode this whole spec exists
+      // to prevent, so `contentRegionFound` is asserted too: the no-op path
+      // must never be silent.
       await page.locator('#main-content').waitFor({ state: 'attached' })
 
-      const overflow = await measureContentOverflow(page)
+      const overflow = await expectNoHorizontalOverflow(page)
       expect(overflow, 'content region was never found — measurement was a no-op').toMatchObject({
-        found: true,
+        contentRegionFound: true,
+      })
+
+      // The DOCUMENT-level half always applies: it is the only metric that
+      // catches something escaping the shell entirely, and unlike the content
+      // half it has no known-defect exemption.
+      expect(overflow, `document overflows: ${JSON.stringify(overflow)}`).toMatchObject({
+        documentOverflows: false,
       })
 
       const known = KNOWN_CONTENT_OVERFLOW[route]
@@ -176,8 +150,10 @@ test.describe('mobile viewport', () => {
         // the numbers. `toMatchObject({ contentOverflows: false })` reports only
         // `true` vs `false`, which tells the next reader nothing about how far
         // off the layout is, or at what width — their first two questions.
-        expect(overflow.overflowBy, `content region overflows: ${JSON.stringify(overflow)}`)
-          .toBeLessThanOrEqual(1)
+        expect(
+          overflow.contentOverflowBy,
+          `content region overflows: ${JSON.stringify(overflow)}`,
+        ).toBeLessThanOrEqual(1)
       }
 
       expect(unexpectedBrowserErrors(browserErrors)).toEqual([])

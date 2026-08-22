@@ -44,9 +44,21 @@ test.describe('transaction history — x402 display + detail panel', () => {
     await expect(panel.getByText('On-chain', { exact: true })).toBeVisible()
     await expect(panel.getByRole('link', { name: /0xabab/i })).toBeVisible()
 
-    // No secrets ever surface in the UI, and the panel doesn't break layout.
+    // No secrets ever surface in the UI.
     await expect(panel).not.toContainText(/delegate_key|private_key|privateKey/)
-    expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
+    // This used to be described as "and the panel doesn't break layout". It
+    // never checked the panel: a fixed-position overlay contributes to neither
+    // scroll box, so this measures `/transactions` BEHIND the panel (#1771).
+    // Kept — the page behind is real content and this is a real assertion at
+    // desktop width — but described accurately now.
+    //
+    // #1772 is the mobile-width clipping of this same table. It does not fire
+    // here: at 1280px the table fits, and the mobile project asserts the route
+    // separately with that defect exempted by name.
+    expect(await expectNoHorizontalOverflow(page)).toMatchObject({
+      hasOverflow: false,
+      contentRegionFound: true,
+    })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 })

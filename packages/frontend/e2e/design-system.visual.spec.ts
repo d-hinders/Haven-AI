@@ -37,10 +37,12 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
  */
 const APP_TOP_BAR = 'xpath=//*[@id="main-content"]/preceding-sibling::header[1]'
 
-// PROVISIONAL (#1805) — replaced with measured numbers later in this PR.
-const FULL_PAGE_MAX_DIFF_PIXELS = 100_000
-const FULL_PAGE_MAX_DIFF_PIXEL_RATIO = 0.005
-const TOP_BAR_MAX_DIFF_PIXELS = 100_000
+// PROBE COMMIT (#1805) — zero budget, so a comparison against the committed
+// baselines reports the EXACT differing-pixel count instead of passing
+// silently. Replaced with the measured numbers before this lands.
+const FULL_PAGE_MAX_DIFF_PIXELS = 0
+const FULL_PAGE_MAX_DIFF_PIXEL_RATIO = 0
+const TOP_BAR_MAX_DIFF_PIXELS = 0
 
 test.describe('design-system visual regression', () => {
   test.skip(
@@ -72,10 +74,11 @@ test.describe('design-system visual regression', () => {
       // but one that matched TWO would silently capture the first — the failure
       // shape this gate exists to close. Assert the count, don't assume it.
       await expect(topBar).toHaveCount(1)
-      await expect(topBar).toHaveScreenshot(`design-system-topbar-${vp.name}.png`, {
+      await expect.soft(topBar).toHaveScreenshot(`design-system-topbar-${vp.name}.png`, {
         animations: 'disabled',
         caret: 'hide',
         maxDiffPixels: TOP_BAR_MAX_DIFF_PIXELS,
+        timeout: 1_000, // PROBE: one attempt, report the count, do not retry
       })
 
       // The app shell clips at h-screen/overflow-hidden, so a `fullPage`
@@ -91,12 +94,13 @@ test.describe('design-system visual regression', () => {
         viewportDevicePx: vp.height * devicePixelRatio,
       })
 
-      await expect(page).toHaveScreenshot(`design-system-${vp.name}.png`, {
+      await expect.soft(page).toHaveScreenshot(`design-system-${vp.name}.png`, {
         fullPage: true,
         animations: 'disabled',
         caret: 'hide',
         maxDiffPixels: FULL_PAGE_MAX_DIFF_PIXELS,
         maxDiffPixelRatio: FULL_PAGE_MAX_DIFF_PIXEL_RATIO,
+        timeout: 1_000, // PROBE: one attempt, report the count, do not retry
       })
     })
   }

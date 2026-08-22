@@ -49,12 +49,30 @@ export function TransactionActivityRow({
   density?: Density
 }) {
   const isCompact = density === 'compact'
-  // Compact density pins to a fixed row height (h-[72px]) so the dashboard's
-  // agents and transactions columns sit on identical rhythm regardless of
-  // line-height nuances inside the title row (badge + text mixed heights).
-  // Horizontal padding only — vertical centering does the rest.
+  // Compact density pins the row to 72px so the dashboard's agents and
+  // transactions columns sit on identical rhythm regardless of line-height
+  // nuances inside the title row (badge + text mixed heights).
+  //
+  // The pin is `sm:` ONLY, and the breakpoint is the whole point (#1833). The
+  // height was measured against the two-column arrangement below
+  // (`sm:grid-cols-[minmax(0,1fr)_auto]`), which does not exist under 640px:
+  // there the two children STACK, so title+description and amount+timestamp
+  // occupy two bands inside a box still clamped to 72px, and the overflow
+  // spilled onto the following row. Rows visibly overlapped on /dashboard at
+  // 390px — found independently by two rendered review passes, neither
+  // looking for it.
+  //
+  // Below `sm` the row therefore sizes to its content, with `py-3` supplying
+  // the vertical breathing room the fixed height used to provide. At `sm` and
+  // up `sm:py-0` hands it back, so the desktop rhythm this pin exists for is
+  // byte-identical to before.
+  //
+  // Sizing to content rather than raising the number on purpose: the content
+  // is variable-height (a wrapping <TransactionMovement>, an optional status
+  // badge), so any fixed value is a new overlap waiting for the first string
+  // long enough to exceed it.
   const containerPadding = isCompact
-    ? 'gap-3 px-4 sm:px-5 h-[72px]'
+    ? 'gap-3 px-4 py-3 sm:px-5 sm:py-0 sm:h-[72px]'
     : 'gap-3 px-4 py-4 sm:px-5'
   return (
     <div className={`grid transition-colors hover:bg-[var(--v2-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${containerPadding}`}>

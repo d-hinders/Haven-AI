@@ -82,6 +82,8 @@ test.describe('Connect agent setup acceptance', () => {
     const connectOverlay = await measureDialogOverflow(page)
     expect(connectOverlay, `connect modal overflows: ${JSON.stringify(connectOverlay)}`).toMatchObject({
       dialogFound: true,
+      // See dashboard.spec.ts — pins WHICH overlay was measured.
+      dialogCount: 1,
       overlayOverflows: false,
     })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])

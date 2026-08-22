@@ -702,25 +702,71 @@ export async function expectNoHorizontalOverflow(page: Page) {
  * three overlays have three different CORRECT positions at 1280px — the
  * centred modal spans 384 to 896, the right-anchored side panel 834 to 1282,
  * the full-viewport overlay 0 to 1280 — so no single anchor holds for all
- * three. And the side panel sits flush against the right edge, where its
- * rounded `right` read 1280, 1281 and 1282 across three runs at a viewport of
- * 1280; an `=== viewportWidth` assertion would flake on sub-pixel layout. The
- * numbers are returned so a failure is diagnosable and so a call site that
+ * three. (All three read off this helper's own output, not reconstructed from
+ * the components.) And the side panel sits flush against the right edge, where
+ * its rounded `right` read 1280, 1281 and 1282 across three runs at a viewport
+ * of 1280; an `=== viewportWidth` assertion would flake on sub-pixel layout.
+ * The numbers are returned so a failure is diagnosable and so a call site that
  * knows its overlay's geometry can pin it.
+ *
+ * One asymmetry the "three different answers" framing would otherwise hide:
+ * for a `ui/Modal`-rooted dialog these two fields are structurally INERT.
+ * `role="dialog"` sits on the `fixed inset-0` wrapper rather than on the
+ * visual panel, so `dialogLeft`/`dialogRight` read `0`/`viewportWidth` no
+ * matter what the panel inside does — resize it, shove it off-centre, and
+ * these two numbers do not move. They are informative for the bespoke
+ * `ReceiveFundsModal` and for `ui/SidePanel`, whose `role="dialog"` IS the
+ * panel. Do not read a stable `0 → 1280` on a `ui/Modal` dialog as evidence
+ * that its panel is where it should be; nothing here measures that.
  *
  * ## Known limit, stated rather than papered over
  *
  * A box that overflows is reported whether or not it MEANT to. One exclusion
  * is built in — boxes 1px or narrower, which is the visually-hidden idiom and
  * not a layout defect; see the comment at the check itself for the measurement
- * that forced it. Beyond that, nothing is excluded: none of the three dialogs
- * currently contains a legitimate horizontal scroller.
+ * that forced it. Note that this predicate is narrower than the idiom it
+ * excludes: it tests width only, not the full `sr-only` signature of a 1px
+ * box with `overflow: hidden` and `clip`. That is deliberate — it is the
+ * smallest rule that removes the measured false positive — but it is a width
+ * test, not a "visually hidden" test, and should be read as one.
  *
- * Deliberately no class-name heuristic exempting `overflow-x-auto`. It would
- * silently exempt a real defect that happened to carry the class, and the repo
- * already has an honest convention for this — exempt a known case BY NAME at
- * the call site with an issue number, the way `KNOWN_CONTENT_OVERFLOW` does,
- * so the exemption is visible rather than inferred.
+ * Beyond that, nothing is excluded, and the consequence is worth stating
+ * plainly rather than discovering: **a legitimate, self-contained horizontal
+ * scroller inside one of these dialogs will fail these specs.** The exclusion
+ * above is purely geometric and does nothing for a properly-sized
+ * `overflow-x-auto` wrapper. None of the three dialogs contains one today —
+ * verified, not assumed — but a `CodeBlock` showing a setup command, or an
+ * `overflow-x-auto` element holding a full delegate address or tx hash, is a
+ * plausible next addition to any of them, and it is exactly the idiom the
+ * playbook recommends for #1772-shaped defects. The next author to add one
+ * will meet this guard.
+ *
+ * Deliberately NOT solved by excluding elements whose computed `overflow-x` is
+ * `auto`/`scroll`, which is the obvious-looking fix and is measurably wrong
+ * here: per CSS Overflow §3, `overflow-y-auto` computes `overflow-x` to
+ * `auto`, so that rule would exempt `ui/Modal`'s and `ui/SidePanel`'s scrolling
+ * BODIES — the exact elements that caught two of this change's three mutation
+ * proofs (1010px and 1129px). It would not narrow the guard, it would gut it.
+ * A class-name heuristic is rejected for the mirror-image reason: it would
+ * silently exempt a real defect that happened to carry the class.
+ *
+ * So the escape hatch is the repo's existing honest one — exempt the known
+ * case BY NAME at the call site with an issue number, the way
+ * `KNOWN_CONTENT_OVERFLOW` does in `navigation.mobile.spec.ts`. Concretely,
+ * when a dialog legitimately gains one scrolling wrapper:
+ *
+ *     const overlay = await measureDialogOverflow(page)
+ *     // The setup-prompt CodeBlock scrolls inside its own wrapper by design
+ *     // (#NNNN). Everything ELSE in the dialog must still fit.
+ *     expect(overlay).toMatchObject({ dialogFound: true, dialogCount: 1 })
+ *     expect(overlay.worstOffender).toMatch(/overflow-x-auto/)
+ *     expect(overlay.offenderCount).toBe(1)
+ *
+ * — which keeps the assertion gating instead of deleting it, and names what
+ * was allowed and why. Widening the helper with an `ignoreSelectors` parameter
+ * was considered and left unbuilt: an unused escape hatch is a guess about a
+ * case that does not exist yet, and this family's whole subject is guards that
+ * were shaped by assumption rather than measurement.
  */
 export async function measureDialogOverflow(page: Page, selector = '[role="dialog"]') {
   return page.evaluate((sel) => {
@@ -832,6 +878,13 @@ export async function measureDialogOverflow(page: Page, selector = '[role="dialo
       dialogOverflows: dialogOverflowBy > 1,
       overlayOverflowBy,
       overlayOverflows: overlayOverflowBy > 1,
+      // NOT a count of distinct defects. One overflowing leaf registers at
+      // every level above it that does not absorb the overflow, so a single
+      // bug in a `ReceiveFundsModal`-shaped dialog (where `role="dialog"` is
+      // the content panel itself) shows up on the leaf AND the panel. Read it
+      // as "how many boxes report it", and `worstOffender` as "where it is
+      // widest" — the mutation proof's 2 → 1 was one defect plus one
+      // visually-hidden false positive, not two bugs.
       offenderCount,
       worstOffender,
       // Viewport-absolute — reported, never asserted here. See the JSDoc.

@@ -75,6 +75,8 @@ test.describe('transaction history — x402 display + detail panel', () => {
     const detailOverlay = await measureDialogOverflow(page)
     expect(detailOverlay, `detail panel overflows: ${JSON.stringify(detailOverlay)}`).toMatchObject({
       dialogFound: true,
+      // See dashboard.spec.ts — pins WHICH overlay was measured.
+      dialogCount: 1,
       overlayOverflows: false,
     })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])

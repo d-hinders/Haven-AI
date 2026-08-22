@@ -54,6 +54,11 @@ test.describe('dashboard browser UX', () => {
     const receiveOverlay = await measureDialogOverflow(page)
     expect(receiveOverlay, `receive modal overflows: ${JSON.stringify(receiveOverlay)}`).toMatchObject({
       dialogFound: true,
+      // Exactly one overlay, so "the dialog measured" is unambiguous. Without
+      // this the helper silently measures whichever `[role="dialog"]` comes
+      // first in DOM order, and a second one (a nested confirm, a portalled
+      // prompt) would go unchecked with nothing going red to say so.
+      dialogCount: 1,
       overlayOverflows: false,
     })
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])

@@ -74,7 +74,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center">
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
       <div
         ref={panelRef}

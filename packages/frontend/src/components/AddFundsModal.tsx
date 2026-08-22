@@ -65,7 +65,7 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center">
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
       <div
         ref={panelRef}

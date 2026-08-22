@@ -46,7 +46,7 @@ export default function AgentPanel() {
   return (
     <div>
       {panel.toastMessage && (
-        <div className="fixed right-4 top-4 z-[250] pointer-events-none">
+        <div className="fixed right-4 top-4 z-[var(--v2-z-panel)] pointer-events-none">
           <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-white px-4 py-3 shadow-[var(--v2-shadow-modal)]">
             <div className="flex items-center gap-2">
               <div className="w-5 h-5 rounded-full bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] flex items-center justify-center flex-shrink-0">

@@ -34,7 +34,12 @@ export default function TopBar({ actionSlot }: TopBarProps) {
   const back = resolveBackLink(pathname)
 
   return (
-    <header className="relative z-[100] h-14 flex items-center px-6 lg:px-8 border-b border-[var(--v2-border)] bg-[var(--v2-bg)]/85 backdrop-blur-md flex-shrink-0">
+    // z-[var(--v2-z-chrome)]: the app chrome tier. Deliberately BELOW the
+    // mobile navigation tiers — the sidebar's toggle is positioned inside this
+    // bar's own band (see the `w-8 lg:hidden` spacer below, which reserves the
+    // room for it), so a bar that outranks the toggle covers the control it is
+    // making space for. That was #1749.
+    <header className="relative z-[var(--v2-z-chrome)] h-14 flex items-center px-6 lg:px-8 border-b border-[var(--v2-border)] bg-[var(--v2-bg)]/85 backdrop-blur-md flex-shrink-0">
       {/* Left region: hamburger spacer + optional back-link */}
       <div className="flex items-center gap-3 min-w-0">
         {/* Spacer for mobile hamburger */}

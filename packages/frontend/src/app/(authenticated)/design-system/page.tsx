@@ -1393,7 +1393,29 @@ export default function DesignSystemPage() {
                       343px Card at 393px — clipped by the Card's
                       `overflow-hidden`, i.e. the very defect the table below
                       is meant to document the correct shape of. */}
-                  <td className="px-2 py-4 align-middle md:px-4">
+                  {/* The BELOW-md widths live on the `<td>`s, not on the
+                      header cells, and that distinction is the whole defect
+                      (#1774/#1750). `Table.Head` is `hidden md:table-header-group`,
+                      so below md the header row is `display: none` and its
+                      width declarations take no part in column sizing at all —
+                      putting `w-[110px]` on the Amount HEADER measured a
+                      byte-identical mobile layout (Activity still 13px at
+                      390px) while making desktop rows grow 85px -> 133px.
+                      `TransactionsTable` carries these widths on its `<td>`s
+                      (`w-9`/`w-[110px]`/`w-8`, and UNCONDITIONALLY — it stays
+                      fixed-width at desktop too, which is the one place this
+                      showcase deliberately diverges), which is why its
+                      `max-w-0` Activity cell lands on a healthy 106px at 390px
+                      while this showcase's collapsed to
+                      3.7px at 320px / 13px at 390px. `md:w-auto` hands the
+                      columns back to content sizing at md and up, so THESE
+                      widths contribute nothing to the desktop baseline. (The
+                      desktop capture does still move by a few pixels — from
+                      the `TransactionMovement` change, which alters the
+                      From/To column's min-content: the middle row measured
+                      85px -> 73px at 1280px. Attributing that to these classes
+                      would send the next reader to the wrong file.) */}
+                  <td className="w-10 px-2 py-4 align-middle md:w-auto md:px-4">
                     <DirectionMark direction={row.direction} />
                   </td>
                   {/* `max-w-0` BELOW md ONLY. Unconditional, it squashed the
@@ -1442,13 +1464,13 @@ export default function DesignSystemPage() {
                   <td className="hidden px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] md:table-cell">
                     {row.date}
                   </td>
-                  <td className="px-2 py-4 align-middle text-right md:px-4">
+                  <td className="w-[110px] px-2 py-4 align-middle text-right md:w-auto md:px-4">
                     <p>
                       <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
                     </p>
                     <p className="mt-1 text-xs text-[var(--v2-ink-3)] md:hidden">{row.date}</p>
                   </td>
-                  <td className="px-2 py-4 align-middle text-right md:px-4">
+                  <td className="w-8 px-2 py-4 align-middle text-right md:w-auto md:px-4">
                     <ExternalDetailsLink href="#" />
                   </td>
                 </tr>

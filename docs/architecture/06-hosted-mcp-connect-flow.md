@@ -6,7 +6,6 @@ covers:
   - packages/connect/**
   - packages/signer/**
   - packages/frontend/src/components/ConnectAgentModal.tsx
-  - packages/frontend/src/lib/hosted-connect.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
@@ -20,7 +19,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
-last-verified: "2026-08-12" # re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-22" # #1813: dropped the `covers:` entry for `lib/hosted-connect.ts`, deleted as unreachable. No claim in the body named it — the flow described here is served by ConnectAgentModal, not the retired hosted card. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract

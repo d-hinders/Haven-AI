@@ -5,9 +5,7 @@ covers:
   - packages/mcp/**
   - packages/mcp-server/**
   - packages/signer/**
-  - packages/frontend/src/lib/hosted-connect.ts
-  - packages/frontend/src/lib/agent-runtime-snippets.ts
-last-verified: "2026-08-12" # re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-22" # #1813: dropped two `covers:` entries for libs deleted as unreachable (`hosted-connect.ts`, `agent-runtime-snippets.ts`). The body's only related line — NEXT_PUBLIC_HAVEN_MCP_URL rendered in connect-agent snippets — is still accurate; those snippets come from the live ConnectAgentModal path. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Migration - Local MCP To Hosted MCP

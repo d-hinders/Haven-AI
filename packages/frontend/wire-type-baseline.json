@@ -10,9 +10,6 @@
     "McpToolCallActivityItem": 1,
     "PaymentActivityItem": 1
   },
-  "packages/frontend/src/hooks/useAgentLastSeen.ts": {
-    "AgentLastSeenResponse": 1
-  },
   "packages/frontend/src/hooks/useAgentPassport.ts": {
     "AgentPassport": 1
   },

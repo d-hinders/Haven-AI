@@ -215,6 +215,13 @@ warning. Operator response:
 > live, and cancelling has nothing to release. The steps above are shorter
 > because the check they encoded is no longer a human's job.
 
+**The revoke-side counterpart** — an agent revoked in Haven whose attestation
+is still live on-chain — has its own procedure in
+[`stuck-revoke-alarm.md`](stuck-revoke-alarm.md). It is a different incident
+with a different automatic path (`passport_revoke` **is** on
+`REBROADCAST_SAFE_SUBMITTERS`, so the bump worker does fee-replace it), and it
+hands the "an attest is holding the lower nonce" case back to this section.
+
 Step 2's cancel is still a manual action; automating it is a known gap,
 deliberately left to an owner decision
 (#1743); see [`backend-scaling.md`](backend-scaling.md) § *Single point of

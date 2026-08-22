@@ -114,8 +114,11 @@ describe('ops probe: register-passport-schema (#971)', () => {
               `this budget was derived, and re-derive it rather than simply raising it again.`
           : `The ops probe subprocess did not complete: ` +
               `${spawnError?.code ?? 'killed'} — ${spawnError?.message ?? `signal ${run.signal}`}. ` +
-              `Elapsed ${elapsedMs} ms of a ${PROBE_TIMEOUT_MS} ms budget. The output assertions ` +
-              `below were skipped because the process never produced a complete result.`,
+              `Elapsed ${elapsedMs} ms. This is NOT the ${PROBE_TIMEOUT_MS} ms budget firing — that ` +
+              `case reports itself separately — so do not reach for the budget to fix it. Something ` +
+              `else ended the process: an external kill (OOM, CI cancellation) or a failure to spawn ` +
+              `at all. The output assertions below were skipped because the process never produced a ` +
+              `complete result.`,
       )
     }
 

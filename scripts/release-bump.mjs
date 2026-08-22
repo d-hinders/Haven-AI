@@ -564,13 +564,31 @@ async function main() {
   header('Done')
   log(`\n  Released: ${newVersion}`)
   log('')
-  log('  Next steps:')
-  log('    git diff --stat                          # review all changes')
-  log('    git add -p && git commit -m "chore: bump to ' + newVersion + '"')
-  log('    npm publish -w packages/sdk --tag alpha')
-  log('    npm publish -w packages/signer --tag alpha')
-  log('    npm publish -w packages/mcp --tag alpha')
-  log('    npm publish -w packages/connect --tag alpha')
+  // #1788: this block used to end with `npm publish` invocations — the one
+  // action CLAUDE.md and the release skill forbid in three separate places,
+  // arriving at the moment of maximum trust, right after the tool has done
+  // everything else correctly. It also named four of the five published
+  // packages, so following it stranded @haven_ai/cli at the previous version.
+  //
+  // Nothing here enumerates packages. The published set is derived at publish
+  // time by publish.yml; a second hand-maintained list is what drifted.
+  log('  Next steps — publishing is NOT one of them:')
+  log('')
+  log('    1. git diff --stat            review the bump')
+  log('    2. Write the two contract docs, or the blocking coupling gate fails:')
+  log('         docs/operations/mcp-runtime-compatibility.md')
+  log('           re-pin the Supported Runtime Manifest table + prepend a last-verified note')
+  log('         docs/regulatory/casp-changelog/<date>-<n>-release.md')
+  log('           a new shard, ending in a perimeter verdict')
+  log('    3. npm run docs:coupling      must exit 0')
+  log('    4. Commit on a release branch and open a PR into `dev`.')
+  log('')
+  log('  Publishing happens on the dev -> main promotion, and is version-gated:')
+  log('  publish.yml skips any version already on npm.')
+  log('')
+  log('  Never run `npm publish` by hand. It bypasses the per-package summary,')
+  log('  the prod release record, and every promotion gate.')
+  log('  See .agents/skills/release/SKILL.md.')
   log('')
 }
 

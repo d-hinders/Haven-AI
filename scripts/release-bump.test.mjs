@@ -156,3 +156,54 @@ test('MUTATION PROOF: a corrupted unrelated version cannot wear a version line a
   const violations = lockfileDiffViolations(before, corrupted, { currentVersion: CUR, newVersion: NEXT })
   assert.ok(violations.some((v) => v.includes('9.9.9')), `garbage version passed the guard: ${violations}`)
 })
+
+/**
+ * #1788: the script used to sign off by printing `npm publish` invocations —
+ * the one action CLAUDE.md and the release skill forbid in three separate
+ * places. The rule was prose in three files and the tool contradicted it at
+ * the moment of maximum trust, right after the bump had succeeded.
+ *
+ * Prose cannot guard a script. These tests do, scoped to the sign-off block so
+ * the prohibition sentence itself (which necessarily contains the words
+ * "npm publish") is not mistaken for an instruction to run it.
+ */
+async function doneBlock() {
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const start = source.indexOf("header('Done')")
+  assert.notEqual(start, -1, "release-bump.mjs no longer has a header('Done') sign-off block")
+  const end = source.indexOf('\nmain().catch', start)
+  assert.notEqual(end, -1, 'could not find the end of main() after the Done block')
+  return source.slice(start, end)
+}
+
+test('MUTATION PROOF: the sign-off never emits a runnable npm publish command (#1788)', async () => {
+  const block = await doneBlock()
+  // A runnable command, not the word: `npm publish` carrying a flag or a
+  // workspace selector. This is the exact shape that shipped and was followed.
+  const runnable = block.match(/npm publish\s+(?:-|--)\S+/g)
+  assert.equal(
+    runnable,
+    null,
+    `release-bump.mjs must not instruct a manual publish; found: ${JSON.stringify(runnable)}`,
+  )
+})
+
+test('the sign-off enumerates no packages, so it cannot drift from the published set (#1788)', async () => {
+  const block = await doneBlock()
+  // The original listed four of five (@haven_ai/cli was missing) — a second
+  // hand-maintained copy of the published set. publish.yml derives it.
+  const enumerated = block.match(/-w\s+packages\/\S+/g)
+  assert.equal(
+    enumerated,
+    null,
+    `the Done block must not name individual packages; found: ${JSON.stringify(enumerated)}`,
+  )
+})
+
+test('the sign-off still tells the operator publishing is not theirs to do (#1788)', async () => {
+  const block = await doneBlock()
+  // Removing the defect must not also remove the guidance: silence would let
+  // the next reader assume publishing is a manual step nobody wrote down.
+  assert.match(block, /Never run `npm publish` by hand/)
+  assert.match(block, /promotion/)
+})

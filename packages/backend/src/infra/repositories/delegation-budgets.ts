@@ -59,6 +59,38 @@ export async function listActiveDelegations(
  * whose recipient matches, else the agent's ACTIVE open-budget row for that
  * token. A pinned delegation always wins over the open one — the tighter
  * grant is the one the owner meant for that recipient (#829).
+ *
+ * ## The time window (#1698, found by review)
+ *
+ * `status` used to be the only filter, and `created_at DESC` the only tie
+ * break. That selected grants the chain would refuse: an ACTIVE row whose
+ * `start_date` is still in the future (the period enforcer reverts before its
+ * first period opens) or one already past `expires_at` (the timestamp caveat
+ * refuses it). Both were unreachable while every grant anchored ~60 s in the
+ * past — and #1698's carry makes the first one routine, because the "steady"
+ * half of a carried budget is deliberately dormant until the old period
+ * boundary and sits in the same (token, recipient) slot as the live "carry"
+ * half. Under the old ordering the dormant grant, being newest, won every
+ * payment for exactly the window the carry exists to cover.
+ *
+ * So the window is now part of the predicate. This can only ever narrow the
+ * result to grants the chain would honour — it never admits a delegation that
+ * was previously excluded, and never raises anyone's budget.
+ *
+ * ## Why soonest-expiring wins
+ *
+ * Among live grants, `expires_at ASC` prefers the one that dies first. For a
+ * carried budget that is the carry grant, which is correct twice over: it is
+ * the one holding the frozen remainder, and it is the one that becomes
+ * worthless at the boundary. Spending the perishable grant before the
+ * perpetual one is the same reasoning anywhere else. `created_at DESC` stays
+ * as the final tie break so behaviour is unchanged for the ordinary case of
+ * several grants sharing an expiry.
+ *
+ * `EXTRACT(EPOCH FROM NOW())` compares against the DATABASE clock rather than
+ * the app's — the same choice the intent-expiry queries make, and for the
+ * same reason: two app instances disagreeing about "now" must not disagree
+ * about which grant authorizes a payment.
  */
 export const SELECT_DELEGATION_FOR_PAYMENT_SQL = `SELECT delegation_hash, delegation_json, recipient_address
      FROM agent_delegations
@@ -66,7 +98,9 @@ export const SELECT_DELEGATION_FOR_PAYMENT_SQL = `SELECT delegation_hash, delega
        AND token_address = LOWER($2)
        AND status = 'active'
        AND (recipient_address = LOWER($3) OR recipient_address IS NULL)
-     ORDER BY (recipient_address IS NULL), created_at DESC`
+       AND start_date <= EXTRACT(EPOCH FROM NOW())
+       AND expires_at > EXTRACT(EPOCH FROM NOW())
+     ORDER BY (recipient_address IS NULL), expires_at ASC, created_at DESC`
 
 export interface DelegationForPaymentRow {
   delegation_hash: string

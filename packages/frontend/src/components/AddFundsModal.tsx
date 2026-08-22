@@ -120,8 +120,8 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
                   </p>
                 </div>
               </div>
-              <Button className="mt-3 w-full" onClick={handleBuyWithCard}>
-                Buy with card →
+              <Button className="mt-3 w-full" onClick={handleBuyWithCard} trailingIcon>
+                Buy with card
               </Button>
             </div>
           )}
@@ -163,8 +163,8 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
                 </div>
               </div>
             ) : !safeAddress ? (
-              <Button variant="ghost" className="mt-3 w-full" onClick={handleReceiveInstead}>
-                Show receive address →
+              <Button variant="ghost" className="mt-3 w-full" onClick={handleReceiveInstead} trailingIcon>
+                Show receive address
               </Button>
             ) : (
               /*

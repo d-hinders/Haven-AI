@@ -10,7 +10,7 @@
  * everything from brand links to muted row metadata.
  */
 
-import { Check, Clipboard } from 'lucide-react'
+import { Check, Clipboard, ExternalLink } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useCopyTimeout } from '@/hooks/useCopyTimeout'
@@ -30,7 +30,7 @@ export function Address({
   value: string
   /** Show the inline copy button with check-pop feedback. */
   copy?: boolean
-  /** Render as an external link (block explorer) with the ↗ affordance. */
+  /** Render as an external link (block explorer) with the lucide `ExternalLink` affordance. */
   href?: string
   /** `false` renders the full value (e.g. receive-funds surfaces). */
   truncate?: boolean
@@ -44,9 +44,10 @@ export function Address({
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="v2-tabular font-mono font-medium text-[var(--v2-brand)] hover:underline"
+      className="v2-tabular inline-flex items-center gap-1 font-mono font-medium text-[var(--v2-brand)] hover:underline"
     >
-      {display} <span aria-hidden="true">↗</span>
+      {display}
+      <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
     </a>
   ) : (
     // Full addresses must be able to wrap (receive-funds surfaces).

@@ -710,14 +710,17 @@ export async function expectNoHorizontalOverflow(page: Page) {
  *
  * ## Known limit, stated rather than papered over
  *
- * A box that overflows is reported whether or not it MEANT to. None of the
- * three dialogs currently contains a legitimate horizontal scroller (every
- * clean run found zero offenders), so nothing is excluded today. Deliberately
- * no class-name heuristic exempting `overflow-x-auto`: it would silently
- * exempt a real defect that happened to carry the class, and the repo already
- * has an honest convention for this — exempt a known case BY NAME at the call
- * site with an issue number, the way `KNOWN_CONTENT_OVERFLOW` does, so the
- * exemption is visible rather than inferred.
+ * A box that overflows is reported whether or not it MEANT to. One exclusion
+ * is built in — boxes 1px or narrower, which is the visually-hidden idiom and
+ * not a layout defect; see the comment at the check itself for the measurement
+ * that forced it. Beyond that, nothing is excluded: none of the three dialogs
+ * currently contains a legitimate horizontal scroller.
+ *
+ * Deliberately no class-name heuristic exempting `overflow-x-auto`. It would
+ * silently exempt a real defect that happened to carry the class, and the repo
+ * already has an honest convention for this — exempt a known case BY NAME at
+ * the call site with an issue number, the way `KNOWN_CONTENT_OVERFLOW` does,
+ * so the exemption is visible rather than inferred.
  */
 export async function measureDialogOverflow(page: Page, selector = '[role="dialog"]') {
   return page.evaluate((sel) => {
@@ -781,7 +784,22 @@ export async function measureDialogOverflow(page: Page, selector = '[role="dialo
       if (style.display === 'none' || style.visibility === 'hidden') continue
 
       const clientWidth = el.clientWidth
-      if (clientWidth > 0) {
+      // A box 1px wide or narrower is not laying out real content, and
+      // treating one as an overflow is a false positive rather than a find.
+      // Measured, not anticipated: the restore run of this very change went red
+      // on `span.sr-only` in the connect modal with `overlayOverflowBy: 67`.
+      // Tailwind's `sr-only` is the standard visually-hidden idiom — `width:
+      // 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)` — so its
+      // `scrollWidth` is the full width of the screen-reader text and its
+      // `clientWidth` is 1. Every such element reports a large "overflow" that
+      // is the utility working exactly as intended.
+      //
+      // Excluded by GEOMETRY rather than by matching the `sr-only` class name:
+      // a class-name rule would silently exempt a real defect that happened to
+      // carry the class, and would miss every other visually-hidden idiom. The
+      // guard loses nothing — the three mutations this change is proven against
+      // overflowed boxes 447, 510 and 574px wide.
+      if (clientWidth > 1) {
         const by = el.scrollWidth - clientWidth
         if (by > 1) {
           offenderCount += 1

@@ -136,9 +136,27 @@ export function isIncidentalPath(file) {
   // such glob exists — the run-report template's. The two docs that genuinely
   // describe e2e specs reach only `live/**`, `fixtures/live-session.ts` and
   // three exact spec paths, so neither can be un-covered by this. Backtested
-  // over 126 first-parent merges into `dev`: 0 docs newly implicated, 4 stop
-  // being implicated (all four the run-report template on a baseline
-  // regeneration), 0 change to blocking findings.
+  // over 126 first-parent merges into `dev`: 4 advisories stop firing, all four
+  // the run-report template on a baseline regeneration, and 0 change to
+  // blocking findings.
+  //
+  // Be precise about what that backtest proves. "No doc is NEWLY implicated" is
+  // not a measurement — it is true by construction, because this rule only ever
+  // moves a path from not-incidental to incidental, and a narrower "is
+  // incidental" predicate can only remove findings. The informative half is the
+  // other direction: WHICH advisories stopped, and whether any of them was
+  // asked for a good reason. All four were the same doc, via the same glob,
+  // matched only by PNGs.
+  //
+  // That enumeration is a snapshot, NOT a standing invariant, and the rule below
+  // is repo-wide rather than scoped to `packages/frontend/e2e/` (matching the
+  // unscoped style of the `__tests__/` and `.spec.` rules). So if a second
+  // package ever grows its own `__screenshots__/` — a Storybook/Chromatic
+  // snapshot dir, a second Playwright project — it becomes incidental here too,
+  // silently, for any doc covering it by wildcard. That is the intended
+  // reading (generated snapshots are generated snapshots wherever they live),
+  // but it is a decision, not an accident: re-run the enumeration before
+  // assuming the blast radius is still one glob.
   //
   // The exact-name escape still works and is the intended way to opt back in: a
   // doc whose `covers` names a baseline PNG by its full path is implicated by a

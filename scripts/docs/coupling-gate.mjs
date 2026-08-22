@@ -110,6 +110,42 @@ export function ageDays(lastVerified, now = Date.now()) {
  * #1076 was skimmed past in a list of eleven.
  */
 export function isIncidentalPath(file) {
+  // Playwright's snapshot directory — the committed visual-regression
+  // baselines. The name is not a convention someone might rename: it is
+  // `snapshotPathTemplate` in `packages/frontend/playwright.config.ts`, and the
+  // *Update visual baselines* workflow commits exactly this directory. The PNGs
+  // are generated, never hand-edited, and described by no runbook — the
+  // docstring's "generated file mirrors a source the doc already covers" case.
+  //
+  // This is checked BEFORE the test-package carve-out below, and that ordering
+  // is the whole fix (#1854): the baselines live INSIDE
+  // `packages/frontend/e2e/`, so the carve-out was protecting them too, and
+  // `docs/bug-reports/_run-report-template.md` (`covers: packages/frontend/e2e/**`)
+  // was implicated by every baseline regeneration. Nothing about a run-report
+  // template goes stale because a PNG's bytes changed.
+  //
+  // Falling through to the checks below would NOT have been enough: a path like
+  // `…/__screenshots__/design-system.visual.spec.ts/design-system-desktop.png`
+  // matches neither `__tests__/` nor the `$`-anchored `.spec.ts` extension test.
+  // The rule has to say `true` itself.
+  //
+  // Scope, stated mechanically rather than asserted (the #1824 style): this line
+  // can only change an outcome for a changed file under a `__screenshots__/`
+  // directory that is matched by a NON-EXACT `covers` glob. Enumerated across
+  // all docs with the front-matter parser and glob engine above, exactly one
+  // such glob exists — the run-report template's. The two docs that genuinely
+  // describe e2e specs reach only `live/**`, `fixtures/live-session.ts` and
+  // three exact spec paths, so neither can be un-covered by this. Backtested
+  // over 126 first-parent merges into `dev`: 0 docs newly implicated, 4 stop
+  // being implicated (all four the run-report template on a baseline
+  // regeneration), 0 change to blocking findings.
+  //
+  // The exact-name escape still works and is the intended way to opt back in: a
+  // doc whose `covers` names a baseline PNG by its full path is implicated by a
+  // change to it, because `implicatedDocs` skips this filter for exact globs.
+  if (/(^|\/)__screenshots__\//.test(file)) {
+    return true
+  }
   // Packages whose CONTENT is tests: the QA scenarios and live e2e specs are
   // what their runbooks document, not a test of some other source. Calling them
   // incidental would silently un-cover the docs that describe them.

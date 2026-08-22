@@ -489,8 +489,7 @@ export async function dismissMobileSidebar(page: Page) {
  * comparison **cannot fail**. `(authenticated)/layout.tsx` wraps everything in
  * `overflow-hidden` twice (the `flex h-screen … overflow-hidden` root and the
  * `flex-1 flex flex-col min-w-0 overflow-hidden` column), so overflowing
- * content is CLIPPED: it never grows the document, and the old metric reported
- * a clean fit while content sat unreachable past the bezel.
+ * content never grows the document and the old metric reported a clean fit.
  *
  * That is worse than no check, because it gets cited as evidence. It was found
  * only by mutation — #1768 shipped a deliberate `w-[120vw]` on `/dashboard`
@@ -500,9 +499,29 @@ export async function dismissMobileSidebar(page: Page) {
  * So the document metric is kept — it is the ONLY one that works on
  * unauthenticated pages like `/login`, which have no shell and no
  * `#main-content` — and the content-region metric is added beside it.
- * `<main id="main-content">` is `overflow-y-auto`, which computes `overflow-x`
- * to `auto`, so it is a real scroll box: comparing its own `scrollWidth`
- * against its own `clientWidth` sees exactly what the shell was hiding.
+ *
+ * ## What each metric actually means — they are DIFFERENT defects
+ *
+ * Do not collapse these two into "content is off-screen"; the next person
+ * debugging a failure needs to know which one fired.
+ *
+ * - `documentOverflows` — something escaped the page box itself. Where the
+ *   ancestors are `overflow-hidden` (the authenticated shell) this means the
+ *   content really is CLIPPED and unreachable, with no scrollbar anywhere.
+ *
+ * - `contentOverflows` — `<main id="main-content">` is wider than its own box.
+ *   `<main>` is `overflow-y-auto`, and per CSS Overflow §3 setting one axis to
+ *   a non-`visible` value computes the OTHER axis to `auto`, so its
+ *   `overflow-x` is `auto` and it is a genuine horizontal scroll box.
+ *   Measured directly rather than reasoned about: with a 120vw child at 393px,
+ *   `getComputedStyle(main).overflowX === 'auto'` and `main.scrollLeft` moves
+ *   to 79 — so the content is REACHABLE by scrolling the pane.
+ *
+ *   That is still a real defect, and it is the #1772 shape: one wide element
+ *   drags the WHOLE content pane into horizontal scroll — headings, cards and
+ *   all — instead of scrolling only itself inside an `overflow-x-auto`
+ *   wrapper. Read a `contentOverflows` failure as "the entire content pane is
+ *   forced into horizontal scroll", NOT as "the content cannot be reached".
  *
  * `hasOverflow` is the UNION, so every existing
  * `toMatchObject({ hasOverflow: false })` call site starts gating for real
@@ -511,23 +530,35 @@ export async function dismissMobileSidebar(page: Page) {
  *
  * ## Assert `contentRegionFound` on authenticated routes
  *
- * When `#main-content` is absent the content metric degrades to `false` — the
- * silent no-op that this whole helper exists to prevent. It cannot tell on its
- * own whether a page SHOULD have a content region, so authenticated call sites
- * pass `{ hasOverflow: false, contentRegionFound: true }` and make the no-op
- * path loud. `/login` legitimately has no content region and asserts only
+ * When the content region is absent — or attached but not laid out — the
+ * content metric degrades to `0`, which reads as "fits": the silent no-op that
+ * this whole helper exists to prevent. So `contentRegionFound` requires a
+ * NON-ZERO `clientWidth`, not merely a node in the DOM; a hydration flash, a
+ * `display:none` mid-transition or a failed stylesheet all produce an attached
+ * `<main>` measuring `0 - 0 = 0`. The helper cannot tell on its own whether a
+ * page SHOULD have a content region, so authenticated call sites pass
+ * `{ hasOverflow: false, contentRegionFound: true }` and make the no-op path
+ * loud. `/login` legitimately has no content region and asserts only
  * `hasOverflow`.
  *
- * ## Known blind spot: `position: fixed` overlays
+ * ## Known blind spot, and it is structural
  *
- * Neither metric sees overflow INSIDE a fixed-position modal. A fixed element
- * is laid out against the viewport, so it contributes to neither the
+ * This compares TWO scroll boxes; it does not walk the ancestor chain. So any
+ * `overflow-hidden` BETWEEN the two measured boxes swallows the evidence
+ * before either one sees it — a card inside `<main>` that clips a decorative
+ * element, and one day clips real content, recreates the exact #1768 failure
+ * one level further down. Fixing the document-level case did not close the
+ * failure class; it closed the instance of it that the shell created.
+ *
+ * The concrete case measured so far is `position: fixed` overlays. A fixed
+ * element is laid out against the viewport, so it contributes to neither the
  * document's scrollable overflow nor `<main>`'s — and an ancestor's
- * `overflow-hidden` does not clip it either. Measured, not assumed (#1771).
+ * `overflow-hidden` does not clip it either. Verified, not assumed: a 120vw
+ * block inside `ReceiveFundsModal` left `dashboard.spec.ts`' assertion green.
  * Call sites that open a dialog before asserting are therefore measuring the
- * page BEHIND the dialog, which is still a real assertion but not a check on
- * the dialog's own layout. Filed as #1773 rather than widened here — it wants
- * its own selector, its own call-site changes and its own mutation proof.
+ * page BEHIND the dialog — still a real assertion, but not a check on the
+ * dialog's own layout. Filed as #1773 rather than widened here: it wants its
+ * own selector, its own call-site changes and its own mutation proof.
  */
 export async function expectNoHorizontalOverflow(page: Page) {
   return page.evaluate(() => {
@@ -538,10 +569,19 @@ export async function expectNoHorizontalOverflow(page: Page) {
       scrollWidth > documentWidth + 1 || bodyScrollWidth > documentWidth + 1
 
     const main = document.getElementById('main-content')
+    const contentScrollWidth = main ? main.scrollWidth : null
+    const contentClientWidth = main ? main.clientWidth : null
+    // Presence is NOT enough: an attached but unlaid-out `<main>` measures
+    // `0 - 0 = 0`, which reads as "fits". Require a real box, so the no-op
+    // path fails the `contentRegionFound` assertion instead of passing.
+    const contentRegionFound = contentClientWidth !== null && contentClientWidth > 0
     // 1px of tolerance for sub-pixel layout rounding. A real overflow is far
     // larger — the three measured so far were the #1768 mutation, #1772's
     // transactions table, and this helper's own mutation proof, all ~100px+.
-    const contentOverflowBy = main ? main.scrollWidth - main.clientWidth : 0
+    const contentOverflowBy =
+      contentRegionFound && contentScrollWidth !== null && contentClientWidth !== null
+        ? contentScrollWidth - contentClientWidth
+        : 0
     const contentOverflows = contentOverflowBy > 1
 
     return {
@@ -549,9 +589,12 @@ export async function expectNoHorizontalOverflow(page: Page) {
       scrollWidth,
       bodyScrollWidth,
       documentOverflows,
-      contentRegionFound: Boolean(main),
-      contentScrollWidth: main ? main.scrollWidth : null,
-      contentClientWidth: main ? main.clientWidth : null,
+      contentRegionFound,
+      // Distinguishes "no such element" from "element present but not laid
+      // out" when a `contentRegionFound` assertion fails.
+      contentAttached: Boolean(main),
+      contentScrollWidth,
+      contentClientWidth,
       contentOverflowBy,
       contentOverflows,
       hasOverflow: documentOverflows || contentOverflows,

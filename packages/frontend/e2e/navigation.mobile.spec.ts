@@ -57,9 +57,10 @@ const ROUTES = ['/dashboard', '/agents', '/transactions', '/approvals'] as const
  */
 const KNOWN_CONTENT_OVERFLOW: Partial<Record<(typeof ROUTES)[number], string>> = {
   '/transactions':
-    '#1772 — transactions table renders without an overflow-x-auto wrapper. ' +
-    'Measured 94-124px of content clipped out of a 393px box (it varies ' +
-    'with how many rows render) — on CI and locally alike.',
+    '#1772 — transactions table renders without an overflow-x-auto wrapper, ' +
+    'so it drags the WHOLE content pane into horizontal scroll instead of ' +
+    'scrolling itself. Measured 94-124px past a 393px box (it varies with ' +
+    'how many rows render) — on CI and locally alike.',
 }
 
 /**
@@ -67,8 +68,10 @@ const KNOWN_CONTENT_OVERFLOW: Partial<Record<(typeof ROUTES)[number], string>> =
  * shared `expectNoHorizontalOverflow` by #1771.
  *
  * It existed because the shared helper compared the DOCUMENT alone, which
- * inside the authenticated shell cannot fail — the shell is `overflow-hidden`
- * twice over, so overflowing content is clipped rather than growing
+ * inside the authenticated shell cannot fail. Overflowing content is absorbed
+ * by `<main>`'s own scroll box (it is `overflow-y-auto`, so `overflow-x`
+ * computes to `auto`) and stopped by the shell's two `overflow-hidden`
+ * ancestors beyond that — either way it never grows
  * `documentElement.scrollWidth`. #1768 proved it: a deliberate `w-[120vw]` on
  * `/dashboard` sailed through, green, on a real CI run. That blind spot was
  * repo-wide rather than local to this file, so widening the shared helper was
@@ -76,7 +79,8 @@ const KNOWN_CONTENT_OVERFLOW: Partial<Record<(typeof ROUTES)[number], string>> =
  *
  * The shared helper now returns both metrics — `documentOverflows` and
  * `contentOverflows` / `contentOverflowBy`, plus `contentRegionFound` so the
- * no-op path stays loud — and `hasOverflow` is their union.
+ * no-op path stays loud — and `hasOverflow` is their union. The two mean
+ * DIFFERENT defects; see the helper's own JSDoc before diagnosing a failure.
  */
 
 test.describe('mobile viewport', () => {

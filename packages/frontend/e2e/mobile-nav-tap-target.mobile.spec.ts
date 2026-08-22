@@ -21,8 +21,13 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
  * ...and after it:
  *
  *   painted box                        32 x 32   (unchanged — that is the point)
- *   MEASURED hit rectangle             44 x 44   (x 10-53, y 10-53)
+ *   MEASURED hit rectangle             44 x 44   (x 10-54, y 10-54)
  *   corners of the intended 44px area  all four reach the toggle
+ *
+ * Pixel conventions, because the two readings differ by one and both appear
+ * below: a 44px-wide box spanning x 10-54 has its LAST HITTING PIXEL at x=53.
+ * `hit.right` in the measurement is that last hitting pixel (53); "right edge
+ * x=54" in the clearance reasoning is the box edge. Same rectangle.
  *
  * ── Why every number above is MEASURED and not read off a class string ───────
  * The obvious cheap test — assert the className contains `after:h-11 after:w-11`
@@ -194,7 +199,8 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         expect(m.painted).toEqual({ w: PAINTED_PX, h: PAINTED_PX })
 
         // 4. The enlarged target did not eat its neighbour. `NetworkSwitcher`
-        //    starts at x=68 in this bar; the 44px target's right edge is x=54.
+        //    starts at x=68 in this bar; the 44px target's right box edge is
+        //    x=54, so its last hitting pixel is x=53 — 14px of clearance.
         expect(m.neighbour).not.toBeNull()
         expect(m.hit.right).toBeLessThan(m.neighbour!.left)
 
@@ -237,6 +243,50 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
       // ...and the ordinary centre click still closes it.
       await page.getByRole('button', { name: 'Close sidebar' }).click()
       await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()
+    })
+
+    // The OPEN-drawer state, which the closed-state measurements above cannot
+    // see. The toggle outranks the drawer (`--v2-z-nav-toggle` 150 vs
+    // `--v2-z-nav-drawer` 140) so that one control both opens and closes it —
+    // which means the invisible target now also floats over the drawer's own
+    // 56px logo band, 6px per edge further than it did before.
+    //
+    // Raised by review rather than predicted, and worth an assertion rather
+    // than a judgement: the 6px looks obviously harmless, but "obviously
+    // harmless" is precisely the reasoning that shipped a control nobody could
+    // tap (#1749). What must stay true is not "no overlap" — the 32px box
+    // already overlapped the logo's leading edge before this PR — but that the
+    // Haven logo link is still reachable at its own centre.
+    test('the enlarged target does not swallow the open drawer\'s logo link', async ({ page }) => {
+      await page.goto('/dashboard')
+      await page.getByRole('button', { name: 'Open sidebar' }).click()
+
+      // Wait for the 200ms slide to FINISH. Hit-testing a transforming element
+      // lands on a part-way drawer and reports a defect that does not exist —
+      // the false failure that hit three of four widths on #1749's first run.
+      await page.waitForFunction(
+        () => Math.round(document.querySelector('aside')!.getBoundingClientRect().left) === 0,
+        undefined,
+        { timeout: 10_000 },
+      )
+
+      const reach = await page.evaluate(() => {
+        const aside = document.querySelector('aside')!
+        const logo = aside.querySelector<HTMLElement>('a[href="/dashboard"]')!
+        const b = logo.getBoundingClientRect()
+        const top = document.elementFromPoint(
+          Math.round(b.left + b.width / 2),
+          Math.round(b.top + b.height / 2),
+        )
+        return {
+          logoReachableAtItsCentre: !!top && (top === logo || logo.contains(top)),
+          // Named, so a red run says WHAT took the tap instead of just `false`.
+          takenBy: top
+            ? `${top.tagName.toLowerCase()}.${String(top.className).trim().split(/\s+/).slice(0, 2).join('.')}`
+            : 'nothing',
+        }
+      })
+      expect(reach).toMatchObject({ logoReachableAtItsCentre: true })
     })
   })
 })

@@ -274,12 +274,20 @@ on the entry point to primary navigation. It borrows the same mechanism (transpa
   consequence of a labelled `sm` Button's width already clearing 44px. A 32px square
   has no long axis, so the overlay is `h-11 w-11` and centred on both. What still
   applies is the *reason* behind the original rule — check what the widened target now
-  reaches. For the toggle: right edge x=54, nearest interactive control (`NetworkSwitcher`)
-  at x=68, 14px of clearance, asserted in `e2e/mobile-nav-tap-target.mobile.spec.ts`.
+  reaches, in **both** states the control has. For the toggle, closed: right box edge
+  x=54, nearest interactive control (`NetworkSwitcher`) at x=68, 14px of clearance.
+  Open: the target floats over the drawer's own logo band, which it already did at 32px
+  — what is asserted there is that the logo link is still reachable at its centre, not
+  that nothing overlaps. Both are pinned in `e2e/mobile-nav-tap-target.mobile.spec.ts`.
 - **Do not add `relative` to an already-positioned element.** `Button` needs it because
   it is static. A `fixed` or `absolute` control is already a positioning context, and
   adding `relative` un-fixes it — on the toggle that shifts the whole app shell 32px
-  and drops the control back under `TopBar`, which was #1749.
+  and drops the control back under `TopBar`, which was #1749. Do not take this on the
+  prose's word: it is a claim about which of two same-property utilities the cascade
+  keeps, so it is pinned by a test rather than by this paragraph —
+  `e2e/mobile-nav-tap-target.mobile.spec.ts` asserts `header.left === 0` as an absolute
+  anchor, and that assertion exists **because** the mutation passed three other mobile
+  specs first.
 
 **Prove it rendered, not in the class string.** A pseudo-element overlay has several
 silent no-op failure modes (a clipping ancestor, a positioning context resolving

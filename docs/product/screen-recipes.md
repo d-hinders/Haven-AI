@@ -132,9 +132,9 @@ Money and risk clarity:
 
 ## Connect And Approve Agent
 
-Use after the user reviews the agent budget and needs to pair an agent runtime
-and approve the agent's on-chain authority. The user is never asked WHICH
-runtime: the connector resolves that itself (#1720), so this flow has one
+Use after the user reviews the agent budget and needs to connect the agent to
+its runtime and approve the agent's on-chain authority. The connector works out
+which runtime that is (#1720) — the user is never asked — so this flow has one
 setup prompt for every environment.
 
 Structure:

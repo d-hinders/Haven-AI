@@ -693,12 +693,14 @@ describe('ConnectAgentModal', () => {
   })
 
   // #1720 acceptance: ONE command for every environment. This is the frontend
-  // half — no runtime ever reaches the payload, whatever the environment. The
+  // half — no runtime reaches the payload. It does NOT vary the environment,
+  // because after the picker's removal there is nothing left to vary: the
+  // environment is the connector's business now, which is the whole point. The
   // other half (the built command never carries --runtime) is asserted in the
   // backend suite, which is where the command is actually constructed; the
   // command in this file is a mocked fixture and asserting on it would prove
   // only that the fixture was edited.
-  it('sends no runtime, whatever the environment', async () => {
+  it('sends no runtime in the create-setup payload', async () => {
     renderModal()
 
     await fillAndCreateSetup()
@@ -1606,6 +1608,16 @@ describe('ConnectAgentModal', () => {
       api_key_hash: 'cd'.repeat(32),
       api_key_prefix: 'sk_agent_aba',
     })
+    // #1720: this path used to send the PICKED runtime to /resolve and
+    // /register even though it configures no runtime at all — nothing runs
+    // locally, `can_write_runtime_config` is false, and the config_target is
+    // 'paste-to-agent'. With no pick it sends none, which is the honest value
+    // and leaves the setup row's runtime free for a later connector run to
+    // fill. Asserted as ABSENT rather than undefined-valued: an explicit
+    // `runtime: undefined` would serialise into the request body as a key.
+    expect(registerPayload).not.toHaveProperty('runtime')
+    const resolveCall = mockApiPost.mock.calls.find(([path]) => path === '/agent-connection-setups/resolve')
+    expect(resolveCall?.[1] as Record<string, unknown>).not.toHaveProperty('runtime')
 
     const dialogAfter = screen.getByRole('dialog').textContent ?? ''
     expect(dialogAfter).toContain('The private signing key lets the agent sign payments within the approved agent budget.')

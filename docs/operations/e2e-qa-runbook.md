@@ -23,7 +23,7 @@ covers:
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-08-22" # #1720: the per-environment run list is no longer a picker-row list — there is no picker, so per-environment coverage now checks that the CONNECTOR resolves each environment from an identical command, and a deliberately-undetectable environment becomes a case worth running rather than an unreachable one. Step 1 rewritten (nothing to pick; commands must match across environments) and a new step 1b added for confirming which resolution rung fired. Other steps and the "Already automated" table NOT re-run. Prior: #1771: corrected the "Already automated" row that credited `hosted-mcp.spec.ts` with mobile-overflow coverage — that test asserted a helper which could not fail inside the app shell and was removed; mobile overflow is covered by `navigation.mobile.spec.ts` under Pixel 5 emulation. Scope of this re-verification: the "Already automated" table only; the hand-test steps were NOT re-run. Prior: #1682: the per-environment run list notes the name-first picker (a row per environment again); steps themselves unchanged. Prior: #1672: noted the collapsed AI-agent picker entry in the per-environment run list; steps themselves unchanged. Prior: #1346 runtime-specific activation + read-only Connect verification re-checked; #1330 Hermes .env credential-reference verification
+last-verified: "2026-08-22" # #1720: the per-environment run list is no longer a picker-row list — there is no picker, so per-environment coverage now checks that the CONNECTOR resolves each environment from an identical command, and a deliberately-undetectable environment becomes a case worth running rather than an unreachable one. Step 1 rewritten (nothing to pick; commands must match across environments) and a new step 2 added for confirming which resolution rung fired, renumbering the rest. Other steps and the "Already automated" table NOT re-run. Prior: #1771: corrected the "Already automated" row that credited `hosted-mcp.spec.ts` with mobile-overflow coverage — that test asserted a helper which could not fail inside the app shell and was removed; mobile overflow is covered by `navigation.mobile.spec.ts` under Pixel 5 emulation. Scope of this re-verification: the "Already automated" table only; the hand-test steps were NOT re-run. Prior: #1682: the per-environment run list notes the name-first picker (a row per environment again); steps themselves unchanged. Prior: #1672: noted the collapsed AI-agent picker entry in the per-environment run list; steps themselves unchanged. Prior: #1346 runtime-specific activation + read-only Connect verification re-checked; #1330 Hermes .env credential-reference verification
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
@@ -85,7 +85,7 @@ deliberately, not an unreachable one.
    pick — expect a single paste-able setup prompt with no runtime question
    anywhere in the flow, and no private key shown. The command must be
    identical to the one the previous environment's run produced.
-1b. **Confirm resolution, per environment.** In the connector's output, check
+2. **Confirm resolution, per environment.** In the connector's output, check
    which rung resolved the runtime — detection, an agent self-report, or the
    installed-client prompt (#1719). In an environment where nothing is
    detectable and stdin is not a TTY, expect a refusal naming `--runtime`
@@ -93,28 +93,28 @@ deliberately, not an unreachable one.
    dashboard cannot show this failure (it fires before Haven is contacted), so
    the connector's output is the only evidence — the waiting screen's recovery
    block now says so.
-2. **Run the connector** in that environment (`npx @haven_ai/connect@alpha …` or
+3. **Run the connector** in that environment (`npx @haven_ai/connect@alpha …` or
    the pasted prompt). Expect: credentials written under `~/.haven/agents/<id>/`,
    hosted MCP + `haven-signer` entries written to that runtime's config, and the
    dashboard advancing to the approval screen. For Hermes, verify its
    `config.yaml` references `MCP_HAVEN_API_KEY` while the matching owner-only
    `.env` holds the value; do not copy secrets into the run report.
-3. **Approve, then activate MCP wiring** — approval, not activation, unlocks
+4. **Approve, then activate MCP wiring** — approval, not activation, unlocks
    Haven tools. Start a new Claude Code session or fresh Codex CLI session
    (`codex resume --last` is one option); restart Codex Desktop or Claude
    Desktop; let Cursor/VS Code hot-reload; and for Hermes start a new session
    or run `/restart` in Gateway. For Hermes, check `hermes mcp list` shows both
    `haven` and `haven-signer`, then run `hermes mcp test haven`. Install its MCP
    SDK with `pip install mcp` if tools are absent.
-4. **Confirm read-only state** — `haven_get_agent` and
+5. **Confirm read-only state** — `haven_get_agent` and
    `haven_get_allowances` show identity, readiness, the Haven wallet, and the
    configured budget/live remaining. Do not sign, fund, or create a payment to
    verify setup.
-5. **Confirm a basic action** — approve the budget on-chain (wallet/passkey), then
+6. **Confirm a basic action** — approve the budget on-chain (wallet/passkey), then
    have the agent do a small allowed action (e.g. a direct `haven_pay` within budget
    or an x402 call). Expect it to settle, or to queue for approval if over budget.
 
-Record per environment: did each of steps 1–5 pass, and any friction.
+Record per environment: did each of steps 1–6 pass, and any friction.
 
 ## #420 — x402 payments, end to end
 

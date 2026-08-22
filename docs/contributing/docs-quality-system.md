@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/docs-drift/docs-drift.test.ts
   - packages/backend/src/docs-drift/env-example-drift.test.ts
   - .env.example
-last-verified: "2026-08-16" # #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
+last-verified: "2026-08-22" # #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
 ---
 
 # Documentation-quality system
@@ -100,7 +100,8 @@ file and is dependency-free like the other `scripts/docs/*` tools.
 ### Validate locally
 
 ```bash
-npm run docs:check   # validate every doc's front-matter + covers globs
+npm run docs:check   # front-matter + covers globs, agent skills, last-verified chains
+npm run docs:chain   # just the chain check, against origin/dev
 npm run docs:test    # unit tests for the docs and agent-skill validators
 ```
 
@@ -114,6 +115,14 @@ on any problem.
 and the boundary between portable workflow text and client-specific mechanics.
 It is dependency-free and runs as part of `npm run docs:check`.
 
+`scripts/docs/chain-integrity.mjs` is the third `docs:check` step and is
+described under [`last-verified` chain integrity](#last-verified-chain-integrity-1843)
+below. Unlike the other two it reads **git history**, so it needs a base
+commit: locally `origin/dev`, in CI `BASE_SHA`/`HEAD_SHA` with
+`fetch-depth: 0`. Without one it says NOTHING WAS CHECKED and, in CI, fails —
+a gate that cannot see the diff must never report a clean bill of health
+(the #1076 lesson).
+
 ## Check layers
 
 ### Phase 1 — deterministic checks (this PR)
@@ -124,16 +133,25 @@ Run by `.github/workflows/docs.yml` on **every** pull request:
 | --- | --- | --- |
 | Front-matter + `covers` resolution | `scripts/docs/validate-frontmatter.mjs` | **Blocking** |
 | Agent-skill structure + adapter alignment | `scripts/docs/validate-agent-skills.mjs` | **Blocking** |
+| `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843)) | `scripts/docs/chain-integrity.mjs` | **Blocking** |
 | Link health | lychee (`.lychee.toml`) | Advisory (`continue-on-error`) |
 | Markdown hygiene | markdownlint-cli2 (`.markdownlint.json`) | Advisory |
 | Product-copy terminology | Vale (`.vale.ini`, scoped to `docs/product/**`) | Advisory |
 
-The two validators are whole-repo and dependency-free, which is why the
+All three blocking checks need no npm dependencies and finish in seconds, which is why the
 `pull_request` trigger carries **no `paths:` filter** — a required check must
 report on every PR or auto-merge deadlocks waiting for a run that never happens
 (the #933 lesson; see [`autonomous-pr-loop.md`](autonomous-pr-loop.md) §One-time
 setup). Add **Docs front-matter & agent skills** to the "Haven automerge rules"
 ruleset for the blocking column above to be true.
+
+The chain check runs **inside that same required job** rather than as a job of
+its own. A new job would be a new check name, and a check name that is not in
+the ruleset blocks nothing — so the rule would have started enforcing on the
+day someone remembered to edit the ruleset, not the day it merged. The cost of
+folding it in is that its failures are attributed to a job whose name says
+"front-matter"; the failure message names the doc and the dropped references,
+so nobody has to guess which of the three spoke.
 
 Until [#1023](https://github.com/d-hinders/Haven-AI/issues/1023) these ran as a
 hard gate only inside `ship-next`, which made the canonical workflow stricter
@@ -143,6 +161,74 @@ on which tool opened the PR.
 Vale is scoped to `docs/product/**` on purpose: engineering docs legitimately use
 "Safe", "AllowanceModule", and "signer", so the terminology rule must not flood
 them.
+
+#### `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843))
+
+Every other check here asks whether a doc was **touched**, or whether its header
+**parses**. None asks whether it still says what it said — so a deletion is the
+one edit that satisfies all of them at once. The coupling gate goes green
+because the doc changed (exactly what it wanted), front-matter validation
+because the header is still well-formed, and the staleness audit *improves*,
+because the edit bumped `last-verified`.
+
+That is not hypothetical. Resolving the #1832/#1841 collision on
+`ship-playbooks/frontend.md`, a session **picked a side instead of chaining**
+and deleted `#1816`'s chain entry, the §4 paragraph it pointed at, and a
+post-review correction — all already merged on `dev`. Valid front-matter, 145
+coherent lines, every gate green.
+
+**The rule.** A `last-verified` note line is a chain, one entry per issue that
+re-verified the doc (#1496). So:
+
+> every issue reference on a doc's previous `last-verified` line must still
+> appear on its new one.
+
+Prepending and appending both satisfy it, so the check never has to know which
+order a given doc uses — and **read the doc's own chain before you add to it**:
+`mcp-runtime-compatibility.md` reads newest-first, `product/design-system.md`
+oldest-first.
+
+**Compacting a chain on purpose** says so on the line itself, which passes the
+check and prints what was dropped:
+
+```yaml
+last-verified: "2026-08-22" # chain-reset(#1843): compacted, history in git log. #1799: …
+```
+
+The marker lives on the line rather than in a PR description so the excuse
+lands in the diff of the file it excuses.
+
+**What it deliberately does not do.** It is not a general "did prose disappear"
+detector; it watches the one line where a lost entry is provable rather than
+guessed. It also does not follow **renames**: a doc moved and chain-edited in
+one pull request has no previous version at its new path, so that shape is a
+known blind spot rather than a covered case. Two heavier designs were weighed in #1843 and rejected: a shrink-only
+line-count ratchet on contract docs (more teeth, but it fires on every
+legitimate deletion, and an escape hatch used routinely stops being read), and
+surfacing deletions in the advisory coupling comment (nearly free, but the
+incident's advisory comment was already green — a comment nobody must answer
+would not have caught it).
+
+The check is also **containment, not the order-preserving subsequence** the
+issue proposed. Backtested over every feature PR merged into `dev` since the
+chaining convention took hold, the ordering half caught zero real defects and
+produced two false positives, both benign: a new note that CITES an older issue
+in its prose ("#1816: … reuses #1800's mechanism") moves that reference to the
+front without dropping anything. One of the two was the resolution that *fixed*
+the incident.
+
+A `dev → main` promotion pull request is exempt: its diff is weeks of history
+that each `dev` PR already carried through this check, and no promoter can act
+on a chain edited before the check existed. The exemption inherits this repo's
+usual caveat — a commit that reached `dev` by direct push or admin merge was
+never checked by any PR gate, this one included — so it is "already checked"
+in the same sense every other gate here means it, not a stronger one. A
+`hotfix/*` into `main` is real work and stays checked.
+
+The measurement behind the containment decision is re-runnable rather than
+quoted: `node scripts/docs/chain-integrity-backtest.mjs --since=<date>` replays
+the check over merged pull requests. It is a development tool; nothing in CI
+runs it.
 
 ### Phase 2 — coupling gate + drift tests ([#644](https://github.com/d-hinders/Haven-AI/issues/644))
 

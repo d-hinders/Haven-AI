@@ -59,6 +59,7 @@ import x402ResourceRoutes from './routes/x402-resources.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
 import openapiRoutes from './routes/openapi.js'
 import catalogRoutes from './routes/catalog.js'
+import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import analyticsRoutes from './routes/analytics.js'
 import accountingRoutes from './routes/accounting.js'
 import fortnoxRoutes from './routes/fortnox.js'
@@ -270,6 +271,7 @@ await app.register(safeExecRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
 await app.register(x402ResourceRoutes, { prefix: '/x402' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
+await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 await app.register(accountingRoutes, { prefix: '/accounting' })
 await app.register(fortnoxRoutes, { prefix: '/accounting/fortnox' })

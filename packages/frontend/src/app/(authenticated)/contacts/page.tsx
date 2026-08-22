@@ -265,7 +265,7 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
           onClick={() => onDelete(contact)}
           aria-label={`Delete ${contact.name}`}
           title="Delete contact"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:h-9 sm:w-9"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 sm:h-9 sm:w-9"
         >
           <Icon icon={Trash2} className="h-4 w-4" />
         </button>

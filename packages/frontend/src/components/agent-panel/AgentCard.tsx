@@ -240,7 +240,7 @@ export function AgentCard({
                 onClick={() => onEdit(agent)}
                 disabled={isBusy}
                 aria-label={`Edit ${agent.name}`}
-                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 Edit
               </button>
@@ -249,7 +249,7 @@ export function AgentCard({
                 onClick={openDetails}
                 disabled={isBusy}
                 aria-label={`Open details for ${agent.name}`}
-                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 Details
               </button>
@@ -260,7 +260,7 @@ export function AgentCard({
                 onClick={() => setPauseModalOpen(true)}
                 disabled={isBusy}
                 aria-label={`Pause ${agent.name}`}
-                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 {busyAction === 'pause' ? 'Pausing...' : 'Pause'}
               </button>
@@ -269,7 +269,7 @@ export function AgentCard({
                 onClick={() => onResume(agent)}
                 disabled={isBusy}
                 aria-label={`Resume ${agent.name}`}
-                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+                className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
               </button>
@@ -284,7 +284,7 @@ export function AgentCard({
                   onClick={() => setRevokeModalOpen(true)}
                   disabled={isBusy}
                   aria-label={`Revoke ${agent.name}`}
-                  className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
+                  className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
                 >
                   Revoke
                 </button>
@@ -301,7 +301,7 @@ export function AgentCard({
                   onClick={() => setRemoveModalOpen(true)}
                   disabled={isBusy}
                   aria-label={`Remove ${agent.name}`}
-                  className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
+                  className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
                 >
                   Remove
                 </button>
@@ -319,7 +319,7 @@ export function AgentCard({
               onClick={() => setRemoveModalOpen(true)}
               disabled={isBusy}
               aria-label={`Remove ${agent.name}`}
-              className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50"
+              className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-danger)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80"
             >
               {busyAction === 'archive' ? 'Removing...' : 'Remove'}
             </button>
@@ -331,7 +331,7 @@ export function AgentCard({
               onClick={() => onRestore(agent)}
               disabled={isBusy}
               aria-label={`Restore ${agent.name} to the list`}
-              className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50"
+              className="text-xs text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors disabled:opacity-50 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
             >
               {busyAction === 'restore' ? 'Restoring...' : 'Restore to list'}
             </button>

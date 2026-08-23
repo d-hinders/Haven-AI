@@ -107,6 +107,7 @@ export {
   reconcilePendingRevocations,
   listStuckRevocations,
   revocationBackoffSeconds,
+  isStaleAnchor,
   setRevoker,
   setRevocationProbe,
   type Standing,
@@ -117,6 +118,17 @@ export {
   type RevocationAnchorReading,
   type RevocationAnchorState,
 } from './revocation.js'
+
+// Re-anchoring after a re-key (#1699, epic #1694). EAS attestations are
+// immutable and the schema's first field is the delegate EOA, so a rotated key
+// means retire-and-reissue — with the DB's `standing` running unbroken across
+// it, because standing was never a column of this table.
+export {
+  reconcileReanchor,
+  reanchorPassportBestEffort,
+  reconcilePendingReanchors,
+  listStuckReanchors,
+} from './reanchor.js'
 
 // x402 passport-reference delivery (#976, `X-Agent-Passport` header) — #998
 // added this re-export so `modules/x402/settle.ts` (the only external

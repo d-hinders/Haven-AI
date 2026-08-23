@@ -313,8 +313,8 @@ const passportReceipt = {
     },
     anchor: {
       type: 'string',
-      enum: ['not_anchored', 'anchored', 'revocation_pending', 'revoked_onchain'],
-      description: "The on-chain anchor's progress, for transparency. Never the authority.",
+      enum: ['not_anchored', 'anchored', 're_anchoring', 'revocation_pending', 'revoked_onchain'],
+      description: "The on-chain anchor's progress, for transparency. Never the authority. `re_anchoring` is the re-key window (#1699): the attestation on-chain is live but names the agent's RETIRED delegate key, because EAS attestations are immutable — the agent's standing is unaffected.",
     },
     evidenceUid: { type: ['string', 'null'] },
     chainId: { type: ['integer', 'null'] },
@@ -2110,8 +2110,8 @@ export const openapiSpec = {
                         },
                         anchor: {
                           type: 'string',
-                          enum: ['not_anchored', 'anchored', 'revocation_pending', 'revoked_onchain'],
-                          description: 'Describes the chain, for transparency — not for deciding.',
+                          enum: ['not_anchored', 'anchored', 're_anchoring', 'revocation_pending', 'revoked_onchain'],
+                          description: "Describes the chain, for transparency — not for deciding. `re_anchoring` means a re-key rotated the delegate key and the attestation naming the old one is being retired and reissued (#1699); standing is unaffected.",
                         },
                         attestationUid: { type: ['string', 'null'] },
                         chainLagging: {

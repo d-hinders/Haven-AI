@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { writeRuntimeConfig, type RuntimeMcpMode } from './config-writers.js'
+import { writeRuntimeConfig, type RuntimeMcpMode, type RuntimeConfigWriteResult } from './config-writers.js'
 import { serverNamesFor } from './server-names.js'
 import {
   acknowledgeLocalMcpConsent,
@@ -279,23 +279,23 @@ export async function installRuntime(
   const signerRuntimePrepared = localRuntime ? undefined : signerCommand !== undefined
 
   progress('Setting up your Haven tools…')
-  const configResult = runtime === 'claude-code'
-    ? localRuntime
+  const configResult = localRuntime
+    ? runtime === 'claude-code'
       ? await configureClaudeCode(deps, localRuntimeInstall?.command ?? '', input.serverName)
-      : await configureClaudeCodeHosted(deps, input, signerCommand)
-    : await writeRuntimeConfig({
-        runtime,
-        hostedMcpUrl: input.hostedMcpUrl,
-        apiKey: input.apiKey,
-        identityPath: input.identityPath,
-        signerPath: input.signerPath,
-        serverName: input.serverName,
-        credentialDirectory: input.credentialDirectory,
-        localMcpCommand: localRuntimeInstall?.command,
-        signerCommand,
-        homeDir: deps.homeDir,
-        mode: localRuntime ? 'local' : 'hosted',
-      })
+      : await writeRuntimeConfig({
+          runtime,
+          hostedMcpUrl: input.hostedMcpUrl,
+          apiKey: input.apiKey,
+          identityPath: input.identityPath,
+          signerPath: input.signerPath,
+          serverName: input.serverName,
+          credentialDirectory: input.credentialDirectory,
+          localMcpCommand: localRuntimeInstall?.command,
+          signerCommand,
+          homeDir: deps.homeDir,
+          mode: 'local',
+        })
+    : await writeHostedRuntimeConfig(deps, { ...input, runtime }, signerCommand)
 
   // #1543: the config write has settled — everything the dashboard's approval
   // unlock reads is now known, so report it before the probes and skill
@@ -510,6 +510,45 @@ async function configureClaudeCode(
       errorCode: 'claude_code_config_failed',
     }
   }
+}
+
+/**
+ * Write the HOSTED topology's runtime config, whichever runtime it is.
+ *
+ * Exported and extracted (#1700) because Claude Code is not written by
+ * `writeRuntimeConfig` at all — its `switch` has no `claude-code` case, so that
+ * runtime falls through to the `default:` branch and returns
+ * `hostedConfigured: false` with a "add it manually" message. Claude Code's
+ * config is written by shelling out to `claude mcp add-json` instead.
+ *
+ * That is easy to not know, and the cost of not knowing it is silent: a caller
+ * that reaches for `writeRuntimeConfig` directly gets a plausible-looking
+ * result object for the single most common runtime, having changed nothing.
+ * Re-key hit exactly that — it reported success while leaving every wired
+ * Claude Code host presenting an API key the backend had just retired. This
+ * function is the one place that fork is decided, so a future caller inherits
+ * the right answer instead of rediscovering the wrong one.
+ */
+export async function writeHostedRuntimeConfig(
+  deps: RuntimeInstallDeps,
+  input: RuntimeInstallInput,
+  signerCommand?: { command: string; args: string[] },
+): Promise<RuntimeConfigWriteResult> {
+  if (input.runtime === 'claude-code') {
+    return configureClaudeCodeHosted(deps, input, signerCommand)
+  }
+  return writeRuntimeConfig({
+    runtime: input.runtime as RuntimeId,
+    hostedMcpUrl: input.hostedMcpUrl,
+    apiKey: input.apiKey,
+    identityPath: input.identityPath,
+    signerPath: input.signerPath,
+    serverName: input.serverName,
+    credentialDirectory: input.credentialDirectory,
+    signerCommand,
+    homeDir: deps.homeDir,
+    mode: 'hosted',
+  })
 }
 
 async function configureClaudeCodeHosted(

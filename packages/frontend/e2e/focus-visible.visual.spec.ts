@@ -48,9 +48,9 @@
  * run. Separate tests make every capture's verdict independent and make a
  * mutation's blast radius a measurement instead of an inference.
  *
- * ── Which of the eleven this file reaches, and which it does not ─────────────
+ * ── Which of the eleven this file reaches (#1873: all eleven) ────────────────
  *
- * Six of eleven, and the gap is a rendering-branch fact rather than a choice:
+ * #1863 reached six, and said why the other five were out of reach:
  *
  *   Sidebar kebab popover   Profile · Settings · Log out          3/3  captured
  *   AgentCard action row    Edit · Pause · Revoke                 3/8  captured
@@ -62,24 +62,78 @@
  * framing). Against the shared `mockHavenApi` fixture's one active legacy agent
  * exactly three render, and they include **Revoke**, the destructive one.
  *
- * The five not reached — Details (`canUseWalletActions: false`), Resume
- * (paused), Remove (delegation), Remove (revoked), Restore (archived, behind
- * the "Removed" disclosure) — carry class strings BYTE-IDENTICAL to a captured
- * sibling: all five are one of the two strings `ring-brand/80` or
- * `ring-danger/80` on a `text-xs` link in this same row on this same surface.
- * State that as the limit it is, not as coverage: **"the same class string
- * therefore the same pixels" is an argument, not a measurement**, and this repo
- * keeps re-learning that those differ. Reaching them means seeding four more
- * synthetic agent states, which puts the fixture under test rather than the
- * component. Filed as its own issue rather than smuggled in here.
+ * So this was never a scoping choice: reaching the other five is FIXTURE work,
+ * not capture work. #1873 does it, and the eleven are now eleven.
+ *
+ *   control              needs                                    rendered by
+ *   Details              canUseWalletActions === false            a different safe_id
+ *   Resume from pause    status: 'paused'                         the paused branch
+ *   Remove (delegation)  account_type: 'delegator_hybrid', active the isDelegationAgent branch
+ *   Remove (revoked)     status: 'revoked', not archived          the isRevoked branch
+ *   Restore to list      archived_at set                          the isArchived branch
+ *
+ * **The argument for NOT doing this was real, and it is the reason each of the
+ * five is proven separately below.** All five carry class strings
+ * BYTE-IDENTICAL to a captured sibling — every one is `ring-brand/80` or
+ * `ring-danger/80` on a `text-xs` link, in this same row, on this same surface
+ * — so the marginal *rendered* information looked small. But "the same class
+ * string therefore the same pixels" is an argument, not a measurement, and this
+ * repo keeps paying the difference: #1818 is a class string that compiled to
+ * nothing, and this file's own first-draft assertion accepted `outline: 2px
+ * solid transparent` as an indicator. A capture nobody can redden is decoration;
+ * each of the five below has a mutation naming it and only it (see the PR body).
+ *
+ * ── Where the four synthetic states live, and why it matters ─────────────────
+ *
+ * In THIS FILE's own route override (`seedAgents` below), never in the shared
+ * `mockHavenApi` fixture. Measured rather than assumed: **twelve other specs
+ * call `mockHavenApi`** — including `design-system.visual.spec.ts`, the
+ * resting-state half of this same pixel gate — and **four of them navigate to
+ * `/agents`** (`connect-agent`, `hosted-mcp`, `navigation.mobile`,
+ * `mobile-nav-layering.mobile`). Adding a paused, revoked, delegation and
+ * archived agent to the shared fixture changes the payload all twelve receive
+ * and the rendered output of those four, none of which is about focus. The
+ * override is registered per test, AFTER `mockHavenApi`, so Playwright matches
+ * it first, and it defers to the shared fixture for every other route via
+ * `route.fallback()`.
+ *
+ * (`scripts/screenshot.mjs` — the #896 evidence capture the design review
+ * reads — is a THIRD fixture, `FIXTURE_AGENTS`, and is untouched by either
+ * choice. Worth knowing before assuming the two are the same seam.)
+ *
+ * Each test seeds exactly the ONE agent it needs. The alternative — one page
+ * holding all five states — was rejected because it couples the five captures
+ * to each other: a layout change in the archived card could reflow the grid and
+ * redden the delegation capture, which is precisely the blast-radius blur that
+ * "one `test()` per control" exists to remove.
+ *
+ * **Seeding a state is not the same as rendering the branch**, so every test
+ * asserts the row's FULL control set before it captures (`expectRowControls`).
+ * `status: 'paused'` reaching the API mock proves nothing about which of
+ * `AgentCard`'s five footer branches ran; "this row holds exactly Edit, Resume
+ * from pause, Revoke" does. It is also what turns a future branch edit into a
+ * named failure instead of a silently re-pointed baseline.
  *
  * ── Tab traversal, and why the count is never hard-coded ─────────────────────
  *
  * The driver is real keyboard `Tab`, because that is the path the user whose
- * bug this is actually takes. **All six controls are reachable by traversal**,
- * so the `.focus()` fallback the issue allows was never needed and nothing is
- * silently substituted. A control reachable by script and not by tab order
- * would itself be a WCAG 2.4.3 finding, so the two are not interchangeable.
+ * bug this is actually takes. **All eleven controls are reachable by
+ * traversal**, so the `.focus()` fallback the issue allows is never used and
+ * nothing is silently substituted. A control reachable by script and not by tab
+ * order would itself be a WCAG 2.4.3 finding, so the two are not
+ * interchangeable.
+ *
+ * That rule decides the one case where it was tempting to break it. **Restore
+ * sits behind the "Removed (n)" disclosure**, so something has to open it
+ * first, and the obvious move is `.click()`. It is opened with Tab + Enter
+ * instead, and this is not ceremony: `:focus-visible` is decided by the last
+ * input MODALITY, so a mouse click anywhere in the run switches the document to
+ * pointer modality, and a `.focus()` after it takes focus with NO ring at all.
+ * The capture would silently become a resting-state one — this file's own
+ * failure mode, arrived at by the back door. Tab + Enter keeps the modality
+ * keyboard end to end, and the `:focus-visible` assertion in
+ * `expectFocusedAndIndicated` is what would catch it if that ever stopped being
+ * true.
  *
  * `.focus()` was measured side by side on the three popover items (it lands on
  * the same nodes, and `:focus-visible` matched there too) — but do not read
@@ -122,6 +176,41 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
  * 390px, but it wraps differently there and deserves its own measured spec
  * rather than a desktop proof reused at a width it was not taken at — that is
  * #1797's rule, and this file honours it by not claiming mobile.
+ *
+ * #1873 put a NUMBER on "wraps differently" rather than leaving it an
+ * adjective, because four of the five branches it adds had never been measured
+ * at any width. Live `boundingBox()` of each action row, against the height of
+ * the baseline CI actually committed:
+ *
+ *   branch              macOS 1280   macOS 390   COMMITTED (Linux 1280)
+ *   Details             438 x 37     300 x 37    438 x 37
+ *   Resume from pause   438 x 37     300 x 37    438 x 37
+ *   Remove (delegation) 438 x 37     300 x 37    438 x 37
+ *   Remove (revoked)    438 x 37     300 x 37    438 x 37
+ *   Restore to list     438 x 29     300 x 45    438 x 45   <- see below
+ *
+ * **Read that last row before trusting any local measurement in this family.**
+ * The archived branch pairs its control with a whole sentence ("History stays
+ * readable; restoring never re-enables spending"). On macOS at 1280 that fits
+ * on one line and the row is 29px; the same branch at 390 wraps to 45px. The
+ * obvious conclusion — "desktop is fine, mobile reflows" — is WRONG on the
+ * platform that judges: Linux's wider metrics wrap it at 1280 too, so the
+ * committed baseline is 45px and even the `Restore to list` label itself
+ * breaks across two lines. A macOS-derived desktop number was off by 16px and
+ * by a whole layout claim.
+ *
+ * That is the same trap #1875 hit from the other side (a mutation reading
+ * 1,746 px on `design-system` where clean code fails identically), and the
+ * rule it produces is: **a local pixel number is only ever evidence about a
+ * DIFFERENCE measured against a baseline rendered by the same machine.** The
+ * mutation figures in this file's PR are exactly that shape — macOS mutant
+ * against macOS control — and are sound. An absolute geometry claim is not,
+ * which is why the authoritative column above is the one CI produced.
+ *
+ * The prediction still holds where it is checkable: every committed PNG's
+ * dimensions equal `Math.round(boundingBox())` of its row ON ITS OWN PLATFORM,
+ * with no clip-rect surprises. A capture verified by looking at it is verified
+ * by the same eye that would accept the wrong one.
  *
  * Keyed on the viewport WIDTH, not on `vp.name === 'desktop'`, so a viewport
  * added to `evidence-viewports.mjs` later is included or excluded by what it
@@ -409,6 +498,72 @@ async function openUserMenuByKeyboard(page: Page) {
   return popover
 }
 
+/**
+ * This spec's OWN `/agents` payload (#1873), layered over `mockHavenApi`.
+ *
+ * Registered inside a test, so it is registered AFTER the `beforeEach` — and
+ * Playwright matches handlers in REVERSE registration order, so this one is
+ * consulted first. Everything except `GET /agents` is handed straight back with
+ * `route.fallback()`, which defers to the next matching handler rather than
+ * fulfilling; the shared fixture therefore still serves auth, balances,
+ * approvals and the rest, unmodified and unaware.
+ *
+ * The point of the layering is blast radius: `haven-api.ts` is shared with
+ * eleven other specs, and a paused or archived agent added there would change
+ * what `/agents` renders for all of them.
+ */
+async function seedAgents(page: Page, agents: ReadonlyArray<Record<string, unknown>>) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() === 'GET' && path === '/agents') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ agents }),
+      })
+      return
+    }
+    await route.fallback()
+  })
+}
+
+/**
+ * One synthetic agent, built by OVERRIDING the shared `testAgent` rather than
+ * by writing a fresh literal. Every field this spec does not name — allowances,
+ * delegate address, timestamps — therefore matches the agent the six original
+ * captures were taken against, so a difference between a new capture and an old
+ * one is the branch and not the fixture.
+ */
+function agentState(overrides: Record<string, unknown>) {
+  return { ...testAgent, ...overrides }
+}
+
+/**
+ * Assert the action row holds EXACTLY these controls, in this order.
+ *
+ * Seeding a state is not the same as rendering the branch. `status: 'paused'`
+ * reaching the API mock says nothing about which of `AgentCard`'s five mutually
+ * exclusive footer branches ran — a fixture field the component ignores would
+ * leave the row on the default branch and the capture would be a duplicate of
+ * an existing baseline, silently. The row's full control set is the observable
+ * that distinguishes them, and it is asserted as a SET-with-order rather than a
+ * `toBeVisible()` on the one target, so a control appearing that should not
+ * (Edit surviving into the `canUseWalletActions: false` branch) fails too.
+ *
+ * Accessible names, not text: two of these controls read "Remove" and are told
+ * apart only by their agent, which is exactly the ambiguity `aria-label` exists
+ * to resolve.
+ */
+async function expectRowControls(row: Locator, expected: readonly string[], label: string) {
+  const names = await row.getByRole('button').evaluateAll((els) =>
+    els.map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim() ?? ''),
+  )
+  expect(names, `${label}: this is not the footer branch the fixture was seeding`).toEqual([
+    ...expected,
+  ])
+}
+
 async function gotoDesktop(page: Page, path: string) {
   if (!DESKTOP) throw new Error('focus gate: no viewport at or above the desktop breakpoint')
   await page.setViewportSize({ width: DESKTOP.width, height: DESKTOP.height })
@@ -503,6 +658,135 @@ test.describe('driven focus-state visual regression', () => {
       // a tighter crop.
       await expect(actionRow).toHaveScreenshot(
         `focus-agentcard-actions-${control.slug}-desktop.png`,
+        SNAPSHOT_OPTIONS,
+      )
+    })
+  }
+
+  // ── AgentCard's other four footer branches — the remaining 5 of 11 (#1873) ─
+  //
+  // One seeded agent per test, one control per test, one capture per test. The
+  // `rowControls` field is the branch assertion: it is what says the fixture
+  // reached the intended branch rather than merely carrying the intended field.
+  const seededControls = [
+    {
+      slug: 'details',
+      // `canUseWalletActions` is `agentUsesActiveSafe(agent)`, which compares
+      // `agent.safe_id` to the ACTIVE safe (`safe-main`, seeded into
+      // localStorage by `seedAuthenticatedSession`). A second safe is the only
+      // way to reach this branch — the flag is derived, never sent.
+      agent: agentState({
+        id: 'agent-other-safe',
+        name: 'Ledger agent',
+        safe_id: 'safe-secondary',
+        safe_name: 'Treasury',
+      }),
+      control: 'Open details for Ledger agent',
+      rowControls: ['Open details for Ledger agent', 'Pause Ledger agent'],
+      tone: 'brand',
+      label: 'Details',
+    },
+    {
+      slug: 'resume',
+      agent: agentState({ id: 'agent-paused', name: 'Paused agent', status: 'paused' }),
+      control: 'Resume Paused agent',
+      rowControls: ['Edit Paused agent', 'Resume Paused agent', 'Revoke Paused agent'],
+      tone: 'brand',
+      label: 'Resume from pause',
+    },
+    {
+      slug: 'remove-delegation',
+      // Delegation agents have no Safe AllowanceModule to tear down, so Revoke
+      // is hidden and Remove IS the shutdown (#1402). That substitution is
+      // visible in `rowControls` and is the branch's signature.
+      //
+      // NOTE for anyone copying this seed: it inherits `testAgent`'s LEGACY
+      // `allowances` rows (Safe-module `token_address`/`allowance_amount`/
+      // `reset_period_min`), which a real `delegator_hybrid` agent would not
+      // carry — on that rail `allowances` is a derived view of
+      // `agent_delegations` (CLAUDE.md § Agent Model). It is correct HERE
+      // because `isDelegationAgent` gates only the action row (AgentCard.tsx),
+      // and the budget section is outside the captured region. Reuse this as a
+      // template for a capture that reads the budget section and it is wrong.
+      agent: agentState({
+        id: 'agent-delegation',
+        name: 'Delegation agent',
+        account_type: 'delegator_hybrid',
+      }),
+      control: 'Remove Delegation agent',
+      rowControls: ['Edit Delegation agent', 'Pause Delegation agent', 'Remove Delegation agent'],
+      tone: 'danger',
+      label: 'Remove (delegation)',
+    },
+    {
+      slug: 'remove-revoked',
+      // `archived_at: null` is load-bearing: the revoked branch is
+      // `isRevoked && !isArchived`, and an archived agent renders Restore
+      // instead. The two Remove controls are DIFFERENT elements in different
+      // branches with different neighbours, which is why they get two captures.
+      agent: agentState({
+        id: 'agent-revoked',
+        name: 'Revoked agent',
+        status: 'revoked',
+        archived_at: null,
+      }),
+      control: 'Remove Revoked agent',
+      rowControls: ['Remove Revoked agent'],
+      tone: 'danger',
+      label: 'Remove (revoked)',
+    },
+    {
+      slug: 'restore',
+      agent: agentState({
+        id: 'agent-archived',
+        name: 'Archived agent',
+        status: 'revoked',
+        archived_at: '2026-05-06T10:00:00.000Z',
+      }),
+      control: 'Restore Archived agent to the list',
+      rowControls: ['Restore Archived agent to the list'],
+      tone: 'brand',
+      label: 'Restore to list',
+      // The only control of the eleven that is not on screen at load.
+      behindRemovedDisclosure: true,
+    },
+  ] as const
+
+  for (const seeded of seededControls) {
+    test(`agent card action row — ${seeded.label} focus indicator (${seeded.tone})`, async ({
+      page,
+    }) => {
+      await seedAgents(page, [seeded.agent])
+      await gotoDesktop(page, '/agents')
+
+      if ('behindRemovedDisclosure' in seeded && seeded.behindRemovedDisclosure) {
+        // Tab + Enter, never `.click()` — see the modality note in the header.
+        // The count is asserted so a disclosure that stopped listing this agent
+        // fails HERE, rather than as a confusing tab-exhaustion error 80
+        // presses later.
+        const disclosure = page.getByRole('button', { name: /^Removed\b/ })
+        await expect(disclosure).toHaveCount(1)
+        await tabToTarget(page, disclosure, 'AgentPanel · Removed disclosure')
+        await page.keyboard.press('Enter')
+      }
+
+      const target = page.locator(`button[aria-label="${seeded.control}"]`)
+      await expect(target).toHaveCount(1)
+      await expect(target).toBeVisible()
+
+      const actionRow = target.locator('xpath=..')
+      await expect(actionRow).toHaveCount(1)
+      await expectRowControls(
+        actionRow,
+        seeded.rowControls,
+        `AgentCard action row · ${seeded.label}`,
+      )
+
+      await tabToTarget(page, target, `AgentCard action row · ${seeded.label}`)
+      await expectFocusedAndIndicated(page, target, `AgentCard action row · ${seeded.label}`)
+
+      await expect(actionRow).toHaveScreenshot(
+        `focus-agentcard-actions-${seeded.slug}-desktop.png`,
         SNAPSHOT_OPTIONS,
       )
     })

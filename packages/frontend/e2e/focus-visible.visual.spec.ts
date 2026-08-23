@@ -179,27 +179,38 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
  *
  * #1873 put a NUMBER on "wraps differently" rather than leaving it an
  * adjective, because four of the five branches it adds had never been measured
- * at either width. Live `boundingBox()` of each action row:
+ * at any width. Live `boundingBox()` of each action row, against the height of
+ * the baseline CI actually committed:
  *
- *   branch              1280        390
- *   Details             438 x 37    300 x 37
- *   Resume from pause   438 x 37    300 x 37
- *   Remove (delegation) 438 x 37    300 x 37
- *   Remove (revoked)    438 x 37    300 x 37
- *   Restore to list     438 x 29    300 x 45   <- reflows
+ *   branch              macOS 1280   macOS 390   COMMITTED (Linux 1280)
+ *   Details             438 x 37     300 x 37    438 x 37
+ *   Resume from pause   438 x 37     300 x 37    438 x 37
+ *   Remove (delegation) 438 x 37     300 x 37    438 x 37
+ *   Remove (revoked)    438 x 37     300 x 37    438 x 37
+ *   Restore to list     438 x 29     300 x 45    438 x 45   <- see below
  *
+ * **Read that last row before trusting any local measurement in this family.**
  * The archived branch pairs its control with a whole sentence ("History stays
- * readable; restoring never re-enables spending"), which sits beside it at 438
- * and takes a second line at 300: the row grows 16px and the ring's neighbour
- * moves. So the mobile claim would have been WRONG for exactly one of the five,
- * which is the useful form of this rule — not "mobile might differ" but "here
- * is the one that does".
+ * readable; restoring never re-enables spending"). On macOS at 1280 that fits
+ * on one line and the row is 29px; the same branch at 390 wraps to 45px. The
+ * obvious conclusion — "desktop is fine, mobile reflows" — is WRONG on the
+ * platform that judges: Linux's wider metrics wrap it at 1280 too, so the
+ * committed baseline is 45px and even the `Restore to list` label itself
+ * breaks across two lines. A macOS-derived desktop number was off by 16px and
+ * by a whole layout claim.
  *
- * These numbers are also the baselines' own proof. Each committed PNG's
- * dimensions are PREDICTED from the 1280 column above (Playwright rounds the
- * clip rect, and every value here is already integral) and match byte for byte
- * — 438x37 for four, 438x29 for `…-restore-…`. A capture verified by looking at
- * it is verified by the same eye that would accept the wrong one.
+ * That is the same trap #1875 hit from the other side (a mutation reading
+ * 1,746 px on `design-system` where clean code fails identically), and the
+ * rule it produces is: **a local pixel number is only ever evidence about a
+ * DIFFERENCE measured against a baseline rendered by the same machine.** The
+ * mutation figures in this file's PR are exactly that shape — macOS mutant
+ * against macOS control — and are sound. An absolute geometry claim is not,
+ * which is why the authoritative column above is the one CI produced.
+ *
+ * The prediction still holds where it is checkable: every committed PNG's
+ * dimensions equal `Math.round(boundingBox())` of its row ON ITS OWN PLATFORM,
+ * with no clip-rect surprises. A capture verified by looking at it is verified
+ * by the same eye that would accept the wrong one.
  *
  * Keyed on the viewport WIDTH, not on `vp.name === 'desktop'`, so a viewport
  * added to `evidence-viewports.mjs` later is included or excluded by what it
@@ -688,6 +699,15 @@ test.describe('driven focus-state visual regression', () => {
       // Delegation agents have no Safe AllowanceModule to tear down, so Revoke
       // is hidden and Remove IS the shutdown (#1402). That substitution is
       // visible in `rowControls` and is the branch's signature.
+      //
+      // NOTE for anyone copying this seed: it inherits `testAgent`'s LEGACY
+      // `allowances` rows (Safe-module `token_address`/`allowance_amount`/
+      // `reset_period_min`), which a real `delegator_hybrid` agent would not
+      // carry — on that rail `allowances` is a derived view of
+      // `agent_delegations` (CLAUDE.md § Agent Model). It is correct HERE
+      // because `isDelegationAgent` gates only the action row (AgentCard.tsx),
+      // and the budget section is outside the captured region. Reuse this as a
+      // template for a capture that reads the budget section and it is wrong.
       agent: agentState({
         id: 'agent-delegation',
         name: 'Delegation agent',

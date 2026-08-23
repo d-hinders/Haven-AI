@@ -449,7 +449,7 @@ export default function EditAgentModal({
         className="absolute inset-0"
         onClick={step !== 'executing' ? handleClose : undefined}
       />
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Edit agent" className="relative bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-[var(--v2-shadow-modal)] max-h-[90vh] overflow-y-auto">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Edit agent" className="relative bg-white border border-[var(--v2-border)] rounded-2xl w-full max-w-lg shadow-modal max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--v2-border)]">
           <div>
@@ -483,7 +483,7 @@ export default function EditAgentModal({
           {step === 'form' && (
             <div className="space-y-5">
               {showAgentFields && (
-                <div className="space-y-4 rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-[var(--v2-shadow-card)]">
+                <div className="space-y-4 rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-card">
                   <div>
                     <label className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-3)]">
                       Agent name

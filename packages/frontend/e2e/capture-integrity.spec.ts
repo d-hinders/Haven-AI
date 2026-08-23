@@ -24,7 +24,12 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 import { VIEWPORTS as SHARED_VIEWPORTS } from '../scripts/evidence-viewports.mjs'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs, the capture path both evidence surfaces go through
-import { TALL_FACTOR, captureFullPage, inspectCapture } from '../scripts/full-page-capture.mjs'
+import {
+  SHELL_MODE,
+  TALL_FACTOR,
+  captureFullPage,
+  inspectCapture,
+} from '../scripts/full-page-capture.mjs'
 
 const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
   name: string
@@ -51,10 +56,19 @@ test.describe('full-page capture integrity', () => {
       // Throws if the capture is blank below the fold — that assertion IS the
       // regression guard, and it is the same one the screenshot script and the
       // visual spec run.
-      const buffer = await captureFullPage(page, {
+      const { buffer, shell } = await captureFullPage(page, {
         label: `/design-system · ${vp.name}`,
         viewportDevicePx,
       })
+
+      // `/design-system` is an authenticated route: it MUST have been un-clipped.
+      // Without this, the shell-less path added for marketing routes (#1939)
+      // would silently become an acceptable outcome here — and a shell that
+      // stopped matching would pass this spec as "no shell needed".
+      expect(shell.mode, 'the authenticated shell must be found and un-clipped').toBe(
+        SHELL_MODE.UNCLIPPED,
+      )
+
       const result = await inspectCapture(buffer, { viewportDevicePx })
 
       // Keep the test from going vacuous. `blankBelowFold` can only be false

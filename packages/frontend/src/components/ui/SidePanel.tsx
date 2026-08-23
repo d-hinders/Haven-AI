@@ -41,7 +41,7 @@ export function SidePanel({
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : 'Details'}
-        className="v2-animate-panel-in relative flex h-full w-full max-w-md flex-col border-l border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]"
+        className="v2-animate-panel-in relative flex h-full w-full max-w-md flex-col border-l border-[var(--v2-border)] bg-white shadow-modal"
       >
         <div className="flex items-start justify-between gap-3 border-b border-[var(--v2-border)] px-5 py-4">
           <div className="min-w-0">

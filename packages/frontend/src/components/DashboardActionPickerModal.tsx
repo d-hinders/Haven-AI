@@ -39,7 +39,7 @@ export default function DashboardActionPickerModal({
   return (
     <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Choose an action" className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)] max-h-[90vh] overflow-y-auto">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Choose an action" className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-white shadow-modal max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
           <div>
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">{title}</h2>

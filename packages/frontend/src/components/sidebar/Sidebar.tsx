@@ -249,7 +249,7 @@ export default function Sidebar() {
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed top-3 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
+        className="lg:hidden fixed top-3 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
       >
         <Icon icon={Menu} className="w-4 h-4" />
       </button>
@@ -391,7 +391,7 @@ export default function Sidebar() {
                     ref={popoverRef}
                     role="menu"
                     aria-label="User menu"
-                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-[var(--v2-shadow-popover)] py-1 z-[var(--v2-z-chrome-popover)]"
+                    className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-popover py-1 z-[var(--v2-z-chrome-popover)]"
                   >
                     <Link
                       href="/profile"

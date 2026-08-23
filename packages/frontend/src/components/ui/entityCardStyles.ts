@@ -9,7 +9,7 @@ export function entityCardClassName({
     'hover:-translate-y-0.5 hover:border-brand/35 hover:bg-[var(--v2-surface)] hover:shadow-[0_16px_34px_-28px_rgba(42,51,90,0.35)]'
 
   return [
-    'group relative rounded-lg border p-5 shadow-[var(--v2-shadow-card)] transition-all duration-200',
+    'group relative rounded-lg border p-5 shadow-card transition-all duration-200',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80',
     muted ? 'opacity-80' : '',
     // #1709: the selected state had NO visual effect at all. Both halves were

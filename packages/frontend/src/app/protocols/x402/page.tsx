@@ -40,7 +40,7 @@ export default function X402() {
       <section className="relative overflow-hidden">
         <HeroBackdrop variant="soft" />
         <div className="relative max-w-6xl mx-auto px-6 pt-20 md:pt-24 pb-10">
-        <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-[var(--v2-shadow-card)]">
+        <div className="inline-flex items-center gap-2 mb-6 px-2.5 py-1 rounded-full border border-[var(--v2-border)] bg-white/80 backdrop-blur text-[12px] text-[var(--v2-ink-2)] shadow-card">
           How x402 works
         </div>
         <h1 className="text-[44px] md:text-[60px] font-semibold tracking-[-0.03em] leading-[1.04] text-[var(--v2-ink)] mb-5 max-w-[720px]">

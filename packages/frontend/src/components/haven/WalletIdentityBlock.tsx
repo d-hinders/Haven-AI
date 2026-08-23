@@ -15,7 +15,7 @@ export function WalletIdentityBlock({
   balance?: string
 }) {
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-[var(--v2-shadow-card)]">
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-card">
       <div className="flex items-start gap-3">
         <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
           <Icon icon={Wallet} className="h-5 w-5" />

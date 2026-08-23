@@ -23,7 +23,7 @@ const TONE_STYLES: Record<BannerTone, { frame: string; badge: string; icon: type
   },
   warning: {
     frame: 'border-warning/20 bg-[var(--v2-warning-soft)]',
-    badge: 'text-[var(--v2-warning)] shadow-[var(--v2-shadow-card)]',
+    badge: 'text-[var(--v2-warning)] shadow-card',
     icon: TriangleAlert,
   },
   // `danger` carries a STRUCTURAL break from `warning`, not only a hue swap
@@ -35,7 +35,7 @@ const TONE_STYLES: Record<BannerTone, { frame: string; badge: string; icon: type
   // also keeps it legible to a red/green-colour-blind reader.
   danger: {
     frame: 'border-2 border-danger/40 border-l-4 border-l-[var(--v2-danger)] bg-[var(--v2-danger-soft)]',
-    badge: 'text-[var(--v2-danger)] shadow-[var(--v2-shadow-card)]',
+    badge: 'text-[var(--v2-danger)] shadow-card',
     icon: OctagonAlert,
   },
 }

@@ -44,6 +44,13 @@ export interface AgentRow {
   created_at: string
   archived_at: string | null
   mcp_last_seen_at: string | null
+  /**
+   * #1878: the MCP server name the connector reported for this agent
+   * (`haven`, or `haven-<slug>`). NULL means never reported — an agent that
+   * predates #1878 or a connector older than it — and must render as unknown
+   * rather than being guessed at as the bare pair.
+   */
+  mcp_server_name: string | null
   has_stranded_funds: boolean
 }
 
@@ -81,7 +88,7 @@ export interface AgentIdStatusRow {
 export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               us.account_type,
-              a.api_key_prefix, a.status, a.created_at, a.archived_at,
+              a.api_key_prefix, a.status, a.created_at, a.archived_at, a.mcp_server_name,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -101,7 +108,7 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
 export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.description, a.delegate_address,
               a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               us.account_type,
-              a.api_key_prefix, a.status, a.created_at, a.archived_at,
+              a.api_key_prefix, a.status, a.created_at, a.archived_at, a.mcp_server_name,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -358,7 +365,11 @@ export async function findAgentIdStatusForUser(
 export const INSERT_AGENT_WITH_KEY_SQL = `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, safe_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id, name, description, delegate_address, safe_id, api_key_prefix, status, created_at,
-                   NULL::timestamptz AS mcp_last_seen_at`
+                   NULL::timestamptz AS mcp_last_seen_at,
+                   -- #1878: an agent created straight through the API was never
+                   -- wired by the connector, so it has no MCP server name. NULL
+                   -- here is the honest answer, not a placeholder.
+                   NULL::text AS mcp_server_name`
 
 export const FIND_SAFE_INFO_SQL = `SELECT safe_address, name AS safe_name, chain_id AS safe_chain_id
              FROM user_safes WHERE id = $1`
@@ -389,6 +400,12 @@ export interface CreatedAgent {
     | 'status'
     | 'created_at'
     | 'mcp_last_seen_at'
+    // #1878: always NULL here — an agent created straight through the API was
+    // never wired by the connector. Declared anyway, because the query DOES
+    // return it and `tx.query<T>()`'s generic is a compile-time assertion
+    // only: a Pick that omits it lets a future refactor rebuild this response
+    // field-by-field and drop the column with neither tsc nor a test noticing.
+    | 'mcp_server_name'
   >
   safeInfo: SafeInfoRow
   savedAllowances: AgentAllowanceRow[]
@@ -454,12 +471,17 @@ export const UPDATE_AGENT_PROFILE_SQL = `WITH updated AS (
                description = COALESCE($4, description),
                updated_at  = NOW()
            WHERE id = $1 AND user_id = $2
-           RETURNING id, name, description, delegate_address, safe_id, api_key_prefix, status, created_at
+           RETURNING id, name, description, delegate_address, safe_id, api_key_prefix, status, created_at,
+                     mcp_server_name
          )
          SELECT updated.id, updated.name, updated.description, updated.delegate_address,
                 updated.safe_id, us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
                 us.account_type,
                 updated.api_key_prefix, updated.status, updated.created_at,
+                -- #1878/#1694: the display name is editable, the wiring name is
+                -- not. This UPDATE never touches mcp_server_name; reading it
+                -- back keeps the renamed agent's card showing the same pair.
+                updated.mcp_server_name,
                 (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = updated.id) AS mcp_last_seen_at
          FROM updated
          LEFT JOIN user_safes us ON updated.safe_id = us.id`

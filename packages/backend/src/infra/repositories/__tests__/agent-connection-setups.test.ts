@@ -8,11 +8,13 @@
 import { randomUUID } from 'node:crypto'
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
+import { updateAgentProfile } from '../agents.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
   cancelSetup,
   findSetupByTokenHash,
   findSetupForUser,
+  insertPendingAgent,
   insertSetupWithAllowances,
   inTransaction,
   listSetupAllowances,
@@ -280,4 +282,95 @@ describeDb('agent-connection-setups repository (#1225)', () => {
       ),
     ).resolves.toBeTruthy()
   })
+
+  // ── #1878: the MCP server name the connector reported ──────────────────
+  //
+  // The column is written here and read back by the agents list, so the
+  // round trip belongs on the real DB rather than against a mock: what these
+  // assert is what Postgres actually stored, including the three-way
+  // distinction NULL has to carry.
+
+  it('stores the reported MCP server name for a NAMED pair', async () => {
+    const { userId, safeId } = await seedUserAndSafe()
+    const agentId = await inTransaction((tx) =>
+      insertPendingAgent(
+        {
+          userId,
+          name: 'Research agent',
+          description: null,
+          delegateAddress: ADDR('2a'),
+          apiKeyHash: 'b'.repeat(64),
+          apiKeyPrefix: 'sk_agent_abc',
+          safeId,
+          mcpServerName: 'haven-research',
+        },
+        tx,
+      ),
+    )
+    const row = await db.query<{ mcp_server_name: string | null }>(
+      `SELECT mcp_server_name FROM agents WHERE id = $1`,
+      [agentId],
+    )
+    expect(row.rows[0].mcp_server_name).toBe('haven-research')
+  })
+
+  it('stores the BARE pair as a value, distinct from never-reported', async () => {
+    // The whole reason the column holds the resolved NAME rather than the
+    // slug. If the bare pair were stored as NULL it would be indistinguishable
+    // from an agent an older connector registered, and the dashboard would
+    // have to guess — wrongly, for every agent wired with --name before
+    // #1878.
+    const { userId, safeId } = await seedUserAndSafe()
+    const base = {
+      userId,
+      description: null,
+      apiKeyHash: 'c'.repeat(64),
+      apiKeyPrefix: 'sk_agent_def',
+      safeId,
+    }
+    const bareId = await inTransaction((tx) =>
+      insertPendingAgent(
+        { ...base, name: 'Bare', delegateAddress: ADDR('3b'), mcpServerName: 'haven' },
+        tx,
+      ),
+    )
+    const legacyId = await inTransaction((tx) =>
+      insertPendingAgent({ ...base, name: 'Legacy', delegateAddress: ADDR('4c') }, tx),
+    )
+
+    const rows = await db.query<{ id: string; mcp_server_name: string | null }>(
+      `SELECT id, mcp_server_name FROM agents WHERE id = ANY($1::uuid[])`,
+      [[bareId, legacyId]],
+    )
+    const byId = new Map(rows.rows.map((r) => [r.id, r.mcp_server_name]))
+    expect(byId.get(bareId)).toBe('haven')
+    expect(byId.get(legacyId)).toBeNull()
+  })
+
+  it('renaming an agent leaves the wiring name untouched', async () => {
+    // #1694's decision is "editable display name, immutable wiring slug".
+    // The rename UPDATE must not disturb this column, and the row it returns
+    // must still carry it — otherwise the card blanks out after a rename.
+    const { userId, safeId } = await seedUserAndSafe()
+    const agentId = await inTransaction((tx) =>
+      insertPendingAgent(
+        {
+          userId,
+          name: 'Before',
+          description: null,
+          delegateAddress: ADDR('5d'),
+          apiKeyHash: 'd'.repeat(64),
+          apiKeyPrefix: 'sk_agent_ghi',
+          safeId,
+          mcpServerName: 'haven-work',
+        },
+        tx,
+      ),
+    )
+
+    const updated = await updateAgentProfile(agentId, userId, 'After', null)
+    expect(updated?.name).toBe('After')
+    expect(updated?.mcp_server_name).toBe('haven-work')
+  })
+
 })

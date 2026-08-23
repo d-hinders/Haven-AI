@@ -46,7 +46,7 @@ import { restartRequiredForRuntime, type RuntimeId } from './runtime-registry.js
 import { getLocalSignerConsentStatus } from './signer-consent.js'
 import { TOMBSTONE_FILENAME, readAgentTombstone } from './tombstone.js'
 import { serverNamesFor, type ServerNames } from './server-names.js'
-import { inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
+import { REKEY_PENDING_FILENAME, inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
 import { shortAddress } from './redact.js'
 
 export interface DoctorCheck {
@@ -99,11 +99,35 @@ const RERUN = 'npx @haven_ai/connect@alpha'
  * re-run mints a fresh agent and retires nothing, so a directory this doctor
  * did NOT select can hold a key that still authenticates and still spends.
  * The superseded_agents check now owns that fact; the note is gone.
+ *
+ * ## Three tells, not two (#1915)
+ *
+ * A directory is an agent credential directory if it holds ANY of
+ * `identity.json`, `TOMBSTONE.json` or `rekey-pending.json`. The third was
+ * added because #1911 shipped a diagnostic for abandoned re-key key material
+ * and this was the one directory shape that diagnostic could not look at: no
+ * enumeration, no `agents[]` entry, no `inspectRekeyPending` call, and so a
+ * live private key at mode 0600 invisible in both the human output and
+ * `--json`.
+ *
+ * The shipped `--rekey` flow cannot produce that shape — `writeRekeyPending`
+ * writes into an EXISTING agent's directory, `startRekey` reads stored
+ * credentials first, and tombstoning does not delete the pending file — so it
+ * takes an out-of-band deletion of `identity.json` while the pending file
+ * survives. Narrow. It is guarded anyway because of what is in the file: this
+ * is the only tell whose *presence* is itself the hazard being reported, so a
+ * blind spot here is a hole in the tool's stated job rather than a missing
+ * nice-to-have. Cost is one `stat`, reached only when the two prior tells
+ * both miss.
+ *
+ * `parkedOnly` records WHY such a directory was enumerated, so the classifier
+ * can say `parked` from evidence instead of inferring it from an absent
+ * identity — a corrupt `identity.json` must keep reading `orphaned`.
  */
 async function discoverCredentialDirectory(
   homeDir: string,
   explicit?: string,
-): Promise<{ directory?: string; others: string[] }> {
+): Promise<{ directory?: string; others: string[]; parkedOnly: Set<string> }> {
   // An explicit --credentials-dir names the agent DIRECTORY itself, so its
   // siblings live in its parent — never in the default root. Scanning the
   // default root under an explicit override would live-probe real keys in a
@@ -113,13 +137,20 @@ async function discoverCredentialDirectory(
   try {
     entries = await readdir(root)
   } catch {
-    return explicit ? { directory: explicit, others: [] } : { others: [] }
+    return explicit
+      ? { directory: explicit, others: [], parkedOnly: new Set() }
+      : { others: [], parkedOnly: new Set() }
   }
   const candidates: Array<{ directory: string; mtimeMs: number }> = []
   // #1681: a directory whose keys were removed but that carries TOMBSTONE.json
   // is a deliberately retired agent — reportable in the superseded scan, but
   // never selectable as the active credential directory.
   const tombstonedOnly: string[] = []
+  // #1915: neither identity nor tombstone, but parked re-key key material.
+  // Like `tombstonedOnly` this is a REPORTABLE, never SELECTABLE directory —
+  // it holds no credentials to describe, so promoting it to the primary would
+  // make the flat check list describe an agent that is not there.
+  const parkedOnly: string[] = []
   for (const entry of entries) {
     const directory = join(root, entry)
     try {
@@ -130,21 +161,32 @@ async function discoverCredentialDirectory(
         await stat(join(directory, TOMBSTONE_FILENAME))
         tombstonedOnly.push(directory)
       } catch {
-        // not an agent credential dir
+        try {
+          await stat(join(directory, REKEY_PENDING_FILENAME))
+          parkedOnly.push(directory)
+        } catch {
+          // not an agent credential dir
+        }
       }
     }
   }
+  const parkedOnlySet = new Set(parkedOnly)
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
   if (explicit) {
     return {
       directory: explicit,
-      others: [...candidates.map((c) => c.directory), ...tombstonedOnly].filter((d) => d !== explicit),
+      others: [...candidates.map((c) => c.directory), ...tombstonedOnly, ...parkedOnly]
+        .filter((d) => d !== explicit),
+      parkedOnly: parkedOnlySet,
     }
   }
-  if (candidates.length === 0 && tombstonedOnly.length === 0) return { others: [] }
+  if (candidates.length === 0 && tombstonedOnly.length === 0 && parkedOnly.length === 0) {
+    return { others: [], parkedOnly: parkedOnlySet }
+  }
   return {
     directory: candidates[0]?.directory,
-    others: [...candidates.slice(1).map((c) => c.directory), ...tombstonedOnly],
+    others: [...candidates.slice(1).map((c) => c.directory), ...tombstonedOnly, ...parkedOnly],
+    parkedOnly: parkedOnlySet,
   }
 }
 
@@ -156,7 +198,24 @@ async function discoverCredentialDirectory(
  * agents legitimately live at once, so the doctor enumerates instead of
  * choosing, and says which of four things each directory IS.
  */
-export type AgentClassification = 'wired' | 'superseded' | 'retired' | 'orphaned'
+/**
+ * What a credential directory IS:
+ *
+ * - `wired` — has a usable key and the runtime config actually launches it;
+ * - `superseded` — has a usable key the runtime is NOT using (still spends);
+ * - `retired` — carries a `TOMBSTONE.json`, a deliberate retirement record;
+ * - `orphaned` — has an `identity.json` that yields no usable API key;
+ * - `parked` (#1915) — holds `rekey-pending.json` and neither of the other
+ *   two tells. Not a broken agent: there is no agent here at all, only the
+ *   private key a `--rekey` generated and nobody finished with. It is its own
+ *   value rather than folded into `orphaned` because the two carry different
+ *   instructions — `orphaned` says "this credential set is unusable, re-run
+ *   setup", while `parked` says "this is loose key material; take the agent
+ *   id to the Haven agent page, then decide whether to delete". Reporting the
+ *   second as the first would print a verdict a reader cannot act on, which
+ *   is how a report teaches people to skim.
+ */
+export type AgentClassification = 'wired' | 'superseded' | 'retired' | 'orphaned' | 'parked'
 
 export interface AgentInventoryEntry {
   /** Wiring slug (#1696); absent for the bare haven / haven-signer pair. */
@@ -173,10 +232,17 @@ export interface AgentInventoryEntry {
   checks: DoctorCheck[]
   /**
    * #1911: a started-but-unfinished `--rekey` in this directory, when there is
-   * one. Populated for EVERY classification, including `superseded` and
-   * `orphaned` — the whole point is that the file holds live key material in a
-   * directory nothing else is looking at. Address and timing only; the private
-   * half is not in this shape (see `RekeyPendingStatus`).
+   * one. Populated for EVERY classification — the whole point is that the file
+   * holds live key material in a directory nothing else is looking at. Address
+   * and timing only; the private half is not in this shape (see
+   * `RekeyPendingStatus`).
+   *
+   * "Every classification" became literally true in #1915. As shipped, it
+   * meant every classification the ENUMERATION could reach, and a directory
+   * holding only `rekey-pending.json` matched no discovery tell at all — so
+   * the one shape whose sole content is the hazard was the one shape this
+   * field could never describe. Such a directory is now enumerated and
+   * classified `parked`.
    *
    * "Populated", not "gates the exit code": `report.ok` rolls up the flat
    * `checks` array plus WIRED entries' checks only, so this field and a
@@ -593,7 +659,7 @@ export async function runDoctor(
   const checks: DoctorCheck[] = []
   let signerCapabilities: Record<string, unknown> | undefined
 
-  const { directory, others } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
+  const { directory, others, parkedOnly } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
 
   // ── Runtime config (read once; every agent's wiring is judged against it) ─
   const configPath = runtimeConfigPathFor(input.runtime, homeDir)
@@ -635,11 +701,18 @@ export async function runDoctor(
     // agent it belongs to is still wired.
     const rekeyPending = await inspectRekeyPending(dir, deps.now?.() ?? Date.now())
     if (!identity?.api_key) {
+      // #1915: fall back to the agent id recorded IN the parked file. Without
+      // it a `parked` directory renders as `unknown: parked` — and the agent
+      // id is the one thing the owner has to carry to the Haven agent page
+      // before deciding whether the key is safe to delete.
+      const agentId = tombstone?.agent_id ?? rekeyPending?.agentId
       inventory.push({
         ...(slug ? { slug } : {}),
-        ...(tombstone?.agent_id ? { agentId: tombstone.agent_id } : {}),
+        ...(agentId ? { agentId } : {}),
         directory: dir,
-        classification: tombstone ? 'retired' : 'orphaned',
+        // A tombstone is a deliberate record and outranks the discovery tell:
+        // a retired directory that also holds a parked key stays `retired`.
+        classification: tombstone ? 'retired' : parkedOnly.has(dir) ? 'parked' : 'orphaned',
         checks: rekeyPending ? [rekeyPendingCheck(rekeyPending, undefined, input.runtime, slug)] : [],
         ...(rekeyPending ? { rekeyPending } : {}),
       })
@@ -785,7 +858,13 @@ export async function runDoctor(
     for (const entry of otherEntries) {
       const identity = await readIdentity(entry.directory)
       const tombstone = await readAgentTombstone(entry.directory)
-      const otherAgent = identity?.agent_id ?? tombstone?.agent_id ?? basename(entry.directory)
+      // #1915 review: use the id the inventory already resolved rather than
+      // re-deriving a narrower one. It is identical for a wired, superseded or
+      // retired directory, and strictly better for one whose only id is in the
+      // parked file — a NAMED agent's directory basename is its wiring slug,
+      // so re-deriving would label the same directory by its slug here and by
+      // its real agent id in the "Other agents" section, for the same entry.
+      const otherAgent = entry.agentId ?? basename(entry.directory)
       const otherUrl = identity?.hosted_mcp_url
         ?? (identity?.api_url ? `${identity.api_url}/mcp` : undefined)
       if (!identity?.api_key || !otherUrl) {
@@ -852,6 +931,16 @@ export async function runDoctor(
   // an OPEN pending re-key elsewhere is someone mid-flow on another agent and
   // stays informational; an EXPIRED or UNREADABLE one is the abandoned case
   // and fails. Deleting is still nobody's call but the owner's.
+  //
+  // #1915 widened what reaches this check without touching the check itself.
+  // A `parked` directory is enumerated now, so its abandoned key cascades to
+  // the exit code through this existing rule on this existing severity scale.
+  // That is deliberate: the exit-code surface already moved once when #1911
+  // made an expired parked key a failure, and moving it a second time — a new
+  // check, or a new severity for this shape — would be a second behaviour
+  // change bought for a strictly narrower case than the first. The state that
+  // fails is the same state that already failed; only the set of directories
+  // it can be found in got honest.
   const parkedElsewhere = inventory
     .filter((entry) => entry.directory !== primaryDirectory && entry.rekeyPending)
     .map((entry) => ({ entry, pending: entry.rekeyPending as RekeyPendingStatus }))

@@ -27,6 +27,7 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import ComingSoonModal from '@/components/ComingSoonModal'
 import InfoModal, { type InfoPage } from '@/components/InfoModal'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -684,6 +685,27 @@ export default function DesignSystemPage() {
             </div>
           </Card>
         </div>
+      </Section>
+
+      <Section
+        title="CopyButton — the one copy affordance"
+        description="The inline check-pop copy button, extracted from <Address> on its second call site (#1878). Any value a user is expected to paste elsewhere gets this, never a hand-rolled button: it owns the hit area, the focus ring, the 1.5s confirmation, and the silent catch around navigator.clipboard — which rejects on insecure origins, denied permissions, and in most headless captures. Failing quietly is correct for an accelerator; the value stays on screen and selectable. Pass `label` lowercase and name the thing, not the widget — it reads as “Copy address”, then “Address copied”."
+      >
+        <Card hover={false} className="p-5">
+          <div className="flex flex-wrap items-center gap-6 text-sm text-[var(--v2-ink-2)]">
+            <span className="inline-flex items-center gap-1">
+              <span className="v2-tabular rounded bg-[var(--v2-surface-2)] px-1.5 py-0.5 font-mono text-xs">haven-research</span>
+              <CopyButton value="haven-research" label="MCP server name" />
+            </span>
+            <span className="inline-flex items-center gap-1">
+              sk_agent_a1b2c3
+              <CopyButton value="sk_agent_a1b2c3" label="API key prefix" />
+            </span>
+          </div>
+          <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+            Click one — the icon swaps to a success check for 1.5s, then reverts.
+          </p>
+        </Card>
       </Section>
 
       <Section

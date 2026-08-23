@@ -10,7 +10,7 @@ import {
   type LocalDelegateKey,
 } from './key.js'
 import { redactSecrets, shortAddress } from './redact.js'
-import { assertValidServerSlug } from './server-names.js'
+import { assertValidServerSlug, serverNamesFor } from './server-names.js'
 import {
   assertServerSlugAvailable,
   defaultCredentialRoot,
@@ -257,6 +257,11 @@ export async function runConnect(options: ConnectOptions, deps: ConnectDeps = {}
       proofSignature,
       apiKeyHash: hashAgentApiKey(localApiKey),
       apiKeyPrefix: agentApiKeyPrefix(localApiKey),
+      // #1878: report the pair we are ACTUALLY wiring, bare pair included, so
+      // the dashboard can name it. Derived here rather than sent as the raw
+      // slug — `serverNamesFor` is the one place the naming rule lives, and
+      // the hosted name is what a user pastes into an MCP config.
+      mcpServerName: serverNamesFor(options.serverName).hosted,
       connectorContext: {
         environment_label: options.environmentLabel ?? 'Local workspace',
         config_target: installCapabilities.canWriteRuntimeConfig

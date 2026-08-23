@@ -1,6 +1,7 @@
 'use client'
 
 import { CirclePause, TriangleAlert } from 'lucide-react'
+import { McpServerName } from './McpServerName'
 import { Icon } from '@/components/ui/Icon'
 import { useState, useMemo, type KeyboardEvent, type MouseEvent } from 'react'
 import { type Agent } from '@/hooks/useAgents'
@@ -162,6 +163,16 @@ export function AgentCard({
                 <span className="text-[var(--v2-ink-3)]">Account:</span> {agent.safe_name}
               </p>
             )}
+            {/*
+              #1878: which MCP pair this agent is wired as. Below the display
+              name rather than beside it, and monospace rather than prose —
+              #1694's decision is "editable display name, immutable wiring
+              slug", so the two must not read as the same kind of thing.
+            */}
+            <div className="mt-0.5 flex min-w-0 items-center gap-1 text-xs">
+              <span className="text-[var(--v2-ink-3)]">MCP:</span>
+              <McpServerName value={agent.mcp_server_name} />
+            </div>
             {agent.description && (
               <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">
                 {agent.description}

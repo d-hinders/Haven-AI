@@ -16,6 +16,13 @@
  * - a probe against an un-acknowledged consent gate exits 1 — the doctor
  *   reports that as "consent missing" with the ack re-run as the repair,
  *   never as "signer broken".
+ *
+ * #1911 extends "secret-free" to the newest file that holds key material: the
+ * doctor reports THAT a `--rekey` is parked (#1700's `rekey-pending.json`),
+ * when, where and at which public address — through an accessor that does not
+ * return the private half at all, so no output path can leak it by omission.
+ * Repair still never deletes it: an expired TTL is a refusal to use the key,
+ * not a licence to destroy key material the owner may still be mid-flow on.
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
@@ -39,6 +46,7 @@ import { restartRequiredForRuntime, type RuntimeId } from './runtime-registry.js
 import { getLocalSignerConsentStatus } from './signer-consent.js'
 import { TOMBSTONE_FILENAME, readAgentTombstone } from './tombstone.js'
 import { serverNamesFor, type ServerNames } from './server-names.js'
+import { inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
 import { shortAddress } from './redact.js'
 
 export interface DoctorCheck {
@@ -71,6 +79,8 @@ export interface DoctorDeps {
   probeHostedIdentity?: typeof probeHostedAgentIdentity
   runCommand?: (command: string, args: string[]) => Promise<void>
   env?: NodeJS.ProcessEnv
+  /** Injected clock — the pending-re-key TTL is the only time-dependent check (#1911). */
+  now?: () => number
 }
 
 interface IdentityFile {
@@ -154,8 +164,28 @@ export interface AgentInventoryEntry {
   agentId?: string
   directory: string
   classification: AgentClassification
-  /** Per-agent checks — empty for entries that are not wired. */
+  /**
+   * Per-agent checks. Empty for entries that are not wired, with one
+   * exception: a directory holding a pending re-key carries that check
+   * whatever its classification (#1911) — an abandoned re-key in a superseded
+   * or retired directory is precisely the case nothing else looks at.
+   */
   checks: DoctorCheck[]
+  /**
+   * #1911: a started-but-unfinished `--rekey` in this directory, when there is
+   * one. Populated for EVERY classification, including `superseded` and
+   * `orphaned` — the whole point is that the file holds live key material in a
+   * directory nothing else is looking at. Address and timing only; the private
+   * half is not in this shape (see `RekeyPendingStatus`).
+   *
+   * "Populated", not "gates the exit code": `report.ok` rolls up the flat
+   * `checks` array plus WIRED entries' checks only, so this field and a
+   * non-wired entry's `checks` are reporting surfaces, not gates. An abandoned
+   * parked key outside the primary directory reaches the exit code through the
+   * flat `rekey_pending_elsewhere` check instead — see its comment in
+   * `runDoctor` for why that check exists rather than a cascade rule change.
+   */
+  rekeyPending?: RekeyPendingStatus
 }
 
 /**
@@ -207,6 +237,140 @@ function agentIsWired(
   // heuristic apply.
   if (bareOwnerExists) return false
   return isPrimary && Boolean(identity?.hosted_mcp_url && configText.includes(identity.hosted_mcp_url))
+}
+
+/**
+ * #1911 — the one state `doctor` could not see: a `--rekey` that was started
+ * and never finished.
+ *
+ * `rekey-pending.json` holds a freshly generated PRIVATE key between the two
+ * re-key phases (#1700). It is 0600, in the same directory, at the same mode,
+ * as the live signer key it is about to replace — so it is not a new exposure.
+ * What it is, is invisible: the surface whose entire job is "tell me what
+ * state this machine's Haven wiring is in" did not read the file, so an
+ * abandoned re-key left key material on disk with nothing naming it, and a
+ * lost terminal left the owner with no way to re-read the address they were
+ * supposed to paste except by running `--rekey` again and discarding the
+ * parked keypair.
+ *
+ * This check reports THAT one exists, when it started, when it expires, its
+ * PUBLIC address and its path. Never its contents — the accessor it reads does
+ * not return them.
+ *
+ * ## What this can and cannot tell you about #1868
+ *
+ * #1868 establishes that a re-key abandoned AFTER the on-chain revoke wedges
+ * the agent: the old delegations are gone, no new ones were issued, nothing
+ * expires the in-flight row, and the only way back is a manual owner re-grant.
+ * A re-key abandoned BEFORE the revoke costs nothing at all. Those two are
+ * worth very different words, so this check says only what it can actually
+ * establish:
+ *
+ * - **Can distinguish: the backend re-key COMPLETED.** `agents.delegate_address`
+ *   is swapped at the `complete` stage, so a hosted identity already reporting
+ *   the address this machine generated proves the whole owner-signed sequence
+ *   ran. Nothing is wedged; only the local half is outstanding, and
+ *   `--rekey-finish` closes it.
+ * - **Cannot distinguish: before the revoke vs. after it,** within the
+ *   not-completed case. `rekey-pending.json` is written before the owner opens
+ *   the dashboard and is never touched again, so it records nothing about how
+ *   far the backend got; and the identity probe this connector makes reads two
+ *   fields (`id`, `delegate_address`) from `GET /machine-payments/agent`, whose
+ *   response is `id`, `name`, `status`, `safe_address`, `delegate_address`,
+ *   `delegate_account_address`, `chain_id` and `execution_rail` — **none of
+ *   which is a re-key stage**. The absent field is what matters here, not the
+ *   count: there is nothing on this endpoint to read the stage from, so
+ *   widening the probe would not help. So "never started on the agent page" and "started, revoked,
+ *   abandoned — the #1868 wedge" are the same observation from here. The check
+ *   says so, and points at the agent page, rather than implying the reassuring
+ *   half.
+ */
+function rekeyPendingCheck(
+  status: RekeyPendingStatus,
+  hostedDelegateAddress: string | undefined,
+  runtime: string,
+  slug: string | undefined,
+): DoctorCheck {
+  const label = 'Pending re-key'
+  const nameFlag = slug ? ` --name ${slug}` : ''
+  if (status.state === 'unreadable') {
+    return {
+      id: 'rekey_pending',
+      label,
+      ok: false,
+      detail:
+        `A re-key was started here but ${status.path} does not parse, so neither the address it ` +
+        'generated nor when it started can be read. The file still holds what was a private key.',
+      repair: `Delete ${status.path}, then start again: ${RERUN} --rekey${nameFlag}`,
+    }
+  }
+
+  const started = status.startedAt ?? 'an unknown time'
+  const address = status.newDelegateAddress ?? 'unknown'
+  const completedOnHaven =
+    hostedDelegateAddress !== undefined &&
+    status.newDelegateAddress !== undefined &&
+    hostedDelegateAddress.toLowerCase() === status.newDelegateAddress.toLowerCase()
+
+  if (completedOnHaven) {
+    // The one branch with a definite backend answer. Haven already signs as
+    // the new address, so this machine is the only thing left behind — and
+    // `identity_match` is failing for exactly this reason, which this check
+    // explains rather than repeats.
+    return {
+      id: 'rekey_pending',
+      label,
+      ok: false,
+      detail:
+        `A re-key started ${started} has COMPLETED on Haven — the agent's signing address is already ` +
+        `${address}, the one this machine generated — but the local half was never finished, so the ` +
+        `credential files here still hold the old key. Parked at ${status.path}.` +
+        (status.state === 'expired'
+          ? ' The local file is also past its 24h TTL, which --rekey-finish refuses, so the finish ' +
+            'command below will not accept it any more.'
+          : ''),
+      repair:
+        status.state === 'expired'
+          ? `The parked key expired. Start again — ${RERUN} --rekey${nameFlag} — and re-run "Replace ` +
+            'signing key" on the Haven agent page with the new address it prints.'
+          : `Run: ${RERUN} --rekey-finish${nameFlag} --api-key <the key the agent page showed you> --runtime ${runtime}`,
+    }
+  }
+
+  // Not completed. What is UNKNOWN from here is how far the agent page got —
+  // and the two possibilities are free and expensive respectively (#1868).
+  const wedgeNote =
+    'Haven is NOT yet on this address, so the re-key did not complete. This machine cannot tell ' +
+    'whether the on-chain revoke on the agent page already ran: if it did not, closing this costs ' +
+    "nothing; if it did, the agent's old delegations are revoked, no new ones were issued, and only " +
+    'an owner re-grant restores its spend authority (#1868). Check the agent page before assuming ' +
+    'the harmless case.'
+
+  if (status.state === 'expired') {
+    return {
+      id: 'rekey_pending',
+      label,
+      ok: false,
+      detail:
+        `A re-key started ${started} EXPIRED ${status.expiresAt ?? ''} without being finished. Its ` +
+        `address was ${address}; the private half it generated is still on disk at ${status.path}. ` +
+        wedgeNote,
+      repair:
+        `Either delete ${status.path} to drop the parked key, or start over: ${RERUN} --rekey${nameFlag}. ` +
+        'Connect never deletes it for you — an expired TTL is a refusal to USE the key, not a licence ' +
+        'to destroy key material you may still be mid-flow on.',
+    }
+  }
+
+  return {
+    id: 'rekey_pending',
+    label,
+    ok: true,
+    detail:
+      `A re-key started ${started} is still open (expires ${status.expiresAt ?? 'unknown'}). Paste this ` +
+      `address into "Replace signing key" on the Haven agent page: ${address}. Parked at ${status.path}. ` +
+      wedgeNote,
+  }
 }
 
 async function readIdentity(directory: string): Promise<IdentityFile | undefined> {
@@ -310,10 +474,16 @@ async function checksForAgent(
   const localDelegate = typeof signerFile?.delegate_address === 'string'
     ? (signerFile.delegate_address as string)
     : undefined
+  // Hoisted for the pending-re-key check below: a hosted delegate that already
+  // equals the parked address is the one thing that proves a backend re-key
+  // completed (#1911). `undefined` when the probe did not succeed, which keeps
+  // "could not ask" out of the "definitely not completed" branch.
+  let hostedDelegateAddress: string | undefined
   if (identity?.api_key && identity.api_url) {
     const probe = await (deps.probeHostedIdentity ?? probeHostedAgentIdentity)(
       identity.api_key, identity.api_url, deps.fetch,
     )
+    if (probe.status === 'ok') hostedDelegateAddress = probe.delegateAddress
     if (probe.status !== 'ok') {
       // #1697 review, finding 1: an unperformable comparison is NOT a pass.
       // Saying "skipped, not passed" in the text while setting ok:true is the
@@ -359,6 +529,12 @@ async function checksForAgent(
             }),
       })
     }
+  }
+
+  // ── Pending re-key (#1911) ────────────────────────────────────────────────
+  const pending = await inspectRekeyPending(directory, deps.now?.() ?? Date.now())
+  if (pending) {
+    checks.push(rekeyPendingCheck(pending, hostedDelegateAddress, input.runtime, sidecar?.server_name))
   }
 
   // ── Signer stdio handshake ────────────────────────────────────────────────
@@ -453,13 +629,19 @@ export async function runDoctor(
     const tombstone = await readAgentTombstone(dir)
     const slug = sidecar?.server_name
     const names = serverNamesFor(slug)
+    // #1911: read on EVERY directory, before the not-wired early return. A
+    // retired or orphaned directory is exactly where an abandoned re-key would
+    // go unnoticed, and the file holds key material regardless of whether the
+    // agent it belongs to is still wired.
+    const rekeyPending = await inspectRekeyPending(dir, deps.now?.() ?? Date.now())
     if (!identity?.api_key) {
       inventory.push({
         ...(slug ? { slug } : {}),
         ...(tombstone?.agent_id ? { agentId: tombstone.agent_id } : {}),
         directory: dir,
         classification: tombstone ? 'retired' : 'orphaned',
-        checks: [],
+        checks: rekeyPending ? [rekeyPendingCheck(rekeyPending, undefined, input.runtime, slug)] : [],
+        ...(rekeyPending ? { rekeyPending } : {}),
       })
       continue
     }
@@ -470,11 +652,17 @@ export async function runDoctor(
       directory: dir,
       classification: wired ? 'wired' : 'superseded',
       checks: [],
+      ...(rekeyPending ? { rekeyPending } : {}),
     }
     if (wired) {
       const result = await checksForAgent({ directory: dir, identity, sidecar }, input, deps)
       entry.checks = result.checks
       capabilitiesByDirectory.set(dir, result.signerCapabilities)
+    } else if (rekeyPending) {
+      // A superseded directory runs no probes (that is the point — it is not
+      // the agent in use), so the backend-completed refinement is unavailable
+      // here and the check reports the file facts alone.
+      entry.checks = [rekeyPendingCheck(rekeyPending, undefined, input.runtime, slug)]
     }
     inventory.push(entry)
   }
@@ -511,7 +699,12 @@ export async function runDoctor(
   } else {
     const primaryIdentity = await readIdentity(primaryDirectory)
     const primarySidecar = await readRuntimeSidecar(primaryDirectory)
-    if (primaryChecksById.size === 0) {
+    // Keyed on a check `checksForAgent` ALWAYS produces, not on the map being
+    // empty (#1911): an unwired primary directory that happens to hold a
+    // pending re-key now carries that one check from the inventory pass, and a
+    // bare `size === 0` would read that as "already done" and silently skip
+    // every real check for the directory the user pointed at.
+    if (!primaryChecksById.has('credentials')) {
       // The primary directory is not wired (or has no key): run its checks
       // anyway — the user pointed the doctor at this machine, and silence
       // about the selected directory would be the old heuristic's failure.
@@ -566,7 +759,7 @@ export async function runDoctor(
     })
   }
 
-  for (const id of ['hosted_mcp', 'identity_match']) {
+  for (const id of ['hosted_mcp', 'identity_match', 'rekey_pending']) {
     const check = primaryChecksById.get(id)
     if (check) checks.push(check)
   }
@@ -633,6 +826,54 @@ export async function runDoctor(
             repair:
               `Revoke ${supersededLive.join(', ')} on the Haven agent page, then remove the old ` +
               'director(y/ies) under ~/.haven/agents. Connect never revokes or deletes for you.',
+          }
+        : {}),
+    })
+  }
+
+  // ── Parked re-keys in OTHER directories (#1911) ───────────────────────────
+  //
+  // Why this is a FLAT check and not merely a nested one. `report.ok` rolls up
+  // the flat list plus every WIRED agent's checks, so a hazard found only in a
+  // non-wired entry does not reach the exit code — and `--json` + `report.ok`
+  // is the obvious way a CI health-check consumes this. Leaving an abandoned
+  // private key visible only in `agents[]` would reproduce, one layer up,
+  // exactly the invisibility #1911 exists to remove: reported, but not
+  // reported anywhere that gates anything.
+  //
+  // The precedent is `superseded_agents` directly above: it is a flat check
+  // that FAILS on a credential hazard found in a directory that is explicitly
+  // not wired. This repo already treats "spend-capable key material in a
+  // directory you are not using" as exit-code-worthy, and a parked private key
+  // is the same kind of fact — arguably more so, since a superseded agent is
+  // at least an agent the owner once chose to create.
+  //
+  // Severity matches the per-agent check rather than inventing a second scale:
+  // an OPEN pending re-key elsewhere is someone mid-flow on another agent and
+  // stays informational; an EXPIRED or UNREADABLE one is the abandoned case
+  // and fails. Deleting is still nobody's call but the owner's.
+  const parkedElsewhere = inventory
+    .filter((entry) => entry.directory !== primaryDirectory && entry.rekeyPending)
+    .map((entry) => ({ entry, pending: entry.rekeyPending as RekeyPendingStatus }))
+  if (parkedElsewhere.length > 0) {
+    const abandoned = parkedElsewhere.filter((item) => item.pending.state !== 'pending')
+    const describe = (item: (typeof parkedElsewhere)[number]): string =>
+      `${item.entry.slug ?? item.entry.agentId ?? basename(item.entry.directory)} (${item.pending.state}, ${item.pending.path})`
+    checks.push({
+      id: 'rekey_pending_elsewhere',
+      label: 'Parked re-keys in other credential directories',
+      ok: abandoned.length === 0,
+      detail:
+        abandoned.length > 0
+          ? `ABANDONED re-key key material outside the agent this report describes: ${abandoned.map(describe).join(', ')}. ` +
+            'Each holds a private key that was generated for a re-key nobody finished.'
+          : `${parkedElsewhere.length} other director(y/ies) hold an open pending re-key: ${parkedElsewhere.map(describe).join(', ')}.`,
+      ...(abandoned.length > 0
+        ? {
+            repair:
+              'Check the Haven agent page for each before deleting: if its on-chain revoke already ran, the agent ' +
+              'has no spend authority until you re-grant it (#1868), and that is not visible from this machine. ' +
+              'Connect never deletes key material for you.',
           }
         : {}),
     })
@@ -728,12 +969,32 @@ export async function runRepair(
     }
   }
 
+  // #1910: WHICH MCP pair does this directory own? `serverNamesFor(undefined)`
+  // is the BARE `haven` / `haven-signer` pair, so a repair that omits the slug
+  // does not merely fail to fix the named agent it was pointed at — it
+  // overwrites a *different*, working agent's entries with this one's
+  // credentials and wrapper path. `--repair` is what people reach for when
+  // something is already broken; breaking a second agent is the worst
+  // available outcome.
+  //
+  // The slug is not a flag the user must remember to repeat: #1696 records it
+  // in this directory's own sidecar, which is already on disk. Read it before
+  // `prepareSignerRuntime` — that call REWRITES the sidecar, and passing the
+  // slug back in is what stops the rewrite from erasing it (a second, quieter
+  // half of the same defect: a repaired named agent would afterwards read as
+  // an unnamed one to every later `--doctor`).
+  const existingSidecar = await readRuntimeSidecar(directory)
+  const serverName = existingSidecar?.server_name
+
   const signerPath = join(directory, 'signer.json')
   const prepared = await prepareSignerRuntime(
-    { credentialDirectory: directory, signerPath, homeDir },
+    { credentialDirectory: directory, signerPath, homeDir, serverName },
     { runCommand: deps.runCommand },
   )
   messages.push(...prepared.messages)
+
+  const names = serverNamesFor(serverName)
+  messages.push(`Rewriting MCP entries ${names.hosted} / ${names.signer}${serverName ? ` (agent "${serverName}")` : ' (unnamed pair)'} — no other pair is touched.`)
 
   const configResult = await writeRuntimeConfig({
     runtime: input.runtime as RuntimeId,
@@ -745,6 +1006,7 @@ export async function runRepair(
     signerCommand: { command: prepared.command, args: prepared.args },
     homeDir,
     mode: 'hosted',
+    serverName,
   })
   messages.push(...configResult.messages)
   messages.push('Repair complete — restart the runtime, then verify with --doctor.')

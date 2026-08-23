@@ -413,6 +413,63 @@ export async function readRekeyPending(directory: string, now = Date.now()): Pro
   return pending
 }
 
+/**
+ * What a pending re-key IS, for anything that only needs to report it (#1911).
+ *
+ * Deliberately a separate return type from {@link RekeyPending}: it has no
+ * `new_delegate_key` field at all, so a caller that reports this cannot leak
+ * the private half by forgetting to strip it. The diagnostic surface uses this
+ * accessor and never {@link readRekeyPending} — key material is unreachable
+ * from that side by construction, not by discipline.
+ *
+ * Also a non-throwing read, where `readRekeyPending` throws: `--rekey-finish`
+ * asked to consume one and deserves an error, but the doctor is enumerating
+ * every directory on the machine and "there isn't one" is the normal answer.
+ */
+export interface RekeyPendingStatus {
+  /** `pending` — still resumable; `expired` — past its TTL; `unreadable` — present but malformed. */
+  state: 'pending' | 'expired' | 'unreadable'
+  /** Where the file is, so the owner can act on it without hunting. */
+  path: string
+  agentId?: string
+  /** PUBLIC address. The private half is never read into this shape. */
+  newDelegateAddress?: string
+  startedAt?: string
+  expiresAt?: string
+}
+
+export async function inspectRekeyPending(
+  directory: string,
+  now = Date.now(),
+): Promise<RekeyPendingStatus | null> {
+  const path = join(directory, REKEY_PENDING_FILENAME)
+  const raw = await readJsonFile(path)
+  if (!raw) {
+    // Distinguish "no file" from "file that will not parse". A file present
+    // but unparseable still holds bytes that were a private key, so it is
+    // reportable — reporting nothing would be the observability gap this
+    // accessor exists to close.
+    const present = (await readRawFile(path)) !== null
+    return present ? { state: 'unreadable', path } : null
+  }
+  const agentId = asString(raw.agent_id)
+  const newDelegateAddress = asString(raw.new_delegate_address)
+  const startedAt = asString(raw.started_at)
+  const expiresAt = asString(raw.expires_at)
+  if (!agentId || !newDelegateAddress) {
+    return { state: 'unreadable', path, ...(startedAt ? { startedAt } : {}) }
+  }
+  const expired = expiresAt !== undefined && Date.parse(expiresAt) < now
+  return {
+    state: expired ? 'expired' : 'pending',
+    path,
+    agentId,
+    newDelegateAddress,
+    ...(startedAt ? { startedAt } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+  }
+}
+
 export async function clearRekeyPending(directory: string): Promise<void> {
   await rm(join(directory, REKEY_PENDING_FILENAME), { force: true }).catch(() => undefined)
 }

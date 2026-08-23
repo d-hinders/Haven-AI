@@ -63,7 +63,6 @@
           - "packages/backend/src/middleware/agentAuth.ts"
           - "packages/backend/src/modules/accounts/mainnet-gate.ts"
           - "packages/backend/src/modules/agents/rekey-*.ts"
-          - "packages/backend/src/modules/machine-payments/**"
           - "packages/backend/src/modules/mpp/**"
           - "packages/backend/src/modules/x402/**"
           - "packages/backend/src/rails/allowance-module.ts"

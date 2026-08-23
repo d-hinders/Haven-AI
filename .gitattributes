@@ -1,0 +1,14 @@
+# `.mjs` is always source text, so diff it as text (#1897).
+#
+# Git calls a blob binary when it finds a NUL byte in the first 8000, and
+# scripts/ci/money-path.test.mjs had two — a literal NUL used as a regex
+# placeholder. The effect was that the drift guard for the MONEY PATH was the
+# one file in the repository that showed up as `Bin 10325 -> 16418 bytes`
+# instead of a diff, so no pull request touching it could be reviewed by
+# reading the change. #1897 rewrote that byte as a `\u0000` escape; this line
+# also makes the diff readable across the commit that still has the old blob
+# on one side, and keeps the class of failure from recurring silently.
+#
+# `diff` only affects how git renders changes. It is not `text`, so no
+# line-ending normalisation is implied.
+*.mjs diff

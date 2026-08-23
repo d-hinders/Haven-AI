@@ -246,10 +246,11 @@ as broken. `--ref=<git ref>` picks the tree it sweeps, defaulting to
 
 **A declared reset is a separate class, not a silenced one
 ([#1885](https://github.com/d-hinders/Haven-AI/issues/1885)).** The sweep's
-summary reads `N unrestored, M declared reset`, and the two are different
-findings. `chain-reset(#N)` is written on a doc's *current* line, while the
+summary counts unrestored docs and declared-reset docs separately, and the
+two are different findings. `chain-reset(#N)` is written on a doc's *current* line, while the
 sweep replays *historical* pairs — so a marker added after the fact (both
-#1496 compactions predate the marker syntax by four days) is invisible to a
+#1496 compactions at `cf177982`, 2026-08-16, predate the marker syntax
+introduced by #1843 at `178c67d0`, 2026-08-22) is invisible to a
 naive replay, and those docs were reported as unrestored breaks in every run
 forever. The fix is **not** to honour the marker on today's line: one declared
 compaction would then excuse every break in that doc's history, before and

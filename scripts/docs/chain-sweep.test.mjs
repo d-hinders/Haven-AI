@@ -16,7 +16,8 @@ import { classifyBreak, declaredResetIssues } from './chain-sweep.mjs'
 
 // The real shape, from `docs/regulatory/casp-risk-guardrails.md`, trimmed.
 // `cf177982` (PR #1497, Closes #1496) compacted the line to date-only; the
-// `chain-reset` marker syntax did not exist until #1843, four days later, so
+// `chain-reset` marker syntax did not exist until #1843 (`178c67d0`,
+// 2026-08-22), six days later, so
 // the declaration could only ever be added retroactively — to TODAY's line.
 const PREV_1496 = 'last-verified: "2026-08-15" # #1482: shape-check. #1471: base-sepolia. #1366: entries move to shards.'
 const NEXT_1496 = 'last-verified: "2026-08-16" # #1496: this line is date-only from now on.'

@@ -59,7 +59,7 @@ export default function DashboardActionPickerModal({
             <button
               key={safe.id}
               onClick={() => onSelect(safe.id)}
-              className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--v2-brand)]/30 hover:bg-[var(--v2-brand-soft)]"
+              className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-left transition-colors hover:border-brand/30 hover:bg-[var(--v2-brand-soft)]"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">

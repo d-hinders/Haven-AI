@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card'
 import { StepList } from '@/components/marketing/StepList'
 import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
 import { FlowCard } from '@/components/marketing/FlowCard'
+import { BrandBandButton } from '@/components/marketing/BrandBandButton'
 
 const INTEGRATIONS = ['Base', 'x402', 'Stripe MPP', 'USDC']
 
@@ -284,7 +285,7 @@ export default function Home() {
         lede="Stablecoins give agents money that moves at their speed. Haven speaks the open standards that ride on those rails: x402 for pay‑per‑request flows and Stripe MPP for broader agent commerce, all under the same rule set."
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <Card hover={false} className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group">
+          <Card hover={false} className="p-7 hover:border-brand/40 hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)] transition-all group">
             <Link href="/protocols/x402" className="block">
               <div className="text-[12px] font-medium tracking-tight text-[var(--v2-brand)] mb-3">
                 HTTP paywalls
@@ -305,7 +306,7 @@ export default function Home() {
             </Link>
           </Card>
 
-          <Card hover={false} className="p-7 hover:border-[var(--v2-brand)]/40 hover:shadow-[0_12px_32px_-16px_rgba(124,58,237,0.30)] transition-all group">
+          <Card hover={false} className="p-7 hover:border-brand/40 hover:shadow-[0_12px_32px_-16px_rgba(124,58,237,0.30)] transition-all group">
             <Link href="/protocols/mpp" className="block">
               <div className="text-[12px] font-medium tracking-tight text-[var(--v2-brand)] mb-3">
                 Stablecoin checkout
@@ -367,21 +368,12 @@ export default function Home() {
             No credit card. No setup call. Live in minutes.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Link
-              href="/signup"
-              className="inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors h-12 px-6 text-[15px] bg-white text-[var(--v2-ink)] hover:bg-white/95 shadow-[0_1px_2px_rgba(16,24,40,0.06)]"
-            >
+            <BrandBandButton href="/signup" trailingArrow>
               Get early access
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75}>
-                <path d="M3.5 8h9M9 4.5L12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </Link>
-            <Link
-              href="/how-it-works"
-              className="inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors h-12 px-6 text-[15px] bg-white/10 hover:bg-white/15 text-white border border-white/20 backdrop-blur"
-            >
+            </BrandBandButton>
+            <BrandBandButton href="/how-it-works" variant="translucent">
               Read the technical overview
-            </Link>
+            </BrandBandButton>
           </div>
         </div>
       </section>

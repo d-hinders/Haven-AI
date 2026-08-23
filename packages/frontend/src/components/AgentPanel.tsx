@@ -36,7 +36,7 @@ export default function AgentPanel() {
   if (!safeAddress) {
     return (
       <EmptyState
-        icon={<BotIcon size={24} />}
+        icon={<BotIcon size={20} />}
         title="Create a Haven account to manage agents"
         body="Agents need a Haven account before they can receive a credential and rules."
       />
@@ -47,7 +47,7 @@ export default function AgentPanel() {
     <div>
       {panel.toastMessage && (
         <div className="fixed right-4 top-4 z-[var(--v2-z-panel)] pointer-events-none">
-          <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-white px-4 py-3 shadow-[var(--v2-shadow-modal)]">
+          <div className="rounded-lg border border-danger/20 bg-white px-4 py-3 shadow-[var(--v2-shadow-modal)]">
             <div className="flex items-center gap-2">
               <div className="w-5 h-5 rounded-full bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] flex items-center justify-center flex-shrink-0">
                 <Icon icon={CircleAlert} className="h-3 w-3" />
@@ -111,7 +111,7 @@ export default function AgentPanel() {
           tone="neutral"
           icon={
             /* Heavier stroke: matches the original spinner's 3px ring weight. */
-            <Icon icon={LoaderCircle} className="h-[18px] w-[18px] animate-spin" strokeWidth={3} />
+            <Icon icon={LoaderCircle} className="h-5 w-5 animate-spin" strokeWidth={3} />
           }
           title="Finalizing your agent…"
           body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."
@@ -129,7 +129,7 @@ export default function AgentPanel() {
           <EmptyState
             tone="warning"
             icon={
-              <Icon icon={Clock} className="h-[22px] w-[22px]" />
+              <Icon icon={Clock} className="h-5 w-5" />
             }
             title="Your agent is taking longer than expected"
             body="Haven is still confirming the new rules on-chain. This can take a little longer under load — check again in a moment."
@@ -150,7 +150,7 @@ export default function AgentPanel() {
         !finalizingAgent &&
         !finalizeTimedOut && (
         <EmptyState
-          icon={<BotIcon size={24} />}
+          icon={<BotIcon size={20} />}
           title="No agents yet"
           body="Set agent rules, then add your Haven credential to your agent so it can make payments within those rules."
           action={

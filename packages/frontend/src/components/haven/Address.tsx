@@ -10,10 +10,10 @@
  * everything from brand links to muted row metadata.
  */
 
-import { Check, Clipboard } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { Icon } from '@/components/ui/Icon'
 import { Tooltip } from '@/components/ui/Tooltip'
-import { useCopyTimeout } from '@/hooks/useCopyTimeout'
 import { truncate } from '@/lib/format'
 
 /** The one truncation rule (`0x1234…abcd`) — re-exported for discoverability. */
@@ -30,13 +30,12 @@ export function Address({
   value: string
   /** Show the inline copy button with check-pop feedback. */
   copy?: boolean
-  /** Render as an external link (block explorer) with the ↗ affordance. */
+  /** Render as an external link (block explorer) with the lucide `ExternalLink` affordance. */
   href?: string
   /** `false` renders the full value (e.g. receive-funds surfaces). */
   truncate?: boolean
   className?: string
 }) {
-  const { copied, markCopied } = useCopyTimeout(1500)
   const display = truncate ? truncateAddress(value) : value
 
   const text = href ? (
@@ -44,23 +43,15 @@ export function Address({
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="v2-tabular font-mono font-medium text-[var(--v2-brand)] hover:underline"
+      className="v2-tabular inline-flex items-center gap-1 font-mono font-medium text-[var(--v2-brand)] hover:underline"
     >
-      {display} <span aria-hidden="true">↗</span>
+      {display}
+      <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
     </a>
   ) : (
     // Full addresses must be able to wrap (receive-funds surfaces).
     <span className={`font-mono ${truncate ? '' : 'break-all'}`.trim()}>{display}</span>
   )
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
-      markCopied()
-    } catch {
-      /* clipboard unavailable — the tooltip still exposes the full value */
-    }
-  }
 
   // inline-flex only when the copy button rides along — plain text spans
   // (especially full wrapping addresses) stay in normal inline flow.
@@ -76,20 +67,7 @@ export function Address({
       ) : (
         text
       )}
-      {copy ? (
-        <button
-          type="button"
-          onClick={handleCopy}
-          aria-label={copied ? 'Address copied' : 'Copy address'}
-          className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-        >
-          {copied ? (
-            <Icon icon={Check} className="h-3 w-3 text-[var(--v2-success)]" />
-          ) : (
-            <Icon icon={Clipboard} className="h-3 w-3" />
-          )}
-        </button>
-      ) : null}
+      {copy ? <CopyButton value={value} label="address" /> : null}
     </span>
   )
 }

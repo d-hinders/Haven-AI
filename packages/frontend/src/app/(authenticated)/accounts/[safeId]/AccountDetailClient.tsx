@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, Clipboard, EllipsisVertical, X } from 'lucide-react'
+import { ArrowRight, Check, Clipboard, EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -408,9 +408,10 @@ export default function AccountDetailClient() {
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent access</h2>
             <Link
               href="/agents"
-              className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+              className="inline-flex items-center gap-1 text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
             >
-              View all agents &rarr;
+              View all agents
+              <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
             </Link>
           </div>
           <p className="mt-1 max-w-2xl pb-5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
@@ -588,9 +589,10 @@ export default function AccountDetailClient() {
               {!txLoading && total > 0 ? (
                 <Link
                   href={`/transactions?safeId=${encodeURIComponent(safeId)}`}
-                  className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
                 >
-                  View all &rarr;
+                  View all
+                  <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
                 </Link>
               ) : null}
             </div>
@@ -751,7 +753,7 @@ function RenameModal({
             />
           </div>
           {error && (
-            <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
+            <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
               {error}
             </div>
           )}

@@ -79,6 +79,64 @@ export async function runCli(
       return 1
     }
   }
+  if (parsed.rekey) {
+    // #1700: replace an agent's signing key on this machine. Two phases with
+    // the owner's dashboard between them — this connector never calls the
+    // re-key API, which is owner-authenticated by design.
+    const { startRekey, finishRekey } = await import('./rekey.js')
+    const { restartGuidance } = await import('./rekey-restart.js')
+    const common = {
+      serverName: parsed.options.serverName,
+      credentialsDir: parsed.options.credentialsDir,
+      runtime: parsed.options.runtime,
+    }
+    try {
+      if (parsed.rekey.phase === 'start') {
+        const result = await startRekey(common)
+        if (parsed.json) {
+          // The address is public; the private half never appears here or
+          // anywhere else this process writes to a stream.
+          io.stdout(
+            `${redactSecrets(
+              JSON.stringify({
+                rekey: 'started',
+                agent_id: result.agentId,
+                new_delegate_address: result.newDelegateAddress,
+                expires_at: result.expiresAt,
+              }),
+            )}\n`,
+          )
+        } else {
+          for (const line of result.messages) io.stdout(redactSecrets(`${line}\n`))
+        }
+        return 0
+      }
+
+      const result = await finishRekey({ ...common, newApiKey: parsed.rekey.newApiKey })
+      const restart = restartGuidance(parsed.options.runtime)
+      if (parsed.json) {
+        io.stdout(
+          `${redactSecrets(
+            JSON.stringify({
+              rekey: 'finished',
+              agent_id: result.agentId,
+              new_delegate_address: result.newDelegateAddress,
+              mcp_servers: result.serverNames,
+              restart_commands: restart.commands,
+            }),
+          )}\n`,
+        )
+      } else {
+        for (const line of result.messages) io.stdout(redactSecrets(`${line}\n`))
+        io.stdout('\n')
+        for (const line of restart.lines) io.stdout(redactSecrets(`${line}\n`))
+      }
+      return 0
+    } catch (err) {
+      io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
+      return 1
+    }
+  }
   if (parsed.doctor || parsed.repair) {
     const { runDoctor, runRepair } = await import('./doctor.js')
     const runtime = parsed.options.runtime ?? ''
@@ -111,7 +169,14 @@ export async function runCli(
             const failed = agent.checks.filter((check) => !check.ok)
             const verdict = agent.classification === 'wired'
               ? failed.length === 0 ? 'wired, all checks passed' : `wired, ${failed.length} check(s) FAILED`
-              : agent.classification
+              // #1915: `parked` is the one classification whose bare name says
+              // nothing a reader can act on — it is not a broken agent, it is
+              // a directory with no agent in it and a private key still in it.
+              // Spell that out here; the path and state are on the parked
+              // re-key check above.
+              : agent.classification === 'parked'
+                ? 'parked re-key only — no identity.json in this directory, but key material is still there'
+                : agent.classification
             io.stdout(redactSecrets(`  ${failed.length > 0 ? '✗' : '•'} ${name}: ${verdict}\n`))
             for (const check of failed) {
               io.stdout(redactSecrets(`      ✗ ${check.label}: ${check.detail}\n`))

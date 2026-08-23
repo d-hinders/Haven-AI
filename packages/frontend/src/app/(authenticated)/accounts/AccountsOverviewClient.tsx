@@ -1,7 +1,7 @@
 'use client'
 
 import { isAddress } from '@haven_ai/core'
-import { Check, ChevronLeft, ChevronRight, CircleAlert, CreditCard, FlaskConical, Link as LinkIcon, Plus, Star, X } from 'lucide-react'
+import { ArrowRight, Check, ChevronLeft, ChevronRight, CircleAlert, CreditCard, FlaskConical, Link as LinkIcon, Plus, Star, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
@@ -181,9 +181,9 @@ function AddSafeModal({
               </p>
               <button
                 onClick={() => setMode('deploy')}
-                className="w-full flex items-center gap-4 p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-[var(--v2-brand)]/30 hover:bg-[var(--v2-brand-soft)] transition-all group text-left"
+                className="w-full flex items-center gap-4 p-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] hover:border-brand/30 hover:bg-[var(--v2-brand-soft)] transition-all group text-left"
               >
-                <div className="w-10 h-10 rounded-lg bg-[var(--v2-brand-soft)] border border-[var(--v2-brand)]/20 flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--v2-brand-soft)] transition-colors">
+                <div className="w-10 h-10 rounded-lg bg-[var(--v2-brand-soft)] border border-brand/20 flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--v2-brand-soft)] transition-colors">
                   <Icon icon={Plus} className="w-5 h-5 text-[var(--v2-brand)]" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -284,7 +284,7 @@ function AddSafeModal({
               )}
 
               {error && (
-                <div className="rounded-lg border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+                <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
                   {error}
                 </div>
               )}
@@ -304,7 +304,7 @@ function AddSafeModal({
 
           {mode === 'deploy' && deployStep === 'deploying' && (
             <div className="flex flex-col items-center py-8">
-              <div className="w-12 h-12 rounded-full border-2 border-[var(--v2-brand)]/30 border-t-[var(--v2-brand)] animate-spin mb-6" />
+              <div className="w-12 h-12 rounded-full border-2 border-brand/30 border-t-[var(--v2-brand)] animate-spin mb-6" />
               <h3 className="text-sm font-medium text-[var(--v2-ink)] mb-2">Deploying your account</h3>
               <p className="text-xs text-[var(--v2-ink-3)] text-center max-w-xs">
                 Haven is deploying your account on {getChainConfig(deployChainId).name}. No wallet action needed.
@@ -315,7 +315,7 @@ function AddSafeModal({
           {mode === 'deploy' && deployStep === 'done' && (
             <div className="space-y-4">
               <div className="flex items-center gap-3 mb-2">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-success)]/30 bg-[var(--v2-success-soft)]">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-success/30 bg-[var(--v2-success-soft)]">
                   <Icon icon={Check} className="h-5 w-5 text-[var(--v2-success)]" />
                 </div>
                 <div>
@@ -585,8 +585,9 @@ function SafeCard({
           <Icon icon={FlaskConical} className="h-3.5 w-3.5" />
           {agentCount} agent{agentCount !== 1 ? 's' : ''}
         </span>
-        <span className="font-medium text-[var(--v2-brand)] opacity-70 transition-opacity group-hover:opacity-100">
-          Open &rarr;
+        <span className="inline-flex items-center gap-1 font-medium text-[var(--v2-brand)] opacity-70 transition-opacity group-hover:opacity-100">
+          Open
+          <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
         </span>
       </div>
     </Link>
@@ -632,7 +633,7 @@ export default function AccountsOverviewClient() {
 
       {/* Orphaned agents warning */}
       {orphanedAgents.length > 0 && (
-        <div className="flex items-center gap-2 px-4 py-3 mb-6 rounded-lg bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20">
+        <div className="flex items-center gap-2 px-4 py-3 mb-6 rounded-lg bg-[var(--v2-warning-soft)] border border-warning/20">
           <Icon icon={CircleAlert} className="h-4 w-4 text-[var(--v2-warning)] flex-shrink-0" />
           <span className="text-sm text-[var(--v2-warning)]">
             {orphanedAgents.length} agent{orphanedAgents.length !== 1 ? 's have' : ' has'} no linked account. Reassign them in the Agents page.

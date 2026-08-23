@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-08-22" # #1758: "no terminal failed revocation state" needed something able to observe agreement, and the only observer was unreachable — a revoke that mines after its bounded wait leaves `revocation_status` permanently `pending`. A new section records what CLOSES a revocation: the attestation's revoked bit read at a settled block, its evidence pointer from the durable outbound record, and the #1743 time question left open. Prior: #1745: the SECOND limit on "recovered, never re-minted" is closed — a null receipt no longer presumes dropped; a re-mint needs positive evidence the prior tx can never mine (its nonce consumed by something else). The bounded-stall argument and the still-open time question (#1743) are recorded rather than implied. The first limit (hash-keyed recovery) stands. Prior: #1742: the sweep's phase isolation protects against a THROW, not a hang — `revokeOnChain`'s bare `tx.wait()` could park the revocation phase and the stuck-revoke alarm downstream of it indefinitely. The wait is now bounded; the retry/backoff model, the no-terminal-failed-state rule and the verifier precedence are unchanged. Prior: #1735: the "recovered, never re-minted" claim is qualified — recovery is keyed off the persisted tx hash (hence the bump-worker exclusion) and presumes a null receipt means dropped, so a fee-stuck anchor can still re-mint (#1745). Anchor wait disposition on expiry recorded. Rest of the anchoring/revocation prose re-read against the code and unchanged.
+last-verified: "2026-08-23" # #1699: new section "Re-anchoring after a re-key" — an EAS attestation is immutable and its first field is the delegate EOA, so a re-key leaves the live attestation naming a RETIRED key (#1847) and re-key now retires and reissues it. Three claims in the body were stale and are corrected against the code, not merely appended to: the `anchor` enumeration was missing `re_anchoring`; "runs retryPendingPassports(), then reconcilePendingRevocations(), then logs listStuckRevocations()" now omitted two phases; and "each of the three phases" was already wrong at three and is now five. Re-read the revocation and sweep sections in full against `modules/passport/**` and `index.ts` — every other claim stands, including the no-terminal-failed-state rule, which the re-anchor path inherits by sharing `retireAttestationOnChain`. Scope: revocation/sweep/anchor-state sections; the schema, binding, assurance-ladder and receipt sections were not re-tested. Prior: #1758: "no terminal failed revocation state" needed something able to observe agreement, and the only observer was unreachable — a revoke that mines after its bounded wait leaves `revocation_status` permanently `pending`. A new section records what CLOSES a revocation: the attestation's revoked bit read at a settled block, its evidence pointer from the durable outbound record, and the #1743 time question left open. Prior: #1745: the SECOND limit on "recovered, never re-minted" is closed — a null receipt no longer presumes dropped; a re-mint needs positive evidence the prior tx can never mine (its nonce consumed by something else). The bounded-stall argument and the still-open time question (#1743) are recorded rather than implied. The first limit (hash-keyed recovery) stands. Prior: #1742: the sweep's phase isolation protects against a THROW, not a hang — `revokeOnChain`'s bare `tx.wait()` could park the revocation phase and the stuck-revoke alarm downstream of it indefinitely. The wait is now bounded; the retry/backoff model, the no-terminal-failed-state rule and the verifier precedence are unchanged. Prior: #1735: the "recovered, never re-minted" claim is qualified — recovery is keyed off the persisted tx hash (hence the bump-worker exclusion) and presumes a null receipt means dropped, so a fee-stuck anchor can still re-mint (#1745). Anchor wait disposition on expiry recorded. Rest of the anchoring/revocation prose re-read against the code and unchanged.
 ---
 
 # L0 Agent Passport — EAS schema
@@ -280,7 +280,7 @@ re-issuing the passport. Issuance is likewise allowed for a paused agent and
 has already revoked spends gas to create the very divergence described above.
 
 `anchor` reports the chain's progress for transparency: `not_anchored`,
-`anchored`, `revocation_pending`, `revoked_onchain`.
+`anchored`, `re_anchoring`, `revocation_pending`, `revoked_onchain`.
 
 ### Why a revoke cannot fail permanently
 
@@ -295,6 +295,55 @@ not a silent state — surfaced by `listStuckRevocations()` for alarming. While 
 is stuck, the verifier still answers `revoked` correctly; the exposure is only to
 merchants who ignored the rule above and checked the chain alone.
 
+### Re-anchoring after a re-key (#1699)
+
+A re-key rotates `agents.delegate_address` in place — same agent id, name and
+history (`routes/agent-rekey.ts`, epic #1694). `PASSPORT_SCHEMA`'s first field
+is `address agentEoa` and an EAS attestation is **immutable**, so the moment the
+rotation completes the live attestation names a key the agent no longer holds.
+There is no mutable-anchor option to reach for; the only way to make the chain
+agree is to revoke the old attestation and issue a new one.
+
+**Revoke precedes issue, for the same reason it does one layer down.** Minting
+first would leave two live credentials for one agent, one of them naming a
+retired key, and a partial failure would make that state permanent. Revoking
+first fails to *this agent has no passport right now* — recoverable. The
+ordering is not merely intended: `resetForReanchor` refuses to clear the row
+unless the retired attestation is `revocation_status = 'confirmed'` **and** its
+`attestation_uid` matches the one the caller just retired, because that uid is
+the only pointer Haven holds to a credential still live on-chain.
+
+**`re_anchoring` is the window between them**, and it is reported rather than
+hidden — including to merchants. Saying `anchored` there would tell a merchant a
+credential is current when the address it names can no longer spend. It ranks
+above `revocation_pending` in `anchorForPassport` because the re-anchor claims
+its row through the same `revocation_status` column an ordinary revoke uses;
+without the ordering the whole window would read as an agent losing its
+standing.
+
+**`standing` does not move.** It derives from `agents.status`, which a re-key
+never writes, so no failure on this path can cost an agent its standing — the
+worst available outcome is a stale anchor that keeps retrying. The hook in the
+re-key route is fire-and-forget and sits **outside** the completion
+transaction, so an EAS outage cannot roll back a re-key that already succeeded.
+
+**The queue is an invariant, not a flag:** `agent_passports.agent_eoa`
+disagreeing with `agents.delegate_address` on a live agent IS the work item.
+Same reasoning as the revocation due-list above — a re-key that completed before
+this code existed, or one whose process died between the credential swap and an
+enqueue, is still picked up. `claimReanchorRevocation` is a separate gate from
+`claimRevocation` rather than a loosened one: that function's
+`agents.status = 'revoked'` clause is a security property relied on by an
+unconditional caller, so it was left intact and a second gate written beside it
+keyed on `<> 'revoked'` plus the stale-anchor predicate. The two are mutually
+exclusive by construction, so an agent revoked mid-re-anchor moves between the
+queues rather than racing inside one.
+
+A stale anchor left unreconciled past the threshold is its own operational
+incident, distinct from a stuck revoke — see
+[`stuck-revoke-alarm.md`](../operations/stuck-revoke-alarm.md), which
+disambiguates the two alarms and their remedies.
+
 ### What actually drives the retries
 
 Both halves of the anchor are fire-and-forget — an EAS write must never block
@@ -302,8 +351,11 @@ agent creation or an owner's revoke — which only holds because something later
 retries what the in-request attempt dropped. That something is the **passport
 sweep** in `index.ts`: a leader-locked tick (every 5 minutes, not hourly, so it
 does not flatten a schedule that starts at 30s) that runs
-`retryPendingPassports()`, then `reconcilePendingRevocations()`, then logs
-anything `listStuckRevocations()` returns as a warning.
+`retryPendingPassports()`, then `reconcilePendingRevocations()`, then
+`reconcilePendingReanchors()` (#1699), then logs anything
+`listStuckRevocations()` or `listStuckReanchors()` returns as a warning — two
+alarms, because the two incidents have opposite standing implications and one
+combined count would be unreadable at the moment it fires.
 
 **Every phase and every row is isolated**, which is not incidental. Neither
 sweep's per-row call catches everything — `issuePassport` and
@@ -314,10 +366,10 @@ the next tick, and every tick after: one bad row silently stopping every
 revocation in the system, which is exactly the failure the sweep exists to
 prevent. Each row is caught individually and counted (`{ attempted, failed }` —
 a sweep reporting `attempted: 50` while failing all 50 reads as healthy), and
-each of the three phases runs in its own try/catch so a failure in the issuance
-retry cannot silence the revocation reconciliation or the alarm. The alarm
-especially must run when everything above it is failing: that is when it
-matters.
+each of the five phases runs in its own try/catch so a failure in one cannot
+silence the others — not the issuance retry, the revocation reconciliation, the
+re-anchor reconciliation, or either alarm. The alarms especially must run when
+everything above them is failing: that is when they matter.
 
 **A try/catch isolates a throw, not a hang** — and until [#1742](https://github.com/d-hinders/Haven-AI/issues/1742)
 that distinction was a real hole rather than a pedantic one. The sweep's phases

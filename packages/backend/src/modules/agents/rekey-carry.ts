@@ -44,6 +44,31 @@
  * same instant as the first one's — so the third grant ends there too. No
  * number of re-keys inside a period can sum to more than the original budget.
  *
+ * ## Two clocks, and why conflating them under-granted (#1849)
+ *
+ * The remainder is measured at REVOKE/METER time and the delegations are built
+ * at ISSUE time, and nothing bounds the gap between them — an owner can start a
+ * re-key, be interrupted, and finish it later. Those are two different
+ * instants, and they answer two different questions:
+ *
+ * - **`meteredAtSec`** — the period the remainder was measured in. The
+ *   remainder is only meaningful inside that period, so ALL the arithmetic
+ *   here is anchored to it.
+ * - **`nowSec`** — the present. Used for exactly one thing: dropping a piece
+ *   the delay has already outrun, so the owner is never asked to sign a grant
+ *   that is dead on arrival.
+ *
+ * Before #1849 there was one clock, the issue-time one, and the remainder was
+ * therefore spent against whichever period the owner happened to finish in. It
+ * could not over-grant — the cap is the remainder either way — but it silently
+ * UNDER-granted, and at its worst gave an agent nothing at all for a period it
+ * was owed a full budget in. The composition below is correct at every gap
+ * size without a timeout anyone has to pick a number for: a gap inside the
+ * period is byte-identical to before, and a gap across a boundary drops the
+ * carry as expired and leaves the steady grant live on the ORIGINAL budget
+ * from the true old boundary — exactly what the un-revoked delegation would
+ * have done.
+ *
  * ## Refusing the fallback
  *
  * `readRemainingBudget` falls back to the FULL budget when the RPC read fails
@@ -90,7 +115,7 @@ export type CarryPlan =
    * to the new delegate — a pure re-anchor, which preserves the boundary by
    * preserving the whole schedule.
    */
-  | { kind: 'dormant'; reissue: DelegationTerms }
+  | { kind: 'dormant'; reissue: DelegationTerms | null; dropped: DroppedPiece[] }
   /**
    * The live case. `boundary` is the instant the old period would have
    * refilled; `carry` covers up to it, `steady` resumes from it.
@@ -105,7 +130,21 @@ export type CarryPlan =
       boundary: number
       carry: DelegationTerms | null
       steady: DelegationTerms | null
+      /**
+       * Pieces the delay outran between metering and issue (#1849). Dropped
+       * rather than issued: `buildBudgetDelegation` has no "expiry must be in
+       * the future" check, so a piece whose window has closed would be built,
+       * persisted, and put in front of the owner to SIGN — a grant that can
+       * never redeem.
+       */
+      dropped: DroppedPiece[]
     }
+
+/** A grant the plan built and then discarded, with the reason to surface. */
+export interface DroppedPiece {
+  role: 'carry' | 'steady' | 'reanchor'
+  reason: string
+}
 
 /** Raised rather than returned: every one of these is a refusal, not a plan. */
 export class CarryRefusedError extends Error {
@@ -162,10 +201,33 @@ function assertTerms(terms: DelegationTerms): void {
 export function planCarry(input: {
   old: DelegationTerms
   meter: MeterReading
+  /**
+   * When the meter was read (`agent_rekeys.metered_at`) — the period the
+   * remainder is meaningful in, and the anchor for every calculation below.
+   */
+  meteredAtSec: number
+  /**
+   * Now, at issue time. Used ONLY to drop a piece the delay has outrun; it
+   * never influences which period the remainder belongs to (#1849).
+   */
   nowSec: number
 }): CarryPlan {
-  const { old, meter, nowSec } = input
+  const { old, meter, meteredAtSec, nowSec } = input
   assertTerms(old)
+  if (!Number.isInteger(meteredAtSec) || !Number.isInteger(nowSec)) {
+    throw new CarryRefusedError('metered_at and now must be whole seconds', 'invalid_terms')
+  }
+  if (nowSec < meteredAtSec) {
+    // Issue cannot precede metering. The stage machine and migration 065's
+    // `meter_after_revoke_check` already order the stages; a clock that says
+    // otherwise is a bug or a skewed host, and carrying on would anchor the
+    // arithmetic to a future the measurement never saw.
+    throw new CarryRefusedError(
+      'the meter was read after the current time — refusing to plan a carry against a clock ' +
+        'that runs backwards',
+      'invalid_terms',
+    )
+  }
 
   // ── The two cases that do not consult the meter AT ALL ─────────────────
   //
@@ -182,8 +244,20 @@ export function planCarry(input: {
   // `readRemainingBudget` reports as `fromChain: false`. That fallback is
   // meaningless here and would have 409'd the entire second re-key on a
   // reading nothing was going to use.
-  if (nowSec >= old.expiresAt) return { kind: 'expired' }
-  if (nowSec < old.startDate) return { kind: 'dormant', reissue: { ...old } }
+  // Classified against the MEASUREMENT clock: these describe the state the
+  // remainder was measured in, not the state at whatever time the owner got
+  // round to finishing.
+  if (meteredAtSec >= old.expiresAt) return { kind: 'expired' }
+  if (meteredAtSec < old.startDate) {
+    const reissue = { ...old }
+    return live(reissue, nowSec)
+      ? { kind: 'dormant', reissue, dropped: [] }
+      : {
+          kind: 'dormant',
+          reissue: null,
+          dropped: [{ role: 'reanchor', reason: expiredByDelay('re-anchored', old.expiresAt) }],
+        }
+  }
 
   // ── From here the meter IS the input, so it must be trustworthy ────────
   //
@@ -205,13 +279,13 @@ export function planCarry(input: {
     )
   }
 
-  const boundary = currentPeriodBoundary(old, nowSec)
+  const boundary = currentPeriodBoundary(old, meteredAtSec)
 
   // The carry lives inside the OLD period, so it is anchored one period
   // before the boundary — its current period IS the old one — and dies at
   // the boundary so it never refills.
   const carryExpiry = Math.min(boundary, old.expiresAt)
-  const carry: DelegationTerms | null =
+  const plannedCarry: DelegationTerms | null =
     meter.remainingAtomic > 0n
       ? {
           budgetAtomic: meter.remainingAtomic,
@@ -224,7 +298,7 @@ export function planCarry(input: {
   // The steady grant picks up exactly where the carry dies. If the old grant
   // would have expired at or before the boundary there is no period after
   // this one, so there is nothing to resume.
-  const steady: DelegationTerms | null =
+  const plannedSteady: DelegationTerms | null =
     old.expiresAt > boundary
       ? {
           budgetAtomic: old.budgetAtomic,
@@ -234,7 +308,45 @@ export function planCarry(input: {
         }
       : null
 
-  return { kind: 'carry', boundary, carry, steady }
+  // ── Drop what the delay outran (#1849) ─────────────────────────────────
+  //
+  // The carry's whole window is the old period. If the owner finished after
+  // that period ended, the carry is already over — and dropping it is not a
+  // loss, because the steady grant below then starts in the PAST with the
+  // full original budget, which is precisely what the un-revoked delegation
+  // would have refilled to. The agent ends up correct rather than merely
+  // warned.
+  const dropped: DroppedPiece[] = []
+  const carry = keep(plannedCarry, 'carry', nowSec, dropped)
+  const steady = keep(plannedSteady, 'steady', nowSec, dropped)
+
+  return { kind: 'carry', boundary, carry, steady, dropped }
+}
+
+/** A grant with a future expiry is still worth issuing; one without is not. */
+function live(terms: DelegationTerms, nowSec: number): boolean {
+  return terms.expiresAt > nowSec
+}
+
+function keep(
+  terms: DelegationTerms | null,
+  role: 'carry' | 'steady',
+  nowSec: number,
+  dropped: DroppedPiece[],
+): DelegationTerms | null {
+  if (!terms) return null
+  if (live(terms, nowSec)) return terms
+  dropped.push({ role, reason: expiredByDelay(role, terms.expiresAt) })
+  return null
+}
+
+function expiredByDelay(role: string, expiresAt: number): string {
+  return (
+    `The ${role} grant's window closed at ${new Date(expiresAt * 1000).toISOString()}, before ` +
+    'this re-key was finished. It is not issued: a grant that can never redeem is not worth a ' +
+    "signature. If the agent needs authority in the current period, the replacement grant's own " +
+    'schedule already covers it — otherwise re-grant its budget.'
+  )
 }
 
 /**

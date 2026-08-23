@@ -38,6 +38,8 @@ import AgentPassportCard from '@/components/AgentPassportCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
+import { ReplaceSigningKeyModal } from '@/components/agent-panel/ReplaceSigningKeyModal'
+import { useAgentPassport } from '@/hooks/useAgentPassport'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -351,6 +353,12 @@ export default function AgentDetailClient({ agentId }: Props) {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [replaceKeyOpen, setReplaceKeyOpen] = useState(false)
+
+  // #1701: drives the passport disclosure in the re-key flow. Only an agent
+  // that HAS a passport has one to leave pointing at the retired key (#1847),
+  // so the warning is shown on evidence rather than unconditionally.
+  const { passport } = useAgentPassport(agentId)
 
   const isActive = agent?.status === 'active'
   const isPaused = agent?.status === 'paused'
@@ -528,6 +536,18 @@ export default function AgentDetailClient({ agentId }: Props) {
                   <DropdownMenuItem onSelect={() => setCredentialsOpen(true)}>
                     Payment credentials
                   </DropdownMenuItem>
+                  {/* #1701. Delegation rail only — re-key replaces a signed
+                      delegation, which an older account simply does not have.
+                      The entry stays reachable on BOTH rails and the modal
+                      carries the refusal, rather than being disabled here: an
+                      owner whose key is lost needs to learn that re-onboarding
+                      is the path, and neither a hidden item nor a greyed one
+                      can tell them. A disabled button would also put the
+                      reason in a hover tooltip, which a keyboard or touch user
+                      never sees. */}
+                  <DropdownMenuItem onSelect={() => setReplaceKeyOpen(true)}>
+                    Replace signing key
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
@@ -630,7 +650,7 @@ export default function AgentDetailClient({ agentId }: Props) {
       ) : null}
 
       {errorMessage ? (
-        <div className="mt-4 rounded-xl border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-4 py-3">
+        <div className="mt-4 rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
           <p className="text-sm font-medium text-[var(--v2-danger)]">Action failed</p>
           <p className="mt-1 text-sm text-[var(--v2-danger)]">{errorMessage}</p>
         </div>
@@ -871,6 +891,21 @@ export default function AgentDetailClient({ agentId }: Props) {
           }}
         />
       ) : null}
+
+      <ReplaceSigningKeyModal
+        open={replaceKeyOpen}
+        onClose={() => setReplaceKeyOpen(false)}
+        agentId={agentId}
+        agentName={currentAgent.name}
+        chainId={chainId}
+        isDelegationAgent={isDelegationAgent}
+        currentDelegateAddress={currentAgent.delegate_address}
+        recentPayments={activity.filter(isPaymentActivityItem)}
+        hasPassport={passport !== null}
+        onCompleted={() => {
+          refetch()
+        }}
+      />
 
       <PaymentCredentialsModal
         open={credentialsOpen}

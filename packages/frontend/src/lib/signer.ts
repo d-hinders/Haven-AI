@@ -129,14 +129,54 @@ export function getStoredHybridSigners(args: {
   }
 }
 
+/**
+ * The device-marker rule, in ONE place (#1933).
+ *
+ * Structural in the passkey element so the spec-derived wire type
+ * (`ApiSchema<'HybridAccountSigners'>`, whose `x`/`y` are plain `string`) and
+ * this module's stored shape both satisfy it — a second copy of this rule was
+ * exactly the defect #1933 removed, and a nominal parameter type would have
+ * forced one back.
+ */
+export interface HybridPasskeyLike {
+  key_id: string
+}
+
 /** A passkey from this signer set whose credential is enrolled on THIS device. */
-export function hybridPasskeyOnDevice(
-  signers: HybridAccountSigners,
-): HybridAccountSigners['passkeys'][number] | null {
+export function hybridPasskeyOnDevice<P extends HybridPasskeyLike>(signers: {
+  passkeys: readonly P[]
+}): P | null {
   for (const passkey of signers.passkeys) {
     if (hasPasskeyCredentialOnDevice(credentialIdFromKeyId(passkey.key_id))) return passkey
   }
   return null
+}
+
+/**
+ * WHICH CREDENTIAL SIGNS. The single selector both signing paths use (#1933).
+ *
+ * Device marker first (#1079): if this device holds the BACKUP rather than the
+ * first-enrolled key, `passkeys[0]` would build the wrong `allowCredentials`
+ * and signing fails — defeating the recovery flow.
+ *
+ * **The `passkeys[0]` fallback is LOAD-BEARING, not vestigial.** When no
+ * marker matches (markers cleared, a fresh browser profile, storage wiped) the
+ * ceremony can still succeed, because the authenticator does its own
+ * credential lookup and the user picks. Deleting the fallback turns a
+ * recoverable "no marker on this device" state into a hard failure for every
+ * such user. The device-selection rule in
+ * `docs/security/delegation-rail-security-model.md` is stated WITH this
+ * fallback for that reason, and
+ * `signer.test.ts` → "keeps passkeys[0] as the fallback when no device marker
+ * is present (#1933 — load-bearing, do not delete)" fails if it is removed.
+ *
+ * Returns `undefined` only for an empty signer set; callers guard that
+ * separately with a message that says what is actually wrong.
+ */
+export function hybridPasskeyToSignWith<P extends HybridPasskeyLike>(signers: {
+  passkeys: readonly P[]
+}): P | undefined {
+  return hybridPasskeyOnDevice(signers) ?? signers.passkeys[0]
 }
 
 /**

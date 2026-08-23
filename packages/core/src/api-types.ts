@@ -299,7 +299,7 @@ export type paths = {
         put?: never;
         /**
          * Re-key step 1a: prepare the batched revoke of every live delegation (#1698).
-         * @description Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys.
+         * @description Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage with an empty carry.
          */
         post: operations["prepareRekeyRevocation"];
         delete?: never;
@@ -2946,6 +2946,7 @@ export type components = {
             archived_at?: string | null;
             allowances: components["schemas"]["AgentAllowance"][];
             mcp_last_seen_at?: string | null;
+            mcp_server_name?: string | null;
             has_stranded_funds?: boolean;
         } & {
             [key: string]: unknown;
@@ -3762,6 +3763,114 @@ export type components = {
             agents: components["schemas"]["DashboardAgentPreview"][];
             /** @description At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection. */
             transactions: components["schemas"]["Transaction"][];
+        };
+        /** @description Reported whether or not it is recoverable — nothing about a stranded residual fails quietly. */
+        AgentRekeyResidual: {
+            atomic: string;
+            token_address?: string | null;
+            disposition?: string | null;
+            recoverable_after_rekey: boolean;
+            note?: string;
+        };
+        AgentRekeyRevokePrepare: {
+            /** @enum {string} */
+            signature_scheme: "eip712_userop";
+            signing_payload: {
+                [key: string]: unknown;
+            };
+            user_operation: {
+                [key: string]: unknown;
+            };
+            /** @example 0x1111111111111111111111111111111111111111 */
+            treasury_address: string;
+            delegation_hashes: string[];
+            instructions: string;
+        } | {
+            /** @enum {string} */
+            signature_scheme: "webauthn_userop";
+            user_op_hash: string;
+            user_operation: {
+                [key: string]: unknown;
+            };
+            /** @example 0x1111111111111111111111111111111111111111 */
+            treasury_address: string;
+            delegation_hashes: string[];
+            instructions: string;
+        } | {
+            /** @enum {boolean} */
+            revoked: true;
+            tx_hash?: string | null;
+            delegation_hashes?: string[];
+            stage: string;
+            carry?: {
+                [key: string]: unknown;
+            }[];
+            agent_has_no_authority: boolean;
+            next_step: string;
+        };
+        AgentRekeyPreflight: {
+            /** Format: uuid */
+            rekey_id: string;
+            /** @enum {string} */
+            stage: "preflight";
+            /** @example 0x1111111111111111111111111111111111111111 */
+            old_delegate_address: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            new_delegate_address: string;
+            residual: components["schemas"]["AgentRekeyResidual"];
+            delegations_to_revoke: string[];
+            next_step: string;
+            ordering_note?: string;
+        };
+        AgentRekeyIssuedDelegation: {
+            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+            delegation_hash: string;
+            /** @enum {string} */
+            carry_role: "carry" | "steady" | "reanchor";
+            /** @example 0x1111111111111111111111111111111111111111 */
+            token_address: string;
+            recipient_address?: string | null;
+            budget_atomic: string;
+            period_seconds?: number;
+            start_date?: number;
+            expires_at?: number;
+            signing_payload: {
+                [key: string]: unknown;
+            };
+        };
+        AgentRekeyIssueResponse: {
+            /** @enum {string} */
+            stage: "issued";
+            /** @example 0x1111111111111111111111111111111111111111 */
+            delegate_account_address: string;
+            delegations: components["schemas"]["AgentRekeyIssuedDelegation"][];
+            skipped?: {
+                /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+                delegation_hash?: string;
+                reason?: string;
+            }[];
+            carry_note?: string;
+            next_step?: string;
+        };
+        AgentRekeyCompleteResponse: {
+            completed: boolean;
+            /** @enum {string} */
+            stage: "completed";
+            /** Format: uuid */
+            agent_id: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            new_delegate_address: string;
+            /** @description Shown ONCE. Never stored in plaintext and never logged. */
+            api_key: string;
+            api_key_prefix: string;
+            old_api_key_revoked: boolean;
+            invalidated_intents?: number;
+            superseded_delegations?: number;
+            residual_on_old_delegate?: {
+                atomic?: string;
+                recoverable?: boolean;
+                note?: string;
+            };
         };
         TransactionsResponse: {
             transactions: components["schemas"]["Transaction"][];
@@ -5027,27 +5136,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        rekey_id: string;
-                        /** @enum {string} */
-                        stage: "preflight";
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        old_delegate_address: string;
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        new_delegate_address: string;
-                        /** @description Reported whether or not it is recoverable — nothing about a stranded residual fails quietly. */
-                        residual: {
-                            atomic: string;
-                            token_address?: string | null;
-                            disposition?: string | null;
-                            recoverable_after_rekey: boolean;
-                            note?: string;
-                        };
-                        delegations_to_revoke: string[];
-                        next_step: string;
-                        ordering_note?: string;
-                    };
+                    "application/json": components["schemas"]["AgentRekeyPreflight"];
                 };
             };
             /** @description Error response */
@@ -5153,17 +5242,25 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Multi-signer accounts choose per request; omitted, an EOA owner defaults to eip712_userop.
+                     * @enum {string}
+                     */
+                    signature_scheme?: "eip712_userop" | "webauthn_userop";
+                };
+            };
+        };
         responses: {
-            /** @description Prepared revocation for the owner to sign. */
+            /** @description Prepared revocation, shaped by the signature scheme — or the no-authority short-circuit. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentRekeyRevokePrepare"];
                 };
             };
             /** @description Error response */
@@ -5226,7 +5323,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Wrong stage — this re-key is past the revoke. */
+            /** @description Wrong stage — this re-key is past the revoke; the account signer configuration is unknown; or the requested signature_scheme is one this account cannot sign. Every one of these lands BEFORE the revoke, so the re-key stays retryable (#1868). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5417,35 +5514,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        stage: "issued";
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        delegate_account_address: string;
-                        delegations: {
-                            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
-                            delegation_hash?: string;
-                            /** @enum {string} */
-                            carry_role?: "carry" | "steady" | "reanchor";
-                            /** @example 0x1111111111111111111111111111111111111111 */
-                            token_address?: string;
-                            recipient_address?: string | null;
-                            budget_atomic?: string;
-                            period_seconds?: number;
-                            start_date?: number;
-                            expires_at?: number;
-                            signing_payload?: {
-                                [key: string]: unknown;
-                            };
-                        }[];
-                        skipped?: {
-                            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
-                            delegation_hash?: string;
-                            reason?: string;
-                        }[];
-                        carry_note?: string;
-                        next_step?: string;
-                    };
+                    "application/json": components["schemas"]["AgentRekeyIssueResponse"];
                 };
             };
             /** @description Error response */
@@ -5570,25 +5639,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        completed: boolean;
-                        /** @enum {string} */
-                        stage: "completed";
-                        /** Format: uuid */
-                        agent_id: string;
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        new_delegate_address: string;
-                        /** @description Shown ONCE. Never stored in plaintext and never logged. */
-                        api_key: string;
-                        api_key_prefix: string;
-                        old_api_key_revoked: boolean;
-                        invalidated_intents?: number;
-                        residual_on_old_delegate?: {
-                            atomic?: string;
-                            recoverable?: boolean;
-                            note?: string;
-                        };
-                    };
+                    "application/json": components["schemas"]["AgentRekeyCompleteResponse"];
                 };
             };
             /** @description Error response */
@@ -6961,10 +7012,10 @@ export interface operations {
                              */
                             standing: "active" | "suspended" | "revoked" | "unknown";
                             /**
-                             * @description Describes the chain, for transparency — not for deciding.
+                             * @description Describes the chain, for transparency — not for deciding. `re_anchoring` means a re-key rotated the delegate key and the attestation naming the old one is being retired and reissued (#1699); standing is unaffected.
                              * @enum {string}
                              */
-                            anchor: "not_anchored" | "anchored" | "revocation_pending" | "revoked_onchain";
+                            anchor: "not_anchored" | "anchored" | "re_anchoring" | "revocation_pending" | "revoked_onchain";
                             attestationUid: string | null;
                             /** @description True when the database says revoked but the chain has not caught up — a merchant reading only the chain in this window would be WRONG. */
                             chainLagging: boolean;
@@ -7270,10 +7321,10 @@ export interface operations {
                              */
                             standing: "active" | "suspended" | "revoked" | "unknown";
                             /**
-                             * @description The on-chain anchor's progress, for transparency. Never the authority.
+                             * @description The on-chain anchor's progress, for transparency. Never the authority. `re_anchoring` is the re-key window (#1699): the attestation on-chain is live but names the agent's RETIRED delegate key, because EAS attestations are immutable — the agent's standing is unaffected.
                              * @enum {string}
                              */
-                            anchor: "not_anchored" | "anchored" | "revocation_pending" | "revoked_onchain";
+                            anchor: "not_anchored" | "anchored" | "re_anchoring" | "revocation_pending" | "revoked_onchain";
                             evidenceUid: string | null;
                             chainId: number | null;
                             controls: {

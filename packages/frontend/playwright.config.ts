@@ -1,7 +1,78 @@
+import { execFileSync } from 'node:child_process'
+import path from 'node:path'
 import { defineConfig, devices } from '@playwright/test'
 
-const PORT = Number(process.env.PLAYWRIGHT_PORT ?? 3000)
+/**
+ * The port this run's app server owns — per worktree, and PROVEN free (#1816).
+ *
+ * What was here before was `Number(process.env.PLAYWRIGHT_PORT ?? 3000)`: a
+ * fixed port in every worktree, paired with `reuseExistingServer: !CI` below.
+ * Locally that adopted whatever was already listening on :3000 and asserted
+ * against it — so with two sessions running (this repo's normal state) a suite
+ * could report green or red for a branch it never loaded. Same class as #1800,
+ * one surface over, and the same answer: derive the port from the worktree
+ * path, prove it bindable by binding it, and then refuse any server that
+ * cannot serve THIS run's own identity token. The refusal is the part that
+ * matters; the port arithmetic only makes the happy path likely.
+ *
+ * The prepare step is a subprocess because `defineConfig` is synchronous while
+ * binding a socket and writing the marker are not. It runs ONCE per run and
+ * both of its results — the port and the run's identity token — are stamped
+ * into the environment, which Playwright's workers inherit when they re-load
+ * this config. Without the stamp each worker would reserve its own (different,
+ * because this run's server now holds the first one) port and point `baseURL`
+ * at nothing, and would republish the marker under a token of its own.
+ *
+ * **The marker is written here rather than in `globalSetup` because it has to
+ * exist before the web server starts.** Locally that is invisible — `next dev`
+ * serves `public/` from disk per request — but CI copies `public/.` into the
+ * standalone tree and only then boots `server.js`, so a marker written later
+ * was never copied and the run refused its own server. Proven the hard way on
+ * this PR's first `Frontend browser smoke`.
+ */
+const RESOLVED_PORT_ENV = 'PLAYWRIGHT_RESOLVED_PORT'
+const RUN_TOKEN_ENV = 'PLAYWRIGHT_RUN_TOKEN'
+const REUSE_EXISTING_SERVER = !process.env.CI
+const PORT = prepareRun()
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${PORT}`
+// Read back by `scripts/e2e-identity.mjs` in `globalSetup`, so the identity
+// probe targets exactly what the tests target rather than re-deriving it.
+process.env.PLAYWRIGHT_RESOLVED_BASE_URL = baseURL
+
+function prepareRun(): number {
+  const stamped = process.env[RESOLVED_PORT_ENV]
+  if (stamped) return Number(stamped)
+
+  // Note there is no early return for `PLAYWRIGHT_BASE_URL`. An external
+  // target normally starts no server of ours, so the port looks irrelevant —
+  // but Playwright still falls back to spawning `webServer` if that target is
+  // unreachable, and the port it would spawn on has to be a real one. The
+  // first draft returned `Number(PLAYWRIGHT_PORT ?? 0)` there, which is a
+  // silent behaviour change from the old code's 3000 and would have spawned
+  // Next on port 0. Resolving normally costs a few milliseconds and gives
+  // that fallback this worktree's own port instead of either wrong answer.
+  //
+  // `--exclusive` mirrors `reuseExistingServer` below: when this run may not
+  // adopt anything, a busy port has to be walked past (Next would silently hop
+  // to another one while Playwright kept polling this one). When it MAY adopt,
+  // walking past would step over this worktree's own warm dev server and
+  // cold-start a second Next on every run — so the derived port is used as is
+  // and the identity probe decides whether what answers is ours.
+  const args = [path.join(__dirname, 'scripts', 'e2e-identity.mjs'), 'prepare']
+  if (!REUSE_EXISTING_SERVER) args.push('--exclusive')
+  const out = execFileSync(process.execPath, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+  }).trim()
+  const [rawPort, token] = out.split('\t')
+  const port = Number(rawPort)
+  if (!Number.isInteger(port) || port <= 0 || !token) {
+    throw new Error(`e2e: could not prepare the run (expected "port<TAB>token", got ${JSON.stringify(out)})`)
+  }
+  process.env[RESOLVED_PORT_ENV] = String(port)
+  process.env[RUN_TOKEN_ENV] = token
+  return port
+}
 const webServerCommand = process.env.CI
   ? [
       'mkdir -p .next/standalone/packages/frontend/.next/static .next/standalone/packages/frontend/public',
@@ -33,6 +104,11 @@ const SUITE_IGNORE = [
 export default defineConfig({
   testDir: './e2e',
   testIgnore: SUITE_IGNORE,
+  // Refuses to run against a server that cannot prove it is this worktree's
+  // app (#1816). Runs AFTER `webServer` — the web server is a Playwright
+  // plugin and plugin setup precedes global setup — so it probes exactly the
+  // server the tests are about to use, started or adopted.
+  globalSetup: './scripts/e2e-identity.mjs',
   // Stable baseline paths (no {platform} suffix): baselines are ALWAYS
   // Linux-rendered via the CI job / update workflow, never local macOS.
   snapshotPathTemplate: '{testDir}/__screenshots__/{testFileName}/{arg}{ext}',
@@ -59,7 +135,15 @@ export default defineConfig({
     command: webServerCommand,
     cwd: __dirname,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    // Kept, but no longer TRUSTED (#1816). `reuseExistingServer` asks only
+    // "did something answer on this URL?", and a 200 is not proof of identity
+    // — that is the whole defect. What makes reuse safe now is the identity
+    // probe in `globalSetup`: adoption of a foreign worktree's server fails
+    // loudly instead of producing a confident verdict for the wrong branch.
+    // The per-worktree reserved port above means there is normally nothing to
+    // adopt in the first place, so this is the second line of defence rather
+    // than the first.
+    reuseExistingServer: REUSE_EXISTING_SERVER,
     timeout: 120_000,
     env: {
       NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: 'playwright-placeholder',

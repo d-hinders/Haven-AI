@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { HeroBackdrop } from '@/components/marketing/HeroBackdrop'
 import { Card } from '@/components/ui/Card'
 import { HavenMark } from '@/components/brand/HavenMark'
+import { BrandBandButton } from '@/components/marketing/BrandBandButton'
 
 const CONTACT_TEAM_HREF =
   'mailto:daniel.hinders@gmail.com?subject=Haven%20investor%20briefing'
@@ -433,13 +434,9 @@ export default function InvestorBriefingPage() {
             contact the team directly.
           </p>
           <div className="flex justify-center">
-            <a
-              href={CONTACT_TEAM_HREF}
-              className="inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors h-12 px-6 text-[15px] bg-white text-[var(--v2-ink)] hover:bg-white/95 shadow-[0_1px_2px_rgba(16,24,40,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-brand)]"
-            >
+            <BrandBandButton href={CONTACT_TEAM_HREF} trailingArrow>
               Contact the team
-              <ArrowIcon />
-            </a>
+            </BrandBandButton>
           </div>
         </div>
       </section>
@@ -622,7 +619,16 @@ function ControlSurfaceMock() {
               <span className="text-[12px] font-medium text-white/80">Payment intent</span>
               <span className="text-[11px] font-mono text-white/45">POST /payments</span>
             </div>
-            <div className="space-y-2 font-mono text-[12px] leading-relaxed text-white/78">
+            {/*
+              text-white/75, not text-white/78 (#1818). `/78` is not a step on
+              Tailwind's opacity scale, so v3.4 dropped the utility entirely and
+              this block inherited the parent's full-strength `text-white` — the
+              same silent-drop failure as the bare-var() shape, on a colour that
+              has nothing to do with var(). `/75` is the nearest scale step and
+              sits below the `/80` label above it, which is the hierarchy the
+              off-scale value was reaching for.
+            */}
+            <div className="space-y-2 font-mono text-[12px] leading-relaxed text-white/75">
               <div>{'{ token: "USDC", amount: "23.40",'}</div>
               <div>{'  protocol: "x402", agent: "research" }'}</div>
             </div>

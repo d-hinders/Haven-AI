@@ -74,11 +74,15 @@ import {
   RENAME_CONTACT_FOR_USER_SQL,
 } from '../src/infra/repositories/contacts.js'
 import {
+  CLAIM_REANCHOR_REVOCATION_SQL,
   CLAIM_REVOCATION_SQL,
   FIND_BY_AGENT_ADDRESS_SQL,
   FIND_BY_ATTESTATION_UID_SQL,
+  LIST_REANCHORS_DUE_SQL,
   LIST_REVOCATIONS_DUE_SQL,
+  LIST_STUCK_REANCHORS_SQL,
   LIST_STUCK_REVOCATIONS_SQL,
+  RESET_FOR_REANCHOR_SQL,
 } from '../src/infra/repositories/agent-passports.js'
 import {
   CANCEL_SETUP_SQL,
@@ -622,6 +626,31 @@ const QUERIES: SmokeQuery[] = [
   {
     name: 'passport: listStuckRevocations — the stuck-revoke alarm (#973)',
     sql: LIST_STUCK_REVOCATIONS_SQL,
+  },
+  {
+    // The re-anchor trio (#1699). Same argument as their revocation cousins,
+    // one step further: these are the ONLY thing that notices a live agent
+    // whose attestation names the delegate key a re-key retired. A schema
+    // mismatch here fails silently and permanently — the queue simply returns
+    // nothing, which is indistinguishable from "no agent needs re-anchoring".
+    name: 'passport: claimReanchorRevocation — the stale-anchor gate (#1699)',
+    sql: CLAIM_REANCHOR_REVOCATION_SQL,
+  },
+  {
+    name: 'passport: listReanchorsDue — the re-anchor queue (#1699)',
+    sql: LIST_REANCHORS_DUE_SQL,
+  },
+  {
+    name: 'passport: listStuckReanchors — the stuck-re-anchor alarm (#1699)',
+    sql: LIST_STUCK_REANCHORS_SQL,
+  },
+  {
+    // IMPORTED, not pasted — the reason the passport set stopped hand-copying
+    // queries at all. A literal here is byte-identical the day it is written
+    // and silently stale the day the real statement changes, and the smoke
+    // test keeps passing against the copy.
+    name: 'passport: resetForReanchor — hands the row back to issuance (#1699)',
+    sql: RESET_FOR_REANCHOR_SQL,
   },
   {
     // The merchant-facing lookup. A schema mismatch here means verification

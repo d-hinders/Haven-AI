@@ -76,6 +76,28 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 })
 
+// Mock ResizeObserver — JSDOM doesn't ship it, and `ui/Modal` uses one to keep
+// its scroll continuation cue (#1893) correct when a dialog's content grows
+// after mount. Without this stub every test that renders any Modal-based dialog
+// throws `ResizeObserver is not defined`.
+//
+// It is deliberately inert: it records nothing and never invokes the callback,
+// because JSDOM has no layout to observe in the first place. Anything asserting
+// on the cue drives the geometry explicitly and fires a `scroll` event, or
+// relies on the real MutationObserver JSDOM does implement.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+Object.defineProperty(window, 'ResizeObserver', {
+  writable: true,
+  configurable: true,
+  value: ResizeObserverStub,
+})
+globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver
+
 beforeEach(() => {
   localStorageMock.clear()
   vi.clearAllMocks()

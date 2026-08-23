@@ -6,7 +6,7 @@ import { useRef, useState, useCallback } from 'react'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { Button } from '@/components/ui/Button'
-import { getChainConfig } from '@/lib/chains'
+import { resolveChainOrNull } from '@/lib/chains'
 
 interface Props {
   open: boolean
@@ -29,16 +29,30 @@ function buildOnrampUrl(safeAddress: string, chainShortName: string): string {
   return `https://pay.coinbase.com/buy/select-asset?${params.toString()}`
 }
 
+// `resolveChainOrNull` was introduced here by #1844 and lifted into
+// `lib/chains.ts` by #1852, when `ReceiveFundsModal` needed the same answer to
+// the same question. A second local copy would have drifted; what stays
+// deliberately unchanged is `getChainConfig`'s throwing contract, which ~20
+// other call sites depend on. See the doc comment on the lifted function.
+
 export default function AddFundsModal({ open, onClose, onReceive, safeAddress, chainId }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState(false)
   useEscapeToClose(open, onClose)
   useFocusTrap(panelRef, open)
 
-  const chainConfig = chainId != null ? getChainConfig(chainId) : null
-  const shortName = chainConfig?.shortName ?? 'base'
-  const chainName = chainConfig?.name ?? 'Base'
-  const onrampAvailable = Boolean(ONRAMP_APP_ID && safeAddress)
+  // #1844: an unresolved chain gets NO default. Both values below are
+  // money-facing — the manual-transfer copy tells a human which network to send
+  // real USDC on, and `shortName` becomes Coinbase Onramp's `defaultNetwork`,
+  // i.e. the delivery network of a preconfigured fiat purchase. The previous
+  // `?? 'base'` / `?? 'Base'` resolved a missing value to MAINNET, silently and
+  // indistinguishably from a fact. A funds surface with no chain refuses to
+  // instruct rather than guessing; `DEFAULT_CHAIN_ID` would be
+  // environment-correct but still unreadable as a guess from the screen.
+  const chainConfig = resolveChainOrNull(chainId)
+  const chainName = chainConfig?.name ?? null
+  const onrampAvailable = Boolean(ONRAMP_APP_ID && safeAddress && chainConfig)
+  const depositInstructionsAvailable = Boolean(safeAddress && chainConfig)
 
   const handleCopy = useCallback(async () => {
     if (!safeAddress) return
@@ -52,8 +66,8 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
   }, [safeAddress])
 
   function handleBuyWithCard() {
-    if (!safeAddress) return
-    const url = buildOnrampUrl(safeAddress, shortName)
+    if (!safeAddress || !chainConfig) return
+    const url = buildOnrampUrl(safeAddress, chainConfig.shortName)
     window.open(url, '_blank', 'noopener,noreferrer,width=480,height=720')
   }
 
@@ -106,8 +120,8 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
                   </p>
                 </div>
               </div>
-              <Button className="mt-3 w-full" onClick={handleBuyWithCard}>
-                Buy with card →
+              <Button className="mt-3 w-full" onClick={handleBuyWithCard} trailingIcon>
+                Buy with card
               </Button>
             </div>
           )}
@@ -121,12 +135,14 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-[var(--v2-ink)]">Transfer from another wallet</p>
                 <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
-                  Send USDC to your account address on {chainName}.
+                  {chainName
+                    ? `Send USDC to your account address on ${chainName}.`
+                    : "We can't confirm which network this account uses, so we can't tell you where to send USDC."}
                 </p>
               </div>
             </div>
 
-            {safeAddress ? (
+            {depositInstructionsAvailable && safeAddress ? (
               <div className="mt-3">
                 <p className="mb-1.5 text-xs font-medium text-[var(--v2-ink-3)]">Account address ({chainName})</p>
                 <div className="flex items-center gap-2 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2">
@@ -146,11 +162,53 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
                   </button>
                 </div>
               </div>
+            ) : !safeAddress ? (
+              <Button variant="ghost" className="mt-3 w-full" onClick={handleReceiveInstead} trailingIcon>
+                Show receive address
+              </Button>
             ) : (
-              <Button variant="ghost" className="mt-3 w-full" onClick={handleReceiveInstead}>
-                Show receive address →
+              /*
+                A refusal still owes the user a next action — `design-review.md`
+                ("Error copy explains the next useful action") does not exempt
+                the states where we are the ones who cannot proceed. Retrying is
+                the honest one, and the only one: the unresolved chain reaches
+                this component as a safe that arrived without `chain_id`, which
+                is a load-shaped condition, so re-fetching is a real step rather
+                than a gesture.
+
+                The label is `ErrorBoundary`'s, deliberately reused rather than
+                reinvented (`ErrorBoundary.tsx:64`) — "Refresh page" promises
+                only a retry. It must NOT grow a sentence like "refreshing
+                usually resolves it": that would re-promise the network the copy
+                above just refused, which is the exact shape of the earlier
+                finding on this PR. `ui/Button` rather than ErrorBoundary's raw
+                element, because that one is styled for a page outside the app
+                shell; inside a modal the primitive is the design-system answer.
+              */
+              <Button
+                variant="ghost"
+                className="mt-3 w-full"
+                onClick={() => window.location.reload()}
+              >
+                Refresh page
               </Button>
             )}
+            {/*
+              The receive handoff is offered ONLY when there is no address at
+              all — its original condition, restored after the rendered review
+              It stays removed after #1852, but for a DIFFERENT reason than the
+              one written here first — recorded rather than quietly rewritten,
+              because the change of reason is the interesting part. Originally:
+              `ReceiveFundsModal` called `getChainConfig(safe.chain_id)` on an
+              unconditional path and THREW on a missing chain, so the refusal
+              screen's own way out was a crash, and it named the network with
+              full confidence in four places besides. #1852 fixed both. The
+              handoff would therefore no longer be dangerous — it would merely
+              be pointless: it sends a user from one refusal to an identical
+              refusal, which reads as the product forgetting what it just told
+              them. With no chain there is still nothing honest to offer beyond
+              saying so.
+            */}
           </div>
 
           {/* Fallback when provider unavailable and no safe */}

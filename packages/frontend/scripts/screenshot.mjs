@@ -10,6 +10,20 @@
  *   npm run screenshot -w packages/frontend                 # /design-system only
  *   npm run screenshot -w packages/frontend -- /dashboard,/agents
  *   npm run screenshot -w packages/frontend -- --scenario=connect-agent
+ *   npm run screenshot -w packages/frontend -- --keep=5   # retain 5 old runs
+ *
+ * ── The previous run survives this one (#1888) ───────────────────────────────
+ * This run writes FLAT into `.screenshots/`, exactly as before, so every literal
+ * `.screenshots/<name>.png` in the playbooks, the reviewer roles and the PR
+ * template still resolves to the NEWEST run. What changed is the other end: the
+ * run that was there before is moved into `.screenshots/previous/<run-id>/` and
+ * its manifest stamped `stale: true` + `superseded_by`, instead of being
+ * `rm -rf`'d. A second pass over one scenario no longer destroys the wide run a
+ * reviewer is mid-way through reading (#1879's review lost its largest claim to
+ * exactly that), and a same-code control run can be held alongside the candidate
+ * it is a control for. Capped at 3 previous runs; `--keep=<n>` /
+ * `SCREENSHOT_KEEP_RUNS` overrides, `--keep=0` restores the old behaviour.
+ * Mechanism and the rejected `latest`-symlink shape: `scripts/capture-retention.mjs`.
  *
  * ── One server per worktree, and it has to prove it (#1800) ──────────────────
  * The port is DERIVED FROM THE WORKTREE PATH and proven free before the dev
@@ -77,12 +91,14 @@
  */
 import { chromium } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { VIEWPORTS } from './evidence-viewports.mjs'
 import { captureFullPage } from './full-page-capture.mjs'
+import { CLIP_TOLERANCE_PX, measureHiddenBelowFold } from './clip-guard.mjs'
+import { ARCHIVE_DIR_NAME, resolveKeepRuns, retainPreviousRun } from './capture-retention.mjs'
 import {
   buildRunIdentity,
   derivePort,
@@ -135,6 +151,10 @@ const extra = ARGS.filter((a) => !a.startsWith('--'))
   .filter(Boolean)
   .map((r) => (r.startsWith('/') ? r : `/${r}`))
 const ROUTES = ['/design-system', ...extra]
+// How many PREVIOUS runs survive this one (#1888). `--keep=` is a `--` flag, so
+// the route parser above already ignores it. `--keep=0` is the pre-#1888
+// destructive behaviour, kept reachable for a disk-pinched machine.
+const KEEP_RUNS = resolveKeepRuns(ARGS, process.env)
 
 // Authenticated-session fixture — mirrors the e2e `testUser` shape so
 // `/auth/me` resolves and the app shell renders. No secrets, no live backend.
@@ -212,6 +232,8 @@ export const FIXTURE_AGENTS = [
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_a1b2c3', status: 'active',
     created_at: '2026-06-02T10:00:00.000Z',
+    // #1878: a NAMED pair — the case multi-agent wiring exists for.
+    mcp_server_name: 'haven-research',
     mcp_last_seen_at: '2026-07-10T08:12:00.000Z', allowances: [],
   },
   {
@@ -222,6 +244,9 @@ export const FIXTURE_AGENTS = [
     safe_chain_id: FIXTURE_SAFE.chain_id, account_type: null,
     api_key_prefix: 'hvn_d4e5f6', status: 'active',
     created_at: '2026-05-18T10:00:00.000Z',
+    // #1878: the BARE pair, reported — must not read like the agent below,
+    // which reported nothing at all.
+    mcp_server_name: 'haven',
     mcp_last_seen_at: '2026-07-09T16:40:00.000Z',
     allowances: [{
       id: 'alw-1', agent_id: 'agent-ops',
@@ -460,12 +485,46 @@ async function waitForServer(url, timeoutMs = 90_000) {
 }
 
 /**
+ * A non-2xx answer for ONE route, returnable from a scenario's `api()` (#1725).
+ *
+ * Until this existed the harness could express exactly one thing — a 200 with a
+ * body — so every ERROR state in the app was out of reach of the capture
+ * tooling, however cheap it was to reach in the product. `AccountSignersCard`'s
+ * `loadError` branch is the case that forced it: the branch is entered when
+ * `api.get('/accounts/hybrid/:addr/signers')` THROWS (`useAccountSigners.ts`
+ * `reload`), and `api.request` throws only on `!response.ok` (`lib/api.ts`).
+ * No 200 body of any shape reaches it, so there was no honest fixture for the
+ * one state of that card a reviewer most needs to see.
+ *
+ * A class rather than a `{ status, body }` shape, because the route handler has
+ * to be able to tell "the scenario is seeding a failure" apart from "the
+ * scenario is serving a body that happens to have a `status` field" — a
+ * duck-typed marker would misfire on the first fixture whose payload carries
+ * one, and misfire SILENTLY, by serving a 200. `instanceof` cannot.
+ *
+ * The failure is served to the app's real fetch, so the app's real error path
+ * runs: the console will carry the browser's own "failed to load resource"
+ * line for that request. That is expected noise for a scenario that seeds a
+ * failure, not a fixture gap — the run reports console errors as advisory.
+ */
+export class ScenarioHttpError {
+  constructor(status, body = { error: 'Screenshot fixture: seeded failure' }) {
+    this.status = status
+    this.body = body
+  }
+}
+
+/** Sugar for the above, so a scenario reads `return httpError(500)`. */
+export const httpError = (status, body) => new ScenarioHttpError(status, body)
+
+/**
  * One browser context wired to the shared auth + data fixture.
  *
  * `scenario.api(apiPath, method)` may return a body to answer a request the
  * shared fixture does not key (or keys differently); returning `undefined`
  * falls through to the normal fixture, so a scenario only states what is
- * special about it.
+ * special about it. Returning a `ScenarioHttpError` answers that one route
+ * with a failure instead (#1725).
  */
 async function newFixtureContext(browser, vp, scenario) {
   const context = await browser.newContext({
@@ -479,6 +538,24 @@ async function newFixtureContext(browser, vp, scenario) {
     window.localStorage.setItem(keys.token, 'screenshot-fixture-token')
     window.localStorage.setItem(keys.activeSafe, 'safe-fixture')
   }, SEED_STORAGE_KEYS)
+
+  // Device-local state a scenario needs (#1856). Some gates read localStorage
+  // rather than the API — `useSafeOperationGate` resolves the signer from the
+  // passkey store the app itself writes at enrolment, and no API answer can
+  // put a credential on this device. `scenario.seed()` returns the same
+  // key/value pairs that store holds, seeded before any app code runs, exactly
+  // like the auth token above.
+  //
+  // Deliberately narrow: it seeds a BROWSER-side store the product owns, so
+  // the app's own read path, gate branch and rendering are all real. It is not
+  // a hook for stubbing component state, and a scenario that needs one should
+  // be re-examined rather than served here.
+  const seeded = scenario?.seed?.()
+  if (seeded) {
+    await context.addInitScript((entries) => {
+      for (const [key, value] of entries) window.localStorage.setItem(key, value)
+    }, Object.entries(seeded))
+  }
 
   // The dev server's overlay ("N · 1 Issue") renders in a `nextjs-portal` web
   // component and lands INSIDE the PNG — dev chrome in an artefact a reviewer
@@ -508,6 +585,17 @@ async function newFixtureContext(browser, vp, scenario) {
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
 
     const scenarioBody = scenario?.api?.(api, req.method())
+    // A scenario may answer ONE route with a failure (#1725). Checked before
+    // the 200 branch, because a `ScenarioHttpError` is a perfectly ordinary
+    // object and `json()` would happily serve it as a 200 body — a fixture
+    // that looks like it is seeding an error state and is not.
+    if (scenarioBody instanceof ScenarioHttpError) {
+      return route.fulfill({
+        status: scenarioBody.status,
+        contentType: 'application/json',
+        body: JSON.stringify(scenarioBody.body),
+      })
+    }
     if (scenarioBody !== undefined) return json(scenarioBody)
 
     if (api === '/auth/me') return json(FIXTURE_USER)
@@ -538,11 +626,84 @@ async function dismissMobileSidebar(page, vp) {
   }
 }
 
+/**
+ * Refuse to shoot when something that must NOT be on screen is (#1725).
+ *
+ * The positive waits a scenario already does prove the state it seeded is
+ * present; they cannot prove the state it did NOT seed is absent. That matters
+ * whenever one surface has several states and they share copy or a container:
+ * a fixture change that quietly moved the card to a neighbouring branch would
+ * still satisfy every `waitFor` the scenario has, and the PNG would land under
+ * the other state's filename. This is the cheap half of #1873's rule — assert
+ * the rendered result, not the seed — expressed for the capture harness, which
+ * has no `expect`.
+ */
+async function refuseIfPresent(locator, what) {
+  const found = await locator.count()
+  if (found > 0) {
+    throw new Error(
+      `${what}: found ${found} match(es) that must not be on screen for this state — ` +
+        'the capture would be filed under the wrong state\'s name',
+    )
+  }
+}
+
 // ── Scenario registry (#1409) ────────────────────────────────────────────────
 
 const CONNECT_SETUP_ID = 'setup-screenshot'
 const CONNECT_SETUP_TOKEN = 'hv_setup_screenshot'
 const CONNECT_COMMAND = `npx -y @haven_ai/connect@alpha --setup ${CONNECT_SETUP_TOKEN} --api https://api.haven.example --ack-local-tools --runtime claude-code`
+
+/**
+ * The three signer sets `account-backup-recovery` shoots (#1725).
+ *
+ * `null` means "answer this route with a failure" — see the scenario for why
+ * `loadError` cannot be reached by any 200 body. Hoisted out of the scenario
+ * so the fixture-contract test can pin all three shapes without driving a
+ * browser, which is what #1409 asks a scenario to be checkable by.
+ */
+const BACKUP_RECOVERY_STAGES = {
+  healthy: {
+    account_address: FIXTURE_SAFE.safe_address,
+    chain_id: FIXTURE_SAFE.chain_id,
+    owner_address: '0x' + 'ee'.repeat(20),
+    // Both dates are noon UTC so the rendered day cannot slide either way with
+    // the runner's timezone — the label IS the evidence here. March 3 is the
+    // exact case #1679's review saw wrap to two lines at 390px; September 12
+    // is longer still, so a regression that unwraps one would have to unwrap
+    // both to go unnoticed.
+    passkeys: [
+      { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+      { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: '2026-09-12T12:00:00.000Z' },
+    ],
+  },
+  // ONE way to approve: one passkey and no wallet. `wayCount` is
+  // `passkeys.length + (owner_address ? 1 : 0)` and the banner is `< 2`, so
+  // this is the minimum that renders it — and `owner_address: null` rather
+  // than an omitted key, because the absence is the claim.
+  'one-way': {
+    account_address: FIXTURE_SAFE.safe_address,
+    chain_id: FIXTURE_SAFE.chain_id,
+    owner_address: null,
+    passkeys: [
+      { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+    ],
+  },
+  'load-error': null,
+}
+
+let backupRecoveryStage = 'healthy'
+
+/** Move `account-backup-recovery` onto one of its three states. */
+function setBackupRecoveryStage(next) {
+  if (!(next in BACKUP_RECOVERY_STAGES)) {
+    throw new Error(
+      `account-backup-recovery: unknown stage "${next}" — expected one of ` +
+        Object.keys(BACKUP_RECOVERY_STAGES).join(', '),
+    )
+  }
+  backupRecoveryStage = next
+}
 
 export const SCENARIOS = {
   'design-system-buttons': {
@@ -590,39 +751,108 @@ export const SCENARIOS = {
   },
   'account-backup-recovery': {
     description:
-      'Backup & recovery card unobstructed at both viewports — wallet + two dated passkeys',
-    // The SHARED fixture serves one passkey and no wallet, which renders the
-    // "only one way to approve" state — the right default for route capture,
-    // but it shows neither the Wallet row nor a second passkey. This scenario
-    // serves the healthy multi-signer set instead, so one PNG carries every
-    // element the row layout has to get right: the Wallet row, the dated
-    // passkey labels that WRAP at 390px (#1679), and the enrolment button with
-    // its anchor subtext.
+      'Backup & recovery card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
+    // ── The three states, and why they are one scenario (#1693, #1725) ───────
+    //
+    // #1693 evidenced the HEALTHY layout only, and #1725's review found the
+    // other two states resting on improvisation. They are all the same card, so
+    // they stay one scenario per the registry's convention — one scenario per
+    // surface, not per state — and are driven by re-serving `/signers` and
+    // reloading between shots, the way `connect-agent` holds one dialog at
+    // three stages.
+    //
+    //   healthy    wallet + two dated passkeys. The row layout, the labels that
+    //              WRAP at 390px (#1679), the enrolment button and its subtext.
+    //   one-way    one passkey, no wallet — the amber "only one way to approve"
+    //              banner. This is a money-adjacent safety affordance: it is
+    //              the ONLY thing telling a user their account has no recovery.
+    //              The shared fixture has served exactly this shape all along
+    //              and nothing ever shot it, which is the cheaper and more
+    //              embarrassing half of the gap. Served explicitly here anyway
+    //              rather than by falling through to the shared fixture: a
+    //              later change that gave that fixture a wallet would silently
+    //              turn this capture into a second healthy render filed under
+    //              the one-way name.
+    //   loadError  the signer fetch FAILS. Where the card's copy has to work
+    //              hardest, and the state a reviewer most needs to see.
+    //
+    // ── Reachability of `loadError`, checked against source, not assumed ─────
+    //
+    // `AccountSignersCard.tsx` enters it on `loadError`, which
+    // `useAccountSigners.ts`'s `reload` sets only in its `catch` — so the
+    // branch is gated on `api.get` THROWING, and `lib/api.ts` throws only on
+    // `!response.ok`. No 200 body reaches it, which is why this needed the
+    // `httpError` plumbing above rather than a cleverer payload. 500 rather
+    // than 4xx because the branch does not discriminate and a server fault is
+    // the honest thing a reviewer is judging the copy against.
+    stages: BACKUP_RECOVERY_STAGES,
+    /** Exposed so the fixture-contract test can pin each stage (#1409). */
+    stage: setBackupRecoveryStage,
     api(apiPath) {
       if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
-        return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
-          owner_address: '0x' + 'ee'.repeat(20),
-          // Both dates are noon UTC so the rendered day cannot slide either
-          // way with the runner's timezone — the label IS the evidence here.
-          // March 3 is the exact case #1679's review saw wrap to two lines at
-          // 390px; September 12 is longer still, so a regression that unwraps
-          // one would have to unwrap both to go unnoticed.
-          passkeys: [
-            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
-            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: '2026-09-12T12:00:00.000Z' },
-          ],
-        }
+        const signers = BACKUP_RECOVERY_STAGES[backupRecoveryStage]
+        return signers === null ? httpError(500) : signers
       }
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
-      await dismissMobileSidebar(page, vp)
+      // The stage is MODULE state and `run` is called once per viewport, so a
+      // reset here is load-bearing rather than tidy: without it the mobile
+      // pass would open on `load-error`, where the desktop pass left it, and
+      // shoot a failure under the healthy capture's name.
+      setBackupRecoveryStage('healthy')
 
       const heading = page.getByRole('heading', { name: 'Backup & recovery' })
-      await heading.waitFor({ timeout: 15_000 })
+
+      /**
+       * Get the account page onto the currently-served stage and let it settle.
+       *
+       * The first load keeps `networkidle`, for continuity with every other
+       * scenario. The RELOADS below use `domcontentloaded` plus the two
+       * explicit waits here, because a reload only has to get this card
+       * re-mounted and re-fetched and those waits are the condition that
+       * actually matters — idleness of the app's wallet sockets is neither
+       * necessary nor sufficient for "the card has rendered its branch".
+       *
+       * Both waits exist because a cheaper `waitUntil` has to buy back what
+       * `networkidle` was incidentally covering, or it trades a timeout for a
+       * race that shoots a plausible-looking WRONG PNG:
+       *
+       *   fonts   an element screenshot taken before the webfont swaps in is
+       *           the wrong type at the wrong metrics, and it does not look
+       *           broken — it looks like a design change.
+       *   sidebar `(authenticated)/layout.tsx` mounts `Sidebar` with
+       *           `dynamic(ssr: false)`. Until that chunk lands `<main>` spans
+       *           the full viewport, so the card is ~240px WIDER. Three states
+       *           captured at two different widths would read as a layout
+       *           regression between them and would be neither.
+       *
+       * Recorded because it cost a diagnosis: `networkidle` was suspected of
+       * being the flake when three consecutive runs timed out here, and it was
+       * NOT — swapping the first goto to `domcontentloaded` timed out exactly
+       * the same, and the untouched `/design-system` route capture was failing
+       * in the same runs. It is a cold `next dev` compile outrunning the 30s
+       * goto budget on a first boot, which the retention line above makes easy
+       * to misread as a change in this scenario. Warm the server once before
+       * judging a failure here.
+       */
+      const settleOnStage = async (navigate) => {
+        await navigate()
+        await page.evaluate(() => document.fonts.ready)
+        // The sidebar's own ARIA contract — the handle the visual specs use for
+        // this widget. Its presence is the proof the chunk mounted and `<main>`
+        // has settled to its final width.
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+        await heading.waitFor({ timeout: 15_000 })
+      }
+
+      await settleOnStage(() =>
+        page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, {
+          waitUntil: 'networkidle',
+          timeout: 30_000,
+        }),
+      )
 
       // The Card root that owns the heading. Card does not forward props, so
       // there is no testid to target without changing a shared primitive;
@@ -631,6 +861,23 @@ export const SCENARIOS = {
       // want from a capture whose entire purpose is trustworthy evidence.
       const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
 
+      // The three states' distinguishing copy, as locators. Regexes, not exact
+      // strings: the banner and the confirmations are authored across several
+      // JSX lines, so the rendered text carries collapsed whitespace that an
+      // exact match would have to reproduce by hand. Each fragment is long
+      // enough to belong to exactly one state.
+      const oneWayBanner = card.getByText(/only one way to approve\. Add a backup now/)
+      const loadErrorCopy = card.getByText(/Haven could not load how this account is approved/)
+      const walletRow = card.getByText('Wallet', { exact: true })
+      const addBackup = card.getByRole('button', { name: 'Add a backup passkey' })
+
+      /** Re-serve `/signers` at `stage` and reload the page onto it. */
+      const openStage = async (stage) => {
+        setBackupRecoveryStage(stage)
+        await settleOnStage(() => page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }))
+      }
+
+      // ── healthy ───────────────────────────────────────────────────────────
       // Wait for the ROWS, not just the heading. The card short-circuits to
       // null until the signer fetch settles, so there is no empty-shell phase
       // to race — but the heading renders in the loadError branch too, where
@@ -638,11 +885,270 @@ export const SCENARIOS = {
       // therefore accept "Haven could not load how this account is approved"
       // as the capture. These two waits are what make the error state time
       // out instead of quietly becoming the evidence.
-      await card.getByText('Wallet', { exact: true }).waitFor({ timeout: 15_000 })
-      await card.getByRole('button', { name: 'Add a backup passkey' }).waitFor({ timeout: 15_000 })
+      await walletRow.waitFor({ timeout: 15_000 })
+      await addBackup.waitFor({ timeout: 15_000 })
+      // And the negative half (#1725): a wallet row proves a wallet, it does
+      // not prove the warning is gone. If a regression rendered the banner
+      // alongside a healthy signer set, every wait above would still pass.
+      await refuseIfPresent(oneWayBanner, 'account-backup-recovery · healthy · one-way banner')
+      await refuseIfPresent(loadErrorCopy, 'account-backup-recovery · healthy · load-error copy')
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'card')
+
+      // ── one way to approve ────────────────────────────────────────────────
+      await openStage('one-way')
+      await oneWayBanner.waitFor({ timeout: 15_000 })
+      // The banner is the subject; these two are what prove the card is in the
+      // SIGNERS branch showing one signer, rather than in some other branch
+      // that happens to contain the copy. `Wallet` absent is the fixture's own
+      // claim read back off the render.
+      await addBackup.waitFor({ timeout: 15_000 })
+      await refuseIfPresent(walletRow, 'account-backup-recovery · one-way · wallet row')
+      await refuseIfPresent(loadErrorCopy, 'account-backup-recovery · one-way · load-error copy')
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'one-way')
+
+      // ── load failure ──────────────────────────────────────────────────────
+      await openStage('load-error')
+      await loadErrorCopy.waitFor({ timeout: 15_000 })
+      // `Try again` is the whole affordance of this state, and it is the half a
+      // reviewer judges: the copy admits a failure, the button is the way out.
+      await card.getByRole('button', { name: 'Try again' }).waitFor({ timeout: 15_000 })
+      // Nothing from the loaded branch may survive into it. `addBackup` absent
+      // is the strongest of these — it is rendered by the `signers ?` arm, so
+      // its presence would mean the card is showing both branches at once.
+      await refuseIfPresent(addBackup, 'account-backup-recovery · load-error · enrolment button')
+      await refuseIfPresent(walletRow, 'account-backup-recovery · load-error · wallet row')
+      await refuseIfPresent(oneWayBanner, 'account-backup-recovery · load-error · one-way banner')
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'load-error')
+    },
+  },
+  'passport-reanchoring': {
+    description:
+      'Agent Passport card during the re-key window (#1699) — the anchor names the retired key while standing stays Active',
+    // No URL reaches this: `re_anchoring` is a transient backend state between
+    // the retire and the re-issue, so nothing a route-based capture can wait
+    // for produces it. Without a fixture the state has ZERO rendered evidence,
+    // which is precisely the gap #1894's design pass found on the neighbouring
+    // re-key flow and #1890 had to close afterwards. Cheaper to seed it here.
+    //
+    // What a reviewer is judging: whether the card keeps the two layers apart
+    // when they DISAGREE. Standing is `active` and the anchor is behind, so a
+    // card that collapsed them would have to pick one and would be wrong
+    // either way — "Issued" claims a retired key's credential is current,
+    // "Revoking…" tells the owner a live agent lost its authority.
+    api(apiPath) {
+      if (apiPath === `/agents/${FIXTURE_AGENTS[0].id}/passport`) {
+        return {
+          passport: {
+            status: 'anchored', assurance_level: 0,
+            attestation_uid: '0x' + '22'.repeat(32),
+            tx_hash: `0x${'c3'.repeat(32)}`, chain_id: FIXTURE_SAFE.chain_id,
+            attempts: 1, last_error: null,
+            requested_at: '2026-06-02T10:05:00.000Z', anchored_at: '2026-06-02T10:05:12.000Z',
+          },
+          standing: {
+            agentId: FIXTURE_AGENTS[0].id, standing: 'active', anchor: 're_anchoring',
+            attestationUid: '0x' + '22'.repeat(32),
+            // False on purpose, and it is an assertion rather than a default:
+            // `chainLagging` is the REVOKED-agent warning, and a card that
+            // showed "treat the agent as revoked now" here would invert the
+            // meaning of the whole state.
+            chainLagging: false, revocationConfirmedAt: null,
+          },
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents/${FIXTURE_AGENTS[0].id}`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      const heading = page.getByRole('heading', { name: 'Agent Passport' })
+      await heading.waitFor({ timeout: 15_000 })
+      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+
+      // Wait for the BADGE and the NOTE, not just the heading. The heading
+      // renders in the loading skeleton and the load-error branch too, so
+      // waiting on it alone would happily accept either as the evidence —
+      // the same trap the Backup & recovery scenario documents above.
+      await card.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
+      await card.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
 
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'card')
+    },
+  },
+  'replace-signing-key': {
+    description:
+      'Replace signing key modal at each step — reason (lost + compromised), address, the point-of-no-return gate both unacknowledged and armed, the no-signer refusal, and the legacy-rail refusal',
+    // No URL reaches this: the modal is behind the agent detail page's options
+    // menu, and its interesting screens are three clicks deep. Every stage
+    // below is a distinct decision a reviewer has to judge as rendered copy.
+    //
+    // ── The account is PASSKEY-OWNED, and that is the fix (#1890) ───────────
+    //
+    // This note used to warn reviewers that every capture carried the refusal
+    // banner and a dead destructive button, because the harness has no
+    // connected wallet (`useActiveSigner` is wagmi-driven, so `pickSigningPath`
+    // could not return 'eoa') and the client refused every non-EOA path
+    // outright. #1894's design pass recorded the consequence: **the ENABLED
+    // danger button had no rendered evidence anywhere.** No fixture could
+    // reach the state where it is live.
+    //
+    // #1890 is what makes that state reachable. A passkey-owned account needs
+    // no wallet connection to be signable, so giving the fixture one passkey
+    // both removes the refusal banner and puts the flow on the exact path this
+    // issue unblocks — the primary path now, not a workaround for the harness.
+    // The armed capture below is the evidence that was missing.
+    api(apiPath) {
+      // agent-research carries the passport, so the #1847 disclosure renders.
+      // The shared fixture gives it a null delegate; re-key needs one to be
+      // replacing, so the scenario supplies it.
+      if (apiPath === '/agents') {
+        return {
+          agents: FIXTURE_AGENTS.map((a) =>
+            a.id === 'agent-research' || a.id === 'agent-retired'
+              ? { ...a, delegate_address: ADDR.delegate }
+              : a,
+          ),
+        }
+      }
+      // agent-retired's account has NO reachable signer, so it renders the one
+      // refusal that is still real. Keyed per agent rather than per scenario so
+      // the armed path and the refusal can both be captured in one run: making
+      // the fixture signable is what unblocked the armed capture, and it would
+      // otherwise have DELETED the refusal's only rendered evidence.
+      if (apiPath === '/agents/agent-retired/account-signers') {
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [],
+        }
+      }
+      if (apiPath.endsWith('/account-signers')) {
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [
+            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+          ],
+        }
+      }
+      // The preflight, so the consequences step renders its real shape rather
+      // than an error. Residual zero — the stranded-funds branch has its own
+      // coverage in the unit tests and would displace this capture.
+      if (apiPath === '/agents/agent-research/rekey') {
+        return {
+          rekey_id: 'rk-fixture-1',
+          stage: 'preflight',
+          old_delegate_address: ADDR.delegate,
+          new_delegate_address: '0x' + '77'.repeat(20),
+          residual: {
+            atomic: '0',
+            token_address: null,
+            disposition: 'none',
+            recoverable_after_rekey: false,
+          },
+          delegations_to_revoke: ['0x' + 'ab'.repeat(32)],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      // `shoot()` measures the deepest scrolling box in the target's subtree
+      // (#1879), so this scenario no longer needs its own `shootWhole()` to see
+      // past `ui/Modal`'s non-scrolling `fixed inset-0` wrapper. The stages
+      // below that clip — `point-of-no-return` worst, at 1060px on mobile —
+      // now get the generic record-and-re-shoot every scenario gets.
+
+      // ── The delegation-rail agent: the whole flow ────────────────────────
+      await page.goto(`${BASE_URL}/agents/agent-research`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Agent options' }).click()
+      await page.getByRole('menuitem', { name: 'Replace signing key' }).click()
+
+      const dialog = page.getByRole('dialog')
+      // Wait for the CHOICE, not just the dialog: the two reasons are the
+      // first thing under review, and a capture that raced them would show an
+      // empty shell that still looks like a finished screen.
+      await dialog.getByRole('radio', { name: /it is lost/i }).waitFor({ timeout: 15_000 })
+      await dialog.getByRole('radio', { name: /someone else/i }).waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'reason')
+
+      // Compromised surfaces the spend list — a different screen, not a
+      // different toggle state, so it gets its own capture.
+      await dialog.getByRole('radio', { name: /someone else/i }).click()
+      await dialog.getByText(/recent spending to review/i).waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'reason-compromised')
+
+      await dialog.getByRole('radio', { name: /it is lost/i }).click()
+      await dialog.getByRole('button', { name: 'Continue' }).click()
+      await dialog.getByText(/haven never receives the private key/i).waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'address')
+
+      await dialog.getByLabel(/new signing address/i).fill('0x' + '77'.repeat(20))
+      await dialog.getByRole('button', { name: 'Continue' }).click()
+
+      // THE screen this issue exists to get right. Wait on the irreversibility
+      // gate itself — if the acknowledgement ever stops rendering, this run
+      // fails instead of shooting a flow that lost its safety catch.
+      await dialog.getByText(/the next step cannot be undone/i).waitFor({ timeout: 15_000 })
+      await dialog.getByRole('checkbox').waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'point-of-no-return')
+
+      // The state that had no rendered evidence anywhere (#1894, closed here).
+      // Ticking the acknowledgement is the ONLY thing that arms the red button,
+      // and until #1890 no fixture could reach a signable account, so every
+      // prior capture showed it dead. Both states are worth having side by
+      // side: the disabled one proves the gate holds, and only this one shows
+      // what the owner is actually about to press.
+      await dialog.getByRole('checkbox').click()
+      await dialog
+        .getByRole('button', { name: /switch off the old key/i })
+        .waitFor({ state: 'visible', timeout: 15_000 })
+      await shoot(dialog, 'point-of-no-return-armed')
+
+      // ── The no-signer agent: the ONE refusal that is still real ─────────
+      // Its copy changed in #1890 (it no longer blames passkeys), and the
+      // fixture that made the armed capture possible would otherwise have
+      // removed every render of this banner from the evidence set.
+      await page.goto(`${BASE_URL}/agents/agent-retired`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('button', { name: 'Agent options' }).click()
+      await page.getByRole('menuitem', { name: 'Replace signing key' }).click()
+
+      const noSigner = page.getByRole('dialog')
+      await noSigner
+        .getByText(/cannot replace this key from this device/i)
+        .waitFor({ timeout: 15_000 })
+      await shoot(noSigner, 'no-signer-refusal')
+
+      // ── The legacy-rail agent: the refusal ──────────────────────────────
+      await page.goto(`${BASE_URL}/agents/agent-ops`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('button', { name: 'Agent options' }).click()
+      await page.getByRole('menuitem', { name: 'Replace signing key' }).click()
+
+      const refusal = page.getByRole('dialog')
+      await refusal.getByText(/not available for this agent/i).waitFor({ timeout: 15_000 })
+      await shoot(refusal, 'legacy-rail-refusal')
     },
   },
   'account-signer-removal': {
@@ -1085,6 +1591,304 @@ export const SCENARIOS = {
       await shoot(comingSoonDialog, 'coming-soon-modal')
     },
   },
+  'add-funds': {
+    description: 'Add funds modal with a RESOLVED chain — the normal path (#1844)',
+    // Route capture cannot see this: it is a dialog behind the dashboard hero's
+    // "Add funds" button. The chain data is the shared fixture's, untouched —
+    // its safe carries chain_id 84532, which is the whole point of the
+    // "resolved" capture.
+    //
+    // The ONE override is the rail marker, and it is about reachability rather
+    // than about this issue: the shared fixture's safe is a `delegator_hybrid`
+    // whose hydrated signer set holds a passkey that is not on this device, so
+    // the hero renders `PasskeyOtherDeviceNotice` INSTEAD of the action buttons
+    // and "Add funds" is unclickable. Measured, not assumed — the first run of
+    // this scenario timed out waiting for the button while the unresolved
+    // counterpart found it, because a missing chain_id happens to route the
+    // gate down a different branch. Dropping `account_type` puts the account on
+    // the Safe rail with no stored passkey, i.e. `no_signer`, which is a hero
+    // that offers its actions. Nothing about the modal under capture changes.
+    api(apiPath) {
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE }] }
+      // Same both-endpoints reasoning as the unresolved twin below.
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE }] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Add funds', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      // Confirmed by the RESOLVED sentence, not by a bare timeout. A run that
+      // somehow lands on the unknown-network state fails here rather than
+      // shooting it under the resolved filename — which is the whole point of
+      // having two scenarios.
+      await dialog
+        .getByText('Send USDC to your account address on Base Sepolia.')
+        .waitFor({ timeout: 20_000 })
+      await shoot(dialog, 'resolved')
+    },
+  },
+  'add-funds-unresolved-chain': {
+    description:
+      'Add funds modal with an UNRESOLVED chain — names no network, offers no onramp (#1844)',
+    // A separate scenario rather than a second state of `add-funds`: the two
+    // need opposite pins on the SAME endpoints for their whole run, and one run
+    // cannot hold both (same reason `connect-agent-approved` is split out).
+    //
+    // The state is not reachable through the UI today — the hero only renders
+    // "Add funds" when the user has at least one account, and `defaultSafe`
+    // falls through to `safes[0]`, so `selectedActionSafe` is never absent
+    // while the button exists. What IS reachable is the wire condition #1844
+    // names as the thing that makes the hazard live: a safe that arrives
+    // WITHOUT `chain_id`. That is what this scenario serves — a partially
+    // loaded safe, at the API boundary, with no component code mutated. The
+    // capture is therefore evidence of the real fallback path, not of a
+    // hand-edited render.
+    //
+    // It carries the same rail override as `add-funds` for the same
+    // reachability reason, so the two captures differ by EXACTLY one field —
+    // `chain_id` — and the pair is therefore evidence about the chain and
+    // nothing else.
+    // Both safe-serving endpoints are overridden even though the dashboard reads
+    // only `/auth/me` (`DashboardClient.tsx:633` → `user?.safes`). Deliberate,
+    // not over-mocking: a fixture whose two safe endpoints disagree about
+    // whether an account HAS a chain is a trap for the next scenario that
+    // reaches for the other one, and the disagreement would be invisible.
+    api(apiPath) {
+      const safeWithoutChain = { ...FIXTURE_SAFE }
+      delete safeWithoutChain.chain_id
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
+      if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Add funds', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      await dialog
+        .getByText(/We can't confirm which network this account uses/)
+        .waitFor({ timeout: 20_000 })
+      await shoot(dialog, 'unresolved')
+    },
+  },
+  'receive-funds': {
+    description: 'Receive funds modal with a RESOLVED chain — the normal path (#1852)',
+    // The resolved half of the #1852 pair. Same construction as `add-funds`
+    // above and for the same reasons: the chain data is the shared fixture's
+    // (84532), and the ONE override is dropping `account_type` so the hero
+    // renders its action buttons instead of `PasskeyOtherDeviceNotice`.
+    api(apiPath) {
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE }] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      // The hero labels this button "Receive" when funded and "Receive funds"
+      // when not — both branches exist and which one renders depends on the
+      // fixture's balances, which this scenario deliberately does not pin.
+      await page.getByRole('button', { name: /^Receive( funds)?$/ }).first().click()
+      const dialog = page.getByRole('dialog')
+      // Confirmed by the RESOLVED sentence rather than by a bare timeout, so a
+      // run that lands on the refusal fails here instead of being shot under
+      // the resolved filename.
+      await dialog
+        .getByText('Send supported tokens to this Haven wallet on Base Sepolia.')
+        .waitFor({ timeout: 20_000 })
+      // The QR is half of what this screen refuses in the other state, so the
+      // resolved capture has to actually show one for the pair to be evidence
+      // about the QR at all.
+      await dialog.getByRole('button', { name: 'Show QR code' }).click()
+      await dialog.getByAltText(/^QR code for /).waitFor({ timeout: 20_000 })
+      await shoot(dialog, 'resolved')
+    },
+  },
+  'receive-funds-unresolved-chain': {
+    description:
+      'Receive funds modal with an UNRESOLVED chain — names no network, shows no address or QR (#1852)',
+    // Separate scenario rather than a second state of `receive-funds`, for the
+    // same reason as the add-funds pair: the two need opposite pins on the SAME
+    // endpoints for their whole run.
+    //
+    // The state is not reachable through the UI today (`chain_id` is
+    // non-nullable in `UserSafe`, and the hero only offers Receive when an
+    // account exists). What IS reachable is the wire condition: a safe that
+    // arrives WITHOUT `chain_id`. That is what this serves — at the API
+    // boundary, with no component code mutated — so the capture evidences the
+    // real refusal path rather than a hand-edited render.
+    //
+    // Same rail override as its twin, so the two differ by EXACTLY one field.
+    api(apiPath) {
+      const safeWithoutChain = { ...FIXTURE_SAFE }
+      delete safeWithoutChain.chain_id
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
+      if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: /^Receive( funds)?$/ }).first().click()
+      const dialog = page.getByRole('dialog')
+      await dialog
+        .getByText(/can't confirm which network this account uses/)
+        .waitFor({ timeout: 20_000 })
+      await shoot(dialog, 'unresolved')
+    },
+  },
+  'send-review': {
+    description:
+      "Send modal STEP 2 (review) — the only TransactionMovement consumer never captured (#1856)",
+    // `TransactionMovement` is a shared primitive with five call sites.
+    // `SendModal.tsx:848` is the one no PNG has ever shown: no URL reaches
+    // step 2, and #1835 could only close the GEOMETRY half of the gap with a
+    // headless width guard. This scenario closes the picture half.
+    //
+    // Two fixture overrides, and the honesty of the capture rests on both
+    // being at boundaries the PRODUCT itself writes, so every line of app code
+    // between the boundary and the pixels is the real one:
+    //
+    //  1. `account_type` dropped → the Safe rail. Same override, for the same
+    //     reachability reason, as `add-funds`/`receive-funds`: the shared
+    //     fixture's `delegator_hybrid` safe has a hydrated passkey that is not
+    //     on this device, and the dashboard hero hides Send entirely for a
+    //     non-Safe-rail account (`DashboardClient.tsx:907`).
+    //  2. `seed` writes the device-local passkey record (see `seed()` below).
+    //     `useSafeOperationGate` returns `no_signer` without it, and
+    //     `SendModal.tsx:821` disables Continue while `signingUnavailable` —
+    //     which is precisely the blocker #1856 was filed on.
+    //
+    // Why that is FAITHFUL rather than a screen the product cannot enter: a
+    // stored passkey signer is the ordinary state of any user who enrolled a
+    // passkey on the device they are sending from — it is the majority path,
+    // not an exotic one. Nothing is stubbed downstream of it. The gate runs its
+    // real branch and returns `ready`; `useActiveSigner` resolves a real
+    // `passkey` signer, which is what makes "Approve with · Device approval"
+    // and "Network fees are paid by Haven (ETH)" render the words a passkey
+    // user actually reads; `OnchainActionGate` takes its unblocked path and
+    // `NetworkGate` renders children because no wallet is connected — again
+    // the real branch for a passkey user, not a bypass. No component is
+    // patched and no step state is forced: the run TYPES an amount and a
+    // recipient and CLICKS Continue, so `handleReview`'s own validation is
+    // what admits the capture.
+    //
+    // What the capture is therefore NOT evidence about: pressing Send. The
+    // seeded credential is not a real WebAuthn credential, so this scenario
+    // stops at review — which is all #1856 asks for, and the reason it stops
+    // is worth stating rather than discovering later.
+    //
+    // Per #1835's measurement the primitive gets ~310px here, roughly double
+    // the ~150px below which the arrow strands, so no defect is expected. This
+    // closes an evidence gap; it is not a bug hunt.
+    seed() {
+      // Exactly the record `setStoredPasskeySigner` writes, under exactly the
+      // key `passkeyStorageKey` computes. `getStoredPasskeySigner` VALIDATES
+      // every field and returns null on anything it does not recognise — a
+      // wrong `schemaVersion`, a non-address `address`, a public-key half
+      // without its twin — and a null there puts the gate silently back on
+      // `no_signer`. `screenshot-fixture.test.ts` runs this record through
+      // that parser and asserts it round-trips every field, so a schema bump
+      // or a dropped field fails a test rather than quietly un-reaching this
+      // capture. It does NOT pin the literal values below — they are fixture
+      // data, free to change, as long as the parser still accepts them.
+      return {
+        [`haven_passkey_${FIXTURE_SAFE.safe_address.toLowerCase()}_${FIXTURE_SAFE.chain_id}`]:
+          JSON.stringify({
+            schemaVersion: 1,
+            address: '0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24',
+            credentialId: 'screenshot-fixture-credential',
+            publicKey: { x: `0x${'11'.repeat(32)}`, y: `0x${'22'.repeat(32)}` },
+            chainId: FIXTURE_SAFE.chain_id,
+            safeAddress: FIXTURE_SAFE.safe_address.toLowerCase(),
+            createdAt: Date.parse('2026-05-01T12:00:00.000Z'),
+          }),
+      }
+    },
+    api(apiPath) {
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE }] }
+      // Keyed explicitly rather than left to the generic empty fallback. That
+      // fallback happens to be truthy, so `!safeDetails` passes and Continue
+      // enables — by accident. `threshold` then reads `undefined ?? 1`, and a
+      // threshold of 1 vs 2 is the difference between the review screen under
+      // capture and one carrying an extra "will wait for approval" banner. A
+      // capture whose layout depends on an accident is not evidence.
+      if (apiPath === `/safe/${FIXTURE_SAFE.safe_address}/details`) {
+        return {
+          address: FIXTURE_SAFE.safe_address,
+          owners: ['0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24'],
+          threshold: 1,
+          nonce: 7,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Send', exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+
+      const amount = dialog.getByPlaceholder('0.00')
+      await amount.waitFor({ timeout: 20_000 })
+      await amount.fill('25.50')
+      // `ADDR.merchant`, deliberately, and NOT `ADDR.recipient`: the latter is
+      // `FIXTURE_CONTACTS[0]`'s address, so `handleRecipientChange` resolves it
+      // to "Cloud vendor" and the movement line renders a NAME. Both are real
+      // product states, but a pasted unknown address is the plain path and the
+      // one whose `To` half is a truncated address — the same shape the
+      // `ApprovalQueue` capture already evidences, so the two are comparable.
+      // Measured, not assumed: the first run of this scenario used
+      // `ADDR.recipient` and failed on the `To 0x9f8f…79A2` assertion because
+      // the screen said "To Cloud vendor".
+      await dialog
+        .getByPlaceholder('Paste address or choose a saved recipient')
+        .fill(ADDR.merchant)
+
+      // Asserted, not assumed. If the seed ever stops satisfying the gate this
+      // is where the run fails — loudly, with "Continue is disabled" as the
+      // message — instead of timing out somewhere downstream with a reason
+      // nobody can read. It is the blocker #1856 names, so it gets its own
+      // check rather than being inferred from a later failure.
+      const cont = dialog.getByRole('button', { name: 'Continue' })
+      if (await cont.isDisabled()) {
+        throw new Error(
+          'Continue is disabled on the send form — the operation gate is not `ready`, ' +
+            'so the review step cannot be driven (see this scenario\'s `seed()`).',
+        )
+      }
+      await cont.click()
+
+      // Confirmed by the review step's OWN copy and by the primitive this
+      // capture exists for. A run that shot a dialog without the movement line
+      // would be an evidence gap wearing a PNG, which is the exact failure
+      // #1856 is about.
+      await dialog.getByText('You are sending').waitFor({ timeout: 20_000 })
+      // `.first()` because the primitive nests its halves: three ancestors
+      // contain "From Operating wallet" as a substring, and a bare locator
+      // would trip strict mode rather than assert anything.
+      await dialog.getByText(`From ${FIXTURE_SAFE.name}`).first().waitFor({ timeout: 20_000 })
+      await dialog
+        .getByText(`To ${truncateFixtureAddress(ADDR.merchant)}`)
+        .first()
+        .waitFor({ timeout: 20_000 })
+      await shoot(dialog, 'review')
+    },
+  },
+}
+
+// Mirror of `truncate` in `src/lib/format.ts` — the review step renders the
+// recipient through it, so the assertion above has to spell the same string.
+function truncateFixtureAddress(address) {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`
 }
 
 function resolveScenarios(names) {
@@ -1106,16 +1910,39 @@ async function main() {
   // leaks both (the try/finally that cleans them up starts further down).
   const scenarios = resolveScenarios(SCENARIO_ARGS)
 
-  await rm(OUT_DIR, { recursive: true, force: true })
-  await mkdir(OUT_DIR, { recursive: true })
-
   // Provenance, printed before anything is captured and stamped into the
   // manifest afterwards: a PNG on its own cannot say which branch it shows.
+  // Resolved BEFORE retention runs, because the archived run's manifest records
+  // which branch/commit displaced it.
   const identity = buildRunIdentity(worktreeIdentity(ROOT))
   console.log(`screenshot: worktree ${identity.worktree}`)
   console.log(
     `screenshot: branch ${identity.branch} @ ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty working tree)' : ''}`,
   )
+
+  // This used to be `rm -rf OUT_DIR`, which destroyed the previous run
+  // unconditionally — including the case that motivated #1888, a narrow
+  // `--scenario=X` run after a wide one. The previous run is now moved aside
+  // into `.screenshots/previous/<run-id>/` and stamped stale, and THIS run still
+  // writes flat into `.screenshots/` so every literal `.screenshots/<name>.png`
+  // reference in the playbooks and reviewer roles keeps resolving to the newest
+  // run. See `scripts/capture-retention.mjs` for why the `latest`-symlink shape
+  // was rejected.
+  const retention = await retainPreviousRun(OUT_DIR, { identity, keep: KEEP_RUNS })
+  if (retention.archived) {
+    console.log(
+      `screenshot: previous run (${retention.files.length} file(s)) archived to ` +
+        `.screenshots/${ARCHIVE_DIR_NAME}/${retention.archived}/ — its manifest is stamped stale`,
+    )
+  }
+  if (retention.pruned.length > 0) {
+    console.log(
+      `screenshot: pruned ${retention.pruned.length} archived run(s) beyond --keep=${retention.keep}: ${retention.pruned.join(', ')}`,
+    )
+  }
+  if (retention.keep <= 0) {
+    console.log('screenshot: --keep=0 — no previous run was retained (destructive mode)')
+  }
 
   // The marker the server serves back at /capture-identity.json. Written
   // BEFORE the server starts so it is on disk for the first probe, and torn
@@ -1297,19 +2124,35 @@ async function main() {
           // so the PNG LOOKS complete. That is worse than a missing capture: a
           // reviewer would judge a screen they have only partly seen. Record
           // the shortfall and shoot the whole thing alongside it.
-          const hidden = await target
-            .evaluate((el) => el.scrollHeight - el.clientHeight)
-            .catch(() => 0)
-          if (hidden > 4) {
-            clipped.push({ capture: base, hidden })
+          const before = await measureHiddenBelowFold(target)
+          if (before.hidden > CLIP_TOLERANCE_PX) {
             await scenarioPage.setViewportSize({
               width: vp.width,
-              height: vp.height + hidden + 48,
+              height: vp.height + before.hidden + 48,
             })
             await scenarioPage.waitForTimeout(200)
+            // Re-measure BEFORE re-shooting. Growing the viewport only helps a
+            // scroller whose cap is viewport-relative (`ui/Modal`'s
+            // `max-h-[calc(100vh-2rem)]`, `ui/SidePanel`'s full-height body). A
+            // box with its own fixed `max-h` keeps clipping however tall the
+            // window gets, and the whole point of this change is that the
+            // difference must be visible instead of assumed.
+            const after = await measureHiddenBelowFold(target)
             const fullFile = path.join(OUT_DIR, `${base}-full.png`)
             await target.screenshot({ path: fullFile })
             captured.push(path.relative(ROOT, fullFile))
+            clipped.push({
+              capture: base,
+              hidden: before.hidden,
+              offender: before.offender,
+              offenderCount: before.offenderCount,
+              residual: after.hidden,
+              // The box still clipping AFTER the growth, which is usually not
+              // the one that was worst BEFORE it (#1887). Recorded separately
+              // because the two answer different questions and the report was
+              // printing the first one under the second one's heading.
+              residualOffender: after.offender,
+            })
             await scenarioPage.setViewportSize({ width: vp.width, height: vp.height })
             await scenarioPage.waitForTimeout(200)
           }
@@ -1350,6 +2193,16 @@ async function main() {
         routes: ROUTES,
         scenarios: scenarios.map((s) => s.name),
         files: captured,
+        // Retention, recorded so the live manifest can be read as "this is the
+        // current run, and here is where the one before it went" (#1888). A
+        // reader who finds PNGs under `previous/` can tell from HERE that they
+        // were displaced by this commit, without opening the archived manifest.
+        stale: false,
+        keep_runs: retention.keep,
+        previous_run: retention.archived
+          ? `${ARCHIVE_DIR_NAME}/${retention.archived}`
+          : null,
+        pruned_runs: retention.pruned,
       },
       null,
       2,
@@ -1359,6 +2212,12 @@ async function main() {
 
   console.log(`\nscreenshot: wrote ${captured.length} PNGs to .screenshots/`)
   for (const f of captured) console.log(`  ${f}`)
+  if (retention.archived) {
+    console.log(
+      `  (the previous run is still on disk at .screenshots/${ARCHIVE_DIR_NAME}/${retention.archived}/ — ` +
+        'stamped stale, so do not attach it as evidence for this commit)',
+    )
+  }
   if (gotoFailures.length > 0) {
     console.error(`\n✗ ${gotoFailures.length} capture(s) FAILED — their PNGs were NOT written:`)
     for (const e of gotoFailures) console.error(`  [${e.route} · ${e.viewport}] ${e.text}`)
@@ -1373,8 +2232,76 @@ async function main() {
     console.log(
       `\n⚠ ${clipped.length} capture(s) had content BELOW THE FOLD — the plain PNG shows only what a user sees without scrolling:`,
     )
-    for (const c of clipped) console.log(`  ${c.capture}: ${c.hidden}px hidden → also wrote ${c.capture}-full.png`)
+    for (const c of clipped) {
+      console.log(
+        `  ${c.capture}: ${c.hidden}px hidden in ${c.offender ?? 'the target'}` +
+          `${c.offenderCount > 1 ? ` (${c.offenderCount} boxes report it)` : ''}` +
+          ` → also wrote ${c.capture}-full.png`,
+      )
+    }
     console.log('  (judge content from the -full PNG; judge what is reachable without scrolling from the other)')
+  }
+  // Split out of the advisory list on purpose. "We grew the viewport and it is
+  // STILL clipped" means the -full PNG is not actually full, so it is the one
+  // artifact in this run that looks like complete evidence and is not.
+  //
+  // It is REPORTED, not fatal, and that is a decision rather than an oversight
+  // (#1879 review). `blankCaptures` deletes its file and exits 1; this does
+  // neither, because the two are not the same situation. A blank PNG has no
+  // evidentiary value at all. A `-full.png` that is 203px short is still the
+  // most complete render of that screen this run can produce, and deleting it
+  // would leave the reviewer with less. More decisively: 8 of the 16 residuals
+  // on `dev` today are a `pre.max-h-48` code block and a modal body that are
+  // SELF-CAPPED by design — no viewport is tall enough, so folding this into
+  // `process.exit(1)` would make `npm run screenshot` fail permanently, on
+  // every branch, for a layout nobody intends to change. A gate that is red on
+  // an unchanged `dev` is one people learn to ignore, which is how this repo
+  // ends up with guards that flag everything.
+  //
+  // What that costs: #1701's scenario-local `shootWhole()` THREW on a non-zero
+  // residual, and generalising the measurement to all 21 call sites means that
+  // one hard assertion becomes a warning. The exchange is deliberate — every
+  // capture gains a measurement that 19 of 21 never had, and one scenario loses
+  // a hard stop. Making the residual gating needs an allowlist of the
+  // legitimately self-capped selectors first; filed rather than guessed at.
+  //
+  // Names the box that is STILL clipping, which is not usually the box that
+  // was worst before the growth (#1887). This line printed `c.offender` — the
+  // BEFORE offender — against `c.residual`, an AFTER number, so it credited
+  // one box's shortfall to another box's name for every residual since #1879
+  // generalised the measurement. Diagnosed by arithmetic before it was fixed:
+  // four `connect-agent` mobile captures with before-values of 203/203/295/1020
+  // all reported a residual of exactly 203, which is `CopyBlock`'s
+  // `pre.max-h-48` (192px cap, ~395px of command text at 390px) showing through
+  // under the modal body's name. Desktop's 66px is the same `pre` at the wider
+  // `max-w-xl` wrap: 192 + 66 = 258px of content.
+  //
+  // This is not cosmetic. The allowlist the note above asks for — the one that
+  // would let this become gating — would have been built from these strings,
+  // and would therefore have exempted `div.min-h-0 flex-1 overflow-y-auto …`:
+  // `ui/Modal`'s body, shared by every dialog in the app, and the one box whose
+  // clipping must never be waved through. An allowlist is only as honest as the
+  // selector it is keyed on.
+  const stillClipped = clipped.filter((c) => c.residual > CLIP_TOLERANCE_PX)
+  if (stillClipped.length > 0) {
+    console.error(
+      `\n⚠ ${stillClipped.length} of those are STILL clipped after growing the viewport — their -full.png is NOT full:`,
+    )
+    for (const c of stillClipped) {
+      console.error(
+        `  ${c.capture}-full.png: ${c.residual}px still hidden in ${c.residualOffender ?? 'the target'}` +
+          `${
+            c.residualOffender && c.residualOffender !== c.offender
+              ? `\n    (a DIFFERENT box from the one that was worst before the growth: ${c.offender})`
+              : ''
+          }`,
+      )
+    }
+    console.error(
+      '  (a box with its own fixed max-height cannot be un-clipped by a taller window — either\n' +
+        '   the scroller is legitimately self-capped, or the content genuinely does not fit. Say\n' +
+        '   which one wherever you attach these, and do NOT attach them as a whole screen.)',
+    )
   }
   if (consoleErrors.length > 0) {
     console.log(`\n⚠ ${consoleErrors.length} console error(s) during capture — the PNGs may show broken screens:`)

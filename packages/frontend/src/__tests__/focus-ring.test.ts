@@ -387,17 +387,20 @@ describe('brand-filled controls carry a ring offset (#1741)', () => {
  * string to "deduplicate" it fails loudly rather than silently restoring the
  * blind spot. Two assertions, two different claims.
  *
- * Two known limits remain, named here so the list is honest rather than ending
+ * One known limit remains, named here so the list is honest rather than ending
  * at the cheapest entry:
  *
  *   1. `DropdownMenu`'s `tone="danger"` item, whose focus indicator is a
- *      background swap rather than a ring — outside a ring rule's domain
- *      entirely.
- *   2. Controls with NO focus ring at all (`Sidebar` logout, `AgentCard`'s
- *      revoke/remove links, #1819). This rule only fires on a class string that
- *      already contains a `focus-visible:ring-*` utility, which is right for a
- *      TONE rule — a missing indicator is a different defect needing its own
- *      guard, not a widened version of this one.
+ *      background swap rather than a ring — outside a *ring* rule's domain
+ *      entirely. It is not unguarded: the indicator rule below covers it, and
+ *      deliberately accepts a `focus-visible:bg-` swap as a valid indicator.
+ *
+ * The other limit this comment used to carry — controls with NO focus ring at
+ * all — is gone, because #1819 built the guard for it rather than widening this
+ * one. That was the right split: this rule only fires on a class string that
+ * ALREADY contains a `focus-visible:ring-*` utility, which is correct for a TONE
+ * rule and structurally blind to an absent indicator. Two rules, two questions:
+ * this one asks "what colour", the one below asks "is there one at all".
  */
 const DESTRUCTIVE_HOVER =
   /hover:(?:bg-\[var\(--v2-danger(?:-soft)?\)\]|text-\[var\(--v2-danger\)\])/
@@ -471,6 +474,284 @@ describe('destructive controls focus in their own tone (#1792)', () => {
     const modal = readFileSync(join(FRONTEND, 'src/components/EditAgentModal.tsx'), 'utf8')
     expect(modal).toMatch(/hover:bg-\[var\(--v2-danger-soft\)\][^"'`]*focus-visible:ring-danger\/\d+/)
   })
+})
+
+/**
+ * A destructive control has a focus indicator AT ALL (#1819).
+ *
+ * The inverse question from the tone rule above, and a strictly more serious
+ * one. A wrong tone is a consistency defect on a control that can still be
+ * perceived; **no indicator is a WCAG 2.4.7 (Focus Visible) failure** — a
+ * keyboard user cannot tell which control Enter will fire, on an action that
+ * destroys something. `Sidebar`'s "Log out" was the worst case: the popover
+ * *programmatically* moves focus to its first item on open (`Sidebar.tsx`'s
+ * open-effect), so focus landed on an element with nothing to show for it.
+ *
+ * Why this could not be a widened version of the tone rule: that rule matches
+ * class strings that already contain a `focus-visible:ring-*` utility, so a
+ * call-site with none contributes nothing to scan and is invisible BY
+ * CONSTRUCTION. #1741's sweep had the same blind spot for the same reason. The
+ * population has to be enumerated from the other end — every destructive
+ * control — and then checked for an indicator.
+ *
+ * **A ring is not the only valid indicator, and this rule says so in code rather
+ * than in an exemption list.** `DropdownMenu`'s `tone="danger"` item indicates
+ * focus with a `focus-visible:bg-` swap. Exempting that file by name would have
+ * been the cheap move and would have encoded the wrong rule; accepting a
+ * background swap encodes the actual requirement — *indicate focus somehow* —
+ * and keeps the file guarded against losing its indicator later. Mutation-proven
+ * by removing that swap and watching this rule name the file.
+ *
+ * Scope, stated because the number is smaller than it looks: across 139
+ * hover-bearing class strings in `src/`, 99 carry no focus ring, but only these
+ * few are destructive. Scoped to destructive controls the rule closes at ZERO
+ * offenders and stays closed — a stronger guarantee than a shrink-only ratchet,
+ * which is why #1819 needed neither a ratchet nor a further split. The other ~95
+ * are mostly non-focusable elements that merely tint on hover; they are a
+ * separate, noisier question and are NOT covered here.
+ *
+ * **Two known limits, named rather than assumed away** — this file's whole
+ * argument is that a guard cannot be trusted because it passes, so its holes
+ * belong in writing:
+ *
+ *   1. **The `bg-` branch checks presence, not distinctness.** It asks whether a
+ *      `focus-visible:bg-` exists, never whether it DIFFERS from the control's
+ *      own `hover:bg-`. `DropdownMenu` currently sets both to
+ *      `--v2-danger-soft`, so its focused and hovered states are identical —
+ *      still an indicator against the resting state, so not a 2.4.7 failure, but
+ *      a hovering mouse user gets no focus signal. Worse, nothing here would
+ *      reject a `focus-visible:bg-white` on a white popover, which would satisfy
+ *      this rule while being invisible. Tightening it means comparing the two
+ *      values in the same string, not just matching one.
+ *   2. **A ring reachable only through `${}` interpolation is invisible to the
+ *      scan.** `QUOTED_STRINGS` reads raw source text, so a destructive hover in
+ *      a template literal whose ring arrives via an interpolated variable would
+ *      be reported as an offender. Note the direction: that is a false POSITIVE,
+ *      the safe failure — a noisy red, not a silent green. No call-site does
+ *      this today (`Button.tsx` and `entityCardStyles.ts` were both checked), so
+ *      it is theoretical; it is written down so the next person meets it as a
+ *      known limit rather than a mystery.
+ */
+const FOCUS_INDICATOR = /focus-visible:(?:ring-[a-z]+\/\d+|bg-)/
+
+/**
+ * Every quoted string in a source file, whatever quote encloses it.
+ *
+ * NOT `className="…"`. That was this rule's first shape and it had a hole big
+ * enough to hide the very case the rule documents: `DropdownMenu` builds its
+ * tone classes in a TERNARY of single-quoted strings, and `Button` keeps its
+ * variants in a lookup table, so neither is ever written as a `className="…"`
+ * literal and neither was scanned. The mutation that removed `DropdownMenu`'s
+ * indicator therefore left this rule green — a guard cannot be trusted because
+ * it passes, only because it fails when it should.
+ *
+ * Splitting on quote characters is the same granularity the tone rules above
+ * use, and it inherits their property: one class STRING at a time, so a file
+ * with several controls is never excused because one of its others is correct.
+ */
+const QUOTED_STRINGS = /[^"'`\n]+/g
+
+describe('destructive controls have a focus indicator at all (#1819)', () => {
+  it('every destructive control indicates focus somehow', () => {
+    const offenders: string[] = []
+    for (const file of sourceFiles(join(FRONTEND, 'src'))) {
+      const text = readFileSync(file, 'utf8')
+      for (const cls of text.match(QUOTED_STRINGS) ?? []) {
+        if (!DESTRUCTIVE_HOVER.test(cls)) continue
+        if (!FOCUS_INDICATOR.test(cls)) {
+          offenders.push(`${relative(FRONTEND, file)}: ${cls.trim().slice(0, 80)}…`)
+        }
+      }
+    }
+    expect(
+      offenders,
+      'a destructive control with no focus indicator is a WCAG 2.4.7 failure — add ' +
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 ' +
+        '(ring-inset on a full-bleed row, which would clip an outset ring)',
+    ).toEqual([])
+  }, SCAN_TIMEOUT)
+
+  it('the indicator scan is looking at a real population', () => {
+    // Same anti-vacuity reasoning as the tone rule: a regex that silently stops
+    // matching turns the assertion above into a green over an empty list.
+    const seen = new Set<string>()
+    for (const file of sourceFiles(join(FRONTEND, 'src'))) {
+      const text = readFileSync(file, 'utf8')
+      for (const cls of text.match(QUOTED_STRINGS) ?? []) {
+        if (DESTRUCTIVE_HOVER.test(cls)) seen.add(relative(FRONTEND, file))
+      }
+    }
+    expect(
+      seen.size,
+      'the destructive-control scan matched nothing — the rule above is passing vacuously',
+    ).toBeGreaterThanOrEqual(5)
+  }, SCAN_TIMEOUT)
+
+  it('a background-swap indicator counts, and DropdownMenu relies on it', () => {
+    // Pins the deliberate design choice above. If someone "tidies" DropdownMenu's
+    // focus-visible:bg- away, the rule must catch it rather than shrug — and if
+    // someone narrows FOCUS_INDICATOR to rings only, this documents what breaks.
+    const menu = readFileSync(join(FRONTEND, 'src/components/ui/DropdownMenu.tsx'), 'utf8')
+    expect(
+      menu,
+      "DropdownMenu's danger item indicates focus with a background swap, not a ring",
+    ).toMatch(/focus-visible:bg-\[var\(--v2-danger-soft\)\]/)
+    expect(FOCUS_INDICATOR.test('focus-visible:bg-[var(--v2-danger-soft)]')).toBe(true)
+  })
+})
+
+/**
+ * A control that hand-copies `Button`'s base class string declares a focus
+ * treatment AT ALL (#1867).
+ *
+ * The third question in this file, and the one nothing asked before. #1819
+ * enumerated DESTRUCTIVE controls and checked each for an indicator, and said
+ * in its own header that "controls with NO focus ring at all" was a separate,
+ * noisier problem it was deliberately not opening. #1867 is one instance of
+ * that problem — the White-on-brand CTA pattern, whose three hand-copies
+ * disagreed about focus for as long as it had three: only
+ * `investor-briefing/page.tsx:438` declared a ring, and the two on `app/page.tsx`
+ * (the highest-traffic buttons in the product) declared nothing and fell back to
+ * the UA outline.
+ *
+ * **Read the calibration before reading the rule.** Those two were not a WCAG
+ * 2.4.7 failure: neither set `focus-visible:outline-none`, so the browser's own
+ * outline survived and a keyboard user always had an indicator. This is a
+ * design-system CONSISTENCY rule, and stating it as an accessibility rule would
+ * be the easier framing and the wrong one.
+ *
+ * ── Why this population and not a wider one ──────────────────────────────────
+ *
+ * The honest scope is decided by what can be identified without guessing.
+ * `design-system.md` § *Button-shaped controls that are not `Button`* publishes
+ * a grep for controls that copy the FULL base signature, and states its own
+ * blind spot: button-shaped controls built from scratch (`CodeBlock`'s copy
+ * button, `ApprovalNotifications.tsx`'s styled `next/link`) do not appear,
+ * because the check classifies by class-string spelling rather than by rendered
+ * role. That blind spot is inherited here deliberately — a rule over "everything
+ * that looks like a button" would need a classifier nobody has scoped, and #1819
+ * measured the cost of guessing: 99 of 139 hover-bearing class strings carry no
+ * ring, and almost all of them are non-focusable elements that merely tint.
+ *
+ * So this rule owns exactly the population the published check names, which is
+ * also the population that *chose* to inherit `Button`'s paint and can be held
+ * to `Button`'s guarantees for it.
+ *
+ * ── The splice, which is load-bearing rather than tidy ───────────────────────
+ *
+ * `QUOTED_STRINGS` splits raw source on quote characters, so a class constant
+ * assembled by `'…' + '…'` — which is how `BrandBandButton` separates its
+ * geometry from its focus clause for readability — reads as TWO strings, the
+ * first of which carries the signature and no ring. Un-spliced, this rule would
+ * report the very file that fixes #1867 as an offender: a false positive, and
+ * the kind that gets a real rule deleted. `spliceConcatenations` rejoins
+ * adjacent same-quote literals exactly as the runtime does, and nothing else.
+ */
+const BUTTON_BASE_SIGNATURE = /rounded-md font-medium tracking-tight/
+
+/**
+ * `Button` itself is the primitive being copied, not a copy, and its ring
+ * COLOUR deliberately lives in `VARIANT_CLASS` rather than in the base string
+ * (#1817) — so its base string carries the signature and no `ring-<tone>/80` by
+ * design. It is not unguarded: `Button keeps its ring colour beside its fill`
+ * above asserts the arrangement directly, and `Button keeps its offset…`
+ * asserts the geometry. Exempting it here is naming that split, not excusing it.
+ */
+const BASE_SIGNATURE_EXEMPT = ['src/components/ui/Button.tsx']
+
+/**
+ * `'a ' + 'b'` → `'a b'`, for adjacent literals under the SAME quote char.
+ *
+ * **Sharp edge, named because a guard's holes belong in writing.** This is
+ * un-scoped: it rewrites every same-quote `+` join in the file, not only the
+ * two halves of a class-constant declaration. The failure it could produce is a
+ * false NEGATIVE, so state exactly what it takes — the signature-bearing
+ * literal must itself be the LEFT operand of a `+` whose right operand carries
+ * a `focus-visible:ring-*`. An unrelated `+` join elsewhere in the file cannot
+ * reach the signature string, because splicing only removes the join itself and
+ * leaves everything between the two strings intact.
+ *
+ * That shape is exactly the legitimate one (`BrandBandButton`'s `BASE` splits
+ * geometry from focus clause across two literals), which is why the splice
+ * exists at all — un-spliced, this rule reports the very file that fixes #1867
+ * as an offender. Scoping it to a matched `const X = …` statement would close
+ * the theoretical hole; it is left un-scoped because a repo-wide scan finds no
+ * `+`-joined literal pair outside the signature call sites, and a narrower
+ * regex over declaration syntax is its own new class of silent miss.
+ */
+function spliceConcatenations(text: string): string {
+  return text.replace(/(['"`])\s*\+\s*\1/g, '')
+}
+
+describe('hand-copies of Button declare a focus treatment (#1867)', () => {
+  function signatureStrings(): { file: string; cls: string }[] {
+    const out: { file: string; cls: string }[] = []
+    for (const file of sourceFiles(join(FRONTEND, 'src'))) {
+      const rel = relative(FRONTEND, file)
+      if (BASE_SIGNATURE_EXEMPT.includes(rel)) continue
+      const text = spliceConcatenations(readFileSync(file, 'utf8'))
+      for (const cls of text.match(QUOTED_STRINGS) ?? []) {
+        if (BUTTON_BASE_SIGNATURE.test(cls)) out.push({ file: rel, cls })
+      }
+    }
+    return out
+  }
+
+  it('every control that copies the base class string declares a focus ring', () => {
+    const offenders = signatureStrings()
+      .filter(({ cls }) => !FOCUS_INDICATOR.test(cls))
+      .map(({ file, cls }) => `${file}: ${cls.trim().slice(0, 80)}…`)
+    expect(
+      offenders,
+      'this control copied Button\'s paint but not its focus ring. Copying the class ' +
+        'string copies nothing else — add the one treatment from design-system.md ' +
+        '§ Focus rings, with the tone that matches the fill it sits on (white on a ' +
+        'dark band, brand on a light surface).',
+    ).toEqual([])
+  }, SCAN_TIMEOUT)
+
+  it('the signature scan is looking at a real population', () => {
+    // Same anti-vacuity reasoning as every other scan in this file. Two members
+    // today: `marketing/BrandBandButton.tsx` (the White-on-brand band CTA, the
+    // primitive #1867 extracted from three hand-copies) and `InvestorButton` in
+    // `investor-briefing/page.tsx`. If this drops to zero the rule above is
+    // green over an empty list.
+    const files = new Set(signatureStrings().map((s) => s.file))
+    expect(
+      files.size,
+      'the base-signature scan matched nothing — the rule above is passing vacuously',
+    ).toBeGreaterThanOrEqual(2)
+  }, SCAN_TIMEOUT)
+
+  it('a ring that lands on the brand band is white, never brand', () => {
+    // The tone half of the same defect, and NOT covered by the rule above: a
+    // control that swapped `ring-white/80` for `ring-brand/80` still "declares a
+    // focus ring" and would stay green. Brand indigo cannot reach 3:1 on a dark
+    // fill at any alpha (measured in `records why a brand ring may never sit on
+    // a dark fill` below), so the offset colour is the tell — a ring offset onto
+    // `--v2-brand` is landing on the band, where only white works.
+    const offenders: string[] = []
+    let seen = 0
+    for (const file of sourceFiles(join(FRONTEND, 'src'))) {
+      const text = spliceConcatenations(readFileSync(file, 'utf8'))
+      for (const cls of text.match(QUOTED_STRINGS) ?? []) {
+        if (!/focus-visible:ring-offset-\[var\(--v2-brand\)\]/.test(cls)) continue
+        seen++
+        if (!/focus-visible:ring-white\/\d+/.test(cls)) {
+          offenders.push(`${relative(FRONTEND, file)}: ${cls.trim().slice(0, 80)}…`)
+        }
+      }
+    }
+    expect(
+      seen,
+      'no ring is offset onto --v2-brand — the assertion below is passing vacuously',
+    ).toBeGreaterThanOrEqual(1)
+    expect(
+      offenders,
+      'a ring offset onto the brand band lands on a DARK fill; use ' +
+        'focus-visible:ring-white/80 (design-system.md § Focus rings)',
+    ).toEqual([])
+  }, SCAN_TIMEOUT)
 })
 
 describe('every focus ring actually compiles to a colour (#1741)', () => {

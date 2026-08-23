@@ -22,7 +22,7 @@ export function DiagramBox({
     <div
       className={`rounded-lg border px-3 py-2 text-center ${
         accent
-          ? 'border-[var(--v2-brand)]/30 bg-[var(--v2-brand-soft)]'
+          ? 'border-brand/30 bg-[var(--v2-brand-soft)]'
           : 'border-[var(--v2-border)] bg-[var(--v2-surface)]'
       } ${className}`}
     >
@@ -38,13 +38,13 @@ export function Arrow({ direction = 'down' }: { direction?: 'down' | 'right' }) 
   if (direction === 'right') {
     return (
       <div className="flex items-center justify-center px-1">
-        <Icon icon={MoveRight} className="h-3 w-5 text-[var(--v2-ink-3)]" />
+        <Icon icon={MoveRight} className="h-3 w-3 text-[var(--v2-ink-3)]" />
       </div>
     )
   }
   return (
     <div className="flex items-center justify-center py-1">
-      <Icon icon={MoveDown} className="h-5 w-3 text-[var(--v2-ink-3)]" />
+      <Icon icon={MoveDown} className="h-3 w-3 text-[var(--v2-ink-3)]" />
     </div>
   )
 }

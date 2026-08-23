@@ -24,6 +24,8 @@
 import { expect, test } from '@playwright/test'
 import {
   collectBrowserErrors,
+  dashboardOverview,
+  dashboardTransaction,
   expectNoHorizontalOverflow,
   mockHavenApi,
   seedAuthenticatedSession,
@@ -207,6 +209,178 @@ test.describe('mobile viewport', () => {
       expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
     })
   }
+
+  /**
+   * The dashboard's compact transaction row must not spill out of its own box
+   * (#1833).
+   *
+   * `TransactionActivityRow`'s `compact` density pinned the row to `h-[72px]`
+   * unconditionally, while the two-column arrangement that height was measured
+   * against is `sm:grid-cols-[minmax(0,1fr)_auto]` — i.e. >=640px only. Below
+   * `sm` the two children stack into a box still clamped to 72px and the
+   * overflow painted on top of the following row. Measured on `dev` at 393px:
+   * a 72px box (top 1564, bottom 1636) whose content reached 1684 — **48px**
+   * into its neighbour.
+   *
+   * BOTH HALVES ARE ASSERTED — the cause AND the reported symptom — and
+   * getting a second row is what makes the second half mean anything. The
+   * shared `dashboardTransaction` fixture serves exactly ONE transaction, so an
+   * adjacency loop over it would iterate zero pairs and pass no matter what the
+   * layout did: the "guard that cannot fail" shape this suite keeps paying for.
+   * Editing the shared fixture would fix that and blast-radius every other spec
+   * (it also feeds `/transactions`), so this test instead registers its OWN
+   * `**\/api/transactions/*` handler AFTER `mockHavenApi`. Playwright tries the
+   * most-recently-registered matching route first, so the override is scoped to
+   * this test and nothing else moves.
+   *
+   * The overflow half would be sufficient alone — rows are stacked block
+   * siblings, so "no row's content escapes its own box" implies "no row
+   * overlaps the next" — but it asserts the CAUSE, and adjacency asserts the
+   * SYMPTOM a human actually reported. Cheap to keep both once a second row
+   * exists, and they can come apart: a future layout could clip overflow
+   * (satisfying the first) while still colliding via a negative margin.
+   *
+   * WHY NOT ASSERT A HEIGHT. `rowHeight > 72` encodes today's content: red the
+   * day someone shortens a label, green the day a longer one overflows a
+   * *raised* fixed height. Not-overflowing holds at any content height, which
+   * is the same reason the fix sizes to content instead of picking a bigger
+   * number.
+   *
+   * The row is located by CONTENT — a `/transactions` link carrying a movement
+   * — not by class. The fix IS a class change, so a probe written against
+   * `.h-\[72px\]` would measure the shape it was written for and then silently
+   * find nothing. The `From `/`To ` filter also excludes the metrics card,
+   * which is a `/transactions` link too and measured 122px at every width,
+   * quietly padding the row count while testing nothing.
+   */
+  test('/dashboard compact transaction row stays inside its box at mobile widths', async ({
+    page,
+  }) => {
+    test.slow()
+
+    // A SECOND row, scoped to this test — see the block comment above.
+    //
+    // The endpoint is `/dashboard/overview`, NOT `/transactions/{safeId}`.
+    // Worth naming because the plausible guess is wrong and fails silently:
+    // an override on `**\/api/transactions/*` never matches, the page keeps
+    // `mockHavenApi`'s single-row overview, and the only symptom is a row
+    // count of 1. The request log settled it.
+    //
+    // The two rows differ in `hash` (React's key) and direction, so a
+    // measurement cannot silently read the same element twice.
+    await page.route('**/api/dashboard/overview', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ...dashboardOverview,
+          transactions: [
+            dashboardTransaction,
+            {
+              ...dashboardTransaction,
+              hash: `0x${'cd'.repeat(32)}`,
+              direction: 'in',
+              valueFormatted: '320.00',
+              timestamp: dashboardTransaction.timestamp - 3600,
+            },
+          ],
+        }),
+      })
+    })
+
+    await page.goto('/dashboard')
+    await page.waitForLoadState('networkidle')
+    await page.locator('#main-content').waitFor({ state: 'attached' })
+    await page.getByRole('button', { name: 'Open sidebar' }).waitFor()
+
+    // The widths #1833 names. Sweeping them inside this project is what this
+    // file's own header blesses — the rule is about committed BASELINES, not
+    // about setting a viewport, and this compares rectangles rather than
+    // pixels, so resizing away from Pixel 5's 393 costs nothing. 320 is the
+    // narrowest supported phone and is where the stacked content is tallest.
+    //
+    // Resizing in a LOOP (rather than `test.use({ viewport })` per test, which
+    // is what `mobile-nav-layering.mobile.spec.ts` does) follows
+    // `design-system.visual.spec.ts`. One page load measured at four widths,
+    // instead of four loads — worth it here because the row's content is
+    // identical at every width and only its layout changes.
+    for (const width of [320, 390, 393, 430] as const) {
+      await page.setViewportSize({ width, height: 844 })
+      // Let the row re-layout before reading rectangles off it.
+      await page.waitForTimeout(200)
+
+      const rows = await page.evaluate(() => {
+        const visible = (el: Element) => el.getClientRects().length > 0
+
+        const links = Array.from(document.querySelectorAll('a[href="/transactions"]'))
+          .filter(visible)
+          // A transaction row carries a <TransactionMovement>; the metrics
+          // card and the section's "Open transactions" button do not.
+          .filter((el) => {
+            const text = el.textContent ?? ''
+            return text.includes('From ') && text.includes('To ')
+          })
+
+        return links.map((link) => {
+          const box = link.getBoundingClientRect()
+          // How far the row's painted content actually reaches. A clamped box
+          // does not clip (no `overflow-hidden`), so the descendants are what
+          // collide with the next row — the box alone cannot show the defect.
+          let contentBottom = box.top
+          for (const el of Array.from(link.querySelectorAll('*'))) {
+            if (!visible(el)) continue
+            const r = el.getBoundingClientRect()
+            if (r.height === 0) continue
+            contentBottom = Math.max(contentBottom, r.bottom)
+          }
+          let contentTop = box.bottom
+          for (const el of Array.from(link.querySelectorAll('*'))) {
+            if (!visible(el)) continue
+            const r = el.getBoundingClientRect()
+            if (r.height === 0) continue
+            contentTop = Math.min(contentTop, r.top)
+          }
+          return {
+            height: +box.height.toFixed(1),
+            overflowBy: +(contentBottom - box.bottom).toFixed(1),
+            contentTop: +contentTop.toFixed(1),
+            contentBottom: +contentBottom.toFixed(1),
+          }
+        })
+      })
+
+      // TWO rows, not just "some". Without this the loops below iterate
+      // nothing (or one thing) and pass vacuously — and the route override
+      // above serves two, so anything less means the override missed or the
+      // probe broke, not that the user has no history. This is the assertion
+      // that keeps the adjacency check honest.
+      expect(
+        rows.length,
+        `@${width}px: expected two dashboard transaction rows to measure, got ${rows.length}`,
+      ).toBe(2)
+
+      // 1. THE CAUSE — content stays inside its own row.
+      for (const [i, row] of rows.entries()) {
+        // Asserted on the MAGNITUDE so a failure prints how far off the layout
+        // is — the first thing the next reader wants to know.
+        expect(
+          row.overflowBy,
+          `@${width}px: row ${i} content escapes its box: ${JSON.stringify(row)}`,
+        ).toBeLessThanOrEqual(1)
+      }
+
+      // 2. THE SYMPTOM — and therefore no row's content reaches into the next.
+      for (let i = 0; i < rows.length - 1; i += 1) {
+        expect(
+          rows[i + 1].contentTop - rows[i].contentBottom,
+          `@${width}px: row ${i} content overlaps row ${i + 1}: ${JSON.stringify([
+            rows[i],
+            rows[i + 1],
+          ])}`,
+        ).toBeGreaterThanOrEqual(-1)
+      }
+    }
+  })
 
   // The navigation-toggle HIT-TEST — the #1749 defect class, where a stacking
   // regression leaves the toggle visible, enabled and `toBeVisible()`-green

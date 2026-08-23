@@ -377,9 +377,9 @@ export async function updateConnectorMetadata(
 
 export const INSERT_AGENT_SQL = `INSERT INTO agents (
            user_id, name, description, delegate_address, api_key_hash,
-           api_key_prefix, safe_id, status
+           api_key_prefix, safe_id, status, mcp_server_name
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_approval')
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_approval', $8)
          RETURNING id`
 
 export async function insertPendingAgent(
@@ -391,6 +391,12 @@ export async function insertPendingAgent(
     apiKeyHash: string
     apiKeyPrefix: string
     safeId: string
+    /**
+     * #1878: the MCP server name the connector reported wiring this agent as.
+     * NULL for every connector older than #1878 — a display aid, never keyed
+     * off, and never guessed at when absent.
+     */
+    mcpServerName?: string | null
   },
   tx: Executor,
 ): Promise<string> {
@@ -402,6 +408,7 @@ export async function insertPendingAgent(
     input.apiKeyHash,
     input.apiKeyPrefix,
     input.safeId,
+    input.mcpServerName ?? null,
   ])
   return result.rows[0].id
 }

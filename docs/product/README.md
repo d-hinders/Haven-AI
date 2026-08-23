@@ -21,7 +21,7 @@ covers:
   - packages/frontend/src/components/ApprovalQueue.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
-last-verified: "2026-08-21" # #1726: the §8 "Known implementation gap" note on 36/40px Button sizes was stale once the hit area reached 44px — rewritten to point at the tap-target rule and to scope the manual check to non-Button controls. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-23" # #1702: indexed the new `agent-key-rotation.md` beside `account-recovery.md`, which is the doc it is most often confused with. Index entry only; no other row re-verified. Prior: #1726: the §8 "Known implementation gap" note on 36/40px Button sizes was stale once the hit area reached 44px — rewritten to point at the tap-target rule and to scope the manual check to non-Button controls. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Haven Product & UX Guide
@@ -33,6 +33,7 @@ This is the durable product UX entrypoint for Haven and the index for the `docs/
 - Screen recipes: [screen-recipes.md](./screen-recipes.md)
 - UI review checklist: [design-review.md](./design-review.md)
 - Account recovery (user-facing model): [account-recovery.md](./account-recovery.md)
+- Replacing an agent's signing key: [agent-key-rotation.md](./agent-key-rotation.md) — the sibling to account recovery, and routinely confused with it
 - Redesign implementation history (archived): [../archive/redesign-handoff.md](../archive/redesign-handoff.md)
 
 When these docs overlap, use this order of authority:

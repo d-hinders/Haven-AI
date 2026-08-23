@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/docs-drift/docs-drift.test.ts
   - packages/backend/src/docs-drift/env-example-drift.test.ts
   - .env.example
-last-verified: "2026-08-16" # #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
+last-verified: "2026-08-23" # #1885: Phase 1 §"Finding a break that is already on `dev`" re-read against `scripts/docs/chain-sweep.mjs` and `chain-integrity.mjs` on `origin/dev` — records that the sweep now classifies a DECLARED RESET separately from an unrestored break (`N unrestored, M declared reset`), why the blanket `nowLine` check was rejected (one declared compaction would excuse every break in the doc, a false negative in the tool built to find silent losses), and the binding actually used (the commit that INTRODUCED the declaration). Also records `--ref=` and the `--follow` rename residual with the measurement that shows it currently empty. Nothing in Phases 2-4 re-verified in this pass. Prior: #1869: Phase 2 §"Coupling gate" re-read against `scripts/docs/coupling-gate.mjs` on `origin/dev` (not against #1824's description of itself) — the same-day-suppression paragraph #1854 flagged and left is REPLACED, because `implicatedDocs` no longer compares `last-verified` to today and the `today` parameter is gone from its signature rather than accepted-and-ignored. The replacement states the behaviour and carries only the reasoning a reader needs (the heuristic's entire live domain was somebody else's stamp, since `changedSet.has(doc)` already covers a doc this change verified), and quotes the 22-advisories/15-of-40-merges/0-blocking measurement WITH its window (`0d299034`) because the docstring records the counts as traffic-dependent. The `--strict` carve-out the old paragraph described is genuinely gone; the one that REMAINS is different and now documented where it lives — a `contract: true` doc under `--strict` skips the incidental-path filter (`filterIncidental = !(strict && contract)`). Phase 1 also gains `scripts/docs/chain-sweep.mjs` (#1876) and the reason it is needed: a chain break already on `dev` is invisible to the diff-scoped check permanently, not merely deferred to the next editor. Nothing else in Phases 2-4 re-verified in this pass. Prior: #1854: Phase 2 §"Scoping covers" re-read against `scripts/docs/coupling-gate.mjs` — documents the test-content carve-out (`packages/qa-agent/**`, `packages/frontend/e2e/**`) and the `__screenshots__/` carve-out from it, which is checked first; the same-day-suppression paragraph in this section is STALE since #1824 and is NOT fixed here (#1869) — nothing else re-verified in this pass. Prior: #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
 ---
 
 # Documentation-quality system
@@ -100,7 +100,8 @@ file and is dependency-free like the other `scripts/docs/*` tools.
 ### Validate locally
 
 ```bash
-npm run docs:check   # validate every doc's front-matter + covers globs
+npm run docs:check   # front-matter + covers globs, agent skills, last-verified chains
+npm run docs:chain   # just the chain check, against origin/dev
 npm run docs:test    # unit tests for the docs and agent-skill validators
 ```
 
@@ -114,6 +115,14 @@ on any problem.
 and the boundary between portable workflow text and client-specific mechanics.
 It is dependency-free and runs as part of `npm run docs:check`.
 
+`scripts/docs/chain-integrity.mjs` is the third `docs:check` step and is
+described under [`last-verified` chain integrity](#last-verified-chain-integrity-1843)
+below. Unlike the other two it reads **git history**, so it needs a base
+commit: locally `origin/dev`, in CI `BASE_SHA`/`HEAD_SHA` with
+`fetch-depth: 0`. Without one it says NOTHING WAS CHECKED and, in CI, fails —
+a gate that cannot see the diff must never report a clean bill of health
+(the #1076 lesson).
+
 ## Check layers
 
 ### Phase 1 — deterministic checks (this PR)
@@ -124,16 +133,25 @@ Run by `.github/workflows/docs.yml` on **every** pull request:
 | --- | --- | --- |
 | Front-matter + `covers` resolution | `scripts/docs/validate-frontmatter.mjs` | **Blocking** |
 | Agent-skill structure + adapter alignment | `scripts/docs/validate-agent-skills.mjs` | **Blocking** |
+| `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843)) | `scripts/docs/chain-integrity.mjs` | **Blocking** |
 | Link health | lychee (`.lychee.toml`) | Advisory (`continue-on-error`) |
 | Markdown hygiene | markdownlint-cli2 (`.markdownlint.json`) | Advisory |
 | Product-copy terminology | Vale (`.vale.ini`, scoped to `docs/product/**`) | Advisory |
 
-The two validators are whole-repo and dependency-free, which is why the
+All three blocking checks need no npm dependencies and finish in seconds, which is why the
 `pull_request` trigger carries **no `paths:` filter** — a required check must
 report on every PR or auto-merge deadlocks waiting for a run that never happens
 (the #933 lesson; see [`autonomous-pr-loop.md`](autonomous-pr-loop.md) §One-time
 setup). Add **Docs front-matter & agent skills** to the "Haven automerge rules"
 ruleset for the blocking column above to be true.
+
+The chain check runs **inside that same required job** rather than as a job of
+its own. A new job would be a new check name, and a check name that is not in
+the ruleset blocks nothing — so the rule would have started enforcing on the
+day someone remembered to edit the ruleset, not the day it merged. The cost of
+folding it in is that its failures are attributed to a job whose name says
+"front-matter"; the failure message names the doc and the dropped references,
+so nobody has to guess which of the three spoke.
 
 Until [#1023](https://github.com/d-hinders/Haven-AI/issues/1023) these ran as a
 hard gate only inside `ship-next`, which made the canonical workflow stricter
@@ -143,6 +161,129 @@ on which tool opened the PR.
 Vale is scoped to `docs/product/**` on purpose: engineering docs legitimately use
 "Safe", "AllowanceModule", and "signer", so the terminology rule must not flood
 them.
+
+#### `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843))
+
+Every other check here asks whether a doc was **touched**, or whether its header
+**parses**. None asks whether it still says what it said — so a deletion is the
+one edit that satisfies all of them at once. The coupling gate goes green
+because the doc changed (exactly what it wanted), front-matter validation
+because the header is still well-formed, and the staleness audit *improves*,
+because the edit bumped `last-verified`.
+
+That is not hypothetical. Resolving the #1832/#1841 collision on
+`ship-playbooks/frontend.md`, a session **picked a side instead of chaining**
+and deleted `#1816`'s chain entry, the §4 paragraph it pointed at, and a
+post-review correction — all already merged on `dev`. Valid front-matter, 145
+coherent lines, every gate green.
+
+**The rule.** A `last-verified` note line is a chain, one entry per issue that
+re-verified the doc (#1496). So:
+
+> every issue reference on a doc's previous `last-verified` line must still
+> appear on its new one.
+
+Prepending and appending both satisfy it, so the check never has to know which
+order a given doc uses — and **read the doc's own chain before you add to it**:
+`mcp-runtime-compatibility.md` reads newest-first, `product/design-system.md`
+oldest-first.
+
+**Compacting a chain on purpose** says so on the line itself, which passes the
+check and prints what was dropped:
+
+```yaml
+last-verified: "2026-08-22" # chain-reset(#1843): compacted, history in git log. #1799: …
+```
+
+The marker lives on the line rather than in a PR description so the excuse
+lands in the diff of the file it excuses.
+
+**What it deliberately does not do.** It is not a general "did prose disappear"
+detector; it watches the one line where a lost entry is provable rather than
+guessed. It also does not follow **renames**: a doc moved and chain-edited in
+one pull request has no previous version at its new path, so that shape is a
+known blind spot rather than a covered case. Two heavier designs were weighed in #1843 and rejected: a shrink-only
+line-count ratchet on contract docs (more teeth, but it fires on every
+legitimate deletion, and an escape hatch used routinely stops being read), and
+surfacing deletions in the advisory coupling comment (nearly free, but the
+incident's advisory comment was already green — a comment nobody must answer
+would not have caught it).
+
+The check is also **containment, not the order-preserving subsequence** the
+issue proposed. Backtested over every feature PR merged into `dev` since the
+chaining convention took hold, the ordering half caught zero real defects and
+produced two false positives, both benign: a new note that CITES an older issue
+in its prose ("#1816: … reuses #1800's mechanism") moves that reference to the
+front without dropping anything. One of the two was the resolution that *fixed*
+the incident.
+
+A `dev → main` promotion pull request is exempt: its diff is weeks of history
+that each `dev` PR already carried through this check, and no promoter can act
+on a chain edited before the check existed. The exemption inherits this repo's
+usual caveat — a commit that reached `dev` by direct push or admin merge was
+never checked by any PR gate, this one included — so it is "already checked"
+in the same sense every other gate here means it, not a stronger one. A
+`hotfix/*` into `main` is real work and stays checked.
+
+The measurement behind the containment decision is re-runnable rather than
+quoted: `node scripts/docs/chain-integrity-backtest.mjs --since=<date>` replays
+the check over merged pull requests. It is a development tool; nothing in CI
+runs it.
+
+**Finding a break that is already on `dev`
+([#1876](https://github.com/d-hinders/Haven-AI/issues/1876)).** The check is
+diff-scoped, so a chain broken by an earlier merge is examined by nothing —
+and, because containment compares a contributor's new line against `dev`'s
+current line, neither of which carries the lost reference, it does not surface
+on the next edit either. It is silent permanently, not deferred. `node
+scripts/docs/chain-sweep.mjs` replays the same exported containment rule over
+every doc's own history and reports the drops whose references are still
+missing today. Also a development tool, also not in CI, and also not
+retroactive: it defaults to `--since=2026-08-15`, because before the chaining
+convention (#1496) replacing the note *was* the convention and every doc reads
+as broken. `--ref=<git ref>` picks the tree it sweeps, defaulting to
+`origin/dev`.
+
+**A declared reset is a separate class, not a silenced one
+([#1885](https://github.com/d-hinders/Haven-AI/issues/1885)).** The sweep's
+summary counts unrestored docs and declared-reset docs separately, and the
+two are different findings. `chain-reset(#N)` is written on a doc's *current* line, while the
+sweep replays *historical* pairs — so a marker added after the fact (both
+#1496 compactions at `cf177982`, 2026-08-16, predate the marker syntax
+introduced by #1843 at `178c67d0`, 2026-08-22) is invisible to a
+naive replay, and those docs were reported as unrestored breaks in every run
+forever. The fix is **not** to honour the marker on today's line: one declared
+compaction would then excuse every break in that doc's history, before and
+after it, and a false negative in the one tool built to find silent losses is
+worse than the false positive it tidies. Instead a declaration is bound to the
+single commit that **introduced** it — the commit that wrote the marker, or,
+for a retroactive declaration, the commit that compacted the chain down to the
+declaring issue's entry alone. Every other break in the same doc is still
+reported. "Introduced" is doing the work: a marker persists on the line for
+good, so a drop made a week later still carries it on both sides of its pair.
+
+The retroactive half is deliberately keyed on the compaction *shape* — `#N` as
+the line's only reference — and not on "the first commit to cite `#N`", which
+was the first attempt and had a hole review found: a note that merely mentions
+an issue in prose ("#1500: … plan tracked in #1496") is indistinguishable from
+an entry to `issueRefs`, so an unrelated commit that dropped a reference while
+name-checking #1496 got excused by #1496's declaration. A prose mention always
+sits alongside the entries it did not delete, which is what standing alone
+rules out. The rule is narrow on purpose and fails toward reporting: a partial
+compaction does not match, and is then listed as unrestored **and** as an
+unmatched declaration — a readable "your marker did not bind", never silence.
+A declaration matching no break is likewise reported, so an inert escape hatch
+cannot pass for a used one.
+
+**The sweep does not use `--follow`**, so a doc renamed inside the `--since`
+window hides the breaks it took under its old path — the same blind spot as the
+diff-scoped check above and as `chain-integrity-backtest.mjs`. Adding `--follow`
+alone would make it worse rather than better: the extra revisions predate the
+rename, the per-revision `git show <rev>:<path>` lookups use today's path, and
+every one of them would resolve to nothing — cost and a false air of
+completeness, no findings. A real fix has to carry the old path per commit.
+Currently the gap is empty rather than tolerated: `git log --diff-filter=R -M
+--since=2026-08-15 origin/dev -- docs/` reports zero renames.
 
 ### Phase 2 — coupling gate + drift tests ([#644](https://github.com/d-hinders/Haven-AI/issues/644))
 
@@ -165,12 +306,30 @@ reached CI with an untouched contract doc ([#1077](https://github.com/d-hinders/
 For the same reason an empty candidate set is reported as "nothing was checked"
 and fails closed under `--strict`, rather than passing.
 
-A doc whose `last-verified` is **today** is suppressed — once you've confirmed it
-accurate in a day's work, subsequent edits to a covered file won't re-flag it
-the same day. This is a noise-reduction heuristic for the advisory comment and it
-does **not** apply to a contract doc under `--strict`: a blocking check must not
-depend on wall-clock time, and a doc some *other* PR verified today says nothing
-about whether this one made it stale.
+**There is no same-day suppression** ([#1824](https://github.com/d-hinders/Haven-AI/issues/1824)).
+A doc is implicated whenever a changed file matches its `covers` globs and the
+PR did not also touch the doc — whatever the doc's `last-verified` date says,
+including today's. The heuristic that used to skip a doc stamped today was
+removed outright, and so was the `--strict` carve-out that existed only to keep
+it away from the blocking half.
+
+The mechanical reason it could never be right: a doc *this* change verified is a
+doc *this* change edited, and the gate already skips docs the PR touched. So the
+only suppression the heuristic could still perform was on a stamp written by
+somebody else's work — the situation [#1077](https://github.com/d-hinders/Haven-AI/issues/1077)
+had already ruled unacceptable for the blocking half. It was not mostly-right
+with an edge case; its entire live domain *was* the edge case. Measured before
+removing rather than argued: across the 40 merges into `dev` in the window
+ending at `0d299034`, it hid 22 advisories over 15 merges — and zero blocking
+findings, which matches what the code already guaranteed structurally. Those
+counts describe this repository's traffic in that window, not a standing number;
+re-derive them if they ever have to carry an argument again.
+
+The `today` parameter was **removed** from `implicatedDocs` rather than left
+accepted-and-ignored, so reintroducing the behaviour is a visible change rather
+than a one-line revival. `last-verified` dates are still read — `ageDays` reports
+each implicated doc's staleness in the advisory comment, where a wall-clock
+skew of a day never changes an outcome.
 
 **Scoping `covers` (#1077).** `covers` means *this doc describes that code*, not
 *this doc applies to that code*. A standing checklist that globs
@@ -181,10 +340,33 @@ screen it is applied to. Narrowing to zero is the opposite failure: a doc that
 matches nothing never gets the doc-reviewer nudge, so keep a real net.
 Two related rules the gate applies for you:
 test files and generated files (`__tests__/`, `*.test.*`, `*.spec.*`,
-`packages/core/src/api-types.ts`) implicate a doc only when `covers` names the
-path **exactly** — a wildcard does not sweep them up, since prose is not made
-stale by a test being added; and a `#` comment may only trail a `covers` item,
-never occupy its own line, which would silently truncate the list.
+`__screenshots__/`, `packages/core/src/api-types.ts`) implicate a doc only when
+`covers` names the path **exactly** — a wildcard does not sweep them up, since
+prose is not made stale by a test being added; and a `#` comment may only trail
+a `covers` item, never occupy its own line, which would silently truncate the
+list.
+
+The incidental-path filter is the one place `--strict` still behaves
+differently, and in the opposite direction to the suppression it replaced: a
+`contract: true` doc under `--strict` skips the filter entirely and sees every
+changed file its globs match, incidental or not. Without that, a test-only PR
+against a wildcard-covered money-path package (`packages/sdk/src/**`,
+`packages/signer/**`) passes the blocking gate silently.
+
+That list has one deliberate carve-out and one carve-out *from* the carve-out,
+and the order between them is load-bearing. Packages whose **content is tests**
+— `packages/qa-agent/**` and `packages/frontend/e2e/**` — are never incidental:
+those scenarios and specs are what their runbooks (`agent-qa.md`,
+`e2e-qa-runbook.md`) document, not a test of some other source, so treating them
+as incidental would silently un-cover the docs that describe them. But
+`__screenshots__/` is checked **first**
+([#1854](https://github.com/d-hinders/Haven-AI/issues/1854)), because Playwright
+writes the committed visual-regression baselines *inside* the e2e tree
+(`snapshotPathTemplate` in `packages/frontend/playwright.config.ts`) and the
+*Update visual baselines* workflow commits them. Those PNGs are generated and
+described by no runbook, so before #1854 every baseline regeneration implicated
+`docs/bug-reports/_run-report-template.md` — noise on a whole class of PR. An
+e2e **spec** change still implicates the runbooks, unchanged.
 
 **Drift tests** (`packages/backend/src/docs-drift/`): vitest tests, modeled on
 the OpenAPI drift test, that pin hand-maintained doc/config claims to the code

@@ -120,7 +120,20 @@ export function AllowanceBarSkeleton({ symbol }: { symbol: string }) {
   )
 }
 
-/** DB-configured allowance row, shown when on-chain data is unavailable. */
+/**
+ * DB-configured allowance row, shown when on-chain data is unavailable.
+ *
+ * **Deliberately renders no bar (#1846).** `AgentAllowance` carries
+ * `allowance_amount` and `reset_period_min` and nothing else — there is no
+ * spend figure on this shape, so there is no proportion to draw. The rule that
+ * used to sit here was `h-full w-full`: the same 3px geometry as `AllowanceBar`
+ * above, permanently pegged at 100%, a meter that renders identically whatever
+ * is true. It read as "fully spent" (or as a live meter that happens to be
+ * pegged) when what is actually known is only the configured envelope.
+ *
+ * If a spend figure ever reaches this shape, render `AllowanceBar` — do not
+ * reintroduce a track here. `AllowanceBar.test.tsx` pins the split.
+ */
 export function ConfiguredAllowanceRow({
   allowance,
   chainId,
@@ -139,9 +152,6 @@ export function ConfiguredAllowanceRow({
           {` ${allowance.token_symbol}`}
           {allowance.reset_period_min > 0 ? ` ${reset}` : ''}
         </span>
-      </div>
-      <div className="h-[3px] w-full rounded-full bg-[var(--v2-surface-2)]">
-        <div className="h-full w-full rounded-full bg-[var(--v2-brand)]/25" />
       </div>
       <p className="text-xs text-[var(--v2-ink-3)]">Configured in Haven</p>
     </div>

@@ -537,7 +537,11 @@ export default function EditAgentModal({
                               aria-label={`Remove ${sym} budget`}
                               className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              <Icon icon={X} className="h-3 w-3" />
+                              {/* 14, not 12 (#1923): a remove control on a data row takes
+                                  14 whatever its box is, matching haven/AgentBudgetCard.
+                                  The row's text-xs run does not pull it to 12 — see
+                                  docs/product/design-system.md § 5 -> Size. */}
+                              <Icon icon={X} className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         </div>
@@ -681,7 +685,7 @@ export default function EditAgentModal({
               )}
 
               {budgetChanged && (safeDetails?.threshold ?? 1) > 1 && (
-                <div className="text-xs text-[var(--v2-warning)] bg-[var(--v2-warning-soft)] border border-[var(--v2-warning)]/20 rounded-lg px-3 py-2">
+                <div className="text-xs text-[var(--v2-warning)] bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg px-3 py-2">
                   This account requires {safeDetails?.threshold} of {safeDetails?.owners?.length} approvals. Haven will submit it for approval.
                 </div>
               )}

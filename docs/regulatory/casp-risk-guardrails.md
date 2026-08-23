@@ -28,8 +28,10 @@ covers:
   - packages/backend/src/modules/catalog/catalog-discovery.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/domain/payment-coverage.ts
+  - packages/backend/src/domain/machine-payment-lifecycle.ts
   - packages/backend/src/infra/relayer*.ts
   - packages/backend/src/infra/outbound-*.ts
+  - packages/backend/src/infra/delegate-*.ts
   - packages/backend/src/modules/reporting/**
   - packages/backend/src/modules/accounts/safe-deployer.ts
   - packages/backend/src/modules/accounts/mainnet-gate.ts
@@ -64,7 +66,7 @@ covers:
   - .github/workflows/publish.yml
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-22" # #1496: this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
+last-verified: "2026-08-22" # chain-reset(#1496): this line is date-only from now on — verification entries are casp-changelog shards (satisfied-by), and the note history this line used to carry (which THREE concurrent PRs corrupted by colliding on it) lives in the shards and git log. EOF log below frozen as of 2026-08-12
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -769,6 +771,26 @@ list in
 is money-path enough to route the [`money.md`](../contributing/ship-playbooks/money.md)
 playbook, it is money-path enough to owe a perimeter shard. **Adding a file to
 that list without adding it here re-opens this hole.**
+
+**That rule is now checked (#1899).** It was maintained by hand for two months
+and had drifted by four globs — `domain/machine-payment-lifecycle.ts` and
+`infra/delegate-*.ts` were simply missing, and `infra/chain/**` and
+`infra/repositories/**` were partly covered by named files. Two of those are
+telling: `infra/relayer*.ts` and `infra/outbound-*.ts` were both here while
+`infra/delegate-*.ts` was not, which is the *same* prefix accident that hid
+`infra/delegate-balance-monitor.ts` — the DETECT mitigation for the x402
+in-flight window — from the money-path list itself until #1892's review. One
+omission in two lists, found twice, because a rule stated in prose is a rule
+nobody re-checks.
+
+`scripts/ci/money-path.test.mjs` now asserts this front matter spans every
+runtime glob in [`.github/money-path-globs.json`](../../.github/money-path-globs.json).
+The two remaining gaps are **exempted explicitly, not silently**: widening a
+`contract: true` doc's `covers:` across `infra/chain/**` (11 files) and
+`infra/repositories/**` (49 files) makes every future PR touching those layers
+owe a CASP shard, which is a friction decision for this doc's owner rather than
+a drift fix. They sit in that test's `EXEMPT` map with their reasons; anything
+else added to the money-path list reddens CI on the day it lands.
 
 Two consequences worth stating outright:
 

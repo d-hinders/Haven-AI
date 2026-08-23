@@ -19,7 +19,7 @@ export function StepProgress({ totalSteps, currentStep, className = '' }: StepPr
                 isActive
                   ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
                   : isCompleted
-                    ? 'border-[var(--v2-success)]/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+                    ? 'border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
                     : 'border-[var(--v2-border)] text-[var(--v2-ink-3)]'
               }`}
             >

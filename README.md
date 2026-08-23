@@ -16,7 +16,7 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-08-12" # #1328 — /demo/mpp/* retired from the endpoints table
+last-verified: "2026-08-23" # #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. Scope: that one sentence in the credential paragraph; the rest of the README was not re-verified. Prior: #1328 — /demo/mpp/* retired from the endpoints table
 ---
 
 # Haven
@@ -173,7 +173,7 @@ npm run dev
 6. Save the one-time Haven credential when the Done step appears
 7. Use **Connect your agent** to add Haven to Claude Code, Cursor, VS Code, Codex CLI, OpenCode, Goose, Amp, or another runtime
 
-The credential contains an agent API key and a delegate signing key. Haven stores only the API-key hash/prefix and never stores the delegate private key. If the API key is exposed or lost, use **Payment credentials** on the agent detail page to rotate it; the new key is shown once and the old key stops working. If the delegate signing key is exposed or lost, pause or revoke the agent and create a new credential path.
+The credential contains an agent API key and a delegate signing key. Haven stores only the API-key hash/prefix and never stores the delegate private key. If the API key is exposed or lost, use **Payment credentials** on the agent detail page to rotate it; the new key is shown once and the old key stops working. If the **delegate signing key** is exposed or lost, a delegation-rail agent is **re-keyed**, not replaced: the same agent gets a new signing key and a new API key, keeping its id, name, history and the remainder of its budget — see [Replacing an agent's signing key](docs/product/agent-key-rotation.md). Legacy AllowanceModule agents have no signed delegation to revoke and re-issue, so those are paused or revoked and re-onboarded.
 
 ## Agent Integration
 
@@ -551,10 +551,15 @@ The five npx-installed packages — `@haven_ai/sdk`, `@haven_ai/signer`, `@haven
 #    and source version constants) and verify the connect bundle.
 npm run release:bump -- <new-version>   # e.g. 0.1.17-alpha.0
 
-# 2. Commit on a release branch, open a PR, get it green, merge to main.
+# 2. Commit on a release branch and open the PR into `dev` — NOT `main`.
+#    `dev-gate` only lets `dev` or `hotfix/*` into `main`, so a release/*
+#    branch aimed at `main` fails by design. Get it green, merge to `dev`.
+
+# 3. Promote `dev → main` (a merge commit, never a squash). Publishing fires
+#    on THIS step, not on the dev merge — the promotion stays a human step.
 ```
 
-On merge, the **Publish packages** workflow (`.github/workflows/publish.yml`) rebuilds `dist` in dependency order and publishes only the packages whose `package.json` version is not yet on npm. The dist-tag is derived from the version: a prerelease like `0.1.17-alpha.0` publishes under `--tag alpha`, a stable `0.2.0` under `latest`. The connector install command the dashboard hands out is pinned to `@alpha`, so the prerelease line is what real users get.
+On the promotion to `main`, the **Publish packages** workflow (`.github/workflows/publish.yml`) rebuilds `dist` in dependency order and publishes only the packages whose `package.json` version is not yet on npm. The dist-tag is derived from the version: a prerelease like `0.1.17-alpha.0` publishes under `--tag alpha`, a stable `0.2.0` under `latest`. The connector install command the dashboard hands out is pinned to `@alpha`, so the prerelease line is what real users get.
 
 - **Trigger model:** version bump = the gate. npm rejects republishing an existing version, so a normal (non-bump) commit is a no-op.
 - **Auth:** [npm Trusted Publishing (OIDC)](https://docs.npmjs.com/trusted-publishers) — there is **no `NPM_TOKEN` secret**. The workflow grants the job `id-token: write` and upgrades npm to ≥ 11.5.1; npm then authenticates the short-lived GitHub Actions OIDC token against a *trusted publisher* configured per package on npm (pointing at `d-hinders/Haven-AI` + workflow `publish.yml`). Nothing to leak or rotate, and it's exempt from the 2FA one-time-password prompt that blocks token-based publishes.

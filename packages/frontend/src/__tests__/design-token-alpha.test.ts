@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import postcss from 'postcss'
 import tailwindcss from 'tailwindcss'
 import { describe, expect, it } from 'vitest'
@@ -150,6 +150,35 @@ describe('compiled CSS: the focus ring is brand-derived (#1708)', () => {
     }
   }, COMPILE_TIMEOUT)
 
+  it('covers every border token this slice converted (#1709)', async () => {
+    // The 91 border-* call-sites reduce to five base tokens. One case per
+    // token, at an alpha actually used in the tree, so a token silently losing
+    // its channel form fails here rather than rendering no border in the app.
+    const cases: Array<[string, string, string]> = [
+      ['border-brand/30', '--v2-brand-rgb', '0.3'],
+      ['border-danger/20', '--v2-danger-rgb', '0.2'],
+      ['border-warning/25', '--v2-warning-rgb', '0.25'],
+      ['border-success/20', '--v2-success-rgb', '0.2'],
+      ['border-debit/30', '--v2-debit-rgb', '0.3'],
+    ]
+    for (const [cls, token, alpha] of cases) {
+      const out = await compile([cls])
+      expect(out, `${cls} did not compile a border colour`).toContain(
+        `border-color: rgb(var(${token}) / ${alpha})`,
+      )
+    }
+  }, COMPILE_TIMEOUT)
+
+  it('a BRACKETED opacity compiles too — the form every grep in #1685 missed (#1709)', async () => {
+    // entityCardStyles.ts carried `bg-[var(--v2-brand)]/[0.03]`. The epic's
+    // census, #1710's enumeration and #1710's acceptance criterion all match
+    // `/[0-9]+`, which cannot match `/[` — so this one instance was invisible
+    // to the count and would have outlived the epic. Pinned here so the
+    // bracketed form is known to work, not merely assumed to.
+    const out = await compile(['bg-brand/[0.03]'])
+    expect(out).toContain('background-color: rgb(var(--v2-brand-rgb) / 0.03)')
+  }, COMPILE_TIMEOUT)
+
   it('solid usages are unchanged — bg/text/border render the token at full opacity', async () => {
     const out = await compile(['bg-brand', 'text-brand', 'border-border', 'bg-surface'])
     expect(out).toContain('background-color: rgb(var(--v2-brand-rgb) / var(--tw-bg-opacity, 1))')
@@ -172,32 +201,26 @@ describe('compiled CSS: the focus ring is brand-derived (#1708)', () => {
   }, COMPILE_TIMEOUT)
 })
 
-describe('no dead ring-* call-sites remain (#1708)', () => {
-  /**
-   * Scoped to `ring-` on purpose. The same bare-var()-with-opacity shape still
-   * exists on `border-*` and `bg-*`/`text-*` call-sites; those are #1709 and
-   * #1710, which rewrite them against the mechanism this slice lands. Widening
-   * this guard here would fail the tree for work another slice owns.
-   */
-  const DEAD_RING = /ring-\[var\(--v2-[a-z0-9-]+\)\]\/[0-9]+/
-
-  function sourceFiles(dir: string, acc: string[] = []): string[] {
-    for (const entry of readdirSync(dir)) {
-      if (entry === 'node_modules' || entry === '.next') continue
-      const full = join(dir, entry)
-      if (statSync(full).isDirectory()) sourceFiles(full, acc)
-      else if (/\.tsx?$/.test(full)) acc.push(full)
-    }
-    return acc
-  }
-
-  it('finds none in packages/frontend/src', () => {
-    const offenders = sourceFiles(join(FRONTEND, 'src'))
-      .filter((f) => !f.endsWith('design-token-alpha.test.ts'))
-      .filter((f) => DEAD_RING.test(readFileSync(f, 'utf8')))
-      .map((f) => relative(FRONTEND, f))
-    expect(offenders, 'use the theme alias (ring-brand/30), not ring-[var(--v2-brand)]/30').toEqual(
-      [],
-    )
-  })
-})
+/**
+ * The two source-scanning guards that lived here are GONE (#1710).
+ *
+ * `no dead ring-* or border-* call-sites remain` (#1708, widened by #1709) and
+ * `no bracketed-alpha-on-var() call-sites remain` (#1709) both matched raw
+ * source text for the dead shape. `compiled-colour-utilities.test.ts` (#1818)
+ * replaced them with something strictly stronger on every axis:
+ *
+ *   - it scans ALL of src/, not just the two dirs design-lint walks;
+ *   - it covers every colour-bearing utility, not ring/border;
+ *   - it accepts a bracketed alpha as well as a numeric one;
+ *   - it strips comments, which a raw-text scan cannot — and that is not
+ *     hypothetical: in #1709 an explanatory comment quoting the dead form
+ *     tripped the very guard it was explaining, and a sweep script later
+ *     rewrote a different comment into a false claim;
+ *   - it decides by COMPILING the class, so it catches a token that exists but
+ *     has no channel form — a shape no regex over call-sites can see.
+ *
+ * Keeping both would have meant two mechanisms for one defect, with the weaker
+ * one producing the false positives. The COMPILE PROBES above stay: they assert
+ * an alias resolves to the right token at the right alpha, which is a different
+ * claim from "this compiles to something".
+ */

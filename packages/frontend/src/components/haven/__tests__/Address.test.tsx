@@ -23,14 +23,32 @@ describe('Address (#853)', () => {
     expect(container.textContent).toBe(ADDR)
   })
 
-  it('href renders an external explorer link with the ↗ affordance', () => {
+  it('href renders an external explorer link whose affordance is the lucide ExternalLink, not a raw glyph (#1857)', () => {
     render(<Address value={ADDR} href="https://basescan.org/address/x" />)
     const link = screen.getByRole('link')
     expect(link.getAttribute('href')).toBe('https://basescan.org/address/x')
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toContain('noopener')
     expect(link.textContent).toContain('0x8f4F…6f4C')
-    expect(link.textContent).toContain('↗')
+
+    // The affordance is the same lucide glyph `TransactionActivityRow` and
+    // `SendModal` already render for it. Pinned by exact class TOKEN through
+    // `classList` — deliberately NOT a regex or `\b` match over the class
+    // string, because the sizing class `h-3.5` carries a dot and
+    // word-boundary assertions over Tailwind arbitrary/decimal values have
+    // failed in this repo in both directions (matching nothing, and matching
+    // the wrong thing).
+    const icon = link.querySelector('svg')
+    expect(icon).not.toBeNull()
+    expect(icon!.classList.contains('lucide-external-link')).toBe(true)
+    expect(icon!.getAttribute('stroke-width')).toBe('1.5')
+    // Decorative: the arrow carried no meaning as text and must carry none now.
+    expect(icon!.getAttribute('aria-hidden')).toBe('true')
+
+    // Paired negative — the raw `↗` (#1857) is GONE, not merely joined by an
+    // icon. Without this, adding the icon while leaving the glyph in place
+    // would pass every assertion above.
+    expect(link.textContent).not.toContain('↗')
   })
 
   describe('copy', () => {

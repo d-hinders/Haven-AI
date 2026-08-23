@@ -159,7 +159,7 @@ function ApprovalCard({
     <Card
       as="article"
       hover={false}
-      className={`overflow-hidden ${actionable ? 'border-[var(--v2-warning)]/25' : ''}`}
+      className={`overflow-hidden ${actionable ? 'border-warning/25' : ''}`}
     >
       <Card.Header>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -268,7 +268,7 @@ function ApprovalCard({
         {showOtherDeviceNotice ? <PasskeyOtherDeviceNotice /> : null}
 
         {actionError ? (
-          <div className="rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
+          <div className="rounded-[10px] border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
             {actionError}
           </div>
         ) : null}
@@ -286,7 +286,7 @@ function ApprovalCard({
         {actionable ? (
           <div className="space-y-3">
             {confirmReject ? (
-              <div className="rounded-[10px] border border-[var(--v2-danger)]/20 bg-[var(--v2-danger-soft)] p-3">
+              <div className="rounded-[10px] border border-danger/20 bg-[var(--v2-danger-soft)] p-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <p className="flex-1 text-sm text-[var(--v2-danger)]">
                     Reject this payment? The agent will need to request it again.

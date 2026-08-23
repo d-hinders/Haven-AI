@@ -65,6 +65,88 @@ describe('AgentPassportCard (#1072)', () => {
     expect(screen.getByText('Issued')).toBeTruthy()
   })
 
+  // #1699 — the re-key window. The agent is fully live and authorised while
+  // the attestation on-chain still names the delegate key the re-key retired,
+  // and the card must say both things rather than pick one.
+  describe('re-anchoring after a re-key (#1699)', () => {
+    const reanchoring = (anchor: 're_anchoring' | 'revocation_pending' | 'anchored') =>
+      state({
+        passport: {
+          status: 'anchored', assurance_level: 0,
+          attestation_uid: '0x' + '11'.repeat(32),
+          tx_hash: '0x' + 'aa'.repeat(32), chain_id: 84532,
+          attempts: 1, last_error: null,
+          requested_at: '2026-08-22T10:00:00.000Z', anchored_at: '2026-08-22T10:00:12.000Z',
+        },
+        standing: {
+          agentId: 'agent-1', standing: 'active', anchor,
+          attestationUid: '0x' + '11'.repeat(32), chainLagging: false, revocationConfirmedAt: null,
+        },
+      })
+
+    it('says the anchor is updating while standing stays Active', () => {
+      mockUseAgentPassport.mockReturnValue(reanchoring('re_anchoring'))
+      render(<AgentPassportCard agentId="agent-1" />)
+      expect(screen.getByText('Updating on-chain')).toBeTruthy()
+      // The two layers, uncollapsed. Standing is the answer and it is Active.
+      expect(screen.getByText('Active')).toBeTruthy()
+      expect(screen.getByText(/signing key was replaced/)).toBeTruthy()
+      // The caveat travels with the link, not only with the note two rows down
+      // (design review of #1699): a reader who clicks straight from the grid
+      // lands on an explorer showing the retired key with no context.
+      expect(screen.getByText('Names the previous key')).toBeTruthy()
+      // Never "Issued": that would claim a credential naming a retired key is
+      // current, which is the #1847 defect this state exists to surface.
+      expect(screen.queryByText('Issued')).toBeNull()
+      // And never the revoke language — the agent did not lose anything.
+      expect(screen.queryByText('Revoking…')).toBeNull()
+      expect(screen.queryByText(/Treat the agent as\s+revoked now/)).toBeNull()
+    })
+
+    it('shows only ONE note when standing is revoked, never two contradicting ones', () => {
+      // The two notes say opposite things — "treat the agent as revoked now"
+      // against "the agent stays active the whole time". The backend makes the
+      // states mutually exclusive; this proves the card does not depend on
+      // that holding forever.
+      mockUseAgentPassport.mockReturnValue(
+        state({
+          passport: {
+            status: 'anchored', assurance_level: 0,
+            attestation_uid: '0x' + '11'.repeat(32),
+            tx_hash: '0x' + 'aa'.repeat(32), chain_id: 84532,
+            attempts: 1, last_error: null,
+            requested_at: '2026-08-22T10:00:00.000Z', anchored_at: '2026-08-22T10:00:12.000Z',
+          },
+          standing: {
+            agentId: 'agent-1', standing: 'revoked', anchor: 're_anchoring',
+            attestationUid: '0x' + '11'.repeat(32), chainLagging: true, revocationConfirmedAt: null,
+          },
+        }),
+      )
+      render(<AgentPassportCard agentId="agent-1" />)
+      expect(screen.getByText(/Treat the agent as/)).toBeTruthy()
+      expect(screen.queryByText(/signing key was replaced/)).toBeNull()
+    })
+
+    it('does not show the re-key note for an ordinary anchored passport', () => {
+      // The control. Without it the assertion above would pass against a card
+      // that printed the note unconditionally.
+      mockUseAgentPassport.mockReturnValue(reanchoring('anchored'))
+      render(<AgentPassportCard agentId="agent-1" />)
+      expect(screen.getByText('Issued')).toBeTruthy()
+      expect(screen.queryByText(/signing key was replaced/)).toBeNull()
+    })
+
+    it('still reads Revoking… for a genuine revocation', () => {
+      // The other control: `re_anchoring` outranks `revocation_pending` in the
+      // badge, so this proves the reordering did not swallow the real case.
+      mockUseAgentPassport.mockReturnValue(reanchoring('revocation_pending'))
+      render(<AgentPassportCard agentId="agent-1" />)
+      expect(screen.getByText('Revoking…')).toBeTruthy()
+      expect(screen.queryByText('Updating on-chain')).toBeNull()
+    })
+  })
+
   it('renders the opt-in state when the agent has no passport', () => {
     mockUseAgentPassport.mockReturnValue(state())
     render(<AgentPassportCard agentId="agent-1" />)

@@ -150,6 +150,32 @@ export function getChainConfig(chainId: number): FrontendChainConfig {
   return chain
 }
 
+/**
+ * The chain config, or `null` — never a guess, and never a throw.
+ *
+ * `getChainConfig` above throws, and that is deliberate: ~20 call sites treat an
+ * unknown chain as a programming error and want the loud failure. This is the
+ * total companion for the few surfaces that must *degrade* instead — funding
+ * screens, where the honest answer to "which network?" is sometimes "we don't
+ * know", and where taking the screen down through the error boundary is worse
+ * than saying so.
+ *
+ * It answers BOTH shapes of unresolved identically, which is the whole point:
+ * a `chainId` that is **absent**, and one that is **present but unregistered**
+ * (a chain the API serves before the frontend registry catches up). Callers that
+ * test only `chainId != null` cover one and crash on the other.
+ *
+ * Introduced local to `AddFundsModal` by #1844; lifted here by #1852 when
+ * `ReceiveFundsModal` needed the same answer. Lifting the WRAPPER is not the
+ * decision that was rejected in #1844 — that was making `getChainConfig` itself
+ * total, which would silently change those ~20 call sites. This adds a second,
+ * explicitly-opted-into function and leaves the throwing contract untouched.
+ */
+export function resolveChainOrNull(chainId?: number | null): FrontendChainConfig | null {
+  if (chainId == null) return null
+  return CHAINS[chainId] ?? null
+}
+
 export function getExplorerUrl(
   chainId: number,
   type: 'tx' | 'address',

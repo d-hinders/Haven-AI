@@ -1751,6 +1751,11 @@ async function main() {
               offender: before.offender,
               offenderCount: before.offenderCount,
               residual: after.hidden,
+              // The box still clipping AFTER the growth, which is usually not
+              // the one that was worst BEFORE it (#1887). Recorded separately
+              // because the two answer different questions and the report was
+              // printing the first one under the second one's heading.
+              residualOffender: after.offender,
             })
             await scenarioPage.setViewportSize({ width: vp.width, height: vp.height })
             await scenarioPage.waitForTimeout(200)
@@ -1847,13 +1852,38 @@ async function main() {
   // capture gains a measurement that 19 of 21 never had, and one scenario loses
   // a hard stop. Making the residual gating needs an allowlist of the
   // legitimately self-capped selectors first; filed rather than guessed at.
+  //
+  // Names the box that is STILL clipping, which is not usually the box that
+  // was worst before the growth (#1887). This line printed `c.offender` — the
+  // BEFORE offender — against `c.residual`, an AFTER number, so it credited
+  // one box's shortfall to another box's name for every residual since #1879
+  // generalised the measurement. Diagnosed by arithmetic before it was fixed:
+  // four `connect-agent` mobile captures with before-values of 203/203/295/1020
+  // all reported a residual of exactly 203, which is `CopyBlock`'s
+  // `pre.max-h-48` (192px cap, ~395px of command text at 390px) showing through
+  // under the modal body's name. Desktop's 66px is the same `pre` at the wider
+  // `max-w-xl` wrap: 192 + 66 = 258px of content.
+  //
+  // This is not cosmetic. The allowlist the note above asks for — the one that
+  // would let this become gating — would have been built from these strings,
+  // and would therefore have exempted `div.min-h-0 flex-1 overflow-y-auto …`:
+  // `ui/Modal`'s body, shared by every dialog in the app, and the one box whose
+  // clipping must never be waved through. An allowlist is only as honest as the
+  // selector it is keyed on.
   const stillClipped = clipped.filter((c) => c.residual > CLIP_TOLERANCE_PX)
   if (stillClipped.length > 0) {
     console.error(
       `\n⚠ ${stillClipped.length} of those are STILL clipped after growing the viewport — their -full.png is NOT full:`,
     )
     for (const c of stillClipped) {
-      console.error(`  ${c.capture}-full.png: ${c.residual}px still hidden in ${c.offender ?? 'the target'}`)
+      console.error(
+        `  ${c.capture}-full.png: ${c.residual}px still hidden in ${c.residualOffender ?? 'the target'}` +
+          `${
+            c.residualOffender && c.residualOffender !== c.offender
+              ? `\n    (a DIFFERENT box from the one that was worst before the growth: ${c.offender})`
+              : ''
+          }`,
+      )
     }
     console.error(
       '  (a box with its own fixed max-height cannot be un-clipped by a taller window — either\n' +

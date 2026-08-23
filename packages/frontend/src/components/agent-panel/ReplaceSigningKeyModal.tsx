@@ -18,6 +18,24 @@
  * they are past it. Before it, cancelling really is free, and the copy says
  * that too.
  *
+ * ## Where the destructive button renders, and why it is not the footer
+ *
+ * A gate only gates what is behind it. `ui/Modal` puts its footer OUTSIDE the
+ * scrolling body, so a footer button is on screen from the first paint no
+ * matter how long the body is — and this body is ~2.7 screen-heights at 390px.
+ * The gate was therefore intact on desktop and defeated on a phone: the
+ * irreversible control sat about three screens above the banner explaining it
+ * and the checkbox enabling it, in the easiest place on a phone to mis-tap
+ * (#1887).
+ *
+ * The fix is positional and one-directional: the BUTTON moved down, into the
+ * red banner as its last child. The warning did not move up and was not
+ * shortened — the banner and the acknowledgement ARE the gate, so buying
+ * vertical space out of them would spend the thing being protected. It applies
+ * only where a gate exists: a resumed re-key is past the revoke and renders no
+ * banner, so its forward action stays in the footer rather than being buried
+ * for the sake of symmetry.
+ *
  * ## Three things this flow must not claim
  *
  * The backend it drives is merged and complete, but three of its siblings are
@@ -33,9 +51,15 @@
  *   across a period boundary can silently carry ZERO. A multi-step flow makes
  *   that reachable by going to lunch, so the flow warns against pausing and
  *   never repeats the backend's "authority resumes at the original boundary".
- * - **#1870** — the revoke leg prepares its UserOperation without a signing
- *   scheme, so a passkey-signing owner has no correct way to sign it. Refused
- *   up front, because the alternative is discovering it after the revoke.
+ * - **#1870 / #1890** — a passkey-signing owner still cannot re-key, and the
+ *   flow still refuses up front, because the alternative is discovering it
+ *   after the revoke. The reason has moved, though: the BACKEND half landed in
+ *   PR #1891 — `routes/agent-rekey.ts` now tells the account which signer will
+ *   sign the revoke and returns a `signature_scheme` to branch on. What is
+ *   missing is the CLIENT half, #1890, which is what would let
+ *   `pickSigningPath` return a passkey path here. Do not read the refusal below
+ *   as "the backend cannot do this" any more; read it as "this file has not
+ *   been taught to yet".
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -351,6 +375,18 @@ export function ReplaceSigningKeyModal({
   const blocked = rekey.signingBlockedReason
   const stepIndex = step === 'done' ? STEP_ORDER.length : STEP_ORDER.indexOf(step)
 
+  /**
+   * Whether the irreversibility gate is on screen — the red banner and the
+   * acknowledgement checkbox bound to it.
+   *
+   * Exactly the condition the banner already rendered under; naming it lets
+   * the footer ask the same question. It is false for a RESUMED re-key (the
+   * revoke already landed, so there is no gate left to pass) and false while a
+   * residual is unresolved (that banner owns the screen and offers its own two
+   * dispositions).
+   */
+  const gateOnScreen = !residual && rekey.resumeMode === 'full'
+
   // The rail refusal is terminal — there is no flow to show behind it, so it
   // replaces the modal body rather than sitting on top of one.
   if (!isDelegationAgent) {
@@ -636,7 +672,7 @@ export function ReplaceSigningKeyModal({
           </ul>
         </ApprovalRequiredBanner>
 
-        {!residual && rekey.resumeMode === 'full' ? (
+        {gateOnScreen ? (
           <ApprovalRequiredBanner title="The next step cannot be undone" tone="danger">
             <p className="text-sm leading-relaxed">
               Approving switches off the old key on-chain straight away.{' '}
@@ -654,6 +690,31 @@ export function ReplaceSigningKeyModal({
               onChange={(e) => setAcknowledged(e.target.checked)}
               label={`I understand ${agentName} cannot pay until I finish, and that stopping partway means setting its budget up again.`}
             />
+            {/* THE DESTRUCTIVE CONTROL LIVES HERE, not in the footer (#1887).
+                The footer is sticky: it renders inside the modal's chrome and
+                stays put while the body scrolls. That made "Switch off the old
+                key" visible from the first paint of this step — above the
+                passport disclosure, above the budget warning, above this
+                banner, and above the checkbox that is supposed to gate it. At
+                390px the body is ~2.7 screen-heights deep, so a phone user met
+                the irreversible button roughly three screens before the
+                sentence explaining what it costs, in the one place on a phone
+                that is easiest to mis-tap.
+
+                The gate was never weak — #1701 built it as a gate rather than
+                a step on purpose. It just did not survive a narrow viewport,
+                because a sticky footer is not below anything.
+
+                So the BUTTON moved down; the warning did not move up and was
+                not compressed. The banner and the acknowledgement are the
+                gate, and shortening them to win vertical space would be
+                trading away the thing being protected. Rendering the button as
+                the last child of the banner makes the gate structural instead
+                of merely adjacent: on any viewport, at any width, you cannot
+                reach this control without having scrolled through the
+                acknowledgement that enables it. `disabled` is unchanged — this
+                is a position change, not a behaviour change. */}
+            <div className="mt-4 flex">{destructiveButton()}</div>
           </ApprovalRequiredBanner>
         ) : null}
       </div>
@@ -844,27 +905,45 @@ export function ReplaceSigningKeyModal({
       )
     }
     // consequences
+    //
+    // The footer carries the forward action ONLY when there is no gate on
+    // screen for it to sit above (#1887). When the gate is rendered the button
+    // is the banner's last child instead, so the footer is left holding the
+    // one action that is always safe here — leaving. `stranded` has no forward
+    // action at all, and `resume` is already past the revoke, so for both the
+    // footer is still the right home.
     return (
       <>
         {cancel}
-        {rekey.resumeMode === 'stranded' ? null : (
-          <Button
-            variant={rekey.resumeMode === 'resume' ? 'primary' : 'danger'}
-            disabled={
-              // A resumed re-key is already past the irreversible step, so
-              // there is no gate left to acknowledge — requiring a checkbox
-              // that is not rendered would dead-end the resume path.
-              (rekey.resumeMode === 'full' && !acknowledged) ||
-              rekey.busy ||
-              Boolean(residual) ||
-              Boolean(blocked)
-            }
-            onClick={() => void runRekey()}
-          >
-            {rekey.resumeMode === 'resume' ? 'Finish replacing the key' : 'Switch off the old key'}
-          </Button>
-        )}
+        {rekey.resumeMode === 'stranded' || gateOnScreen ? null : destructiveButton()}
       </>
+    )
+  }
+
+  /**
+   * The one control that spends the agent's authority.
+   *
+   * Rendered from exactly one place so its `disabled` predicate cannot drift
+   * between the gate and the footer — the two positions differ in where they
+   * sit on the page and in nothing else.
+   */
+  function destructiveButton() {
+    return (
+      <Button
+        variant={rekey.resumeMode === 'resume' ? 'primary' : 'danger'}
+        disabled={
+          // A resumed re-key is already past the irreversible step, so
+          // there is no gate left to acknowledge — requiring a checkbox
+          // that is not rendered would dead-end the resume path.
+          (rekey.resumeMode === 'full' && !acknowledged) ||
+          rekey.busy ||
+          Boolean(residual) ||
+          Boolean(blocked)
+        }
+        onClick={() => void runRekey()}
+      >
+        {rekey.resumeMode === 'resume' ? 'Finish replacing the key' : 'Switch off the old key'}
+      </Button>
     )
   }
 }

@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/docs-drift/docs-drift.test.ts
   - packages/backend/src/docs-drift/env-example-drift.test.ts
   - .env.example
-last-verified: "2026-08-23" # #1869: Phase 2 §"Coupling gate" re-read against `scripts/docs/coupling-gate.mjs` on `origin/dev` (not against #1824's description of itself) — the same-day-suppression paragraph #1854 flagged and left is REPLACED, because `implicatedDocs` no longer compares `last-verified` to today and the `today` parameter is gone from its signature rather than accepted-and-ignored. The replacement states the behaviour and carries only the reasoning a reader needs (the heuristic's entire live domain was somebody else's stamp, since `changedSet.has(doc)` already covers a doc this change verified), and quotes the 22-advisories/15-of-40-merges/0-blocking measurement WITH its window (`0d299034`) because the docstring records the counts as traffic-dependent. The `--strict` carve-out the old paragraph described is genuinely gone; the one that REMAINS is different and now documented where it lives — a `contract: true` doc under `--strict` skips the incidental-path filter (`filterIncidental = !(strict && contract)`). Phase 1 also gains `scripts/docs/chain-sweep.mjs` (#1876) and the reason it is needed: a chain break already on `dev` is invisible to the diff-scoped check permanently, not merely deferred to the next editor. Nothing else in Phases 2-4 re-verified in this pass. Prior: #1854: Phase 2 §"Scoping covers" re-read against `scripts/docs/coupling-gate.mjs` — documents the test-content carve-out (`packages/qa-agent/**`, `packages/frontend/e2e/**`) and the `__screenshots__/` carve-out from it, which is checked first; the same-day-suppression paragraph in this section is STALE since #1824 and is NOT fixed here (#1869) — nothing else re-verified in this pass. Prior: #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
+last-verified: "2026-08-23" # #1885: Phase 1 §"Finding a break that is already on `dev`" re-read against `scripts/docs/chain-sweep.mjs` and `chain-integrity.mjs` on `origin/dev` — records that the sweep now classifies a DECLARED RESET separately from an unrestored break (`N unrestored, M declared reset`), why the blanket `nowLine` check was rejected (one declared compaction would excuse every break in the doc, a false negative in the tool built to find silent losses), and the binding actually used (the commit that INTRODUCED the declaration). Also records `--ref=` and the `--follow` rename residual with the measurement that shows it currently empty. Nothing in Phases 2-4 re-verified in this pass. Prior: #1869: Phase 2 §"Coupling gate" re-read against `scripts/docs/coupling-gate.mjs` on `origin/dev` (not against #1824's description of itself) — the same-day-suppression paragraph #1854 flagged and left is REPLACED, because `implicatedDocs` no longer compares `last-verified` to today and the `today` parameter is gone from its signature rather than accepted-and-ignored. The replacement states the behaviour and carries only the reasoning a reader needs (the heuristic's entire live domain was somebody else's stamp, since `changedSet.has(doc)` already covers a doc this change verified), and quotes the 22-advisories/15-of-40-merges/0-blocking measurement WITH its window (`0d299034`) because the docstring records the counts as traffic-dependent. The `--strict` carve-out the old paragraph described is genuinely gone; the one that REMAINS is different and now documented where it lives — a `contract: true` doc under `--strict` skips the incidental-path filter (`filterIncidental = !(strict && contract)`). Phase 1 also gains `scripts/docs/chain-sweep.mjs` (#1876) and the reason it is needed: a chain break already on `dev` is invisible to the diff-scoped check permanently, not merely deferred to the next editor. Nothing else in Phases 2-4 re-verified in this pass. Prior: #1854: Phase 2 §"Scoping covers" re-read against `scripts/docs/coupling-gate.mjs` — documents the test-content carve-out (`packages/qa-agent/**`, `packages/frontend/e2e/**`) and the `__screenshots__/` carve-out from it, which is checked first; the same-day-suppression paragraph in this section is STALE since #1824 and is NOT fixed here (#1869) — nothing else re-verified in this pass. Prior: #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
 ---
 
 # Documentation-quality system
@@ -241,7 +241,49 @@ every doc's own history and reports the drops whose references are still
 missing today. Also a development tool, also not in CI, and also not
 retroactive: it defaults to `--since=2026-08-15`, because before the chaining
 convention (#1496) replacing the note *was* the convention and every doc reads
-as broken.
+as broken. `--ref=<git ref>` picks the tree it sweeps, defaulting to
+`origin/dev`.
+
+**A declared reset is a separate class, not a silenced one
+([#1885](https://github.com/d-hinders/Haven-AI/issues/1885)).** The sweep's
+summary counts unrestored docs and declared-reset docs separately, and the
+two are different findings. `chain-reset(#N)` is written on a doc's *current* line, while the
+sweep replays *historical* pairs — so a marker added after the fact (both
+#1496 compactions at `cf177982`, 2026-08-16, predate the marker syntax
+introduced by #1843 at `178c67d0`, 2026-08-22) is invisible to a
+naive replay, and those docs were reported as unrestored breaks in every run
+forever. The fix is **not** to honour the marker on today's line: one declared
+compaction would then excuse every break in that doc's history, before and
+after it, and a false negative in the one tool built to find silent losses is
+worse than the false positive it tidies. Instead a declaration is bound to the
+single commit that **introduced** it — the commit that wrote the marker, or,
+for a retroactive declaration, the commit that compacted the chain down to the
+declaring issue's entry alone. Every other break in the same doc is still
+reported. "Introduced" is doing the work: a marker persists on the line for
+good, so a drop made a week later still carries it on both sides of its pair.
+
+The retroactive half is deliberately keyed on the compaction *shape* — `#N` as
+the line's only reference — and not on "the first commit to cite `#N`", which
+was the first attempt and had a hole review found: a note that merely mentions
+an issue in prose ("#1500: … plan tracked in #1496") is indistinguishable from
+an entry to `issueRefs`, so an unrelated commit that dropped a reference while
+name-checking #1496 got excused by #1496's declaration. A prose mention always
+sits alongside the entries it did not delete, which is what standing alone
+rules out. The rule is narrow on purpose and fails toward reporting: a partial
+compaction does not match, and is then listed as unrestored **and** as an
+unmatched declaration — a readable "your marker did not bind", never silence.
+A declaration matching no break is likewise reported, so an inert escape hatch
+cannot pass for a used one.
+
+**The sweep does not use `--follow`**, so a doc renamed inside the `--since`
+window hides the breaks it took under its old path — the same blind spot as the
+diff-scoped check above and as `chain-integrity-backtest.mjs`. Adding `--follow`
+alone would make it worse rather than better: the extra revisions predate the
+rename, the per-revision `git show <rev>:<path>` lookups use today's path, and
+every one of them would resolve to nothing — cost and a false air of
+completeness, no findings. A real fix has to carry the old path per commit.
+Currently the gap is empty rather than tolerated: `git log --diff-filter=R -M
+--since=2026-08-15 origin/dev -- docs/` reports zero renames.
 
 ### Phase 2 — coupling gate + drift tests ([#644](https://github.com/d-hinders/Haven-AI/issues/644))
 

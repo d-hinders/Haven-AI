@@ -162,10 +162,29 @@ const LEGAL_HW = new Map([
 const LEGAL_SIZE_PROP = new Set(ICON_SCALE_PX)
 
 /**
- * Find each `<Icon …/>` element by walking brace depth to its real `>`, so a
- * multiline element is one unit. Returns [{start, end, text, line}].
+ * Blank out comment BODIES, preserving length and newlines so every offset and
+ * line number downstream is unchanged.
+ *
+ * Not defensive tidying: `Icon.tsx`'s own JSDoc describes the rule and so
+ * contains the literal text `<Icon>`. Without this, the wrapper's
+ * documentation counts as three call sites and lands in the census's
+ * `UNCLASSIFIED` bucket — the one number that is supposed to mean "nothing was
+ * silently dropped". Caught by running the published command from a clean
+ * shell rather than trusting the run that produced the figure.
  */
-function iconElements(source) {
+function maskComments(source) {
+  const blank = (m) => m.replace(/[^\n]/g, ' ')
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, blank) // /* … */ and JSX {/* … */}
+    .replace(/(?<!:)\/\/[^\n]*/g, blank) // // … , but not the // in https://
+}
+
+/**
+ * Find each `<Icon …/>` element by walking brace depth to its real `>`, so a
+ * multiline element is one unit. Returns [{text, line}].
+ */
+function iconElements(rawSource) {
+  const source = maskComments(rawSource)
   const out = []
   for (let i = 0; ; ) {
     const m = source.indexOf('<Icon', i)

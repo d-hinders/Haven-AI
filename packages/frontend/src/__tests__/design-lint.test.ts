@@ -175,6 +175,37 @@ describe('design-lint icon-size element rule (#1858)', () => {
     expect(scanEl(F, '<IconBadge className="h-[13px] w-[13px]" />')).toEqual([])
   })
 
+  it('does not read PROSE about <Icon> as a call site', () => {
+    // Icon.tsx's own JSDoc documents this rule and therefore contains the
+    // literal `<Icon>`. Counting it put three phantom entries in the census's
+    // UNCLASSIFIED bucket — the one figure that is supposed to certify that
+    // nothing was dropped.
+    const doc = ['/**', ' * All `<Icon>` elements render at h-[13px] per the old rule.', ' */'].join('\n')
+    expect(scanEl(F, doc)).toEqual([])
+    expect(scanEl(F, '{/* an <Icon> here is h-[13px] */}')).toEqual([])
+    expect(scanEl(F, '// <Icon className="h-[13px] w-[13px]" />')).toEqual([])
+  })
+
+  it('still sees a real element on the line after such a comment', () => {
+    // Masking must preserve line numbers, or every violation below a comment
+    // is reported at the wrong place.
+    // The comment MUST span several lines: a single-line one is removed and
+    // re-added as the same one line, so it cannot tell blanking from deletion.
+    const src = [
+      '/**',
+      ' * Prose mentioning <Icon>,',
+      ' * over four lines.',
+      ' */',
+      '<Icon icon={X} className="h-[13px] w-[13px]" />',
+    ].join('\n')
+    expect(scanEl(F, src)).toEqual([{ rule: 'icon-size', line: 5, match: 'h-[13px] w-[13px]' }])
+  })
+
+  it('does not treat the // in a URL as a comment (shared #1204 guard)', () => {
+    const src = '<Icon icon={X} className="h-[13px] w-[13px]" /> // see https://x.test/a'
+    expect(scanEl(F, src)[0].match).toBe('h-[13px] w-[13px]')
+  })
+
   it('honours the marketing exemption and the escape marker', () => {
     expect(scanEl('src/app/page.tsx', '<Icon icon={X} className="h-[13px] w-[13px]" />')).toEqual([])
     const escaped = '{/* design-lint-disable-line */}\n<Icon icon={X} className="h-[13px] w-[13px]" />'

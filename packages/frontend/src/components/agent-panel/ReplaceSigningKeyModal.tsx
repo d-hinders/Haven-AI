@@ -36,11 +36,11 @@
  * banner, so its forward action stays in the footer rather than being buried
  * for the sake of symmetry.
  *
- * ## Three things this flow must not claim
+ * ## Two things this flow must not claim
  *
- * The backend it drives is merged and complete, but three of its siblings are
- * not, and each leaves a state a user can now reach from here. None of them
- * is worked around — a UI cannot fix them — but none of them is papered over:
+ * The backend it drives is merged and complete, but two of its siblings are
+ * not, and each leaves a state a user can now reach from here. Neither is
+ * worked around — a UI cannot fix them — but neither is papered over:
  *
  * - **#1847** — the passport attestation stays anchored to the RETIRED
  *   delegate. #1701's issue text says "passport standing carries (the on-chain
@@ -51,15 +51,12 @@
  *   across a period boundary can silently carry ZERO. A multi-step flow makes
  *   that reachable by going to lunch, so the flow warns against pausing and
  *   never repeats the backend's "authority resumes at the original boundary".
- * - **#1870 / #1890** — a passkey-signing owner still cannot re-key, and the
- *   flow still refuses up front, because the alternative is discovering it
- *   after the revoke. The reason has moved, though: the BACKEND half landed in
- *   PR #1891 — `routes/agent-rekey.ts` now tells the account which signer will
- *   sign the revoke and returns a `signature_scheme` to branch on. What is
- *   missing is the CLIENT half, #1890, which is what would let
- *   `pickSigningPath` return a passkey path here. Do not read the refusal below
- *   as "the backend cannot do this" any more; read it as "this file has not
- *   been taught to yet".
+ *
+ * A third used to sit here and no longer does. #1870/#1890 closed: the backend
+ * takes a `signature_scheme` (PR #1891) and this flow now sends one, so a
+ * passkey-signing owner completes the whole re-key. The only refusal left is
+ * `no_signer` — no signer of any kind reachable on this device — and that one
+ * is real.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -445,9 +442,9 @@ export function ReplaceSigningKeyModal({
       {blocked && step !== 'done' ? (
         <ApprovalRequiredBanner title="You cannot replace this key from this device" tone="warning">
           <p className="text-sm leading-relaxed">
-            {blocked === 'no_signer'
-              ? 'Connect the wallet that owns this Haven account. Replacing a signing key needs the account owner’s signature, and Haven never signs on your behalf.'
-              : 'Replacing a signing key currently needs the account owner’s wallet. Approving with a passkey is not supported for this action yet, so it is refused here rather than failing part-way through and leaving the agent unable to pay.'}
+            Connect the wallet that owns this Haven account, or use a device with one of its
+            passkeys. Replacing a signing key needs the account owner’s signature, and Haven never
+            signs on your behalf.
           </p>
         </ApprovalRequiredBanner>
       ) : null}

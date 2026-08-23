@@ -1354,15 +1354,19 @@ export const openapiSpec = {
         operationId: 'prepareRekeyRevocation',
         summary: 'Re-key step 1a: prepare the batched revoke of every live delegation (#1698).',
         description:
-          'Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys.',
+          'Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage with an empty carry.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }, rekeyIdParam],
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: signatureSchemeBody } },
+        },
         responses: {
           '200': {
-            description: 'Prepared revocation for the owner to sign.',
+            description: 'Prepared revocation, shaped by the signature scheme — or the no-authority short-circuit.',
             content: {
               'application/json': {
-                schema: { type: 'object', additionalProperties: true },
+                schema: { $ref: '#/components/schemas/AgentRekeyRevokePrepare' },
               },
             },
           },
@@ -1370,7 +1374,11 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '404': errorResponse,
-          '409': { ...errorResponse, description: 'Wrong stage — this re-key is past the revoke.' },
+          '409': {
+            ...errorResponse,
+            description:
+              'Wrong stage — this re-key is past the revoke; the account signer configuration is unknown; or the requested signature_scheme is one this account cannot sign. Every one of these lands BEFORE the revoke, so the re-key stays retryable (#1868).',
+          },
           '502': errorResponse,
         },
       },
@@ -7647,6 +7655,60 @@ export const openapiSpec = {
           recoverable_after_rekey: { type: 'boolean' },
           note: { type: 'string' },
         },
+      },
+      /**
+       * The revoke-prepare 200, discriminated by `signature_scheme` (#1870).
+       *
+       * Named rather than inline for the reason #1701 established: a response
+       * body a client renders belongs in `components/schemas`, so the
+       * dashboard imports one definition instead of restating it. Only the
+       * nested `user_operation` stays open — it is bundler-shaped and the
+       * client relays it back verbatim.
+       */
+      AgentRekeyRevokePrepare: {
+        oneOf: [
+          {
+            type: 'object',
+            description: 'The treasury EOA owner signs signing_payload (EIP-712).',
+            required: ['signature_scheme', 'signing_payload', 'user_operation', 'treasury_address', 'delegation_hashes', 'instructions'],
+            properties: {
+              signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+              signing_payload: eip712Payload,
+              user_operation: preparedUserOperation,
+              treasury_address: address,
+              delegation_hashes: delegationHashList,
+              instructions: { type: 'string' },
+            },
+          },
+          {
+            type: 'object',
+            description: 'An account passkey signs user_op_hash via WebAuthn.',
+            required: ['signature_scheme', 'user_op_hash', 'user_operation', 'treasury_address', 'delegation_hashes', 'instructions'],
+            properties: {
+              signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
+              user_op_hash: { type: 'string' },
+              user_operation: preparedUserOperation,
+              treasury_address: address,
+              delegation_hashes: delegationHashList,
+              instructions: { type: 'string' },
+            },
+          },
+          {
+            type: 'object',
+            description:
+              'Nothing to revoke on-chain — an agent that never held a budget, or one already revoked. No signature is needed and the re-key is advanced straight to the metered stage with an empty carry.',
+            required: ['revoked', 'stage', 'agent_has_no_authority', 'next_step'],
+            properties: {
+              revoked: { type: 'boolean', enum: [true] },
+              tx_hash: { type: 'string', nullable: true },
+              delegation_hashes: delegationHashList,
+              stage: { type: 'string' },
+              carry: { type: 'array', items: { type: 'object', additionalProperties: true } },
+              agent_has_no_authority: { type: 'boolean' },
+              next_step: { type: 'string' },
+            },
+          },
+        ],
       },
       AgentRekeyPreflight: {
         type: 'object',

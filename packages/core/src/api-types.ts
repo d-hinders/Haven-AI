@@ -299,7 +299,7 @@ export type paths = {
         put?: never;
         /**
          * Re-key step 1a: prepare the batched revoke of every live delegation (#1698).
-         * @description Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys.
+         * @description Revoke comes FIRST, always. If the revoke lands and the issue does not, the agent has no authority — recoverable, and the correct posture when a key is lost. The reverse ordering would leave two simultaneously live keys. The response branches on the signature scheme, exactly as the per-hash and batch delegation revokes do: an EOA owner signs EIP-712 typed data (signing_payload); a passkey signs the userOpHash via WebAuthn (user_op_hash). A multi-signer account (EOA owner AND enrolled passkeys) picks per request with signature_scheme — without it the server would infer the owner path and estimate verification gas for a 65-byte signature the device may not be able to produce (#1870). An agent with no live delegations short-circuits: nothing to revoke, so the re-key advances straight to the metered stage with an empty carry.
          */
         post: operations["prepareRekeyRevocation"];
         delete?: never;
@@ -3737,6 +3737,42 @@ export type components = {
             recoverable_after_rekey: boolean;
             note?: string;
         };
+        AgentRekeyRevokePrepare: {
+            /** @enum {string} */
+            signature_scheme: "eip712_userop";
+            signing_payload: {
+                [key: string]: unknown;
+            };
+            user_operation: {
+                [key: string]: unknown;
+            };
+            /** @example 0x1111111111111111111111111111111111111111 */
+            treasury_address: string;
+            delegation_hashes: string[];
+            instructions: string;
+        } | {
+            /** @enum {string} */
+            signature_scheme: "webauthn_userop";
+            user_op_hash: string;
+            user_operation: {
+                [key: string]: unknown;
+            };
+            /** @example 0x1111111111111111111111111111111111111111 */
+            treasury_address: string;
+            delegation_hashes: string[];
+            instructions: string;
+        } | {
+            /** @enum {boolean} */
+            revoked: true;
+            tx_hash?: string | null;
+            delegation_hashes?: string[];
+            stage: string;
+            carry?: {
+                [key: string]: unknown;
+            }[];
+            agent_has_no_authority: boolean;
+            next_step: string;
+        };
         AgentRekeyPreflight: {
             /** Format: uuid */
             rekey_id: string;
@@ -5171,17 +5207,25 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Multi-signer accounts choose per request; omitted, an EOA owner defaults to eip712_userop.
+                     * @enum {string}
+                     */
+                    signature_scheme?: "eip712_userop" | "webauthn_userop";
+                };
+            };
+        };
         responses: {
-            /** @description Prepared revocation for the owner to sign. */
+            /** @description Prepared revocation, shaped by the signature scheme — or the no-authority short-circuit. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentRekeyRevokePrepare"];
                 };
             };
             /** @description Error response */
@@ -5244,7 +5288,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Wrong stage — this re-key is past the revoke. */
+            /** @description Wrong stage — this re-key is past the revoke; the account signer configuration is unknown; or the requested signature_scheme is one this account cannot sign. Every one of these lands BEFORE the revoke, so the re-key stays retryable (#1868). */
             409: {
                 headers: {
                     [name: string]: unknown;

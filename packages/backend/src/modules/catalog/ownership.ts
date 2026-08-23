@@ -111,6 +111,7 @@ export type OwnershipFailureReason =
   | 'not_configured'
   | 'invalid_hostname'
   | 'invalid_token'
+  | 'invalid_submission_id'
   | 'token_expired'
   | 'proof_not_found'
   | 'proof_mismatch'
@@ -192,6 +193,40 @@ export function isValidVerifyToken(token: string): boolean {
   return VERIFY_TOKEN.test(token)
 }
 
+/**
+ * The alphabet a `submissionId` may use. UUIDs satisfy it; so do the other
+ * opaque-id shapes a repository might reasonably produce.
+ */
+const SUBMISSION_ID = /^[A-Za-z0-9._:-]{1,128}$/
+
+/**
+ * Is this a submission id this module is willing to put inside the MAC?
+ *
+ * The MAC's security argument is that its five fields are unambiguously
+ * delimited by `\n`, and the module's own docstring leans on "hostname and
+ * submissionId cannot contain `\n`" as load-bearing. Until this check existed
+ * that was true of `hostname` and `verifyToken` — both strictly validated —
+ * but merely ASSUMED of `submissionId`, and the assumption was about a slice
+ * (#1711) that is not merged.
+ *
+ * No collision is constructible even without it: the field count is fixed at
+ * five, and injecting a newline here ADDS a field, so producing an identical
+ * message from a different (id, host, token) triple would require a newline
+ * in `hostname` or `verifyToken`, which both now refuse. So this is symmetry
+ * and an explicit trust boundary, not a live fix — recorded as a decision
+ * rather than left as a silence, because a silence is how a decision quietly
+ * becomes an omission.
+ */
+export function isValidSubmissionId(submissionId: string): boolean {
+  return SUBMISSION_ID.test(submissionId)
+}
+
+function assertValidSubmissionId(submissionId: string): void {
+  if (!isValidSubmissionId(submissionId)) {
+    throw new Error('ownership claim carries a submission id outside the permitted alphabet')
+  }
+}
+
 function assertValidVerifyToken(token: string): void {
   if (!isValidVerifyToken(token)) {
     // Deliberately does not echo the value.
@@ -220,21 +255,32 @@ function assertValidVerifyToken(token: string): void {
  * characters, whitespace, and unicode by construction, so an IDN must arrive
  * already punycoded (`xn--…`, which satisfies the label grammar).
  *
- * ## The all-numeric last label, and a caveat worth keeping
+ * ## The URL round-trip, which is the rule that actually holds the invariant
  *
- * A final label of digits only is refused. Not for tidiness: WHATWG `URL`
- * applies abbreviated-IPv4 parsing to such hosts, so `https://123.456/x`
- * canonicalizes its host to `123.0.1.200` with no DNS involved. That would
- * again make the string in the MAC differ from the string network-verified.
+ * The grammar alone is an enumeration of disguises, and enumerations lose.
+ * WHATWG `URL` rewrites some hosts during canonicalization, and it does so in
+ * more spellings than a label rule catches:
  *
- * The caveat: `assertSafeUrl` ALREADY refuses those as IP literals, so such a
- * claim could never have reached `ok: true`. Which is the point — until this
- * rule existed, the invariant held because of a second, independent guard
- * rather than because this grammar enforced it, and a check that passes its
- * own test while another layer quietly does the work is the shape of a defect
- * nobody finds until the other layer moves. Both layers now hold it
- * independently, and this comment records that `assertSafeUrl` is the one
- * that would still catch it if this rule were ever relaxed.
+ *   https://123.456/x               -> host 123.0.1.200   (abbreviated IPv4)
+ *   https://0xa9.0xfe.0xa9.0xfe/x   -> host 169.254.169.254 (hex IPv4)
+ *   https://0177.0.0.1/x            -> host 127.0.0.1     (octal IPv4)
+ *
+ * Each of those would make the string inside the MAC differ from the string
+ * actually network-verified. Rather than patch a fourth spelling when someone
+ * finds it, this function asserts the PROPERTY the module claims: the
+ * normalized hostname must survive URL canonicalization byte-identically.
+ * That covers every quirk of the parser, including ones not yet discovered.
+ *
+ * The grammar check is kept in front of it — it fails faster and yields a
+ * better refusal reason — but the round-trip is what guarantees the invariant.
+ *
+ * Layering, stated precisely rather than optimistically: `assertSafeUrl` also
+ * refuses all of these, as IP literals, so none could ever have reached
+ * `ok: true`. That was the problem worth naming, not the reassurance — an
+ * invariant held only by a downstream guard, while the function that appears
+ * to own it does not, is the shape of a defect nobody finds until that guard
+ * moves. With the round-trip in place this function holds it on its own, and
+ * `assertSafeUrl` remains an independent second floor.
  */
 export function isValidHostname(hostname: string): boolean {
   const host = normalizeHostname(hostname)
@@ -243,8 +289,12 @@ export function isValidHostname(hostname: string): boolean {
   // A merchant domain is never a single label; that is a search-domain lookup.
   if (labels.length < 2) return false
   if (!labels.every((label) => HOSTNAME_LABEL.test(label))) return false
-  // See "The all-numeric last label" above.
-  return !/^[0-9]+$/.test(labels[labels.length - 1]!)
+  // The general rule — see "The URL round-trip" above.
+  try {
+    return new URL(`https://${host}/x`).hostname === host
+  } catch {
+    return false
+  }
 }
 
 function assertValidHostname(hostname: string): void {
@@ -264,6 +314,7 @@ function assertValidHostname(hostname: string): void {
 export function deriveOwnershipProof(claim: OwnershipClaim, secret: string): string {
   assertValidHostname(claim.hostname)
   assertValidVerifyToken(claim.verifyToken)
+  assertValidSubmissionId(claim.submissionId)
   const message = [
     'haven-domain-ownership',
     OWNERSHIP_PROOF_VERSION,
@@ -439,6 +490,15 @@ export async function verifyDomainOwnership(
       ok: false,
       reason: 'invalid_token',
       detail: 'submission verify token is outside the permitted alphabet',
+      attempts,
+    }
+  }
+
+  if (!isValidSubmissionId(claim.submissionId)) {
+    return {
+      ok: false,
+      reason: 'invalid_submission_id',
+      detail: 'submission id is outside the permitted alphabet',
       attempts,
     }
   }

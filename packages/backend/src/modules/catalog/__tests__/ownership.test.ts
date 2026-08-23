@@ -22,6 +22,7 @@ import {
   expectedProofPayload,
   isTokenExpired,
   isValidHostname,
+  isValidSubmissionId,
   isValidVerifyToken,
   ownershipInstructions,
   tokenExpiresAt,
@@ -135,6 +136,24 @@ describe('hostname grammar backstop', () => {
     expect(isValidHostname(host)).toBe(false)
   })
 
+  it.each([
+    ['hex IPv4', '0xa9.0xfe.0xa9.0xfe', '169.254.169.254'],
+    ['hex loopback', '0x7f.0x0.0x0.0x1', '127.0.0.1'],
+    ['octal IPv4', '0177.0.0.1', '127.0.0.1'],
+  ])('refuses the %s disguise, which URL canonicalization rewrites', (_l, host, canonical) => {
+    // The general rule, not a fourth patch: the round-trip check refuses ANY
+    // host the URL parser rewrites, including spellings nobody has found yet.
+    expect(new URL(`https://${host}/x`).hostname).toBe(canonical)
+    expect(isValidHostname(host)).toBe(false)
+  })
+
+  it('accepts only hostnames that survive URL canonicalization byte-identically', () => {
+    for (const host of ['shop.example.com', 'a.co', 'xn--bcher-kva.example.com', 'sub.deep.example.org']) {
+      expect(new URL(`https://${host}/x`).hostname).toBe(host)
+      expect(isValidHostname(host)).toBe(true)
+    }
+  })
+
   it('refuses an all-numeric final label, which WHATWG URL reads as an IPv4 literal', () => {
     // `new URL('https://123.456/x')` canonicalizes the host to 123.0.1.200
     // with no DNS involved. `assertSafeUrl` would also catch it as an IP
@@ -242,6 +261,41 @@ describe('the URL-constructing exports defend themselves', () => {
 
   it('wellKnownUrl rejects a hostile token', () => {
     expect(() => wellKnownUrl({ ...CLAIM, verifyToken: '../../../etc/passwd' })).toThrow()
+  })
+})
+
+describe('submission-id trust boundary', () => {
+  // Explicit decision, not silence: the MAC's five fields are `\n`-delimited
+  // and the module's argument leans on submissionId not containing a newline.
+  // That was validated for hostname and verifyToken but merely ASSUMED here,
+  // about a slice (#1711) that is not merged.
+  it.each([
+    ['11111111-1111-4111-8111-111111111111', true],
+    ['abc_123:x.y-z', true],
+    ['', false],
+    ['id\nwith-newline', false],
+    ['id\u0000nul', false],
+    ['id with space', false],
+    ['x'.repeat(129), false],
+  ])('%s -> %s', (id, expected) => {
+    expect(isValidSubmissionId(id)).toBe(expected)
+  })
+
+  it('refuses a newline-bearing submission id without any outbound request', async () => {
+    const fetchText = vi.fn(serving('anything'))
+    const resolveTxt = vi.fn(noTxt)
+    const result = await verifyDomainOwnership({ ...CLAIM, submissionId: 'a\nb' }, SECRET, {
+      fetchText,
+      resolveTxt,
+      now: NOW,
+    })
+    expect(result).toMatchObject({ ok: false, reason: 'invalid_submission_id' })
+    expect(fetchText).not.toHaveBeenCalled()
+    expect(resolveTxt).not.toHaveBeenCalled()
+  })
+
+  it('refuses to derive a proof for a newline-bearing submission id', () => {
+    expect(() => deriveOwnershipProof({ ...CLAIM, submissionId: 'a\nb' }, SECRET)).toThrow()
   })
 })
 

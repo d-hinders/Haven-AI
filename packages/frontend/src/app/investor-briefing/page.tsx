@@ -553,9 +553,25 @@ function InvestorButton({
   )
 }
 
+/**
+ * The same decorative trailing arrow as `BrandBandButton`'s, on this page's own
+ * light-background button. `aria-hidden` for the same reason and by the same
+ * `Icon`-style convention (#1940): every `InvestorButton` carries its own text,
+ * and the two "Contact the team" buttons on this page — plus the band CTA at
+ * the foot of it — all render an IDENTICAL arrow, so the glyph distinguishes
+ * nothing and only adds noise to the announcement.
+ */
 function ArrowIcon() {
   return (
-    <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.75}>
+    <svg
+      className="w-3.5 h-3.5"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      aria-hidden="true"
+      focusable={false}
+    >
       <path d="M3.5 8h9M9 4.5L12.5 8 9 11.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )

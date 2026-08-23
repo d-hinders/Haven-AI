@@ -244,7 +244,16 @@ export function AgentCard({
           zero clearance, identically on macOS and Linux (measured 29px vs the
           siblings' 37px). Stating the padding makes the clearance a property of
           the row rather than of which children happen to render. 4px is the
-          sibling clearance exactly — 2px of ring, 2px clear. */}
+          sibling clearance exactly — 2px of ring, 2px clear.
+
+          The result is deliberately asymmetric and that is fine: the branches
+          with separators now get ~8px (4 accidental + 4 stated) and the
+          archived branch gets 4. Both contain the ring with room to spare, and
+          the alternative — a `pb` conditional on which branch rendered — would
+          encode the accident instead of retiring it. Giving the separators
+          `text-xs` would equalise the band at 16px and make all five branches
+          4px, but it also resizes a visible glyph, so it is a design change
+          rather than this fix. */}
       <div className="flex items-center gap-2 pt-3 pb-1 border-t border-[var(--v2-border)]" onClick={stopCardClick}>
         {isOperational && (
           <>
@@ -355,6 +364,12 @@ export function AgentCard({
                 162px of slack before the row could overflow, and the measured
                 overflow at 390px is 0. A two-word action label is an atomic
                 phrase; the explanatory sentence is the thing that should reflow.
+
+                That budget is ASSERTED rather than merely recorded here — see
+                "the archived branch does not overflow at 390px" in
+                `e2e/focus-visible.visual.spec.ts`, which checks both the
+                overflow and the single line at exactly this width. Arithmetic
+                in a comment is run by nobody.
 
                 Rejected: shortening to `Restore` (43px unwrapped) — a shorter
                 label is still a wrappable one, so it buys probability where the

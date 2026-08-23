@@ -217,11 +217,36 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
  * with `whitespace-nowrap` (its 390px budget is measured in `AgentCard.tsx`:
  * 162px of slack, 0px of overflow).
  *
- * Post-#1909 the padding change is a clean, checkable prediction — exactly +4px
- * on every one of these eight rows, and byte-identical on the three sidebar
- * captures, which share no markup with this row. The wrap fix is checked by
- * `expectRowControlsUnwrapped` below rather than by reading the PNG, because a
- * green baseline only ever proves the baseline matches the render.
+ * The padding change was a checkable prediction rather than a colour check:
+ * exactly +4px on every one of these eight rows, and byte-identical on the
+ * three sidebar captures, which share no markup with this row. What CI then
+ * committed, which is the authoritative column:
+ *
+ *   capture                          before      after     delta
+ *   …-edit-desktop                   438 x 37   438 x 41    +4
+ *   …-pause-desktop                  438 x 37   438 x 41    +4
+ *   …-revoke-desktop                 438 x 37   438 x 41    +4
+ *   …-details-desktop                438 x 37   438 x 41    +4
+ *   …-resume-desktop                 438 x 37   438 x 41    +4
+ *   …-remove-delegation-desktop      438 x 37   438 x 41    +4
+ *   …-remove-revoked-desktop         438 x 37   438 x 41    +4
+ *   …-restore-desktop                438 x 45   438 x 49    +4
+ *   focus-sidebar-menu-* (x3)        176 x 118  176 x 118   byte-identical
+ *
+ * **Read the archived row's 49 rather than assuming 33.** Freeing the label
+ * did not shorten that row on Linux, and that is the fix working rather than
+ * failing: the row is two line-boxes tall either way, and what changed is
+ * WHICH child occupies the second one. Before, the two-word action label
+ * broke. After, the label is atomic and the explanatory SENTENCE takes the
+ * second line — which is what a sentence is for. macOS cannot show this at
+ * 1280px because the sentence fits on one line there (438x33); it shows it at
+ * 390px, where the same substitution is visible locally.
+ *
+ * The wrap fix is therefore checked by `expectRowControlsUnwrapped` below
+ * rather than by reading the PNG, because a green baseline only ever proves
+ * the baseline matches the render, never that the render is correct — and
+ * these two heights are equal, so height alone cannot tell the fixed row from
+ * the broken one.
  *
  * That is the same trap #1875 hit from the other side (a mutation reading
  * 1,746 px on `design-system` where clean code fails identically), and the
@@ -609,9 +634,16 @@ async function expectRowControls(row: Locator, expected: readonly string[], labe
  * deliberately pairs its control with a SENTENCE that is expected to reflow,
  * and pinning that would be the actual layout bug.
  *
- * All eight of this row's controls already satisfy it, which the committed
- * baselines prove independently: a wrapped control makes the row >=45px, and
- * the seven non-archived rows are 37px on Linux.
+ * The seven non-archived branches satisfied it before #1909 too, which their
+ * pre-fix baselines prove independently: a wrapped control would have made
+ * those rows >=45px and they were 37px on Linux. (Post-#1909 they are 41px —
+ * the +4px is the `pb-1`, not a wrap.)
+ *
+ * The archived branch is the one this guard is really for, and note that its
+ * baseline CANNOT stand in for it: that row is 49px both before and after the
+ * fix, because the second line moved from the label to the sentence rather
+ * than disappearing. Height is blind to exactly the difference that matters
+ * here, which is why the assertion reads the CONTROL rather than the row.
  */
 async function expectRowControlsUnwrapped(row: Locator, label: string) {
   const lines = await row.getByRole('button').evaluateAll((els) =>
@@ -866,4 +898,70 @@ test.describe('driven focus-state visual regression', () => {
       )
     })
   }
+
+  /**
+   * The archived row at 390px — GEOMETRY ONLY, deliberately no capture (#1909).
+   *
+   * #1909 pinned `Restore to list` with `whitespace-nowrap`, and the argument
+   * against doing that is overflow at the width where this row is tightest. The
+   * budget was measured before choosing: row content width 300px, gap 8px,
+   * label 77px pinned, and the sentence beside it 340px unwrapped with a 53px
+   * `min-content` — so 300 - 77 - 8 - 53 leaves 162px of slack and the sentence
+   * absorbs the reflow. That reasoning shipped as a comment in `AgentCard.tsx`,
+   * and **a comment is not a check**: it is arithmetic about the one width this
+   * fix makes a correctness claim about, run by nobody. This closes it.
+   *
+   * No `toHaveScreenshot`, on purpose. This file does not claim mobile pixels —
+   * #1797's rule is that a desktop proof may not be reused at a width it was
+   * not taken at, and the honest way to honour that is to assert the invariant
+   * that actually matters here (does the row overflow, is the label one line)
+   * rather than to mint a mobile baseline this file has no coverage argument
+   * for. Overflow is a boolean, not a pixel count, so it needs no baseline and
+   * carries none of the platform-metrics caveat the captures do.
+   */
+  test('agent card action row — the archived branch does not overflow at 390px', async ({
+    page,
+  }) => {
+    const mobile = VIEWPORTS.find((vp) => vp.width < DESKTOP_MIN_VIEWPORT_WIDTH)
+    if (!mobile) throw new Error('focus gate: no viewport below the desktop breakpoint')
+
+    const seeded = seededControls.find((s) => s.slug === 'restore')!
+    await seedAgents(page, [seeded.agent])
+    await page.setViewportSize({ width: mobile.width, height: mobile.height })
+    await page.goto('/agents')
+    await page.evaluate(() => document.fonts.ready)
+    await page.waitForLoadState('networkidle')
+
+    const disclosure = page.getByRole('button', { name: /^Removed\b/ })
+    await expect(disclosure).toHaveCount(1)
+    await tabToTarget(page, disclosure, 'AgentPanel · Removed disclosure (390px)')
+    await page.keyboard.press('Enter')
+
+    const target = page.locator(`button[aria-label="${seeded.control}"]`)
+    await expect(target).toHaveCount(1)
+    await expect(target).toBeVisible()
+
+    const actionRow = target.locator('xpath=..')
+    await expect(actionRow).toHaveCount(1)
+
+    // The label is atomic at this width too — the whole point of pinning it.
+    await expectRowControlsUnwrapped(actionRow, 'AgentCard action row · Restore to list @ 390px')
+
+    const overflow = await actionRow.evaluate((rowEl) => {
+      const card = rowEl.closest('[role="link"]') as HTMLElement
+      return {
+        row: rowEl.scrollWidth - rowEl.clientWidth,
+        card: card.scrollWidth - card.clientWidth,
+        rowContentWidth: rowEl.clientWidth,
+      }
+    })
+    expect(
+      overflow.row,
+      `the pinned "Restore to list" label overflowed its action row at ${mobile.width}px ` +
+        `(row content width ${overflow.rowContentWidth}px). This is the failure mode ` +
+        `\`whitespace-nowrap\` was measured against in #1909 — re-measure the budget ` +
+        `before widening the label or the sentence beside it.`,
+    ).toBe(0)
+    expect(overflow.card, `the archived card overflowed at ${mobile.width}px`).toBe(0)
+  })
 })

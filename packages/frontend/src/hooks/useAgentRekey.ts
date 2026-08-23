@@ -41,6 +41,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import type { Address } from 'viem'
+import type { ApiSchema } from '@haven_ai/core'
 import { api, ApiRequestError } from '@/lib/api'
 import { useActiveSigner } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
@@ -106,20 +107,21 @@ interface TypedDataPayload {
   message: Record<string, unknown>
 }
 
-export interface PreflightResult {
-  rekey_id: string
-  stage: RekeyStage
-  old_delegate_address: string
-  new_delegate_address: string
-  residual: {
-    atomic: string
-    token_address: string | null
-    disposition: string
-    recoverable_after_rekey: boolean
-  }
-  delegations_to_revoke: string[]
-}
+/**
+ * The re-key wire shapes come from the SPEC, not from a copy kept here
+ * (#1447/#1442). The routes are documented in `openapi/spec.ts`, so
+ * restating them in the hook would leave two definitions of one contract
+ * with nothing keeping them equal — on a flow that revokes and re-issues
+ * spend authority. #1701 promoted them from inline path bodies to named
+ * `components/schemas` so they could be imported here.
+ */
+export type PreflightResult = ApiSchema<'AgentRekeyPreflight'>
 
+// The spec types this 200 as an open object (additionalProperties) because it
+// carries a bundler-shaped UserOperation this client only relays back
+// verbatim. There is no generated type to import, and inventing a narrower one
+// here would be a second, weaker contract.
+// ui-local: no generated type exists — the spec types this response as an open object
 interface RevokePrepare {
   signing_payload: TypedDataPayload
   user_op_hash: string
@@ -130,37 +132,11 @@ interface RevokePrepare {
   stage?: RekeyStage
 }
 
-export interface IssuedDelegation {
-  delegation_hash: string
-  /** `carry` = capped at the frozen remainder; `steady` = the next full period. */
-  carry_role: 'carry' | 'steady' | 'reanchor'
-  token_address: string
-  budget_atomic: string
-  period_seconds: number
-  start_date: number
-  expires_at: number
-  signing_payload: TypedDataPayload
-}
+export type IssuedDelegation = ApiSchema<'AgentRekeyIssuedDelegation'>
+export type IssueResult = ApiSchema<'AgentRekeyIssueResponse'>
+export type CompleteApiResult = ApiSchema<'AgentRekeyCompleteResponse'>
 
-export interface IssueResult {
-  stage: RekeyStage
-  delegate_account_address: string
-  delegations: IssuedDelegation[]
-  /**
-   * Delegations that produced no replacement. The backend attaches a `reason`
-   * string; it is deliberately NOT carried through — see the file header.
-   */
-  skipped: Array<{ delegation_hash: string }>
-}
-
-export interface CompleteResult {
-  api_key: string
-  api_key_prefix: string
-  new_delegate_address: string
-  invalidated_intents: number
-  superseded_delegations: number
-  residual_atomic: string
-}
+export type CompleteResult = ApiSchema<'AgentRekeyCompleteResponse'>
 
 /**
  * Refusals the UI has a specific answer for. Everything else collapses to
@@ -387,29 +363,17 @@ export function useAgentRekey(agentId: string, chainId: number) {
         for (const d of delegations) {
           signatures.push({
             delegation_hash: d.delegation_hash,
-            signature: await signTypedData(d.signing_payload),
+            // The spec types the payload as an open object; it is relayed to
+            // the wallet verbatim, exactly as the account will validate it.
+            signature: await signTypedData(d.signing_payload as unknown as TypedDataPayload),
           })
         }
-        const res = await api.post<{
-          api_key: string
-          api_key_prefix: string
-          new_delegate_address: string
-          invalidated_intents: number
-          superseded_delegations: number
-          residual_on_old_delegate: { atomic: string }
-        }>(`/agents/${agentId}/rekey/${rekeyId}/complete`, { signatures })
+        const res = await api.post<CompleteResult>(
+          `/agents/${agentId}/rekey/${rekeyId}/complete`,
+          { signatures },
+        )
         setStage('completed')
-        return {
-          ok: true,
-          value: {
-            api_key: res.api_key,
-            api_key_prefix: res.api_key_prefix,
-            new_delegate_address: res.new_delegate_address,
-            invalidated_intents: res.invalidated_intents,
-            superseded_delegations: res.superseded_delegations,
-            residual_atomic: res.residual_on_old_delegate?.atomic ?? '0',
-          },
-        }
+        return { ok: true, value: res }
       } catch (err) {
         return { ok: false, failure: classify(err) }
       } finally {

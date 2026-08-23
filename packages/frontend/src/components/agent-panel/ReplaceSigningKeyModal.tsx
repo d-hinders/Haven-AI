@@ -284,7 +284,7 @@ export function ReplaceSigningKeyModal({
       return
     }
     setIssuedDelegations(issued.value.delegations)
-    setSkippedCount(issued.value.skipped.length)
+    setSkippedCount(issued.value.skipped?.length ?? 0)
 
     const n = issued.value.delegations.length
     setSigningLabel(
@@ -752,7 +752,7 @@ export function ReplaceSigningKeyModal({
             <li>
               New signing address: <Address value={result.new_delegate_address} copy />
             </li>
-            {result.invalidated_intents > 0 ? (
+            {(result.invalidated_intents ?? 0) > 0 ? (
               <li>
                 {result.invalidated_intents}{' '}
                 {result.invalidated_intents === 1 ? 'payment was' : 'payments were'} cancelled
@@ -766,9 +766,9 @@ export function ReplaceSigningKeyModal({
                 the new key.
               </li>
             ) : null}
-            {result.residual_atomic !== '0' ? (
+            {(result.residual_on_old_delegate?.atomic ?? '0') !== '0' ? (
               <li>
-                {formatUsdc(result.residual_atomic)} USDC remains on the retired address and cannot
+                {formatUsdc(result.residual_on_old_delegate?.atomic ?? '0')} USDC remains on the retired address and cannot
                 be moved.
               </li>
             ) : null}

@@ -55,10 +55,12 @@ jobs:
         run: node scripts/ci/change-classifier.mjs
 
   # Unconditional by design (#1030). These tests cover repo-level CI config —
-  # the money-path glob list and the money-flow QA freshness gate that replaced
-  # the in-session money-path approval pause (#1024). They must run on EVERY PR,
-  # not behind a surface filter: the whole failure being fixed is a money-path
-  # safeguard that nobody noticed was wrong. Dependency-free, ~1s, no npm ci.
+  # originally the money-path glob list and the money-flow QA freshness gate
+  # that replaced the in-session money-path approval pause (#1024), and since
+  # #1206 everything else in scripts/ci/ too (the step below enumerates it).
+  # They must run on EVERY PR, not behind a surface filter: the whole failure
+  # being fixed is a money-path safeguard that nobody noticed was wrong.
+  # Dependency-free, seconds, no npm ci.
   ci_config_checks:
     name: Repo CI config checks
     runs-on: ubuntu-latest
@@ -68,7 +70,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
-      - name: Money-path list + QA freshness gate
+      # The name says the GLOB, not a list of suites, on purpose (#1874). It
+      # read "Money-path list + QA freshness gate" while the glob had grown to
+      # cover seven suites — the money-path list (including its prose
+      # restatement scan) and the QA freshness gate, plus the change
+      # classifier, the routing matrix, the root-guard ownership manifest, the
+      # package-dependency table and the baseline-push follow-up. Someone
+      # debugging a red run on a PR touching none of the money path looked in
+      # the wrong place first, and the name read as owned by the money-path
+      # work rather than as the general repo-config suite this is — a mild
+      # disincentive to putting new repo-level tests exactly where they belong.
+      # Any enumeration in the NAME goes stale the next time a suite is added,
+      # which is the defect itself; the glob cannot.
+      - name: Repo CI config suites (scripts/ci/*.test.mjs)
         run: node --test scripts/ci/*.test.mjs
       # #1206: this suite previously ran NOWHERE — it lives outside every
       # test glob. Dependency-free like the step above, so it belongs here.

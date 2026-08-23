@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-08-22" # #1852: the Receive Funds recipe's unresolved-network rule now names the QR code and the explorer link explicitly (a receive surface withholds them together with the address, or it is still instructing), adds the required-but-non-promising next action, and pins the account name as the one thing that stays. The unconditional "keep raw address visible" bullet is now conditioned on a confirmed network — it contradicted the #1844 bullet directly above it. Only the Receive Funds recipe re-read. Prior: #1844: the Receive Funds recipe gains the unresolved-network rule — a funding surface that cannot confirm the account's network names none, withholds the address and the on-ramp, and says so, rather than defaulting to Base mainnet. Only that recipe re-read. Prior: #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
+last-verified: "2026-08-23" # #1701: adds the Replace An Agent Signing Key recipe — the point-of-no-return gate (name the irreversible step before it is taken, require an acknowledgement that names the consequence, say stopping is free up to the line, remove backdrop/Escape/close past it), tone escalation reserved for that step, and refuse-before-the-gate. Only the new recipe written; the existing recipes on this page were not re-read. Prior: #1852: the Receive Funds recipe's unresolved-network rule now names the QR code and the explorer link explicitly (a receive surface withholds them together with the address, or it is still instructing), adds the required-but-non-promising next action, and pins the account name as the one thing that stays. The unconditional "keep raw address visible" bullet is now conditioned on a confirmed network — it contradicted the #1844 bullet directly above it. Only the Receive Funds recipe re-read. Prior: #1844: the Receive Funds recipe gains the unresolved-network rule — a funding surface that cannot confirm the account's network names none, withholds the address and the on-ramp, and says so, rather than defaulting to Base mainnet. Only that recipe re-read. Prior: #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
 ---
 
 # Haven Screen Recipes
@@ -381,6 +381,57 @@ Money and risk clarity:
 - Submission, success, retry guidance, and explorer links belong in the
   agent/tool result today. Surface them on this screen only if execution status
   is later wired back into the route.
+
+## Replace An Agent Signing Key
+
+Use for any owner-authorised change that revokes on-chain authority partway
+through a multi-step flow. Today that is replacing an agent's signing key; the
+shape generalises to any sequence with a step that cannot be taken back.
+
+Structure:
+1. Reason first, because the reasons carry different urgency. A lost key and a
+   possibly-stolen one take the same steps, but the second needs the agent's
+   recent spending on screen so the owner can judge the damage before deciding.
+2. The new public signing address, generated on the agent's own machine and
+   pasted here. Say plainly that the private half never reaches Haven and
+   cannot be moved between machines.
+3. What carries over and what stops working, as two separate lists in the
+   owner's terms — budget remainder and period boundary carry; the old key,
+   the old credential and any unmade quoted payment stop.
+4. The gate. See below.
+5. The new credential, shown once, with what to do with it.
+
+The point-of-no-return gate:
+- **Name the step that cannot be undone, before it is taken**, and say what the
+  agent cannot do until the flow finishes. Do not present it as one step among
+  several.
+- **Require an explicit acknowledgement** that names the consequence, not a
+  bare "are you sure".
+- **Say that stopping is free up to here.** An owner who does not know where
+  the line is has to treat the whole flow as dangerous.
+- **Remove the escape hatches past the line.** Backdrop dismissal, Escape and
+  the close button all go, so a stray click cannot strand the agent mid-flow.
+  This is the case `product/README.md` § Modals already carves out.
+- **Warn against pausing** when a measurement taken at the start is applied at
+  the end. A flow that is safe to resume tomorrow should say so; one that is
+  not must say that instead.
+
+Money and risk clarity:
+- Escalate tone only at the gate. Grouping every caveat into one warning and
+  reserving the danger treatment for the irreversible step is what makes the
+  irreversible step legible — several same-weight warnings in front of it read
+  as one undifferentiated block of yellow and the alarm stops working.
+- Where a balance becomes permanently unrecoverable, say permanently, name the
+  amount, and offer the recovery that is still possible while it still is.
+- Refuse before the gate, never after. When the account cannot sign the flow
+  from this device, or the agent is on a rail that has no key to replace, say
+  so up front with the reason and the alternative — a refusal discovered
+  halfway through is a stranded agent.
+- Let a blocked owner still read the flow. Disabling the irreversible action is
+  the protection; disabling navigation only hides what they need to prepare.
+- Never repeat a backend's prose about what happens next. Render its structured
+  fields and write the sentence here, so a claim cannot go stale server-side
+  without anything type-checking it.
 
 ## Reporting
 

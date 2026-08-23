@@ -663,6 +663,152 @@ export const SCENARIOS = {
       await shoot(card, 'card')
     },
   },
+  'replace-signing-key': {
+    description:
+      'Replace signing key modal at each step — reason (lost + compromised), address, the point-of-no-return gate, and the legacy-rail refusal',
+    // No URL reaches this: the modal is behind the agent detail page's options
+    // menu, and its interesting screens are three clicks deep. Every stage
+    // below is a distinct decision a reviewer has to judge as rendered copy.
+    //
+    // ⚠️ READ THIS BEFORE JUDGING THE PNGs. The capture fixture has no
+    // connected wallet, and `useActiveSigner` is wagmi-driven, so
+    // `pickSigningPath` cannot return 'eoa' here. Every capture therefore
+    // carries the #1870 refusal banner ("You cannot replace this key from this
+    // device"). That is a REAL state a passkey-signing owner sees today, not a
+    // rendering fault — but it is not the primary path, and the destructive
+    // button is consequently disabled in these PNGs. It being disabled here is
+    // the harness, not the design.
+    api(apiPath) {
+      // agent-research carries the passport, so the #1847 disclosure renders.
+      // The shared fixture gives it a null delegate; re-key needs one to be
+      // replacing, so the scenario supplies it.
+      if (apiPath === '/agents') {
+        return {
+          agents: FIXTURE_AGENTS.map((a) =>
+            a.id === 'agent-research' ? { ...a, delegate_address: ADDR.delegate } : a,
+          ),
+        }
+      }
+      if (apiPath.endsWith('/account-signers')) {
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [],
+        }
+      }
+      // The preflight, so the consequences step renders its real shape rather
+      // than an error. Residual zero — the stranded-funds branch has its own
+      // coverage in the unit tests and would displace this capture.
+      if (apiPath === '/agents/agent-research/rekey') {
+        return {
+          rekey_id: 'rk-fixture-1',
+          stage: 'preflight',
+          old_delegate_address: ADDR.delegate,
+          new_delegate_address: '0x' + '77'.repeat(20),
+          residual: {
+            atomic: '0',
+            token_address: null,
+            disposition: 'none',
+            recoverable_after_rekey: false,
+          },
+          delegations_to_revoke: ['0x' + 'ab'.repeat(32)],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      /**
+       * Grow the viewport until the modal's SCROLLING BODY has nothing below
+       * the fold, then shoot.
+       *
+       * `shoot`'s own clip guard cannot help here, and the first run of this
+       * scenario proved it: `ui/Modal` puts `role="dialog"` on the
+       * `fixed inset-0` container, so its `scrollHeight - clientHeight` is 0
+       * no matter how much is hidden, while the actual scroller is the nested
+       * `min-h-0 flex-1 overflow-y-auto` body. The guard measured the wrapper,
+       * read 0, and wrote a PNG that cut off the irreversibility banner, the
+       * acknowledgement checkbox and the passport disclosure — the three
+       * things this capture exists to evidence. It looked complete, which is
+       * what made it dangerous.
+       *
+       * Same class as the `measureDialogOverflow` finding in frontend.md §4:
+       * measuring a box against itself cannot see a nested scroller. Measured
+       * on the body, then ASSERTED back to zero, so a capture that is still
+       * clipped fails the run instead of being attached as evidence.
+       */
+      const shootWhole = async (dialog, name) => {
+        const body = dialog.locator('div.overflow-y-auto').first()
+        const hidden = await body.evaluate((el) => el.scrollHeight - el.clientHeight)
+        if (hidden > 0) {
+          await page.setViewportSize({ width: vp.width, height: vp.height + hidden + 64 })
+          await page.waitForTimeout(250)
+        }
+        const stillHidden = await body.evaluate((el) => el.scrollHeight - el.clientHeight)
+        if (stillHidden > 0) {
+          throw new Error(
+            `replace-signing-key/${name} at ${vp.name}: modal body still clips ${stillHidden}px ` +
+              'after growing the viewport — refusing to write a truncated capture.',
+          )
+        }
+        await shoot(dialog, name)
+        await page.setViewportSize({ width: vp.width, height: vp.height })
+        await page.waitForTimeout(150)
+      }
+
+      // ── The delegation-rail agent: the whole flow ────────────────────────
+      await page.goto(`${BASE_URL}/agents/agent-research`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('button', { name: 'Agent options' }).click()
+      await page.getByRole('menuitem', { name: 'Replace signing key' }).click()
+
+      const dialog = page.getByRole('dialog')
+      // Wait for the CHOICE, not just the dialog: the two reasons are the
+      // first thing under review, and a capture that raced them would show an
+      // empty shell that still looks like a finished screen.
+      await dialog.getByRole('radio', { name: /it is lost/i }).waitFor({ timeout: 15_000 })
+      await dialog.getByRole('radio', { name: /someone else/i }).waitFor({ timeout: 15_000 })
+      await shootWhole(dialog, 'reason')
+
+      // Compromised surfaces the spend list — a different screen, not a
+      // different toggle state, so it gets its own capture.
+      await dialog.getByRole('radio', { name: /someone else/i }).click()
+      await dialog.getByText(/recent spending to review/i).waitFor({ timeout: 15_000 })
+      await shootWhole(dialog, 'reason-compromised')
+
+      await dialog.getByRole('radio', { name: /it is lost/i }).click()
+      await dialog.getByRole('button', { name: 'Continue' }).click()
+      await dialog.getByText(/haven never receives the private key/i).waitFor({ timeout: 15_000 })
+      await shootWhole(dialog, 'address')
+
+      await dialog.getByLabel(/new signing address/i).fill('0x' + '77'.repeat(20))
+      await dialog.getByRole('button', { name: 'Continue' }).click()
+
+      // THE screen this issue exists to get right. Wait on the irreversibility
+      // gate itself — if the acknowledgement ever stops rendering, this run
+      // fails instead of shooting a flow that lost its safety catch.
+      await dialog.getByText(/the next step cannot be undone/i).waitFor({ timeout: 15_000 })
+      await dialog.getByRole('checkbox').waitFor({ timeout: 15_000 })
+      await shootWhole(dialog, 'point-of-no-return')
+
+      // ── The legacy-rail agent: the refusal ──────────────────────────────
+      await page.goto(`${BASE_URL}/agents/agent-ops`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('button', { name: 'Agent options' }).click()
+      await page.getByRole('menuitem', { name: 'Replace signing key' }).click()
+
+      const refusal = page.getByRole('dialog')
+      await refusal.getByText(/not available for this agent/i).waitFor({ timeout: 15_000 })
+      await shootWhole(refusal, 'legacy-rail-refusal')
+    },
+  },
   'account-signer-removal': {
     description: 'Account backup-removal consequence dialog with exactly two approval ways',
     api(apiPath) {

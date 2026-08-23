@@ -110,15 +110,24 @@ export function anchorForPassport(
   staleAnchor = false,
 ): AnchorState {
   if (passportStatus !== 'anchored') return 'not_anchored'
-  if (revocationStatus === 'confirmed') return 'revoked_onchain'
-  // Ordered ABOVE the `pending` check on purpose. A re-anchor claims the row by
-  // setting `revocation_status = 'pending'` — the same column the ordinary
-  // revoke uses — so without this the entire re-key window would report
-  // `revocation_pending`, which says the agent lost its standing. It did not.
-  // `staleAnchor` is only ever true for a live agent (the predicate that
-  // computes it requires `agents.status <> 'revoked'`), so a genuinely revoked
-  // agent can never take this branch.
+  // Ordered ABOVE BOTH revocation checks, and that is the whole subtlety of
+  // this function. A re-anchor drives the row through the SAME
+  // `revocation_status` column an ordinary revoke uses — `pending` while it
+  // holds the lease, then `confirmed` for the moment between the retire
+  // landing and `resetForReanchor` clearing the row. Read without this branch,
+  // a routine re-key would report `revocation_pending` and then
+  // `revoked_onchain` for an agent that is live and fully authorised, and the
+  // dashboard would render "Revoked on-chain" in the danger tone at the exact
+  // moment nothing is wrong.
+  //
+  // Safe because the two situations cannot overlap: `staleAnchor` is only ever
+  // true for a LIVE agent (every caller gates it on `agents.status <>
+  // 'revoked'`, and so does the SQL predicate that feeds the queue), while an
+  // ordinary revocation only reaches `pending`/`confirmed` for a REVOKED one
+  // (`claimRevocation` requires it). So a genuinely revoked agent can never
+  // take this branch, and a live one has no other honest answer.
   if (staleAnchor) return 're_anchoring'
+  if (revocationStatus === 'confirmed') return 'revoked_onchain'
   if (revocationStatus === 'pending') return 'revocation_pending'
   return 'anchored'
 }

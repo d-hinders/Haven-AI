@@ -89,19 +89,35 @@ export async function reconcileReanchor(agentId: string, userId: string): Promis
 
   if (!isStaleAnchor(row.agent_eoa, facts.delegate_address)) return 'anchored'
 
-  // The single gate: invariant + lease, atomically. A loser submits NOTHING.
-  if (!(await repo.claimReanchorRevocation(agentId))) return 're_anchoring'
+  // ── Resume, do not restart ──────────────────────────────────────────────
+  //
+  // `confirmed` means the retire already landed. For an ordinary revocation
+  // that is terminal; here it is the MIDDLE of the operation, because the row
+  // still has to be handed back to issuance. The two steps are sequential
+  // statements with no transaction around them — deliberately, since one of
+  // them is a chain round-trip — so a crash, a deploy or a lease expiry can
+  // land squarely between them. Re-submitting a revoke for an already-revoked
+  // uid is not an option either: EAS reverts it `AlreadyRevoked`, so a
+  // restart-from-the-top would burn gas and never converge.
+  //
+  // Skipping straight to the reset is safe precisely because `resetForReanchor`
+  // re-checks `revocation_status = 'confirmed'` and the uid itself, atomically.
+  // This branch cannot invent a confirmation it did not find.
+  if (row.revocation_status !== 'confirmed') {
+    // The single gate: invariant + lease, atomically. A loser submits NOTHING.
+    if (!(await repo.claimReanchorRevocation(agentId))) return 're_anchoring'
 
-  const retired = await retireAttestationOnChain(
-    agentId,
-    row.chain_id,
-    row.attestation_uid,
-    row.revocation_attempts,
-  )
-  // The retire scheduled its own backoff and stays due. Critically, the row is
-  // NOT reset — the old uid is still the only pointer Haven holds to a
-  // credential that is still live on-chain, and losing it would strand it.
-  if (retired !== 'revoked_onchain') return 're_anchoring'
+    const retired = await retireAttestationOnChain(
+      agentId,
+      row.chain_id,
+      row.attestation_uid,
+      row.revocation_attempts,
+    )
+    // The retire scheduled its own backoff and stays due. Critically, the row
+    // is NOT reset — the old uid is still the only pointer Haven holds to a
+    // credential that is still live on-chain, and losing it would strand it.
+    if (retired !== 'revoked_onchain') return 're_anchoring'
+  }
 
   // Hand the row back to the issuance state machine. Refuses unless the
   // revocation is confirmed AND the uid matches the one just retired.

@@ -91,12 +91,41 @@ describe('AgentPassportCard (#1072)', () => {
       // The two layers, uncollapsed. Standing is the answer and it is Active.
       expect(screen.getByText('Active')).toBeTruthy()
       expect(screen.getByText(/signing key was replaced/)).toBeTruthy()
+      // The caveat travels with the link, not only with the note two rows down
+      // (design review of #1699): a reader who clicks straight from the grid
+      // lands on an explorer showing the retired key with no context.
+      expect(screen.getByText('Names the previous key')).toBeTruthy()
       // Never "Issued": that would claim a credential naming a retired key is
       // current, which is the #1847 defect this state exists to surface.
       expect(screen.queryByText('Issued')).toBeNull()
       // And never the revoke language — the agent did not lose anything.
       expect(screen.queryByText('Revoking…')).toBeNull()
       expect(screen.queryByText(/Treat the agent as\s+revoked now/)).toBeNull()
+    })
+
+    it('shows only ONE note when standing is revoked, never two contradicting ones', () => {
+      // The two notes say opposite things — "treat the agent as revoked now"
+      // against "the agent stays active the whole time". The backend makes the
+      // states mutually exclusive; this proves the card does not depend on
+      // that holding forever.
+      mockUseAgentPassport.mockReturnValue(
+        state({
+          passport: {
+            status: 'anchored', assurance_level: 0,
+            attestation_uid: '0x' + '11'.repeat(32),
+            tx_hash: '0x' + 'aa'.repeat(32), chain_id: 84532,
+            attempts: 1, last_error: null,
+            requested_at: '2026-08-22T10:00:00.000Z', anchored_at: '2026-08-22T10:00:12.000Z',
+          },
+          standing: {
+            agentId: 'agent-1', standing: 'revoked', anchor: 're_anchoring',
+            attestationUid: '0x' + '11'.repeat(32), chainLagging: true, revocationConfirmedAt: null,
+          },
+        }),
+      )
+      render(<AgentPassportCard agentId="agent-1" />)
+      expect(screen.getByText(/Treat the agent as/)).toBeTruthy()
+      expect(screen.queryByText(/signing key was replaced/)).toBeNull()
     })
 
     it('does not show the re-key note for an ordinary anchored passport', () => {

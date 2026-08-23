@@ -82,6 +82,7 @@ import {
   LIST_REVOCATIONS_DUE_SQL,
   LIST_STUCK_REANCHORS_SQL,
   LIST_STUCK_REVOCATIONS_SQL,
+  RESET_FOR_REANCHOR_SQL,
 } from '../src/infra/repositories/agent-passports.js'
 import {
   CANCEL_SETUP_SQL,
@@ -639,22 +640,12 @@ const QUERIES: SmokeQuery[] = [
     sql: LIST_STUCK_REANCHORS_SQL,
   },
   {
+    // IMPORTED, not pasted — the reason the passport set stopped hand-copying
+    // queries at all. A literal here is byte-identical the day it is written
+    // and silently stale the day the real statement changes, and the smoke
+    // test keeps passing against the copy.
     name: 'passport: resetForReanchor — hands the row back to issuance (#1699)',
-    sql: `UPDATE agent_passports
-             SET status = 'pending',
-                 attestation_uid = NULL, tx_hash = NULL,
-                 agent_eoa = NULL, smart_account = NULL,
-                 anchored_at = NULL, anchoring_started_at = NULL,
-                 attempts = 0, last_error = NULL,
-                 revocation_status = 'none',
-                 revocation_requested_at = NULL, revocation_confirmed_at = NULL,
-                 revocation_tx_hash = NULL, revocation_attempts = 0,
-                 revocation_last_error = NULL, revocation_next_attempt_at = NULL,
-                 updated_at = NOW()
-           WHERE agent_id = $1
-             AND status = 'anchored'
-             AND revocation_status = 'confirmed'
-             AND attestation_uid = $2`,
+    sql: RESET_FOR_REANCHOR_SQL,
   },
   {
     // The merchant-facing lookup. A schema mismatch here means verification

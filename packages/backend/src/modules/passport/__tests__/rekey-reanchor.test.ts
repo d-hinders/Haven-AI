@@ -380,6 +380,106 @@ describeDb('#1699 — passport re-anchoring on re-key', () => {
       expect(await repo.findByAgent(agentId)).toBeNull()
     })
 
+    it('an owner revoke DURING the retire mints nothing — fail-closed', async () => {
+      // The nastiest interleaving available: the retire is in flight, the
+      // owner hits Revoke, and the re-anchor is about to mint a replacement.
+      // Minting here would hand a REVOKED agent a fresh, live credential —
+      // the #973 divergence, created by the very machinery meant to close it.
+      const { agentId, userId } = await seedAnchoredAgent()
+      await rekeyTo(agentId, NEW_DELEGATE)
+
+      setRevoker(async () => {
+        await db.query(`UPDATE agents SET status = 'revoked' WHERE id = $1`, [agentId])
+        return { txHash: REVOKE_TX }
+      })
+      const anchor = vi.fn(async () => ({ attestationUid: NEW_UID, txHash: ANCHOR_TX }))
+      setAnchor(anchor)
+
+      await reconcileReanchor(agentId, userId)
+
+      // Nothing was minted. `issuePassport` refuses a revoked agent, and that
+      // refusal is what closes this window — not anything in reanchor.ts,
+      // which is why it is asserted here rather than assumed.
+      expect(anchor).not.toHaveBeenCalled()
+      const row = await repo.findByAgent(agentId)
+      expect(row?.attestation_uid).toBeNull()
+
+      // And the resting state is honest: the retired attestation IS revoked
+      // on-chain, nothing replaced it, so there is no live credential for a
+      // revoked agent and nothing for the stuck-revoke alarm to chase.
+      const after = await passportStanding(agentId)
+      expect(after.standing).toBe('revoked')
+      expect(after.anchor).toBe('not_anchored')
+      expect(after.chainLagging).toBe(false)
+      expect(await repo.listRevocationsDue(10)).toEqual([])
+      expect(await repo.listReanchorsDue(10)).toEqual([])
+    })
+
+    it('RESUMES a re-anchor abandoned between the retire and the reset', async () => {
+      // Found in review of this slice. The retire and the reset are sequential
+      // statements with a chain round-trip between them, so a crash, a deploy
+      // or an expired lease can land in the gap. The row is then `anchored` +
+      // `confirmed` on a LIVE agent with a stale EOA — and both the queue and
+      // the claim gate originally treated `confirmed` as terminal, so nothing
+      // ever picked it up again. The agent kept a dead attestation forever.
+      const { agentId, userId, oldUid } = await seedAnchoredAgent()
+      await rekeyTo(agentId, NEW_DELEGATE)
+
+      // Reproduce the abandoned state exactly: retire confirmed, no reset.
+      await repo.claimReanchorRevocation(agentId)
+      await repo.markRevocationConfirmed(agentId, REVOKE_TX)
+      expect((await repo.findByAgent(agentId))?.attestation_uid).toBe(oldUid)
+
+      // 1. It is still DUE. This is the assertion that would have caught it.
+      expect((await repo.listReanchorsDue(10)).map((r) => r.agent_id)).toEqual([agentId])
+
+      // 2. And it finishes without re-submitting a revoke. EAS reverts a
+      //    second revoke of the same uid `AlreadyRevoked`, so a
+      //    restart-from-the-top would burn gas and never converge.
+      const revoker = vi.fn(async () => ({ txHash: REVOKE_TX }))
+      setRevoker(revoker)
+      setAnchor(async () => ({ attestationUid: NEW_UID, txHash: ANCHOR_TX }))
+
+      expect(await reconcileReanchor(agentId, userId)).toBe('anchored')
+      expect(revoker).not.toHaveBeenCalled()
+      expect((await repo.findByAgent(agentId))?.agent_eoa?.toLowerCase()).toBe(
+        NEW_DELEGATE.toLowerCase(),
+      )
+    })
+
+    it('never shows a live agent as revoked, in ANY state of the rotation', async () => {
+      // The display half of the same finding, asserted at every step rather
+      // than at the ends — the defect lived entirely in the middle.
+      const { agentId, userId } = await seedAnchoredAgent()
+      await rekeyTo(agentId, NEW_DELEGATE)
+
+      const seen: string[] = []
+      const record = async () => {
+        const st = await passportStanding(agentId)
+        seen.push(`${st.standing}/${st.anchor}`)
+      }
+      await record() // stale, revocation_status 'none'
+      await repo.claimReanchorRevocation(agentId)
+      await record() // stale, revocation_status 'pending'
+      await repo.markRevocationConfirmed(agentId, REVOKE_TX)
+      await record() // stale, revocation_status 'confirmed' — the gap
+
+      setRevoker(async () => ({ txHash: REVOKE_TX }))
+      setAnchor(async () => ({ attestationUid: NEW_UID, txHash: ANCHOR_TX }))
+      await reconcileReanchor(agentId, userId)
+      await record() // done
+
+      expect(seen).toEqual([
+        'active/re_anchoring',
+        'active/re_anchoring',
+        'active/re_anchoring',
+        'active/anchored',
+      ])
+      // Stated as its own assertion because it is the acceptance criterion,
+      // not a consequence: no window shows the agent as revoked.
+      expect(seen.some((s) => s.includes('revoked'))).toBe(false)
+    })
+
     it('binds whatever key is current, even if a SECOND re-key landed mid-flight', async () => {
       const { agentId, userId } = await seedAnchoredAgent()
       await rekeyTo(agentId, NEW_DELEGATE)
@@ -514,8 +614,18 @@ describe('anchorForPassport with a stale anchor (#1699)', () => {
     expect(anchorForPassport('anchored', 'pending', false)).toBe('revocation_pending')
   })
 
-  it('never outranks a CONFIRMED revocation', () => {
-    expect(anchorForPassport('anchored', 'confirmed', true)).toBe('revoked_onchain')
+  it('ALSO outranks a confirmed revocation, for the same reason (review of #1699)', () => {
+    // Amended after review. `confirmed` is terminal for an ordinary revoke but
+    // INTERMEDIATE for a re-anchor — it is the state between the retire
+    // landing and `resetForReanchor` clearing the row. Ranking it above
+    // `staleAnchor` made a live, fully authorised agent read `revoked_onchain`
+    // in that gap, which the dashboard renders as "Revoked on-chain" in the
+    // danger tone. The window is short but it is not theoretical: the two
+    // writes are sequential statements with no transaction around them.
+    expect(anchorForPassport('anchored', 'confirmed', true)).toBe('re_anchoring')
+    // The control, and the reason the reorder is safe: without a stale anchor
+    // — i.e. for a genuinely revoked agent — `confirmed` still means revoked.
+    expect(anchorForPassport('anchored', 'confirmed', false)).toBe('revoked_onchain')
   })
 
   it('is inert for a row that never anchored', () => {

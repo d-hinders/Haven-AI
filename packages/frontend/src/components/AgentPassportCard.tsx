@@ -46,10 +46,17 @@ function headlineBadge(
   if (status === 'failed') return { label: 'Issuance failed', tone: 'danger' }
   if (status === 'pending') return { label: 'Issuing…', tone: 'neutral' }
   if (anchor === 'revoked_onchain') return { label: 'Revoked on-chain', tone: 'danger' }
-  // Above `revocation_pending`, mirroring the backend's ordering: a re-anchor
-  // claims the row through the same revocation columns, so without this the
-  // whole re-key window would read "Revoking…" on a live, authorised agent.
-  if (anchor === 're_anchoring') return { label: 'Updating on-chain', tone: 'warning' }
+  // Above BOTH revocation labels, mirroring the backend's ordering: a re-anchor
+  // drives the row through the same revocation columns, so without this the
+  // re-key window would read "Revoking…" and then "Revoked on-chain" on a
+  // live, fully authorised agent.
+  //
+  // `neutral`, not `warning`, and this component already settled the question:
+  // `'Issuing…'` above is neutral for exactly this shape of state — the system
+  // is doing something in the background and the owner has nothing to do.
+  // `warning` is earned by `revocation_pending` and `Suspended`, which are
+  // changes in posture; here nothing about the agent's posture has changed.
+  if (anchor === 're_anchoring') return { label: 'Updating on-chain', tone: 'neutral' }
   if (anchor === 'revocation_pending') return { label: 'Revoking…', tone: 'warning' }
   return { label: 'Issued', tone: 'success' }
 }
@@ -152,6 +159,13 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
                   >
                     View transaction
                   </a>
+                  {/* The caveat has to travel WITH the link. The note below
+                      explains the whole state, but a reader who clicks
+                      straight from the grid lands on an explorer showing the
+                      retired key with no on-page context. */}
+                  {standing?.anchor === 're_anchoring' ? (
+                    <span className="block text-xs text-[var(--v2-ink-3)]">Names the previous key</span>
+                  ) : null}
                 </dd>
               </div>
             ) : null}
@@ -159,16 +173,22 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
           {passport.status === 'failed' && passport.last_error ? (
             <p className="mt-3 text-xs text-[var(--v2-danger)]">{passport.last_error}</p>
           ) : null}
+          {/* An `else if`, not a second `if`. The two notes contradict each
+              other outright — "treat the agent as revoked now" against "the
+              agent stays active the whole time" — so rendering both would be
+              worse than rendering neither. The backend makes them mutually
+              exclusive (`chainLagging` requires standing `revoked`;
+              `re_anchoring` is only ever produced for a live agent), and this
+              encodes that rather than depending on it holding forever. */}
           {standing?.chainLagging ? (
             <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
               Revoked in Haven; the on-chain record has not caught up yet. Treat the agent as
               revoked now.
             </p>
-          ) : null}
-          {standing?.anchor === 're_anchoring' ? (
+          ) : standing?.anchor === 're_anchoring' ? (
             <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
               This agent&apos;s signing key was replaced. The on-chain record still names the old
-              key and is being reissued; the agent stays active the whole time.
+              key until it is reissued. The agent stays active the whole time.
             </p>
           ) : null}
         </Card.Section>

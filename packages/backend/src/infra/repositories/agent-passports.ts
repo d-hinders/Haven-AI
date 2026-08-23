@@ -754,13 +754,7 @@ export async function claimReanchorRevocation(
  * here because it is not a column of this table: it derives from
  * `agents.status`, which a re-key never changes.
  */
-export async function resetForReanchor(
-  agentId: string,
-  revokedAttestationUid: string,
-  db: Executor = pool,
-): Promise<boolean> {
-  const { rowCount } = await db.query(
-    `UPDATE agent_passports
+export const RESET_FOR_REANCHOR_SQL = `UPDATE agent_passports
         SET status = 'pending',
             attestation_uid = NULL, tx_hash = NULL,
             agent_eoa = NULL, smart_account = NULL,
@@ -774,18 +768,36 @@ export async function resetForReanchor(
       WHERE agent_id = $1
         AND status = 'anchored'
         AND revocation_status = 'confirmed'
-        AND attestation_uid = $2`,
-    [agentId, revokedAttestationUid],
-  )
+        AND attestation_uid = $2`
+
+export async function resetForReanchor(
+  agentId: string,
+  revokedAttestationUid: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const { rowCount } = await db.query(RESET_FOR_REANCHOR_SQL, [agentId, revokedAttestationUid])
   return (rowCount ?? 0) > 0
 }
 
-/** Stale anchors due for another re-anchor attempt, oldest first. */
+/**
+ * Stale anchors due for another re-anchor attempt, oldest first.
+ *
+ * **Note what is NOT excluded here, unlike the revocation due-list:
+ * `revocation_status = 'confirmed'`.** For a revocation, confirmed is
+ * terminal — the chain agrees and there is nothing left to do. For a
+ * re-anchor it is the MIDDLE of the operation: the retired attestation is
+ * dead, but the row still has to be handed back to issuance and a new
+ * attestation minted. A re-anchor whose process died in that gap — between
+ * `markRevocationConfirmed` and `resetForReanchor`, two sequential statements
+ * with no transaction around them — would otherwise never be due again, and
+ * the agent would keep a `pending`-shaped passport with no live attestation
+ * for a key it does hold, forever. Excluding confirmed rows here was the
+ * stranding bug found in review of this very slice.
+ */
 export const LIST_REANCHORS_DUE_SQL = `SELECT p.agent_id, a.user_id, p.revocation_attempts
        FROM agent_passports p
        JOIN agents a ON a.id = p.agent_id
       WHERE ${STALE_ANCHOR_PREDICATE}
-        AND p.revocation_status <> 'confirmed'
         AND (p.revocation_next_attempt_at IS NULL OR p.revocation_next_attempt_at <= NOW())
       ORDER BY COALESCE(p.revocation_requested_at, p.anchored_at) ASC
       LIMIT $1`
@@ -812,6 +824,12 @@ export async function listReanchorsDue(
  * credential, a stuck RE-ANCHOR means a live agent's credential names a key it
  * no longer holds. Folding them into one count would make the alarm
  * unreadable at the moment it fires.
+ *
+ * `LIMIT 100` where the revocation twin has none: this is a log line, and the
+ * sweep already truncates to the first 10 for display while reporting the true
+ * count. An unbounded scan buys nothing an operator reads and, on a bad day,
+ * serialises the whole table into a warning. The asymmetry is deliberate; the
+ * twin predates the truncation and simply has not been revisited.
  */
 export const LIST_STUCK_REANCHORS_SQL = `SELECT p.agent_id, p.agent_eoa, a.delegate_address,
               p.revocation_attempts, p.revocation_last_error

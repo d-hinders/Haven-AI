@@ -208,9 +208,9 @@ you need the reasoning. Never edit one without the other — CI will not let you
   this line described for a year as the files having "dissolved". They had not;
   both are registered in `index.ts` today. A parenthetical that reads as an
   exclusion is worse than an omission, because nobody re-checks it — #1892.);
-- `modules/x402/`, `modules/mpp/`, `modules/machine-payments/`,
-  `domain/payment-token.ts`, `domain/payment-coverage.ts`,
-  `domain/machine-payment-lifecycle.ts`, or `rails/allowance-module.ts`;
+- `modules/x402/`, `modules/mpp/`, `domain/payment-token.ts`,
+  `domain/payment-coverage.ts`, `domain/machine-payment-lifecycle.ts`, or
+  `rails/allowance-module.ts`;
 - `rails/execution-rail.ts` (the rail seam) and `rails/allowance-nonce-coordinator.ts`;
 - `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`,
   `rails/hybrid-account-config.ts`, `rails/hybrid-signer-actions.ts`,
@@ -265,6 +265,21 @@ denominator whenever you requote the figure; a different one gives a different
 number. A vocabulary wide enough to catch those misses matches **149 — 56% of the
 backend**, at which point the classification stops discriminating. So the list stays
 hand-written, in one place, with the copies pinned to it.
+
+**Two things the pinning now also checks (#1897/#1899).** Every glob must match
+real tracked code, so the list cannot claim a module layout the repository does
+not have — a `modules/machine-payments/` entry, added pre-emptively by #1158 for
+a split that landed as `modules/mpp/`, sat matching nothing until #1897 removed
+it. Removing a glob normally *shrinks* the perimeter and needs its own answer to
+"is it dead, or did it just move?"; that one had never matched anything in the
+repository's history, and every machine-payment file today is covered by another
+entry. If a glob's code genuinely moved, **repoint it — never just delete it**;
+if it is genuinely still coming, `PRE_EMPTIVE_GLOBS` in the drift test is where
+to say so. And `docs/regulatory/casp-risk-guardrails.md`'s `covers:` front matter
+— a fourth copy of this perimeter, which declares itself maintained against this
+list — is now pinned to it too, with its two remaining gaps exempted explicitly
+rather than silently.
+
 A comment-only diff in a listed file may be treated as non-money-path when the
 review confirms zero behavioral change — say so explicitly in the PR.
 

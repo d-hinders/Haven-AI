@@ -485,12 +485,46 @@ async function waitForServer(url, timeoutMs = 90_000) {
 }
 
 /**
+ * A non-2xx answer for ONE route, returnable from a scenario's `api()` (#1725).
+ *
+ * Until this existed the harness could express exactly one thing — a 200 with a
+ * body — so every ERROR state in the app was out of reach of the capture
+ * tooling, however cheap it was to reach in the product. `AccountSignersCard`'s
+ * `loadError` branch is the case that forced it: the branch is entered when
+ * `api.get('/accounts/hybrid/:addr/signers')` THROWS (`useAccountSigners.ts`
+ * `reload`), and `api.request` throws only on `!response.ok` (`lib/api.ts`).
+ * No 200 body of any shape reaches it, so there was no honest fixture for the
+ * one state of that card a reviewer most needs to see.
+ *
+ * A class rather than a `{ status, body }` shape, because the route handler has
+ * to be able to tell "the scenario is seeding a failure" apart from "the
+ * scenario is serving a body that happens to have a `status` field" — a
+ * duck-typed marker would misfire on the first fixture whose payload carries
+ * one, and misfire SILENTLY, by serving a 200. `instanceof` cannot.
+ *
+ * The failure is served to the app's real fetch, so the app's real error path
+ * runs: the console will carry the browser's own "failed to load resource"
+ * line for that request. That is expected noise for a scenario that seeds a
+ * failure, not a fixture gap — the run reports console errors as advisory.
+ */
+export class ScenarioHttpError {
+  constructor(status, body = { error: 'Screenshot fixture: seeded failure' }) {
+    this.status = status
+    this.body = body
+  }
+}
+
+/** Sugar for the above, so a scenario reads `return httpError(500)`. */
+export const httpError = (status, body) => new ScenarioHttpError(status, body)
+
+/**
  * One browser context wired to the shared auth + data fixture.
  *
  * `scenario.api(apiPath, method)` may return a body to answer a request the
  * shared fixture does not key (or keys differently); returning `undefined`
  * falls through to the normal fixture, so a scenario only states what is
- * special about it.
+ * special about it. Returning a `ScenarioHttpError` answers that one route
+ * with a failure instead (#1725).
  */
 async function newFixtureContext(browser, vp, scenario) {
   const context = await browser.newContext({
@@ -551,6 +585,17 @@ async function newFixtureContext(browser, vp, scenario) {
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
 
     const scenarioBody = scenario?.api?.(api, req.method())
+    // A scenario may answer ONE route with a failure (#1725). Checked before
+    // the 200 branch, because a `ScenarioHttpError` is a perfectly ordinary
+    // object and `json()` would happily serve it as a 200 body — a fixture
+    // that looks like it is seeding an error state and is not.
+    if (scenarioBody instanceof ScenarioHttpError) {
+      return route.fulfill({
+        status: scenarioBody.status,
+        contentType: 'application/json',
+        body: JSON.stringify(scenarioBody.body),
+      })
+    }
     if (scenarioBody !== undefined) return json(scenarioBody)
 
     if (api === '/auth/me') return json(FIXTURE_USER)
@@ -581,11 +626,84 @@ async function dismissMobileSidebar(page, vp) {
   }
 }
 
+/**
+ * Refuse to shoot when something that must NOT be on screen is (#1725).
+ *
+ * The positive waits a scenario already does prove the state it seeded is
+ * present; they cannot prove the state it did NOT seed is absent. That matters
+ * whenever one surface has several states and they share copy or a container:
+ * a fixture change that quietly moved the card to a neighbouring branch would
+ * still satisfy every `waitFor` the scenario has, and the PNG would land under
+ * the other state's filename. This is the cheap half of #1873's rule — assert
+ * the rendered result, not the seed — expressed for the capture harness, which
+ * has no `expect`.
+ */
+async function refuseIfPresent(locator, what) {
+  const found = await locator.count()
+  if (found > 0) {
+    throw new Error(
+      `${what}: found ${found} match(es) that must not be on screen for this state — ` +
+        'the capture would be filed under the wrong state\'s name',
+    )
+  }
+}
+
 // ── Scenario registry (#1409) ────────────────────────────────────────────────
 
 const CONNECT_SETUP_ID = 'setup-screenshot'
 const CONNECT_SETUP_TOKEN = 'hv_setup_screenshot'
 const CONNECT_COMMAND = `npx -y @haven_ai/connect@alpha --setup ${CONNECT_SETUP_TOKEN} --api https://api.haven.example --ack-local-tools --runtime claude-code`
+
+/**
+ * The three signer sets `account-backup-recovery` shoots (#1725).
+ *
+ * `null` means "answer this route with a failure" — see the scenario for why
+ * `loadError` cannot be reached by any 200 body. Hoisted out of the scenario
+ * so the fixture-contract test can pin all three shapes without driving a
+ * browser, which is what #1409 asks a scenario to be checkable by.
+ */
+const BACKUP_RECOVERY_STAGES = {
+  healthy: {
+    account_address: FIXTURE_SAFE.safe_address,
+    chain_id: FIXTURE_SAFE.chain_id,
+    owner_address: '0x' + 'ee'.repeat(20),
+    // Both dates are noon UTC so the rendered day cannot slide either way with
+    // the runner's timezone — the label IS the evidence here. March 3 is the
+    // exact case #1679's review saw wrap to two lines at 390px; September 12
+    // is longer still, so a regression that unwraps one would have to unwrap
+    // both to go unnoticed.
+    passkeys: [
+      { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+      { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: '2026-09-12T12:00:00.000Z' },
+    ],
+  },
+  // ONE way to approve: one passkey and no wallet. `wayCount` is
+  // `passkeys.length + (owner_address ? 1 : 0)` and the banner is `< 2`, so
+  // this is the minimum that renders it — and `owner_address: null` rather
+  // than an omitted key, because the absence is the claim.
+  'one-way': {
+    account_address: FIXTURE_SAFE.safe_address,
+    chain_id: FIXTURE_SAFE.chain_id,
+    owner_address: null,
+    passkeys: [
+      { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+    ],
+  },
+  'load-error': null,
+}
+
+let backupRecoveryStage = 'healthy'
+
+/** Move `account-backup-recovery` onto one of its three states. */
+function setBackupRecoveryStage(next) {
+  if (!(next in BACKUP_RECOVERY_STAGES)) {
+    throw new Error(
+      `account-backup-recovery: unknown stage "${next}" — expected one of ` +
+        Object.keys(BACKUP_RECOVERY_STAGES).join(', '),
+    )
+  }
+  backupRecoveryStage = next
+}
 
 export const SCENARIOS = {
   'design-system-buttons': {
@@ -633,39 +751,108 @@ export const SCENARIOS = {
   },
   'account-backup-recovery': {
     description:
-      'Backup & recovery card unobstructed at both viewports — wallet + two dated passkeys',
-    // The SHARED fixture serves one passkey and no wallet, which renders the
-    // "only one way to approve" state — the right default for route capture,
-    // but it shows neither the Wallet row nor a second passkey. This scenario
-    // serves the healthy multi-signer set instead, so one PNG carries every
-    // element the row layout has to get right: the Wallet row, the dated
-    // passkey labels that WRAP at 390px (#1679), and the enrolment button with
-    // its anchor subtext.
+      'Backup & recovery card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
+    // ── The three states, and why they are one scenario (#1693, #1725) ───────
+    //
+    // #1693 evidenced the HEALTHY layout only, and #1725's review found the
+    // other two states resting on improvisation. They are all the same card, so
+    // they stay one scenario per the registry's convention — one scenario per
+    // surface, not per state — and are driven by re-serving `/signers` and
+    // reloading between shots, the way `connect-agent` holds one dialog at
+    // three stages.
+    //
+    //   healthy    wallet + two dated passkeys. The row layout, the labels that
+    //              WRAP at 390px (#1679), the enrolment button and its subtext.
+    //   one-way    one passkey, no wallet — the amber "only one way to approve"
+    //              banner. This is a money-adjacent safety affordance: it is
+    //              the ONLY thing telling a user their account has no recovery.
+    //              The shared fixture has served exactly this shape all along
+    //              and nothing ever shot it, which is the cheaper and more
+    //              embarrassing half of the gap. Served explicitly here anyway
+    //              rather than by falling through to the shared fixture: a
+    //              later change that gave that fixture a wallet would silently
+    //              turn this capture into a second healthy render filed under
+    //              the one-way name.
+    //   loadError  the signer fetch FAILS. Where the card's copy has to work
+    //              hardest, and the state a reviewer most needs to see.
+    //
+    // ── Reachability of `loadError`, checked against source, not assumed ─────
+    //
+    // `AccountSignersCard.tsx` enters it on `loadError`, which
+    // `useAccountSigners.ts`'s `reload` sets only in its `catch` — so the
+    // branch is gated on `api.get` THROWING, and `lib/api.ts` throws only on
+    // `!response.ok`. No 200 body reaches it, which is why this needed the
+    // `httpError` plumbing above rather than a cleverer payload. 500 rather
+    // than 4xx because the branch does not discriminate and a server fault is
+    // the honest thing a reviewer is judging the copy against.
+    stages: BACKUP_RECOVERY_STAGES,
+    /** Exposed so the fixture-contract test can pin each stage (#1409). */
+    stage: setBackupRecoveryStage,
     api(apiPath) {
       if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
-        return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
-          owner_address: '0x' + 'ee'.repeat(20),
-          // Both dates are noon UTC so the rendered day cannot slide either
-          // way with the runner's timezone — the label IS the evidence here.
-          // March 3 is the exact case #1679's review saw wrap to two lines at
-          // 390px; September 12 is longer still, so a regression that unwraps
-          // one would have to unwrap both to go unnoticed.
-          passkeys: [
-            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
-            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: '2026-09-12T12:00:00.000Z' },
-          ],
-        }
+        const signers = BACKUP_RECOVERY_STAGES[backupRecoveryStage]
+        return signers === null ? httpError(500) : signers
       }
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
-      await dismissMobileSidebar(page, vp)
+      // The stage is MODULE state and `run` is called once per viewport, so a
+      // reset here is load-bearing rather than tidy: without it the mobile
+      // pass would open on `load-error`, where the desktop pass left it, and
+      // shoot a failure under the healthy capture's name.
+      setBackupRecoveryStage('healthy')
 
       const heading = page.getByRole('heading', { name: 'Backup & recovery' })
-      await heading.waitFor({ timeout: 15_000 })
+
+      /**
+       * Get the account page onto the currently-served stage and let it settle.
+       *
+       * The first load keeps `networkidle`, for continuity with every other
+       * scenario. The RELOADS below use `domcontentloaded` plus the two
+       * explicit waits here, because a reload only has to get this card
+       * re-mounted and re-fetched and those waits are the condition that
+       * actually matters — idleness of the app's wallet sockets is neither
+       * necessary nor sufficient for "the card has rendered its branch".
+       *
+       * Both waits exist because a cheaper `waitUntil` has to buy back what
+       * `networkidle` was incidentally covering, or it trades a timeout for a
+       * race that shoots a plausible-looking WRONG PNG:
+       *
+       *   fonts   an element screenshot taken before the webfont swaps in is
+       *           the wrong type at the wrong metrics, and it does not look
+       *           broken — it looks like a design change.
+       *   sidebar `(authenticated)/layout.tsx` mounts `Sidebar` with
+       *           `dynamic(ssr: false)`. Until that chunk lands `<main>` spans
+       *           the full viewport, so the card is ~240px WIDER. Three states
+       *           captured at two different widths would read as a layout
+       *           regression between them and would be neither.
+       *
+       * Recorded because it cost a diagnosis: `networkidle` was suspected of
+       * being the flake when three consecutive runs timed out here, and it was
+       * NOT — swapping the first goto to `domcontentloaded` timed out exactly
+       * the same, and the untouched `/design-system` route capture was failing
+       * in the same runs. It is a cold `next dev` compile outrunning the 30s
+       * goto budget on a first boot, which the retention line above makes easy
+       * to misread as a change in this scenario. Warm the server once before
+       * judging a failure here.
+       */
+      const settleOnStage = async (navigate) => {
+        await navigate()
+        await page.evaluate(() => document.fonts.ready)
+        // The sidebar's own ARIA contract — the handle the visual specs use for
+        // this widget. Its presence is the proof the chunk mounted and `<main>`
+        // has settled to its final width.
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+        await heading.waitFor({ timeout: 15_000 })
+      }
+
+      await settleOnStage(() =>
+        page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, {
+          waitUntil: 'networkidle',
+          timeout: 30_000,
+        }),
+      )
 
       // The Card root that owns the heading. Card does not forward props, so
       // there is no testid to target without changing a shared primitive;
@@ -674,6 +861,23 @@ export const SCENARIOS = {
       // want from a capture whose entire purpose is trustworthy evidence.
       const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
 
+      // The three states' distinguishing copy, as locators. Regexes, not exact
+      // strings: the banner and the confirmations are authored across several
+      // JSX lines, so the rendered text carries collapsed whitespace that an
+      // exact match would have to reproduce by hand. Each fragment is long
+      // enough to belong to exactly one state.
+      const oneWayBanner = card.getByText(/only one way to approve\. Add a backup now/)
+      const loadErrorCopy = card.getByText(/Haven could not load how this account is approved/)
+      const walletRow = card.getByText('Wallet', { exact: true })
+      const addBackup = card.getByRole('button', { name: 'Add a backup passkey' })
+
+      /** Re-serve `/signers` at `stage` and reload the page onto it. */
+      const openStage = async (stage) => {
+        setBackupRecoveryStage(stage)
+        await settleOnStage(() => page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }))
+      }
+
+      // ── healthy ───────────────────────────────────────────────────────────
       // Wait for the ROWS, not just the heading. The card short-circuits to
       // null until the signer fetch settles, so there is no empty-shell phase
       // to race — but the heading renders in the loadError branch too, where
@@ -681,11 +885,43 @@ export const SCENARIOS = {
       // therefore accept "Haven could not load how this account is approved"
       // as the capture. These two waits are what make the error state time
       // out instead of quietly becoming the evidence.
-      await card.getByText('Wallet', { exact: true }).waitFor({ timeout: 15_000 })
-      await card.getByRole('button', { name: 'Add a backup passkey' }).waitFor({ timeout: 15_000 })
-
+      await walletRow.waitFor({ timeout: 15_000 })
+      await addBackup.waitFor({ timeout: 15_000 })
+      // And the negative half (#1725): a wallet row proves a wallet, it does
+      // not prove the warning is gone. If a regression rendered the banner
+      // alongside a healthy signer set, every wait above would still pass.
+      await refuseIfPresent(oneWayBanner, 'account-backup-recovery · healthy · one-way banner')
+      await refuseIfPresent(loadErrorCopy, 'account-backup-recovery · healthy · load-error copy')
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'card')
+
+      // ── one way to approve ────────────────────────────────────────────────
+      await openStage('one-way')
+      await oneWayBanner.waitFor({ timeout: 15_000 })
+      // The banner is the subject; these two are what prove the card is in the
+      // SIGNERS branch showing one signer, rather than in some other branch
+      // that happens to contain the copy. `Wallet` absent is the fixture's own
+      // claim read back off the render.
+      await addBackup.waitFor({ timeout: 15_000 })
+      await refuseIfPresent(walletRow, 'account-backup-recovery · one-way · wallet row')
+      await refuseIfPresent(loadErrorCopy, 'account-backup-recovery · one-way · load-error copy')
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'one-way')
+
+      // ── load failure ──────────────────────────────────────────────────────
+      await openStage('load-error')
+      await loadErrorCopy.waitFor({ timeout: 15_000 })
+      // `Try again` is the whole affordance of this state, and it is the half a
+      // reviewer judges: the copy admits a failure, the button is the way out.
+      await card.getByRole('button', { name: 'Try again' }).waitFor({ timeout: 15_000 })
+      // Nothing from the loaded branch may survive into it. `addBackup` absent
+      // is the strongest of these — it is rendered by the `signers ?` arm, so
+      // its presence would mean the card is showing both branches at once.
+      await refuseIfPresent(addBackup, 'account-backup-recovery · load-error · enrolment button')
+      await refuseIfPresent(walletRow, 'account-backup-recovery · load-error · wallet row')
+      await refuseIfPresent(oneWayBanner, 'account-backup-recovery · load-error · one-way banner')
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'load-error')
     },
   },
   'passport-reanchoring': {

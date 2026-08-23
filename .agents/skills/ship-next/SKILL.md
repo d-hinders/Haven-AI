@@ -218,16 +218,20 @@ you need the reasoning. Never edit one without the other — CI will not let you
   `routes/agent-rekey.ts` and `modules/agents/rekey-*.ts`
   (the delegation rail — including re-key, which revokes and re-issues an agent's
   on-chain spend authority. It was missing here, in the JSON and in the labeler
-  from #1698 until #1892, while `infra/repositories/**` already covered its storage
+  from #1698 until #1892, while `infra/repositories/` already covered its storage
   layer: a PR touching the re-key repository was labelled and one touching only the
   route was not, so the list read as though it knew about re-key);
-- `rails/sweep.ts`, `infra/relayer*.ts`, `infra/outbound-*.ts`, `infra/chain/`,
-  `infra/repositories/`, or `modules/accounts/mainnet-gate.ts` (funds recovery, gas
-  payment, the durable outbound-tx queue and its bump worker, the relayer spend
-  guard/monitor, the contract-call and persistence layers, and the mainnet authority
-  floor — the relayer/mainnet trio added by #1045 after review found them missing
-  while they literally move or gate money; the outbound globs added after epic #1554
-  shipped files that broadcast and replace real transactions without appearing here);
+- `rails/sweep.ts`, `infra/relayer*.ts`, `infra/delegate-*.ts`, `infra/outbound-*.ts`,
+  `infra/chain/`, `infra/repositories/`, or `modules/accounts/mainnet-gate.ts` (funds
+  recovery, gas payment, the durable outbound-tx queue and its bump worker, the relayer
+  spend guard/monitor, the delegate exposure monitor, the contract-call and persistence
+  layers, and the mainnet authority floor — the relayer/mainnet trio added by #1045
+  after review found them missing while they literally move or gate money; the outbound
+  globs added after epic #1554 shipped files that broadcast and replace real
+  transactions without appearing here; `infra/delegate-*.ts` added by #1892's own
+  review, which found the delegate balance monitor unlisted while its equally
+  read-only sibling `infra/relayer-balance-monitor.ts` was matched by prefix accident —
+  the two even share an alert channel);
 - `routes/safe-exec.ts`, `routes/approvals.ts`, or `routes/hybrid-accounts.ts`
   (user-signed execution, the approval queue, account provisioning);
 - `packages/sdk/src/signer.ts` (signing schemes are spend authority);
@@ -251,11 +255,16 @@ nothing looks wrong — the right answer comes out for the wrong reason, and onl
 someone asking *why* it was right finds the hole (which is how #1892 was found, off
 the back of #1870 shipping correctly). That is why the drift check above is
 bidirectional and why adding a path is cheap while leaving one out is the failure
-mode. It is **not** derived from the code: measured against `packages/backend/src` on
-2026-08-23, a narrow money-verb scan finds 29 of 266 files but misses **30 of the 48**
-files already on this list, and a vocabulary wide enough to catch them matches 149 —
-56% of the backend, at which point the classification stops discriminating. The list
-stays hand-written, in one place, with the copies pinned to it.
+mode. It is **not** derived from the code, and that was measured rather than assumed
+(#1892, against `packages/backend/src` on 2026-08-23, 266 non-test `.ts` files). A
+narrow money-verb scan matches **29 of 266** — good discrimination — but misses **30
+of the 48** files this list covered before #1892, counting the pre-#1892 Merge Gate
+entries expanded to real non-test files under `packages/backend/src` only, so
+excluding `db/migrations/**`, `packages/sdk/` and the control globs. State that
+denominator whenever you requote the figure; a different one gives a different
+number. A vocabulary wide enough to catch those misses matches **149 — 56% of the
+backend**, at which point the classification stops discriminating. So the list stays
+hand-written, in one place, with the copies pinned to it.
 A comment-only diff in a listed file may be treated as non-money-path when the
 review confirms zero behavioral change — say so explicitly in the PR.
 

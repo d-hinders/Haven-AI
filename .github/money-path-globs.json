@@ -49,7 +49,18 @@
     "only because a human had labelled the ISSUE. Note infra/repositories/** already",
     "covered the re-key REPOSITORY, so a PR touching the storage layer was labelled",
     "while one touching only the route was not -- the most misleading kind of",
-    "half-coverage, because the list read as though it knew about re-key."
+    "half-coverage, because the list read as though it knew about re-key.",
+    "",
+    "2026-08-23 (#1892, from review): infra/delegate-*.ts added. The delegate",
+    "balance monitor (#714, epic #713) is the DETECT mitigation for the x402",
+    "in-flight window -- the interval where Safe-funded USDC sits on a hot",
+    "delegate EOA outside every policy layer -- and it alerts on `lingering`,",
+    "i.e. sweepable money nobody swept. Its sibling infra/relayer-balance-monitor.ts",
+    "is EQUALLY read-only and was already matched by infra/relayer*.ts; the two",
+    "even share the DELEGATE_ALERT_WEBHOOK_URL channel. Listing one and not the",
+    "other was an accident of glob prefix, not a judgement. Globbed rather than",
+    "named so the next delegate-* infra file is covered the day it is written,",
+    "same reasoning as #1607's relayer.ts -> relayer*.ts widening."
   ],
   "globs": [
     "packages/backend/src/db/migrations/**",
@@ -57,6 +68,7 @@
     "packages/backend/src/domain/payment-coverage.ts",
     "packages/backend/src/domain/payment-token.ts",
     "packages/backend/src/infra/chain/**",
+    "packages/backend/src/infra/delegate-*.ts",
     "packages/backend/src/infra/outbound-*.ts",
     "packages/backend/src/infra/relayer*.ts",
     "packages/backend/src/infra/repositories/**",

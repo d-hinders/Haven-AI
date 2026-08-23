@@ -211,12 +211,13 @@ machine records that. Check the agent page before assuming the harmless reading.
 - **A key is never moved between machines.** There is no "restore my key here". The
   new keypair is generated on the target machine, and any design that transported one
   would break the non-custody the whole system rests on.
-- **Telling two agents apart in your MCP config is not solved yet.** If you run
-  several agents, the dashboard cannot currently show which wiring slug belongs to
-  which agent — the slug never reaches Haven
-  ([#1878](https://github.com/d-hinders/Haven-AI/issues/1878)). Until it does,
-  `--doctor` on the machine itself is the way to see which agent a credential
-  directory holds.
+- **Agents connected before mid-2026 do not show their MCP server name.** The
+  dashboard names the MCP pair each agent is wired as, so several agents in one
+  harness can be told apart ([#1878](https://github.com/d-hinders/Haven-AI/issues/1878)) —
+  but only for agents a current connector registered. Older ones read "MCP name
+  not recorded", and re-keying does not fill it in: the finish step does not
+  re-register, so only a fresh connect records the name. `--doctor` on the
+  machine maps them in the meantime.
 
 ## See also
 

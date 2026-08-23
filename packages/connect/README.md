@@ -218,10 +218,16 @@ before anything is written, and **immutable once wired** — it is the server na
 and tool prefix every host depends on. `haven`, `signer` and `signer-*` are
 refused, because their derived names would collide with another pair's.
 
-> The slug is local. Haven does not receive it, so the dashboard cannot yet tell
-> you which agent corresponds to which entry
-> ([#1878](https://github.com/d-hinders/Haven-AI/issues/1878)). Until it can,
-> `--doctor` on this machine is what maps the two.
+> A current connector reports the resolved server name (`haven`, or
+> `haven-<slug>`) to Haven at registration, and the dashboard shows it on each
+> agent, so you can match an agent to its config entry without leaving the
+> browser ([#1878](https://github.com/d-hinders/Haven-AI/issues/1878)). It is a
+> label, not authority — nothing keys off it.
+>
+> Agents connected before that shipped read **"MCP name not recorded"**: Haven
+> genuinely does not know, and guessing would name the wrong pair for anyone who
+> used `--name`. They keep working exactly as they are; `--doctor` on the machine
+> still maps them, and reconnecting records the name.
 
 ## Replacing an agent's signing key (`--rekey`)
 

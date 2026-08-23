@@ -169,7 +169,8 @@ export function AgentCard({
               #1694's decision is "editable display name, immutable wiring
               slug", so the two must not read as the same kind of thing.
             */}
-            <div className="mt-0.5 flex min-w-0 items-center">
+            <div className="mt-0.5 flex min-w-0 items-center gap-1 text-xs">
+              <span className="text-[var(--v2-ink-3)]">MCP:</span>
               <McpServerName value={agent.mcp_server_name} />
             </div>
             {agent.description && (

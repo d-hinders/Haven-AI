@@ -24,10 +24,8 @@
  * every one of them works fine.
  */
 
-import { Check, Clipboard } from 'lucide-react'
-import { Icon } from '@/components/ui/Icon'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { Tooltip } from '@/components/ui/Tooltip'
-import { useCopyTimeout } from '@/hooks/useCopyTimeout'
 
 /** The signer half is derived, never stored — one naming rule, one home. */
 export function signerNameFor(hosted: string): string {
@@ -35,23 +33,12 @@ export function signerNameFor(hosted: string): string {
 }
 
 export function McpServerName({ value }: { value: string | null | undefined }) {
-  const { copied, markCopied } = useCopyTimeout(1500)
-
   if (!value) {
     return (
       <Tooltip label="Haven records this when an agent connects with a current version of the connector. Agents connected earlier keep working exactly as they are — only the label is missing.">
-        <span className="text-xs text-[var(--v2-ink-3)]">MCP name not recorded</span>
+        <span className="text-xs text-[var(--v2-ink-3)]">not recorded</span>
       </Tooltip>
     )
-  }
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
-      markCopied()
-    } catch {
-      /* clipboard unavailable — the name is still readable on screen */
-    }
   }
 
   return (
@@ -61,18 +48,7 @@ export function McpServerName({ value }: { value: string | null | undefined }) {
           {value}
         </span>
       </Tooltip>
-      <button
-        type="button"
-        onClick={handleCopy}
-        aria-label={copied ? 'MCP server name copied' : `Copy MCP server name ${value}`}
-        className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-      >
-        {copied ? (
-          <Icon icon={Check} className="h-3 w-3 text-[var(--v2-success)]" />
-        ) : (
-          <Icon icon={Clipboard} className="h-3 w-3" />
-        )}
-      </button>
+      <CopyButton value={value} label="MCP server name" />
     </span>
   )
 }

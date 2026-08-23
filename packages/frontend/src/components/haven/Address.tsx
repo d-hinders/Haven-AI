@@ -10,10 +10,10 @@
  * everything from brand links to muted row metadata.
  */
 
-import { Check, Clipboard, ExternalLink } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { Icon } from '@/components/ui/Icon'
 import { Tooltip } from '@/components/ui/Tooltip'
-import { useCopyTimeout } from '@/hooks/useCopyTimeout'
 import { truncate } from '@/lib/format'
 
 /** The one truncation rule (`0x1234…abcd`) — re-exported for discoverability. */
@@ -36,7 +36,6 @@ export function Address({
   truncate?: boolean
   className?: string
 }) {
-  const { copied, markCopied } = useCopyTimeout(1500)
   const display = truncate ? truncateAddress(value) : value
 
   const text = href ? (
@@ -54,15 +53,6 @@ export function Address({
     <span className={`font-mono ${truncate ? '' : 'break-all'}`.trim()}>{display}</span>
   )
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
-      markCopied()
-    } catch {
-      /* clipboard unavailable — the tooltip still exposes the full value */
-    }
-  }
-
   // inline-flex only when the copy button rides along — plain text spans
   // (especially full wrapping addresses) stay in normal inline flow.
   const wrapperClass = copy
@@ -77,20 +67,7 @@ export function Address({
       ) : (
         text
       )}
-      {copy ? (
-        <button
-          type="button"
-          onClick={handleCopy}
-          aria-label={copied ? 'Address copied' : 'Copy address'}
-          className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-        >
-          {copied ? (
-            <Icon icon={Check} className="h-3 w-3 text-[var(--v2-success)]" />
-          ) : (
-            <Icon icon={Clipboard} className="h-3 w-3" />
-          )}
-        </button>
-      ) : null}
+      {copy ? <CopyButton value={value} label="address" /> : null}
     </span>
   )
 }

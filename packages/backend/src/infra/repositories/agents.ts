@@ -400,6 +400,12 @@ export interface CreatedAgent {
     | 'status'
     | 'created_at'
     | 'mcp_last_seen_at'
+    // #1878: always NULL here — an agent created straight through the API was
+    // never wired by the connector. Declared anyway, because the query DOES
+    // return it and `tx.query<T>()`'s generic is a compile-time assertion
+    // only: a Pick that omits it lets a future refactor rebuild this response
+    // field-by-field and drop the column with neither tsc nor a test noticing.
+    | 'mcp_server_name'
   >
   safeInfo: SafeInfoRow
   savedAllowances: AgentAllowanceRow[]

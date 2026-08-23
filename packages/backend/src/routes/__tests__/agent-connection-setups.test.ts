@@ -2866,6 +2866,90 @@ describe('GET /:setupId/connector-status (#1377 part D)', () => {
   })
 })
 
+describe('#1878 the register route seam — body field to stored value', () => {
+  // The unit tests above prove normalizeMcpServerName in isolation and the
+  // real-DB repository tests prove insertPendingAgent stores what it is given.
+  // Neither proves the HANDLER connects them: a body key read under the wrong
+  // name, or a value normalized and then not passed on, leaves both green and
+  // stores NULL forever.
+  const CHALLENGE_KEY = '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38'
+
+  // This block sits outside the main register describe, so it wires the pool
+  // mocks itself; the env vars come from the root beforeEach (#1129).
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockConnect.mockReset()
+    mockClientQuery.mockReset()
+    mockClientRelease.mockReset()
+    mockClientQuery.mockResolvedValue({ rows: [] })
+    mockConnect.mockResolvedValue({
+      query: (...args: unknown[]) => mockClientQuery(...args),
+      release: mockClientRelease,
+    })
+    mockRequestPassport.mockReset().mockResolvedValue(true)
+    mockIssueBestEffort.mockReset()
+  })
+
+  async function registerWith(mcpServerName: unknown) {
+    const app = await buildApp()
+    const wallet = new Wallet(CHALLENGE_KEY)
+    const proof = await wallet.signMessage(SETUP.challenge_message)
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: [SETUP] }
+      if (String(sql).includes('SELECT id FROM agents')) return { rows: [] }
+      if (String(sql).includes('INSERT INTO agents')) return { rows: [{ id: 'agent-1' }] }
+      return { rows: [] }
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_test',
+        challenge_id: SETUP.challenge_id,
+        delegate_address: wallet.address,
+        proof_signature: proof,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+        runtime: 'claude-code',
+        ...(mcpServerName === undefined ? {} : { mcp_server_name: mcpServerName }),
+      },
+    })
+    const insertAgent = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO agents'),
+    )
+    await app.close()
+    return { statusCode: response.statusCode, params: insertAgent?.[1] as unknown[] }
+  }
+
+  it('carries a named pair from the request body into the insert', async () => {
+    const { statusCode, params } = await registerWith('haven-research')
+    expect(statusCode).toBe(201)
+    expect(params).toContain('haven-research')
+  })
+
+  it('carries the bare pair as a value, not as an omission', async () => {
+    const { statusCode, params } = await registerWith('haven')
+    expect(statusCode).toBe(201)
+    expect(params).toContain('haven')
+  })
+
+  it('stores NULL when an older connector sends nothing — and still registers', async () => {
+    const { statusCode, params } = await registerWith(undefined)
+    expect(statusCode).toBe(201)
+    // The last bound parameter is the server name; absent must reach the
+    // insert as NULL rather than undefined, which pg would reject.
+    expect(params?.[params.length - 1]).toBeNull()
+  })
+
+  it('registers successfully even when the reported name is garbage', async () => {
+    // The direction that matters: a bad label must never cost the user an
+    // agent. 201, and NULL in the column.
+    const { statusCode, params } = await registerWith('<script>alert(1)</script>')
+    expect(statusCode).toBe(201)
+    expect(params?.[params.length - 1]).toBeNull()
+  })
+})
+
 describe('#1878 normalizeMcpServerName — the connector\'s self-reported wiring label', () => {
   it('accepts the bare pair and a named pair', () => {
     expect(normalizeMcpServerName('haven')).toBe('haven')

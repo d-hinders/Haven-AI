@@ -72,4 +72,45 @@ describe('createConnectApiClient', () => {
     expect(String(calls[0].init.body)).toContain('local_mcp_acknowledged')
     expect(String(calls[0].init.body)).toContain('activation_command_available')
   })
+
+  it('#1878 serializes mcpServerName onto the wire as snake_case mcp_server_name', async () => {
+    // The one seam the runtime tests cannot see: they assert what is handed to
+    // a MOCKED api.registerSetup, which is the camelCase side. This asserts the
+    // actual HTTP body — a camelCase→snake_case mapping is exactly the kind of
+    // line that silently typos, and the backend would then store NULL forever
+    // with every test still green.
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init })
+      return new Response(JSON.stringify({
+        setup_id: 'setup-1',
+        agent_id: 'agent-1',
+        status: 'connected_local',
+        agent_status: 'pending_approval',
+        api_key_prefix: 'sk_agent_ret',
+        api_key_scope: 'setup_pending',
+        delegate_address: '0x1111111111111111111111111111111111111111',
+        hosted_mcp_url: 'https://mcp.haven.example/v1',
+        next_action: 'return_to_haven_for_wallet_approval',
+      }), { status: 201 })
+    }) as unknown as typeof fetch
+
+    const api = createConnectApiClient('https://api.haven.example', fetchImpl)
+    await api.registerSetup({
+      setupToken: 'hv_setup_test',
+      connectorVersion: '0.1.0',
+      challengeId: 'challenge-1',
+      delegateAddress: '0x1111111111111111111111111111111111111111',
+      proofSignature: '0xproof',
+      apiKeyHash: 'a'.repeat(64),
+      apiKeyPrefix: 'sk_agent_abc',
+      runtime: 'claude-code',
+      mcpServerName: 'haven-research',
+    })
+
+    expect(JSON.parse(String(calls[0].init.body))).toMatchObject({
+      mcp_server_name: 'haven-research',
+    })
+  })
+
 })

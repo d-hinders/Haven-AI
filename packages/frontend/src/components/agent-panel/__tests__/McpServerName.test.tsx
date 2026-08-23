@@ -54,7 +54,7 @@ describe('McpServerName', () => {
     // The check-pop is async state; awaiting it keeps the act() boundary
     // honest and incidentally pins that the button reports success.
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /copied/i })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: 'MCP server name copied' })).toBeInTheDocument(),
     )
   })
 

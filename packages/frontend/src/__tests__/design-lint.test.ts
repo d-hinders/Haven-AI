@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 // The gate's pure scanner — the CLI wrapper lives in the same file.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs script; typed via the cast below
-import { scanSource } from '../../scripts/design-lint.mjs'
+import { scanSource, scanElements } from '../../scripts/design-lint.mjs'
 
 type Hit = { rule: string; line: number; match: string }
 const scan = scanSource as (file: string, source: string) => Hit[]
+const scanEl = scanElements as (file: string, source: string) => Hit[]
 
 describe('design-lint scanner (#855)', () => {
   it('flags raw Tailwind palette classes', () => {
@@ -119,5 +120,64 @@ describe('design-lint scanner (#855)', () => {
     // copy-lint-ignore — one convention across the lint gates).
     const above = '{/* design-lint-disable-line */}\n<p className="text-[10px]" />'
     expect(scan('src/components/X.tsx', above)).toEqual([])
+  })
+})
+
+describe('design-lint icon-size element rule (#1858)', () => {
+  const F = 'src/components/X.tsx'
+
+  it('accepts every rung of the scale and nothing else', () => {
+    for (const cls of ['h-3 w-3', 'h-3.5 w-3.5', 'h-4 w-4', 'h-5 w-5', 'h-6 w-6', 'h-7 w-7']) {
+      expect(scanEl(F, `<Icon icon={X} className="${cls}" />`)).toEqual([])
+    }
+    // …and the neighbouring Tailwind steps are NOT on it:
+    for (const cls of ['h-2.5 w-2.5', 'h-2 w-2', 'h-8 w-8']) {
+      expect(scanEl(F, `<Icon icon={X} className="${cls}" />`).map((h) => h.match)).toEqual([cls])
+    }
+  })
+
+  it('flags every arbitrary pixel value — the cluster #1858 was filed over', () => {
+    for (const px of [11, 13, 17, 18, 22]) {
+      const hits = scanEl(F, `<Icon icon={X} className="h-[${px}px] w-[${px}px]" />`)
+      expect(hits).toEqual([
+        { rule: 'icon-size', line: 1, match: `h-[${px}px] w-[${px}px]` },
+      ])
+    }
+  })
+
+  it('flags a non-square pair and a single-axis size', () => {
+    expect(scanEl(F, '<Icon icon={X} className="h-3 w-5" />')[0].match).toBe('h-3 w-5 (not square)')
+    expect(scanEl(F, '<Icon icon={X} className="h-4" />')[0].match).toBe('h-4 w-? (one axis only)')
+  })
+
+  it('reads the size prop as pixels, on the same scale', () => {
+    expect(scanEl(F, '<Icon icon={X} size={16} />')).toEqual([])
+    expect(scanEl(F, '<Icon icon={X} size={13} />')[0].match).toBe('size={13}')
+  })
+
+  it('leaves container sizing and runtime-computed sizes alone', () => {
+    expect(scanEl(F, '<Icon icon={X} className="h-full w-full" />')).toEqual([])
+    // A size that is not statically knowable is out of this gate's reach —
+    // documented as a blind spot rather than guessed at:
+    expect(scanEl(F, '<Icon icon={X} size={size} />')).toEqual([])
+  })
+
+  it('sees a MULTILINE element whose className sits below the tag (#1858)', () => {
+    // This is the case a line-based rule cannot reach, and the same case that
+    // made an earlier line-regex census report 110 sized sites against 120.
+    const src = ['<Icon', '  icon={ChevronRight}', '  className={`h-[13px] w-[13px] rotate-90`}', '/>'].join('\n')
+    expect(scanEl(F, src)).toEqual([{ rule: 'icon-size', line: 1, match: 'h-[13px] w-[13px]' }])
+    // Proof the gap is real and not asserted: the line-based form finds nothing.
+    expect(src.split('\n').filter((l) => /<Icon.*h-\[13px\]/.test(l))).toEqual([])
+  })
+
+  it('does not mistake <IconSomething> for the wrapper', () => {
+    expect(scanEl(F, '<IconBadge className="h-[13px] w-[13px]" />')).toEqual([])
+  })
+
+  it('honours the marketing exemption and the escape marker', () => {
+    expect(scanEl('src/app/page.tsx', '<Icon icon={X} className="h-[13px] w-[13px]" />')).toEqual([])
+    const escaped = '{/* design-lint-disable-line */}\n<Icon icon={X} className="h-[13px] w-[13px]" />'
+    expect(scanEl(F, escaped)).toEqual([])
   })
 })

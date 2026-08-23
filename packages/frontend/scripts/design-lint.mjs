@@ -125,7 +125,120 @@ export const RULES = [
     regex: /\.slice\(\s*0,\s*6\s*\)[^\n]*\.slice\(\s*-4\s*\)/g,
     exempt: (file) => isMarketingSurface(file) || file.includes('components/haven/Address.tsx'),
   },
+  // ── Element rule (#1858) — the one § 5 invariant that had no gate ────────
+  // `Icon.tsx` enforces its other two conventions by construction:
+  // `strokeWidth` defaults to 1.5 and `aria-hidden` is derived from `label`.
+  // Size had neither a default nor a check, which is why it — and only it —
+  // drifted: 34 of 120 sized call sites were off the documented scale,
+  // including eight arbitrary pixel values.
+  //
+  // Scanned per ELEMENT, not per line, and that is load-bearing rather than
+  // fastidious: a `<Icon>`'s `className` routinely sits two lines below its
+  // tag, and the same shortcut is what made an earlier line-based census
+  // report 110/30 against the true 120/34. See `scanElements`.
+  {
+    id: 'icon-size',
+    describe: 'off-scale <Icon> size — use the 12/14/16/20/24/28 scale (see /design-system → Icons)',
+    element: true,
+    exempt: isMarketingSurface,
+  },
 ]
+
+/**
+ * The icon size scale (#1858), as the exact Tailwind class pairs that express
+ * it. Six values, all first-class Tailwind steps — no arbitrary value is ever
+ * needed to land on the scale, which is what makes "no arbitrary values"
+ * a rule rather than an inconvenience.
+ */
+export const ICON_SCALE_PX = [12, 14, 16, 20, 24, 28]
+const LEGAL_HW = new Map([
+  ['3', 12],
+  ['3.5', 14],
+  ['4', 16],
+  ['5', 20],
+  ['6', 24],
+  ['7', 28],
+])
+const LEGAL_SIZE_PROP = new Set(ICON_SCALE_PX)
+
+/**
+ * Find each `<Icon …/>` element by walking brace depth to its real `>`, so a
+ * multiline element is one unit. Returns [{start, end, text, line}].
+ */
+function iconElements(source) {
+  const out = []
+  for (let i = 0; ; ) {
+    const m = source.indexOf('<Icon', i)
+    if (m < 0) break
+    // `<IconFoo` is a different component, not this wrapper.
+    if (/[A-Za-z0-9_]/.test(source[m + 5] ?? '')) {
+      i = m + 5
+      continue
+    }
+    let depth = 0
+    let end = -1
+    for (let j = m; j < source.length; j++) {
+      const c = source[j]
+      if (c === '{') depth++
+      else if (c === '}') depth--
+      else if (c === '>' && depth === 0) {
+        end = j
+        break
+      }
+    }
+    if (end < 0) {
+      i = m + 5
+      continue
+    }
+    out.push({ text: source.slice(m, end + 1), line: source.slice(0, m).split('\n').length })
+    i = end + 1
+  }
+  return out
+}
+
+/**
+ * Element-scoped scan for `icon-size` (#1858).
+ *
+ * What it CAN see, and therefore what it forbids:
+ *   - an `h-`/`w-` pair that is not one of the six scale classes;
+ *   - a non-square pair (`h-3 w-5`) — lucide's viewBox is square, so the extra
+ *     axis is dead box, never a wider glyph;
+ *   - any arbitrary value (`h-[13px]`), which is the whole defect class the
+ *     issue called the tell;
+ *   - a single-axis size (`h-4` with no `w-`);
+ *   - a literal `size={13}` off the scale.
+ *
+ * What it CANNOT see — stated so a clean run is not over-trusted:
+ *   - `size={someVariable}` and classNames assembled entirely at runtime;
+ *   - a size arriving from a `cva`/lookup table in another file;
+ *   - a `className` prop threaded in by a wrapper component.
+ * `h-full`/`w-full` is container sizing and is deliberately legal.
+ */
+export function scanElements(relFile, source) {
+  const rule = RULES.find((r) => r.id === 'icon-size')
+  if (rule.exempt(relFile)) return []
+  const lines = source.split('\n')
+  const hits = []
+  for (const el of iconElements(source)) {
+    if (isEscaped(lines, el.line - 1, 'design-lint-disable-line')) continue
+    if (/\b[hw]-full\b/.test(el.text)) continue
+    const h = el.text.match(/\bh-(\[[^\]]+\]|[\d.]+)/)
+    const w = el.text.match(/\bw-(\[[^\]]+\]|[\d.]+)/)
+    const sizeProp = el.text.match(/\bsize=\{(\d+)\}/)
+    let bad = null
+    if (h || w) {
+      const hv = h?.[1]
+      const wv = w?.[1]
+      if (!h || !w) bad = `h-${hv ?? '?'} w-${wv ?? '?'} (one axis only)`
+      else if (hv !== wv) bad = `h-${hv} w-${wv} (not square)`
+      else if (!LEGAL_HW.has(hv)) bad = `h-${hv} w-${wv}`
+    } else if (sizeProp && !LEGAL_SIZE_PROP.has(Number(sizeProp[1]))) {
+      bad = `size={${sizeProp[1]}}`
+    }
+    if (bad) hits.push({ rule: 'icon-size', line: el.line, match: bad })
+  }
+  return hits
+}
 
 function* walk(dir) {
   for (const entry of readdirSync(dir)) {
@@ -145,6 +258,8 @@ export function scanSource(relFile, source) {
   const hits = []
   const lines = source.split('\n')
   for (const rule of RULES) {
+    // Element rules are scanned whole-element, not line-by-line (#1858).
+    if (rule.element) continue
     if (rule.exempt(relFile)) continue
     lines.forEach((raw, i) => {
       // Escape on the offending line or the line above (shared semantics).
@@ -172,7 +287,8 @@ function scanAll() {
     if (!existsSync(abs)) continue
     for (const file of walk(abs)) {
       const rel = path.relative(ROOT, file)
-      const hits = scanSource(rel, readFileSync(file, 'utf8'))
+      const src = readFileSync(file, 'utf8')
+      const hits = [...scanSource(rel, src), ...scanElements(rel, src)]
       for (const h of hits) {
         counts[rel] ??= {}
         counts[rel][h.rule] = (counts[rel][h.rule] ?? 0) + 1

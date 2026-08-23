@@ -111,7 +111,7 @@ export default function AgentPanel() {
           tone="neutral"
           icon={
             /* Heavier stroke: matches the original spinner's 3px ring weight. */
-            <Icon icon={LoaderCircle} className="h-[18px] w-[18px] animate-spin" strokeWidth={3} />
+            <Icon icon={LoaderCircle} className="h-5 w-5 animate-spin" strokeWidth={3} />
           }
           title="Finalizing your agent…"
           body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."
@@ -129,7 +129,7 @@ export default function AgentPanel() {
           <EmptyState
             tone="warning"
             icon={
-              <Icon icon={Clock} className="h-[22px] w-[22px]" />
+              <Icon icon={Clock} className="h-5 w-5" />
             }
             title="Your agent is taking longer than expected"
             body="Haven is still confirming the new rules on-chain. This can take a little longer under load — check again in a moment."

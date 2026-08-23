@@ -18,6 +18,13 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadMoneyPathGlobs, loadMoneyPathControlGlobs, matchesGlob } from './qa-freshness.mjs'
 import { parseFrontMatter, globToRegExp } from '../docs/validate-frontmatter.mjs'
+import {
+  allGlobs,
+  perimeterMatchers,
+  plantedCopy,
+  proseCeiling,
+  scoreCount,
+} from './money-path-restatement-scan.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (p) => readFileSync(path.join(ROOT, p), 'utf8')
@@ -320,6 +327,64 @@ describe('money-path list stays in one piece', () => {
         'change is asked the CASP perimeter question at all. Add the path to its ' +
         '`covers:`, or — if spanning the whole layer is a friction decision rather ' +
         'than a drift fix — add it to EXEMPT here with a reason and an issue (#1899).',
+    )
+  })
+
+  test('a count-based fifth-copy detector is pointed the wrong way (#1904)', () => {
+    // The FIFTH copy — the one that does not exist yet, and the reason #1904
+    // closed without shipping a gate.
+    //
+    // #1899 sketched a general detector: count distinct perimeter basenames per
+    // tracked .md/.yml, fail above a threshold ("start high — say 8"). #1904
+    // measured three variants of that idea and all three failed; the reasoning,
+    // the numbers and the re-derivation command live in the header of
+    // money-path-restatement-scan.mjs, which is a REPORTING tool and never fails.
+    //
+    // This test is not a threshold and does not guard the tree. It is the
+    // positive control plus the finding, expressed as an invariant so the next
+    // person to propose the detector meets the measurement instead of
+    // re-deriving it a third time. Two assertions:
+    //
+    //   1. The instrument can return a POSITIVE. A negative result from a
+    //      broken tool terminates an investigation while feeling like rigour,
+    //      so a planted fresh copy must score above ordinary prose. If this
+    //      fails, every negative conclusion downstream of it is void.
+    //
+    //   2. The instrument is loudest when the copy is CORRECT. A copy that has
+    //      rotted to a quarter of the list — the only state anyone cares about
+    //      — scores BELOW ordinary prose and is invisible. That is not a
+    //      tuning problem: the signal measures the copy's freshness, so its
+    //      sensitivity runs inversely to the severity of the fault.
+    //
+    // Deliberately relative to the live prose ceiling rather than to the
+    // absolute numbers (prose 15, copies 28-37 at 345bb582). Pinning the
+    // absolutes would go red the day someone writes a new architecture doc,
+    // and a false rejection is what teaches people to edit the guard instead
+    // of the list (#1892).
+    const globs = allGlobs()
+    const m = perimeterMatchers(globs)
+    const ceiling = proseCeiling(m)
+    assert.ok(ceiling > 0, 'scored no prose at all — the scan is broken, not the tree clean')
+
+    const fresh = scoreCount(plantedCopy(globs), m)
+    assert.ok(
+      fresh > ceiling,
+      `the instrument no longer fires on a planted fresh copy (${fresh} vs prose ceiling ${ceiling}). ` +
+        'Two causes, and they are opposite. Either the scan broke — fix it before trusting ' +
+        'any negative result from it, because a false negative here reads exactly like ' +
+        '"no fifth copy exists" — or a document was added that names so much of the ' +
+        'perimeter it pulled the ceiling up into the real-copy range, in which case run ' +
+        '`node scripts/ci/money-path-restatement-scan.mjs` and read the top of the ranking: ' +
+        'that document is itself the fifth copy this issue was about.',
+    )
+
+    const rotten = scoreCount(plantedCopy(globs, Math.round(globs.length * 0.25)), m)
+    assert.ok(
+      rotten < ceiling,
+      `a copy carrying only a quarter of the list now scores ${rotten}, at or above the prose ` +
+        `ceiling of ${ceiling}. That would be news: #1904 closed because a count-based detector ` +
+        'is silent on exactly the stale copies it exists to catch. If this assertion fails, the ' +
+        'populations have separated and the detector is worth measuring again.',
     )
   })
 

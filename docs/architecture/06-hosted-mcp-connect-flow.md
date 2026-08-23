@@ -19,7 +19,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
-last-verified: "2026-08-22" # #1813: dropped the `covers:` entry for `lib/hosted-connect.ts`, deleted as unreachable. No claim in the body named it — the flow described here is served by ConnectAgentModal, not the retired hosted card. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-23" # #1702: re-verified, NOT edited. Implicated only because `packages/connect/**` is in `covers:` and #1702 rewrites that package's README; the body makes no claim about credential-overwrite semantics, `--name`, or re-key, and its review-checklist line "API-key rotation changes identity credentials, not signing authority" is about the separate `POST /agents/:id/rotate-key` route and stays true. Recorded so the coupling-gate loop is closed in the audit trail rather than left as an unaddressed flag. Prior: #1813: dropped the `covers:` entry for `lib/hosted-connect.ts`, deleted as unreachable. No claim in the body named it — the flow described here is served by ConnectAgentModal, not the retired hosted card. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract

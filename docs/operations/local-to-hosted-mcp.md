@@ -5,7 +5,7 @@ covers:
   - packages/mcp/**
   - packages/mcp-server/**
   - packages/signer/**
-last-verified: "2026-08-22" # #1813: dropped two `covers:` entries for libs deleted as unreachable (`hosted-connect.ts`, `agent-runtime-snippets.ts`). The body's only related line — NEXT_PUBLIC_HAVEN_MCP_URL rendered in connect-agent snippets — is still accurate; those snippets come from the live ConnectAgentModal path. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+last-verified: "2026-08-23" # #1702: the delegate-key-loss answer here was the PRE-#1694 one — "pause or revoke the agent and create a new key path". Epic #1694 made a delegation-rail agent's key REPLACEABLE (re-key: same agent, new key, budget remainder and period boundary carried), so the guidance is now split by rail rather than stated as one blanket answer. Found by the cross-epic doc sweep #1702's acceptance criteria asked for, not by the coupling gate — no `covers:` glob connects this file to `routes/agent-rekey.ts`. This doc names both rails a few lines above, so a single answer was actively wrong here rather than merely incomplete. Scope: the delegate-key paragraph only. Prior: #1813: dropped two `covers:` entries for libs deleted as unreachable (`hosted-connect.ts`, `agent-runtime-snippets.ts`). The body's only related line — NEXT_PUBLIC_HAVEN_MCP_URL rendered in connect-agent snippets — is still accurate; those snippets come from the live ConnectAgentModal path. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Migration - Local MCP To Hosted MCP
@@ -83,8 +83,12 @@ delegate key stays local for signing.
 
 If you do not have the credential file, open Haven, select the agent, and use
 the payment-credential flow to rotate the API key. Haven cannot recover a lost
-delegate private key. If the delegate key is gone, pause or revoke the agent
-and create a new signing path.
+delegate private key — nobody can, which is the point of it being yours. What
+you do next depends on the rail: a **delegation-rail** agent is re-keyed (same
+agent, new key, budget remainder carried — see
+[Replacing an agent's signing key](../product/agent-key-rotation.md)), while a
+**legacy AllowanceModule** agent has no delegation to revoke and re-issue, so
+it is paused or revoked and re-onboarded.
 
 When using Connect Agent 2 for a new setup, use the Haven-generated connector
 prompt instead of manually rebuilding this file. The prompt carries only a

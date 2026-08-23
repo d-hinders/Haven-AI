@@ -666,19 +666,26 @@ export const SCENARIOS = {
   },
   'replace-signing-key': {
     description:
-      'Replace signing key modal at each step — reason (lost + compromised), address, the point-of-no-return gate, and the legacy-rail refusal',
+      'Replace signing key modal at each step — reason (lost + compromised), address, the point-of-no-return gate both unacknowledged and armed, the no-signer refusal, and the legacy-rail refusal',
     // No URL reaches this: the modal is behind the agent detail page's options
     // menu, and its interesting screens are three clicks deep. Every stage
     // below is a distinct decision a reviewer has to judge as rendered copy.
     //
-    // ⚠️ READ THIS BEFORE JUDGING THE PNGs. The capture fixture has no
-    // connected wallet, and `useActiveSigner` is wagmi-driven, so
-    // `pickSigningPath` cannot return 'eoa' here. Every capture therefore
-    // carries the #1870 refusal banner ("You cannot replace this key from this
-    // device"). That is a REAL state a passkey-signing owner sees today, not a
-    // rendering fault — but it is not the primary path, and the destructive
-    // button is consequently disabled in these PNGs. It being disabled here is
-    // the harness, not the design.
+    // ── The account is PASSKEY-OWNED, and that is the fix (#1890) ───────────
+    //
+    // This note used to warn reviewers that every capture carried the refusal
+    // banner and a dead destructive button, because the harness has no
+    // connected wallet (`useActiveSigner` is wagmi-driven, so `pickSigningPath`
+    // could not return 'eoa') and the client refused every non-EOA path
+    // outright. #1894's design pass recorded the consequence: **the ENABLED
+    // danger button had no rendered evidence anywhere.** No fixture could
+    // reach the state where it is live.
+    //
+    // #1890 is what makes that state reachable. A passkey-owned account needs
+    // no wallet connection to be signable, so giving the fixture one passkey
+    // both removes the refusal banner and puts the flow on the exact path this
+    // issue unblocks — the primary path now, not a workaround for the harness.
+    // The armed capture below is the evidence that was missing.
     api(apiPath) {
       // agent-research carries the passport, so the #1847 disclosure renders.
       // The shared fixture gives it a null delegate; re-key needs one to be
@@ -686,8 +693,23 @@ export const SCENARIOS = {
       if (apiPath === '/agents') {
         return {
           agents: FIXTURE_AGENTS.map((a) =>
-            a.id === 'agent-research' ? { ...a, delegate_address: ADDR.delegate } : a,
+            a.id === 'agent-research' || a.id === 'agent-retired'
+              ? { ...a, delegate_address: ADDR.delegate }
+              : a,
           ),
+        }
+      }
+      // agent-retired's account has NO reachable signer, so it renders the one
+      // refusal that is still real. Keyed per agent rather than per scenario so
+      // the armed path and the refusal can both be captured in one run: making
+      // the fixture signable is what unblocked the armed capture, and it would
+      // otherwise have DELETED the refusal's only rendered evidence.
+      if (apiPath === '/agents/agent-retired/account-signers') {
+        return {
+          account_address: FIXTURE_SAFE.safe_address,
+          chain_id: FIXTURE_SAFE.chain_id,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [],
         }
       }
       if (apiPath.endsWith('/account-signers')) {
@@ -695,7 +717,9 @@ export const SCENARIOS = {
           account_address: FIXTURE_SAFE.safe_address,
           chain_id: FIXTURE_SAFE.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
-          passkeys: [],
+          passkeys: [
+            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+          ],
         }
       }
       // The preflight, so the consequences step renders its real shape rather
@@ -763,6 +787,36 @@ export const SCENARIOS = {
       await dialog.getByText(/the next step cannot be undone/i).waitFor({ timeout: 15_000 })
       await dialog.getByRole('checkbox').waitFor({ timeout: 15_000 })
       await shoot(dialog, 'point-of-no-return')
+
+      // The state that had no rendered evidence anywhere (#1894, closed here).
+      // Ticking the acknowledgement is the ONLY thing that arms the red button,
+      // and until #1890 no fixture could reach a signable account, so every
+      // prior capture showed it dead. Both states are worth having side by
+      // side: the disabled one proves the gate holds, and only this one shows
+      // what the owner is actually about to press.
+      await dialog.getByRole('checkbox').click()
+      await dialog
+        .getByRole('button', { name: /switch off the old key/i })
+        .waitFor({ state: 'visible', timeout: 15_000 })
+      await shoot(dialog, 'point-of-no-return-armed')
+
+      // ── The no-signer agent: the ONE refusal that is still real ─────────
+      // Its copy changed in #1890 (it no longer blames passkeys), and the
+      // fixture that made the armed capture possible would otherwise have
+      // removed every render of this banner from the evidence set.
+      await page.goto(`${BASE_URL}/agents/agent-retired`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      })
+      await dismissMobileSidebar(page, vp)
+      await page.getByRole('button', { name: 'Agent options' }).click()
+      await page.getByRole('menuitem', { name: 'Replace signing key' }).click()
+
+      const noSigner = page.getByRole('dialog')
+      await noSigner
+        .getByText(/cannot replace this key from this device/i)
+        .waitFor({ timeout: 15_000 })
+      await shoot(noSigner, 'no-signer-refusal')
 
       // ── The legacy-rail agent: the refusal ──────────────────────────────
       await page.goto(`${BASE_URL}/agents/agent-ops`, {

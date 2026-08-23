@@ -15,16 +15,35 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockUseActiveSigner, mockApiGet, mockApiPost } = vi.hoisted(() => ({
+const {
+  mockUseActiveSigner,
+  mockApiGet,
+  mockApiPost,
+  mockOnDevice,
+  mockSignUserOpWithPasskey,
+  mockSignDelegationWithPasskey,
+} = vi.hoisted(() => ({
   mockUseActiveSigner: vi.fn(),
   mockApiGet: vi.fn(),
   mockApiPost: vi.fn(),
+  mockOnDevice: vi.fn(),
+  mockSignUserOpWithPasskey: vi.fn(),
+  mockSignDelegationWithPasskey: vi.fn(),
 }))
 
 vi.mock('@/lib/signer', () => ({
   useActiveSigner: (...args: unknown[]) => mockUseActiveSigner(...args),
-  hasPasskeyCredentialOnDevice: () => false,
+  hasPasskeyCredentialOnDevice: (...args: unknown[]) => mockOnDevice(...args),
   credentialIdFromKeyId: (k: string) => k,
+}))
+
+// The two WebAuthn ceremonies, stubbed at the module the hook lazily imports.
+// Stubbing here rather than inside the kit keeps the assertions about WHICH
+// artefact each step hands the account — the thing #1890 is about — instead of
+// about signature bytes no test can verify anyway.
+vi.mock('@/lib/delegationPasskeySigner', () => ({
+  signUserOpWithPasskey: (...args: unknown[]) => mockSignUserOpWithPasskey(...args),
+  signDelegationWithPasskey: (...args: unknown[]) => mockSignDelegationWithPasskey(...args),
 }))
 
 vi.mock('@/lib/api', async () => {
@@ -110,6 +129,9 @@ async function advanceToConsequences() {
 
 beforeEach(() => {
   mockUseActiveSigner.mockReturnValue(eoaSigner())
+  mockOnDevice.mockReturnValue(false)
+  mockSignUserOpWithPasskey.mockResolvedValue('0xpasskeyop')
+  mockSignDelegationWithPasskey.mockResolvedValue('0xpasskeydelegation')
   mockApiGet.mockResolvedValue({
     account_address: '0x9999999999999999999999999999999999999999',
     chain_id: 8453,
@@ -312,7 +334,248 @@ describe('rail refusal', () => {
   })
 })
 
-describe('signing-path refusal (#1870)', () => {
+/** A passkey-owned account: no EOA owner anywhere, one enrolled passkey. */
+function passkeyOnlyAccount() {
+  mockUseActiveSigner.mockReturnValue(null)
+  mockApiGet.mockResolvedValue({
+    account_address: '0x9999999999999999999999999999999999999999',
+    chain_id: 8453,
+    owner_address: null,
+    passkeys: [{ key_id: '0xkey1' }],
+  })
+}
+
+/**
+ * An account with BOTH an EOA owner and an enrolled passkey, where the passkey
+ * is the signer reachable on this device. This is the population #1870's
+ * `signWith` fix exists for, and the one the backend's old inference
+ * silently mis-prepared: it saw an EOA owner and sized the UserOperation for a
+ * 65-byte signature that a several-hundred-byte WebAuthn signature would then
+ * fail against — after the revoke.
+ */
+function multiSignerOnPasskeyDevice() {
+  mockUseActiveSigner.mockReturnValue(eoaSigner())
+  mockOnDevice.mockReturnValue(true)
+  mockApiGet.mockResolvedValue({
+    account_address: '0x9999999999999999999999999999999999999999',
+    chain_id: 8453,
+    owner_address: '0x5555555555555555555555555555555555555555',
+    passkeys: [{ key_id: '0xkey1' }],
+  })
+}
+
+/**
+ * A full run whose revoke prepare answers on `scheme`, driven to completion.
+ * Returns the recorded calls so a test can assert what each step was handed.
+ */
+function fullRunOn(scheme: 'eip712_userop' | 'webauthn_userop') {
+  mockApiPost.mockImplementation(async (path: string) => {
+    if (path.endsWith('/rekey')) {
+      return {
+        rekey_id: 'rk-1',
+        stage: 'preflight',
+        old_delegate_address: CURRENT,
+        new_delegate_address: NEXT,
+        residual: { atomic: '0', token_address: null, disposition: 'none', recoverable_after_rekey: false },
+        delegations_to_revoke: ['0xhash'],
+      }
+    }
+    if (path.endsWith('/revoke')) {
+      // The server answers on ONE branch or the other, never both — the
+      // WebAuthn branch deliberately omits `signing_payload` so a client
+      // cannot sign the wrong artefact for the scheme it was handed.
+      return scheme === 'webauthn_userop'
+        ? {
+            signature_scheme: 'webauthn_userop',
+            user_op_hash: '0xuserophash',
+            user_operation: { sender: '0xacc', nonce: '1n' },
+            treasury_address: '0xacc',
+            delegation_hashes: ['0xhash'],
+            instructions: 'Sign user_op_hash with the account passkey (WebAuthn), then submit',
+          }
+        : {
+            signature_scheme: 'eip712_userop',
+            signing_payload: { domain: {}, types: {}, primaryType: 'PackedUserOperation', message: {} },
+            user_operation: { sender: '0xacc', nonce: '1n' },
+            treasury_address: '0xacc',
+            delegation_hashes: ['0xhash'],
+            instructions: 'Sign signing_payload (EIP-712) with the treasury owner key, then submit',
+          }
+    }
+    if (path.endsWith('/revoke/submit')) return { stage: 'metered' }
+    if (path.endsWith('/issue')) {
+      return {
+        stage: 'issued',
+        delegate_account_address: '0xacc',
+        delegations: [
+          {
+            delegation_hash: '0xd1',
+            carry_role: 'carry',
+            token_address: '0xusdc',
+            budget_atomic: '1000',
+            period_seconds: 86400,
+            start_date: 0,
+            expires_at: 0,
+            signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: { delegate: NEXT } },
+          },
+        ],
+        skipped: [],
+      }
+    }
+    if (path.endsWith('/complete')) {
+      return {
+        api_key: 'sk_agent_new',
+        api_key_prefix: 'sk_agent_ne',
+        new_delegate_address: NEXT,
+        invalidated_intents: 0,
+        superseded_delegations: 0,
+        residual_on_old_delegate: { atomic: '0' },
+      }
+    }
+    return {}
+  })
+}
+
+function revokePrepareBody(): Record<string, unknown> {
+  const call = mockApiPost.mock.calls.find(
+    (c: unknown[]) => typeof c[0] === 'string' && (c[0] as string).endsWith('/revoke'),
+  )
+  return (call?.[1] ?? {}) as Record<string, unknown>
+}
+
+describe('passkey owners can re-key (#1890)', () => {
+  /**
+   * The user-facing point of the whole issue. #1881 refused every non-EOA
+   * signing path up front, correctly, because the backend could not be told
+   * which signer would sign and guessing would have put the failure AFTER the
+   * revoke (#1868's permanent wedge). PR #1891 removed that condition, so the
+   * refusal now blocks a population the backend serves correctly.
+   *
+   * Asserted on the DESTRUCTIVE button rather than on the banner's absence:
+   * the banner is the symptom, the dead irreversible control was the defect.
+   */
+  it('lets a passkey-only account reach the irreversible step', async () => {
+    passkeyOnlyAccount()
+    renderModal()
+    await advanceToConsequences()
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect(screen.getByRole('button', { name: /switch off the old key/i })).toBeEnabled()
+    expect(screen.queryByText(/cannot replace this key from this device/i)).toBeNull()
+  })
+
+  it('tells the backend it will sign with a passkey, and signs the prepared op', async () => {
+    passkeyOnlyAccount()
+    fullRunOn('webauthn_userop')
+    renderModal()
+    await advanceToConsequences()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /switch off the old key/i }))
+
+    await waitFor(() => expect(screen.getByText(/signing key replaced/i)).toBeInTheDocument())
+
+    // 2. The scheme is SENT, not inferred server-side — this is what sizes the
+    //    UserOperation's verificationGasLimit for the signature it will carry.
+    expect(revokePrepareBody()).toEqual({ signature_scheme: 'webauthn_userop' })
+    // 4. And the signing step branched on the discriminant: the WebAuthn
+    //    ceremony ran, and the EOA wallet was never asked.
+    expect(mockSignUserOpWithPasskey).toHaveBeenCalledTimes(1)
+    expect(mockSignUserOpWithPasskey.mock.calls[0][1]).toMatchObject({ sender: '0xacc' })
+  })
+
+  /**
+   * `complete` runs PAST the revoke. Unblocking the passkey path at the revoke
+   * alone would have carried a passkey owner over the point of no return and
+   * then thrown "connect your owner wallet" on the far side — a failure this
+   * change would have INTRODUCED after the irreversible step, recoverable only
+   * by a manual owner re-grant (#1868). So the end-to-end run is the test, not
+   * the revoke in isolation.
+   */
+  it('signs the replacement delegations with the passkey too, not just the revoke', async () => {
+    passkeyOnlyAccount()
+    fullRunOn('webauthn_userop')
+    renderModal()
+    await advanceToConsequences()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /switch off the old key/i }))
+
+    await waitFor(() => expect(screen.getByText(/signing key replaced/i)).toBeInTheDocument())
+
+    expect(mockSignDelegationWithPasskey).toHaveBeenCalledTimes(1)
+    // The delegation MESSAGE is what the kit signs — the typed data IS the
+    // delegation, exactly as the budget-grant sibling does it.
+    expect(mockSignDelegationWithPasskey.mock.calls[0][1]).toMatchObject({ delegate: NEXT })
+    // And the new API key came back, which only happens on a completed re-key.
+    expect(screen.getByText(/sk_agent_new/)).toBeInTheDocument()
+  })
+
+  it('uses the passkey on a multi-signer account whose reachable signer is one', async () => {
+    multiSignerOnPasskeyDevice()
+    fullRunOn('webauthn_userop')
+    renderModal()
+    await advanceToConsequences()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /switch off the old key/i }))
+
+    await waitFor(() => expect(screen.getByText(/signing key replaced/i)).toBeInTheDocument())
+    // An EOA owner EXISTS on this account. The device still decides.
+    expect(revokePrepareBody()).toEqual({ signature_scheme: 'webauthn_userop' })
+    expect(mockSignUserOpWithPasskey).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * The discriminant wins over local state, and this is the only test that can
+   * tell the two apart — everywhere else they agree, so branching on
+   * `signingPath` would pass every other assertion in this file.
+   *
+   * Only the SERVER knows which signature the UserOperation was estimated for.
+   * A client that signs on its own guess signs the wrong artefact for the op
+   * it was handed, which is the entire class of defect #1870 was about. The
+   * refusal lands before `revoke/submit`, so nothing is revoked and the
+   * re-key is still retryable at `preflight`.
+   */
+  it('signs what the server resolved, not what this device assumed', async () => {
+    passkeyOnlyAccount()
+    fullRunOn('eip712_userop') // the device would have guessed webauthn
+    renderModal()
+    await advanceToConsequences()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /switch off the old key/i }))
+
+    await waitFor(() => expect(screen.getByText(/that did not go through/i)).toBeInTheDocument())
+    // No WebAuthn ceremony over an op prepared for a 65-byte signature...
+    expect(mockSignUserOpWithPasskey).not.toHaveBeenCalled()
+    // ...and nothing was submitted, so the revoke never landed.
+    expect(
+      mockApiPost.mock.calls.some(
+        (c: unknown[]) => typeof c[0] === 'string' && (c[0] as string).endsWith('/revoke/submit'),
+      ),
+    ).toBe(false)
+  })
+
+  /**
+   * Paired regression: the EOA path #1881 shipped is untouched. Without this,
+   * "the passkey path works" could be satisfied by a hook that took the
+   * passkey branch for everyone.
+   */
+  it('leaves the EOA owner path exactly as it was', async () => {
+    fullRunOn('eip712_userop')
+    const wallet = eoaSigner()
+    mockUseActiveSigner.mockReturnValue(wallet)
+    renderModal()
+    await advanceToConsequences()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /switch off the old key/i }))
+
+    await waitFor(() => expect(screen.getByText(/signing key replaced/i)).toBeInTheDocument())
+    expect(revokePrepareBody()).toEqual({ signature_scheme: 'eip712_userop' })
+    expect(mockSignUserOpWithPasskey).not.toHaveBeenCalled()
+    expect(mockSignDelegationWithPasskey).not.toHaveBeenCalled()
+    // Two EIP-712 signatures: the revoke UserOperation and one delegation.
+    expect(wallet.walletClient.signTypedData).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('signing-path refusal — the one reason left (#1890)', () => {
   /**
    * The refusal gates the IRREVERSIBLE action, not the reading of it — so the
    * assertion is on the destructive button, which is the actual guarantee.
@@ -352,6 +615,22 @@ describe('signing-path refusal (#1870)', () => {
     )
     fireEvent.click(screen.getByRole('radio', { name: /it is lost/i }))
     expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled()
+  })
+
+  /**
+   * The refusal must not still claim passkeys are the problem. It is the
+   * copy, not the predicate, that a user reads — and this sentence would now
+   * be false, telling an owner to go and find a wallet they may not have when
+   * a passkey on another device would do.
+   */
+  it('no longer tells the owner that passkeys are unsupported', async () => {
+    mockUseActiveSigner.mockReturnValue(null)
+    renderModal()
+    await waitFor(() =>
+      expect(screen.getByText(/cannot replace this key from this device/i)).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/passkey is not supported/i)).toBeNull()
+    expect(screen.getByText(/or use a device with one of its passkeys/i)).toBeInTheDocument()
   })
 })
 

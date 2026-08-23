@@ -12,7 +12,7 @@
  * A missing element only proves suppression when something can produce it.
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { mockUseActiveSigner, mockApiGet, mockApiPost } = vi.hoisted(() => ({
@@ -36,6 +36,29 @@ vi.mock('@/lib/api', async () => {
 })
 
 import { ReplaceSigningKeyModal } from '../ReplaceSigningKeyModal'
+
+/**
+ * The irreversibility gate as a BOX, found without naming a class (#1887).
+ *
+ * The first draft of this used `closest('div.rounded-[10px]')`, which is
+ * `ApprovalRequiredBanner`'s literal Tailwind frame class — a shared primitive
+ * this file does not own, so a restyle there would have broken these two tests
+ * for a reason unrelated to the gate (code review on #1887).
+ *
+ * Instead: walk up from the banner's title until an ancestor also contains the
+ * acknowledgement checkbox. That is the gate's definition rather than its
+ * styling — "the box holding both the warning and the thing that unlocks it" —
+ * and it is what the assertions actually mean. Returns null when there is no
+ * such ancestor, so the paired-absence test can assert its absence honestly.
+ */
+function gateBox(): HTMLElement | null {
+  const title = screen.queryByText(/the next step cannot be undone/i)
+  const checkbox = screen.queryByRole('checkbox')
+  if (!title || !checkbox) return null
+  let node: HTMLElement | null = title.parentElement
+  while (node && !node.contains(checkbox)) node = node.parentElement
+  return node
+}
 import { ApiRequestError } from '@/lib/api'
 
 const CURRENT = '0x2222222222222222222222222222222222222222'
@@ -117,6 +140,43 @@ describe('the point of no return (#1868)', () => {
 
     fireEvent.click(screen.getByRole('checkbox'))
     expect(proceed).toBeEnabled()
+  })
+
+  /**
+   * The gate must be STRUCTURAL, not merely adjacent (#1887).
+   *
+   * `ui/Modal` renders its footer outside the scrolling body, so a footer
+   * button is on screen from the first paint however deep the body runs. At
+   * 390px this body is roughly 2.7 screen-heights, which put the irreversible
+   * control about three screens ABOVE the banner explaining it and the
+   * checkbox enabling it — reachable, and easiest to mis-tap, before its own
+   * gate. Position is the fix: the button is the banner's last child.
+   *
+   * Asserted by CONTAINMENT rather than document order, and the distinction is
+   * the whole test. The footer already came after the body in the DOM, so an
+   * order assertion was green against the defect and would have proved
+   * nothing. Verified by mutation: returning `destructiveButton()` to the
+   * footer fails this on `expect(gate).toContainElement(proceed)`.
+   */
+  it('renders the destructive control inside the gate, not in the sticky footer', async () => {
+    renderModal()
+    await advanceToConsequences()
+
+    const gate = gateBox()
+    // Sanity, so a change to the banner's structure fails loudly here instead
+    // of silently scoping the real assertion to the wrong node and passing.
+    expect(gate).not.toBeNull()
+
+    const proceed = screen.getByRole('button', { name: /switch off the old key/i })
+    expect(gate).toContainElement(proceed)
+    // Exactly one — the footer must not keep a second copy of it.
+    expect(screen.getAllByRole('button', { name: /switch off the old key/i })).toHaveLength(1)
+    // Inside the gate, it still comes after the acknowledgement it depends on.
+    expect(
+      within(gate as HTMLElement)
+        .getAllByRole('checkbox')[0]
+        .compareDocumentPosition(proceed) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 
   it('says the agent cannot pay and that stopping means starting the budget over', async () => {
@@ -480,6 +540,26 @@ describe('resuming an interrupted re-key', () => {
     expect(paths.some((p) => p.includes('/revoke'))).toBe(false)
     expect(paths.some((p) => p.endsWith('/issue'))).toBe(true)
     expect(paths.some((p) => p.endsWith('/complete'))).toBe(true)
+  })
+
+  /**
+   * Paired absence for #1887's placement rule: the button moves into the gate
+   * only when there IS a gate. A resumed re-key is already past the revoke, so
+   * no red banner and no acknowledgement render — and burying the one control
+   * that finishes the job at the end of a long scroll, with nothing gating it,
+   * would be ceremony rather than safety. It stays in the footer.
+   *
+   * This is what stops the fix from being written as "the forward action is
+   * always inline", which would read as equally correct and be wrong here.
+   */
+  it('keeps the resume action in the footer, because there is no gate to sit below', async () => {
+    inFlightAt('metered')
+    renderModal()
+    await advanceToConsequences()
+
+    expect(screen.queryByText(/the next step cannot be undone/i)).toBeNull()
+    const finish = screen.getByRole('button', { name: /finish replacing the key/i })
+    expect(finish.closest('div.rounded-\\[10px\\]')).toBeNull()
   })
 
   // Paired: a stage the backend genuinely cannot carry forward offers no

@@ -175,16 +175,98 @@ already-configured machine behaves as follows (characterized in
 - **Runtime MCP entries are replaced, not duplicated**: Connect owns the
   `haven` and `haven-signer` entries (and the managed Codex/Hermes
   equivalents) and re-points them at the newest agent's credentials.
-  Unrelated MCP servers and configuration are preserved. One runtime is
-  therefore wired to one Haven agent — the newest one.
+  Unrelated MCP servers and configuration are preserved. Without `--name`, one
+  runtime is therefore wired to one Haven agent — the newest one. With
+  `--name`, each agent owns its own suffixed pair and they coexist; see
+  [Running several agents in one runtime](#running-several-agents-in-one-runtime).
 - **The previous agent is not revoked by a re-run.** Its credentials remain on
   disk and its authority remains whatever its on-chain rules say. Revoke
   agents you no longer use from the Haven dashboard, then delete their
   credential directories.
-- **Connect never overwrites an existing credential file.** A write that would
+- **A re-run never overwrites an existing credential file.** A write that would
   collide with an existing `identity.json`/`signer.json`/`agent.json` is
   refused outright (and a partially failed write rolls itself back), so a
-  re-run cannot corrupt stored key material.
+  re-run cannot corrupt stored key material. **`--rekey` is the one exception,
+  and it is a different operation** — it deliberately replaces a credential set
+  in place, at an unchanged path, and is the supported way to replace a key
+  rather than accumulate agents. See
+  [Replacing an agent's signing key](#replacing-an-agents-signing-key-rekey).
+
+## Running several agents in one runtime
+
+`--name <slug>` gives an agent its own MCP server pair and its own credential
+directory, so several agents coexist in one runtime instead of replacing each
+other:
+
+```sh
+npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example \
+  --name research --runtime claude-code
+```
+
+| | Without `--name` | With `--name research` |
+|---|---|---|
+| MCP entries | `haven`, `haven-signer` | `haven-research`, `haven-signer-research` |
+| Credentials | `~/.haven/agents/<agent-id>/` | `~/.haven/agents/research/` |
+
+A writer only ever touches the pair it owns, so adding a named agent cannot
+disturb the bare pair or another named one. Omitting `--name` is byte-identical
+to how the connector behaved before named pairs existed, so nothing already
+wired needs changing.
+
+The slug is **1–32 lowercase letters, digits and single hyphens**, validated
+before anything is written, and **immutable once wired** — it is the server name
+and tool prefix every host depends on. `haven`, `signer` and `signer-*` are
+refused, because their derived names would collide with another pair's.
+
+> The slug is local. Haven does not receive it, so the dashboard cannot yet tell
+> you which agent corresponds to which entry
+> ([#1878](https://github.com/d-hinders/Haven-AI/issues/1878)). Until it can,
+> `--doctor` on this machine is what maps the two.
+
+## Replacing an agent's signing key (`--rekey`)
+
+If an agent's signing key is lost or exposed, replace it: same agent, same name,
+same history, new key. This does **not** create a new agent, and it is not the
+same as running setup again.
+
+Re-key is authorised by the **account owner in the dashboard** — the connector
+never calls Haven's re-key endpoints, which refuse an agent credential by
+design. So it runs in two phases with the dashboard between them:
+
+```sh
+# 1. On this machine: generate the new key, print its public address.
+npx -y @haven_ai/connect@alpha --rekey [--name research]
+
+# 2. In the dashboard: agent → Replace signing key → paste that address.
+#    Sign the steps. It shows a new API key ONCE.
+
+# 3. Back here: write the new credentials and rewire this agent's MCP pair.
+npx -y @haven_ai/connect@alpha --rekey-finish --api-key sk_agent_... \
+  --runtime claude-code [--name research]
+```
+
+Between the two phases nothing has changed: the agent keeps working on its old
+key until you finish. Phase one refuses up front what the backend would refuse
+anyway — a legacy-rail account, a revoked agent — so you find out before signing
+anything. Phase two refuses to write unless the pasted key authenticates,
+belongs to **this** agent, and Haven's recorded signing address matches the one
+this machine generated.
+
+**Pass `--runtime` on the finish step.** Your API key lives inside the MCP config
+as well as in the credential files, so without it the credentials are correct and
+every wired host still presents the retired key and fails with 401.
+
+**Then restart every long-lived host** — not just the one in front of you. Each
+long-running process loaded its wiring at startup and is still holding the old
+key. The connector prints the exact restart command for your runtime; the sweep
+across the rest is yours.
+
+> **If the key is lost, check for a balance on it first.** An agent's delegate
+> address can hold a small amount from x402 settlement, and sweeping it needs a
+> signature from that key. After a re-key it is unrecoverable — by you and by
+> Haven. Haven's preflight reads the balance and refuses until you say what
+> happened to it. Full detail:
+> [Replacing an agent's signing key](../../docs/product/agent-key-rotation.md).
 
 ## Diagnosing a stuck setup: `--doctor` / `--repair` (#1589)
 

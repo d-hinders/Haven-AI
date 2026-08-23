@@ -14,6 +14,11 @@ export interface ConnectApiClient {
    * never any secret material.
    */
   getConnectorStatus(setupId: string, apiKey: string): Promise<ConnectorStatusResponse>
+  /**
+   * #1700: the agent behind an API key. Used by the re-key flow on both sides
+   * of the dashboard hand-off — see {@link AgentIdentity}.
+   */
+  getAgentIdentity(apiKey: string): Promise<AgentIdentity>
 }
 
 export interface ConnectorStatusResponse {
@@ -117,6 +122,26 @@ export interface RegisterSetupResponse {
   next_action: string
 }
 
+/**
+ * The agent identity behind an API key (#1700).
+ *
+ * Read from `GET /machine-payments/agent`, the same agent-authenticated
+ * endpoint the SDK's `getAgent()` uses. Re-key needs it twice and for two
+ * different questions: BEFORE, to refuse a legacy-rail account the way the
+ * backend would rather than let the owner discover it five signed steps later;
+ * and AFTER, to prove the API key the owner pasted really belongs to this
+ * agent and really names the key this machine just generated.
+ */
+export interface AgentIdentity {
+  id: string
+  name: string
+  status: string
+  safe_address: string | null
+  delegate_address: string | null
+  chain_id: number | null
+  execution_rail: 'legacy' | 'delegation' | string
+}
+
 export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch = fetch): ConnectApiClient {
   const root = baseUrl.replace(/\/+$/, '')
   return {
@@ -148,6 +173,12 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
             restart_required: input.installCapabilities.restartRequired,
           },
         }),
+      }),
+
+    getAgentIdentity: (apiKey) =>
+      request(fetchImpl, `${root}/machine-payments/agent`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${apiKey}` },
       }),
 
     getConnectorStatus: (setupId, apiKey) =>

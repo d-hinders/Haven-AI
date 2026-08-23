@@ -79,6 +79,64 @@ export async function runCli(
       return 1
     }
   }
+  if (parsed.rekey) {
+    // #1700: replace an agent's signing key on this machine. Two phases with
+    // the owner's dashboard between them — this connector never calls the
+    // re-key API, which is owner-authenticated by design.
+    const { startRekey, finishRekey } = await import('./rekey.js')
+    const { restartGuidance } = await import('./rekey-restart.js')
+    const common = {
+      serverName: parsed.options.serverName,
+      credentialsDir: parsed.options.credentialsDir,
+      runtime: parsed.options.runtime,
+    }
+    try {
+      if (parsed.rekey.phase === 'start') {
+        const result = await startRekey(common)
+        if (parsed.json) {
+          // The address is public; the private half never appears here or
+          // anywhere else this process writes to a stream.
+          io.stdout(
+            `${redactSecrets(
+              JSON.stringify({
+                rekey: 'started',
+                agent_id: result.agentId,
+                new_delegate_address: result.newDelegateAddress,
+                expires_at: result.expiresAt,
+              }),
+            )}\n`,
+          )
+        } else {
+          for (const line of result.messages) io.stdout(redactSecrets(`${line}\n`))
+        }
+        return 0
+      }
+
+      const result = await finishRekey({ ...common, newApiKey: parsed.rekey.newApiKey })
+      const restart = restartGuidance(parsed.options.runtime)
+      if (parsed.json) {
+        io.stdout(
+          `${redactSecrets(
+            JSON.stringify({
+              rekey: 'finished',
+              agent_id: result.agentId,
+              new_delegate_address: result.newDelegateAddress,
+              mcp_servers: result.serverNames,
+              restart_commands: restart.commands,
+            }),
+          )}\n`,
+        )
+      } else {
+        for (const line of result.messages) io.stdout(redactSecrets(`${line}\n`))
+        io.stdout('\n')
+        for (const line of restart.lines) io.stdout(redactSecrets(`${line}\n`))
+      }
+      return 0
+    } catch (err) {
+      io.stderr(`${redactSecrets(err instanceof Error ? err.message : String(err))}\n`)
+      return 1
+    }
+  }
   if (parsed.doctor || parsed.repair) {
     const { runDoctor, runRepair } = await import('./doctor.js')
     const runtime = parsed.options.runtime ?? ''

@@ -137,6 +137,38 @@ function orderingReply(reply: FastifyReply, err: RekeyOrderingError): FastifyRep
   })
 }
 
+/**
+ * The message for a carry that is absent because there was nothing to carry —
+ * as opposed to one the delay outran, which `planCarry` reports itself.
+ *
+ * All three branches exist because two independent things can have happened
+ * since the meter was read, and the owner is owed the truth about both: the
+ * old period may have ended, and the whole grant may have died. Saying
+ * "authority resumes at the original boundary" when the steady grant was
+ * itself dropped contradicts the very next line of the same response — the
+ * shape a reviewer caught on #1849 before it shipped.
+ */
+function fullySpentReason(
+  steady: { startDate: number } | null,
+  dropped: ReadonlyArray<{ role: string }>,
+  nowSec: number,
+): string {
+  const spent = 'The period was fully spent when the meter was read.'
+  if (!steady) {
+    // Either the grant had no period after this one, or the delay outran the
+    // one it had. Promise nothing: the accompanying drop reason, when there
+    // is one, says which.
+    return dropped.some((d) => d.role === 'steady')
+      ? `${spent} The grant's own life then ended before this re-key was finished, so nothing ` +
+          'is issued for it — no spend was lost that was still available to lose.'
+      : `${spent} The grant had no period after that one, so there is nothing to resume.`
+  }
+  return steady.startDate <= nowSec
+    ? `${spent} That period has since ended, so the replacement grant is already live on the ` +
+        'original budget.'
+    : `${spent} No carry grant is issued; authority resumes at the original boundary.`
+}
+
 export default async function agentRekeyRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
@@ -615,6 +647,23 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       }
 
       const nowSec = Math.floor(Date.now() / 1000)
+      // #1849: the period the remainder was MEASURED in, which is the only
+      // period it means anything in. `metered_at` has been on the row since
+      // migration 065 and was never read — the carry arithmetic ran against
+      // the issue-time clock instead, so an owner who finished after a period
+      // boundary had the remainder spent against the wrong period. That could
+      // not over-grant, but it silently under-granted, at worst to zero for a
+      // period the agent was owed a full budget in.
+      if (!rekey.metered_at) {
+        // Unreachable through the stage machine (`metered` is what sets it),
+        // and refused rather than defaulted anyway: falling back to `nowSec`
+        // here would silently restore the exact bug this closes.
+        return reply.code(409).send({
+          error: 'rekey_out_of_order',
+          detail: 'the re-key has no metering timestamp — re-run the revoke/submit step',
+        })
+      }
+      const meteredAtSec = Math.floor(new Date(rekey.metered_at).getTime() / 1000)
       const built: Array<{
         delegation_hash: string
         carry_role: string
@@ -643,6 +692,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
               remainingAtomic: BigInt(entry.remaining_atomic),
               fromChain: entry.from_chain,
             },
+            meteredAtSec,
             nowSec,
           })
         } catch (err) {
@@ -667,17 +717,25 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
             reason: 'The replaced delegation had already expired — nothing to carry.',
           })
         } else if (plan.kind === 'dormant') {
-          pieces.push({ role: 'reanchor', terms: plan.reissue })
+          if (plan.reissue) pieces.push({ role: 'reanchor', terms: plan.reissue })
         } else {
           if (plan.carry) pieces.push({ role: 'carry', terms: plan.carry })
-          else
+          else if (plan.dropped.every((d) => d.role !== 'carry'))
             skipped.push({
               delegation_hash: entry.delegation_hash,
-              reason:
-                'The period was fully spent — no carry grant is issued; authority resumes at the ' +
-                'original boundary.',
+              reason: fullySpentReason(plan.steady, plan.dropped, nowSec),
             })
           if (plan.steady) pieces.push({ role: 'steady', terms: plan.steady })
+        }
+
+        // #1849: anything the delay outran, reported with the delay named. A
+        // dropped piece is not a silent omission — it is the difference
+        // between the owner understanding why a grant is missing and
+        // concluding the re-key broke their agent.
+        if (plan.kind !== 'expired') {
+          for (const drop of plan.dropped) {
+            skipped.push({ delegation_hash: entry.delegation_hash, reason: drop.reason })
+          }
         }
 
         for (const piece of pieces) {

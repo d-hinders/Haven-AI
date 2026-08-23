@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-08-09" # #1228: real-DB characterization pointer added (§2) / testing-strategy rule added
+last-verified: "2026-08-23" # #1892: §2's inline restatement of the money-path file list REMOVED, not corrected — it was a third copy, it contradicted this playbook's own "links, does not restate" line, and it had drifted (no re-key surface, no infra/chain, no infra/repositories, four rails/ files missing). §2 now points at .github/money-path-globs.json, the single CI-enforced perimeter. Only §2 was re-read; §§1, 3-5 untouched and NOT re-verified in this pass. Prior: #1228: real-DB characterization pointer added (§2) / testing-strategy rule added
 ---
 
 # Money / agent-authority playbook
@@ -15,9 +15,11 @@ Read [`docs/regulatory/casp-risk-guardrails.md`](../../regulatory/casp-risk-guar
 
 ## 2. Characterization-tests-first
 
-For any change to **existing** money-path behavior (`routes/x402.ts`, `routes/x402-resources.ts`, `routes/payments.ts`, `routes/machine-payments.ts`, `modules/mpp/`, `domain/payment-coverage.ts`, `rails/allowance-module.ts`, the rail seam `rails/execution-rail.ts`, the delegation rail `rails/delegation-*.ts` / `rails/hybrid-provisioning.ts` / `rails/hybrid-account-config.ts` / `routes/agent-delegations.ts`, `packages/sdk/src/signer.ts`, `middleware/agentAuth.ts`, `db/migrations/`), pin the current behavior with a characterization test **before** changing it, as required by the canonical skill's [Implement section](../../../.agents/skills/ship-next/SKILL.md#implement). The test encodes the invariant the change must preserve.
+For any change to **existing** behavior on a file matched by [`.github/money-path-globs.json`](../../../.github/money-path-globs.json) — the single, CI-enforced perimeter — pin the current behavior with a characterization test **before** changing it, as required by the canonical skill's [Implement section](../../../.agents/skills/ship-next/SKILL.md#implement). The test encodes the invariant the change must preserve. The annotated version, with the reasoning behind each group, is the skill's [Merge Gate](../../../.agents/skills/ship-next/SKILL.md#merge-gate); `scripts/ci/money-path.test.mjs` pins the two to each other in both directions.
 
-For other files in `casp-risk-guardrails.md`'s `covers:` list (e.g. `infra/relayer.ts`, `modules/accounts/safe-deployer.ts`, the passkeys / safe-deploy / user-safes routes), the §1 required reading still applies — §2 scopes only the characterization-test requirement.
+This section used to restate the list inline, which contradicted the line at the top of this playbook and drifted exactly as that line predicts: it was missing the re-key surface (`routes/agent-rekey.ts`, live since #1698), `infra/chain/`, `infra/repositories/`, and four `rails/` files, so a re-key change read here as *not* needing a characterization test (#1892). A perimeter is maintainable in one place or in none.
+
+For other files in `casp-risk-guardrails.md`'s `covers:` list (e.g. `modules/accounts/safe-deployer.ts`, the passkeys / safe-deploy / user-safes routes — `infra/relayer.ts` was on this list of examples until #1607 put the relayer globs on the money-path list itself), the §1 required reading still applies — §2 scopes only the characterization-test requirement. **The regulatory `covers:` list is deliberately wider than the money-path list and is not the same question**; do not treat a difference between them as drift. Worth knowing which way that asymmetry runs, though: `casp-risk-guardrails.md` has covered `routes/agent-rekey.ts`, `modules/agents/rekey-*.ts` and `infra/repositories/agent-rekeys.ts` since #1736, while the money-path list carried none of them until #1892 — the regulatory perimeter was complete and the classification perimeter was not, so the wider list is a useful place to look when adding to the narrower one.
 
 Where the invariant being pinned is **the database's behaviour** —
 idempotency, locking, constraints, transactional integrity — the

@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
-last-verified: "2026-08-15" # #1444: `expectMatchesSpec` validates real route responses against the spec schema — assert it when you touch a documented route. #1443: route-coverage.test.ts widens the OpenAPI gate beyond the seven hand-listed files to every registered module, with a shrink-only per-module deferral list; keeping spec.test.ts green is no longer sufficient
+last-verified: "2026-08-15" # #1882: front-matter only — the `last-verified` chain had DROPPED `#1228`. Restored verbatim from `a3c5bcf5^`; it was dropped at `a3c5bcf5` (PR #1449, #1443, 2026-08-15), which REPLACED the note line rather than chaining under it, on the day the chaining convention took hold. The very next edit to this line (#1444) chained correctly. Nothing in the body was re-verified in this pass. #1444: `expectMatchesSpec` validates real route responses against the spec schema — assert it when you touch a documented route. #1443: route-coverage.test.ts widens the OpenAPI gate beyond the seven hand-listed files to every registered module, with a shrink-only per-module deferral list; keeping spec.test.ts green is no longer sufficient Prior: #1228: db-schema-smoke is no longer the only real-DB check — scoped against testing-strategy.md
 ---
 
 # Backend / API playbook

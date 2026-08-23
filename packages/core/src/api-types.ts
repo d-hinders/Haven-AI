@@ -3729,6 +3729,78 @@ export type components = {
             /** @description At most 5. Payment-enrichment fields (paymentId, paymentFlowStatus, amountSek, …) are never populated in this projection. */
             transactions: components["schemas"]["Transaction"][];
         };
+        /** @description Reported whether or not it is recoverable — nothing about a stranded residual fails quietly. */
+        AgentRekeyResidual: {
+            atomic: string;
+            token_address?: string | null;
+            disposition?: string | null;
+            recoverable_after_rekey: boolean;
+            note?: string;
+        };
+        AgentRekeyPreflight: {
+            /** Format: uuid */
+            rekey_id: string;
+            /** @enum {string} */
+            stage: "preflight";
+            /** @example 0x1111111111111111111111111111111111111111 */
+            old_delegate_address: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            new_delegate_address: string;
+            residual: components["schemas"]["AgentRekeyResidual"];
+            delegations_to_revoke: string[];
+            next_step: string;
+            ordering_note?: string;
+        };
+        AgentRekeyIssuedDelegation: {
+            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+            delegation_hash: string;
+            /** @enum {string} */
+            carry_role: "carry" | "steady" | "reanchor";
+            /** @example 0x1111111111111111111111111111111111111111 */
+            token_address: string;
+            recipient_address?: string | null;
+            budget_atomic: string;
+            period_seconds?: number;
+            start_date?: number;
+            expires_at?: number;
+            signing_payload: {
+                [key: string]: unknown;
+            };
+        };
+        AgentRekeyIssueResponse: {
+            /** @enum {string} */
+            stage: "issued";
+            /** @example 0x1111111111111111111111111111111111111111 */
+            delegate_account_address: string;
+            delegations: components["schemas"]["AgentRekeyIssuedDelegation"][];
+            skipped?: {
+                /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+                delegation_hash?: string;
+                reason?: string;
+            }[];
+            carry_note?: string;
+            next_step?: string;
+        };
+        AgentRekeyCompleteResponse: {
+            completed: boolean;
+            /** @enum {string} */
+            stage: "completed";
+            /** Format: uuid */
+            agent_id: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            new_delegate_address: string;
+            /** @description Shown ONCE. Never stored in plaintext and never logged. */
+            api_key: string;
+            api_key_prefix: string;
+            old_api_key_revoked: boolean;
+            invalidated_intents?: number;
+            superseded_delegations?: number;
+            residual_on_old_delegate?: {
+                atomic?: string;
+                recoverable?: boolean;
+                note?: string;
+            };
+        };
         TransactionsResponse: {
             transactions: components["schemas"]["Transaction"][];
             total: number;
@@ -4993,27 +5065,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        rekey_id: string;
-                        /** @enum {string} */
-                        stage: "preflight";
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        old_delegate_address: string;
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        new_delegate_address: string;
-                        /** @description Reported whether or not it is recoverable — nothing about a stranded residual fails quietly. */
-                        residual: {
-                            atomic: string;
-                            token_address?: string | null;
-                            disposition?: string | null;
-                            recoverable_after_rekey: boolean;
-                            note?: string;
-                        };
-                        delegations_to_revoke: string[];
-                        next_step: string;
-                        ordering_note?: string;
-                    };
+                    "application/json": components["schemas"]["AgentRekeyPreflight"];
                 };
             };
             /** @description Error response */
@@ -5383,35 +5435,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        stage: "issued";
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        delegate_account_address: string;
-                        delegations: {
-                            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
-                            delegation_hash?: string;
-                            /** @enum {string} */
-                            carry_role?: "carry" | "steady" | "reanchor";
-                            /** @example 0x1111111111111111111111111111111111111111 */
-                            token_address?: string;
-                            recipient_address?: string | null;
-                            budget_atomic?: string;
-                            period_seconds?: number;
-                            start_date?: number;
-                            expires_at?: number;
-                            signing_payload?: {
-                                [key: string]: unknown;
-                            };
-                        }[];
-                        skipped?: {
-                            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
-                            delegation_hash?: string;
-                            reason?: string;
-                        }[];
-                        carry_note?: string;
-                        next_step?: string;
-                    };
+                    "application/json": components["schemas"]["AgentRekeyIssueResponse"];
                 };
             };
             /** @description Error response */
@@ -5536,25 +5560,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        completed: boolean;
-                        /** @enum {string} */
-                        stage: "completed";
-                        /** Format: uuid */
-                        agent_id: string;
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        new_delegate_address: string;
-                        /** @description Shown ONCE. Never stored in plaintext and never logged. */
-                        api_key: string;
-                        api_key_prefix: string;
-                        old_api_key_revoked: boolean;
-                        invalidated_intents?: number;
-                        residual_on_old_delegate?: {
-                            atomic?: string;
-                            recoverable?: boolean;
-                            note?: string;
-                        };
-                    };
+                    "application/json": components["schemas"]["AgentRekeyCompleteResponse"];
                 };
             };
             /** @description Error response */

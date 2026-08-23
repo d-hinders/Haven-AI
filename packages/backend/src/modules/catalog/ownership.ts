@@ -109,6 +109,7 @@ export type OwnershipMethod = 'well-known' | 'dns-txt'
 /** Stable, persistable failure reasons. */
 export type OwnershipFailureReason =
   | 'not_configured'
+  | 'invalid_hostname'
   | 'token_expired'
   | 'proof_not_found'
   | 'proof_mismatch'
@@ -120,7 +121,26 @@ export type OwnershipResult =
       ok: false
       reason: OwnershipFailureReason
       detail: string
-      /** Per-method detail, for the status endpoint's "why not yet" line. */
+      /**
+       * Per-method detail. **SERVER-SIDE ONLY — redact before returning this
+       * to an untrusted caller.**
+       *
+       * `detail` propagates the SSRF guard's granular verdicts
+       * (`ipv4-private`, `ipv6-unique-local`, `dns_failure`, …). Handed
+       * verbatim to an anonymous submitter, that is a blind internal-DNS
+       * oracle: they aim a redirect at a hostname they do not own and learn
+       * whether Haven's resolver sees it and roughly what address class it
+       * resolves into. No content leaks and no connection is made, so the
+       * severity is limited — but it is free to close and expensive to
+       * retrofit.
+       *
+       * FOR #1711's `GET /catalog/submit/:id` IMPLEMENTER: collapse every
+       * `unreachable` / `proof_not_found` attempt to a single generic
+       * "could not read the proof" for the public response, and keep these
+       * values for logs and ops only. `proof_mismatch` is safe to surface —
+       * it tells a genuine merchant their file content is wrong, which is
+       * the one thing they need to know.
+       */
       attempts: { method: OwnershipMethod; reason: OwnershipFailureReason; detail: string }[]
     }
 
@@ -137,6 +157,47 @@ function normalizeHostname(hostname: string): string {
   return hostname.trim().toLowerCase().replace(/\.$/, '')
 }
 
+/** One DNS label: 1–63 chars, alphanumeric, inner hyphens only. */
+const HOSTNAME_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
+
+/**
+ * Strict hostname grammar, applied as a BACKSTOP rather than as a convenience.
+ *
+ * The route that creates a submission (#1711) validates its input, but this
+ * module must not depend on a sibling slice's validation being the only guard
+ * — a security backstop with that coupling is not a backstop. The concrete
+ * failure it closes: WHATWG `URL` SILENTLY STRIPS embedded tab/CR/LF rather
+ * than erroring, so `"evil.com\n.attacker.net"` builds a URL whose host is
+ * `evil.com.attacker.net`. No forgery follows (the fetch still has to reach
+ * whatever that collapses to, which the attacker must genuinely control), but
+ * the string fed to the MAC and persisted as "the verified domain" would not
+ * be the string that was network-verified. That is a data-integrity and
+ * log-injection defect the moment #1711/#1715/#1716 show it to a human — and
+ * it would quietly falsify this module's own claim that there is no way to
+ * implement the comparison sloppily. The comparison was always clean; its
+ * INPUT was unvalidated.
+ *
+ * Rejecting every character outside `[a-z0-9.-]` also rules out C0/C1 control
+ * characters, whitespace, and unicode by construction, so an IDN must arrive
+ * already punycoded (`xn--…`, which satisfies the label grammar).
+ */
+export function isValidHostname(hostname: string): boolean {
+  const host = normalizeHostname(hostname)
+  if (host.length === 0 || host.length > 253) return false
+  const labels = host.split('.')
+  // A merchant domain is never a single label; that is a search-domain lookup.
+  if (labels.length < 2) return false
+  return labels.every((label) => HOSTNAME_LABEL.test(label))
+}
+
+function assertValidHostname(hostname: string): void {
+  if (!isValidHostname(hostname)) {
+    // Deliberately does NOT echo the rejected value — it is attacker-supplied
+    // and this message may reach a log.
+    throw new Error('ownership claim carries a hostname that is not a valid DNS name')
+  }
+}
+
 /**
  * The MAC over the claim. `\n`-delimited with a fixed context string so no two
  * different claims can produce the same input by shifting a delimiter into a
@@ -144,6 +205,7 @@ function normalizeHostname(hostname: string): string {
  * line domain-separates this MAC from any other use of the same secret.
  */
 export function deriveOwnershipProof(claim: OwnershipClaim, secret: string): string {
+  assertValidHostname(claim.hostname)
   const message = [
     'haven-domain-ownership',
     OWNERSHIP_PROOF_VERSION,
@@ -288,6 +350,17 @@ export async function verifyDomainOwnership(
       ok: false,
       reason: 'not_configured',
       detail: 'CATALOG_OWNERSHIP_SECRET is not set; domain ownership cannot be proven',
+      attempts,
+    }
+  }
+
+  // Backstop, not convenience — see `isValidHostname`. Checked before expiry
+  // so a malformed claim also never reaches an outbound request.
+  if (!isValidHostname(claim.hostname)) {
+    return {
+      ok: false,
+      reason: 'invalid_hostname',
+      detail: 'submission hostname is not a valid DNS name',
       attempts,
     }
   }

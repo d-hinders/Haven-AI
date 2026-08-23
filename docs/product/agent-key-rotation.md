@@ -177,6 +177,23 @@ Its `identity_match` check fails loudly when the two disagree — the state wher
 agent would quote as itself and sign as something else. Run it **after** restarting,
 because it too can only see what is on disk and what a fresh process reports.
 
+**If you started a re-key and never finished it, `--doctor` now says so (#1911).** It
+reports the parked keypair per agent — that one exists, when it started, whether it has
+expired, its **public** address and its path, never its private half — so an abandoned
+re-key is not silent, and a lost terminal is not a cliff: the address you were meant to
+paste is re-printable without discarding the parked key. An expired one is its own
+failure rather than a footnote, and neither `--doctor` nor `--repair` deletes it —
+dropping key material is your call.
+
+One thing it **cannot** tell you, said here because the difference is expensive. If
+Haven already reports the address this machine generated, the re-key completed and only
+the local half is outstanding — run `--rekey-finish`. Otherwise the machine cannot see
+whether the on-chain revoke on the agent page already ran. If it did not, closing the
+re-key costs nothing. If it did, the agent's old delegations are revoked and no new ones
+were issued, so it has **no spend authority until you re-grant it**
+([#1868](https://github.com/d-hinders/Haven-AI/issues/1868)) — and nothing on this
+machine records that. Check the agent page before assuming the harmless reading.
+
 ## Limits
 
 - **Delegation-rail accounts only.** Agents on the legacy Safe AllowanceModule rail

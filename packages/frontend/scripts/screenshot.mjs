@@ -664,6 +664,65 @@ export const SCENARIOS = {
       await shoot(card, 'card')
     },
   },
+  'passport-reanchoring': {
+    description:
+      'Agent Passport card during the re-key window (#1699) — the anchor names the retired key while standing stays Active',
+    // No URL reaches this: `re_anchoring` is a transient backend state between
+    // the retire and the re-issue, so nothing a route-based capture can wait
+    // for produces it. Without a fixture the state has ZERO rendered evidence,
+    // which is precisely the gap #1894's design pass found on the neighbouring
+    // re-key flow and #1890 had to close afterwards. Cheaper to seed it here.
+    //
+    // What a reviewer is judging: whether the card keeps the two layers apart
+    // when they DISAGREE. Standing is `active` and the anchor is behind, so a
+    // card that collapsed them would have to pick one and would be wrong
+    // either way — "Issued" claims a retired key's credential is current,
+    // "Revoking…" tells the owner a live agent lost its authority.
+    api(apiPath) {
+      if (apiPath === `/agents/${FIXTURE_AGENTS[0].id}/passport`) {
+        return {
+          passport: {
+            status: 'anchored', assurance_level: 0,
+            attestation_uid: '0x' + '22'.repeat(32),
+            tx_hash: `0x${'c3'.repeat(32)}`, chain_id: FIXTURE_SAFE.chain_id,
+            attempts: 1, last_error: null,
+            requested_at: '2026-06-02T10:05:00.000Z', anchored_at: '2026-06-02T10:05:12.000Z',
+          },
+          standing: {
+            agentId: FIXTURE_AGENTS[0].id, standing: 'active', anchor: 're_anchoring',
+            attestationUid: '0x' + '22'.repeat(32),
+            // False on purpose, and it is an assertion rather than a default:
+            // `chainLagging` is the REVOKED-agent warning, and a card that
+            // showed "treat the agent as revoked now" here would invert the
+            // meaning of the whole state.
+            chainLagging: false, revocationConfirmedAt: null,
+          },
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents/${FIXTURE_AGENTS[0].id}`, {
+        waitUntil: 'networkidle',
+        timeout: 30_000,
+      })
+      await dismissMobileSidebar(page, vp)
+
+      const heading = page.getByRole('heading', { name: 'Agent Passport' })
+      await heading.waitFor({ timeout: 15_000 })
+      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+
+      // Wait for the BADGE and the NOTE, not just the heading. The heading
+      // renders in the loading skeleton and the load-error branch too, so
+      // waiting on it alone would happily accept either as the evidence —
+      // the same trap the Backup & recovery scenario documents above.
+      await card.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
+      await card.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
+
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'card')
+    },
+  },
   'replace-signing-key': {
     description:
       'Replace signing key modal at each step — reason (lost + compromised), address, the point-of-no-return gate both unacknowledged and armed, the no-signer refusal, and the legacy-rail refusal',

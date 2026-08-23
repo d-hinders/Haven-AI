@@ -21,6 +21,7 @@ import {
   TALL_FACTOR,
   assertCaptureNotBlank,
   inspectCapture,
+  resolveScrollShell,
   scanPng,
 } from '../../scripts/full-page-capture.mjs'
 
@@ -287,6 +288,16 @@ describe('assertCaptureNotBlank', () => {
     ).rejects.toThrow(/unclipScrollShell/)
   })
 
+  it('tags its failure so a caller never has to guess the cause', async () => {
+    // Downstream, 'blank-below-fold' must be something this guard SAID, not a
+    // default the reporter applied to every failure it did not recognise —
+    // that default is what reported a 30s screenshot timeout as a blank PNG.
+    const error: unknown = await assertCaptureNotBlank(blankBelowFoldPng(), {
+      viewportDevicePx: 20,
+    }).catch((e: unknown) => e)
+    expect((error as { captureCause?: string }).captureCause).toBe('blank-below-fold')
+  })
+
   it('resolves with the inspection for a healthy capture', async () => {
     const png = encodePng(8, Array.from({ length: 400 }, () => paintedRow(8)))
     await expect(assertCaptureNotBlank(png, { viewportDevicePx: 20 })).resolves.toMatchObject({
@@ -300,5 +311,236 @@ describe('assertCaptureNotBlank', () => {
     await expect(
       assertCaptureNotBlank(blankBelowFoldPng(), {} as { viewportDevicePx: number }),
     ).rejects.toThrow(/viewportDevicePx/)
+  })
+})
+
+/**
+ * ── Which of the three failures is this? (#1936 / #1939 / #1943) ─────────────
+ *
+ * `resolveScrollShell` replaced one question ("is `#main-content` there?") with
+ * a verdict that separates three situations that used to share one error
+ * message. These tests exist to prove the separation is real — a classifier
+ * that answered "missing-scroll-root" to everything would still make the
+ * marketing capture fail and would still blame the shell for a cold compile,
+ * which is exactly the defect being fixed.
+ *
+ * The page is faked rather than driven: every input this function reads is the
+ * return value of a `page.evaluate`, so a fake that returns those values
+ * exercises the real branching. The REAL DOM behaviour (that marketing routes
+ * have no `#main-content`, that `/design-system` does) is proven by
+ * `e2e/capture-integrity.spec.ts` and by the two-route run recorded on the PR.
+ */
+type FakeProbe = {
+  found: boolean
+  docScrollHeight: number
+  viewportHeight: number
+  renderedChars: number
+}
+
+const MARKETING: FakeProbe = {
+  found: false,
+  docScrollHeight: 9000,
+  viewportHeight: 800,
+  renderedChars: 5000,
+}
+const SHELL_MOUNTED: FakeProbe = {
+  found: true,
+  docScrollHeight: 18_000,
+  viewportHeight: 800,
+  renderedChars: 4000,
+}
+const PROTECTED_ROUTE_NULL: FakeProbe = {
+  found: false,
+  docScrollHeight: 800,
+  viewportHeight: 800,
+  renderedChars: 0,
+}
+
+/**
+ * A `page` with exactly the three evaluate shapes the module uses: the probe
+ * (called with a selector), the clipping scan (called with none) and the
+ * un-clip walk (the selector call that follows a `found: true` probe).
+ */
+function fakePage(
+  probes: FakeProbe[],
+  clipping: { offenders: { selector: string; held: number }[] } = { offenders: [] },
+  unclipHeight = 33_160,
+) {
+  let index = 0
+  let unclipped = false
+  const waits: number[] = []
+  return {
+    waits,
+    async waitForTimeout(ms: number) {
+      waits.push(ms)
+    },
+    async evaluate(_fn: unknown, arg?: unknown) {
+      // The clipping scan is the one evaluate called with a NUMBER (the
+      // minimum hidden height that counts as a scroll shell); the probe and
+      // the un-clip walk are called with the selector. The fake applies that
+      // floor itself, exactly as the real in-page scan does — otherwise the
+      // threshold would be untested and a decorative 32px overlay would count.
+      if (typeof arg === 'number') {
+        const kept = clipping.offenders.filter((o) => o.held >= arg).slice(0, 3)
+        return { count: kept.length, offenders: kept }
+      }
+      const probe = probes[Math.min(index, probes.length - 1)]
+      if (probe.found && unclipped) return unclipHeight
+      if (probe.found) unclipped = true
+      index += 1
+      return probe
+    },
+  }
+}
+
+describe('resolveScrollShell', () => {
+  it('waits out the ProtectedRoute race and reports it as a wait, not a failure', async () => {
+    // The #1936/#1943 race: the shell is genuinely absent for the first probes
+    // and arrives afterwards. Before this, that random window failed the run
+    // with "update SCROLL_SHELL_ROOT" against a selector that was correct.
+    const page = fakePage([PROTECTED_ROUTE_NULL, PROTECTED_ROUTE_NULL, SHELL_MOUNTED])
+    const result = await resolveScrollShell(page, { timeoutMs: 5_000, pollMs: 1 })
+
+    expect(result.mode, 'a late shell must still be un-clipped, not reported missing').toBe(
+      'unclipped',
+    )
+    expect(result.raced, 'a capture that had to wait must SAY it waited').toBe(true)
+    expect(result.height).toBe(33_160)
+  })
+
+  it('captures a marketing route with no shell instead of throwing', async () => {
+    // #1939: `/` and `/investor-briefing` have no `#main-content` at all, and
+    // need none — they scroll natively. Every one of these used to throw, and
+    // the caller deleted the PNG.
+    const page = fakePage([MARKETING])
+    const result = await resolveScrollShell(page, { timeoutMs: 5_000, pollMs: 1 })
+
+    expect(result.mode, 'a natively scrolling page has no shell to un-clip').toBe('no-scroll-shell')
+    expect(result.waitedMs, 'a settled marketing page must not burn the wait budget').toBeLessThan(
+      1_000,
+    )
+  })
+
+  it('still throws missing-scroll-root when content is clipped and the root is gone', async () => {
+    // The load-bearing half. A renamed `#main-content` on a page that IS still
+    // clipping must fail exactly as loudly as before — this is the #1738 defect
+    // and the reason "just stop throwing" was rejected in #1939.
+    const page = fakePage([{ ...MARKETING, docScrollHeight: 810 }], {
+      offenders: [{ selector: 'main#content-main.flex-1', held: 15_000 }],
+    })
+
+    await expect(resolveScrollShell(page, { timeoutMs: 20, pollMs: 1 })).rejects.toThrow(
+      /scroll root "#main-content" not found.*main#content-main.*15000px held.*Update SCROLL_SHELL_ROOT/s,
+    )
+  })
+
+  it('names a page that never rendered as not-rendered, not as a selector problem', async () => {
+    // The third cause, previously indistinguishable from the other two: a cold
+    // `next dev` first compile (measured at 315s on this change's own machine),
+    // a failed hydration, an error boundary. Telling a reader to update
+    // SCROLL_SHELL_ROOT here sends them to a file that is not the problem.
+    const page = fakePage([PROTECTED_ROUTE_NULL])
+    const error = await resolveScrollShell(page, { timeoutMs: 20, pollMs: 1 }).catch((e) => e)
+
+    expect(error.shellCause, 'an unrendered page is not a selector defect').toBe('not-rendered')
+    expect(error.message).toMatch(/rendered almost nothing/)
+    expect(error.message).toMatch(/next dev/)
+    expect(
+      error.message,
+      'this message must NOT send the reader to the selector',
+    ).not.toMatch(/Update SCROLL_SHELL_ROOT/)
+  })
+
+  it('does not grant no-scroll-shell to a page that is merely short', async () => {
+    // Guard against the cheap version of this fix: "root missing → capture
+    // anyway". A short page that clips is still the #1738 failure.
+    const page = fakePage([{ ...PROTECTED_ROUTE_NULL, renderedChars: 4_000 }], {
+      offenders: [{ selector: 'div.overflow-hidden', held: 900 }],
+    })
+    await expect(resolveScrollShell(page, { timeoutMs: 20, pollMs: 1 })).rejects.toThrow(
+      /missing|not found/,
+    )
+  })
+
+  it('does not mistake the ProtectedRoute LOADING state for a shell-less page', async () => {
+    // The early exit is where this race could come back wearing a different
+    // label: a still-loading authenticated page that satisfied it would be
+    // captured at once and filed as `captured_without_unclip` — a deliberate
+    // result, not a failure. Pinned against the REAL markup
+    // (`src/components/ProtectedRoute.tsx`: a `min-h-screen` centred div
+    // reading "Loading...") so a future change to that copy, or to the
+    // thresholds, has to redden this rather than pass silently.
+    const loading: FakeProbe = {
+      found: false,
+      renderedChars: 10,
+      docScrollHeight: 800,
+      viewportHeight: 800,
+    }
+    const page = fakePage([loading, loading, SHELL_MOUNTED])
+    const result = await resolveScrollShell(page, { timeoutMs: 5_000, pollMs: 1 })
+
+    expect(result.mode, 'a loading shell must be waited for, never captured as shell-less').toBe(
+      'unclipped',
+    )
+    expect(result.raced, 'and the wait must be recorded').toBe(true)
+  })
+
+  it('does not end the wait for a page that is only marginally taller than the fold', async () => {
+    // The height half of the same floor, and the half the "Loading..." fixture
+    // above cannot reach — it is stopped by the character floor first, so
+    // without this test the margin is shadowed and a mutation of it stays
+    // green. A loading state that grew a header and a little overflow (400
+    // characters, 900px against an 800px viewport) is the shape that would
+    // slip through a bare `> viewportHeight`.
+    const nearlyFold = {
+      found: false,
+      renderedChars: 400,
+      docScrollHeight: 900,
+      viewportHeight: 800,
+    }
+    const page = fakePage([nearlyFold, nearlyFold, SHELL_MOUNTED])
+    const result = await resolveScrollShell(page, { timeoutMs: 5_000, pollMs: 1 })
+
+    expect(
+      result.mode,
+      'one-and-a-bit viewports is not "unmistakably a scrolling page" — keep waiting for the shell',
+    ).toBe('unclipped')
+  })
+
+  it('ignores a decorative overlay that holds a few pixels', async () => {
+    // Measured, not imagined: the first real run of this fix against `/` and
+    // `/investor-briefing` failed all four captures on
+    // `div.pointer-events-none.absolute.inset-0` holding **32px** — a
+    // background layer, not a scroll shell. "Any overflow counts" would have
+    // re-created #1939 with a better error message.
+    //
+    // The page here is deliberately one that does NOT scroll natively, so the
+    // document-scrolls short-circuit cannot answer this for us — otherwise the
+    // threshold would be shadowed and this test would prove nothing.
+    const page = fakePage([{ ...MARKETING, docScrollHeight: 800, viewportHeight: 800 }], {
+      offenders: [{ selector: 'div.pointer-events-none.absolute.inset-0', held: 32 }],
+    })
+    const result = await resolveScrollShell(page, { timeoutMs: 20, pollMs: 1 })
+
+    expect(
+      result.mode,
+      'a 32px decorative overlay is not a scroll shell — a blank-below-the-fold capture needs a screen of held content',
+    ).toBe('no-scroll-shell')
+  })
+
+  it('names the renamed root when content lives in a scroller the document will not paint', async () => {
+    // The REAL app-shell shape, and the one the first version of this
+    // discriminator missed: `<main id="main-content">` is `overflow-y: auto`,
+    // not hidden, so "count only hidden overflow" classified a genuinely
+    // renamed root as "no scroll shell" and let the second guard catch it by
+    // accident. Proven against the live app by renaming SCROLL_SHELL_ROOT.
+    const page = fakePage([{ ...MARKETING, docScrollHeight: 800, viewportHeight: 800 }], {
+      offenders: [{ selector: 'main#content-main.flex-1', held: 35_000 }],
+    })
+    const error = await resolveScrollShell(page, { timeoutMs: 20, pollMs: 1 }).catch((e) => e)
+
+    expect(error.shellCause).toBe('missing-scroll-root')
+    expect(error.message).toMatch(/hold a screen or more of content/)
+    expect(error.message).toMatch(/main#content-main/)
   })
 })

@@ -44,6 +44,23 @@
  * fix without the guard would just be the same trap re-armed for whoever next
  * changes the shell's overflow.
  *
+ * ── Saying WHICH failure this is (#1936 / #1939 / #1943) ────────────────────
+ * The first version of this module asked one question — "is `#main-content`
+ * there?" — and gave one answer for every way it could be missing. Three
+ * different situations arrived at the same sentence ("update SCROLL_SHELL_ROOT"),
+ * and two of them were not about the selector at all:
+ *
+ *   1. a MARKETING route (`/`, `/investor-briefing`) has no app shell and needs
+ *      no un-clipping — every such capture failed and was deleted (#1939);
+ *   2. an AUTHENTICATED route whose shell has not mounted YET, because
+ *      `ProtectedRoute` renders `null` while auth resolves (#1936, #1943);
+ *   3. a page that never finished rendering — a cold `next dev` compile under
+ *      load, a failed hydration, an error boundary.
+ *
+ * `resolveScrollShell` waits out (2), captures (1) directly, and names (3) as a
+ * build/render problem — while still failing loudly on the case that matters,
+ * a genuinely renamed root with content still clipped behind it.
+ *
  * Dependency-free on purpose (`node:zlib` only), like `evidence-viewports.mjs`:
  * both the screenshot script and the Playwright visual spec import it.
  */
@@ -75,14 +92,241 @@ export const TALL_FACTOR = 1.25
 export const PAINTED_SLACK = 1.05
 
 /**
+ * How long to wait for the scroll root before deciding it is not coming
+ * (#1936/#1943), and how often to re-probe while waiting.
+ *
+ * The authenticated shell renders inside `ProtectedRoute`, which returns `null`
+ * while it resolves auth — so there is a real window after navigation in which
+ * the document genuinely has no `#main-content`. Querying once lands in that
+ * window at random, which is why the same command failed desktop on one run and
+ * mobile on the next, on identical code.
+ */
+export const SCROLL_SHELL_WAIT_MS = 10_000
+export const SCROLL_SHELL_POLL_MS = 250
+
+/**
+ * A page carrying less rendered text than this is treated as "not rendered
+ * yet" rather than "has no shell". A cold `next dev` compile (a first compile of
+ * `/` measured at 315s while building this change; 448s recorded on another
+ * session the same week), a route that never hydrated, and an error boundary
+ * all land here — and none of them are a selector problem.
+ */
+export const MIN_RENDERED_CHARS = 40
+
+/**
+ * How much TALLER than the viewport a page must be before "it has no shell" is
+ * allowed to end the wait early.
+ *
+ * This exists because the early exit is the one place where the race can come
+ * back wearing a different label. `resolveScrollShell` stops waiting for
+ * `#main-content` as soon as a page looks like a settled, natively scrolling
+ * one — and if a still-loading authenticated page ever satisfied that, it would
+ * be captured immediately and filed under `captured_without_unclip`, i.e. as a
+ * deliberate result rather than a failure. That is harder to notice than the
+ * throw it replaced.
+ *
+ * `ProtectedRoute`'s loading state (`src/components/ProtectedRoute.tsx`) is a
+ * `min-h-screen` centred div reading "Loading..." — ~10 characters, exactly one
+ * viewport tall. Both floors are therefore load-bearing against real markup,
+ * and both are pinned by a test: the character floor and this height margin
+ * would each have to be crossed by a future loading state before the early exit
+ * could fire on one.
+ *
+ * Defence in depth, not a single point: even if that happened, the #1738
+ * blank-below-fold guard still reads the PNG back and refuses it — as it did
+ * during this change's own live mutation run.
+ */
+export const SETTLED_TALL_FACTOR = 1.25
+
+/** What `resolveScrollShell` concluded about the page it looked at. */
+export const SHELL_MODE = {
+  /** The shell was found and un-clipped. The normal authenticated path. */
+  UNCLIPPED: 'unclipped',
+  /**
+   * The page has no scroll shell and does not need one — it scrolls natively
+   * and nothing is clipping content away. Marketing routes (`/`,
+   * `/investor-briefing`, …) live here: they are captured directly.
+   */
+  NO_SCROLL_SHELL: 'no-scroll-shell',
+}
+
+/** Why a scroll-shell resolution failed. `cause` is machine-readable. */
+export class ScrollShellError extends Error {
+  constructor(message, { cause, probe, waitedMs } = {}) {
+    super(message)
+    this.name = 'ScrollShellError'
+    /** 'not-rendered' | 'missing-scroll-root' */
+    this.shellCause = cause
+    this.probe = probe
+    this.waitedMs = waitedMs
+  }
+}
+
+/** One cheap DOM probe: is the root there, and what kind of page is this? */
+async function probeShell(page, selector) {
+  return page.evaluate((sel) => {
+    const doc = document.documentElement
+    const text = (document.body?.innerText ?? '').trim()
+
+    return {
+      found: Boolean(document.querySelector(sel)),
+      docScrollHeight: doc.scrollHeight,
+      viewportHeight: window.innerHeight,
+      renderedChars: text.length,
+    }
+  }, selector)
+}
+
+/**
+ * Is anything on this page hiding a SCREEN'S WORTH of content behind a clip?
+ *
+ * This is the discriminator between the two "no `#main-content`" pages. A
+ * marketing route has no clipping scroller, so a plain `fullPage` shot is
+ * complete. A shell whose root was RENAMED still clips — content is being
+ * hidden and nobody un-clipped it — and that must fail loudly, exactly as it
+ * did before. Run only when the root is missing; it walks every element.
+ *
+ * `minHeld` is one viewport, and it is load-bearing rather than a fudge
+ * factor. The first version of this probe counted ANY overflow, and the real
+ * marketing pages promptly failed on `div.pointer-events-none.absolute.inset-0`
+ * holding **32px** — a decorative background layer, not a scroll shell. The
+ * failure being detected is "the capture is blank below the fold", which by
+ * definition needs more than a viewport of content held back; the renamed-root
+ * case holds ~17,000px, three orders of magnitude clear of a rounding overlay.
+ *
+ * KNOWN LIMIT, stated rather than papered over: a marketing page that grew its
+ * own scroller taller than a viewport (a long `overflow-y-auto` panel) would be
+ * reported as a renamed scroll root. Neither `/` nor `/investor-briefing` has
+ * one today — measured, both capture clean — and the failure is loud and names
+ * the offending box, which is the opposite of the silent deletion this change
+ * exists to remove.
+ */
+async function probeClipping(page, minHeld) {
+  return page.evaluate((floor) => {
+    const offenders = []
+    for (const el of document.querySelectorAll('*')) {
+      const style = getComputedStyle(el)
+      // `hidden`/`clip` hide content outright; `auto`/`scroll` hold it inside a
+      // scroller the DOCUMENT does not know about — and `fullPage` paints the
+      // document. The app shell is the second kind (`<main>` is `overflow-y:
+      // auto`), which is exactly the box a renamed root leaves un-un-clipped.
+      const holdsY = ['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowY)
+      if (!holdsY) continue
+      if (el.scrollHeight - el.clientHeight < floor) continue
+      offenders.push({
+        selector: `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${
+          el.className && typeof el.className === 'string'
+            ? `.${el.className.trim().split(/\s+/).slice(0, 3).join('.')}`
+            : ''
+        }`,
+        held: el.scrollHeight - el.clientHeight,
+      })
+      if (offenders.length >= 3) break
+    }
+    return { count: offenders.length, offenders }
+  }, minHeld)
+}
+
+/**
+ * Decide what kind of page this is, waiting out the `ProtectedRoute` race.
+ *
+ * Returns `{ mode, height, waitedMs, raced, probe }` for a page that can be
+ * captured, and THROWS a `ScrollShellError` for one that cannot. Three causes
+ * that used to produce one indistinguishable symptom are now separated:
+ *
+ *   `mode: 'unclipped'`         the shell was there (possibly only after a
+ *                               wait — `raced: true` says the race was real)
+ *   `mode: 'no-scroll-shell'`   no shell, and none needed: the page scrolls
+ *                               natively and nothing clips content (marketing)
+ *   throws 'missing-scroll-root'  content IS clipped and the root is gone —
+ *                               a genuinely renamed selector, the #1738 defect
+ *   throws 'not-rendered'       the page painted essentially nothing, so this
+ *                               is a compile/hydration problem, not a selector
+ */
+export async function resolveScrollShell(
+  page,
+  { selector = SCROLL_SHELL_ROOT, timeoutMs = SCROLL_SHELL_WAIT_MS, pollMs = SCROLL_SHELL_POLL_MS } = {},
+) {
+  const start = Date.now()
+  let probe = await probeShell(page, selector)
+  // Stop waiting once the shell is here, OR once the page is unmistakably a
+  // settled, natively scrolling one. "Unmistakably" is the whole point — see
+  // SETTLED_TALL_FACTOR for why a bare `> viewportHeight` sits exactly on the
+  // real loading state's boundary.
+  const settled = (p) =>
+    p.found ||
+    (p.renderedChars >= MIN_RENDERED_CHARS &&
+      p.docScrollHeight > p.viewportHeight * SETTLED_TALL_FACTOR)
+
+  // Counted, not timed. `raced` must be true because we actually had to poll
+  // for the shell, not because the wall clock happened to move — a timing test
+  // of a fast fake would report "no race" for a page that plainly raced.
+  let polls = 0
+  while (!settled(probe) && Date.now() - start < timeoutMs) {
+    await page.waitForTimeout(pollMs)
+    probe = await probeShell(page, selector)
+    polls += 1
+  }
+  const waitedMs = Date.now() - start
+
+  if (probe.found) {
+    const height = await unclipFrom(page, selector)
+    return { mode: SHELL_MODE.UNCLIPPED, height, waitedMs, polls, raced: polls > 0, probe }
+  }
+
+  if (probe.renderedChars < MIN_RENDERED_CHARS) {
+    throw new ScrollShellError(
+      `full-page capture: the page rendered almost nothing (${probe.renderedChars} characters of text) ` +
+        `and "${selector}" never appeared after waiting ${waitedMs}ms. This is NOT a selector problem: ` +
+        `a cold "next dev" first compile under load, a route that never hydrated, or an error boundary ` +
+        `all end here. Re-run against a warm server before touching SCROLL_SHELL_ROOT.`,
+      { cause: 'not-rendered', probe, waitedMs },
+    )
+  }
+
+  // MEASURED, not assumed (and two plausible shortcuts died here):
+  //
+  //   "the document's scrollHeight is tall" — a clipped `/design-system`
+  //   reports 17,876px, because layout overflows THROUGH the shell's clip;
+  //   "the document can be scrolled" — it can: `window.scrollY` moves on that
+  //   same clipped page, while everything past the first viewport stays
+  //   unpainted. Both said "this page is fine" about the exact page that is
+  //   not.
+  //
+  // What actually separates the two is whether a BOX is holding a screen's
+  // worth of content that the document will therefore never paint.
+  const clipping = await probeClipping(page, Math.max(probe.viewportHeight, 1))
+  if (clipping.count > 0) {
+    const list = clipping.offenders.map((o) => `${o.selector} (${o.held}px held)`).join(', ')
+    throw new ScrollShellError(
+      `full-page capture: scroll root "${selector}" not found, but ${clipping.count} element(s) hold ` +
+        `a screen or more of content inside them — ${list}. This page HAS a scroll ` +
+        `shell and it no longer matches the selector, so the capture would be blank below the fold. ` +
+        `Update SCROLL_SHELL_ROOT in scripts/full-page-capture.mjs.`,
+      { cause: 'missing-scroll-root', probe, waitedMs },
+    )
+  }
+
+  return {
+    mode: SHELL_MODE.NO_SCROLL_SHELL,
+    height: probe.docScrollHeight,
+    waitedMs,
+    polls,
+    raced: false,
+    probe,
+  }
+}
+
+/**
  * Make the document itself scrollable so `fullPage: true` paints everything.
  *
  * Walks from the scroll container up to `<html>` clearing the height cap and
  * the clip on every ancestor — the shell nests two `overflow-hidden` divs
  * inside an `h-screen` flex row, so clearing only the innermost is not enough.
  *
- * Returns the resulting document height. THROWS when the scroll root is
- * missing: a renamed `#main-content` must fail the run, because the fallback
+ * Delegates the decision to `resolveScrollShell`, so it waits out the
+ * `ProtectedRoute` race and tolerates a page that legitimately has no shell.
+ * It still THROWS on a renamed root while content is clipped — that fallback
  * is silently capturing the blank page this whole module exists to prevent.
  *
  * ── How to read the resulting PNG ────────────────────────────────────────────
@@ -99,7 +343,12 @@ export const PAINTED_SLACK = 1.05
  * white column beside the content is the capture technique, not a broken
  * sidebar — do not file it as one.
  */
-export async function unclipScrollShell(page, { selector = SCROLL_SHELL_ROOT } = {}) {
+export async function unclipScrollShell(page, options = {}) {
+  return resolveScrollShell(page, options)
+}
+
+/** Clear the height cap and the clip from the scroll root up to `<html>`. */
+async function unclipFrom(page, selector) {
   const height = await page.evaluate((sel) => {
     const root = document.querySelector(sel)
     if (!root) return null
@@ -110,14 +359,6 @@ export async function unclipScrollShell(page, { selector = SCROLL_SHELL_ROOT } =
     }
     return document.documentElement.scrollHeight
   }, selector)
-
-  if (height === null) {
-    throw new Error(
-      `full-page capture: scroll root "${selector}" not found. The app shell clips at ` +
-        `h-screen/overflow-hidden, so without un-clipping it the capture is blank below ` +
-        `the first viewport. Update SCROLL_SHELL_ROOT in scripts/full-page-capture.mjs.`,
-    )
-  }
 
   // Reflow after the style writes; without it the capture can size itself from
   // the pre-un-clip layout and land back in the failure case.
@@ -133,11 +374,22 @@ export async function unclipScrollShell(page, { selector = SCROLL_SHELL_ROOT } =
  * against a CSS height would put the fold in the wrong place (at `dsf: 2` it
  * would sit at half the real fold and the guard would never fire).
  */
-export async function captureFullPage(page, { path, label, viewportDevicePx, selector } = {}) {
-  await unclipScrollShell(page, selector ? { selector } : undefined)
+export async function captureFullPage(page, { path, label, viewportDevicePx, selector, timeoutMs } = {}) {
+  const shell = await resolveScrollShell(page, {
+    ...(selector ? { selector } : {}),
+    ...(Number.isFinite(timeoutMs) ? { timeoutMs } : {}),
+  })
   const buffer = await page.screenshot({ path, fullPage: true })
-  await assertCaptureNotBlank(buffer, { label, viewportDevicePx })
-  return buffer
+  try {
+    await assertCaptureNotBlank(buffer, { label, viewportDevicePx })
+  } catch (err) {
+    // Carry the shell verdict onto the failure so the caller can say WHICH of
+    // the three causes it is looking at instead of printing one sentence for
+    // all of them (#1936/#1939/#1943).
+    err.shell = shell
+    throw err
+  }
+  return { buffer, shell }
 }
 
 /** Structured verdict for one capture. `blankBelowFold` is the failure. */
@@ -165,7 +417,10 @@ export async function assertCaptureNotBlank(buffer, { label = 'capture', viewpor
   if (!result.blankBelowFold) return result
 
   const pct = (result.paintedRatio * 100).toFixed(1)
-  throw new Error(
+  // Tagged, so a caller can tell THIS failure from the other ways a capture can
+  // fail (a `page.screenshot` timeout on a 36,000px image under load is not a
+  // blank capture, and reporting it as one is the #1936 mistake in miniature).
+  const blank = new Error(
     `${label}: capture is BLANK below the fold — ${result.width}×${result.height}, but the last ` +
       `painted row is y=${result.lastPaintedRow} (${pct}% of the image), which is within one ` +
       `${viewportDevicePx}px viewport. The image is the right SIZE and mostly empty, so it looks ` +
@@ -176,6 +431,8 @@ export async function assertCaptureNotBlank(buffer, { label = 'capture', viewpor
       `boundary, ends at the fold for its own reasons. Check what the route should render at ` +
       `this height before assuming the capture is at fault.`,
   )
+  blank.captureCause = 'blank-below-fold'
+  throw blank
 }
 
 // ── PNG reading ──────────────────────────────────────────────────────────────

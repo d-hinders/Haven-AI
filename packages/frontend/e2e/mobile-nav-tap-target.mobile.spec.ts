@@ -153,6 +153,18 @@ const MIN_CONTROL_GAP_PX = 8
  * information. Roughly two glyphs plus an ellipsis at this 13px type.
  */
 const LEGIBLE_SEGMENT_PX = 24
+/**
+ * Tailwind's `sm`, where the wallet control's label appears (#1803). Not a
+ * choice made here: it is the breakpoint #1767 already dropped the chip's
+ * chain segment at, and the same one this collapse uses.
+ */
+const SM_BREAKPOINT_PX = 640
+/**
+ * The wallet control's collapsed box below `sm` — the notification bell's own
+ * 40px square, deliberately, so the phone bar reads as one row of equally
+ * sized controls rather than as three different shapes.
+ */
+const COLLAPSED_WALLET_PX = 40
 
 type Measurement = {
   painted: { w: number; h: number }
@@ -175,6 +187,20 @@ type Measurement = {
   smallestBarGap: number | null
   /** Rendered widths of the account chip's truncating text segments. */
   chipSegments: number[]
+  /**
+   * The wallet control — the bar's RIGHTMOST control, and what #1803 dropped
+   * the label of. Three facts, because the collapse can fail in three ways:
+   * it can not happen (`renderedTextPx` stays wide), it can happen and take
+   * the accessible name with it (`accessibleName` empties — the defect an
+   * icon-only control invites), or it can happen at the wrong size
+   * (`painted`, which must match the bell's 40px box next to it).
+   */
+  wallet: {
+    accessibleName: string
+    renderedTextPx: number
+    painted: { w: number; h: number }
+    hit: { w: number; h: number }
+  } | null
   /** The `w-8 shrink-0 lg:hidden` spacer: the room `TopBar` claims to reserve. */
   slot: { left: number; right: number; width: number; centreX: number } | null
   /** The bar itself. Height, because the spacer's own height is 0. */
@@ -340,6 +366,65 @@ async function measureToggle(page: Page): Promise<Measurement> {
       const slotBox = slotEl?.getBoundingClientRect()
       const headerBox = header.getBoundingClientRect()
 
+      // The wallet control (#1803). Found POSITIONALLY — the rightmost control
+      // in the bar's band — rather than by a label, because every one of its
+      // five states renders a different label and the state under test here
+      // ("Connect wallet") is the fixture's, not the definition.
+      //
+      // `renderedTextPx` sums only segments that actually paint:
+      // `getClientRects().length` is what separates "the label is hidden below
+      // `sm`" from "the label is there and squeezed", which is the exact
+      // distinction #1767 got wrong in the chip's own measurement and had to
+      // fix. `accessibleName` prefers `aria-label` the way the browser's own
+      // name computation does — and that IS the assertion, because with the
+      // label `display: none` there is nothing else left to name the button.
+      const rightmost = inBar.length > 0 ? inBar[inBar.length - 1] : null
+      const walletEl = rightmost
+        ? Array.from(header.querySelectorAll<HTMLElement>('button, a[href], [role="button"]')).find(
+            (el) => el.getBoundingClientRect().left === rightmost.left,
+          ) ?? null
+        : null
+      const walletBox = walletEl?.getBoundingClientRect()
+      const wallet =
+        walletEl && walletBox
+          ? {
+              accessibleName: (
+                walletEl.getAttribute('aria-label') ??
+                Array.from(walletEl.querySelectorAll<HTMLElement>('span'))
+                  .filter((el) => el.getClientRects().length > 0)
+                  .map((el) => el.textContent ?? '')
+                  .join(' ')
+              ).trim(),
+              renderedTextPx: Math.round(
+                Array.from(walletEl.querySelectorAll<HTMLElement>('span'))
+                  .filter((el) => el.getClientRects().length > 0 && !!el.textContent?.trim())
+                  .reduce((sum, el) => sum + el.getBoundingClientRect().width, 0),
+              ),
+              painted: { w: Math.round(walletBox.width), h: Math.round(walletBox.height) },
+              // Its OWN hit rectangle, walked the same way the toggle's is.
+              // The collapsed control is an icon-only square, so it borrows
+              // #1726's invisible 44px extension exactly as the sidebar toggle
+              // does — and exactly like the toggle's, a `::after` overlay has
+              // several silent no-op failure modes that only a real engine's
+              // hit-testing can tell apart from a working one.
+              hit: (() => {
+                const wx = Math.round(walletBox.left + walletBox.width / 2)
+                const wy = Math.round(walletBox.top + walletBox.height / 2)
+                const cap = Math.ceil(Math.max(walletBox.width, walletBox.height) / 2) + 12
+                return {
+                  w:
+                    walkFrom(walletEl, wx, wy, -1, 0, cap) +
+                    walkFrom(walletEl, wx, wy, 1, 0, cap) +
+                    1,
+                  h:
+                    walkFrom(walletEl, wx, wy, 0, -1, cap) +
+                    walkFrom(walletEl, wx, wy, 0, 1, cap) +
+                    1,
+                }
+              })(),
+            }
+          : null
+
       return {
         painted: { w: Math.round(box.width), h: Math.round(box.height) },
         hit: { left: cx - l, right: cx + r, top: cy - u, bottom: cy + d, w: l + r + 1, h: u + d + 1 },
@@ -368,6 +453,7 @@ async function measureToggle(page: Page): Promise<Measurement> {
               el.getClientRects().length > 0 && !!el.textContent && el.textContent.trim().length > 1,
           )
           .map((el) => Math.round(el.getBoundingClientRect().width)),
+        wallet,
         slot: slotBox
           ? {
               left: Math.round(slotBox.left),
@@ -493,18 +579,65 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         //    390px viewport. It is dropped below `sm` now, so the account name
         //    gets the room.
         //
-        //    RELAXED BELOW 390px, deliberately and temporarily (#1803). At
-        //    320px the bar does not fit at all and never did — measured on
-        //    `dev` before this change, the chip ran 57.5px underneath the
-        //    notification bell — so the account name lands at 17px here. That
-        //    is a strict improvement on overlapping tap targets, and it is not
-        //    a design: fixing it means DROPPING a control at this width, which
-        //    is a product decision #1803 owns. Asserted as "still present"
-        //    rather than dropped to nothing, so it cannot silently get worse.
+        //    The width-scoped exception that used to sit here is GONE (#1803).
+        //    It relaxed this floor to 1px below 390 because at 320 the bar was
+        //    over-subscribed by more than the chip could absorb: the account
+        //    name landed at 17px, orderly and unreadable. That is fixed at the
+        //    source rather than excused here — the wallet control's label is
+        //    dropped below `sm` (assertion 10), which returns 48.64px to the
+        //    row at 320 and takes the name from 17px to 66px. The floor is now
+        //    the same number at every width this suite runs, which is the only
+        //    form in which it means anything at 320.
         expect(m.chipSegments.length).toBeGreaterThan(0)
-        expect(Math.min(...m.chipSegments)).toBeGreaterThanOrEqual(
-          width >= 390 ? LEGIBLE_SEGMENT_PX : 1,
-        )
+        expect(Math.min(...m.chipSegments)).toBeGreaterThanOrEqual(LEGIBLE_SEGMENT_PX)
+
+        // 10. What PAYS for (9), and the two ways paying for it goes wrong
+        //     (#1803, owner decision 2026-08-23).
+        //
+        //     The bar cannot fit three labelled controls at 320 and never
+        //     could; the widest one drops its label rather than everything
+        //     squeezing together. Measured on `/dashboard`: "Connect wallet"
+        //     was 88.64px at 320 (and wrapped to two lines, painting taller
+        //     than the 56px band); collapsed it is the bell's own 40px square.
+        //
+        //     a. The collapse HAPPENED. `renderedTextPx` is the width of the
+        //        label segments that actually paint — 0 below `sm`. Asserted
+        //        on painted width rather than on the absence of the class,
+        //        because `hidden sm:inline` is a claim and this is the render.
+        //     b. The button still has a NAME. This is the defect an icon-only
+        //        control invites: the label is `display: none`, so it stops
+        //        contributing to the accessible name, and without the explicit
+        //        `aria-label` the control announces as "button" — a silent,
+        //        invisible regression that no layout assertion in this file
+        //        would notice. jsdom cannot see it either (no CSS, no layout),
+        //        which is why it is asserted HERE and not only in the unit
+        //        test.
+        //     c. It collapsed to the RIGHT size — the 40px box the
+        //        notification bell next to it already paints. A different
+        //        number would pass (a) and (b) and leave the bar a row of
+        //        mismatched squares.
+        //
+        //     Asserted on BOTH sides of the breakpoint, from the same
+        //     measurement. 1023 is above `sm`, so the label must come BACK
+        //     there: "hide it at every width" is the plausible over-correction
+        //     and it would satisfy (a), (b) and (c) at 320 and 390 without
+        //     anyone noticing the desktop bar had lost its label too.
+        expect(m.wallet).not.toBeNull()
+        expect(m.wallet!.accessibleName.length).toBeGreaterThan(0)
+        if (width < SM_BREAKPOINT_PX) {
+          expect(m.wallet!.renderedTextPx).toBe(0)
+          expect(m.wallet!.painted).toEqual({ w: COLLAPSED_WALLET_PX, h: COLLAPSED_WALLET_PX })
+          //  d. ...and a 40px painted square is 4px under the comfort target,
+          //     so it borrows the same invisible extension the toggle does
+          //     (#1726/#1766). Measured as a hit rectangle, never as a class:
+          //     the whole point of assertion 1 at the top of this file is that
+          //     `after:h-11 after:w-11` in a className proves nothing about
+          //     what a finger reaches.
+          expect(m.wallet!.hit.w).toBeGreaterThanOrEqual(COMFORTABLE_TAP_TARGET_PX)
+          expect(m.wallet!.hit.h).toBeGreaterThanOrEqual(COMFORTABLE_TAP_TARGET_PX)
+        } else {
+          expect(m.wallet!.renderedTextPx).toBeGreaterThan(LEGIBLE_SEGMENT_PX)
+        }
       })
     })
   }

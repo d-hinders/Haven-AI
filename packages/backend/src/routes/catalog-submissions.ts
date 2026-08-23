@@ -2,7 +2,8 @@
  * Self-service catalogue submission entry point (epic #1717, #1711).
  *
  * Public, unauthenticated `POST /catalog/submit`: writes a queue row and
- * returns `id` + `verify_token`. That is ALL it does — the request path never
+ * returns `id` + `verify_token` (the token only to the caller whose own insert
+ * created the row — see `acknowledgement`). That is ALL it does — the path never
  * probes, never fetches, never touches the merchant endpoint. Everything after
  * the write (ownership proof #1712, the SSRF-hardened verification probe
  * #1713, lifecycle #1714) runs async on the leader-locked monitor.
@@ -15,8 +16,8 @@
  *      address cannot become a global lockout;
  *   3. per-hostname dedupe — one pending/active submission per host, enforced
  *      as a database invariant (partial unique index, migration 066);
- *   4. capped pending queue — a flood cannot grow the pending set unboundedly.
- *
+ *   4. capped pending queue — the ceiling is enforced by a serialised
+ *      count-and-insert, not a check-then-act (see the repository);
  *   5. body-size ceiling (`MAX_BODY_BYTES`) — the public path does not accept
  *      Fastify's 1 MB default;
  *   6. input normalization — https-only, length caps, and embedded
@@ -37,6 +38,13 @@
  *   is forbidden to make. The real gate belongs where the fetch happens, on
  *   the resolved address, in #1712/#1713. A stored private-range row is
  *   harmless precisely because nothing in this slice ever dials it.
+ * - **Transitional IPv6 encodings of a v4 address.** `mappedIpv4` folds the
+ *   `::ffff:` form only. NAT64 (`64:ff9b::7f00:1`) and 6to4
+ *   (`2002:7f00:1::`) spellings of 127.0.0.1 are accepted. Same class of gap
+ *   as the line above and deferred to the same place: those prefixes only
+ *   reach the embedded address on a network actually running such a gateway,
+ *   whereas `::ffff:` round-trips on any dual-stack host, which is why that
+ *   one is folded here and these are not.
  * - **Per-IP fairness inside the queue cap.** The cap is global, so an
  *   attacker spread across many source addresses can fill the pending set to
  *   `QUEUE_CAP` with junk hostnames and make legitimate merchants see 429
@@ -215,7 +223,10 @@ function normalizeSubmitTarget(
   // `example.com.` and `example.com` are the same origin to every resolver but
   // two different strings to a unique index. Canonicalising here fixes both,
   // and is why the stored hostname is the dotless form.
-  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
+  // `\.+$`, not `\.$`: stripping only one dot leaves `example.com...` as its
+  // own distinct stored string. Not exploitable — a name with an internal
+  // empty label does not resolve — but airtight costs nothing here.
+  const hostname = parsed.hostname.toLowerCase().replace(/\.+$/, '')
   if (!hostname || hostname.length > MAX_HOSTNAME_LENGTH) {
     return { error: `resource_url host must be ${MAX_HOSTNAME_LENGTH} characters or fewer` }
   }

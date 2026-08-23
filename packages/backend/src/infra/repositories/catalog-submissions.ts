@@ -15,6 +15,7 @@
  * the read-back for the no-op path ("same id returned").
  */
 import pool from '../../db.js'
+import { KEYED_LOCK_NAMESPACES } from '../../platform/leader-lock.js'
 import { withTransaction, type Executor } from '../transaction.js'
 
 export interface CatalogSubmissionRow {
@@ -41,10 +42,13 @@ const PENDING_STATUSES = "'submitted', 'ownership_verified', 'verified_payable'"
  * concurrent inserts each evaluate the subquery before the other commits, both
  * see room, and both write. Only mutual exclusion actually bounds the set.
  *
- * Lives in the KEYED namespace (811100) rather than `LEADER_LOCK_KEYS` so it
- * cannot collide with the `catalogIngest` monitor key #1713 adds.
+ * Uses its OWN keyed namespace rather than `LEADER_LOCK_KEYS`, so it can
+ * collide neither with the `catalogIngest` monitor key #1713 adds nor with
+ * `accountDeploy`'s hashed subject ids — the namespace registry's rule is
+ * never to reuse a value, and an earlier version of this file hardcoded
+ * `accountDeploy`'s.
  */
-const QUEUE_CAP_LOCK_NAMESPACE = 811100
+const QUEUE_CAP_LOCK_NAMESPACE = KEYED_LOCK_NAMESPACES.catalogSubmissionQueue
 const QUEUE_CAP_LOCK_ID = 1711
 
 export const INSERT_CATALOG_SUBMISSION_SQL = `

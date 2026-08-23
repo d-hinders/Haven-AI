@@ -137,7 +137,7 @@ export function AgentCard({
                   : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
             }`}
           >
-            <BotIcon size={17} />
+            <BotIcon size={16} />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
@@ -189,7 +189,7 @@ export function AgentCard({
 
       {isPaused && (
         <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg">
-          <Icon icon={CirclePause} className="h-[13px] w-[13px] text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
+          <Icon icon={CirclePause} className="h-3.5 w-3.5 text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-xs font-medium text-[var(--v2-warning)]">Paused in Haven</p>
             <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">
@@ -201,7 +201,7 @@ export function AgentCard({
 
       {agent.has_stranded_funds && (
         <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-[var(--v2-warning-soft)] border border-warning/20 rounded-lg">
-          <Icon icon={TriangleAlert} className="h-[13px] w-[13px] text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
+          <Icon icon={TriangleAlert} className="h-3.5 w-3.5 text-[var(--v2-warning)] flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-[var(--v2-warning)]">Stranded funds on delegate</p>
             <p className="mt-0.5 text-xs leading-relaxed text-[var(--v2-warning)]">

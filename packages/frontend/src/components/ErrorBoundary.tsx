@@ -34,7 +34,7 @@ export default class ErrorBoundary extends Component<Props, State> {
           <div className="max-w-md text-center">
             {/* Alert icon */}
             <div className="w-12 h-12 rounded-xl bg-[var(--v2-danger-soft)] border border-danger/20 flex items-center justify-center mx-auto mb-5">
-              <Icon icon={CircleAlert} className="h-[22px] w-[22px] text-[var(--v2-danger)]" />
+              <Icon icon={CircleAlert} className="h-6 w-6 text-[var(--v2-danger)]" />
             </div>
 
             <h1 className="text-base font-semibold text-[var(--v2-ink)] mb-2">
@@ -47,7 +47,7 @@ export default class ErrorBoundary extends Component<Props, State> {
             {this.state.error && (
               <details className="text-left mb-5 group">
                 <summary className="text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] cursor-pointer select-none inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded">
-                  <Icon icon={ChevronRight} className="h-2.5 w-2.5 transition-transform group-open:rotate-90" />
+                  <Icon icon={ChevronRight} className="h-3 w-3 transition-transform group-open:rotate-90" />
                   Show technical details
                 </summary>
                 <pre className="mt-2 text-xs text-[var(--v2-danger)] bg-[var(--v2-danger-soft)] border border-danger/20 rounded-lg p-3 overflow-auto max-h-32 font-mono">

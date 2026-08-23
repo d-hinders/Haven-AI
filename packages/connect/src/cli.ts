@@ -169,7 +169,14 @@ export async function runCli(
             const failed = agent.checks.filter((check) => !check.ok)
             const verdict = agent.classification === 'wired'
               ? failed.length === 0 ? 'wired, all checks passed' : `wired, ${failed.length} check(s) FAILED`
-              : agent.classification
+              // #1915: `parked` is the one classification whose bare name says
+              // nothing a reader can act on — it is not a broken agent, it is
+              // a directory with no agent in it and a private key still in it.
+              // Spell that out here; the path and state are on the parked
+              // re-key check above.
+              : agent.classification === 'parked'
+                ? 'parked re-key only — no identity.json in this directory, but key material is still there'
+                : agent.classification
             io.stdout(redactSecrets(`  ${failed.length > 0 ? '✗' : '•'} ${name}: ${verdict}\n`))
             for (const check of failed) {
               io.stdout(redactSecrets(`      ✗ ${check.label}: ${check.detail}\n`))

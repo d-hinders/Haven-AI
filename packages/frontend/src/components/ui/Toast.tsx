@@ -182,7 +182,7 @@ function ToastItemView({ item, onDismiss }: ToastItemProps) {
     <div
       role="presentation"
       className={[
-        'flex items-start gap-3 rounded-md px-4 py-3 shadow-[var(--v2-shadow-popover)] min-w-[240px] max-w-sm',
+        'flex items-start gap-3 rounded-md px-4 py-3 shadow-popover min-w-[240px] max-w-sm',
         'transition-all duration-200',
         visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1',
         styles.container,

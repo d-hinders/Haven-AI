@@ -23,7 +23,7 @@ const SettingsClient = dynamic(() => import('./SettingsClient'), {
         <Skeleton className="h-32 rounded-[10px]" />
         <Skeleton className="h-32 rounded-[10px]" />
       </div>
-      <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)]">
+      <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card">
         <Card.Header padding="spacious" className="space-y-2">
           <Skeleton variant="text" className="h-4 w-32" />
           <Skeleton variant="text" className="h-4 w-full max-w-sm" />

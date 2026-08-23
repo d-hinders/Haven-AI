@@ -124,7 +124,7 @@ export default function FilterBar({
   }
 
   return (
-    <div ref={ref} className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-[var(--v2-shadow-card)]">
+    <div ref={ref} className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-card">
       <div className="flex flex-wrap items-start gap-3">
         <div className="relative">
           <button
@@ -139,7 +139,7 @@ export default function FilterBar({
             <Chevron open={open === 'safe'} />
           </button>
           {open === 'safe' && safes.length > 1 && (
-            <div className="absolute left-0 top-full z-40 mt-2 min-w-60 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+            <div className="absolute left-0 top-full z-40 mt-2 min-w-60 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-modal">
               <DropdownButton
                 active={!filters.safeId}
                 onClick={() => {
@@ -179,7 +179,7 @@ export default function FilterBar({
             <Chevron open={open === 'agent'} />
           </button>
           {open === 'agent' && (
-            <div className="absolute left-0 top-full z-40 mt-2 min-w-64 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+            <div className="absolute left-0 top-full z-40 mt-2 min-w-64 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-modal">
               <DropdownButton
                 active={!filters.agentId}
                 onClick={() => {
@@ -235,7 +235,7 @@ export default function FilterBar({
             <Chevron open={open === 'token'} />
           </button>
           {open === 'token' && (
-            <div className="absolute left-0 top-full z-40 mt-2 max-h-80 min-w-72 overflow-y-auto rounded-lg border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+            <div className="absolute left-0 top-full z-40 mt-2 max-h-80 min-w-72 overflow-y-auto rounded-lg border border-[var(--v2-border)] bg-white shadow-modal">
               <DropdownButton
                 active={!filters.tokenKey}
                 onClick={() => {
@@ -272,7 +272,7 @@ export default function FilterBar({
             <Chevron open={open === 'direction'} />
           </button>
           {open === 'direction' && (
-            <div className="absolute left-0 top-full z-40 mt-2 min-w-44 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-modal)]">
+            <div className="absolute left-0 top-full z-40 mt-2 min-w-44 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-modal">
               <DropdownButton
                 active={!filters.direction}
                 onClick={() => {

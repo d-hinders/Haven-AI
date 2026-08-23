@@ -291,15 +291,21 @@
    * computed `box-shadow` is `none`. Read straight out of the served
    * stylesheet in a real browser on this branch.
    *
-   * The same dead form is currently live on `--v2-shadow-card`,
+   * The same dead form was live on `--v2-shadow-card`,
    * `--v2-shadow-card-raised`, `--v2-shadow-modal` and `--v2-shadow-popover`
-   * — so every Card, this Modal's own panel, and every popover render with no
-   * shadow at all today. That is a pre-existing app-wide defect, out of scope
-   * here, and filed as #1945; this comment exists so the next person does not
+   * — every Card, every Modal panel and every popover rendered with no shadow
+   * at all. Fixed in #1945, and NOT by adding the type hint at 67 call sites:
+   * the four elevation tiers are Tailwind THEME entries now
+   * (`tailwind.config.js` → `boxShadow`), spelled `shadow-card`,
+   * `shadow-card-raised`, `shadow-modal`, `shadow-popover`. The arbitrary-value
+   * syntax that caused this is gone from the product rather than repaired, and
+   * `src/__tests__/shadow-token.test.ts` compiles the stylesheet to keep it
+   * gone. This comment stays because the DIAGNOSIS is still what it was: do not
    * "fix" this class back into the broken spelling.
    *
-   * `.v2-modal-backdrop` directly above is the same idiom and provably
-   * resolves, which is why the cue follows it.
+   * The cue itself stays a class rather than joining that scale. It is one
+   * inset continuation marker with one call site, not an elevation tier, and
+   * `.v2-modal-backdrop` directly above is the same idiom for the same reason.
    */
   box-shadow: var(--v2-shadow-scroll-edge);
 }

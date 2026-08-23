@@ -49,7 +49,7 @@ export default function DashboardOnboardingGuide({
   if (allComplete) {
     if (completeDismissed) return null
     return (
-      <section className="v2-animate-slide-in flex flex-col gap-3 rounded-[14px] border border-success/20 bg-[var(--v2-success-soft)] px-5 py-4 shadow-[var(--v2-shadow-card)] sm:flex-row sm:items-center sm:justify-between">
+      <section className="v2-animate-slide-in flex flex-col gap-3 rounded-[14px] border border-success/20 bg-[var(--v2-success-soft)] px-5 py-4 shadow-card sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <span
             aria-hidden="true"
@@ -121,7 +121,7 @@ export default function DashboardOnboardingGuide({
   }
 
   return (
-    <section className="v2-animate-fade-in rounded-[14px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)]">
+    <section className="v2-animate-fade-in rounded-[14px] border border-[var(--v2-border)] bg-white p-5 shadow-card">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--v2-brand)]">

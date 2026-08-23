@@ -253,7 +253,7 @@ function WalletPopover({
       ref={popoverRef}
       role="dialog"
       aria-label="Wallet menu"
-      className="absolute right-0 top-full mt-2 w-72 z-50 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-xl shadow-[var(--v2-shadow-modal)] overflow-hidden"
+      className="absolute right-0 top-full mt-2 w-72 z-50 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-xl shadow-modal overflow-hidden"
     >
       <div className="p-4 border-b border-[var(--v2-border)]">
         {unavailablePasskey && (
@@ -558,7 +558,7 @@ export default function WalletButton() {
               // Offset against the page, as ui/Button does: on a brand-FILLED
               // control an un-offset brand ring composites brand-over-brand and
               // measures ~1.0:1 — invisible at any opacity (#1741).
-              className={`inline-flex items-center gap-2 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white shadow-[var(--v2-shadow-button)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] sm:px-4 sm:py-2 ${COLLAPSE_BELOW_SM}`}
+              className={`inline-flex items-center gap-2 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white shadow-button transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] sm:px-4 sm:py-2 ${COLLAPSE_BELOW_SM}`}
             >
               <Icon icon={Wallet} className="h-4 w-4 shrink-0 sm:hidden" />
               <span className={LABEL_BELOW_SM}>Connect wallet</span>

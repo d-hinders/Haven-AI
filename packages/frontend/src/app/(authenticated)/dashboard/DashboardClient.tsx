@@ -121,7 +121,7 @@ function ConnectedAgentsSection({
   onConnectAgent: () => void
 }) {
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card overflow-hidden">
       <Card.Header
         as="h2"
         title="Connected agents"
@@ -260,7 +260,7 @@ function DashboardHero({
 
   return (
     <section
-      className="relative overflow-hidden rounded-[24px] border border-[var(--v2-border-anchor)] bg-[var(--v2-surface-anchor)] shadow-[var(--v2-shadow-card-raised)]"
+      className="relative overflow-hidden rounded-[24px] border border-[var(--v2-border-anchor)] bg-[var(--v2-surface-anchor)] shadow-card-raised"
     >
       {/*
         Subtle ambient drift on the hero's gradient backdrop — the v2-mesh-drift
@@ -415,9 +415,9 @@ function MetricCard({
   // translate) makes the affordance obvious and matches the Stripe-style
   // hover treatment used on the dashboard hero.
   const baseClass =
-    'group block rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-[var(--v2-shadow-card)] transition-all duration-200 ease-out motion-reduce:transition-none motion-reduce:hover:translate-y-0'
+    'group block rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-card transition-all duration-200 ease-out motion-reduce:transition-none motion-reduce:hover:translate-y-0'
   const hoverClass =
-    'hover:-translate-y-px hover:shadow-[var(--v2-shadow-card-raised)] hover:border-[var(--v2-border-strong)]'
+    'hover:-translate-y-px hover:shadow-card-raised hover:border-[var(--v2-border-strong)]'
 
   if (href) {
     return (
@@ -536,7 +536,7 @@ function TransactionsSection({
   resolveAddress: (address: string) => string | null
 }) {
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-[var(--v2-shadow-card)] overflow-hidden">
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card overflow-hidden">
       <Card.Header
         as="h2"
         title="Recent transactions"

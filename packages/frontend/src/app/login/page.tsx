@@ -57,7 +57,7 @@ function LoginForm() {
   }
 
   return (
-    <div className="w-full max-w-sm rounded-[14px] border border-[var(--v2-border)] bg-white p-6 shadow-[var(--v2-shadow-card)]">
+    <div className="w-full max-w-sm rounded-[14px] border border-[var(--v2-border)] bg-white p-6 shadow-card">
       <h1 className="text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2">Welcome back</h1>
       <p className="text-sm text-[var(--v2-ink-2)] mb-8">Log in to your Haven account.</p>
 

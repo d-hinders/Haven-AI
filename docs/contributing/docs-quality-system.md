@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/docs-drift/docs-drift.test.ts
   - packages/backend/src/docs-drift/env-example-drift.test.ts
   - .env.example
-last-verified: "2026-08-23" # #1854: Phase 2 §"Scoping covers" re-read against `scripts/docs/coupling-gate.mjs` — documents the test-content carve-out (`packages/qa-agent/**`, `packages/frontend/e2e/**`) and the `__screenshots__/` carve-out from it, which is checked first; the same-day-suppression paragraph in this section is STALE since #1824 and is NOT fixed here (#1869) — nothing else re-verified in this pass. Prior: #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
+last-verified: "2026-08-23" # #1869: Phase 2 §"Coupling gate" re-read against `scripts/docs/coupling-gate.mjs` on `origin/dev` (not against #1824's description of itself) — the same-day-suppression paragraph #1854 flagged and left is REPLACED, because `implicatedDocs` no longer compares `last-verified` to today and the `today` parameter is gone from its signature rather than accepted-and-ignored. The replacement states the behaviour and carries only the reasoning a reader needs (the heuristic's entire live domain was somebody else's stamp, since `changedSet.has(doc)` already covers a doc this change verified), and quotes the 22-advisories/15-of-40-merges/0-blocking measurement WITH its window (`0d299034`) because the docstring records the counts as traffic-dependent. The `--strict` carve-out the old paragraph described is genuinely gone; the one that REMAINS is different and now documented where it lives — a `contract: true` doc under `--strict` skips the incidental-path filter (`filterIncidental = !(strict && contract)`). Phase 1 also gains `scripts/docs/chain-sweep.mjs` (#1876) and the reason it is needed: a chain break already on `dev` is invisible to the diff-scoped check permanently, not merely deferred to the next editor. Nothing else in Phases 2-4 re-verified in this pass. Prior: #1854: Phase 2 §"Scoping covers" re-read against `scripts/docs/coupling-gate.mjs` — documents the test-content carve-out (`packages/qa-agent/**`, `packages/frontend/e2e/**`) and the `__screenshots__/` carve-out from it, which is checked first; the same-day-suppression paragraph in this section is STALE since #1824 and is NOT fixed here (#1869) — nothing else re-verified in this pass. Prior: #1843: Phase 1 re-read against `scripts/docs/*` and `docs.yml` — gains the `last-verified` chain-integrity check (third `docs:check` step, inside the existing required job, needs `fetch-depth: 0`), the `chain-reset` escape hatch, and why the rule is containment rather than #1843's proposed subsequence; nothing in Phases 2–4 re-verified in this pass. Prior: #1337: strict-gaten släpper en BEVISAT beräknad tom change-set (ren merge/sync-PR); okänd/trasig diff förblir fail-closed (#1076)
 ---
 
 # Documentation-quality system
@@ -230,6 +230,19 @@ quoted: `node scripts/docs/chain-integrity-backtest.mjs --since=<date>` replays
 the check over merged pull requests. It is a development tool; nothing in CI
 runs it.
 
+**Finding a break that is already on `dev`
+([#1876](https://github.com/d-hinders/Haven-AI/issues/1876)).** The check is
+diff-scoped, so a chain broken by an earlier merge is examined by nothing —
+and, because containment compares a contributor's new line against `dev`'s
+current line, neither of which carries the lost reference, it does not surface
+on the next edit either. It is silent permanently, not deferred. `node
+scripts/docs/chain-sweep.mjs` replays the same exported containment rule over
+every doc's own history and reports the drops whose references are still
+missing today. Also a development tool, also not in CI, and also not
+retroactive: it defaults to `--since=2026-08-15`, because before the chaining
+convention (#1496) replacing the note *was* the convention and every doc reads
+as broken.
+
 ### Phase 2 — coupling gate + drift tests ([#644](https://github.com/d-hinders/Haven-AI/issues/644))
 
 **Coupling gate** (`.github/workflows/docs-coupling.yml` →
@@ -251,12 +264,30 @@ reached CI with an untouched contract doc ([#1077](https://github.com/d-hinders/
 For the same reason an empty candidate set is reported as "nothing was checked"
 and fails closed under `--strict`, rather than passing.
 
-A doc whose `last-verified` is **today** is suppressed — once you've confirmed it
-accurate in a day's work, subsequent edits to a covered file won't re-flag it
-the same day. This is a noise-reduction heuristic for the advisory comment and it
-does **not** apply to a contract doc under `--strict`: a blocking check must not
-depend on wall-clock time, and a doc some *other* PR verified today says nothing
-about whether this one made it stale.
+**There is no same-day suppression** ([#1824](https://github.com/d-hinders/Haven-AI/issues/1824)).
+A doc is implicated whenever a changed file matches its `covers` globs and the
+PR did not also touch the doc — whatever the doc's `last-verified` date says,
+including today's. The heuristic that used to skip a doc stamped today was
+removed outright, and so was the `--strict` carve-out that existed only to keep
+it away from the blocking half.
+
+The mechanical reason it could never be right: a doc *this* change verified is a
+doc *this* change edited, and the gate already skips docs the PR touched. So the
+only suppression the heuristic could still perform was on a stamp written by
+somebody else's work — the situation [#1077](https://github.com/d-hinders/Haven-AI/issues/1077)
+had already ruled unacceptable for the blocking half. It was not mostly-right
+with an edge case; its entire live domain *was* the edge case. Measured before
+removing rather than argued: across the 40 merges into `dev` in the window
+ending at `0d299034`, it hid 22 advisories over 15 merges — and zero blocking
+findings, which matches what the code already guaranteed structurally. Those
+counts describe this repository's traffic in that window, not a standing number;
+re-derive them if they ever have to carry an argument again.
+
+The `today` parameter was **removed** from `implicatedDocs` rather than left
+accepted-and-ignored, so reintroducing the behaviour is a visible change rather
+than a one-line revival. `last-verified` dates are still read — `ageDays` reports
+each implicated doc's staleness in the advisory comment, where a wall-clock
+skew of a day never changes an outcome.
 
 **Scoping `covers` (#1077).** `covers` means *this doc describes that code*, not
 *this doc applies to that code*. A standing checklist that globs
@@ -272,6 +303,13 @@ test files and generated files (`__tests__/`, `*.test.*`, `*.spec.*`,
 prose is not made stale by a test being added; and a `#` comment may only trail
 a `covers` item, never occupy its own line, which would silently truncate the
 list.
+
+The incidental-path filter is the one place `--strict` still behaves
+differently, and in the opposite direction to the suppression it replaced: a
+`contract: true` doc under `--strict` skips the filter entirely and sees every
+changed file its globs match, incidental or not. Without that, a test-only PR
+against a wildcard-covered money-path package (`packages/sdk/src/**`,
+`packages/signer/**`) passes the blocking gate silently.
 
 That list has one deliberate carve-out and one carve-out *from* the carve-out,
 and the order between them is load-bearing. Packages whose **content is tests**

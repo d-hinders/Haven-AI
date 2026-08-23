@@ -238,20 +238,30 @@ export function Modal({
             body's last line happens to sit on. The token carries the reasoning
             and the two rejected alternatives.
 
-            No transition, on purpose. `docs/product/design-system.md` § 4 bans
-            entrance animations on first paint, and this cue's first honest
-            reading lands in an effect after the first commit — so a fade-in
-            would animate on first paint in every overflowing dialog in the
-            app. `docs/product/design-review.md` additionally requires any
-            animation to be gated behind `prefers-reduced-motion: no-preference`.
-            At 6px the appear/disappear is a hairline, not a flash; verified by
-            scrolling a real dialog, not by looking at a still.
+            No transition ON THE INITIAL, MOUNT-TIME APPEARANCE, on purpose —
+            and the claim is scoped to that deliberately. A dialog that opens
+            already overflowing gets its first honest reading in the effect
+            above, i.e. right after the first commit, so a fade-in there would
+            be exactly the first-paint entrance motion
+            `docs/product/design-system.md` § 4 bans, in every overflowing
+            dialog in the app.
+
+            That argument does NOT reach the recurring toggles while a user is
+            actively scrolling an open dialog. Those are not first-paint motion
+            and sit closer to the transitions § 4 allows, which
+            `docs/product/design-review.md` would require to be gated behind
+            `prefers-reduced-motion: no-preference`. Whether they should have
+            one is an OPEN question, not a decision taken here: at 6px the snap
+            is a hairline rather than a flash, and it costs no layout shift —
+            measured across a real scroll, the body holds `clientHeight` 362 and
+            `top` 169 while the cue toggles, because the cue is a pure overlay.
+            Verified by scrolling a real dialog, not by reading a still.
           */}
           {hasContentBelow && (
             <div
               data-modal-scroll-cue=""
               aria-hidden="true"
-              className="v2-scroll-edge-cue pointer-events-none absolute inset-x-0 bottom-0 h-1.5"
+              className="shadow-[var(--v2-shadow-scroll-edge)] pointer-events-none absolute inset-x-0 bottom-0 h-1.5"
             />
           )}
         </div>
